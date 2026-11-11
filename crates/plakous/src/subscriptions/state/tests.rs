@@ -1114,6 +1114,7 @@ async fn device_approval_wait_leaves_no_recovery_when_cancelled_or_expired()
     store_acceptance(&paths, notice, accepted_at)?;
     let loaded = load_acceptance_exact(&paths, notice, accepted_at + 1)?;
     let consent = PendingCompatibilityConsent {
+        effects: NativeLoginEffects(Arc::default()),
         state: SubscriptionState::new(paths.clone()),
         notice,
         exact_receipt: loaded.exact_bytes,
@@ -1146,6 +1147,10 @@ async fn device_approval_wait_leaves_no_recovery_when_cancelled_or_expired()
     no_residue(&paths)?;
 
     let expired_calls = Arc::clone(&calls);
+    assert!(
+        consent.effects.may_have_started(),
+        "device polling is provider I/O even before recovery is armed"
+    );
     assert_eq!(
         complete_approved_with_consent(
             &consent,
@@ -1195,6 +1200,7 @@ async fn dropping_a_browser_completion_while_its_callback_is_pending_leaves_no_r
     store_acceptance(&paths, notice, accepted_at)?;
     let loaded = load_acceptance_exact(&paths, notice, accepted_at + 1)?;
     let consent = PendingCompatibilityConsent {
+        effects: NativeLoginEffects(Arc::default()),
         state: SubscriptionState::new(paths.clone()),
         notice,
         exact_receipt: loaded.exact_bytes,
@@ -1237,6 +1243,7 @@ async fn pending_login_revalidates_exact_consent_before_and_after_completion()
     store_acceptance(&paths, notice, accepted_at)?;
     let loaded = load_acceptance_exact(&paths, notice, accepted_at + 1)?;
     let consent = PendingCompatibilityConsent {
+        effects: NativeLoginEffects(Arc::default()),
         state: SubscriptionState::new(paths.clone()),
         notice,
         exact_receipt: loaded.exact_bytes,
@@ -1263,6 +1270,7 @@ async fn pending_login_revalidates_exact_consent_before_and_after_completion()
     store_acceptance(&paths, notice, accepted_at)?;
     let exact = load_acceptance_exact(&paths, notice, accepted_at + 1)?;
     let callback_error_consent = PendingCompatibilityConsent {
+        effects: NativeLoginEffects(Arc::default()),
         state: SubscriptionState::new(paths.clone()),
         notice,
         exact_receipt: exact.exact_bytes,
@@ -1282,6 +1290,7 @@ async fn pending_login_revalidates_exact_consent_before_and_after_completion()
     store_acceptance(&paths, notice, accepted_at)?;
     let exact = load_acceptance_exact(&paths, notice, accepted_at + 1)?;
     let ambiguous_commit_consent = PendingCompatibilityConsent {
+        effects: NativeLoginEffects(Arc::default()),
         state: SubscriptionState::new(paths.clone()),
         notice,
         exact_receipt: exact.exact_bytes,
@@ -1307,6 +1316,7 @@ async fn pending_login_revalidates_exact_consent_before_and_after_completion()
     store_acceptance(&paths, notice, accepted_at)?;
     let exact = load_acceptance_exact(&paths, notice, accepted_at + 1)?;
     let exact_consent = PendingCompatibilityConsent {
+        effects: NativeLoginEffects(Arc::default()),
         state: SubscriptionState::new(paths.clone()),
         notice,
         exact_receipt: exact.exact_bytes,
@@ -1331,6 +1341,7 @@ async fn pending_login_revalidates_exact_consent_before_and_after_completion()
     store_acceptance(&paths, notice, accepted_at)?;
     let exact = load_acceptance_exact(&paths, notice, accepted_at + 1)?;
     let post_consent = PendingCompatibilityConsent {
+        effects: NativeLoginEffects(Arc::default()),
         state: SubscriptionState::new(paths.clone()),
         notice,
         exact_receipt: exact.exact_bytes,
@@ -1367,6 +1378,7 @@ async fn pending_login_revalidates_exact_consent_before_and_after_completion()
     store_acceptance(&paths, notice, accepted_at)?;
     let exact = load_acceptance_exact(&paths, notice, accepted_at + 1)?;
     let expiry_consent = PendingCompatibilityConsent {
+        effects: NativeLoginEffects(Arc::default()),
         state: SubscriptionState::new(paths.clone()),
         notice,
         exact_receipt: exact.exact_bytes,
@@ -1387,6 +1399,25 @@ async fn pending_login_revalidates_exact_consent_before_and_after_completion()
         Err(NativeSubscriptionError::ProfileInactive)
     );
     assert_eq!(calls.load(AtomicOrdering::SeqCst), 1);
+
+    assert!(
+        !consent.effects.may_have_started(),
+        "missing consent precedes effect I/O"
+    );
+    assert!(
+        !exact_consent.effects.may_have_started(),
+        "changed consent precedes effect I/O"
+    );
+    assert!(
+        callback_error_consent.effects.may_have_started(),
+        "recovery I/O was entered"
+    );
+    assert!(ambiguous_commit_consent.effects.may_have_started());
+    assert!(post_consent.effects.may_have_started());
+    assert!(
+        expiry_consent.effects.may_have_started(),
+        "expiry after recovery arming is not a pre-I/O refusal"
+    );
 
     fs::remove_dir_all(root)?;
     Ok(())
@@ -1547,6 +1578,7 @@ async fn same_second_reack_has_a_distinct_generation_and_invalidates_old_handles
     store_acceptance(&paths, notice, accepted_at)?;
     let first = load_acceptance_exact(&paths, notice, accepted_at)?;
     let old_handle = PendingCompatibilityConsent {
+        effects: NativeLoginEffects(Arc::default()),
         state: SubscriptionState::new(paths.clone()),
         notice,
         exact_receipt: first.exact_bytes.clone(),

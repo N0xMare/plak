@@ -272,6 +272,11 @@ fn messages_configuration_error(
 }
 struct PendingLogin(plakous_anthropic::ClaudeOAuthLogin);
 impl super::login::NativePendingLogin for PendingLogin {
+    fn validate_remote_input(&self, input: &str) -> Result<(), NativeSubscriptionError> {
+        self.0
+            .validate_authorization_input(input)
+            .map_err(map_claude_error)
+    }
     fn instructions(&self) -> NativeLoginInstructions<'_> {
         NativeLoginInstructions {
             verification_uri: self.0.authorization_url(),
@@ -644,6 +649,7 @@ impl NativeVertical for Vertical {
             {
                 let online = subscriptions.claude_online_for_login().await?;
                 let consent = PendingCompatibilityConsent {
+                    effects: crate::subscriptions::NativeLoginEffects(Arc::default()),
                     state: subscriptions.state.clone(),
                     notice: NativeSubscriptions::notice(provider)?,
                     exact_receipt: online.acceptance.exact_bytes.clone(),

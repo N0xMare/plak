@@ -129,7 +129,7 @@ fn host_draft_ids_survive_reconnect_only_after_durable_admission_for_every_submi
             }))
         );
         service.observe(SessionObservation::IntentStarted(Some(format!(
-            "attachment:{attachment}:{id}"
+            "local-attachment:{attachment}:{id}"
         ))));
         service.observe(SessionObservation::DraftAccepted(intent.clone()));
         assert_eq!(
@@ -248,11 +248,11 @@ fn answering_draft(intent: SessionIntent<plakous_host_protocol::Core>, stray_err
         }
     };
     sender.send(ContentObservation::IntentStarted(Some(
-        "attachment:999:detail".into(),
+        "local-attachment:999:detail".into(),
     )));
     let detail = sender.answering();
     sender.send(ContentObservation::IntentStarted(Some(format!(
-        "attachment:{attachment}:{id}"
+        "local-attachment:{attachment}:{id}"
     ))));
     let admission = sender.answering();
     drain();
@@ -344,7 +344,7 @@ fn terminal_draft_verdict(
     let (channel, events) = crate::surface_protocol::host_event_channel::<Core>();
     let sender = crate::runtime::Sender::over(channel);
     sender.send(C::IntentStarted(Some(format!(
-        "attachment:{attachment}:{id}"
+        "local-attachment:{attachment}:{id}"
     ))));
     sender.answering().send(verdict);
     while let Ok(event) = events.try_recv() {
@@ -942,7 +942,7 @@ fn each_moved_connection_gets_the_replay_on_its_next_root_attach() {
         binding("s1"),
         SessionObservation::SessionOpening,
         notice.clone(),
-        SessionObservation::IntentStarted(Some("attachment:1:mine".into())),
+        SessionObservation::IntentStarted(Some("local-attachment:1:mine".into())),
         draft.clone(),
         SessionObservation::IntentStarted(None),
         binding("s2"),

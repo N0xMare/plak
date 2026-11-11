@@ -111,7 +111,7 @@ fn approve(pilot: &mut Pilot) {
     let started = delivery.started().unwrap();
     assert_eq!(
         HostEvent::from(started.clone()),
-        HostEvent::IntentStarted(Some("attachment:1".into())),
+        HostEvent::IntentStarted(Some("local-attachment:1".into())),
         "the session sees the face's attachment"
     );
     pilot.publish([
@@ -219,7 +219,7 @@ fn the_tui_takes_only_the_agent_transcript_it_opened() {
     assert_eq!(delivery, open);
     assert_eq!(
         delivery.started().map(HostEvent::from),
-        Some(HostEvent::IntentStarted(Some("attachment:1".into())))
+        Some(HostEvent::IntentStarted(Some("local-attachment:1".into())))
     );
     pilot.publish([stream("c2"), stream("c1")]);
     assert_eq!(pilot.drain(), [stream("c1")]);

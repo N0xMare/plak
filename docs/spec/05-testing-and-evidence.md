@@ -5819,9 +5819,23 @@ package group reports remaining days without failing. Publication dry runs
 and uploads separately require more than a third of each compiled review
 window remaining (chapter 06).
 
+### Protocol-7 operator console evidence
+
 Protocol-7 consent contracts deterministically cover replay, expiry, changed
 principal/connection/generation/action, disconnect/restart, four-grant quota,
 mutation single-flight and aggregate per-principal quota with web writes off.
+Refused admission preserves the grant and quota. Real start-handler tests with
+an offline application seam admit two pending logins, perform a key write while
+both wait, refuse a third without burning consent, then admit it after a cancel.
+Corrected-paste contracts drive the same attempt through refusal and success;
+provider preflight tests retain the opaque token after malformed/mismatched input
+without dispatch. Key-store path and logout notice refusals are distinguished
+from post-I/O uncertainty. Missing named-key isolation is tested with a populated
+default key, not an empty home.
+Facade consent tests also pin the one-way completion-effects witness: missing
+or changed consent before recovery I/O leaves it false; recovery arming, device
+polling and failures after that boundary leave it true, including later expiry.
+The witness neither changes nor replaces the existing recovery crash contracts.
 They use synthetic account IDs and no provider traffic. No persisted format
 or binding input changes are introduced by the consent machinery.
 
@@ -5854,3 +5868,4 @@ Real local/remote attachment provenance contracts also verify that Use now
 can bind either session but bootstraps a fresh home default only locally,
 even with a local-looking client correlation and an intervening answer-window
 reset. Remote default publication remains a confirmed etag write.
+Missing request provenance fails closed; local faces carry an explicit stamp.

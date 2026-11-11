@@ -88,8 +88,8 @@ fn file_round_trip_and_fingerprint() {
             zeroize::Zeroizing::new(("sk-test-secret-key-9999").to_string()),
         )
         .unwrap_err();
-        assert!(error.contains("OPENAI_API_KEY"));
-        assert!(error.contains("still wins over the file store"));
+        assert!(error.to_string().contains("OPENAI_API_KEY"));
+        assert!(error.to_string().contains("still wins over the file store"));
         return;
     };
     set_api_key(
@@ -328,7 +328,7 @@ proptest! {
             prop_assert!(resolve_api_key(&paths, account).unwrap().is_none());
         } else {
             let error = set_api_key(&paths, "openai", zeroize::Zeroizing::new(key.clone())).unwrap_err();
-            prop_assert!(error.contains("OPENAI_API_KEY"));
+            prop_assert!(error.to_string().contains("OPENAI_API_KEY"));
         }
     }
 }

@@ -10325,11 +10325,24 @@ retains the opaque pending token and records machine provenance on success
 (best-effort warning on failure). It never invokes a terminal confirmation
 helper. Challenge URLs/codes are private request responses, never observations,
 snapshots or resync data. Paste is bounded at 16 KiB including whitespace.
+Consent reports the stored credential's actual newer-build classification,
+separately from the requested replacement flag. A challenge warns when opening
+the flow retired an unusable record whose remote grant may remain active.
+Completed progress carries a required nullable `warning` for a same-upstream
+sibling: its provider limits are shared, not additional allowance.
+Malformed or state-mismatched paste is a typed no-effect refusal and retains
+the pending token and input channel for a corrected submission. Local key-store,
+account admission and logout notice refusals are likewise distinct from unknown
+outcomes after a potentially effectful write or exchange starts.
 One native-account attempt is pending host-wide, at most three accounts total
 and two per principal, three starts/minute/principal, at most 15 minutes or the
 provider expiry. Poll is at most once/second. Grants and attempts bind principal,
 connection and generation. Device-login unavailable has no loopback fallback;
 use host CLI with explicit port 1455 forwarding instead, never copied tokens.
+Login admission releases the principal's mutation single-flight permit once the
+attempt is recorded; a pending login does not block another admitted login or
+an unrelated credential/config mutation. Refused admission preserves its grant
+and does not charge a mutation or start quota.
 
 Host login replaces the selected native account for every build/home of this
 user on that machine. Other machines use independent login families. Cross-

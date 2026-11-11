@@ -657,7 +657,7 @@ impl AccountOps for PlakousApplication {
         }
         if account.vertical().is_api() {
             crate::home::secrets::clear_api_key(self.product_paths()?, account.as_str())
-                .map_err(CliFailure::new)?;
+                .map_err(|error| CliFailure::new(error.to_string()))?;
         } else {
             let subscriptions = self.subscriptions_for(account)?;
             self.executor

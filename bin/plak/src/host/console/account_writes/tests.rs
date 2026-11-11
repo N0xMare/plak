@@ -26,6 +26,17 @@ fn secret(value: &str) -> SecretInput {
     SecretInput::new(Zeroizing::new(value.into())).expect("bounded fixture")
 }
 
+fn seed_default_key(paths: &PlakPaths) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(paths.api_key_file("openai"))?
+        .write_all(b"synthetic-default-key")
+}
+
 #[test]
 fn successful_key_writes_emit_audit_without_secret_values() -> Result<(), Box<dyn std::error::Error>>
 {
@@ -79,7 +90,12 @@ async fn wire_key_creation_is_write_only_exact_named_and_confirmation_is_consume
         secrets::resolve_api_key(&paths, &account_id)?.as_deref(),
         Some("synthetic-console-secret")
     );
+    seed_default_key(&paths)?;
     assert_eq!(secrets::resolve_api_key(&paths, "openai/missing")?, None);
+    assert_eq!(
+        secrets::key_status(&paths, "openai/missing")?.source,
+        secrets::KeySource::Missing
+    );
     assert!(matches!(
         console.request(owner(), request).await,
         Ok(HostResponse::Refused {
@@ -119,6 +135,28 @@ fn secret_decode_bounds_whitespace_and_never_includes_input_in_debug_or_errors()
     let error = serde_json::from_str::<SecretInput>(&too_large).expect_err("byte bound");
     assert!(!error.to_string().contains(&" ".repeat(100)));
     assert!(SecretInput::new(Zeroizing::new("x".repeat(SecretInput::MAX_BYTES + 1))).is_err());
+}
+
+#[test]
+fn an_effectful_completion_is_not_downgraded_by_its_error_wording() {
+    use crate::commands::application::host::HostAccountError;
+    let cause = || {
+        plakous_hosted::error::CliFailure::from(
+            plakous_hosted::capabilities::AccountAdmissionError::AccountBusy {
+                account: "claude/work".into(),
+            },
+        )
+    };
+    assert!(matches!(
+        host_failure(HostAccountError::Refused(cause())).response(),
+        HostResponse::Refused {
+            reason: ReadRefusal::Busy { .. }
+        }
+    ));
+    assert!(matches!(
+        host_failure(HostAccountError::OutcomeUnknown(cause())).response(),
+        HostResponse::OperationOutcomeUnknown {}
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -185,6 +223,58 @@ async fn environment_override_proves_no_effect_for_wire_set_and_clear()
             })
         ));
         assert_eq!(std::fs::read_to_string(&path)?, "unchanged-file");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn key_store_path_refusals_are_no_effect_not_unknown()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    std::fs::write(paths.home(), "not-a-directory")?;
+    let console = Console::new(
+        paths.clone(),
+        root.path().join("state"),
+        None,
+        ConfiguredSwitches {
+            web_accounts_read: false,
+            web_config_read: false,
+            web_credentials_write: false,
+            web_config_write: false,
+        },
+    );
+    for set in [true, false] {
+        let account_id = "openai/work".to_owned();
+        let action = if set {
+            OperatorAction::AccountKeySet {
+                account_id: account_id.clone(),
+            }
+        } else {
+            OperatorAction::AccountKeyClear {
+                account_id: account_id.clone(),
+            }
+        };
+        let token = confirmation(&console, action);
+        let request = if set {
+            HostRequest::AccountKeySet {
+                account_id,
+                secret: secret("synthetic-key"),
+                confirmation: token,
+            }
+        } else {
+            HostRequest::AccountKeyClear {
+                account_id,
+                confirmation: token,
+            }
+        };
+        assert!(matches!(
+            Arc::clone(&console).account_write(owner(), request).await,
+            Ok(HostResponse::Refused {
+                reason: ReadRefusal::AccountOperationFailed {}
+            })
+        ));
+        assert_eq!(std::fs::read_to_string(paths.home())?, "not-a-directory");
     }
     Ok(())
 }

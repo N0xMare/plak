@@ -11,6 +11,28 @@ mod private_read;
 
 const MAX_API_KEY_BYTES: usize = 16 * 1024;
 
+/// Whether a failed key write could already have changed the credential.
+#[derive(Debug)]
+pub enum ApiKeyWriteError {
+    Refused(String),
+    OutcomeUnknown(String),
+}
+
+impl From<String> for ApiKeyWriteError {
+    fn from(message: String) -> Self {
+        Self::Refused(message)
+    }
+}
+
+impl std::fmt::Display for ApiKeyWriteError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Refused(message) | Self::OutcomeUnknown(message) => formatter.write_str(message),
+        }
+    }
+}
+impl std::error::Error for ApiKeyWriteError {}
+
 /// API-key account ids (not OAuth subscription accounts).
 #[must_use]
 pub fn is_api_key_account(account: &str) -> bool {
@@ -147,30 +169,33 @@ pub fn set_api_key(
     paths: &PlakPaths,
     account: &str,
     key: zeroize::Zeroizing<String>,
-) -> Result<(), String> {
+) -> Result<(), ApiKeyWriteError> {
     if !is_api_key_account(account) {
         return Err(format!(
             "account `{account}` is not an API-key account; use plak login for OAuth accounts"
-        ));
+        )
+        .into());
     }
     refuse_env_override(account)?;
     if key.len() > MAX_API_KEY_BYTES {
-        return Err("API key is empty or too large".into());
+        return Err("API key is empty or too large".to_owned().into());
     }
     let key = key.trim();
     if key.is_empty() || key.len() > MAX_API_KEY_BYTES || key.chars().any(char::is_control) {
-        return Err("API key is empty or too large".to_owned());
+        return Err("API key is empty or too large".to_owned().into());
     }
     let selected: AccountRef = account
         .parse()
         .map_err(|error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string())?;
     if let Some(name) = selected.name() {
-        return set_shelf_secret(
+        return store_shelf_secret(
             paths,
             SecretShelf::Api(selected.vertical()),
             name.as_str(),
             key,
-        );
+            true,
+        )
+        .map(|_| ());
     }
     paths.ensure_layout()?;
     let path = paths.api_key_file(if account == "xai-api" { "xai" } else { account });
@@ -178,16 +203,17 @@ pub fn set_api_key(
     Ok(())
 }
 
-pub fn clear_api_key(paths: &PlakPaths, account: &str) -> Result<bool, String> {
+pub fn clear_api_key(paths: &PlakPaths, account: &str) -> Result<bool, ApiKeyWriteError> {
     if !is_api_key_account(account) {
-        return Err(format!("account `{account}` is not an API-key account"));
+        return Err(format!("account `{account}` is not an API-key account").into());
     }
     refuse_env_override(account)?;
     let selected: AccountRef = account
         .parse()
         .map_err(|error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string())?;
     if let Some(name) = selected.name() {
-        return remove_shelf_secret(paths, SecretShelf::Api(selected.vertical()), name.as_str());
+        return remove_shelf_secret(paths, SecretShelf::Api(selected.vertical()), name.as_str())
+            .map_err(Into::into);
     }
     let path = paths.api_key_file(if account == "xai-api" { "xai" } else { account });
     if !path.is_file() {
@@ -285,7 +311,7 @@ fn fingerprint(secret: &str) -> String {
 #[cfg(feature = "web")]
 pub(crate) mod observation;
 
-fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), ApiKeyWriteError> {
     use std::fs::OpenOptions;
     #[cfg(unix)]
     {
@@ -298,11 +324,12 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
             .open(path)
             .map_err(|_| "could not write API key file".to_owned())?;
         file.write_all(bytes)
-            .map_err(|_| "could not write API key file".to_owned())?;
+            .map_err(|_| ApiKeyWriteError::OutcomeUnknown("could not write API key file".into()))?;
     }
     #[cfg(not(unix))]
     {
-        fs::write(path, bytes).map_err(|_| "could not write API key file".to_owned())?;
+        fs::write(path, bytes)
+            .map_err(|_| ApiKeyWriteError::OutcomeUnknown("could not write API key file".into()))?;
     }
     Ok(())
 }
@@ -401,7 +428,9 @@ pub fn set_shelf_secret(
     name: &str,
     value: &str,
 ) -> Result<(), String> {
-    store_shelf_secret(paths, shelf, name, value, true).map(|_| ())
+    store_shelf_secret(paths, shelf, name, value, true)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 /// Stores one secret on `shelf` only when it has none of that name: `true`
@@ -417,7 +446,7 @@ pub fn create_shelf_secret(
     name: &str,
     value: &str,
 ) -> Result<bool, String> {
-    store_shelf_secret(paths, shelf, name, value, false)
+    store_shelf_secret(paths, shelf, name, value, false).map_err(|error| error.to_string())
 }
 
 /// Writes a private staging file, then renames it over `name` (`replace`)
@@ -428,16 +457,16 @@ fn store_shelf_secret(
     name: &str,
     value: &str,
     replace: bool,
-) -> Result<bool, String> {
+) -> Result<bool, ApiKeyWriteError> {
     validate_secret_name(name)?;
     let value = value.trim();
     if value.is_empty() || value.len() > MAX_NAMED_SECRET_BYTES {
-        return Err(format!(
-            "secret value is empty or larger than {MAX_NAMED_SECRET_BYTES} bytes"
-        ));
+        return Err(
+            format!("secret value is empty or larger than {MAX_NAMED_SECRET_BYTES} bytes").into(),
+        );
     }
     if value.chars().any(char::is_control) {
-        return Err("secret value has a control character".to_owned());
+        return Err("secret value has a control character".to_owned().into());
     }
     paths.ensure_secret_shelf_dir(shelf)?;
     let path = paths.secret_shelf_file(shelf, name);
@@ -474,7 +503,9 @@ fn store_shelf_secret(
     let created = written?;
     fs::File::open(paths.secret_shelf_dir(shelf))
         .and_then(|dir| dir.sync_all())
-        .map_err(|_| "could not sync the secrets directory".to_owned())?;
+        .map_err(|_| {
+            ApiKeyWriteError::OutcomeUnknown("could not sync the secrets directory".into())
+        })?;
     Ok(created)
 }
 

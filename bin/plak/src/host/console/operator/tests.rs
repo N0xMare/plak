@@ -123,19 +123,26 @@ fn expiry_restart_disconnect_and_outstanding_quota_revoke_authority() {
 fn mutation_quota_is_shared_and_web_writes_are_default_off() {
     let console = new_console();
     let owner = owner();
-    assert!(console.admit_mutation(&owner.principal, true).is_ok());
-    assert!(console.admit_mutation(&owner.principal, false).is_err());
+    let admit = |credential| {
+        console
+            .operator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .admit_mutation(&owner.principal, credential)
+    };
+    assert!(admit(true).is_ok());
+    assert!(admit(false).is_err());
     console.end_mutation(&owner.principal);
     for _ in 1..10 {
-        assert!(console.admit_mutation(&owner.principal, true).is_ok());
+        assert!(admit(true).is_ok());
         console.end_mutation(&owner.principal);
     }
-    assert!(console.admit_mutation(&owner.principal, true).is_err());
+    assert!(admit(true).is_err());
     for _ in 0..30 {
-        assert!(console.admit_mutation(&owner.principal, false).is_ok());
+        assert!(admit(false).is_ok());
         console.end_mutation(&owner.principal);
     }
-    assert!(console.admit_mutation(&owner.principal, false).is_err());
+    assert!(admit(false).is_err());
     {
         let mut state = console
             .operator
@@ -149,10 +156,10 @@ fn mutation_quota_is_shared_and_web_writes_are_default_off() {
         }
     }
     for _ in 0..5 {
-        assert!(console.admit_mutation(&owner.principal, true).is_ok());
+        assert!(admit(true).is_ok());
         console.end_mutation(&owner.principal);
     }
-    assert!(console.admit_mutation(&owner.principal, true).is_err());
+    assert!(admit(true).is_err());
     assert!(matches!(
         console.prepare(
             HostRequestContext {
@@ -163,4 +170,75 @@ fn mutation_quota_is_shared_and_web_writes_are_default_off() {
         ),
         Err(RequestRefusal::CapabilityDisabled { .. })
     ));
+}
+
+#[test]
+fn refused_mutation_admission_preserves_grant_and_does_not_charge_quota() {
+    let console = new_console();
+    let owner = owner();
+    let first = grant(&console, &owner);
+    let permit = console
+        .mutation(&owner, &action(), &first)
+        .ok()
+        .expect("admitted");
+    let second = grant(&console, &owner);
+    assert!(matches!(
+        console.mutation(&owner, &action(), &second),
+        Err(super::super::account_writes::MutationRefusal::Quota(
+            RequestRefusal::RateLimited { .. }
+        ))
+    ));
+    {
+        let state = console
+            .operator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        assert!(state.grants.contains_key(&second));
+        assert_eq!(state.quotas[&owner.principal].credentials.len(), 1);
+    }
+    drop(permit);
+    assert!(console.mutation(&owner, &action(), &second).is_ok());
+    assert!(
+        console
+            .mutation(&owner, &action(), "invalid-confirmation")
+            .is_err()
+    );
+    assert_eq!(
+        console
+            .operator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .quotas[&owner.principal]
+            .credentials
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn definition_consent_refuses_reserved_template_names_before_minting_a_grant() {
+    let console = new_console();
+    for action in [
+        OperatorAction::TemplatePut {
+            id: "root".into(),
+            if_match: "a".repeat(64),
+        },
+        OperatorAction::ProfilePut {
+            id: "roster".into(),
+            if_match: "a".repeat(64),
+        },
+    ] {
+        assert!(matches!(
+            console.prepare(owner(), action),
+            Ok(HostResponse::Refused { .. })
+        ));
+    }
+    assert!(
+        console
+            .operator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .grants
+            .is_empty()
+    );
 }

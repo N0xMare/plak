@@ -110,10 +110,7 @@ impl Console {
         action: &OperatorAction,
         confirmation: &str,
     ) -> Result<Mutation, MutationRefusal> {
-        self.consume(context, action, confirmation)
-            .map_err(MutationRefusal::Consent)?;
-        self.admit_mutation(&context.principal, operator::credentials(action))
-            .map_err(MutationRefusal::Quota)?;
+        self.admit_mutation(context, action, confirmation)?;
         Ok(Mutation {
             console: Arc::clone(self),
             principal: context.principal.clone(),
@@ -198,12 +195,11 @@ impl Console {
                     return Err(validation("secret", ValidationCode::InvalidValue).into());
                 }
                 crate::home::secrets::set_api_key(&self.paths, &selected, secret.into_zeroizing())
-                    .map_err(|_| failed(true))?;
+                    .map_err(key_failure)?;
             }
             HostRequest::AccountKeyClear { .. } => {
                 env_override(&selected)?;
-                crate::home::secrets::clear_api_key(&self.paths, &selected)
-                    .map_err(|_| failed(true))?;
+                crate::home::secrets::clear_api_key(&self.paths, &selected).map_err(key_failure)?;
             }
             HostRequest::AccountRemove { .. } => {
                 if account.vertical().is_api() {
@@ -228,7 +224,7 @@ impl Console {
                 remote_grant_may_remain = crate::commands::application::host::logout_host_account(
                     &mut app, &account, local_only,
                 )
-                .map_err(|_| failed(true))?;
+                .map_err(host_failure)?;
             }
             _ => return Err(validation("request", ValidationCode::InvalidAction).into()),
         }
@@ -283,6 +279,21 @@ fn failed(outcome_unknown: bool) -> AccountError {
     }
 }
 
+fn key_failure(error: crate::home::secrets::ApiKeyWriteError) -> AccountError {
+    failed(matches!(
+        error,
+        crate::home::secrets::ApiKeyWriteError::OutcomeUnknown(_)
+    ))
+}
+
+fn host_failure(error: crate::commands::application::host::HostAccountError) -> AccountError {
+    use crate::commands::application::host::HostAccountError;
+    match error {
+        HostAccountError::Refused(error) => account_failure(&error, false),
+        HostAccountError::OutcomeUnknown(_error) => failed(true),
+    }
+}
+
 fn account_failure(
     error: &plakous_hosted::error::CliFailure,
     outcome_unknown: bool,
@@ -304,6 +315,10 @@ fn account_failure(
         Some(E::DefaultAccountNotRemovable { .. }) => {
             validation("account_id", ValidationCode::InvalidAction).into()
         }
+        Some(E::UnknownAccount { .. } | E::AccountTargetMismatch { .. }) => {
+            validation("account_id", ValidationCode::InvalidAccount).into()
+        }
+        Some(E::CapabilityUnavailable(_)) => failed(false),
         _ => failed(outcome_unknown),
     }
 }

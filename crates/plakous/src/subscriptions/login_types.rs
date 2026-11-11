@@ -2,6 +2,21 @@
 
 use super::{Duration, Instant, NativeProvider, fmt};
 
+/// Read-only, process-local evidence retained while a pending login is consumed.
+/// This is not credential or completion authority and cannot be reset by a caller.
+#[derive(Clone, Debug)]
+pub struct NativeLoginEffects(pub(super) std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl NativeLoginEffects {
+    /// Whether completion entered potentially effectful recovery/provider I/O.
+    /// False proves that a returned completion error preceded that boundary;
+    /// true does not claim a credential was written.
+    #[must_use]
+    pub fn may_have_started(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
 /// Supported native login interaction modes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeLoginMode {

@@ -74,6 +74,7 @@ pub use tree_nodes::TreeNodes;
 pub(crate) const ANSWER: &str = "answer:";
 /// Transport-only provenance, before any untrusted client correlation.
 pub(crate) const REMOTE_ATTACHMENT: &str = "remote-attachment:";
+pub(crate) const LOCAL_ATTACHMENT: &str = "local-attachment:";
 
 /// The most root patches the service keeps after the root snapshot for an
 /// attach; past it, a new attachment asks the session for a fresh one.
@@ -261,7 +262,7 @@ fn origin(attachment: AttachmentId, face: Face) -> String {
     let prefix = if face == Face::Remote {
         REMOTE_ATTACHMENT
     } else {
-        "attachment:"
+        LOCAL_ATTACHMENT
     };
     format!("{prefix}{attachment}")
 }
@@ -271,7 +272,7 @@ fn origin(attachment: AttachmentId, face: Face) -> String {
 fn attachment_of(correlation: &str) -> Option<(AttachmentId, Option<String>)> {
     let rest = correlation
         .strip_prefix(REMOTE_ATTACHMENT)
-        .or_else(|| correlation.strip_prefix("attachment:"))?;
+        .or_else(|| correlation.strip_prefix(LOCAL_ATTACHMENT))?;
     let (id, client) = match rest.split_once(':') {
         Some((id, client)) => (id, Some(client.to_owned())),
         None => (rest, None),

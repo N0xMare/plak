@@ -13,6 +13,25 @@ pub(crate) enum HostLoginStartError {
     Failed,
 }
 
+#[derive(Debug)]
+pub(crate) enum HostAccountError {
+    Refused(CliFailure),
+    OutcomeUnknown(CliFailure),
+}
+
+impl HostAccountError {
+    fn effectful_call(error: CliFailure) -> Self {
+        use std::error::Error as _;
+        if error.source().is_some_and(|source| {
+            source.is::<plakous_hosted::capabilities::AccountAdmissionError>()
+        }) {
+            Self::Refused(error)
+        } else {
+            Self::OutcomeUnknown(error)
+        }
+    }
+}
+
 /// Exact non-interactive preparation after host consent, before provider I/O.
 pub(crate) fn prepare_host_login(
     app: &mut impl AccountOps,
@@ -49,20 +68,24 @@ pub(crate) fn logout_host_account(
     app: &mut impl AccountOps,
     account: &AccountRef,
     local_only: bool,
-) -> CliResult<Option<bool>> {
-    fn retire(app: &mut impl AccountOps, account: &AccountRef) -> CliResult<()> {
-        let status = app.logout_local(account)?;
+) -> Result<Option<bool>, HostAccountError> {
+    fn retire(app: &mut impl AccountOps, account: &AccountRef) -> Result<(), HostAccountError> {
+        let status = app
+            .logout_local(account)
+            .map_err(HostAccountError::effectful_call)?;
         if !matches!(
             status,
             CredentialState::Revoked | CredentialState::SignedOut
         ) {
-            return Err(CliFailure::new(
+            return Err(HostAccountError::OutcomeUnknown(CliFailure::new(
                 "local credential retirement did not settle",
-            ));
+            )));
         }
         Ok(())
     }
-    let stored = app.stored_credential(account)?;
+    let stored = app
+        .stored_credential(account)
+        .map_err(HostAccountError::Refused)?;
     if local_only
         || matches!(
             stored,
@@ -76,17 +99,20 @@ pub(crate) fn logout_host_account(
         stored,
         StoredCredential::Usable(CompatibilityState::Current)
     ) {
-        return Err(CliFailure::new(
+        return Err(HostAccountError::Refused(CliFailure::new(
             "exact integration notice consent is required",
-        ));
+        )));
     }
-    match app.revoke(account)? {
+    match app
+        .revoke(account)
+        .map_err(HostAccountError::effectful_call)?
+    {
         Revocation::Revoked(CredentialState::Revoked | CredentialState::SignedOut) => {
             Ok(Some(false))
         }
-        Revocation::Revoked(_) => Err(CliFailure::new(
+        Revocation::Revoked(_) => Err(HostAccountError::OutcomeUnknown(CliFailure::new(
             "remote credential revocation did not settle",
-        )),
+        ))),
         Revocation::Unusable => {
             retire(app, account)?;
             Ok(Some(true))
@@ -127,8 +153,9 @@ impl PlakousApplication {
         pasted: Option<&str>,
         timeout: std::time::Duration,
         mut cancelled: tokio::sync::watch::Receiver<bool>,
-    ) -> CliResult<LoginOutcome> {
+    ) -> Result<LoginOutcome, HostAccountError> {
         let (account, pending) = pending;
+        let effects = pending.effects();
         let result = self
             .executor
             .block_on(async move {
@@ -150,7 +177,15 @@ impl PlakousApplication {
                     },
                 }
             })
-            .map_err(application_execution_failure)?;
-        result.map_err(|error| self.account_failure(error, &account))
+            .map_err(application_execution_failure)
+            .map_err(HostAccountError::Refused)?;
+        result.map_err(|error| {
+            let error = self.account_failure(error, &account);
+            if effects.may_have_started() {
+                HostAccountError::OutcomeUnknown(error)
+            } else {
+                HostAccountError::Refused(error)
+            }
+        })
     }
 }

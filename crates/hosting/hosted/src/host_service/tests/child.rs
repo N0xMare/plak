@@ -432,7 +432,7 @@ fn only_a_childs_marked_answers_reach_it() {
     let accepted = Observation::DraftAccepted(SessionIntent::Steer(Draft::from("now")));
     let refused = Observation::Row(TranscriptRow::error(NoticeScope::Tree, "mail refused"));
     service.observe(Observation::IntentStarted(Some(format!(
-        "{ANSWER}attachment:{first}:r1"
+        "{ANSWER}local-attachment:{first}:r1"
     ))));
     service.observe(accepted.clone());
     service.observe(refused.clone());

@@ -1,15 +1,17 @@
-{"frame":"request","id":1,"op":{"op":"host","request":{"request":"operator_prepare","action":{"action":"account_key_set","account_id":"openai/work"}}}}
+{"frame":"request","id":1,"op":{"op":"host","request":{"request":"operator_prepare","action":{"action":"account_key_set","account_id":"openai"}}}}
 {"frame":"request","id":2,"op":{"op":"host","request":{"request":"operator_confirm","nonce":"fixture-nonce"}}}
-{"frame":"request","id":3,"op":{"op":"host","request":{"request":"account_key_set","account_id":"openai/work","secret":"synthetic-fixture-value","confirmation":"fixture-grant"}}}
+{"frame":"request","id":3,"op":{"op":"host","request":{"request":"account_key_set","account_id":"openai","secret":"synthetic-fixture-value","confirmation":"fixture-grant"}}}
 {"frame":"request","id":4,"op":{"op":"host","request":{"request":"account_login_cancel","attempt":"fixture-attempt"}}}
 {"frame":"request","id":5,"op":{"op":"host","request":{"request":"config_patch","changes":[{"key":"turn.auto_continue","value":false}],"if_match":"fixture-revision","confirmation":"fixture-grant"}}}
 {"frame":"request","id":6,"op":{"op":"host","request":{"request":"template_put","id":"work","changes":[{"field":"account","value":"codex/work"},{"field":"model","value":"gpt-5.6-luna"}],"if_match":"fixture-revision","confirmation":"fixture-grant"}}}
 {"frame":"request","id":7,"op":{"op":"host","request":{"request":"profile_put","id":"work","body":{"root":"work","working_set":["work"]},"if_match":"fixture-revision","confirmation":"fixture-grant"}}}
 {"frame":"response","id":2,"outcome":{"ok":{"answer":"host","response":{"response":"operator_confirmed","confirmation":"fixture-grant","expires_in_ms":59000}}}}
-{"frame":"response","id":3,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"environment_override","proven_no_effect":true,"variable":"OPENAI_API_KEY","remedies":[{"action":"restart_host_without_override","account_id":"openai/work"}]}}}}}
+{"frame":"response","id":3,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"environment_override","proven_no_effect":true,"variable":"OPENAI_API_KEY","remedies":[{"action":"restart_host_without_override","account_id":"openai"}]}}}}}
 {"frame":"response","id":5,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"conflict","etag":"current-fixture-revision"}}}}}
 {"frame":"response","id":6,"outcome":{"ok":{"answer":"host","response":{"response":"saved","etag":"new-fixture-revision","published_durability_uncertain":true,"fields":[{"key":"template:work","applies":"new_session"}]}}}}
 {"frame":"response","id":7,"outcome":{"ok":{"answer":"host","response":{"response":"operation_outcome_unknown"}}}}
 {"frame":"response","id":8,"outcome":{"refused":{"refusal":"capability_disabled","capability":"credentials_write"}}}
 {"frame":"response","id":9,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"confirmation_expired"}}}}}
 {"frame":"response","id":10,"outcome":{"ok":{"answer":"host","response":{"response":"login_challenge","attempt":"fixture-attempt","method":"device_code","authorize_url":"https://example.invalid/fixture-authorization","user_code":"synthetic-device-code","expires_in_ms":900000,"warning":"This logs in the serving machine."}}}}
+{"frame":"response","id":11,"outcome":{"ok":{"answer":"host","response":{"response":"login_progress","attempt":"fixture-attempt","phase":"succeeded","provenance_warning":false,"warning":"Same upstream account as claude/personal; provider limits are shared, not additional allowance."}}}}
+{"frame":"response","id":12,"outcome":{"ok":{"answer":"host","response":{"response":"login_progress","attempt":"fixture-attempt","phase":"awaiting_input","provenance_warning":false,"warning":null}}}}

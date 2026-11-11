@@ -401,7 +401,7 @@ capacity and rate refusals do not open a session or close the connection.
 | `credential_mutations_per_minute` | `10` | Across every connection of the verified principal. |
 | `config_mutations_per_minute` | `30` | Across every connection of the verified principal. |
 | `login_starts_per_minute` | `3` | Native attempt starts per principal. |
-| `pending_logins_per_principal` | `2` | Native attempts; mutation admission is also single-flight. |
+| `pending_logins_per_principal` | `2` | Native attempts; admission releases mutation single-flight once recorded. |
 | `pending_logins_host` | `3` | One per exact native account, at most three total. |
 | `login_lifetime_ms` | `900000` | Earlier provider expiry wins. |
 | `login_poll_ms` | `1000` | Minimum interval between attempt polls. |
@@ -424,6 +424,10 @@ capacity and rate refusals do not open a session or close the connection.
 | `usage_cache_ms` | `30000` | Exact-fenced console observation freshness. |
 | `usage_reread_ms` | `30000` | Suggested explicit refresh interval, not automatic retry. |
 | `cursor_ttl_ms` | `30000` | Immutable page-snapshot lifetime. |
+
+Admission refusals preserve one-shot consent and do not charge credential,
+config or login-start quotas. A pending native login is governed by attempt
+quotas, not a 15-minute principal-wide mutation lock.
 
 Diagnostics retain at most 32 entries, each with at most 512 encoded message
 bytes. At most 32 page snapshots share the host's 8 MiB snapshot budget.

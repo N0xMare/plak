@@ -398,6 +398,7 @@ async fn named_compatibility_lock_allows_same_process_login_and_refresh_commits(
             .await?;
         let accepted = native.state.load_acceptance_exact(notice, test_now())?;
         let consent = PendingCompatibilityConsent {
+            effects: NativeLoginEffects(Arc::default()),
             state: native.state.clone(),
             notice,
             exact_receipt: accepted.exact_bytes,

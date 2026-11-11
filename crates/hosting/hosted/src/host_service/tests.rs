@@ -44,7 +44,7 @@ fn durable_draft_verdict_outlives_its_attachment_and_mailbox_ack_is_not_cached()
             service.detach(attachment).unwrap();
         }
         service.observe(Observation::IntentStarted(Some(format!(
-            "attachment:{attachment}:{id}"
+            "local-attachment:{attachment}:{id}"
         ))));
         service.observe(Observation::DraftAccepted(SessionIntent::Prompt(
             Draft::from("one admission"),
@@ -81,7 +81,7 @@ fn rejected_or_dropped_wire_drafts_release_the_hostwide_identity() {
         service.begin_wire_draft(id, pending);
         if rejected {
             service.observe(Observation::IntentStarted(Some(format!(
-                "attachment:1:{id}"
+                "local-attachment:1:{id}"
             ))));
             service.observe(Observation::DraftRejected(SessionIntent::Prompt(
                 Draft::from("refused"),
@@ -619,7 +619,7 @@ fn a_face_takes_its_scopes_in_order_with_its_own_correlation() {
     assert_eq!(
         intents.try_recv().unwrap().started(),
         Some(plakous_host_protocol::ContentObservation::IntentStarted(
-            Some("attachment:1".into())
+            Some("local-attachment:1".into())
         ))
     );
     actions
@@ -628,7 +628,7 @@ fn a_face_takes_its_scopes_in_order_with_its_own_correlation() {
     let started = intents.try_recv().unwrap().started().unwrap();
     assert_eq!(
         Observation::from(started.clone()),
-        Observation::IntentStarted(Some("attachment:1:c7".into()))
+        Observation::IntentStarted(Some("local-attachment:1:c7".into()))
     );
     for observation in [
         started.into(),
@@ -748,7 +748,7 @@ fn a_faces_agent_view_is_one_of_the_services() {
 fn a_face_of_its_own_passes_a_foreign_attachment_window_through() {
     let (published, events) = observation_channel::<Core>();
     let face = FaceReceiver::new(events);
-    let foreign = Observation::IntentStarted(Some("attachment:7".into()));
+    let foreign = Observation::IntentStarted(Some("local-attachment:7".into()));
     let answer = Observation::DraftRestored(Draft::from("back"));
     for observation in [
         foreign.clone(),
@@ -771,7 +771,7 @@ fn a_faces_service_passes_a_foreign_attachment_window_through() {
     let (actions, _intents) = intent_channel::<Core>();
     let (published, events) = observation_channel::<Core>();
     let (_actions, face) = face(actions, events);
-    let foreign = Observation::IntentStarted(Some("attachment:7".into()));
+    let foreign = Observation::IntentStarted(Some("local-attachment:7".into()));
     let answer = Observation::DraftRestored(Draft::from("back"));
     published.send(foreign.clone()).unwrap();
     published.send(answer.clone()).unwrap();
@@ -808,7 +808,7 @@ fn a_detached_requester_takes_no_more_answers() {
     let (service, _intents) = service(16);
     let first = service.attach(&root(), Face::Remote).unwrap();
     service.observe(Observation::IntentStarted(Some(format!(
-        "attachment:{first}"
+        "local-attachment:{first}"
     ))));
     service.detach(first).unwrap();
     let second = service.attach(&root(), Face::Remote).unwrap();

@@ -158,6 +158,9 @@ pub enum HostResponse {
         attempt: String,
         phase: LoginPhase,
         provenance_warning: bool,
+        #[serde(deserialize_with = "required")]
+        #[schemars(required, schema_with = "nullable::<String>")]
+        warning: Option<String>,
     },
     OperatorPrepared {
         consent: OperatorConsent,

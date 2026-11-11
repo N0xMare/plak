@@ -66,8 +66,8 @@ mod vertical;
 
 pub use error::NativeSubscriptionError;
 pub use login_types::{
-    CompatibilityNotice, NativeDeviceCode, NativeLoginCompletion, NativeLoginInstructions,
-    NativeLoginMode,
+    CompatibilityNotice, NativeDeviceCode, NativeLoginCompletion, NativeLoginEffects,
+    NativeLoginInstructions, NativeLoginMode,
 };
 #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 use models::require_exact_native_tool_mode;

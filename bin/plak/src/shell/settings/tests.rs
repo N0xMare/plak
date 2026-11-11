@@ -1437,15 +1437,20 @@ fn only_local_use_now_can_bootstrap_a_fresh_home_default() {
                     name: "mine".into(),
                     apply: crate::surface_protocol::ProfileApply::Fork,
                 }),
-                Some("attachment:1:local"),
+                Some("local-attachment:1:local"),
             )
             .unwrap();
         let delivery = intents.try_recv().unwrap();
         let (events, _observed) = host_event_sink();
+        assert!(
+            !events.is_local_request(),
+            "missing provenance is not local authority"
+        );
         assert!(events.send(delivery.started().unwrap()));
         assert_eq!(events.is_local_request(), face == Face::Local);
         let answering = events.answering();
         assert!(events.send(ContentEvent::IntentStarted(None)));
+        assert!(!events.is_local_request(), "a cleared window fails closed");
         assert_eq!(answering.is_local_request(), face == Face::Local);
         let (SessionIntent::Extension(intent), _guard) = delivery.into_parts() else {
             panic!("profile intent");

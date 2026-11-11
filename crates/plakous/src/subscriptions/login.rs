@@ -16,6 +16,7 @@ pub struct PendingNativeLogin {
 
 #[derive(Clone)]
 pub(super) struct PendingCompatibilityConsent {
+    pub(super) effects: super::NativeLoginEffects,
     pub(super) state: SubscriptionState,
     pub(super) notice: CompatibilityNotice,
     pub(super) exact_receipt: Vec<u8>,
@@ -73,6 +74,9 @@ impl PendingCompatibilityConsent {
 
 pub(super) trait NativePendingLogin: Send {
     fn instructions(&self) -> NativeLoginInstructions<'_>;
+    fn validate_remote_input(&self, _input: &str) -> Result<(), NativeSubscriptionError> {
+        Err(NativeSubscriptionError::InvalidCallback)
+    }
     fn complete(
         self: Box<Self>,
         consent: PendingCompatibilityConsent,
@@ -85,6 +89,11 @@ pub(super) trait NativePendingLogin: Send {
 }
 
 impl PendingNativeLogin {
+    /// Retains read-only effect-boundary evidence after completion consumes this token.
+    #[must_use]
+    pub fn effects(&self) -> super::NativeLoginEffects {
+        self.consent.effects.clone()
+    }
     /// Whether opening this login retired an unusable stored record.
     #[must_use]
     pub const fn replaced_unusable_record(&self) -> bool {
@@ -95,6 +104,14 @@ impl PendingNativeLogin {
     #[must_use]
     pub fn instructions(&self) -> NativeLoginInstructions<'_> {
         self.inner.instructions()
+    }
+
+    /// Validates a paste without consuming pending authority or provider I/O.
+    ///
+    /// # Errors
+    /// Returns the provider's redacted local callback, profile or deadline refusal.
+    pub fn validate_remote_input(&self, input: &str) -> Result<(), NativeSubscriptionError> {
+        self.inner.validate_remote_input(input)
     }
 
     /// Completes the admitted automatic or device login under its exact consent.
@@ -135,6 +152,10 @@ where
         .await?;
     consent.validate_at(now()?).await?;
     lock.verify()?;
+    consent
+        .effects
+        .0
+        .store(true, std::sync::atomic::Ordering::Release);
     let mut armed = ArmedLoginRecovery {
         consent,
         operation: Some(consent.arm_recovery()?),

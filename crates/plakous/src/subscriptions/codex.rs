@@ -852,6 +852,7 @@ impl NativeVertical for Vertical {
             {
                 let online = subscriptions.codex_online_for_login().await?;
                 let consent = PendingCompatibilityConsent {
+                    effects: crate::subscriptions::NativeLoginEffects(Arc::default()),
                     state: subscriptions.state.clone(),
                     notice: NativeSubscriptions::notice(provider)?,
                     exact_receipt: online.acceptance.exact_bytes.clone(),
@@ -962,6 +963,10 @@ where
     Fut: Future<Output = Result<NativeAuthStatus, NativeSubscriptionError>>,
     C: FnMut() -> Result<u64, NativeSubscriptionError>,
 {
+    consent
+        .effects
+        .0
+        .store(true, std::sync::atomic::Ordering::Release);
     let approved = approval.await?;
     complete_pending_with_consent(consent, now, || operation(approved)).await
 }

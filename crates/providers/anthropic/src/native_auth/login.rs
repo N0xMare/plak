@@ -23,6 +23,18 @@ impl ClaudeOAuthLogin {
         &self.authorization_url
     }
 
+    /// Checks a paste without consuming this attempt or starting an exchange.
+    ///
+    /// # Errors
+    /// Returns a redacted deadline, profile or callback refusal.
+    pub fn validate_authorization_input(&self, input: &str) -> Result<(), ClaudeNativeAuthError> {
+        self.core.ensure_flow_active(self.deadline)?;
+        parse_claude_oauth_authorization_input(input, self.state.expose_secret())
+            .map(zeroize::Zeroizing::new)
+            .map(|_| ())
+            .ok_or(ClaudeNativeAuthError::InvalidCallback)
+    }
+
     /// Validates pasted authorization input and exchanges the code for tokens.
     ///
     /// # Errors

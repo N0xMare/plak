@@ -895,9 +895,10 @@ fn host_logout_never_falls_back_to_local_retirement_after_failed_remote_revoke()
     let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Revoked);
     backend.credential = CredentialState::Ready;
     backend.revoke_failed = true;
-    assert!(
-        commands::application::host::logout_host_account(&mut backend, &account, false).is_err()
-    );
+    assert!(matches!(
+        commands::application::host::logout_host_account(&mut backend, &account, false),
+        Err(commands::application::host::HostAccountError::OutcomeUnknown(_))
+    ));
     assert!(
         backend
             .calls
@@ -923,6 +924,19 @@ fn host_logout_never_falls_back_to_local_retirement_after_failed_remote_revoke()
             .calls
             .contains(&Call::LogoutLocal(NativeProvider::Claude))
     );
+}
+
+#[cfg(feature = "web")]
+#[test]
+fn host_logout_notice_refusal_happens_before_any_credential_effect() {
+    let account = "claude/work".parse().unwrap();
+    let mut backend = FakeBackend::new(CompatibilityState::Required, CredentialState::Revoked);
+    backend.credential = CredentialState::Ready;
+    assert!(matches!(
+        commands::application::host::logout_host_account(&mut backend, &account, false),
+        Err(commands::application::host::HostAccountError::Refused(_))
+    ));
+    assert_eq!(backend.calls, vec![Call::Status(NativeProvider::Claude)]);
 }
 
 impl AccountOps for FakeBackend {

@@ -329,6 +329,11 @@ pub struct PendingNativeLogin(std::convert::Infallible);
     reason = "disabled logins retain the compiled async API contract"
 )]
 impl PendingNativeLogin {
+    /// Retains read-only effect-boundary evidence while completion consumes a token.
+    #[must_use]
+    pub fn effects(&self) -> super::NativeLoginEffects {
+        match self.0 {}
+    }
     /// Reports whether this login retired an unusable record.
     #[must_use]
     pub fn replaced_unusable_record(&self) -> bool {
@@ -337,6 +342,13 @@ impl PendingNativeLogin {
     /// Returns the exact operator instructions.
     #[must_use]
     pub fn instructions(&self) -> NativeLoginInstructions<'_> {
+        match self.0 {}
+    }
+    /// Validates pasted input without consuming pending authority or provider I/O.
+    ///
+    /// # Errors
+    /// No attempt exists in this build.
+    pub fn validate_remote_input(&self, _input: &str) -> Result<(), NativeSubscriptionError> {
         match self.0 {}
     }
     /// Completes an automatic or device login.

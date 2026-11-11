@@ -1076,6 +1076,11 @@ pub(crate) fn agent_event_and_cursor_serde_round_trip() {
 /// surface is a `compile_fail` doctest on the facade module.
 pub(crate) fn auth_module_exists_without_existing_login() {
     use plakous::auth::{CredentialGeneration, SecretString};
+    use plakous::subscriptions::{NativeLoginEffects, NativeSubscriptionError, PendingNativeLogin};
+    let _: fn(&PendingNativeLogin, &str) -> Result<(), NativeSubscriptionError> =
+        PendingNativeLogin::validate_remote_input;
+    let _: fn(&PendingNativeLogin) -> NativeLoginEffects = PendingNativeLogin::effects;
+    let _: fn(&NativeLoginEffects) -> bool = NativeLoginEffects::may_have_started;
     assert_ne!(std::any::type_name::<CredentialGeneration>(), "");
     assert_ne!(std::any::type_name::<SecretString>(), "");
 }

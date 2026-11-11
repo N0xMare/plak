@@ -134,6 +134,36 @@ impl XaiRemoteBrowserLogin {
         self.flow.authorization_url()
     }
 
+    /// Checks a paste without consuming this attempt or starting an exchange.
+    ///
+    /// # Errors
+    /// Returns a redacted deadline, profile, callback or denial refusal.
+    pub fn validate_authorization_input(&self, input: &str) -> Result<(), XaiNativeAuthError> {
+        self.flow.ensure_active()?;
+        match parse_remote_authorization_input(
+            input,
+            self.flow.binding.expose_state(),
+            &self.flow.redirect_uri,
+            xai_callback_policy(),
+        )
+        .map(oauth_callback_to_browser)
+        .map_err(map_oauth_workflow_error)?
+        {
+            BrowserCallback::AuthorizationCode { state, .. } => self
+                .flow
+                .binding
+                .verify(&state, self.flow.binding.expose_nonce())
+                .map_err(|_| XaiNativeAuthError::InvalidCallback),
+            BrowserCallback::ProviderError { state } => {
+                self.flow
+                    .binding
+                    .verify(&state, self.flow.binding.expose_nonce())
+                    .map_err(|_| XaiNativeAuthError::InvalidCallback)?;
+                Err(XaiNativeAuthError::AuthorizationDenied)
+            }
+        }
+    }
+
     /// Validates and consumes one pasted authorization input, then performs the
     /// shared token, identity, and selected-slot installation.
     ///

@@ -1713,6 +1713,27 @@ async fn remote_browser_login_never_binds_and_uses_shared_complete_lifecycle() -
     let pairs = parsed.query_pairs().collect::<BTreeMap<_, _>>();
     let state = required(pairs.get("state"), "remote browser state")?.to_string();
     let nonce = required(pairs.get("nonce"), "remote browser nonce")?.to_string();
+    assert!(matches!(
+        login.validate_authorization_input("nope"),
+        Err(XaiNativeAuthError::InvalidCallback)
+    ));
+    assert!(matches!(
+        login.validate_authorization_input(
+            "http://127.0.0.1:56121/callback?code=remote-browser-code&state=wrong-state"
+        ),
+        Err(XaiNativeAuthError::InvalidCallback)
+    ));
+    assert!(
+        login
+            .validate_authorization_input(&format!(
+                "http://127.0.0.1:56121/callback?code=remote-browser-code&state={state}"
+            ))
+            .is_ok()
+    );
+    assert!(
+        peer.requests.lock().await.is_empty(),
+        "preflight never dispatches tokens or consumes the attempt"
+    );
     assert_eq!(
         pairs.get("redirect_uri").map(AsRef::as_ref),
         Some(XAI_LOOPBACK_REDIRECT)

@@ -334,7 +334,7 @@ pub fn key_set(
         account,
         zeroize::Zeroizing::new((key.as_str()).to_string()),
     )
-    .map_err(CliFailure::from)?;
+    .map_err(|error| CliFailure::new(error.to_string()))?;
     writeln!(
         stderr,
         "stored API key for {account} (fingerprint only on status)"
@@ -346,7 +346,8 @@ pub fn key_set(
 /// `plak key clear <account>`.
 pub fn key_clear(account: &str, stdout: &mut dyn io::Write) -> CliResult<ProcessOutcome> {
     let paths = product_paths::PlakPaths::home_from_env().map_err(CliFailure::from)?;
-    let removed = product_secrets::clear_api_key(&paths, account).map_err(CliFailure::from)?;
+    let removed = product_secrets::clear_api_key(&paths, account)
+        .map_err(|error| CliFailure::new(error.to_string()))?;
     writeln!(
         stdout,
         "{}",

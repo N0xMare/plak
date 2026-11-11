@@ -245,6 +245,25 @@ async fn mismatched_state_fails_before_token_exchange() {
         login.pkce.verifier().expose_secret()
     );
     assert!(matches!(
+        login.validate_authorization_input(&input),
+        Err(ClaudeNativeAuthError::InvalidCallback)
+    ));
+    assert!(matches!(
+        login.validate_authorization_input("nope"),
+        Err(ClaudeNativeAuthError::InvalidCallback)
+    ));
+    assert!(
+        login
+            .validate_authorization_input(&format!(
+                "{}#{}",
+                "fixture-code".repeat(3),
+                login.state.expose_secret()
+            ))
+            .is_ok(),
+        "a rejected paste must retain the same pending authority"
+    );
+    assert!(manager.status().unwrap().is_none());
+    assert!(matches!(
         login.complete(&input).await,
         Err(ClaudeNativeAuthError::InvalidCallback)
     ));

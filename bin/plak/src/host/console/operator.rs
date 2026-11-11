@@ -95,27 +95,37 @@ impl Console {
                     ValidationCode::InvalidValue,
                 )));
             }
-            let identity = match super::accounts::reader(&self.state)
+            let subscriptions = match super::accounts::reader(&self.state)
                 .and_then(|reader| reader.subscriptions_for(&account))
             {
-                Ok(subscriptions) => subscriptions
-                    .upstream_account_fingerprint(provider)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map_or_else(
-                        || "unknown or signed out".into(),
-                        |identity| format!("{identity:?}"),
-                    ),
-                Err(_) => "unknown or unavailable".into(),
+                Ok(subscriptions) => subscriptions,
+                Err(reason) => return Ok(refused(reason)),
             };
+            let Ok(status) =
+                crate::commands::support::offline_subscription_status(&subscriptions, provider)
+                    .await
+            else {
+                return Ok(refused(ReadRefusal::AccountOperationFailed {}));
+            };
+            let newer =
+                status.credential == crate::presentation::CredentialState::WrittenByNewerBuild;
+            let identity = subscriptions
+                .upstream_account_fingerprint(provider)
+                .await
+                .ok()
+                .flatten()
+                .map_or_else(
+                    || "unknown or signed out".into(),
+                    |identity| format!("{identity:?}"),
+                );
             Some(format!(
-                " Experimental integration {}. Provenance: {}. Source revision: {}. Reviewed: {}; expires: {}. Current safe upstream identity digest: {}.",
+                " Experimental integration {}. Provenance: {}. Source revision: {}. Reviewed: {}; expires: {}. Stored credential written by a newer build: {}. Current safe upstream identity digest: {}.",
                 notice.profile_id(),
                 notice.provenance(),
                 notice.source_revision(),
                 notice.reviewed_at(),
                 notice.expires_at(),
+                newer,
                 identity
             ))
         } else {
@@ -224,6 +234,7 @@ impl Console {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn consume(
         &self,
         context: &HostRequestContext,
@@ -231,62 +242,26 @@ impl Console {
         confirmation: &str,
     ) -> Result<(), ReadRefusal> {
         let mut state = self.operator.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(grant) = state.grants.get(confirmation) else {
-            return Err(ReadRefusal::ConfirmationRequired {});
-        };
-        if !same_owner(&grant.owner, context) || !grant.confirmed || &grant.action != action {
-            return Err(ReadRefusal::ConfirmationRequired {});
-        }
-        let grant = state
-            .grants
-            .remove(confirmation)
-            .ok_or(ReadRefusal::ConfirmationRequired {})?;
-        if Instant::now() >= grant.expires {
-            return Err(ReadRefusal::ConfirmationExpired {});
-        }
+        state.check_grant(context, action, confirmation)?;
+        state.grants.remove(confirmation);
         Ok(())
     }
 
     pub(super) fn admit_mutation(
         &self,
-        principal: &HostPrincipal,
-        credential: bool,
-    ) -> Result<(), RequestRefusal> {
-        let now = Instant::now();
+        context: &HostRequestContext,
+        action: &OperatorAction,
+        confirmation: &str,
+    ) -> Result<(), super::account_writes::MutationRefusal> {
+        use super::account_writes::MutationRefusal;
         let mut state = self.operator.lock().unwrap_or_else(PoisonError::into_inner);
-        state.quotas.retain(|_, quota| {
-            quota
-                .credentials
-                .retain(|time| now.duration_since(*time) < TTL);
-            quota.config.retain(|time| now.duration_since(*time) < TTL);
-            quota.active || !quota.credentials.is_empty() || !quota.config.is_empty()
-        });
-        if !state.quotas.contains_key(principal) && state.quotas.len() >= PRINCIPALS {
-            return Err(RequestRefusal::RateLimited {
-                retry_after_ms: 60_000,
-            });
-        }
-        let quota = state.quotas.entry(principal.clone()).or_default();
-        let count = if credential {
-            &mut quota.credentials
-        } else {
-            &mut quota.config
-        };
-        if quota.active || count.len() >= if credential { 10 } else { 30 } {
-            return Err(RequestRefusal::RateLimited {
-                retry_after_ms: if quota.active {
-                    1_000
-                } else {
-                    u64::try_from(
-                        TTL.saturating_sub(now.duration_since(*count.front().unwrap_or(&now)))
-                            .as_millis(),
-                    )
-                    .unwrap_or(60_000)
-                },
-            });
-        }
-        count.push_back(now);
-        quota.active = true;
+        state
+            .check_grant(context, action, confirmation)
+            .map_err(MutationRefusal::Consent)?;
+        state
+            .admit_mutation(&context.principal, credentials(action))
+            .map_err(MutationRefusal::Quota)?;
+        state.grants.remove(confirmation);
         Ok(())
     }
 
@@ -319,6 +294,68 @@ impl Console {
     }
 }
 
+impl State {
+    fn check_grant(
+        &self,
+        context: &HostRequestContext,
+        action: &OperatorAction,
+        confirmation: &str,
+    ) -> Result<(), ReadRefusal> {
+        let Some(grant) = self.grants.get(confirmation) else {
+            return Err(ReadRefusal::ConfirmationRequired {});
+        };
+        if !same_owner(&grant.owner, context) || !grant.confirmed || &grant.action != action {
+            return Err(ReadRefusal::ConfirmationRequired {});
+        }
+        if Instant::now() >= grant.expires {
+            return Err(ReadRefusal::ConfirmationExpired {});
+        }
+        Ok(())
+    }
+
+    fn admit_mutation(
+        &mut self,
+        principal: &HostPrincipal,
+        credential: bool,
+    ) -> Result<(), RequestRefusal> {
+        let now = Instant::now();
+        self.quotas.retain(|_, quota| {
+            quota
+                .credentials
+                .retain(|time| now.duration_since(*time) < TTL);
+            quota.config.retain(|time| now.duration_since(*time) < TTL);
+            quota.active || !quota.credentials.is_empty() || !quota.config.is_empty()
+        });
+        if !self.quotas.contains_key(principal) && self.quotas.len() >= PRINCIPALS {
+            return Err(RequestRefusal::RateLimited {
+                retry_after_ms: 60_000,
+            });
+        }
+        let quota = self.quotas.entry(principal.clone()).or_default();
+        let count = if credential {
+            &mut quota.credentials
+        } else {
+            &mut quota.config
+        };
+        if quota.active || count.len() >= if credential { 10 } else { 30 } {
+            return Err(RequestRefusal::RateLimited {
+                retry_after_ms: if quota.active {
+                    1_000
+                } else {
+                    u64::try_from(
+                        TTL.saturating_sub(now.duration_since(*count.front().unwrap_or(&now)))
+                            .as_millis(),
+                    )
+                    .unwrap_or(60_000)
+                },
+            });
+        }
+        count.push_back(now);
+        quota.active = true;
+        Ok(())
+    }
+}
+
 fn same_owner(left: &HostRequestContext, right: &HostRequestContext) -> bool {
     left.principal == right.principal
         && left.connection_id == right.connection_id
@@ -348,7 +385,7 @@ fn validate(action: &OperatorAction) -> Result<(), ReadRefusal> {
     match action {
         OperatorAction::TemplatePut { id, if_match }
         | OperatorAction::ProfilePut { id, if_match } => {
-            if crate::home::secrets::validate_secret_name(id).is_err() || if_match.len() != 64 {
+            if crate::product_config::validate_template_name(id).is_err() || if_match.len() != 64 {
                 return Err(validation("id", ValidationCode::InvalidId));
             }
         }

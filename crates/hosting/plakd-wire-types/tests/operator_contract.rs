@@ -20,6 +20,14 @@ fn protocol_seven_operator_fixtures_are_addressed_and_secret_debug_is_redacted()
             serde_json::to_value(request)?
         } else {
             let response = serde_json::from_value::<HostFrame<PlakExtension>>(value.clone())?;
+            if value["outcome"]["ok"]["response"]["response"] == "login_progress" {
+                let mut missing = value.clone();
+                missing["outcome"]["ok"]["response"]
+                    .as_object_mut()
+                    .ok_or("response")?
+                    .remove("warning");
+                assert!(serde_json::from_value::<HostFrame<PlakExtension>>(missing).is_err());
+            }
             let debug = format!("{response:?}");
             assert!(!debug.contains("https://example.invalid/fixture-authorization"));
             assert!(!debug.contains("synthetic-device-code"));

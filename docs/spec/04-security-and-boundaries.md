@@ -795,21 +795,44 @@ widens it.
 
 ### 2.10 The web endpoint
 
-Authenticated protocol-7 config writes are allowlisted home operations with
-mandatory etags and deferred-execution consent. They cannot edit web switches,
-allow/origin, runners, tools infrastructure, MCP servers, project trust or
-arbitrary paths. Remote legacy settings/default and credential-refresh intents
-are refused before dispatch; same-user socket trust does not grant a client-
-asserted local face. Existing local-face behavior is retained.
+An admitted web client is an operator acting with the serving user's authority.
+In addition to session and directory operations, enabled protocol-7 console
+capabilities manage provider accounts and publish allowlisted home configuration.
+These are real credential and deferred-execution powers, not cosmetic settings.
+Capability switches and confirmations are product controls, not an OS sandbox
+or a boundary against that user's already-admitted agent shell.
 
-Protocol-7 operator consent is confirmation, not independent authentication
-or proof of human presence. An admitted same-origin script or stolen usable
-cookie can prepare and confirm itself. Grants are random, single-use,
-60-second, exact-action/principal/connection/generation-bound process state.
-No agent observation, tool result, transcript, directory update or unsolicited
-event may carry a login challenge or handle. Capability switches do not
-sandbox the already-admitted agent shell or distinguish same-uid shell
-access from the user's socket/CLI authority.
+Credential-management responses never return stored credentials. Only the
+requesting face's explicit, confirmed operator login receives its private
+challenge. Login URLs, user codes and completion handles never enter agent
+observations, tool results, transcripts, directory updates, unsolicited events
+or logs. Agent tools and model-visible channels cannot initiate, approve,
+complete or subscribe to console login. An authentication failure may name an
+operator action, but never starts it or embeds an authorization URL. Pending
+authority stays on the host; completion consumes the same opaque attempt.
+Callback pages belong to the provider, not a new public host callback endpoint.
+This does not distinguish an agent's same-uid shell from the operator's CLI or
+trusted same-user socket: that shell already has the user's process authority.
+
+The acceptor assigns principals: authenticated tailnet login for web, verified
+peer uid for the socket. Home-only startup-captured web read/write switches
+default off and require matching reads for writes; allow/origin authentication
+remains mandatory. Same-user socket console operations are trusted by default,
+not gated by web switches, but retain identical validation, etag, consent,
+requester binding and principal-wide quota rules. No client can edit web
+switches, allow/origin, runners, tools infrastructure, MCP servers, project
+trust or arbitrary paths through console writes. Legacy remote settings,
+default and credential-refresh intents are refused before dispatch; a trusted
+socket does not grant a client-asserted local face. Local-face behavior remains.
+
+Operator consent is confirmation, not independent authentication or proof of
+human presence: an admitted same-origin script or stolen usable cookie can
+prepare and confirm itself. Grants are random, single-use, 60-second,
+exact-action/principal/connection/generation-bound process state. Refused
+admission neither consumes a grant nor charges a mutation/start quota. Pending
+logins use their own attempt quotas, not the principal's mutation single-flight
+permit. Local and remote provenance is explicitly transport-stamped before
+client correlation; absent or unrecognized provenance grants no local authority.
 
 P6 console reads are attachment-free home observations, never authority to
 admit a session, model, template or credential. Admitted web principals require
@@ -859,9 +882,11 @@ title), `archive_session {session,archived}` and `delete_session
 returned unchanged to the calling product command.
 
 `plak host --web` (chapter 02 §4.5) serves the host's sessions to browsers
-on the tailnet. Everything a client admitted there can do, an operator at
-the TUI can do, except the local-face intents of §4.6: it holds the serving
-user's shell. That includes the wire's session requests (`retry_attach`,
+on the tailnet with the serving user's shell authority. Session and directory
+controls have TUI equivalents, except the local-face intents of §4.6. This is
+not a claim that the retained embedded TUI Providers view implements console
+account writes: it remains read-only (§3.6); host-client TUIs use the same
+confirmed operator wire as web. Session controls include (`retry_attach`,
 `resume_session`, `rebind`), which act on the serving user's own sessions
 as the TUI's `/attach`, `/resume` and rebind do, the session directory's
 (chapter 02 §4.4), and `stop_session`. The directory reads every session of
@@ -898,8 +923,9 @@ v2 shows every face the job lifecycle the same way: `job_started`'s command
 and `job_terminal`'s output tail are redacted as a process row's are. JSONL
 v1, a local, same-user stream, projects them as the runtime displays them.
 The redactor is best-effort display minimization, not a credential
-boundary. The endpoint's whole job is
-deciding who the client is, and its checks stop different attackers.
+boundary. The endpoint authenticates its operator and enforces the
+face-specific capability, validation and consent rules. Its authentication
+checks address different attackers.
 
 Host `retry_attach` and `rebind` require the requesting connection's root
 attachment, not a child attachment. They do not exec or hand off the host
@@ -1530,6 +1556,20 @@ are not completion authority. Disconnect, expiry and restart retire pending
 authority. No login is initiated/approved/completed through an agent tool,
 model-visible channel or unsolicited observation; same-uid shell/socket/CLI
 access remains the stated residual, not a credential-isolation guarantee.
+
+`PendingNativeLogin::validate_remote_input` borrows the same opaque authority
+to apply provider-owned callback, state and deadline checks without exchange
+or consumption. Invalid paste is refused and can be corrected on that attempt;
+validation does not replace completion-time consent, expiry or CAS checks.
+Its read-only `NativeLoginEffects` witness survives token consumption and
+latches before potentially effectful recovery I/O or device polling. The host
+uses that actual boundary, not an error's wording, to distinguish a pre-I/O
+consent refusal from uncertainty after work began. It is process-local evidence,
+not credential/completion authority, and changes no recovery marker or CAS law.
+Login consent names the actual stored newer-build state, not merely a client
+replacement flag. Unusable-record retirement and same-upstream shared limits
+remain visible warnings, as in the CLI. Pre-effect admission, notice, storage
+path and input refusals are typed separately from post-effect uncertainty.
 
 Login is authorization-code with PKCE (S256) against a revision-pinned profile
 for every vertical. Only one vertical has a loopback flow at all; the others are
