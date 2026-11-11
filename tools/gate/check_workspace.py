@@ -1729,15 +1729,13 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # `test-hooks` only: the offline script's child runner, bound and journaled
     # as a host's dial is, then selected for the process (spec 01 §8.5).
-    ("plak", "src/test_hooks.rs"): {
+    ("plak", "src/test_hooks.rs"): {'runner': {'RunnerServices'}},
+    ("plak", "src/test_hooks/child_runner.rs"): {
         'runner': {
-            'Bind',
             'CallJournal',
-            'ClientWindows',
             'FileCallJournal',
             'RunnerClient',
             'RunnerServices',
-            'protocol',
         },
         'tools': {'runner::RunnerBackend'},
     },
@@ -1999,8 +1997,36 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'WorkspaceRefusal',
         },
     },
-    ('plak', 'src/lib.rs'): {'runner': {'RunnerServices', 'RunnerLeaseClock', 'ClientWindows'}},
-    ('plak', 'src/test_hooks/runner.rs'): {'runner': {'RunnerLeaseClock', 'ClientWindows'}},
+    ('plak', 'src/lib.rs'): {
+        'runner': {
+            'RunnerServices',
+            'RunnerLeaseClock',
+            'ClientWindows',
+            'RunnerClient',
+            'PlacementFailure',
+        },
+        'tools': {'runner::RunnerLink'},
+    },
+    ('plak', 'src/test_hooks/runner.rs'): {
+        'runner': {
+            'RunnerLeaseClock',
+            'ClientWindows',
+            'RunnerClient',
+            'PlacementFailure',
+            'ProbePhase',
+        },
+    },
+    ('plak', 'src/test_hooks/runner/link.rs'): {
+        'runner': {'RunnerClient'},
+        'tools': {
+            'LineOwner',
+            'runner::RunnerCall',
+            'runner::RunnerCallFuture',
+            'runner::RunnerFailure',
+            'runner::RunnerLink',
+            'runner::RunnerOpenFuture',
+        },
+    },
     ('plak', 'src/commands/runner/registry.rs'): {
         'runner': {
             'AdmissionSnapshot',

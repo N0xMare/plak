@@ -1,5 +1,97 @@
 use super::*;
 
+#[tokio::test]
+async fn placement_hold_cut_nonrunnable_resident_is_retired_before_or_after_instruction_preparation()
+ {
+    for after_prepare in [false, true] {
+        for status in [NodeStatus::RecoveryRequired, NodeStatus::Closed] {
+            let fixture = fixture(json!([held("unsubmitted"), held("corrective")]), leaf).await;
+            fixture.held_reached().await;
+            let reached = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(tokio::sync::Notify::new());
+            hooks::set_before_submit_nudge(
+                &fixture.child,
+                Arc::new({
+                    let (reached, release) = (reached.clone(), release.clone());
+                    move || {
+                        reached.notify_one();
+                        let release = release.clone();
+                        Box::pin(async move {
+                            release.notified().await;
+                        })
+                    }
+                }),
+            );
+            fixture.provider_gates[0].release();
+            tokio::time::timeout(Duration::from_secs(5), reached.notified())
+                .await
+                .unwrap();
+            let barrier = if after_prepare {
+                let barrier = fixture
+                    .runtime
+                    .live
+                    .lock()
+                    .await
+                    .get(&fixture.child)
+                    .unwrap()
+                    .follow_up_barrier()
+                    .expect("instruction delivery barrier");
+                let held = barrier.read_owned().await;
+                release.notify_one();
+                fixture
+                    .until("prepared corrective instruction", |tree, child| {
+                        tree.commands().values().any(|command| {
+                            command.recipient == child
+                                && command.kind == crate::agent_tree::AgentCommandKind::Corrective
+                                && command.unresolved()
+                        })
+                    })
+                    .await;
+                Some(held)
+            } else {
+                None
+            };
+            fixture
+                .mutate(|tree| {
+                    tree.set_node_status_for_test(&fixture.child, status);
+                    tree.attempt_mut_for_test(&fixture.child).status =
+                        if status == NodeStatus::RecoveryRequired {
+                            AttemptStatus::RecoveryRequired
+                        } else {
+                            AttemptStatus::Cancelled
+                        };
+                })
+                .await;
+            if !after_prepare {
+                release.notify_one();
+            }
+            drop(barrier);
+            fixture
+                .until("nonrunnable resident waiter", |tree, child| {
+                    !tree.has_turn_waiter(child)
+                })
+                .await;
+            assert!(
+                fixture
+                    .runtime
+                    .live
+                    .lock()
+                    .await
+                    .get(&fixture.child)
+                    .is_none(),
+                "nonrunnable resident was mistaken for a drained owner: {status:?}, prepared={after_prepare}"
+            );
+            assert_eq!(
+                fixture
+                    .runtime
+                    .read(|tree| tree.attempt(&fixture.child).unwrap().usage.turns)
+                    .unwrap(),
+                1
+            );
+        }
+    }
+}
+
 async fn drain_without_a_terminal(fixture: &Fixture) {
     tokio::time::timeout(
         Duration::from_secs(5),

@@ -383,6 +383,31 @@ secret list` manage the runner machine's own secrets, which an MCP server with
 `plak doctor` resolves each `[runners.<name>]` with `ssh -G` (no connection)
 and shows the user, host and port it would dial.
 
+A running session waits when its saved runner loses its link or is still
+reconciling. It stays busy and needs attention; this is not proof that its
+processes died. There is no default timeout that fails safe held work overnight.
+After reconnection, the host completes the ownership and recovery barrier before
+automatically releasing the same turn. Do not submit the work again or change
+its runner to work around the wait.
+
+The hold sends no new model work. A held child does not spend another turn,
+send a result or wake its parent just because the runner is absent. Parked mail
+waits unread for admission; an owed fork seal waits for its runner without
+inventing a candidate. Other available placements can keep working. A child-only
+hold needs attention without changing its root's own runner status.
+
+Stop remains available while disconnected and still cancels the tree. Remote
+cleanup may remain pending until the runner answers; a stopped row is not a
+claim that an unreachable process was killed. A fixed unknown outcome, replaced
+runner identity or permanent refusal still ends the affected work honestly;
+reconnection does not make an uncertain effect or seal safe to repeat.
+
+A host restart is different from a runner reconnect: a live hold is not durable.
+Ordinary unpaid recovery and the host's `resume_after_loss` policy apply, with
+hold as the default. Runner readiness alone is not consent for a paid
+continuation. The product still places a tree's children on its selected
+runner; these waits do not add a cross-runner spawn argument.
+
 ---
 
 ### Subscription compatibility review deadlines

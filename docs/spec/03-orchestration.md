@@ -904,6 +904,9 @@ Host drain, shutdown or replacement of the live turn ends a between-turn
 placement wait without finalizing the attempt, closing its descendants or
 mailing its parent. Only an explicit Stop takes the interrupted-turn path;
 reopen settles a drained owner's obligations under §14.1.
+A non-runnable node or attempt whose live entry is still resident is not a
+drained owner: closed and reconciliation-required entries still follow their
+ordinary retirement path.
 
 | Field | Notes |
 | --- | --- |
@@ -3623,6 +3626,11 @@ admission. Recorded Stop suppresses continuation regardless of old hold chrome.
 Root loss-resume producers wait for placement before posting consent and
 enqueueing their continuation. A delivery already prepared when placement
 closes is not discarded or repeatedly re-driven: the driver owns its hold.
+Unlike a child's deferred continuation, an operator's root Resume made before
+placement admission is only process-local intent. A further host restart
+requires Resume again. This keeps the root's existing consent/submission
+boundary intact and conservatively grants no new paid permission from an
+unadmitted request; children retain their durable consent-before-deferral law.
 
 For a runner-placed seal, the existing reservation without any dispatch stage
 proves unstarted debt: reopen reconstructs its ticket and waits for placement.

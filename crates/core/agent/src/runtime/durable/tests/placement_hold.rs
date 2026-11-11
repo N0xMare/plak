@@ -10,6 +10,9 @@ use plakous_tools::internal::runner::{
 };
 use std::time::Duration;
 
+#[cfg(feature = "test-hooks")]
+mod nested;
+
 /// Serves probes, environment and session calls in process over the test
 /// workspace, as the runner side would.
 struct InProcessRunner {
@@ -240,6 +243,50 @@ async fn held_agent(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn placement_hold_refusal_ends_before_paid_dispatch_or_after_preparation() -> TestResult {
+    for after_prepare in [false, true] {
+        let model = artifact_test_model(0, 140_000)?;
+        let (agent, services, _directory) =
+            held_agent(model.clone(), None, after_prepare, "placement-refusal").await?;
+        if !after_prepare {
+            services.refuse();
+        }
+        let turn = agent
+            .start(
+                CommandId::new("placement-refusal:start")?,
+                "do not dispatch on refusal",
+            )
+            .await?
+            .into_turn()
+            .ok_or("turn")?;
+        if after_prepare {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                while services.is_available() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await?;
+            services.refuse();
+        }
+        let result = tokio::time::timeout(Duration::from_secs(30), turn.result()).await??;
+        assert!(
+            matches!(result.outcome(), TurnResultOutcome::Failed(error)
+            if error.kind() == AgentErrorKind::ExternalBindingUnavailable),
+            "{:?}",
+            result.outcome()
+        );
+        assert_eq!(
+            model.calls.load(Ordering::Acquire),
+            0,
+            "refusal admitted paid work"
+        );
+        services.set_available(true);
+        agent.shutdown().await?;
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_held_placement_parks_the_first_dispatch_until_release() -> TestResult {
     let model = artifact_test_model(0, 140_000)?;
     let (agent, services, _directory) =
@@ -392,6 +439,14 @@ fn held_effect_registry(tool: &Arc<HeldEffect>) -> TestResult<FrozenToolRegistry
 fn effect_registry(
     executor: Arc<dyn plakous_tools::ToolExecutor>,
 ) -> TestResult<FrozenToolRegistry> {
+    let mut registry = ToolRegistryBuilder::default();
+    registry.register(effect_registration(executor)?)?;
+    Ok(registry.freeze())
+}
+
+fn effect_registration(
+    executor: Arc<dyn plakous_tools::ToolExecutor>,
+) -> TestResult<ToolRegistration> {
     let definition = ToolDefinition::new(
         ToolName::new("probe")?,
         "1.0.0",
@@ -407,15 +462,13 @@ fn effect_registry(
         ToolConcurrency::Serial,
         ToolEffect::Mutating,
     )?;
-    let mut registry = ToolRegistryBuilder::default();
-    registry.register(ToolRegistration::new(
+    Ok(ToolRegistration::new(
         RegisteredToolId::new("probe.registration")?,
         ToolExecutorId::new("probe.executor")?,
         plakous_tools::ToolExecutorBindingIdentity::new(1, &[b"probe.executor"])?,
         definition,
         executor,
-    ))?;
-    Ok(registry.freeze())
+    ))
 }
 
 struct HeldBatch {

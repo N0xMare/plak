@@ -1,15 +1,15 @@
 //! Cooperative placement-hold parking before new paid model work.
 
 use super::Driver;
-use crate::AgentError;
 use crate::runtime::terminal::cancelled_error;
+use crate::{AgentError, AgentErrorKind};
 
 impl Driver {
     /// Waits while this node's runner placement is held, before any new
     /// model or compaction dispatch (spec 01 §5.4): no request slot is kept,
     /// controls are answered, and cancellation, shutdown or a lost lease end
     /// the wait. Release is the placement owner's, after its reconnect
-    /// barrier; a refused placement ends the wait too, and its calls refuse.
+    /// barrier; a refused placement ends the wait without paid dispatch.
     /// The wait counts toward no model operation budget.
     pub(super) async fn wait_for_placement(
         &mut self,
@@ -19,7 +19,7 @@ impl Driver {
             return Ok(());
         };
         if !gate.is_held() {
-            return Ok(());
+            return placement_admission(&gate);
         }
         // A held node must not keep another agent's inference waiting.
         self.request_slot.take();
@@ -32,7 +32,7 @@ impl Driver {
                 () = cancellation.cancelled() => break Err(cancelled_error()),
                 () = self.shutdown.cancelled() => break Err(cancelled_error()),
                 () = self.authority.lease_lost() => break Err(self.authority.heartbeat_failure()),
-                () = gate.released() => break Ok(()),
+                () = gate.released() => break placement_admission(&gate),
                 // A session workflow (an idle compaction) has no turn to
                 // cancel: its owner's cooperative interruption stops it.
                 () = crate::executor::sleep(std::time::Duration::from_millis(100)), if active.is_none() => {
@@ -50,11 +50,24 @@ impl Driver {
         result
     }
 
-    /// Whether this node's runner placement holds new work right now.
-    pub(super) fn placement_held(&self) -> bool {
+    /// Whether this node's placement excludes new work, held or refused.
+    pub(super) fn placement_unavailable(&self) -> bool {
         self.tools
             .environment()
             .placement_gate()
-            .is_some_and(|gate| gate.is_held())
+            .is_some_and(|gate| !gate.is_ready())
+    }
+}
+
+fn placement_admission(
+    gate: &plakous_tools::internal::runner::PlacementGate,
+) -> Result<(), AgentError> {
+    if gate.is_ready() {
+        Ok(())
+    } else {
+        Err(AgentError::new(
+            AgentErrorKind::ExternalBindingUnavailable,
+            "execution placement was refused",
+        ))
     }
 }

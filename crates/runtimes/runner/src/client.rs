@@ -169,6 +169,7 @@ struct State {
 
 struct Pending {
     request: Request,
+    claimed_at_ms: u64,
     answer: oneshot::Sender<Result<Value, RunnerFailure>>,
     /// Recorded in the journal, so its answer settles the record.
     journaled: bool,
@@ -601,6 +602,8 @@ impl RunnerClient {
             for pending in state.pending.values() {
                 let mut request = pending.request.clone();
                 request.replay = true;
+                request.age_ms =
+                    Some(plakous_model::now_unix_millis().saturating_sub(pending.claimed_at_ms));
                 let _ = sender.send(HostFrame::Request(request));
             }
             state.sender = Some(sender);
@@ -1007,6 +1010,7 @@ impl Inner {
                 request_id.clone(),
                 Pending {
                     request,
+                    claimed_at_ms: entry.claimed_at_ms,
                     answer,
                     journaled: false,
                     connection,
@@ -1215,12 +1219,13 @@ impl Inner {
             None => RunnerFailure::NotSent("the runner is not connected".to_owned()),
         };
         let sender = sender.ok_or_else(not_connected)?;
+        let claimed_at_ms = plakous_model::now_unix_millis();
         let journaled = match (&self.journal, keyed(&request)) {
             (Some(journal), true) => {
                 journal
                     .claim(&JournalEntry {
                         request: request.clone(),
-                        claimed_at_ms: plakous_model::now_unix_millis(),
+                        claimed_at_ms,
                         dispatched_to: instance,
                     })
                     .map_err(|error| {
@@ -1247,6 +1252,7 @@ impl Inner {
             request_id.clone(),
             Pending {
                 request,
+                claimed_at_ms,
                 answer,
                 journaled,
                 connection,

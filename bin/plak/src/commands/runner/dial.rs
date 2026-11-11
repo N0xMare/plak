@@ -5,7 +5,7 @@
 use std::process::Stdio;
 
 use plakous::runner::protocol::{Hello, VersionTriple};
-use plakous::runner::{CallJournal, ClientWindows, FileCallJournal, RunnerClient};
+use plakous::runner::{CallJournal, FileCallJournal, RunnerClient};
 use plakous_hosted::error::{CliFailure, CliResult};
 
 use crate::home::paths::PlakPaths;
@@ -125,7 +125,7 @@ pub(crate) async fn dial_placed(
         ))
     };
     let (client, hello) =
-        RunnerClient::connect_journaled(stream, bind, ClientWindows::default(), journal)
+        RunnerClient::connect_journaled(stream, bind, crate::test_hooks::runner_windows(), journal)
             .await
             .map_err(|error| match error {
                 plakous::runner::ConnectError::VersionMismatch { runner } => {

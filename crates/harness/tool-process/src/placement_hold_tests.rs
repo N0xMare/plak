@@ -309,8 +309,8 @@ async fn a_promotion_refused_by_a_lost_link_is_made_once_after_release() -> Test
     outage.await?;
     let runner = &placed.runner;
     assert!(
-        runner.interrupted.load(Ordering::SeqCst) > 0,
-        "the hold was exercised"
+        !runner.refuse_promotion.load(Ordering::SeqCst),
+        "the promotion's unsent cut was exercised"
     );
     assert!(
         result.projection.session_id.is_some(),
@@ -343,8 +343,8 @@ async fn a_process_ended_during_a_refused_promotions_hold_reports_its_end() -> T
     outage.await?;
     let runner = &placed.runner;
     assert!(
-        runner.interrupted.load(Ordering::SeqCst) > 0,
-        "the hold was exercised"
+        !runner.refuse_promotion.load(Ordering::SeqCst),
+        "the promotion's unsent cut was exercised"
     );
     assert_eq!(
         result.projection.session_id, None,

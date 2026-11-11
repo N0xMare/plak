@@ -133,6 +133,10 @@ impl OfflineSelection {
         }
         .map_err(|error| error.to_string())?
         .target_binding();
+        let request_slots = session
+            .account
+            .as_deref()
+            .map(plakous_hosted::request_slots::for_account);
         let runtime_controller = controller;
         let runtime_tree = prepared;
         let telemetry = state_roots.telemetry_emitter();
@@ -204,7 +208,13 @@ impl OfflineSelection {
                         telemetry.clone(),
                     )
                 }
-                .map(|runtime| transport_roots.bind_process_transport(runtime))
+                .map(|runtime| {
+                    let runtime = transport_roots.bind_process_transport(runtime);
+                    match &request_slots {
+                        Some(slots) => runtime.with_request_slots(slots.clone()),
+                        None => runtime,
+                    }
+                })
                 .map_err(|error| error.to_string())
             });
         let primary = Arc::clone(&runtime);

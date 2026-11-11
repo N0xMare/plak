@@ -558,7 +558,7 @@ impl Driver {
             }
             let provider_dispatch_gate = Arc::clone(&self.provider_dispatch_gate);
             let dispatch_guard = provider_dispatch_gate.lock().await;
-            if self.placement_held() {
+            if self.placement_unavailable() {
                 // Held while this round queued: park again without the gate.
                 drop(dispatch_guard);
                 continue;

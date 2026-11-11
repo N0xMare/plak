@@ -39,6 +39,9 @@ pub(super) async fn placement_admission(
         crate::agent::placement::Admission::Ready => Ok(()),
         crate::agent::placement::Admission::Stopped => Err(InstructionStartError::Stopped),
         crate::agent::placement::Admission::Drained => Err(InstructionStartError::Drained),
+        crate::agent::placement::Admission::Failed => Err(InstructionStartError::Failed(
+            "child instruction is no longer admissible".into(),
+        )),
     }
 }
 
@@ -113,7 +116,9 @@ pub(in crate::agent) async fn start_instruction_turn(
                 {
                     InstructionStartError::Stopped
                 } else {
-                    InstructionStartError::Drained
+                    InstructionStartError::Failed(
+                        "child instruction is no longer admissible".into(),
+                    )
                 },
             );
         }

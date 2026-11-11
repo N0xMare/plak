@@ -171,6 +171,17 @@ mod test_hooks {
     pub(crate) fn runner_windows() -> plakous::runner::ClientWindows {
         plakous::runner::ClientWindows::default()
     }
+    pub(crate) fn runner_before_ready(
+        _client: &plakous::runner::RunnerClient,
+    ) -> std::future::Ready<Result<(), plakous::runner::PlacementFailure>> {
+        std::future::ready(Ok(()))
+    }
+    pub(crate) fn runner_ready_result(_result: &Result<(), plakous::runner::PlacementFailure>) {}
+    pub(crate) fn runner_link(
+        client: plakous::runner::RunnerClient,
+    ) -> std::sync::Arc<dyn plakous::tools::runner::RunnerLink> {
+        std::sync::Arc::new(client)
+    }
     pub(crate) fn runner_lease_clock(
         _home: &std::path::Path,
     ) -> Option<std::sync::Arc<plakous::runner::RunnerLeaseClock>> {

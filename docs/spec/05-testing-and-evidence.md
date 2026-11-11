@@ -1398,7 +1398,9 @@ acknowledgment retain exactly the same report. No wire or binding input changes.
 
 Placement-hold regression cuts also retire a child live entry without Stop
 during a corrective nudge and during transient instruction admission. Joining
-the turn waiter must leave the attempt open, without result mail. Hosted wake
+the turn waiter must leave the attempt open, without result mail. Non-runnable
+resident cuts before admission and after instruction preparation instead require
+retirement, for both closed and reconciliation-required attempts. Hosted wake
 binding cuts close placement after its immutable receipt is prepared: release
 admits the unread batch once under a fresh identity, while Stop leaves no
 unresolved receipt. Root loss-resume tests distinguish pending production
@@ -1411,6 +1413,45 @@ refused placement and cached placement from stale login attention.
 
 Test code has one home per kind, and production behavior is never moved into
 test code to change density accounting.
+
+The strict authority registry also includes the seven `runner_hold_*` shapes
+below. They run against a real serving product and a separately paired daemon
+through a framed fixture bridge, not SQLite-ordinal substitutions. The daemon's
+supplied awake clock is frozen before startup; SIGSTOP alone is not suspend
+evidence. Every pause has Drop cleanup and every process loop has a literal
+bound. The strict default selection includes all seven shapes.
+Scripted product bindings attach the real host account budget through
+`SessionRuntimeBinding::with_request_slots`; merely writing a one-slot config
+without binding that shared budget is not isolation evidence. The queued-nested
+fixture records actual executor entry and correlated delivery, requiring neither
+before release and exactly one after release. Refusal cuts before first dispatch
+and after preparation also require zero paid model requests.
+
+| Shape | Authority cut and oracle |
+| --- | --- |
+| `runner_hold_poll` | An Acked foreground start, a claimed observation before bridge forwarding, link loss across the read window and separately the effect window, then reconciliation held before Ready. Natural completion, no unknown/cleanup stop/promotion, unchanged paid count while held, and equal normalized operation-id/state sets and terminal/effect counts across the two timings. A second loss after the barrier but before publication must return the real client's `link_lost` verdict, not stale Ready. |
+| `runner_hold_live_key` | Withhold an actual runner result before Ack; retain the pending model key past its independent effect window. Rebind must replay that original key/digest with its original age, execute once and admit no paid triage. |
+| `runner_hold_not_sent` | Stop after the retained placement's availability read but before the client call, then disconnect before transport enqueue. Require typed NotSent, no effect before Ready, and exactly one eventual start, without replaying a composite prefix. |
+| `runner_hold_stop` | Stop a held observation with a queued mutating suffix while the daemon stays absent. Require bounded terminal publication and no suffix, extra provider request or continuation after release. |
+| `runner_hold_host_loss` | Kill only the host while held; serve the reopened directory before the runner returns, then cross unpaid recovery. No in-place hold restoration, one lost-turn terminal and no continuation consent from Ready. |
+| `runner_hold_identity` | Replace the saved identity while an unsent call waits, and separately restart the same saved runner with a sent key outstanding. Old waiters close rather than strand; fixed unknown closes before Ready and is never a fresh send. |
+| `runner_hold_isolation` | With request slots set to one, hold a remote root while another root of that same account on the local runner completes. Keep the first root busy/unsettled, then release it once. The product has no cross-runner child spawn field; child/tree isolation is separately exercised by orchestration fixtures, not claimed by this two-root proof. |
+
+The offline script's test-only `runner_windows` object independently names
+`read_ms`, `effect_ms`, `ping_ms` and `dead_ms`. The same object supplies local,
+remote and scripted-child dials; no shared read/effect-window shortcut remains.
+Production builds keep their ordinary windows. `runner_hold_cuts` names an
+owner-only fixture directory: pre-send entry/release sits outside client locks;
+pre-Ready entry/release and result record the actual publication verdict, and a
+link-loss marker observes that retained client's connection. The framed bridge
+records only request identity/class/digest/replay/age and verb, never payloads,
+and can stop forwarding a poll or withhold an answered key before Ack. These
+are test hooks, not product configuration, wire fields or persisted hold state.
+There is no optional hold cap in the product to shorten in these fixtures.
+
+Live paired-machine acceptance remains separate: real suspend, awake lease
+lapse, matching source/binary identities, host restart and human web/TUI review
+are not inferred from these controlled process cuts.
 
 Protocol-5 contracts pin closed request/answer/progress JSON and the generated
 schema together. Placement tests distinguish committed UUID replay from fresh

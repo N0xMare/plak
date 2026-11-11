@@ -51,10 +51,13 @@ pub struct ScriptPlan {
     /// Product-selected effort for an offline profile binding, not script data.
     #[serde(skip)]
     pub profile_effort: Option<plakous::model::ReasoningEffort>,
-    /// Fixture-only host runner windows, in milliseconds, for controlled
-    /// link-loss proofs. Ordinary scripts keep production windows.
+    /// Independent fixture-only host runner windows for both local and remote
+    /// dials. Ordinary scripts keep production windows.
     #[serde(default)]
-    pub runner_window_ms: Option<u64>,
+    pub runner_windows: Option<RunnerWindows>,
+    /// Owner-only directory for pre-send and reconnect-barrier rendezvous.
+    #[serde(default)]
+    pub runner_hold_cuts: Option<std::path::PathBuf>,
     /// Park the first Prepared request at its pre-send authority check until
     /// this test-owned readiness gate opens. No native credential is read.
     #[serde(default)]
@@ -305,6 +308,20 @@ pub enum ScriptToolPolicy {
     /// Every mutating call pauses in an effect-decision frame until the
     /// control plane answers, so a process can be cut inside that frame.
     DecisionRequired,
+}
+
+/// Independent host response and liveness windows, in milliseconds.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerWindows {
+    /// An unanswered read on a lost link becomes re-issuable after this window.
+    pub read_ms: u64,
+    /// Healthy-link effect answer window; a lost live model key retains its age.
+    pub effect_ms: u64,
+    /// Transport heartbeat cadence.
+    pub ping_ms: u64,
+    /// Silence required to declare link loss, independently of answer windows.
+    pub dead_ms: u64,
 }
 
 /// A child runner: the product home its daemon runs from, and the host

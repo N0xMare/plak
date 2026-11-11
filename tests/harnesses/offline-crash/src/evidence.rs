@@ -1,7 +1,6 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -45,7 +44,6 @@ pub enum EvidenceKind {
 #[derive(Debug)]
 pub(crate) struct FsyncEvidenceLog {
     path: PathBuf,
-    next: AtomicU64,
 }
 
 impl FsyncEvidenceLog {
@@ -72,14 +70,8 @@ impl FsyncEvidenceLog {
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
         file.sync_all()?;
         sync_parent(&path)?;
-        let existing = read_evidence(&path)?;
-        let next = existing
-            .last()
-            .map_or(1, |record| record.sequence.saturating_add(1));
-        Ok(Self {
-            path,
-            next: AtomicU64::new(next),
-        })
+        read_evidence(&path)?;
+        Ok(Self { path })
     }
 
     pub(crate) fn append(
@@ -89,7 +81,14 @@ impl FsyncEvidenceLog {
         boundary: CrashBoundary,
         operation_id: Option<String>,
     ) -> io::Result<u64> {
-        let sequence = self.next.fetch_add(1, Ordering::AcqRel);
+        let mut file = OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(&self.path)?;
+        // Independent roots and processes may open this path. The file lock
+        // owns allocation through fsync; a per-binding counter would duplicate ids.
+        file.lock()?;
+        let sequence = next_sequence(&mut file)?;
         let row = EvidenceRecord {
             version: PROTOCOL_VERSION,
             sequence,
@@ -100,11 +99,45 @@ impl FsyncEvidenceLog {
         };
         let mut encoded = serde_json::to_vec(&row).map_err(io::Error::other)?;
         encoded.push(b'\n');
-        let mut file = OpenOptions::new().append(true).open(&self.path)?;
         file.write_all(&encoded)?;
         file.flush()?;
         file.sync_data()?;
         Ok(sequence)
+    }
+}
+
+fn next_sequence(file: &mut File) -> io::Result<u64> {
+    let length = file.metadata()?.len();
+    if length == 0 {
+        return Ok(1);
+    }
+    let mut offset = length.saturating_sub(4096);
+    loop {
+        file.seek(SeekFrom::Start(offset))?;
+        let mut tail = Vec::new();
+        file.read_to_end(&mut tail)?;
+        if tail.pop() != Some(b'\n') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "incomplete evidence row",
+            ));
+        }
+        let preceding = tail.iter().rposition(|byte| *byte == b'\n');
+        if preceding.is_some() || offset == 0 {
+            let row = &tail[preceding.map_or(0, |index| index + 1)..];
+            let record: EvidenceRecord = serde_json::from_slice(row).map_err(io::Error::other)?;
+            if record.version != PROTOCOL_VERSION {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unsupported evidence protocol version",
+                ));
+            }
+            return record
+                .sequence
+                .checked_add(1)
+                .ok_or_else(|| io::Error::other("evidence sequence exhausted"));
+        }
+        offset = length.saturating_sub((length - offset).saturating_mul(2));
     }
 }
 
@@ -119,8 +152,14 @@ pub fn read_evidence(path: impl AsRef<Path>) -> io::Result<Vec<EvidenceRecord>> 
     if !path.exists() {
         return Ok(Vec::new());
     }
+    let file = File::open(path)?;
+    file.lock_shared()?;
+    read_records(&file)
+}
+
+fn read_records(file: &File) -> io::Result<Vec<EvidenceRecord>> {
     let mut records = Vec::new();
-    for line in BufReader::new(File::open(path)?).lines() {
+    for line in BufReader::new(file).lines() {
         let line = line?;
         let record: EvidenceRecord = serde_json::from_str(&line).map_err(io::Error::other)?;
         if record.version != PROTOCOL_VERSION {
@@ -173,6 +212,53 @@ fn sync_parent(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn independent_writers_share_one_durable_evidence_sequence()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("evidence.jsonl");
+        FsyncEvidenceLog::open(&path)?.append(
+            EvidenceKind::ProviderDispatched,
+            Some(1),
+            CrashBoundary::ProviderDispatchOne,
+            Some("x".repeat(9000)),
+        )?;
+        let writers = [
+            FsyncEvidenceLog::open(&path)?,
+            FsyncEvidenceLog::open(&path)?,
+        ];
+        std::thread::scope(|scope| {
+            let mut joins = Vec::new();
+            for (writer, log) in writers.into_iter().enumerate() {
+                joins.push(scope.spawn(move || {
+                    for row in 0..64 {
+                        log.append(
+                            EvidenceKind::ProviderDispatched,
+                            Some(row),
+                            CrashBoundary::ProviderDispatchOne,
+                            Some(format!("{writer}:{row}")),
+                        )?;
+                    }
+                    Ok::<_, io::Error>(())
+                }));
+            }
+            for join in joins {
+                join.join()
+                    .map_err(|_| io::Error::other("evidence writer panicked"))??;
+            }
+            Ok::<_, io::Error>(())
+        })?;
+        let records = read_evidence(path);
+        assert!(
+            records.is_ok(),
+            "independent writers broke the durable evidence sequence: {records:?}"
+        );
+        let records = records?;
+        assert_eq!(records.len(), 129);
+        assert_eq!(records.last().map(|record| record.sequence), Some(129));
+        Ok(())
+    }
 
     #[test]
     fn summary_requests_append_across_provider_relaunches() -> Result<(), Box<dyn std::error::Error>>

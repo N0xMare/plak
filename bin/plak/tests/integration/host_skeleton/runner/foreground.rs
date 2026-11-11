@@ -45,7 +45,8 @@ fn clock(fixture: &Fixture, milliseconds: u64) {
 fn begin(fixture: &Fixture, window: u64) -> (Host, Client, String) {
     clock(fixture, 0);
     let mut script = job_script(fixture, false);
-    script["runner_window_ms"] = json!(window);
+    script["runner_windows"] =
+        json!({"read_ms": window, "effect_ms": window, "ping_ms": 100, "dead_ms": 500});
     script["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(3000);
     let command = script["steps"][0]["output"]["tool"]["arguments"]["command"].as_str().unwrap().replace("read line", &format!(
         "n=0; while [ ! -f '{}' ]; do [ \"$n\" -lt 30000 ] || exit 1; n=$((n + 1)); sleep 0.01; done; printf done > '{}'",

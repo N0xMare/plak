@@ -223,6 +223,13 @@ pub struct SessionInputWindow {
 }
 
 impl SessionRuntimeBinding {
+    /// Shares the host's request slots across opens and runtime refreshes.
+    #[must_use]
+    pub fn with_request_slots(mut self, slots: crate::agent::RequestSlots) -> Self {
+        self.builder = self.builder.request_slots(slots);
+        self
+    }
+
     /// Installs this node's explicit runner backend and executor. No other
     /// session's execution authority changes.
     #[doc(hidden)]

@@ -493,14 +493,17 @@ async fn refresh_existing(
     } else {
         Some(reconcile_remote(services, &remote.id, &client).await?)
     };
-    services.runners().ready(
+    crate::test_hooks::runner_before_ready(&client).await?;
+    let ready = services.runners().ready(
         &remote.id,
         connection,
         runner,
         options,
         discovery,
         services.now_unix_seconds(),
-    )?;
+    );
+    crate::test_hooks::runner_ready_result(&ready);
+    ready?;
     Ok(pending)
 }
 
@@ -650,17 +653,20 @@ async fn finish_remote_bind(
     let pending = reconcile_remote(services, &remote.id, &dialed.client).await?;
     let backend = plakous::tools::runner::RunnerBackend::new(
         dialed.hello.descriptor.clone(),
-        std::sync::Arc::new(dialed.client.clone()),
+        crate::test_hooks::runner_link(dialed.client.clone()),
     )
     .map_err(|_| unavailable(ProbePhase::Bind, false))?;
-    services.runners().ready(
+    crate::test_hooks::runner_before_ready(&dialed.client).await?;
+    let ready = services.runners().ready(
         &remote.id,
         connection,
         plakous::runner::RunnerServices::new(std::sync::Arc::new(backend), runtime.clone()),
         options,
         discovery,
         services.now_unix_seconds(),
-    )?;
+    );
+    crate::test_hooks::runner_ready_result(&ready);
+    ready?;
     tracing::info!(target: "plak.runner", runner_id = %remote.id, "runner_reconnected");
     Ok((dialed, pending))
 }

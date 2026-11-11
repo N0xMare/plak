@@ -64,6 +64,7 @@ pub(super) enum Admission {
     Ready,
     Stopped,
     Drained,
+    Failed,
 }
 
 pub(super) async fn wait_ready(
@@ -74,7 +75,7 @@ pub(super) async fn wait_ready(
 ) -> Admission {
     loop {
         let Ok(notify) = driver.read(crate::agent_tree::ProductAgentTree::waiters) else {
-            return Admission::Drained;
+            return Admission::Failed;
         };
         let mut notified = Box::pin(notify.notified_owned());
         notified.as_mut().enable();
@@ -89,12 +90,11 @@ pub(super) async fn wait_ready(
         {
             return Admission::Stopped;
         }
-        if !super::children::resume_allowed(driver, agent, identity)
-            || live
-                .lock()
-                .await
-                .get(agent)
-                .is_none_or(|child| child.turn_id() != identity.turn)
+        if live
+            .lock()
+            .await
+            .get(agent)
+            .is_none_or(|child| child.turn_id() != identity.turn)
             || driver
                 .read(|tree| tree.tree_id.clone())
                 .ok()
@@ -102,6 +102,9 @@ pub(super) async fn wait_ready(
                 .is_some_and(|runtime| runtime.is_closed())
         {
             return Admission::Drained;
+        }
+        if !super::children::resume_allowed(driver, agent, identity) {
+            return Admission::Failed;
         }
         if ready(driver, agent) {
             return Admission::Ready;

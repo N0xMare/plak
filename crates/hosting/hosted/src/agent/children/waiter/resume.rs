@@ -114,7 +114,8 @@ pub(super) async fn try_transient_resume(
             super::finish_interrupted_turn(driver, live, agent_id, identity, observer).await;
             return Some(Err(()));
         }
-        crate::agent::placement::Admission::Drained => return Some(Err(())),
+        crate::agent::placement::Admission::Drained
+        | crate::agent::placement::Admission::Failed => return Some(Err(())),
     }
     let notice = failed_worktree::snapshot_failure(driver, identity, agent_id)
         .await

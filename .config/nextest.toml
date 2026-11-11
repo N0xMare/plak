@@ -94,7 +94,14 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
-  test(placement_hold_cut_)
+  test(placement_hold_cut_nonrunnable_resident_is_retired_before_or_after_instruction_preparation)
+  | test(placement_hold_cut_nudge_drain_keeps_owner_loss_debt_without_result_mail)
+  | test(placement_hold_cut_parked_mail_and_late_reservation_wait_without_claim_or_turn)
+  | test(placement_hold_cut_prepared_wake_binding_withdraws_unread_batch_on_release_and_stop)
+  | test(placement_hold_cut_queued_nested_work_waits_without_executor_admission_and_runs_once)
+  | test(placement_hold_cut_submit_nudge_waits_and_stop_wins_without_release)
+  | test(placement_hold_cut_transient_instruction_drain_keeps_owner_loss_debt_without_result_mail)
+  | test(placement_hold_cut_yield_deadline_does_not_promote_on_rebind)
   | test(await_claim_waits_for_an_unclaimed_child_to_exit)
   |
   test(an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists)
@@ -268,6 +275,7 @@ not (
   | test(durability::)
   |
   test(host_skeleton::runner::foreground::)
+  | test(host_skeleton::runner::hold::)
   | test(host_skeleton::runner::pending_stop::)
   |
   test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)
@@ -367,7 +375,14 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(placement_hold_cut_)
+  test(placement_hold_cut_nonrunnable_resident_is_retired_before_or_after_instruction_preparation)
+  | test(placement_hold_cut_nudge_drain_keeps_owner_loss_debt_without_result_mail)
+  | test(placement_hold_cut_parked_mail_and_late_reservation_wait_without_claim_or_turn)
+  | test(placement_hold_cut_prepared_wake_binding_withdraws_unread_batch_on_release_and_stop)
+  | test(placement_hold_cut_queued_nested_work_waits_without_executor_admission_and_runs_once)
+  | test(placement_hold_cut_submit_nudge_waits_and_stop_wins_without_release)
+  | test(placement_hold_cut_transient_instruction_drain_keeps_owner_loss_debt_without_result_mail)
+  | test(placement_hold_cut_yield_deadline_does_not_promote_on_rebind)
   | test(await_claim_waits_for_an_unclaimed_child_to_exit)
   |
   test(an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists)
@@ -547,6 +562,7 @@ test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
   test(host_skeleton::runner::foreground::)
+  | test(host_skeleton::runner::hold::)
   | test(host_skeleton::runner::pending_stop::)
   |
   test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)

@@ -2340,12 +2340,20 @@ No historical record or Working attempt is rewritten. Exactly one dispatch
 consumes the captured capability after readiness. A crash while parked therefore
 recovers under the existing Prepared, undispatched-operation rules (§5.5).
 
+`SessionRuntimeBinding::with_request_slots` attaches the host's explicit shared
+`RequestSlots` to each constructed runtime, including reopen and refresh. It is
+process-local scheduling, never a stored binding or routing fact.
+
 Placement parking is the same kind of wait for a node placed on a runner whose
 placement is held (§8.4): its link is lost or its reconnect barrier has not yet
 published readiness. Before taking a request slot and again before each paid
 physical dispatch of a model round or compaction, the driver parks while the
 environment's placement gate reads held, and parks again if the gate reads
-held once the slot and dispatch gate are taken. It is in memory only, keeps the
+held once the slot and dispatch gate are taken. A refusal is not readiness:
+before the first dispatch or on release from a hold, a refused placement ends
+with `ExternalBindingUnavailable`, without a paid model or compaction request.
+The physical dispatch fence also rejects a refusal arriving behind the slot
+or dispatch gate. Parking is in memory only, keeps the
 same driver, turn, child attempt and runtime lease heartbeat, releases the
 request slot and dispatch gate, processes controls, and ends on exact-turn
 cancellation, shutdown, lease loss, release or refusal; an idle session

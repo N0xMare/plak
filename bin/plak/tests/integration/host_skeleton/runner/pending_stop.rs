@@ -3,7 +3,7 @@
 use super::foreground::Paused;
 use super::*;
 
-fn remote(fixture: &Fixture) -> (ChildRunner, String, String) {
+pub(super) fn remote(fixture: &Fixture) -> (ChildRunner, String, String) {
     use std::fmt::Write as _;
     use std::io::Read as _;
     use std::os::unix::fs::PermissionsExt as _;
@@ -97,7 +97,7 @@ fn start_remote_job(fixture: &Fixture, path: &str, id: &str) -> (Host, String) {
     (host, session)
 }
 
-fn ready(client: &mut Client, id: &str) {
+pub(super) fn ready(client: &mut Client, id: &str) {
     let deadline = std::time::Instant::now() + WAIT;
     loop {
         let Outcome::Ok(Answer::Options { options }) =
