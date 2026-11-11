@@ -1,10 +1,10 @@
 //! A failed child turn's transient resume: its gate and its instruction turn.
 
 use super::{
-    Arc, ChildFeedSource, ChildTurnIdentity, CommandKind, FailedTurnWaits, ResumeGate, ResumeOwner,
-    TreeDriver, TurnResult, TurnResultHandle, TurnResultOutcome, end_attempt_work, failed_worktree,
-    finalize_child_failure, mutate_child, persist_or_fault, project_turn_end, settle_or_fault,
-    start_instruction_turn, transient,
+    Arc, ChildFeedSource, ChildTurnIdentity, CommandKind, FailedTurnWaits, InstructionStartError,
+    ResumeGate, ResumeOwner, TreeDriver, TurnResult, TurnResultHandle, TurnResultOutcome,
+    end_attempt_work, failed_worktree, finalize_child_failure, mutate_child, persist_or_fault,
+    project_turn_end, settle_or_fault, start_instruction_turn, transient,
 };
 
 pub(super) fn resume_allowed_in(
@@ -108,8 +108,13 @@ pub(super) async fn try_transient_resume(
         })
         .ok()
         .flatten()?;
-    if !crate::agent::placement::wait_ready(driver, live, agent_id, identity).await {
-        return Some(Err(()));
+    match crate::agent::placement::wait_ready(driver, live, agent_id, identity).await {
+        crate::agent::placement::Admission::Ready => {}
+        crate::agent::placement::Admission::Stopped => {
+            super::finish_interrupted_turn(driver, live, agent_id, identity, observer).await;
+            return Some(Err(()));
+        }
+        crate::agent::placement::Admission::Drained => return Some(Err(())),
     }
     let notice = failed_worktree::snapshot_failure(driver, identity, agent_id)
         .await
@@ -177,7 +182,7 @@ pub(super) async fn try_transient_resume(
         .await;
         return Some(Err(()));
     }
-    if let Ok(next) = start_instruction_turn(
+    let started = start_instruction_turn(
         driver,
         live,
         agent_id,
@@ -186,27 +191,32 @@ pub(super) async fn try_transient_resume(
         plan.text,
         CommandKind::Resume,
     )
-    .await
-    {
-        Some(Ok(next))
-    } else {
-        if resume_allowed(driver, agent_id, identity) {
-            let _ = end_attempt_work(driver, live, agent_id, identity).await;
-            finalize_child_failure(
-                driver,
-                identity,
-                agent_id,
-                crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
-                    kind: "turn_failed",
-                },
-                error.message().to_owned(),
-                FailedTurnWaits::Settle(result),
-                observer,
-            )
-            .await;
+    .await;
+    match started {
+        Ok(next) => return Some(Ok(next)),
+        Err(InstructionStartError::Drained) => return Some(Err(())),
+        Err(InstructionStartError::Stopped) => {
+            super::finish_interrupted_turn(driver, live, agent_id, identity, observer).await;
+            return Some(Err(()));
         }
-        Some(Err(()))
+        Err(InstructionStartError::Failed(_)) => {}
     }
+    if resume_allowed(driver, agent_id, identity) {
+        let _ = end_attempt_work(driver, live, agent_id, identity).await;
+        finalize_child_failure(
+            driver,
+            identity,
+            agent_id,
+            crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
+                kind: "turn_failed",
+            },
+            error.message().to_owned(),
+            FailedTurnWaits::Settle(result),
+            observer,
+        )
+        .await;
+    }
+    Some(Err(()))
 }
 
 /// The transient-resume bound of `agent_id`'s own epoch: a child keeps the

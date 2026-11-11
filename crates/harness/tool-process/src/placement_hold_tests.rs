@@ -236,9 +236,6 @@ impl Placed {
     }
 }
 
-/// Start a foreground command, lose the placement's link as it starts, and
-/// release it after the command ended: the command completes naturally,
-/// its result comes through, and nothing stops it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn placement_hold_cut_yield_deadline_does_not_promote_on_rebind() -> TestResult {
     let placed = placed(true, false)?;
@@ -268,6 +265,9 @@ async fn placement_hold_cut_yield_deadline_does_not_promote_on_rebind() -> TestR
     Ok(())
 }
 
+/// Start a foreground command, lose the placement's link as it starts, and
+/// release it after the command ended: the command completes naturally,
+/// its result comes through, and nothing stops it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_foreground_command_survives_a_placement_hold() -> TestResult {
     let placed = placed(true, false)?;

@@ -468,6 +468,7 @@ pub(crate) fn tree_needs_operator(tree_id: &str) -> bool {
     struct Attention {
         runtime: std::sync::Weak<crate::topology_runtime::ProductTopologyRuntime>,
         value: bool,
+        observations: Vec<std::sync::Weak<ChildObservation>>,
     }
     static LAST: std::sync::LazyLock<Mutex<std::collections::BTreeMap<String, Attention>>> =
         std::sync::LazyLock::new(Mutex::default);
@@ -487,36 +488,42 @@ pub(crate) fn tree_needs_operator(tree_id: &str) -> bool {
                 && !tree.placement_ready(&node.agent_id)
         })
     });
-    let Ok(live) = runtime.live.try_lock() else {
-        return placement_attention.unwrap_or(false)
-            || LAST
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .get(tree_id)
-                .is_some_and(|last| last.runtime.ptr_eq(&Arc::downgrade(&runtime)) && last.value);
-    };
-    let value = placement_attention.unwrap_or_else(|| {
-        LAST.lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(tree_id)
-            .is_some_and(|last| last.runtime.ptr_eq(&Arc::downgrade(&runtime)) && last.value)
-    }) || live.keys().any(|id| {
-        live.get(id)
-            .and_then(of)
-            .is_some_and(|observation| observation.needs_operator())
+    // A busy live table may reuse weak observation identities, never a cached
+    // login/approval bit: the current observation also clears after retirement.
+    let observations = runtime.live.try_lock().ok().map(|live| {
+        live.keys()
+            .filter_map(|id| live.get(id).and_then(of))
+            .map(|observation| Arc::downgrade(&observation))
+            .collect::<Vec<_>>()
     });
     let mut last = LAST
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let previous = last
+        .get(tree_id)
+        .filter(|last| last.runtime.ptr_eq(&Arc::downgrade(&runtime)));
+    let placement_attention =
+        placement_attention.unwrap_or_else(|| previous.is_some_and(|last| last.value));
+    let observations = observations.unwrap_or_else(|| {
+        previous
+            .map(|last| last.observations.clone())
+            .unwrap_or_default()
+    });
     last.retain(|_, last| last.runtime.strong_count() > 0);
     last.insert(
         tree_id.to_owned(),
         Attention {
             runtime: Arc::downgrade(&runtime),
-            value,
+            value: placement_attention,
+            observations: observations.clone(),
         },
     );
-    value
+    drop(last);
+    placement_attention
+        || observations
+            .iter()
+            .filter_map(std::sync::Weak::upgrade)
+            .any(|observation| observation.needs_operator())
 }
 
 impl ChildObservation {

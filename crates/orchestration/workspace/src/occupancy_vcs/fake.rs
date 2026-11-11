@@ -68,11 +68,18 @@ pub struct FakeCall {
 
 type LockProbe = Box<dyn Fn() -> bool + Send + Sync>;
 
+#[derive(Clone, Copy, PartialEq)]
+enum Placement {
+    Ready,
+    Held,
+    Refused,
+}
+
 /// A [`VcsOps`] that records every call instead of running it: copies are
 /// plain directories under `<launch>/.plak/fake/<agent_id>`.
 #[derive(Default)]
 pub struct FakeVcs {
-    placements: Mutex<BTreeMap<PathBuf, bool>>,
+    placements: Mutex<BTreeMap<PathBuf, Placement>>,
     calls: Mutex<Vec<FakeCall>>,
     lock_probe: Mutex<Option<LockProbe>>,
     next_seal: Mutex<Option<Result<VcsSnapshot, VcsError>>>,
@@ -92,7 +99,21 @@ impl FakeVcs {
         self.placements
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(path, ready);
+            .insert(
+                path,
+                if ready {
+                    Placement::Ready
+                } else {
+                    Placement::Held
+                },
+            );
+    }
+    /// Refuses a placement rather than leaving it in a releasable hold.
+    pub fn refuse_placement(&self, path: PathBuf) {
+        self.placements
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(path, Placement::Refused);
     }
     /// Enables a deterministic Ready/Refreshed pair for indexed refresh cuts.
     pub fn script_refresh(&self) {
@@ -484,7 +505,17 @@ impl VcsOps for FakeVcs {
             .iter()
             .filter(|(root, _)| path.starts_with(root))
             .max_by_key(|(root, _)| root.components().count())
-            .map(|(_, ready)| *ready)
+            .map(|(_, placement)| *placement == Placement::Ready)
+    }
+
+    fn placement_held(&self, path: &Path) -> bool {
+        self.placements
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(root, _)| path.starts_with(root))
+            .max_by_key(|(root, _)| root.components().count())
+            .is_some_and(|(_, placement)| *placement == Placement::Held)
     }
 
     fn prepare_refresh<'a>(

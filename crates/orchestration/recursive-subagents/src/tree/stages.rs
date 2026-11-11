@@ -78,7 +78,7 @@ pub(super) fn local_stage(
 pub(crate) struct EffectStages {
     pub(crate) base_pins: Vec<Arc<VcsStage>>,
     pub(crate) refreshes: Vec<Arc<VcsStage>>,
-    pub(crate) seals: Vec<Arc<VcsStage>>,
+    pub(crate) seals: Vec<Option<Arc<VcsStage>>>,
     pub(crate) dormancy: Vec<Arc<VcsStage>>,
     pub(crate) adopts: Vec<Arc<VcsStage>>,
     pub(crate) hooks: Vec<Arc<VcsStage>>,
@@ -93,6 +93,34 @@ impl EffectStages {
 }
 
 impl ProductAgentTree {
+    pub(crate) fn record_placed_seal_stages(
+        &mut self,
+        effects: &Effects,
+    ) -> Result<EffectStages, TopologyError> {
+        let mut stages = EffectStages::default();
+        for ticket in &effects.seals {
+            let runner = self
+                .nodes
+                .get(&ticket.agent_id)
+                .and_then(|node| node.placement.runner_id.as_deref());
+            let Some(runner) = runner else {
+                stages.seals.push(None);
+                continue;
+            };
+            let mut intent = local_stage(
+                VcsStageKind::Seal,
+                VcsStageClass::Reproducible,
+                &ticket.agent_id,
+                runner,
+            );
+            intent.attempt_id.clone_from(&ticket.attempt_id);
+            intent.candidate_id = Some(ticket.candidate_id.clone());
+            intent.base_commit = Some(ticket.base_commit.clone());
+            stages.seals.push(Some(self.record_vcs_stage(&intent)?));
+        }
+        Ok(stages)
+    }
+
     /// Records `intent` as a stage about to run and returns its key. The
     /// caller publishes the revision before the stage runs.
     ///
@@ -255,7 +283,7 @@ impl ProductAgentTree {
             intent.attempt_id.clone_from(&ticket.attempt_id);
             intent.candidate_id = Some(ticket.candidate_id.clone());
             intent.base_commit = Some(ticket.base_commit.clone());
-            stages.seals.push(self.record_vcs_stage(&intent)?);
+            stages.seals.push(Some(self.record_vcs_stage(&intent)?));
         }
         for ticket in &effects.dormancy {
             let on = placed(self, ticket.agent_id());

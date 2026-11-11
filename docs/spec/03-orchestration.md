@@ -900,6 +900,10 @@ settles no parent wait, sends no result and interrupts no subtree. Wait
 deadlines and urgent-mail wakes remain ordinary caller-local events; a root
 Stop still cascades. Nodes on other runners continue independently, including
 sealing and result delivery, even with one shared account request slot.
+Host drain, shutdown or replacement of the live turn ends a between-turn
+placement wait without finalizing the attempt, closing its descendants or
+mailing its parent. Only an explicit Stop takes the interrupted-turn path;
+reopen settles a drained owner's obligations under §14.1.
 
 | Field | Notes |
 | --- | --- |
@@ -1484,6 +1488,9 @@ placement, not its parent's or a picker cache. A loss in between defers the
 unadmitted wake with its batch unread. No park timer or host-loss consent is
 created. Corrective Starts wait outside the tree and live-table locks and
 recheck placement before binding; Stop/interrupt wins while still absent.
+If placement closes after preparation but before binding, the unadmitted wake
+receipt is withdrawn with its batch unread. Release uses a fresh command id
+and admits that batch once; Stop leaves no unresolved wake receipt.
 
 Attempt success requires the child to call `submit_result` with the current
 `turn_token` and schema-valid `output_json`. **Last assistant text is never a
@@ -2469,6 +2476,8 @@ unready placement defers rather than suppresses the wake, consumes no mail,
 and is rechecked before the delivery is reserved. A held fork seal pushes
 nothing until its real outcome is recorded. Neither runner loss nor elapsed
 hold time generates a child result/nudge or paid parent triage cascade.
+The non-interactive run-until-idle face also waits and retries a deferred
+wake: it preserves its completed result rather than declaring interruption.
 
 Completion is **pushed**, not only polled. A host-authored `result` message is
 enqueued into the tree inbox from the seal, so it can name the candidate; an
@@ -3611,10 +3620,17 @@ release retries the existing obligations, not a model command. Ready is not
 continuation consent: paid owner-loss continuation still requires its durable
 decision and `resume_after_loss` policy (default hold), plus current placement
 admission. Recorded Stop suppresses continuation regardless of old hold chrome.
+Root loss-resume producers wait for placement before posting consent and
+enqueueing their continuation. A delivery already prepared when placement
+closes is not discarded or repeatedly re-driven: the driver owns its hold.
 
 For a runner-placed seal, the existing reservation without any dispatch stage
 proves unstarted debt: reopen reconstructs its ticket and waits for placement.
-The stage is published before dispatch. Once a stage exists an unresolved seal
+The persisted node's `runner_id`, not the current route or port's admission
+answer, selects this stage guard. The stage is published before dispatch even
+if the route disappeared. A mixed local/remote batch stages each remote seal
+under its actual runner, without inventing a local runner for unrelated effects.
+Once a stage exists an unresolved seal
 remains the existing explicit VCS recovery obligation, never an automatic retry.
 An in-process reservation has no such pre-dispatch proof and remains ambiguous.
 Hold state, elapsed time and waiters add no persisted fields or wire versions.

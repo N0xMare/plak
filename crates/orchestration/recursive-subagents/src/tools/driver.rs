@@ -1017,13 +1017,7 @@ impl TreeDriver {
         let mut settled = Settled::default();
         let mut first_save_error = None;
         while !effects.is_empty() {
-            let runner = self.vcs.stage_runner().map(str::to_owned).or_else(|| {
-                effects
-                    .seals
-                    .iter()
-                    .any(|ticket| self.vcs.placement_ready(&ticket.path).is_some())
-                    .then(|| "local".to_owned())
-            });
+            let runner = self.vcs.stage_runner().map(str::to_owned);
             let driver = self.clone();
             let (admitted, refused, stages) = self
                 .write_owed(move |tree| {
@@ -1032,13 +1026,14 @@ impl TreeDriver {
                     // On a runner each effect is a recorded stage, published
                     // before it runs (spec 03 §14).
                     let stages = match &runner {
-                        Some(runner) if !effects.is_empty() => {
-                            let stages = tree.record_effect_stages(&effects, runner)?;
-                            driver.save_guarded(tree)?;
-                            stages
-                        }
-                        _ => crate::tree::EffectStages::default(),
+                        Some(runner) => tree.record_effect_stages(&effects, runner)?,
+                        None => tree.record_placed_seal_stages(&effects)?,
                     };
+                    if !effects.is_empty()
+                        && (runner.is_some() || stages.seals.iter().any(Option::is_some))
+                    {
+                        driver.save_guarded(tree)?;
+                    }
                     Ok::<_, TopologyError>((effects, refused, stages))
                 })
                 .await??;

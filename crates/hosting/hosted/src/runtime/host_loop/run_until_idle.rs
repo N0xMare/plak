@@ -261,18 +261,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     super::super::result_mail::LossNotice::WithMail,
                 )
                 .map_err(CliFailure::new)?;
-                if !matches!(
-                    self.fit_child_wake(&command).await?,
-                    super::wake::WakeFit::Fits
-                ) {
-                    if let Some(Ok(
-                        OneShotOutcome::Completed { assistant }
-                        | OneShotOutcome::Truncated { assistant },
-                    )) = state.result.take()
-                    {
-                        state.result = Some(Ok(OneShotOutcome::Interrupted { assistant }));
+                match self.fit_child_wake(&command).await? {
+                    super::wake::WakeFit::Fits => {}
+                    super::wake::WakeFit::Deferred => {
+                        std::thread::sleep(Duration::from_millis(20));
+                        continue;
                     }
-                    continue;
+                    super::wake::WakeFit::DoesNotFit | super::wake::WakeFit::Stopped(_) => {
+                        if let Some(Ok(
+                            OneShotOutcome::Completed { assistant }
+                            | OneShotOutcome::Truncated { assistant },
+                        )) = state.result.take()
+                        {
+                            state.result = Some(Ok(OneShotOutcome::Interrupted { assistant }));
+                        }
+                        continue;
+                    }
                 }
                 let trigger_ids = notices
                     .iter()

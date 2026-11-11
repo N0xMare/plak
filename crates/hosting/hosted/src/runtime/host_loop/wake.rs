@@ -553,6 +553,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
 
     pub(super) async fn fit_child_wake(&mut self, command: &str) -> CliResult<WakeFit> {
         if self.role.config.state_roots.runner_pending() {
+            #[cfg(test)]
+            tests::pending_cut(&self.role.config.session.id);
             return Ok(WakeFit::Deferred);
         }
         let watch = super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state);

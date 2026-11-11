@@ -12,6 +12,72 @@ use std::time::Duration;
 
 struct ObservedChild(Arc<ChildObservation>);
 
+#[tokio::test]
+async fn placement_hold_attention_contention_reuses_only_placement_not_stale_login() {
+    let root = tempfile::tempdir().unwrap();
+    let id = format!("attention-cache-{}", uuid::Uuid::new_v4());
+    let tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
+        &id,
+        "root",
+        "owner",
+        root.path().to_owned(),
+        "tuple",
+        crate::agent_tree_protocol::WriterMode::SingleLease,
+    )
+    .unwrap();
+    crate::topology_runtime::insert_root(id.clone(), tree, None)
+        .await
+        .unwrap();
+    let runtime = crate::topology_runtime::lookup(&id).unwrap();
+    let turn = "00000000-0000-0000-0000-000000000001".parse().unwrap();
+    let projection = ChildTurnProjection::recovered(None, turn);
+    projection
+        .observation
+        .lock()
+        .projection
+        .as_mut()
+        .unwrap()
+        .progress
+        .waiting_for_login = true;
+    runtime
+        .try_occupy_live(
+            "c1".into(),
+            Box::new(ObservedChild(projection.observation.clone())),
+        )
+        .await
+        .map_err(|_| "slot")
+        .unwrap();
+    assert!(tree_needs_operator(&id));
+    projection
+        .observation
+        .lock()
+        .projection
+        .as_mut()
+        .unwrap()
+        .progress
+        .waiting_for_login = false;
+    runtime
+        .read(|_| {
+            assert!(
+                !tree_needs_operator(&id),
+                "a contended tree retained stale login attention"
+            );
+        })
+        .unwrap();
+    {
+        let _contended = runtime.live.lock().await;
+        runtime
+            .read(|_| {
+                assert!(
+                    !tree_needs_operator(&id),
+                    "a contended live table reused stale login attention"
+                );
+            })
+            .unwrap();
+    }
+    crate::topology_runtime::force_release(&id).await;
+}
+
 impl crate::topology_runtime::LiveChildHandle for ObservedChild {
     fn host_observation(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
         Some(self.0.clone())

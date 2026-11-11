@@ -1396,6 +1396,19 @@ checks that frozen awake time preserves foreground, advancing it stops
 foreground but preserves promoted jobs, and report cuts before receipt
 acknowledgment retain exactly the same report. No wire or binding input changes.
 
+Placement-hold regression cuts also retire a child live entry without Stop
+during a corrective nudge and during transient instruction admission. Joining
+the turn waiter must leave the attempt open, without result mail. Hosted wake
+binding cuts close placement after its immutable receipt is prepared: release
+admits the unread batch once under a fresh identity, while Stop leaves no
+unresolved receipt. Root loss-resume tests distinguish pending production
+from an already prepared delivery, and the run-until-idle test releases at
+the Deferred cut without replacing a completed result by Interrupted.
+A local-home `RoutedVcs` fixture drops the remote child's route and checks the
+stored seal stage at dispatch, including mixed local/remote ticket indices.
+Live-progress label and attention-contention tests distinguish held from
+refused placement and cached placement from stale login attention.
+
 Test code has one home per kind, and production behavior is never moved into
 test code to change density accounting.
 

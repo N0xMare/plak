@@ -54,6 +54,14 @@ impl ProductAgentTree {
             .is_some_and(|node| self.vcs.0.placement_ready(&node.path).unwrap_or(true))
     }
 
+    /// Whether the node's retained placement is held rather than refused.
+    #[must_use]
+    pub fn placement_held(&self, agent_id: &str) -> bool {
+        self.nodes
+            .get(agent_id)
+            .is_some_and(|node| self.vcs.0.placement_held(&node.path))
+    }
+
     /// The caller's children that will still report on their own: open
     /// attempts on a node that runs (or will once resumed from a reopen), and
     /// nodes sealing a result they have not pushed yet. Interrupted and

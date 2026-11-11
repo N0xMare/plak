@@ -52,9 +52,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .and_then(|item| self.role.config.session.queue_commands.pending_for(item))
             .filter(|submission| submission.kind == sessions::projector::SubmissionKind::HostWake)
             .cloned();
-        if self.role.config.state_roots.runner_pending() && wake.is_some() {
-            return Ok(HostStep::Continue);
-        }
         if self.refuse_archived_prompt(&raw_text)? {
             return Ok(HostStep::Continue);
         }

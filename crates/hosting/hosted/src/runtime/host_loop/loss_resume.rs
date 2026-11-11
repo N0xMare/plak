@@ -170,6 +170,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// id. A submission a crash left prepared is that queued item. `None`
     /// when nothing is held, or while the root is not free to run it.
     pub(super) async fn root_loss_resume_delivery(&mut self) -> CliResult<Option<NextPrompt>> {
+        if self.role.config.state_roots.runner_pending() {
+            self.role.root_loss_resume_due = true;
+            return Ok(None);
+        }
         self.role.root_loss_resume_due = false;
         if self.role.recovery.blocked() || self.role.pending_start.is_some() {
             return Ok(None);

@@ -1019,6 +1019,72 @@ fn test_runtime(root: &std::path::Path) -> (String, Arc<ProductTopologyRuntime>)
     (tree_id, runtime)
 }
 
+#[tokio::test]
+async fn placement_hold_label_tracks_live_progress_but_not_a_refused_runner() {
+    let root = tempfile::tempdir().unwrap();
+    let (id, runtime) = test_runtime(root.path());
+    let vcs = Arc::new(crate::occupancy_vcs::fake::FakeVcs::new());
+    let (child, path) = runtime
+        .mutate_then_emit_borrowed_for_test(false, |tree| {
+            tree.set_vcs(vcs.clone());
+            let child = tree
+                .spawn_agent(
+                    "root",
+                    &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+                    None,
+                )
+                .unwrap()
+                .agent_id;
+            Ok((child.clone(), tree.node(&child).unwrap().path.clone()))
+        })
+        .await
+        .unwrap();
+    let turn_id = "00000000-0000-0000-0000-000000000001".parse().unwrap();
+    let projection = super::super::child_projection::ChildTurnProjection::recovered(None, turn_id);
+    let mut observers = ChildObservers::default();
+    observers.children.insert(
+        child.clone(),
+        Observer {
+            turn_id,
+            observation: projection.observation.clone(),
+        },
+    );
+    let mut view = runtime
+        .read(crate::agent_tree::view::project_tree_view)
+        .unwrap();
+    vcs.set_placement_ready(path.clone(), false);
+    observers.project(&mut view);
+    let progress = view
+        .nodes
+        .iter()
+        .find(|node| node.agent_id == child)
+        .unwrap()
+        .live_progress
+        .as_ref()
+        .unwrap();
+    assert!(
+        progress
+            .activity
+            .as_deref()
+            .is_some_and(|activity| activity.starts_with("tools waiting · "))
+    );
+    vcs.refuse_placement(path);
+    assert!(observers.project(&mut view));
+    let progress = view
+        .nodes
+        .iter()
+        .find(|node| node.agent_id == child)
+        .unwrap()
+        .live_progress
+        .as_ref()
+        .unwrap();
+    assert!(
+        progress.activity.is_none(),
+        "refused placement is not waiting"
+    );
+    crate::topology_runtime::force_release(&id).await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn placement_hold_child_only_attention_and_activity_clear_without_a_tree_revision() {
     let root = tempfile::tempdir().unwrap();

@@ -6,6 +6,42 @@ use super::{
 };
 use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger as _};
 
+#[derive(Debug)]
+pub(in crate::agent) enum InstructionStartError {
+    Stopped,
+    Drained,
+    Failed(String),
+}
+
+impl From<String> for InstructionStartError {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+impl std::fmt::Display for InstructionStartError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stopped => formatter.write_str("child instruction was stopped"),
+            Self::Drained => formatter.write_str("child instruction owner was drained"),
+            Self::Failed(message) => formatter.write_str(message),
+        }
+    }
+}
+
+pub(super) async fn placement_admission(
+    driver: &TreeDriver,
+    live: &Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
+    agent_id: &str,
+    identity: &ChildTurnIdentity,
+) -> Result<(), InstructionStartError> {
+    match crate::agent::placement::wait_ready(driver, live, agent_id, identity).await {
+        crate::agent::placement::Admission::Ready => Ok(()),
+        crate::agent::placement::Admission::Stopped => Err(InstructionStartError::Stopped),
+        crate::agent::placement::Admission::Drained => Err(InstructionStartError::Drained),
+    }
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "Instruction-turn start preserves pending delivery identity, admission acknowledgement, and runtime release when the attempt cannot bind."
@@ -18,11 +54,11 @@ pub(in crate::agent) async fn start_instruction_turn(
     command_id: CommandId,
     prompt: String,
     kind: CommandKind,
-) -> Result<TurnResultHandle, String> {
+) -> Result<TurnResultHandle, InstructionStartError> {
+    #[cfg(test)]
+    crate::agent::park::hooks::before_instruction_admission(agent_id).await;
     loop {
-        if !crate::agent::placement::wait_ready(driver, live, agent_id, identity).await {
-            return Err("child instruction was cancelled before placement admission".into());
-        }
+        placement_admission(driver, live, agent_id, identity).await?;
         let command_text = command_id.as_str().to_owned();
         let transient = kind == CommandKind::Resume;
         let result_context = crate::agent::ledger::ChildLedger::new(driver, agent_id)
@@ -39,7 +75,10 @@ pub(in crate::agent) async fn start_instruction_turn(
             .await
             .map_err(String::from)?;
         let (mut live_map, delivery) =
-            crate::agent::live::lock_for_transition(live, agent_id, identity.turn).await?;
+            match crate::agent::live::lock_for_transition(live, agent_id, identity.turn).await {
+                Ok(locked) => locked,
+                Err(_) => return Err(InstructionStartError::Drained),
+            };
         let admissible = if transient {
             resume_allowed(driver, agent_id, identity)
         } else {
@@ -63,18 +102,26 @@ pub(in crate::agent) async fn start_instruction_turn(
                 )
                 .await
                 .map_err(String::from)?;
-            return Err(if transient {
-                "transient continuation was cancelled"
-            } else {
-                "child instruction was cancelled"
-            }
-            .to_owned());
+            return Err(
+                if driver
+                    .read(|tree| {
+                        tree.node(agent_id).is_ok_and(|node| {
+                            node.status == crate::agent_tree_protocol::NodeStatus::Interrupted
+                        })
+                    })
+                    .unwrap_or(false)
+                {
+                    InstructionStartError::Stopped
+                } else {
+                    InstructionStartError::Drained
+                },
+            );
         }
         let child = live_map
             .get_mut(agent_id)
-            .ok_or_else(|| "child live session is missing".to_owned())?;
+            .ok_or(InstructionStartError::Drained)?;
         if child.turn_id() != identity.turn {
-            return Err("child turn has already been replaced".into());
+            return Err(InstructionStartError::Drained);
         }
         if !crate::agent::placement::ready(driver, agent_id) {
             drop(live_map);
@@ -107,7 +154,7 @@ pub(in crate::agent) async fn start_instruction_turn(
                     )
                     .await;
                 }
-                return Err(error);
+                return Err(error.into());
             }
         };
         let turn_id = child.turn_id();
@@ -150,9 +197,9 @@ pub(in crate::agent) async fn start_instruction_turn(
                 crate::topology_runtime::retire_live(driver, live, agent_id, Some(turn_id), true)
                     .await
             {
-                return Err(format!("{error}; {retirement_error}"));
+                return Err(format!("{error}; {retirement_error}").into());
             }
-            return Err(error);
+            return Err(error.into());
         }
         if let Err(error) = crate::agent::ledger::ChildLedger::settlement_only(driver)
             .settle(&command_text, crate::driver::ledger::Settlement::Recorded)
@@ -164,9 +211,9 @@ pub(in crate::agent) async fn start_instruction_turn(
                 crate::topology_runtime::retire_live(driver, live, agent_id, Some(turn_id), true)
                     .await
             {
-                return Err(format!("{error}; {retirement_error}"));
+                return Err(format!("{error}; {retirement_error}").into());
             }
-            return Err(error);
+            return Err(error.into());
         }
         settle_or_fault(driver, effects, agent_id).await;
         return Ok(result);

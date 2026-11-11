@@ -4412,9 +4412,6 @@ async fn continuation_admitted(fixture: &Fixture) -> String {
     .expect("the continuation turn is admitted")
 }
 
-/// Under the default hold the operator's Resume records the one durable
-/// decision before it starts one new instruction turn; a second Resume
-/// records nothing and submits nothing again.
 #[tokio::test]
 async fn placement_hold_owner_loss_keeps_consent_pending_and_stop_suppresses_reopen() {
     for stop in [false, true] {
@@ -4490,6 +4487,9 @@ async fn placement_hold_owner_loss_keeps_consent_pending_and_stop_suppresses_reo
     }
 }
 
+/// Under the default hold the operator's Resume records the one durable
+/// decision before it starts one new instruction turn; a second Resume
+/// records nothing and submits nothing again.
 #[tokio::test]
 async fn a_held_continuation_resumes_once_with_consent_recorded_first() {
     let fixture = Fixture::new("held-resume");

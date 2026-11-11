@@ -17,7 +17,7 @@ impl ProductAgentTree {
         };
         // Only managed ports publish a stage before dispatch. Absence of a
         // stage proves an unsent reservation there, never on a local port.
-        if (self.vcs.0.placement_ready(&node.path).is_none() && node.placement.runner_id.is_none())
+        if node.placement.runner_id.is_none()
             || node.attempt_id != reservation.attempt_id
             || self.operations.values().any(|op| {
                 op.tool_name == tree::VcsStageIntent::KIND && op.caller_agent_id == agent_id

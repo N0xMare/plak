@@ -190,10 +190,11 @@ impl WakeIdentity<'_> {
                 bound_turns: count,
             }
             .command_id();
-            // Below-retention consumption did not spend a turn, but its id
+            // Consumption or withdrawal did not spend a turn, but its id
             // cannot name another command on this attachment.
             if !tree.command(&id).is_some_and(|command| {
-                command.fact == Some(CommandFact::Accepted) && command.turn_id.is_none()
+                command.withdrawn
+                    || (command.fact == Some(CommandFact::Accepted) && command.turn_id.is_none())
             }) {
                 return Ok(id);
             }

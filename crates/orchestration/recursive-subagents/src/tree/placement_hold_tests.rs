@@ -2,6 +2,62 @@ use super::test_support::*;
 use super::*;
 use plakous_workspace::occupancy_vcs::fake::FakeOp;
 
+#[tokio::test]
+async fn placement_hold_routed_local_home_publishes_remote_seal_before_dispatch_without_a_live_route()
+ {
+    use crate::tree::TreeStore as _;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (_root, vcs, mut tree) = fake_tree();
+    let local = tree
+        .spawn_agent("root", &mint_req(), None)
+        .unwrap()
+        .agent_id;
+    let remote = tree
+        .spawn_agent("root", &mint_req(), None)
+        .unwrap()
+        .agent_id;
+    tree.nodes.get_mut(&remote).unwrap().placement.runner_id = Some("remote-child".into());
+    for id in [&local, &remote] {
+        let workspace = tree.node(id).unwrap().workspace_id.clone();
+        tree.workspaces.get_mut(&workspace).unwrap().base_commit = Some("a".repeat(40));
+    }
+    tree.record_turn_completed(&local).unwrap();
+    tree.record_turn_completed(&remote).unwrap();
+    let effects = tree.take_effects();
+    let tree_id = tree.tree_id.clone();
+    // The route was dropped: the live port now reports neither placement nor runner.
+    let routed = Arc::new(crate::routed_vcs::RoutedVcs::new(vcs.clone(), &tree_id, vec![]).await);
+    let store = Arc::new(MemoryTreeStore::new());
+    let staged = Arc::new(AtomicUsize::new(0));
+    vcs.watch_lock({
+        let (store, staged) = (store.clone(), staged.clone());
+        move || {
+            if let Some(stage) = plakous_workspace::occupancy_vcs::stage::current() {
+                let stored = store.load(&tree_id).unwrap().unwrap().0;
+                let operation = stored
+                    .operations()
+                    .get(stage.operation_id())
+                    .expect("stage published before dispatch");
+                let intent: serde_json::Value =
+                    serde_json::from_str(&operation.canonical_request).unwrap();
+                assert_eq!(intent["target_runner"], "remote-child");
+                staged.fetch_add(1, Ordering::SeqCst);
+            }
+            false
+        }
+    });
+    let tree = Arc::new(std::sync::Mutex::new(tree));
+    let driver = crate::tools::TreeDriver::new(tree.clone(), store, routed, None);
+    driver.save(&mut tree.lock().unwrap()).unwrap();
+    driver.settle(effects).await.unwrap();
+    assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 2);
+    assert_eq!(
+        staged.load(Ordering::SeqCst),
+        1,
+        "only the persisted remote seal is staged"
+    );
+}
+
 #[test]
 fn placement_hold_defers_seal_without_mail_or_parent_wait_and_isolates_siblings() {
     let (_root, vcs, mut tree) = fake_tree();

@@ -19,7 +19,7 @@ mod instruction;
 mod leave_tests;
 mod resume;
 
-pub(in crate::agent) use instruction::start_instruction_turn;
+pub(in crate::agent) use instruction::{InstructionStartError, start_instruction_turn};
 
 pub(in crate::agent) use resume::resume_allowed;
 #[cfg(test)]
@@ -570,10 +570,23 @@ impl crate::node::TurnRole<()> for ChildTurns {
                 // `is_exhausted` above is the only exit, so the budget
                 // always has a next round here.
                 let next_nudge = harness_nudge.next().unwrap_or(harness_nudge);
-                if let Ok(next) =
-                    start_submit_harness_turn(&driver, live, &agent_id, &identity, next_nudge).await
+                match start_submit_harness_turn(&driver, live, &agent_id, &identity, next_nudge)
+                    .await
                 {
-                    return AfterTerminal::Next(next);
+                    Ok(next) => return AfterTerminal::Next(next),
+                    Err(InstructionStartError::Drained) => return AfterTerminal::Settled(()),
+                    Err(InstructionStartError::Stopped) => {
+                        finish_interrupted_turn(
+                            &driver,
+                            live,
+                            &agent_id,
+                            &identity,
+                            observer.as_ref(),
+                        )
+                        .await;
+                        return AfterTerminal::Settled(());
+                    }
+                    Err(InstructionStartError::Failed(_)) => {}
                 }
                 if driver
                     .read(|tree| {
@@ -1352,12 +1365,10 @@ pub(super) async fn start_submit_harness_turn(
     agent_id: &str,
     identity: &ChildTurnIdentity,
     nudge: SubmitNudgeBudget,
-) -> Result<TurnResultHandle, String> {
+) -> Result<TurnResultHandle, InstructionStartError> {
     #[cfg(test)]
     crate::agent::park::hooks::before_submit_nudge(agent_id).await;
-    if !crate::agent::placement::wait_ready(driver, live, agent_id, identity).await {
-        return Err("child instruction was cancelled before placement admission".into());
-    }
+    instruction::placement_admission(driver, live, agent_id, identity).await?;
     let (prompt, command_id) = driver
         .read(|tree| {
             let node = tree.node(agent_id).map_err(|error| error.message)?;

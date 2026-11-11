@@ -99,6 +99,11 @@ pub trait VcsOps: Send + Sync {
         None
     }
 
+    /// Whether `path` is temporarily held, excluding a permanent refusal.
+    fn placement_held(&self, path: &Path) -> bool {
+        self.placement_ready(path) == Some(false)
+    }
+
     /// The runner this port's effects run on when it is not this process:
     /// its effects are then recorded as tree stages before they run, and
     /// each runs under its stage's key (see [`super::stage`]). `None`, the

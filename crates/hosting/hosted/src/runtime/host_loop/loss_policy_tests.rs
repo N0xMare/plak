@@ -7,6 +7,72 @@ use crate::runtime::Sender;
 use crate::runtime::recover_tests::{script, scripted_host_with};
 use crate::runtime::test_kit::TestExtension;
 
+#[test]
+fn placement_hold_root_loss_resume_defers_then_runs_one_prepared_delivery() {
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = scripted_host_with(
+        root.path(),
+        script(serde_json::json!([
+            {"output": {"text": "continued once"}}
+        ])),
+    );
+    let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host =
+        super::RootActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
+    lose_root(&host);
+    let roots = host.role.config.state_roots.clone();
+    let registry = plakous::runner::RunnerRegistry::default();
+    registry.configure(plakous::runner::ConfiguredRunner {
+        runner_id: "local".into(),
+        names: vec!["local".into()],
+    });
+    let pending = roots.clone().with_runner_readiness(registry, "local");
+    host.role.config.state_roots = pending.clone();
+    assert!(
+        host.block(async |host| host.resume_after_loss_all().await)
+            .is_none()
+    );
+    assert!(
+        host.block(async |host| host.root_loss_resume_delivery().await)
+            .unwrap()
+            .is_none()
+    );
+    let intents = host
+        .role
+        .config
+        .store
+        .load_intents(&host.role.config.session.id)
+        .unwrap();
+    assert_eq!(intents.root_continuations.len(), 0);
+    assert_eq!(intents.submissions.len(), 0);
+    assert!(host.role.root_loss_resume_due);
+    host.role.config.state_roots = roots;
+    let (text, delivery, echoed) = host
+        .block(async |host| host.root_loss_resume_delivery().await)
+        .unwrap()
+        .expect("ready continuation");
+    // A loss after preparation must not discard or repeatedly re-drive its receipt.
+    host.role.config.state_roots = pending;
+    host.block(async |host| host.run_prompt(text, delivery, echoed, None).await)
+        .unwrap();
+    assert_eq!(host.role.config.session.root_turn_count, 1);
+    let intents = host
+        .role
+        .config
+        .store
+        .load_intents(&host.role.config.session.id)
+        .unwrap();
+    assert_eq!(intents.root_continuations.len(), 1);
+    assert_eq!(intents.submissions.len(), 1);
+    host.block(async |host| host.release().await).unwrap();
+}
+
 /// Records a lost root turn as the open does after its feed scan.
 fn lose_root<P: plakous_host_protocol::ProtocolExtension>(host: &super::RootActor<'_, P>) {
     assert!(

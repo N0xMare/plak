@@ -103,6 +103,10 @@ impl VcsOps for RoutedVcs {
         self.port(path).placement_ready(path)
     }
 
+    fn placement_held(&self, path: &Path) -> bool {
+        self.port(path).placement_held(path)
+    }
+
     fn stage_runner(&self) -> Option<&str> {
         self.home.stage_runner()
     }

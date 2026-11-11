@@ -25,6 +25,9 @@ use crate::agent_tree_protocol::{
 };
 use crate::topology_runtime::ProductTopologyRuntime;
 
+mod binding;
+mod drain;
+
 pub(in crate::agent) struct Fixture {
     provider_gates: Vec<plakous_offline_crash_harness::gate::GateHandle>,
     pub(in crate::agent) root: tempfile::TempDir,

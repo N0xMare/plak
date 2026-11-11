@@ -363,6 +363,10 @@ impl VcsOps for RemoteVcs {
         self.link.placement().map(|gate| gate.is_ready())
     }
 
+    fn placement_held(&self, _path: &Path) -> bool {
+        self.link.placement().is_some_and(|gate| gate.is_held())
+    }
+
     fn stage_runner(&self) -> Option<&str> {
         Some(&self.runner_id)
     }

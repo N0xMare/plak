@@ -194,7 +194,7 @@ impl ChildObservers {
                             plakous_host_protocol::topology::NodeStatus::Running
                                 | plakous_host_protocol::topology::NodeStatus::Sealing
                         )
-                        && !tree.placement_ready(&node.agent_id)
+                        && tree.placement_held(&node.agent_id)
                 })
                 .map(|node| node.agent_id.clone())
                 .collect()

@@ -892,7 +892,6 @@ mod revert;
 mod stages;
 mod succession;
 pub use refresh::{RefreshReport, RefreshStatus};
-pub(crate) use stages::EffectStages;
 mod runtime_error;
 pub mod text;
 mod tree_store;

@@ -1091,7 +1091,7 @@ async fn retired_duplicate_restart_marks_child_recovery_required() {
     .await
     .err()
     .unwrap();
-    assert!(error.contains("result reconciliation required"));
+    assert!(error.to_string().contains("result reconciliation required"));
     runtime
         .read(|tree| {
             assert_eq!(

@@ -33,10 +33,7 @@ pub(super) fn watch_debt(owner: &Arc<crate::topology_runtime::ProductTopologyRun
                     .into_iter()
                     .filter(|id| tree.placement_ready(id))
                     .collect::<std::collections::BTreeSet<_>>();
-                let seals = tree.nodes().values().any(|node| {
-                    node.status == crate::agent_tree_protocol::NodeStatus::Sealing
-                        && tree.placement_ready(&node.agent_id)
-                });
+                let seals = tree.has_ready_deferred_seals();
                 (ready, seals)
             }) else {
                 continue;
@@ -62,18 +59,36 @@ pub(super) fn ready(driver: &TreeDriver, agent: &str) -> bool {
 
 // A between-turn wait owns no tree/live lock and claims no mail. The safety
 // tick also observes placement edges, which do not advance the tree revision.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Admission {
+    Ready,
+    Stopped,
+    Drained,
+}
+
 pub(super) async fn wait_ready(
     driver: &TreeDriver,
     live: &Arc<tokio::sync::Mutex<LiveChildTable>>,
     agent: &str,
     identity: &ChildTurnIdentity,
-) -> bool {
+) -> Admission {
     loop {
         let Ok(notify) = driver.read(crate::agent_tree::ProductAgentTree::waiters) else {
-            return false;
+            return Admission::Drained;
         };
         let mut notified = Box::pin(notify.notified_owned());
         notified.as_mut().enable();
+        if driver
+            .read(|tree| {
+                identity.still_owns(tree, agent)
+                    && tree.node(agent).is_ok_and(|node| {
+                        node.status == crate::agent_tree_protocol::NodeStatus::Interrupted
+                    })
+            })
+            .unwrap_or(false)
+        {
+            return Admission::Stopped;
+        }
         if !super::children::resume_allowed(driver, agent, identity)
             || live
                 .lock()
@@ -86,10 +101,10 @@ pub(super) async fn wait_ready(
                 .and_then(|id| crate::topology_runtime::lookup(&id))
                 .is_some_and(|runtime| runtime.is_closed())
         {
-            return false;
+            return Admission::Drained;
         }
         if ready(driver, agent) {
-            return true;
+            return Admission::Ready;
         }
         let _ = tokio::time::timeout(std::time::Duration::from_secs(1), notified).await;
     }

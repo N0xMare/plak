@@ -6,6 +6,15 @@ use super::{
 };
 
 impl ProductAgentTree {
+    /// Whether an unsent seal ticket can now leave its placement hold.
+    #[must_use]
+    pub fn has_ready_deferred_seals(&self) -> bool {
+        self.effects
+            .seals
+            .iter()
+            .any(|ticket| self.vcs.0.placement_ready(&ticket.path).unwrap_or(true))
+    }
+
     pub(crate) fn defer_unavailable_seals(&mut self, effects: &mut Effects) {
         let (ready, deferred): (Vec<_>, Vec<_>) = std::mem::take(&mut effects.seals)
             .into_iter()
@@ -413,7 +422,7 @@ impl Effects {
             completed.refreshes.push((ticket, answer));
         }
         for (index, ticket) in seals.into_iter().enumerate() {
-            let staged = EffectStages::at(&plan.seals, index);
+            let staged = plan.seals.get(index).cloned().flatten();
             let sealed = stage::run(staged, ticket.seal(vcs)).await;
             completed.seals.push((ticket, sealed));
         }
@@ -459,7 +468,7 @@ impl Effects {
         completed.stages = [
             plan.base_pins,
             plan.refreshes,
-            plan.seals,
+            plan.seals.into_iter().flatten().collect(),
             plan.adopts,
             plan.hooks,
             plan.unmints,

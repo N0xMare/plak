@@ -4288,7 +4288,8 @@ verdicts) are addressed, the session profile and workspace chrome states.
   or Stop. A child's held placement or deferred seal also sets attention,
   without overwriting the root's own runner status. Merely having live or
   parked children on available placements does not set it. A live child turn uses
-  the existing `tools waiting · <runner>` label, without a new wire field.
+  the existing `tools waiting · <runner>` label only while its placement is
+  held, never for a permanent refusal, without a new wire field.
   Activity stays
   `busy`, the runner status keeps its `link_lost` or `reconcile` phase, and
   `activity_seq` does not advance for this. No field, client protocol or

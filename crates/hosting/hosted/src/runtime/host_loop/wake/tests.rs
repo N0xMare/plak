@@ -17,6 +17,70 @@ use crate::surface_protocol::HostEvent;
 use crate::surface_protocol::{HostEventReceiver, UserAction, UserActionSender};
 use std::sync::Arc;
 
+type PendingCut = Box<dyn FnOnce() + Send>;
+static PENDING_CUTS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::BTreeMap<String, PendingCut>>,
+> = std::sync::LazyLock::new(std::sync::Mutex::default);
+
+pub(super) fn pending_cut(session: &str) {
+    let cut = PENDING_CUTS.lock().unwrap().remove(session);
+    if let Some(cut) = cut {
+        cut();
+    }
+}
+
+#[test]
+fn placement_hold_run_until_idle_retries_deferred_mail_without_interrupting_the_result() {
+    with_host(1, |host, _, _, _| {
+        let registry = plakous::runner::RunnerRegistry::default();
+        registry.configure(plakous::runner::ConfiguredRunner {
+            runner_id: "local".into(),
+            names: vec!["local".into()],
+        });
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let catalog = Arc::new(
+            plakous::runner::WorkspaceCatalog::machine(
+                vec![workspace.path().to_owned()],
+                home.path(),
+                false,
+            )
+            .unwrap(),
+        );
+        host.role.config.state_roots = host
+            .role
+            .config
+            .state_roots
+            .clone()
+            .with_runner_readiness(registry.clone(), "local");
+        let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        PENDING_CUTS.lock().unwrap().insert(
+            host.role.config.session.id.clone(),
+            Box::new({
+                let released = released.clone();
+                move || {
+                    registry.ready_local(catalog, 1).unwrap();
+                    released.store(true, std::sync::atomic::Ordering::Release);
+                }
+            }),
+        );
+        let mut state = completed_run(25);
+        let step = host
+            .block(async |host| host.next_run_prompt(&mut state).await)
+            .unwrap();
+        assert!(released.load(std::sync::atomic::Ordering::Acquire));
+        assert!(
+            matches!(step, HostStep::Prompt { .. }),
+            "deferred wake ended the run"
+        );
+        assert!(matches!(
+            state.result,
+            Some(Ok(crate::runtime::OneShotOutcome::Completed { .. }))
+        ));
+        assert_eq!(submissions(host).len(), 1);
+    });
+}
+
 fn submissions<P: plakous_host_protocol::ProtocolExtension>(
     host: &RootActor<'_, P>,
 ) -> Vec<crate::sessions::projector::Submission> {

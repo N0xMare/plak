@@ -259,7 +259,8 @@ pub(super) async fn park_until_wake(
             }
             WakeDecision::Fire(arrivals) => {
                 if !crate::agent::placement::ready(driver, agent_id)
-                    && !crate::agent::placement::wait_ready(driver, live, agent_id, identity).await
+                    && crate::agent::placement::wait_ready(driver, live, agent_id, identity).await
+                        != crate::agent::placement::Admission::Ready
                 {
                     return end_park(driver, live, agent_id, identity).await;
                 }
@@ -422,7 +423,8 @@ async fn start_wake_turn(
     #[cfg(test)]
     hooks::before_wake_admission(agent_id).await;
     if !crate::agent::placement::ready(driver, agent_id)
-        && !crate::agent::placement::wait_ready(driver, live, agent_id, identity).await
+        && crate::agent::placement::wait_ready(driver, live, agent_id, identity).await
+            != crate::agent::placement::Admission::Ready
     {
         return Err(WakeRefusal::ParkEnded);
     }
@@ -439,6 +441,8 @@ async fn start_wake_turn(
         .await
         .map_err(String::from)
         .map_err(WakeRefusal::Failed)?;
+    #[cfg(test)]
+    hooks::before_wake_binding(agent_id).await;
     let Ok((mut live_map, delivery)) =
         super::live::lock_for_transition(live, agent_id, identity.turn).await
     else {
@@ -459,6 +463,14 @@ async fn start_wake_turn(
         .unwrap_or(false);
     if !crate::agent::placement::ready(driver, agent_id) {
         drop(live_map);
+        settle_wake(
+            &mut crate::agent::ledger::ChildLedger::settlement_only(driver),
+            &command_text,
+            WakeSubmission::Refused,
+        )
+        .await
+        .map_err(String::from)
+        .map_err(WakeRefusal::Failed)?;
         mutate_child(driver, agent_id, {
             let id = agent_id.to_owned();
             move |tree| tree.defer_wake(&id)
@@ -489,6 +501,14 @@ async fn start_wake_turn(
         Err(error) => {
             drop(live_map);
             if error == super::live::RESTART_PLACEMENT_UNAVAILABLE {
+                settle_wake(
+                    &mut crate::agent::ledger::ChildLedger::settlement_only(driver),
+                    &command_text,
+                    WakeSubmission::Refused,
+                )
+                .await
+                .map_err(String::from)
+                .map_err(WakeRefusal::Failed)?;
                 mutate_child(driver, agent_id, {
                     let id = agent_id.to_owned();
                     move |tree| tree.defer_wake(&id)
