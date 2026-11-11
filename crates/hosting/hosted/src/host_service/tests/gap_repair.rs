@@ -68,3 +68,66 @@ fn a_saturated_attachment_bounds_gap_repair_until_a_snapshot_arrives() {
         assert!(service.attached(id));
     }
 }
+
+#[test]
+fn an_unanswered_gap_repair_retries_after_its_deadline_without_new_loss() {
+    let (service, intents) = service(4);
+    let id = service.attach(&root(), Face::Remote).unwrap();
+    let scope = TranscriptScope::Root;
+    service.take(id);
+    resyncs(&intents, &scope);
+    for _ in 0..16 {
+        service.observe(stream(scope.clone()));
+    }
+    service.take(id);
+    assert_eq!(resyncs(&intents, &scope), 1);
+    let deadline = service.lock().attachments[&id].repairing[&scope];
+    service.repair_gaps_at(
+        deadline
+            .checked_sub(std::time::Duration::from_millis(1))
+            .unwrap(),
+    );
+    assert_eq!(resyncs(&intents, &scope), 0);
+    service.repair_gaps_at(deadline);
+    assert_eq!(resyncs(&intents, &scope), 1);
+    service.repair_gaps_at(deadline);
+    assert_eq!(resyncs(&intents, &scope), 0);
+}
+
+#[test]
+fn a_snapshot_clears_losses_recorded_while_its_repair_was_outstanding() {
+    for scope in [
+        TranscriptScope::Root,
+        TranscriptScope::Agent("child".into()),
+    ] {
+        let (service, intents) = service(4);
+        let id = service.attach(&root(), Face::Remote).unwrap();
+        if let TranscriptScope::Agent(agent_id) = &scope {
+            service
+                .intent(
+                    id,
+                    SessionIntent::OpenAgentTranscript {
+                        agent_id: agent_id.clone(),
+                    },
+                )
+                .unwrap();
+        }
+        service.take(id);
+        resyncs(&intents, &scope);
+        for _ in 0..16 {
+            service.observe(stream(scope.clone()));
+        }
+        service.take(id);
+        assert_eq!(resyncs(&intents, &scope), 1);
+        for _ in 0..16 {
+            service.observe(stream(scope.clone()));
+        }
+        let mut snapshot = PresentationSnapshot::empty(2);
+        snapshot.scope = scope.clone();
+        service.observe(Observation::PresentationSnapshot(snapshot));
+        service.take(id);
+        service.observe(Observation::ClearView);
+        service.take(id);
+        assert_eq!(resyncs(&intents, &scope), 0);
+    }
+}

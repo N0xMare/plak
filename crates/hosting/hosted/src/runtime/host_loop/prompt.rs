@@ -1126,6 +1126,7 @@ impl<'o, P: plakous_host_protocol::ProtocolExtension>
             selected_mail,
             ..
         } = mail;
+        self.wake_turn_admitted();
         let _ = self.role.events.send(ContentEvent::SetBusy(true));
         let _ = self.role.events.send(ContentEvent::Status {
             phase: HostPhase::Running,

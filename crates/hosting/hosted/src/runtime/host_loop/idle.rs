@@ -189,8 +189,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 // An intent is activity: the idle release waits afresh.
                 self.role.idle_since = None;
             }
-            let cancels_resume =
-                received.is_ok() && !matches!(&received, Ok(UserAction::ResyncTranscript { .. }));
+            let idle_read = received
+                .as_ref()
+                .is_ok_and(crate::intent_dispatch::is_idle_read);
+            let cancels_resume = received.is_ok() && !idle_read;
             let cancelled_resume = cancels_resume && self.role.pending_resume.is_some();
             if cancels_resume {
                 self.cancel_transient_resume();
@@ -1133,12 +1135,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     return Ok(HostStep::Quit);
                 }
             };
-            if selected.is_none() && observed_tree && one_shot.is_none() {
+            if idle_read && selected.is_none() && observed_tree && one_shot.is_none() {
                 drop(acknowledgement);
                 // Preserve the iteration boundary: action notices precede
                 // any pause/wake notice the automatic check may commit.
                 self.commit_notice_intents();
-                if let Some(step) = self.idle_automatic_prompt(false, true).await? {
+                InterruptWatch::deferring(self.role.actions, &self.role.interrupt_state).poll();
+                let preempted = self.role.interrupt_state.borrow().has_wake_preemptor();
+                if !preempted && let Some(step) = self.idle_automatic_prompt(false, true).await? {
                     return Ok(step);
                 }
             }

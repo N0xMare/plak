@@ -19,7 +19,7 @@
 //! refused, with its own refusal, when the node is closed, retiring, out
 //! of reach or unknown.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, PoisonError};
 
 use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptRow, TranscriptScope};
@@ -264,7 +264,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 seq: 0,
                 scopes: Scopes::Held(BTreeSet::from([scope])),
                 gapped: BTreeSet::new(),
-                repairing: BTreeSet::new(),
+                repairing: BTreeMap::new(),
                 snapshot_held: 0,
                 dropped: false,
                 // As a root attachment made before an unresolved

@@ -136,7 +136,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     pub(super) async fn transient_resume_prompt(&mut self) -> CliResult<HostStep> {
         let watch = InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.defer_input();
-        if watch.interrupted() || self.role.interrupt_state.borrow().has_deferred() {
+        if watch.interrupted() || self.role.interrupt_state.borrow().has_wake_preemptor() {
             self.cancel_transient_resume();
             return Ok(HostStep::Continue);
         }

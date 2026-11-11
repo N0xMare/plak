@@ -4556,8 +4556,10 @@ verdicts) are addressed, the session profile and workspace chrome states.
   never dropped (an attachment that cannot take one gets
   `resync_required` and is detached), a *droppable* one may be coalesced or
   evicted and is repaired by a resnapshot. Repair waits for room in the
-  attachment queue and permits at most one outstanding snapshot ask per
-  attachment and transcript scope; a baseline clears losses it supersedes.
+  attachment queue and permits at most one snapshot ask per attachment and
+  transcript scope within a five-second retry window; an unanswered ask
+  re-arms after that window on consumer or observation progress, even without
+  new loss. A baseline clears losses it supersedes.
   A saturated or slow client cannot create a resync feedback loop in the
   session mailbox. An **addressed** observation
   goes to one attachment only: the answer to its own request (draft and
@@ -6107,18 +6109,23 @@ Idle interactive roots auto-continue on pending process notices or unread
 child results or questions when `[turn] auto_continue` is enabled (default true). A 2 s
 quiet window coalesces completions. Content-free `plak.wake` logs report each
 wake decision/reason transition with mail and process-exit counts and quiet
-window age. If wake work stays unread with host wakes enabled and no decision
+window age. Admission of any root turn resets idle starvation accounting.
+If wake work stays unread with host wakes enabled and no decision
 runs for over ten seconds, tree observation warns once until a decision runs
 or the work clears. The warning includes received action-class counts and
 host-wide transcript gap-repair ask counts by root/agent scope since the last
 check; these counters are diagnostic, never wake or delivery authority. A wake leaves no transcript row: the
 host neither persists nor emits one for it, and the host-authored prompt
 itself is model input, never a transcript row. The woken turn's own rows
-follow the previous turn's. User prompts, follow-ups, queued structural
-work, shutdown and observed interrupts take precedence. Ordinary deferred
-reads do not abandon admission. After a non-prompt action, an idle iteration
-that observed the tree checks automatic work with the same retry/loss-resume,
-continuation and wake precedence as a receive timeout; a stream of transcript
+follow the previous turn's. User prompts, follow-ups, settings/profile
+extensions, queued structural work, shutdown and interrupts take precedence.
+Only the explicit non-mutating host-read allowlist may remain deferred without
+abandoning automatic admission; new intents preempt by default. After a read
+action, an idle iteration that observed the tree polls ingress without consuming
+Esc and checks automatic work only without pending preemptors, with the same
+retry/loss-resume, continuation and wake precedence as a receive timeout.
+Reads do not cancel a transient resume. Mutating actions cross the ordinary
+idle-entry projection boundary before automatic work. A stream of transcript
 resyncs cannot starve child-result or process-exit wakes. Esc
 confirms interruption of that turn as usual and disables auto-continue until the next prompt.
 A wake whose turn ends at the context window disables it the same way, as a

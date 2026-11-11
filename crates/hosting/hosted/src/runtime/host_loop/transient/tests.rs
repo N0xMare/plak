@@ -28,6 +28,31 @@ fn failure(gate: ResumeGate) -> TransientFailure {
     }
 }
 
+#[test]
+fn queued_transcript_reads_do_not_cancel_a_transient_resume() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    config.store.save(&mut config.session).unwrap();
+    let (sender, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = RootActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+    assert!(host.in_runtime(|host| {
+        host.schedule_transient_resume(failure(ResumeGate::Network), "temporary connection failure")
+    }));
+    host.role.last_tree_observed_at = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+    for _ in 0..2 {
+        sender
+            .send(UserAction::ResyncTranscript {
+                scope: plakous_host_protocol::views::transcript::TranscriptScope::Root,
+            })
+            .unwrap();
+    }
+    let _ = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap();
+    assert!(host.role.pending_resume.is_some());
+}
+
 #[tokio::test(start_paused = true)]
 async fn root_transient_waits_for_exact_route_and_cancels_probe() {
     use plakous::model::{

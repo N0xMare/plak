@@ -97,6 +97,31 @@ async fn cancel_that_joins_is_settled() {
 }
 
 #[test]
+fn deferred_escape_preempts_wakes_without_consuming_the_interrupt() {
+    let (sender, receiver) = user_action_channel::<TestExtension>();
+    let state = RefCell::new(InterruptWatchState::default());
+    sender
+        .send(UserAction::ResyncTranscript {
+            scope: plakous_host_protocol::views::transcript::TranscriptScope::Root,
+        })
+        .unwrap();
+    InterruptWatch::deferring(&receiver, &state).poll();
+    assert!(!state.borrow().has_wake_preemptor());
+    sender.send(UserAction::Interrupt).unwrap();
+    let watch = InterruptWatch::deferring(&receiver, &state);
+    watch.poll();
+    assert!(!watch.interrupted());
+    assert!(state.borrow().has_wake_preemptor());
+    assert!(matches!(
+        state
+            .borrow_mut()
+            .take_deferred()
+            .map(|delivery| delivery.into_parts().0),
+        Some(UserAction::Interrupt)
+    ));
+}
+
+#[test]
 fn watch_records_urgent_and_defers_ordinary_actions() {
     let (sender, receiver) = user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());

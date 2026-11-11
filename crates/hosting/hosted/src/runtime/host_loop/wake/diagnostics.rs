@@ -38,6 +38,13 @@ impl Diagnostics {
         self.resync_start = crate::host_service::wake_stats::snapshot();
     }
 
+    fn admitted(&mut self, session: &str) {
+        self.bind(session);
+        self.pending_since = None;
+        self.checked = None;
+        self.warned = false;
+    }
+
     fn starved(&mut self, now: Instant, enabled: bool) -> bool {
         if !enabled || self.mail + self.exits == 0 {
             self.pending_since = None;
@@ -55,6 +62,13 @@ impl Diagnostics {
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
+    pub(in crate::runtime::host_loop) fn wake_turn_admitted(&mut self) {
+        self.role
+            .child_wake
+            .diagnostics
+            .admitted(&self.role.config.session.id);
+    }
+
     pub(in crate::runtime::host_loop) fn wake_received(
         &mut self,
         action: &crate::surface_protocol::UserAction<P>,
@@ -143,5 +157,18 @@ mod tests {
         track.exits = 1;
         assert!(!track.starved(now + Duration::from_secs(41), true));
         assert!(track.starved(now + Duration::from_secs(52), true));
+    }
+
+    #[test]
+    fn a_long_admitted_turn_is_not_idle_starvation() {
+        let now = Instant::now();
+        let mut track = Diagnostics::default();
+        track.checked("session", now);
+        track.mail = 1;
+        assert!(!track.starved(now, true));
+        track.admitted("session");
+        assert!(!track.starved(now + Duration::from_secs(60), true));
+        assert!(!track.starved(now + Duration::from_secs(70), true));
+        assert!(track.starved(now + Duration::from_secs(71), true));
     }
 }

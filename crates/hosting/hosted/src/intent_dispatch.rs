@@ -58,6 +58,25 @@ pub(crate) enum Disposition {
     Defer,
 }
 
+/// Read actions that may remain deferred while idle automatic work is admitted.
+pub(crate) fn is_idle_read<P: plakous_host_protocol::ProtocolExtension>(
+    action: &UserAction<P>,
+) -> bool {
+    matches!(
+        action,
+        UserAction::ResyncTranscript { .. }
+            | UserAction::RefreshTopologyTree
+            | UserAction::OpenTopologyNavigator
+            | UserAction::OpenAgentTranscript { .. }
+            | UserAction::CloseAgentTranscript
+            | UserAction::ReadTopologyNodeUsage { .. }
+            | UserAction::RequestCallDetail { .. }
+            | UserAction::RefreshReadiness
+            | UserAction::RefreshTemplates
+            | UserAction::Promptable
+    )
+}
+
 impl IntentClass {
     /// The class of `action`. Exhaustive: a new intent must be classified.
     pub(crate) fn of<P: plakous_host_protocol::ProtocolExtension>(action: &UserAction<P>) -> Self {

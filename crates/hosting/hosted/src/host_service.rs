@@ -47,6 +47,7 @@
 mod child;
 pub(crate) mod drafts;
 mod face;
+mod gap_repair;
 mod tree_nodes;
 pub mod wire;
 
@@ -130,7 +131,7 @@ struct Attachment<P: ProtocolExtension> {
     /// Scopes whose transcript content this attachment lost to a full
     /// queue; repaid with a fresh baseline.
     gapped: BTreeSet<TranscriptScope>,
-    repairing: BTreeSet<TranscriptScope>,
+    repairing: BTreeMap<TranscriptScope, std::time::Instant>,
     /// Attach-snapshot items still at the head of the queue; they do not
     /// count against the capacity.
     snapshot_held: usize,
@@ -908,7 +909,7 @@ impl<P: ProtocolExtension> HostService<P> {
             seq: 0,
             scopes,
             gapped: BTreeSet::new(),
-            repairing: BTreeSet::new(),
+            repairing: BTreeMap::new(),
             snapshot_held: items.len(),
             dropped: false,
             waiting,
@@ -1228,61 +1229,6 @@ impl<P: ProtocolExtension> HostService<P> {
             }
         }
         self.repair_gaps();
-    }
-
-    /// Repays each attachment's transcript gaps: the root's from the kept
-    /// baseline, any scope without one by asking the session for a fresh
-    /// snapshot of it, correlated to the attachment.
-    fn repair_gaps(&self) {
-        let mut asks = Vec::new();
-        {
-            let mut state = self.lock();
-            let State {
-                attachments,
-                snapshot,
-                ..
-            } = &mut *state;
-            for (id, held) in attachments.iter_mut() {
-                if held.dropped
-                    || held.queue.len().saturating_sub(held.snapshot_held)
-                        >= held.capacity(self.capacity)
-                {
-                    continue;
-                }
-                for scope in std::mem::take(&mut held.gapped) {
-                    if held.repairing.contains(&scope) {
-                        held.gapped.insert(scope);
-                        continue;
-                    }
-                    match (&scope, &snapshot.baseline) {
-                        (TranscriptScope::Root, Some((baseline, patches))) => {
-                            for item in std::iter::once(baseline).chain(patches) {
-                                held.offer(item.clone(), item.class(), self.capacity);
-                            }
-                        }
-                        _ => {
-                            if let Some(sender) = held.sender.clone() {
-                                held.repairing.insert(scope.clone());
-                                asks.push((*id, sender, scope));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        for (id, sender, scope) in asks {
-            if sender
-                .send(SessionIntent::ResyncTranscript {
-                    scope: scope.clone(),
-                })
-                .is_ok()
-            {
-                wake_stats::record(&scope);
-            } else if let Some(held) = self.lock().attachments.get_mut(&id) {
-                held.repairing.remove(&scope);
-                held.gapped.insert(scope);
-            }
-        }
     }
 }
 

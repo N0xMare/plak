@@ -3,6 +3,70 @@
 use super::*;
 use plakous_host_protocol::views::transcript::TranscriptScope;
 
+#[test]
+fn continuation_yields_to_a_prompt_queued_behind_a_read() {
+    with_host(0, |host, _, actions, _| {
+        host.role.config.continuation = Some("carry on".into());
+        host.role.last_tree_observed_at =
+            Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        actions
+            .send(UserAction::ResyncTranscript {
+                scope: TranscriptScope::Root,
+            })
+            .unwrap();
+        actions
+            .send(UserAction::Prompt("human prompt".into()))
+            .unwrap();
+        let text = host.block(async |host| {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let HostStep::Prompt { text, .. } = host.next_prompt(None).await.unwrap() {
+                        break text;
+                    }
+                }
+            })
+            .await
+            .unwrap()
+        });
+        assert_eq!(text, "human prompt");
+    });
+}
+
+#[test]
+fn an_extension_queued_behind_a_read_preempts_automatic_work() {
+    with_host(1, |host, _, actions, _| {
+        host.role.config.continuation = Some("carry on".into());
+        host.role.last_tree_observed_at =
+            Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        actions
+            .send(UserAction::ResyncTranscript {
+                scope: TranscriptScope::Root,
+            })
+            .unwrap();
+        actions
+            .send(UserAction::Extension(
+                crate::runtime::test_kit::ProbeIntent::InspectUsage,
+            ))
+            .unwrap();
+        assert!(matches!(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+            HostStep::Continue
+        ));
+        assert!(host.role.interrupt_state.borrow().has_wake_preemptor());
+        assert_eq!(host.role.config.continuation.as_deref(), Some("carry on"));
+        assert_eq!(submissions(host).len(), 0);
+        host.role.last_tree_observed_at =
+            Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        assert!(matches!(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+            HostStep::Continue
+        ));
+        assert_eq!(submissions(host).len(), 0);
+    });
+}
+
 fn with_resync_traffic(test: impl FnOnce(), actions: &UserActionSender<TestExtension>) {
     std::thread::scope(|scope| {
         let controls = actions.clone();
@@ -116,7 +180,7 @@ fn placement_hold_defers_a_root_wake_then_admits_once_under_resync_reads() {
                 HostStep::Continue
             ));
         }
-        assert!(submissions(host).is_empty());
+        assert_eq!(submissions(host).len(), 0);
         assert!(!host.role.config.session.child_wake_suppressed);
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();

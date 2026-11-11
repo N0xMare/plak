@@ -101,19 +101,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> InterruptWatchState<P> {
 
     /// Work that must be dispatched before admitting a background wake.
     pub(crate) fn has_wake_preemptor(&self) -> bool {
-        self.deferred.iter().any(|delivery| {
-            matches!(
-                IntentClass::of(delivery),
-                IntentClass::Quit | IntentClass::Stop | IntentClass::IdleOnly { .. }
-            ) || matches!(
-                &**delivery,
-                crate::surface_protocol::UserAction::Prompt(_)
-                    | crate::surface_protocol::UserAction::FollowUp(_)
-                    | crate::surface_protocol::UserAction::Steer(_)
-                    | crate::surface_protocol::UserAction::StopAllTopology
-                    | crate::surface_protocol::UserAction::StopProcesses { .. }
-            )
-        })
+        self.deferred
+            .iter()
+            .any(|delivery| !crate::intent_dispatch::is_idle_read(delivery))
     }
 
     /// Whether a stop a running turn took is still to be finished.
