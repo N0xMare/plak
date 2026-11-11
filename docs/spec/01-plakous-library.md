@@ -2340,9 +2340,10 @@ No historical record or Working attempt is rewritten. Exactly one dispatch
 consumes the captured capability after readiness. A crash while parked therefore
 recovers under the existing Prepared, undispatched-operation rules (§5.5).
 
-`SessionRuntimeBinding::with_request_slots` attaches the host's explicit shared
-`RequestSlots` to each constructed runtime, including reopen and refresh. It is
-process-local scheduling, never a stored binding or routing fact.
+`SessionRuntimeBinding::with_request_slots` is a doc-hidden host/test integration
+hook, not part of the supported embedding surface. It attaches the host's explicit
+shared `RequestSlots` to each constructed runtime, including reopen and refresh.
+This is process-local scheduling, never a stored binding or routing fact.
 
 Placement parking is the same kind of wait for a node placed on a runner whose
 placement is held (§8.4): its link is lost or its reconnect barrier has not yet

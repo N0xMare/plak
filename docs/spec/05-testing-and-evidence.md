@@ -1420,6 +1420,12 @@ through a framed fixture bridge, not SQLite-ordinal substitutions. The daemon's
 supplied awake clock is frozen before startup; SIGSTOP alone is not suspend
 evidence. Every pause has Drop cleanup and every process loop has a literal
 bound. The strict default selection includes all seven shapes.
+These strict shapes fail with a short-`PLAK_TEST_TMPDIR` diagnostic if their
+Unix socket path is too long; they cannot silently pass by skipping the fixture.
+The pre-send cuts require NotSent while the daemon is still paused, before
+rebind. Their five-second liveness guard is below a separately configured
+thirty-second read window: it tests admission ordering, not a 300 ms scheduling
+promise, and waiting under client locks still fails that cut.
 Scripted product bindings attach the real host account budget through
 `SessionRuntimeBinding::with_request_slots`; merely writing a one-slot config
 without binding that shared budget is not isolation evidence. The queued-nested

@@ -6,6 +6,12 @@ use super::*;
 mod support;
 use support::*;
 
+fn strict_fixture() -> Fixture {
+    fixture().expect(
+        "strict runner hold shape cannot skip a long Unix socket path; shorten PLAK_TEST_TMPDIR",
+    )
+}
+
 fn elapsed_window(started: std::time::Instant) {
     until("independent effect window", || {
         started.elapsed() >= std::time::Duration::from_millis(1900)
@@ -70,7 +76,7 @@ fn loss_before_publication(
 fn runner_hold_poll() {
     let mut twins = Vec::new();
     for beyond_effect in [false, true] {
-        let Some(fixture) = fixture() else { return };
+        let fixture = strict_fixture();
         let remote = Remote::new(&fixture);
         remote.arm("before-poll");
         fixture.write_script(&remote.script(&fixture));
@@ -120,7 +126,7 @@ fn runner_hold_poll() {
 
 #[test]
 fn runner_hold_live_key() {
-    let Some(fixture) = fixture() else { return };
+    let fixture = strict_fixture();
     let remote = Remote::new(&fixture);
     remote.arm("before-answer");
     fixture.write_script(&remote.script(&fixture));
@@ -164,11 +170,14 @@ fn runner_hold_live_key() {
 
 #[test]
 fn runner_hold_not_sent() {
-    let Some(fixture) = fixture() else { return };
+    let fixture = strict_fixture();
     let remote = Remote::new(&fixture);
     std::fs::write(remote.cuts.join("before-send.verb"), b"process.start").unwrap();
     std::fs::write(remote.cuts.join("before-send.match"), b"local-job.marker").unwrap();
     let mut script = remote.script(&fixture);
+    // NotSent must precede rebind, not wait out a client read window. Keep
+    // that window beyond the generous liveness guard, even under parallel load.
+    script["runner_windows"]["read_ms"] = json!(30000);
     let suffix = script["steps"][0]["output"]["tool"].take();
     let mut prefix = suffix.clone();
     prefix["arguments"]["command"] = json!(format!(
@@ -189,7 +198,7 @@ fn runner_hold_not_sent() {
     remote.release("before-send");
     until_within(
         "NotSent releases client gates before reconciliation",
-        std::time::Duration::from_millis(300),
+        std::time::Duration::from_secs(5),
         || remote.cuts.join("not-sent").is_file(),
     );
     let mut admin = Client::connect(&host);
@@ -217,7 +226,7 @@ fn runner_hold_not_sent() {
 
 #[test]
 fn runner_hold_stop() {
-    let Some(fixture) = fixture() else { return };
+    let fixture = strict_fixture();
     let remote = Remote::new(&fixture);
     remote.arm("before-poll");
     let mut script = remote.script(&fixture);
@@ -276,7 +285,7 @@ fn runner_hold_stop() {
 
 #[test]
 fn runner_hold_host_loss() {
-    let Some(fixture) = fixture() else { return };
+    let fixture = strict_fixture();
     let fixture = fixture.with_session_lease_seconds(2);
     let remote = Remote::new(&fixture);
     remote.arm("before-poll");
@@ -323,7 +332,7 @@ fn runner_hold_host_loss() {
 #[test]
 fn runner_hold_identity() {
     replacement_refusal();
-    let Some(fixture) = fixture() else { return };
+    let fixture = strict_fixture();
     let remote = Remote::new(&fixture);
     remote.arm("before-answer");
     fixture.write_script(&remote.script(&fixture));
@@ -361,17 +370,19 @@ fn runner_hold_identity() {
 }
 
 fn replacement_refusal() {
-    let Some(fixture) = fixture() else { return };
+    let fixture = strict_fixture();
     let remote = Remote::new(&fixture);
     std::fs::write(remote.cuts.join("before-send.verb"), b"process.start").unwrap();
-    fixture.write_script(&remote.script(&fixture));
+    let mut script = remote.script(&fixture);
+    script["runner_windows"]["read_ms"] = json!(30000);
+    fixture.write_script(&script);
     let (mut host, _attached, session, _) = remote.start(&fixture);
     remote.entered("before-send");
     let mut paused = Paused::new(remote.runner.pid().unwrap());
     remote.release("before-send");
     until_within(
         "unsent identity call releases client gates before reconciliation",
-        std::time::Duration::from_millis(300),
+        std::time::Duration::from_secs(5),
         || remote.cuts.join("not-sent").is_file(),
     );
     let mut admin = Client::connect(&host);
@@ -400,7 +411,7 @@ fn replacement_refusal() {
 
 #[test]
 fn runner_hold_isolation() {
-    let Some(fixture) = fixture() else { return };
+    let fixture = strict_fixture();
     let remote = Remote::new(&fixture);
     let config = fixture.home().join("config.toml");
     let text = std::fs::read_to_string(&config).unwrap().replace(
