@@ -252,7 +252,7 @@ fn trusted_project_cannot_override_home_orchestration() {
             config.field_value(row.field).map(|value| value.to_string()),
             global.field_value(row.field).map(|value| value.to_string())
         );
-        assert_eq!(config.origin(row.field), ConfigValueOrigin::User);
+        assert_eq!(config.origin(row.field), global.origin(row.field));
     }
     assert!(
         !config.tui_mouse,

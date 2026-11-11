@@ -64,6 +64,7 @@ pub enum LoginPhase {
     Cancelling,
     Succeeded,
     Failed,
+    OutcomeUnknown,
     Cancelled,
     Expired,
 }

@@ -63,6 +63,7 @@ impl Wake for ReadWake {
 }
 
 pub(super) struct PendingRead<P: ProtocolExtension> {
+    timeout: Result<P::HostResponse, RequestRefusal>,
     task: HostReadTask<P>,
     pub(super) deadline: Instant,
     waker: Waker,
@@ -105,7 +106,8 @@ where
         let Some(id) = peek(line) else {
             return Ok(None);
         };
-        let oversized = line.len() > self.host.admission.limits.request_bytes;
+        let oversized = line.len() > self.host.admission.limits.request_bytes
+            || !P::host_request_size_allowed(line);
         let refused = if oversized {
             Some(RequestRefusal::Malformed {
                 detail: "host request exceeds its byte limit".into(),
@@ -114,6 +116,7 @@ where
             self.principal_budget.rate(self.host.admission.limits).err()
         };
         if let Some(refusal) = refused {
+            self.audit_host_refusal(id, &refusal);
             write_frame(
                 &mut self.out,
                 &HostFrame::<P>::Response {
@@ -133,7 +136,10 @@ where
         request_id: RequestId,
         request: P::HostRequest,
     ) -> Forwarded<P> {
-        let refused = |refusal| Forwarded::Answered(Outcome::Refused(refusal));
+        let refused = |refusal| {
+            self.audit_host_refusal(request_id, &refusal);
+            Forwarded::Answered(Outcome::Refused(refusal))
+        };
         if self.host_reads.contains_key(&request_id) {
             return refused(RequestRefusal::Malformed {
                 detail: "host request id is already in flight".to_owned(),
@@ -160,9 +166,11 @@ where
         };
         let started = Instant::now();
         let deadline = started.checked_add(limits.deadline).unwrap_or(started);
+        let timeout = self.host.sessions.host_request_timeout(&request);
         self.host_reads.insert(
             request_id,
             PendingRead {
+                timeout,
                 task: self.host.sessions.host_request(context, request),
                 deadline,
                 waker: Waker::from(Arc::new(ReadWake {
@@ -197,14 +205,14 @@ where
                 continue;
             };
             let result = if now >= read.deadline {
-                Poll::Ready(Err(RequestRefusal::DeadlineExceeded))
+                Poll::Ready(read.timeout.clone())
             } else {
                 read.task
                     .as_mut()
                     .poll(&mut Context::from_waker(&read.waker))
             };
             let result = if Instant::now() >= read.deadline {
-                Poll::Ready(Err(RequestRefusal::DeadlineExceeded))
+                Poll::Ready(read.timeout.clone())
             } else {
                 result
             };
@@ -218,10 +226,25 @@ where
             self.host_reads.remove(&id);
             let outcome = match result {
                 Ok(response) => Outcome::Ok(Answer::Host { response }),
-                Err(refusal) => Outcome::Refused(refusal),
+                Err(refusal) => {
+                    self.audit_host_refusal(id, &refusal);
+                    Outcome::Refused(refusal)
+                }
             };
             write_frame(&mut self.out, &HostFrame::<P>::Response { id, outcome })?;
         }
         Ok(())
+    }
+
+    fn audit_host_refusal(&self, request_id: RequestId, refusal: &RequestRefusal) {
+        self.host.sessions.host_request_refused(
+            HostRequestContext {
+                principal: self.principal.clone(),
+                connection_id: self.connection_id,
+                host_generation: self.host.generation,
+                request_id,
+            },
+            refusal,
+        );
     }
 }

@@ -3,7 +3,7 @@ name = "plakous-host-protocol-consumer"
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.99.0"
-description = "Compile fixture: generic host requests and extension-free Core frames."
+description = "Compile fixture: generic host requests, Core frames and product operator writes."
 license = "MIT"
 repository = "https://github.com/N0xMare/plak"
 readme = "../../../README.md"
@@ -17,4 +17,6 @@ class = "repository-only"
 
 [dependencies]
 plakous-host-protocol = { version = "0.0.3", path = "../../../crates/hosting/host-protocol", default-features = false }
+plakd-wire-types = { version = "0.0.3", path = "../../../crates/hosting/plakd-wire-types" }
 serde_json = "1"
+zeroize = "1"

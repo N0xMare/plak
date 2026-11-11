@@ -13,12 +13,32 @@ mod operator;
 pub use operator::*;
 mod secret;
 pub use secret::SecretInput;
+mod writes;
+pub use writes::*;
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostRequest {
+    ConfigPatch {
+        changes: Vec<ConfigChange>,
+        if_match: String,
+        confirmation: String,
+    },
+    TemplatePut {
+        id: String,
+        changes: Vec<TemplateChange>,
+        if_match: String,
+        confirmation: String,
+    },
+    ProfilePut {
+        id: String,
+        body: ProfileBody,
+        if_match: String,
+        confirmation: String,
+    },
     AccountKeySet {
         account_id: String,
+        #[schemars(length(max = 16384), extend("writeOnly" = true))]
         secret: SecretInput,
         confirmation: String,
     },
@@ -47,6 +67,7 @@ pub enum HostRequest {
     },
     AccountLoginComplete {
         attempt: String,
+        #[schemars(length(max = 16384), extend("writeOnly" = true))]
         pasted: SecretInput,
     },
     AccountLoginPoll {
@@ -110,15 +131,25 @@ pub enum HostRequest {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "response", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostResponse {
+    /// Accepted work may have taken effect. Reread status; never auto-retry.
+    OperationOutcomeUnknown {},
+    Saved {
+        etag: String,
+        published_durability_uncertain: bool,
+        fields: Vec<SavedField>,
+    },
     AccountChanged {
         account_id: String,
-        remote_grant_may_remain: bool,
-        provenance_warning: bool,
+        #[serde(deserialize_with = "required")]
+        #[schemars(required, schema_with = "nullable::<bool>")]
+        remote_grant_may_remain: Option<bool>,
     },
     LoginChallenge {
         attempt: String,
         method: LoginMethod,
         authorize_url: SecretInput,
+        #[serde(deserialize_with = "required")]
+        #[schemars(required, schema_with = "nullable::<SecretInput>")]
         user_code: Option<SecretInput>,
         expires_in_ms: u64,
         warning: String,
@@ -216,10 +247,10 @@ pub struct Diagnostic {
 pub enum ReadRefusal {
     EnvironmentOverride {
         proven_no_effect: bool,
+        variable: String,
+        remedies: Vec<ReadRemedy>,
     },
-    AccountOperationFailed {
-        outcome_unknown: bool,
-    },
+    AccountOperationFailed {},
     DeviceLoginUnavailable {},
     ConfirmationRequired {},
     ConfirmationExpired {},
@@ -261,6 +292,7 @@ pub enum ValidationCode {
     ReadOnly,
     InvalidAccount,
     UnknownAccount,
+    AccountSignedIn,
     InvalidId,
     UnknownId,
     InvalidWindow,
@@ -304,6 +336,7 @@ pub struct ReadRemedy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadAction {
+    RestartHostWithoutOverride,
     Login,
     SetKey,
     Refresh,

@@ -154,8 +154,11 @@ pub fn set_api_key(
         ));
     }
     refuse_env_override(account)?;
+    if key.len() > MAX_API_KEY_BYTES {
+        return Err("API key is empty or too large".into());
+    }
     let key = key.trim();
-    if key.is_empty() || key.len() > MAX_API_KEY_BYTES {
+    if key.is_empty() || key.len() > MAX_API_KEY_BYTES || key.chars().any(char::is_control) {
         return Err("API key is empty or too large".to_owned());
     }
     let selected: AccountRef = account

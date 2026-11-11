@@ -529,8 +529,9 @@ pub(super) fn edit_document(
             (Some(_), None) => {
                 section_table(&mut document, row.section())?.remove(row.key());
             }
-            (Some(current), Some(desired)) => {
+            (Some(current), Some(mut desired)) => {
                 if !same_value(&current, &desired) {
+                    *desired.decor_mut() = current.decor().clone();
                     section_table(&mut document, row.section())?
                         .insert(row.key(), Item::Value(desired));
                 }

@@ -3906,9 +3906,11 @@ provider dispatch. The existing host-TUI request test retains the terminal
 notice assertion. Neither client polling nor a terminal is required for the
 public runtime invariant.
 
-The real wire settings client saves runtime settings with nondefault terminal
-preferences in the host configuration. Skipped appearance fields never travel
-in that request, and the durable `[tui]` values remain unchanged.
+The local-face settings payload/dispatch fixture saves runtime settings with
+nondefault terminal preferences in the host configuration. Skipped appearance
+fields never travel in that payload, and the durable `[tui]` values remain
+unchanged. It does not authorize remote legacy saves: protocol-7 role checks
+refuse those before product dispatch.
 Product DTO contract examples decode and re-encode unchanged before and after
 extraction, including temporary reload values. Schema extraction is checked
 against raw `plak wire schema` output with an uninstalled executable and an
@@ -5830,3 +5832,18 @@ connection/principal/generation theft refusal, disconnect cancellation, fresh
 restart state, one-account exclusion and host-wide pending quotas. Existing
 facade callback/device/claim/CAS tests remain the provider workflow authority;
 no paid or live login is required by offline gates.
+
+Protocol-7 configuration evidence covers two-connection stale forms, CLI and
+external-byte/comment edits, exact allowlists, invalid values with unchanged
+bytes, referenced definitions, built-in collisions, typed template/profile
+publication and comment preservation. Atomic publication probes cover write,
+file sync, publish and parent-sync boundaries: old or complete new bytes,
+never partial publication or false no-effect after rename. New template
+exclusive-link and replacement-rename paths are checked separately. The
+legacy remote settings/default/credential-refresh path refuses at role
+classification; local-face dispatch remains available. Schema/DTO and public
+compile contracts follow exact protocol 7; the runner version is unchanged.
+Publication SIGKILL cuts run in the durability lane; injected parent-sync
+failures run offline. Connection-drop and forced-deadline contracts verify
+retirement of pending authority and an explicit unknown outcome for admitted
+writes rather than a false no-effect refusal.

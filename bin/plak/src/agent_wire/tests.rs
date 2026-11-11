@@ -343,6 +343,23 @@ fn only_a_local_face_may_probe_or_check_the_installed_build() {
             },
             intent(2, SurfaceIntent::ProbeReload),
             intent(3, SurfaceIntent::CheckBuild),
+            intent(
+                4,
+                SurfaceIntent::SaveSettings(SettingsView::default().into()),
+            ),
+            intent(
+                5,
+                SurfaceIntent::ApplyProfile {
+                    name: "codex-default".into(),
+                    apply: crate::surface_protocol::ProfileApply::Default,
+                },
+            ),
+            intent(
+                6,
+                SurfaceIntent::RefreshUsageCredential {
+                    account: "codex".into(),
+                },
+            ),
             ClientFrame::Bye,
         ] {
             client.send(Ok(line(&frame))).unwrap();
@@ -372,9 +389,9 @@ fn only_a_local_face_may_probe_or_check_the_installed_build() {
             .count();
         match face {
             None | Some(Face::Remote) => {
-                assert_eq!((reached, refused), (0, 2), "{face:?}: {taken:?}");
+                assert_eq!((reached, refused), (0, 5), "{face:?}: {taken:?}");
             }
-            Some(Face::Local) => assert_eq!((reached, refused), (2, 0), "{taken:?}"),
+            Some(Face::Local) => assert_eq!((reached, refused), (5, 0), "{taken:?}"),
         }
     }
 }

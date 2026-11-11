@@ -69,6 +69,25 @@ pub(super) fn execute_config_set(
     {
         cfg.set_origin(field, product_config::ConfigValueOrigin::Project);
     }
+    if scope == product_config::ConfigWriteScope::User {
+        product_config::ProductConfig::update_user(paths, |current| {
+            current.set_key(&key, &value)?;
+            if crate::config_key_changes_orchestration(&key)
+                && let Some(reason) = topology_product::roster_apply_refusal(paths, None)
+            {
+                return Err(reason.message().to_owned());
+            }
+            Ok(())
+        })
+        .map_err(|error| CliFailure::new(error.into_message()))?;
+        let note = if crate::config_key_changes_orchestration(&key) {
+            " · saved; applies to new sessions and at the next /reload of an idle session"
+        } else {
+            ""
+        };
+        writeln!(stdout, "set {key}{note}").map_err(|_| CliFailure::new("stdout failed"))?;
+        return Ok(ProcessOutcome::Success);
+    }
     if crate::config_key_changes_orchestration(&key) {
         // a roster or orchestration change is accepted only
         // from a quiescent tree. A headless `plak config set` names no

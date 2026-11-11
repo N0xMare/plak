@@ -16,7 +16,7 @@ pub(super) const PROVIDER_RESERVE: Duration = Duration::from_secs(1);
 
 pub(super) fn admission() -> HostReadLimits {
     HostReadLimits {
-        request_bytes: 64 * 1024,
+        request_bytes: 272 * 1024,
         per_connection: 2,
         per_principal: 4,
         host: 32,
@@ -29,6 +29,17 @@ pub(super) fn admission() -> HostReadLimits {
 pub(super) fn welcome(limits: &HostReadLimits) -> ConsoleLimits {
     let freshness = plakous::subscriptions::USAGE_OBSERVATION_FRESHNESS;
     ConsoleLimits {
+        confirmation_ttl_ms: 60_000,
+        confirmations_per_principal: 4,
+        credential_mutations_per_minute: 10,
+        config_mutations_per_minute: 30,
+        login_starts_per_minute: 3,
+        pending_logins_per_principal: 2,
+        pending_logins_host: 3,
+        login_lifetime_ms: 900_000,
+        login_poll_ms: 1_000,
+        secret_input_bytes: crate::presentation::MAX_REMOTE_AUTHORIZATION_INPUT_BYTES as u64,
+        credential_request_bytes: 64 * 1024,
         max_request_bytes: limits.request_bytes as u64,
         max_response_bytes: RESPONSE_BYTES as u64,
         max_definition_bytes: DEFINITION_BYTES as u64,
@@ -65,7 +76,7 @@ mod tests {
         )?;
         let value = serde_json::to_value(welcome(&admission()))?;
         let limits = value.as_object().ok_or("limits object")?;
-        assert_eq!(limits.len(), 17);
+        assert_eq!(limits.len(), 28);
         for (key, value) in limits {
             let number = value.as_u64().ok_or("integer limit")?;
             assert!(

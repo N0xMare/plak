@@ -9,6 +9,16 @@ const ALLOW_MUST_BE_AN_ARRAY: &str = "[web] allow must be an array like [\"you@e
 /// The longest login the endpoint compares.
 const MAX_LOGIN_BYTES: usize = 256;
 
+pub(super) fn validate_switches(config: &super::ProductConfig) -> Result<(), String> {
+    if config.web_credentials_write && !config.web_accounts_read {
+        return Err("web.credentials_write requires web.accounts_read".into());
+    }
+    if config.web_config_write && !config.web_config_read {
+        return Err("web.config_write requires web.config_read".into());
+    }
+    Ok(())
+}
+
 /// `[web] allow`: each login non-empty, at most 256 bytes, printable with
 /// no spaces, and named once. An empty list admits no one.
 pub(super) fn assigned_logins(value: FieldValue<'_>) -> Result<Vec<String>, String> {

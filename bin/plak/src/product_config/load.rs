@@ -559,7 +559,7 @@ impl ProductConfig {
             ConfigField::WebOrigin => self.web_origin.clone_from(&source.web_origin),
             ConfigField::WebAccountsRead => self.web_accounts_read = source.web_accounts_read,
             ConfigField::WebCredentialsWrite => {
-                self.web_credentials_write = source.web_credentials_write
+                self.web_credentials_write = source.web_credentials_write;
             }
             ConfigField::WebConfigRead => self.web_config_read = source.web_config_read,
             ConfigField::WebConfigWrite => self.web_config_write = source.web_config_write,
@@ -1221,12 +1221,7 @@ impl ProductConfig {
 
     /// The one rule set: load, `plak config set`, and `SaveRoster` share it.
     pub fn validate(&self) -> Result<(), String> {
-        if self.web_credentials_write && !self.web_accounts_read {
-            return Err("web.credentials_write requires web.accounts_read".into());
-        }
-        if self.web_config_write && !self.web_config_read {
-            return Err("web.config_write requires web.config_read".into());
-        }
+        super::web::validate_switches(self)?;
         self.job_config()?;
         for (name, template) in &self.templates {
             template.validate(name)?;
@@ -1413,18 +1408,7 @@ impl ProductConfig {
                     value.string(key)?,
                 )?);
             }
-            ConfigField::RootAgent => {
-                // Empty clears the pointer, the same spelling that empties the
-                // working set; a partial tuple is not an expressible template.
-                // In a file an empty name is a named error, not a clear.
-                let name = value.string(key)?;
-                if matches!(value, FieldValue::Cli(_)) && name.is_empty() {
-                    self.clear_root_binding();
-                } else {
-                    validate_template_name(name)?;
-                    self.root_agent = Some(name.to_owned());
-                }
-            }
+            ConfigField::RootAgent => self.assign_root_agent(key, value)?,
             ConfigField::WorkingSet => self.working_set = WorkingSet::parse(value.names()?)?,
             ConfigField::Subagents => self.subagents = value.boolean()?,
             ConfigField::AutoContinue => self.auto_continue = value.boolean()?,
@@ -1511,6 +1495,18 @@ impl ProductConfig {
             ConfigField::WebCredentialsWrite => self.web_credentials_write = value.boolean()?,
             ConfigField::WebConfigRead => self.web_config_read = value.boolean()?,
             ConfigField::WebConfigWrite => self.web_config_write = value.boolean()?,
+        }
+        Ok(())
+    }
+
+    fn assign_root_agent(&mut self, key: &ConfigKey, value: FieldValue<'_>) -> Result<(), String> {
+        // Only CLI empty input clears the pointer; a file's empty name is invalid.
+        let name = value.string(key)?;
+        if matches!(value, FieldValue::Cli(_)) && name.is_empty() {
+            self.clear_root_binding();
+        } else {
+            validate_template_name(name)?;
+            self.root_agent = Some(name.to_owned());
         }
         Ok(())
     }

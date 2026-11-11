@@ -10,6 +10,8 @@ pub struct SecretInput(Arc<Zeroizing<String>>);
 impl SecretInput {
     pub const MAX_BYTES: usize = 64 * 1024;
 
+    /// # Errors
+    /// Refuses input above the envelope's byte limit without reflecting it.
     pub fn new(value: Zeroizing<String>) -> Result<Self, &'static str> {
         if value.len() > Self::MAX_BYTES {
             return Err("secret input exceeds its byte limit");
@@ -17,10 +19,12 @@ impl SecretInput {
         Ok(Self(Arc::new(value)))
     }
 
+    #[must_use]
     pub fn expose(&self) -> &str {
         self.0.as_str()
     }
 
+    #[must_use]
     pub fn into_zeroizing(self) -> Zeroizing<String> {
         Arc::try_unwrap(self.0).unwrap_or_else(|shared| Zeroizing::new(shared.as_str().to_owned()))
     }

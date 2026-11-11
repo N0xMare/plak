@@ -1,6 +1,7 @@
 //! Serialize config publication and merge each settings writer's own changes.
 
 use std::fs::{File, OpenOptions};
+use std::os::unix::fs::MetadataExt as _;
 use std::os::unix::fs::OpenOptionsExt as _;
 
 use super::{ConfigSaveError, ConfigWriteScope, ProductConfig, keys::CONFIG_KEYS};
@@ -12,6 +13,14 @@ pub(super) struct ConfigLock {
 
 impl ConfigLock {
     pub(super) fn take(paths: &PlakPaths) -> Result<Self, ConfigSaveError> {
+        Self::take_with(paths, false)
+    }
+
+    pub(super) fn try_take(paths: &PlakPaths) -> Result<Self, ConfigSaveError> {
+        Self::take_with(paths, true)
+    }
+
+    fn take_with(paths: &PlakPaths, immediate: bool) -> Result<Self, ConfigSaveError> {
         let failed = |message: &str| ConfigSaveError::BeforePublication(message.to_owned());
         paths
             .ensure_layout()
@@ -28,8 +37,23 @@ impl ConfigLock {
             )
             .open(paths.home().join("config.lock"))
             .map_err(|_| failed("could not open config publication lock"))?;
-        file.lock()
-            .map_err(|_| failed("could not take config publication lock"))?;
+        let metadata = file
+            .metadata()
+            .map_err(|_| failed("could not inspect config publication lock"))?;
+        if !metadata.is_file()
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.nlink() != 1
+            || metadata.mode() & 0o777 != 0o600
+        {
+            return Err(failed("unsafe config publication lock"));
+        }
+        if immediate {
+            file.try_lock()
+                .map_err(|_| failed("config publication is busy"))?;
+        } else {
+            file.lock()
+                .map_err(|_| failed("could not take config publication lock"))?;
+        }
         Ok(Self { _file: file })
     }
 }

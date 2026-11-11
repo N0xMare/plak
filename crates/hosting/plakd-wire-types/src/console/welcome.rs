@@ -57,6 +57,10 @@ pub enum CapabilityRemedy {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "Independent endpoint capabilities have a flat wire representation."
+)]
 pub struct ConfiguredSwitches {
     pub web_accounts_read: bool,
     pub web_config_read: bool,
@@ -67,6 +71,17 @@ pub struct ConfiguredSwitches {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConsoleLimits {
+    pub confirmation_ttl_ms: u64,
+    pub confirmations_per_principal: u64,
+    pub credential_mutations_per_minute: u64,
+    pub config_mutations_per_minute: u64,
+    pub login_starts_per_minute: u64,
+    pub pending_logins_per_principal: u64,
+    pub pending_logins_host: u64,
+    pub login_lifetime_ms: u64,
+    pub login_poll_ms: u64,
+    pub secret_input_bytes: u64,
+    pub credential_request_bytes: u64,
     pub max_request_bytes: u64,
     pub max_response_bytes: u64,
     pub max_definition_bytes: u64,

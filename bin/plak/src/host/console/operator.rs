@@ -5,7 +5,7 @@ use plakd_wire_types::console::{
     HostResponse, OperatorAction, OperatorConsent, ReadRefusal, ValidationCode,
 };
 use plakous_host_protocol::wire::{ConsoleCapability, RequestRefusal};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
@@ -25,10 +25,10 @@ pub(super) struct State {
     quotas: BTreeMap<HostPrincipal, Quota>,
 }
 
+#[derive(Default)]
 struct Quota {
-    since: Instant,
-    credentials: u8,
-    config: u8,
+    credentials: VecDeque<Instant>,
+    config: VecDeque<Instant>,
     active: bool,
 }
 
@@ -54,6 +54,81 @@ pub(super) fn account(action: &OperatorAction) -> Option<&str> {
 }
 
 impl Console {
+    pub(super) async fn prepare_operator(
+        &self,
+        context: HostRequestContext,
+        action: OperatorAction,
+    ) -> Result<HostResponse, RequestRefusal> {
+        self.write_capability(&context.principal, &action)?;
+        if let Err(reason) = validate(&action) {
+            return Ok(refused(reason));
+        }
+        let detail = if let OperatorAction::AccountLoginStart {
+            account_id,
+            notice_revision,
+            ..
+        } = &action
+        {
+            let account = match super::accounts::exact(account_id) {
+                Ok(account) => account,
+                Err(reason) => return Ok(refused(reason)),
+            };
+            let Some(provider) = account.vertical().capability().native_provider() else {
+                return Ok(refused(validation(
+                    "account_id",
+                    ValidationCode::InvalidAccount,
+                )));
+            };
+            let Ok(notice) = plakous::subscriptions::NativeSubscriptions::notice(provider) else {
+                return Ok(refused(validation(
+                    "notice_revision",
+                    ValidationCode::InvalidValue,
+                )));
+            };
+            let now = u64::try_from(super::clock::now_ms()).unwrap_or(u64::MAX) / 1_000;
+            if notice.notice_revision() != notice_revision
+                || notice.is_killed()
+                || now >= notice.expires_at()
+            {
+                return Ok(refused(validation(
+                    "notice_revision",
+                    ValidationCode::InvalidValue,
+                )));
+            }
+            let identity = match super::accounts::reader(&self.state)
+                .and_then(|reader| reader.subscriptions_for(&account))
+            {
+                Ok(subscriptions) => subscriptions
+                    .upstream_account_fingerprint(provider)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map_or_else(
+                        || "unknown or signed out".into(),
+                        |identity| format!("{identity:?}"),
+                    ),
+                Err(_) => "unknown or unavailable".into(),
+            };
+            Some(format!(
+                " Experimental integration {}. Provenance: {}. Source revision: {}. Reviewed: {}; expires: {}. Current safe upstream identity digest: {}.",
+                notice.profile_id(),
+                notice.provenance(),
+                notice.source_revision(),
+                notice.reviewed_at(),
+                notice.expires_at(),
+                identity
+            ))
+        } else {
+            None
+        };
+        let mut response = self.prepare(context, action)?;
+        if let (HostResponse::OperatorPrepared { consent }, Some(detail)) = (&mut response, detail)
+        {
+            consent.summary.push_str(&detail);
+        }
+        Ok(response)
+    }
+
     pub(super) fn write_capability(
         &self,
         principal: &HostPrincipal,
@@ -179,47 +254,38 @@ impl Console {
     ) -> Result<(), RequestRefusal> {
         let now = Instant::now();
         let mut state = self.operator.lock().unwrap_or_else(PoisonError::into_inner);
-        state
-            .quotas
-            .retain(|_, quota| quota.active || now.duration_since(quota.since) < TTL);
+        state.quotas.retain(|_, quota| {
+            quota
+                .credentials
+                .retain(|time| now.duration_since(*time) < TTL);
+            quota.config.retain(|time| now.duration_since(*time) < TTL);
+            quota.active || !quota.credentials.is_empty() || !quota.config.is_empty()
+        });
         if !state.quotas.contains_key(principal) && state.quotas.len() >= PRINCIPALS {
             return Err(RequestRefusal::RateLimited {
                 retry_after_ms: 60_000,
             });
         }
-        let quota = state.quotas.entry(principal.clone()).or_insert(Quota {
-            since: now,
-            credentials: 0,
-            config: 0,
-            active: false,
-        });
-        if !quota.active && now.duration_since(quota.since) >= TTL {
-            *quota = Quota {
-                since: now,
-                credentials: 0,
-                config: 0,
-                active: false,
-            };
-        }
+        let quota = state.quotas.entry(principal.clone()).or_default();
         let count = if credential {
             &mut quota.credentials
         } else {
             &mut quota.config
         };
-        if quota.active || *count >= if credential { 10 } else { 30 } {
+        if quota.active || count.len() >= if credential { 10 } else { 30 } {
             return Err(RequestRefusal::RateLimited {
                 retry_after_ms: if quota.active {
                     1_000
                 } else {
                     u64::try_from(
-                        TTL.saturating_sub(now.duration_since(quota.since))
+                        TTL.saturating_sub(now.duration_since(*count.front().unwrap_or(&now)))
                             .as_millis(),
                     )
                     .unwrap_or(60_000)
                 },
             });
         }
-        *count += 1;
+        count.push_back(now);
         quota.active = true;
         Ok(())
     }
@@ -334,22 +400,6 @@ fn summary(action: &OperatorAction) -> String {
         };
     }
     "Publish allowlisted home configuration on this serving host. Templates can select tools and execute on_mint/env on a runner; root and roster choices grant deferred execution. Existing epochs and frozen child rosters are unchanged. No automatic rebind, carry or restart.".into()
-}
-
-pub(super) fn audit(
-    context: &HostRequestContext,
-    action: &'static str,
-    target: Option<&str>,
-    category: &'static str,
-) {
-    let (face, login) = match &context.principal {
-        HostPrincipal::Socket(uid) => ("socket", uid.to_string()),
-        HostPrincipal::Web(login) => ("web", login.clone()),
-    };
-    eprintln!(
-        "{}",
-        serde_json::json!({"audit":"operator", "time_ms":super::clock::now_ms(), "login":login, "face":face, "connection_id":context.connection_id, "request_id":context.request_id, "action":action, "target":target, "category":category})
-    );
 }
 
 #[cfg(test)]

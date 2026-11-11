@@ -339,10 +339,8 @@ struct Reader {
 impl Drop for Reader {
     fn drop(&mut self) {
         use zeroize::Zeroize as _;
-        for line in &mut self.queued {
-            if let Ok(text) = line {
-                text.zeroize();
-            }
+        for text in self.queued.iter_mut().flatten() {
+            text.zeroize();
         }
     }
 }
@@ -350,11 +348,11 @@ impl Drop for Reader {
 impl Reader {
     /// Reads once; `false` at the end of input.
     async fn fill(&mut self) -> bool {
+        use zeroize::Zeroize as _;
         match self.read.read(&mut self.buffer).await {
             Ok(0) | Err(_) => false,
             Ok(read) => {
                 self.queued.extend(self.lines.push(&self.buffer[..read]));
-                use zeroize::Zeroize as _;
                 self.buffer[..read].zeroize();
                 true
             }

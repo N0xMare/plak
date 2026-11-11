@@ -100,6 +100,17 @@ pub struct Creation<'a> {
 
 /// What a host of many sessions needs of its product's stores.
 pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
+    /// Deadline outcome selected before work starts. Mutations may already
+    /// have taken effect when their response deadline expires.
+    fn host_request_timeout(
+        &self,
+        _request: &P::HostRequest,
+    ) -> Result<P::HostResponse, RequestRefusal> {
+        Err(RequestRefusal::DeadlineExceeded)
+    }
+    /// Categorical audit hook for refusals that precede product decoding or
+    /// execution. Implementations must not log the request body.
+    fn host_request_refused(&self, _context: HostRequestContext, _reason: &RequestRefusal) {}
     /// Retires process-local operator authority when its authenticated
     /// connection leaves. It never stops or releases an agent session.
     fn host_disconnect(&self, _principal: &HostPrincipal, _connection_id: u64, _generation: u64) {}
@@ -715,6 +726,17 @@ pub struct HostConnection<P: ProtocolExtension, W: Write> {
     /// stay until the stop is answered.
     draining: Option<NodeLink<P, W>>,
     watch: Option<Watch>,
+}
+
+impl<P: ProtocolExtension, W: Write> Drop for HostConnection<P, W> {
+    fn drop(&mut self) {
+        self.host_reads.clear();
+        self.host.sessions.host_disconnect(
+            &self.principal,
+            self.connection_id,
+            self.host.generation,
+        );
+    }
 }
 
 impl<P: ProtocolExtension, W: Write + Clone> HostConnection<P, W>

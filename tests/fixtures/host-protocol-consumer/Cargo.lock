@@ -103,6 +103,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
+name = "plakd-wire-types"
+version = "0.0.3"
+dependencies = [
+ "plakous-host-protocol",
+ "schemars",
+ "serde",
+ "serde_json",
+ "zeroize",
+]
+
+[[package]]
 name = "plakous-host-protocol"
 version = "0.0.3"
 dependencies = [
@@ -111,14 +122,17 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
 name = "plakous-host-protocol-consumer"
 version = "0.0.0"
 dependencies = [
+ "plakd-wire-types",
  "plakous-host-protocol",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -330,6 +344,12 @@ checksum = "23f0c9c52aa7cd7d77769a4cfe2a9adb1b331f489a41d912ce14513d5ab995c6"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "zeroize"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
 
 [[package]]
 name = "zmij"

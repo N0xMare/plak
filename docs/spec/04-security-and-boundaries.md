@@ -795,6 +795,13 @@ widens it.
 
 ### 2.10 The web endpoint
 
+Authenticated protocol-7 config writes are allowlisted home operations with
+mandatory etags and deferred-execution consent. They cannot edit web switches,
+allow/origin, runners, tools infrastructure, MCP servers, project trust or
+arbitrary paths. Remote legacy settings/default and credential-refresh intents
+are refused before dispatch; same-user socket trust does not grant a client-
+asserted local face. Existing local-face behavior is retained.
+
 Protocol-7 operator consent is confirmation, not independent authentication
 or proof of human presence. An admitted same-origin script or stolen usable
 cookie can prepare and confirm itself. Grants are random, single-use,
@@ -1199,6 +1206,12 @@ environment-variable, or provider discovery of its own.
 
 ### 3.3 Refresh is claim-based and crash-safe
 
+Confirmed host refresh enters this same claimed workflow. Host login workers
+retain the same ArmedLoginRecovery drop behavior: cancel before exchange
+creates no credential; cancellation or process loss during exchange leaves
+the existing recovery/quarantine evidence, not a new rollback protocol.
+No pending-login/grant namespace survives host restart.
+
 Before any refresh network call, the store durably writes
 `RefreshOutcomeUnknown` at the next generation and mints a non-cloneable claim.
 The claim first takes an exclusive refresh execution lock (plus the private
@@ -1317,6 +1330,12 @@ armed marker for crash recovery. Paste-complete logins (Grok, Claude) and the
 Codex device flow arm only after the code or approval has arrived.
 
 ### 3.4 Isolation between accounts and routes
+
+Protocol-7 operator actions bind the full exact AccountRef, not a provider
+label, and connection IDs are not completion authority. Named slot creation
+occurs only through explicit login/key set. Missing named status, refresh,
+logout, completion and removal never select the default or a sibling; API
+key operations and native OAuth remain separate capabilities.
 
 Account admission is closed to the product's supported vertical vocabulary
 (chapter 02 §8.2). Unknown account strings are typed refusals on fresh selection,
@@ -1450,6 +1469,11 @@ does not get the Codex credential, and no other account's quota is spent
 without explicit user instruction.
 
 ### 3.5 Credentials never reach a prompt or a hook
+
+Native console login challenges are the sole private operator-response
+exception, not prompt/tool/hook data. No agent channel can initiate, confirm,
+complete or subscribe to login; an auth-failure remedy names operator action
+without embedding its URL. Infrastructure/MCP administration stays CLI-only.
 
 Plakous-owned credentials, grants, bearer tokens, and unintended ambient
 secrets never enter canonical messages, tool arguments, family artifacts,
@@ -2029,6 +2053,11 @@ parser diagnostics. Secret-bearing request and challenge fields deliberately
 redact Debug. Failure replies never reflect secret input; a lost reply is not
 authority to repeat an exchange. Pending-login state is process-local; existing
 credential records and recovery formats are unchanged.
+Audit budgets aggregate by verified principal, with suppressed counts rather
+than unbounded repeated records. A dropped connection cancels pending login
+authority even without an explicit leave frame. The host never labels an
+admitted mutation's deadline or worker loss as proven no-effect; clients see
+`operation_outcome_unknown` and must reread, not replay.
 
 The portable runner dial core never formats keys, offers, pairing secrets,
 `K_pair`, proofs or cryptographic session state in `Debug`; these types have no

@@ -13,6 +13,12 @@ Operator-facing instructions live in
 
 ## 1. Files and discovery
 
+Protocol-7 host operators may edit a home template through confirmed, typed
+`template_put`. This is the explicit exception to file-authored template
+bodies: ordinary config saves and `config_patch` still refuse body changes.
+User-profile writes use root/working_set only; built-ins are read-only. No
+console operation accepts a filesystem destination or raw TOML.
+
 `plak host install --web unix:<absolute socket> --ui <absolute dir>
 [--dry-run]` writes `$HOME/.config/systemd/user/plak-host.service` on Linux
 only (chapter 02 §4.6). The required socket and UI paths have no defaults;
@@ -28,7 +34,7 @@ is a no-op; edited, unrelated or symlinked units are never overwritten.
 
 The current state directory is `state/r27.e37.p37.t10/`: runtime SQLite
 schema 27, runtime format epoch 37, product schema 37, and tree schema 10.
-These are format identities, not configuration keys. Client wire protocol 6
+These are format identities, not configuration keys. Client wire protocol 7
 and runner protocol 5 require separate exact matches, with no negotiation. Product schema 37 adds
 operator title overrides and archival state; it composes with runtime epoch
 37 without changing the runtime codec or tree encoding. Session export stays
@@ -314,12 +320,13 @@ repository can never grant web access.
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
 | `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plak mcp login`. |
 | `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset holds; home-scoped | Whether the root and the sub-agents whose host was lost (a crash, a lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). Read when the root attaches and opens, and by plak host's start scan, which under continue opens a session whose root's loss is held; a released 0.0.3 build (or older) refuses a config.toml that sets it. |
+
 | `web.allow` | array of string | `(unset)` | tailnet logins, no duplicates; unset admits no one; home-scoped | The tailnet logins (Tailscale-User-Login) plak host --web admits through tailscale serve. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it. |
 | `web.origin` | string | `(unset)` | https://<host>[:port], nothing after it; home-scoped | The exact origin tailscale serve publishes plak host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it. |
 | `web.accounts_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home account status and usage. Same-user sockets are trusted independently. Captured at host startup; restart to change it; a 0.0.3 build refuses a config.toml that sets it. |
+| `web.credentials_write` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed operator credential mutations. Requires accounts_read; home-only, default off and captured at host startup. Credentials replace this user's machine-wide selected account, not the browser's credentials. |
 | `web.config_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home profiles, templates and allowlisted configuration. Same-user sockets are trusted independently. Captured at host startup; restart to change it; a 0.0.3 build refuses a config.toml that sets it. |
-| `web.credentials_write` | bool | `false` | home-only; requires accounts_read; host restart required | Enable confirmed selected-account mutations; affects this user's credentials on the serving machine, not the browser. |
-| `web.config_write` | bool | `false` | home-only; requires config_read; host restart required | Enable confirmed home definition writes, including deferred execution via tools/on_mint/env and root selection. |
+| `web.config_write` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed allowlisted home configuration, template and profile writes. Grants deferred execution through tools, on_mint and env. Requires config_read; home-only, default off and captured at host startup. |
 
 Telemetry retention applies to schema 22's frozen terminal facts as well as
 diagnostic rows. Recorded console values are measured retained subtotals,
@@ -378,7 +385,7 @@ spawn budget is fixed at 8; neither is a config key any more, and a file that
 still carries `occupancy` or `max_agents_per_cell` gets the named removal
 error in §5.
 
-### Console read limits
+### Console limits
 
 The console welcome advertises these enforced defaults (byte counts are
 encoded bytes; durations are milliseconds). They are product limits, not
@@ -387,7 +394,18 @@ capacity and rate refusals do not open a session or close the connection.
 
 | welcome limit | default | meaning |
 | --- | --- | --- |
-| `max_request_bytes` | `65536` | Pre-decode request bound. |
+| `confirmation_ttl_ms` | `60000` | Original prepare deadline; confirm does not extend it. |
+| `confirmations_per_principal` | `4` | Outstanding nonces and grants combined. |
+| `credential_mutations_per_minute` | `10` | Across every connection of the verified principal. |
+| `config_mutations_per_minute` | `30` | Across every connection of the verified principal. |
+| `login_starts_per_minute` | `3` | Native attempt starts per principal. |
+| `pending_logins_per_principal` | `2` | Native attempts; mutation admission is also single-flight. |
+| `pending_logins_host` | `3` | One per exact native account, at most three total. |
+| `login_lifetime_ms` | `900000` | Earlier provider expiry wins. |
+| `login_poll_ms` | `1000` | Minimum interval between attempt polls. |
+| `secret_input_bytes` | `16384` | Decoded API-key/callback input, including whitespace. |
+| `credential_request_bytes` | `65536` | Before secret decoding; narrower field limits also apply. |
+| `max_request_bytes` | `278528` | Outer console bound; only template/profile writes may exceed 64 KiB. |
 | `max_response_bytes` | `262144` | Private response bound. |
 | `max_definition_bytes` | `262144` | Retained source-file bound. |
 | `page_rows` | `100` | Default and maximum; explicit limits must be 1 through 100. |
@@ -410,9 +428,16 @@ bytes. At most 32 page snapshots share the host's 8 MiB snapshot budget.
 Legacy per-session usage reads keep their own fresh-read and 60 s aging law;
 the console may consume their observations, never the reverse.
 
-### Host console read applicability
+### Host console applicability
 
-This home-only, read-only projection is distinct from `ConfigScope`'s
+Saved writes return an etag and applicability per changed field. Existing
+epochs and their frozen child rosters never change in place. Config epoch
+settings retain the CLI's all-persisted-trees quiescence fence; immediate
+settings retain their existing reread path. No save automatically rebinds,
+carries, resumes, prompts or restarts the host. Private clients explicitly
+choose the existing session Switch/Fork/Use-now workflow when needed.
+
+This home-only projection is distinct from `ConfigScope`'s
 Immediate/Epoch publication rule. `new_session` includes construction on a
 new session or an explicit rebind; exact reopen keeps construction-bound
 stored values. `next_attach` does not change a running turn. Telemetry limits
@@ -825,7 +850,35 @@ section; omitted keys continue to follow defaults. Every root binding edit copie
 fresh unshared name (`default`, `default-2`, and so on), preserving its other
 fields and leaving the previous template file untouched. Saves preflight all
 existing template bodies and refuse changes to them; edit user or project
-files directly. Unrelated settings saves do not rewrite templates.
+files directly, or use the protocol-7 confirmed home `template_put` exception.
+`config_patch` never edits a body. Unrelated settings saves do not rewrite templates.
+
+Protocol-7 `config_patch`, `template_put` and `profile_put` publish one file
+per request. All require a matching content etag and one-use consent; stale
+etags return conflict and no write. The shared home publication lock covers
+read-current, comparison, complete candidate validation and atomic publication;
+CLI home key edits reread under this lock as well. Recheck actual bytes before
+publish detects uncooperative editor changes, but the remaining last-instant
+editor race is not filesystem CAS. Etag hashes include comments, missing-file
+markers and sorted relevant template/profile bytes; revisions are process-
+local and generation scoped, not persisted counters. Settings metadata marks
+allowlisted fields writable only for an effective config-write principal.
+
+Template changes are closed typed fields, including explicit on_mint/env edits.
+Untouched fields/comments survive. New names use exclusive links; an existing
+body uses etag-checked rename through a retained, owned no-follow directory
+handle. Publication files are 0600. Complete candidate config and previously
+valid user-profile references must still validate through the existing parser/
+resolver. Names use `[a-z][a-z0-9-]{0,31}` and the existing reserved-name rules;
+unrepresentable existing IDs are read-only. No rename/delete or multi-file
+transaction is offered. Create template prerequisites, then a profile, then
+change root/roster pointers, each with a fresh etag. Invalid candidate/parser
+errors return closed field/code diagnostics, never raw user text. A parent
+sync failure answers Saved with `published_durability_uncertain:true`, not
+a proven no-effect refusal.
+Directory creation is synced before publishing a child file. A lost worker
+or response deadline after admission answers `operation_outcome_unknown`;
+clients reread before another explicitly confirmed edit.
 
 A private atomic-file operation exclusively creates a temporary file, writes
 and `fsync`s its contents, publishes it, then syncs its parent directory. Fresh

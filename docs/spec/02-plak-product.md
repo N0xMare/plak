@@ -3988,6 +3988,20 @@ latency, and nothing else. Prompt text never reaches a span.
 
 ### 4.4 Wire v2
 
+Protocol-7 `config_patch`, `template_put` and `profile_put` use the P6
+attachment-free seam, typed allowlisted fields and mandatory if_match etags.
+Prepare/confirm binds the exact target/revision; conflict never auto-merges.
+Publication replies distinguish Saved from published/durability-uncertain
+(section 07 §§1, 3, 5). No persisted version, export encoding, binding input
+or runner protocol changes are introduced by these console operations.
+
+Remote `SaveSettings`, `ApplyProfile {apply:default}` and the legacy
+`RefreshUsageCredential` are now local-face-only: refusal is
+`refused_for_role {row:local_face}` before dispatch, with no config/credential
+write. Remote web and host-client TUI forms use the consented host requests.
+Switch/Fork/Use now remain explicit session binding actions. Local-face
+legacy behavior is unchanged.
+
 `plakd-wire-types` owns the serialized product extension DTOs and their
 protocol classification, over `plakous-host-protocol`. Product handlers,
 configuration, local appearance wrappers and reload-file/probe authority stay
@@ -4026,6 +4040,13 @@ disconnect and restart retire them. Product refusals include
 `confirmation_required`, `confirmation_expired` and `conflict {etag}`.
 Credential/config write capabilities in welcome are independent of reads;
 verified socket peers are trusted by default, web writes default off.
+An admitted mutation whose worker or response deadline loses completion
+evidence answers `operation_outcome_unknown`, not a no-effect refusal.
+Clients reread status/configuration and never automatically replay it. Native
+login progress distinguishes `cancelling` from the worker's terminal phase;
+an exchange that wins a cancellation race may still succeed. Account-change
+replies carry nullable `remote_grant_may_remain`: only subscription logout
+reports a known revoke/local-retire consequence, never an inferred revocation.
 
 P6's private `host` family reads home account status/recorded usage,
 profiles, templates and allowlisted configuration without attaching or opening
@@ -4950,9 +4971,10 @@ target, outcome category and applicable revision. This is an ordinary bounded
 host log, not durable execution authority. Never log frames, challenges,
 callback input, keys or raw parser diagnostics. Limits aggregate across
 connections: one mutation per principal at once, ten credential mutations and
-thirty config mutations per minute, with no waiting queue; excess work gets
+thirty config mutations per rolling minute, with no waiting queue; excess work gets
 typed `rate_limited`. Consent quota is four outstanding grants/nonces per
-principal. The host-wide work cap remains 32.
+principal. Audit output caps each principal at 180 lines/minute and reports
+suppressed counts in the next window. The host-wide work cap remains 32.
 
 `plak host --web <unix:path|127.0.0.1:port> [--ui <dir>] [--dev-login
 <login>]` (§4.6) serves the host's sessions to browsers: wire v2 over a
@@ -7441,10 +7463,18 @@ These are in-process host observations, not new JSONL v1 lines.
 
 ### 5.5 The Menu
 
+Host-client Accounts/Providers/login and config-builder presentation belongs
+to the private clients. Both use the protocol-7 host operator requests, host
+identity, consequence/Confirm affordance, masked secret input and typed
+remedies. No credential form uses the chat composer. The retained embedded
+menu's local-face operations remain unchanged; this public increment does not
+claim those private client forms or their human TUI review are implemented.
+
 Usage's explicit `[refresh]` action (§7.2) appears only on a subscription
 vertical whose credential needs a refresh (an expired access token, a
 `RefreshRequired` posture, or SuperGrok's reclaimable quarantine), refreshes it
-and re-reads Usage; login stays CLI-only. The label is muted until the pointer
+and re-reads Usage; the retained embedded view offers CLI login repair.
+Protocol-7 private host clients use Accounts/Providers operator forms instead. The label is muted until the pointer
 hovers it or Up/Down has focused it.
 
 No Menu read blocks the host's action loop. A subscription posture read takes

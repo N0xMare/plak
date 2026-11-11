@@ -173,6 +173,30 @@ pub type SettingsUpdate = SettingsView;
 pub struct PlakExtension;
 
 impl ProtocolExtension for PlakExtension {
+    fn host_request_size_allowed(line: &str) -> bool {
+        #[derive(serde::Deserialize)]
+        struct Frame {
+            op: Operation,
+        }
+        #[derive(serde::Deserialize)]
+        struct Operation {
+            request: Request,
+        }
+        #[derive(serde::Deserialize)]
+        struct Request {
+            request: String,
+        }
+        if line.len() <= 64 * 1024 {
+            return true;
+        }
+        // Ignored fields are skipped, not decoded into secret buffers.
+        serde_json::from_str::<Frame>(line).is_ok_and(|frame| {
+            matches!(
+                frame.op.request.request.as_str(),
+                "template_put" | "profile_put"
+            )
+        })
+    }
     type Intent = SurfaceIntent;
     type Observation = SurfaceObservation;
     type HostRequest = console::HostRequest;
@@ -194,6 +218,12 @@ impl ProtocolExtension for PlakExtension {
         matches!(
             intent,
             SurfaceIntent::CheckBuild
+                | SurfaceIntent::SaveSettings(_)
+                | SurfaceIntent::ApplyProfile {
+                    apply: ProfileApply::Default,
+                    ..
+                }
+                | SurfaceIntent::RefreshUsageCredential { .. }
                 | SurfaceIntent::ProbeReload
                 | SurfaceIntent::AcceptReloadRequest { .. }
                 | SurfaceIntent::RefuseReloadRequest { .. }

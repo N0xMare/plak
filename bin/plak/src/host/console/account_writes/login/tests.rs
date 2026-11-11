@@ -49,7 +49,7 @@ fn pending_authority_is_connection_owned_cancelled_on_disconnect_and_not_recover
     assert!(!logins.attempts.contains_key(&id));
     assert!(pasted.blocking_recv().is_err());
     assert!(
-        Logins::default().attempts.get(&id).is_none(),
+        !Logins::default().attempts.contains_key(&id),
         "restart has no pending authority"
     );
 }

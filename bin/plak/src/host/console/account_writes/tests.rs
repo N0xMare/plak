@@ -165,7 +165,8 @@ async fn environment_override_proves_no_effect_for_wire_set_and_clear()
             console.request(owner(), request).await,
             Ok(HostResponse::Refused {
                 reason: ReadRefusal::EnvironmentOverride {
-                    proven_no_effect: true
+                    proven_no_effect: true,
+                    ..
                 }
             })
         ));

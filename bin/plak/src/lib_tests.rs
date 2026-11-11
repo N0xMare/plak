@@ -786,6 +786,7 @@ struct FakeBackend {
     models_failure: Option<CliFailure>,
     openrouter_key_usage: Option<product_usage::VerticalObservation>,
     revoke_refused: bool,
+    revoke_failed: bool,
     refresh_failure: Option<&'static str>,
     access_token_expired: bool,
     host_identity_unavailable: bool,
@@ -811,11 +812,100 @@ impl FakeBackend {
             models_failure: None,
             openrouter_key_usage: None,
             revoke_refused: false,
+            revoke_failed: false,
             refresh_failure: None,
             access_token_expired: false,
             host_identity_unavailable: false,
         }
     }
+}
+
+#[cfg(feature = "web")]
+#[test]
+fn host_login_preparation_requires_exact_notice_and_explicit_newer_build_consent() {
+    let account = "codex/work".parse().unwrap();
+    let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+    assert!(
+        commands::application::prepare_host_login(&mut backend, &account, "wrong-review", false)
+            .is_err()
+    );
+    assert!(backend.calls.is_empty() && backend.selected_accounts.is_empty());
+    backend.compatibility = CompatibilityState::Inactive;
+    assert!(
+        commands::application::prepare_host_login(&mut backend, &account, "exact-review", false)
+            .is_err()
+    );
+    assert!(
+        !backend
+            .calls
+            .iter()
+            .any(|call| matches!(call, Call::Login(..) | Call::Acknowledge(..)))
+    );
+    backend.compatibility = CompatibilityState::Current;
+    backend.credential = CredentialState::WrittenByNewerBuild;
+    backend.calls.clear();
+    assert!(
+        commands::application::prepare_host_login(&mut backend, &account, "exact-review", false)
+            .is_err()
+    );
+    assert!(
+        !backend
+            .calls
+            .iter()
+            .any(|call| matches!(call, Call::ReplaceNewerBuild(..) | Call::Acknowledge(..)))
+    );
+    backend.calls.clear();
+    commands::application::prepare_host_login(&mut backend, &account, "exact-review", true)
+        .unwrap();
+    assert_eq!(
+        backend.calls,
+        [
+            Call::Status(NativeProvider::Codex),
+            Call::ReplaceNewerBuild(NativeProvider::Codex),
+            Call::Acknowledge(NativeProvider::Codex, "exact-review".into())
+        ]
+    );
+    assert!(
+        backend
+            .selected_accounts
+            .iter()
+            .all(|selected| selected == &account)
+    );
+}
+
+#[cfg(feature = "web")]
+#[test]
+fn host_logout_never_falls_back_to_local_retirement_after_failed_remote_revoke() {
+    let account = "claude/work".parse().unwrap();
+    let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Revoked);
+    backend.credential = CredentialState::Ready;
+    backend.revoke_failed = true;
+    assert!(commands::application::logout_host_account(&mut backend, &account, false).is_err());
+    assert!(
+        backend
+            .calls
+            .contains(&Call::Revoke(NativeProvider::Claude))
+    );
+    assert!(
+        !backend
+            .calls
+            .contains(&Call::LogoutLocal(NativeProvider::Claude))
+    );
+    backend.calls.clear();
+    assert_eq!(
+        commands::application::logout_host_account(&mut backend, &account, true).unwrap(),
+        Some(true)
+    );
+    assert!(
+        !backend
+            .calls
+            .contains(&Call::Revoke(NativeProvider::Claude))
+    );
+    assert!(
+        backend
+            .calls
+            .contains(&Call::LogoutLocal(NativeProvider::Claude))
+    );
 }
 
 impl AccountOps for FakeBackend {
@@ -1021,6 +1111,9 @@ impl AccountOps for FakeBackend {
     ) -> CliResult<commands::application::Revocation> {
         let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::Revoke(provider));
+        if self.revoke_failed {
+            return Err(CliFailure::new("synthetic revocation transport failure"));
+        }
         Ok(if self.revoke_refused {
             commands::application::Revocation::Unusable
         } else {

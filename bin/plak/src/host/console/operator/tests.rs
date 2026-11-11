@@ -1,6 +1,6 @@
 use super::*;
 
-fn console() -> std::sync::Arc<Console> {
+fn new_console() -> std::sync::Arc<Console> {
     Console::new(
         crate::home::paths::PlakPaths::explicit(std::path::PathBuf::from("unused")),
         "unused".into(),
@@ -45,7 +45,7 @@ fn grant(console: &Console, context: &HostRequestContext) -> String {
 
 #[test]
 fn grants_are_one_shot_and_bound_to_connection_principal_generation_and_action() {
-    let console = console();
+    let console = new_console();
     let owner = owner();
     let confirmation = grant(&console, &owner);
     for thief in [
@@ -81,7 +81,7 @@ fn grants_are_one_shot_and_bound_to_connection_principal_generation_and_action()
 
 #[test]
 fn expiry_restart_disconnect_and_outstanding_quota_revoke_authority() {
-    let console = console();
+    let console = new_console();
     let owner = owner();
     let confirmation = grant(&console, &owner);
     console
@@ -100,7 +100,7 @@ fn expiry_restart_disconnect_and_outstanding_quota_revoke_authority() {
     console.disconnect(&owner.principal, owner.connection_id, owner.host_generation);
     assert!(console.consume(&owner, &action(), &confirmation).is_err());
     assert!(
-        super::tests::console()
+        new_console()
             .consume(&owner, &action(), &confirmation)
             .is_err()
     );
@@ -121,12 +121,34 @@ fn expiry_restart_disconnect_and_outstanding_quota_revoke_authority() {
 
 #[test]
 fn mutation_quota_is_shared_and_web_writes_are_default_off() {
-    let console = console();
+    let console = new_console();
     let owner = owner();
     assert!(console.admit_mutation(&owner.principal, true).is_ok());
     assert!(console.admit_mutation(&owner.principal, false).is_err());
     console.end_mutation(&owner.principal);
     for _ in 1..10 {
+        assert!(console.admit_mutation(&owner.principal, true).is_ok());
+        console.end_mutation(&owner.principal);
+    }
+    assert!(console.admit_mutation(&owner.principal, true).is_err());
+    for _ in 0..30 {
+        assert!(console.admit_mutation(&owner.principal, false).is_ok());
+        console.end_mutation(&owner.principal);
+    }
+    assert!(console.admit_mutation(&owner.principal, false).is_err());
+    {
+        let mut state = console
+            .operator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let quota = state.quotas.get_mut(&owner.principal).expect("quota");
+        for time in quota.credentials.iter_mut().take(5) {
+            *time = Instant::now()
+                .checked_sub(Duration::from_secs(61))
+                .expect("monotonic test clock");
+        }
+    }
+    for _ in 0..5 {
         assert!(console.admit_mutation(&owner.principal, true).is_ok());
         console.end_mutation(&owner.principal);
     }

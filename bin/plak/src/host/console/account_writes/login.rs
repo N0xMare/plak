@@ -1,6 +1,10 @@
 //! Each attempt owns its application, pending token and cancellable worker.
 
-use super::*;
+use super::{
+    AccountError, AccountOps, Arc, Console, HostPrincipal, HostRequest, HostRequestContext,
+    HostResponse, OperatorAction, PlakousApplication, ReadRefusal, RequestRefusal, ValidationCode,
+    failed, refused, validation, worker,
+};
 use crate::commands::application::{HostLoginStartError, LoginOutcome};
 use crate::presentation::CredentialState;
 use plakd_wire_types::console::{LoginMethod, LoginPhase, SecretInput};
@@ -39,6 +43,17 @@ impl Drop for Attempt {
 struct Progress {
     phase: LoginPhase,
     provenance_warning: bool,
+}
+
+struct LoginWork<'a> {
+    id: &'a str,
+    account: &'a str,
+    notice_revision: &'a str,
+    replace_newer: bool,
+    cancel: watch::Receiver<bool>,
+    pasted: oneshot::Receiver<SecretInput>,
+    progress: &'a Mutex<Progress>,
+    reply: oneshot::Sender<Result<HostResponse, AccountError>>,
 }
 impl Progress {
     fn pending(&self) -> bool {
@@ -156,13 +171,7 @@ impl Console {
                 )
                 .await;
         }
-        let (HostRequest::AccountLoginPoll { attempt: id }
-        | HostRequest::AccountLoginCancel { attempt: id }
-        | HostRequest::AccountLoginComplete { attempt: id, .. }) = &request
-        else {
-            unreachable!()
-        };
-        let id = id.clone();
+        let id = attempt_id(&request).to_owned();
         let mut logins = self.logins.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(attempt) = logins.attempts.get_mut(&id) else {
             return Ok(refused(validation("attempt", ValidationCode::UnknownId)));
@@ -181,6 +190,9 @@ impl Console {
             .progress
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        if progress.pending() && attempt.cancel.receiver_count() == 0 {
+            progress.phase = LoginPhase::OutcomeUnknown;
+        }
         if now >= attempt.expires && progress.pending() {
             let _ = attempt.cancel.send(true);
             progress.phase = LoginPhase::Expired;
@@ -225,16 +237,16 @@ impl Console {
             }
             _ => unreachable!(),
         }
-        operator::audit(
-            &context,
-            "login_progress",
-            Some(&attempt.account),
-            "success",
-        );
+        let phase = progress.phase;
+        let provenance_warning = progress.provenance_warning;
+        let account = attempt.account.clone();
+        drop(progress);
+        drop(logins);
+        self.audit(&context, "login_progress", Some(&account), "success", None);
         Ok(HostResponse::LoginProgress {
             attempt: id.clone(),
-            phase: progress.phase,
-            provenance_warning: progress.provenance_warning,
+            phase,
+            provenance_warning,
         })
     }
 
@@ -276,92 +288,94 @@ impl Console {
             )?;
         let task_id = id.clone();
         let owner = context.clone();
+        let registry = Arc::clone(&self);
         let mut guard = CancelStart(Some(cancel));
         if worker(move || {
             let _permit = permit;
-            let result = self.run_login(
-                &owner,
-                &task_id,
-                &account,
-                &notice_revision,
+            let result = self.run_login(LoginWork {
+                id: &task_id,
+                account: &account,
+                notice_revision: &notice_revision,
                 replace_newer,
-                receiver,
+                cancel: receiver,
                 pasted,
-                &progress,
+                progress: &progress,
                 reply,
-            );
+            });
             let mut progress = progress.lock().unwrap_or_else(PoisonError::into_inner);
             if progress.pending() {
-                progress.phase = if result.is_ok() {
+                progress.phase = if matches!(result, Err(AccountError::Unknown)) {
+                    LoginPhase::OutcomeUnknown
+                } else if result.is_ok() {
                     LoginPhase::Succeeded
                 } else {
                     LoginPhase::Failed
                 };
             }
-            operator::audit(
-                &owner,
-                "login_finished",
-                Some(&account),
-                if result.is_ok() { "success" } else { "error" },
-            );
+            let category = match progress.phase {
+                LoginPhase::Succeeded => "success",
+                LoginPhase::Cancelled => "cancelled",
+                LoginPhase::Expired => "expired",
+                LoginPhase::OutcomeUnknown => "outcome_unknown",
+                _ => "error",
+            };
+            drop(progress);
+            self.audit(&owner, "login_finished", Some(&account), category, None);
         })
         .is_err()
         {
-            return Ok(refused(failed(false)));
+            registry
+                .logins
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .attempts
+                .remove(&id);
+            return Ok(failed(false).response());
         }
         let result = challenge.await.unwrap_or_else(|_| Err(failed(false)));
         guard.0 = None;
-        Ok(result.unwrap_or_else(refused))
+        Ok(result.unwrap_or_else(AccountError::response))
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one worker owns the exact pending login and its bounded channels"
-    )]
-    fn run_login(
-        &self,
-        owner: &HostRequestContext,
-        id: &str,
-        account: &str,
-        notice_revision: &str,
-        replace_newer: bool,
-        mut cancel: watch::Receiver<bool>,
-        pasted: oneshot::Receiver<SecretInput>,
-        progress: &Mutex<Progress>,
-        reply: oneshot::Sender<Result<HostResponse, ReadRefusal>>,
-    ) -> Result<(), ReadRefusal> {
+    fn run_login(&self, work: LoginWork<'_>) -> Result<(), AccountError> {
+        let LoginWork {
+            id,
+            account,
+            notice_revision,
+            replace_newer,
+            cancel,
+            pasted,
+            progress,
+            reply,
+        } = work;
         let mut reply = Some(reply);
         let mut app = self.application()?;
         let account = super::super::accounts::exact(account)?;
         let start = (|| {
-            let notice = app.notice(&account).map_err(|_| failed(false))?;
-            if notice.notice_revision != notice_revision {
-                return Err(validation("notice_revision", ValidationCode::InvalidValue));
-            }
-            app.prepare_login(&account).map_err(|_| failed(false))?;
-            let status = app.offline_status(&account).map_err(|_| failed(false))?;
-            if matches!(
-                status.compatibility,
-                CompatibilityState::Inactive | CompatibilityState::Unsupported
-            ) {
-                return Err(validation("notice_revision", ValidationCode::InvalidValue));
-            }
-            if status.credential == CredentialState::WrittenByNewerBuild {
-                if !replace_newer {
-                    return Err(validation("replace_newer", ValidationCode::InvalidValue));
-                }
-                app.replace_newer_build(&account)
-                    .map_err(|_| failed(true))?;
-            }
-            app.acknowledge_exact(&account, notice_revision)
-                .map_err(|_| failed(false))?;
+            crate::commands::application::prepare_host_login(
+                &mut app,
+                &account,
+                notice_revision,
+                replace_newer,
+            )
+            .map_err(|_| failed(false))?;
             if *cancel.borrow() {
                 return Err(failed(false));
             }
-            app.begin_host_login(&account).map_err(|error| match error {
-                HostLoginStartError::DeviceUnavailable => ReadRefusal::DeviceLoginUnavailable {},
-                HostLoginStartError::Failed => failed(false),
-            })
+            app.begin_host_login(&account, cancel.clone())
+                .map_err(|error| match error {
+                    HostLoginStartError::DeviceUnavailable => {
+                        ReadRefusal::DeviceLoginUnavailable {}.into()
+                    }
+                    HostLoginStartError::Cancelled => {
+                        progress
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .phase = LoginPhase::Cancelled;
+                        failed(false)
+                    }
+                    HostLoginStartError::Failed => failed(false),
+                })
         })();
         let challenge = match start {
             Ok(challenge) => challenge,
@@ -407,61 +421,101 @@ impl Console {
         let pasted = if device {
             None
         } else {
-            let value = app.executor.block_on(async {
-                if *cancel.borrow() { return None; }
-                tokio::select! { biased; _ = cancel.changed() => None, value = tokio::time::timeout(timeout, pasted) => value.ok().and_then(Result::ok) }
-            }).map_err(|_| failed(false))?;
+            let value = wait_for_paste(&app, pasted, cancel.clone(), expires, progress)?;
             if value.is_none() {
-                progress
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .phase = if Instant::now() >= expires {
-                    LoginPhase::Expired
-                } else {
-                    LoginPhase::Cancelled
-                };
                 app.end_login_attempt(&account);
                 return Ok(());
             }
             value
         };
-        let result = app
-            .finish_host_login(
-                challenge.pending,
-                pasted.as_ref().map(SecretInput::expose),
-                expires.saturating_duration_since(Instant::now()),
-                cancel,
-            )
-            .map_err(|_| failed(true));
-        app.end_login_attempt(&account);
-        match result? {
-            LoginOutcome::Completed(CredentialState::Ready) => {
-                progress
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .phase = LoginPhase::Succeeded;
-                progress
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .provenance_warning = !app.record_login_host(&account);
-                operator::audit(owner, "login_ready", Some(account.as_str()), "success");
-            }
-            LoginOutcome::Cancelled => {
-                progress
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .phase = LoginPhase::Cancelled
-            }
-            LoginOutcome::TimedOut => {
-                progress
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .phase = LoginPhase::Expired
-            }
-            _ => return Err(failed(true)),
-        }
-        Ok(())
+        finish_attempt(
+            &mut app,
+            challenge.pending,
+            pasted,
+            expires,
+            cancel,
+            progress,
+        )
     }
+}
+
+fn attempt_id(request: &HostRequest) -> &str {
+    match request {
+        HostRequest::AccountLoginPoll { attempt }
+        | HostRequest::AccountLoginCancel { attempt }
+        | HostRequest::AccountLoginComplete { attempt, .. } => attempt,
+        _ => unreachable!(),
+    }
+}
+
+fn wait_for_paste(
+    app: &PlakousApplication,
+    pasted: oneshot::Receiver<SecretInput>,
+    mut cancel: watch::Receiver<bool>,
+    expires: Instant,
+    progress: &Mutex<Progress>,
+) -> Result<Option<SecretInput>, AccountError> {
+    let value = app.executor.block_on(async {
+        if *cancel.borrow() { return None; }
+        tokio::select! { biased; _ = cancel.changed() => None, value = tokio::time::timeout(expires.saturating_duration_since(Instant::now()), pasted) => value.ok().and_then(Result::ok) }
+    }).map_err(|_| failed(false))?;
+    if value.is_none() {
+        progress
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .phase = if Instant::now() >= expires {
+            LoginPhase::Expired
+        } else {
+            LoginPhase::Cancelled
+        };
+    }
+    Ok(value)
+}
+
+fn finish_attempt(
+    app: &mut PlakousApplication,
+    pending: <PlakousApplication as AccountOps>::PendingLogin,
+    pasted: Option<SecretInput>,
+    expires: Instant,
+    cancel: watch::Receiver<bool>,
+    progress: &Mutex<Progress>,
+) -> Result<(), AccountError> {
+    let account = pending.0.clone();
+    let result = app
+        .finish_host_login(
+            pending,
+            pasted.as_ref().map(SecretInput::expose),
+            expires.saturating_duration_since(Instant::now()),
+            cancel,
+        )
+        .map_err(|_| failed(true));
+    app.end_login_attempt(&account);
+    match result? {
+        LoginOutcome::Completed(CredentialState::Ready) => {
+            progress
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .phase = LoginPhase::Succeeded;
+            progress
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .provenance_warning = !app.record_login_host(&account);
+        }
+        LoginOutcome::Cancelled => {
+            progress
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .phase = LoginPhase::Cancelled;
+        }
+        LoginOutcome::TimedOut => {
+            progress
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .phase = LoginPhase::Expired;
+        }
+        LoginOutcome::Completed(_) => return Err(failed(true)),
+    }
+    Ok(())
 }
 
 fn owner_matches(left: &HostRequestContext, right: &HostRequestContext) -> bool {

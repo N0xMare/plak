@@ -1,10 +1,16 @@
 //! Stable home-only definitions. Parsing consumes retained, bounded bytes.
 
 mod catalog;
-mod files;
+pub(super) mod files;
 mod settings;
 pub(super) fn editable_key(key: &str) -> bool {
     settings::keys().any(|entry| entry.path == key)
+}
+pub(super) fn applicability(key: &str) -> plakd_wire_types::console::SettingApplies {
+    crate::product_config::config_key(key).map_or(
+        plakd_wire_types::console::SettingApplies::NewSession,
+        settings::applies,
+    )
 }
 #[cfg(test)]
 mod tests;
@@ -21,6 +27,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 pub(super) struct Snapshot {
+    pub files: files::Files,
     pub config: ProductConfig,
     pub profiles: crate::profiles::console::ReadCatalog,
     pub templates: BTreeMap<String, (TemplateSource, AgentTemplate)>,
@@ -42,6 +49,19 @@ impl Snapshot {
         between_reads: impl FnOnce(),
     ) -> Result<Self, ReadRefusal> {
         let first = files::Files::read(paths)?;
+        let snapshot = Self::from_files(first, nonce)?;
+        between_reads();
+        if snapshot.files != files::Files::read(paths)? {
+            return Err(ReadRefusal::Busy {
+                scope: ReadScope::Config,
+                retry_after_ms: 50,
+            });
+        }
+        Ok(snapshot)
+    }
+
+    pub fn from_files(first: files::Files, nonce: &[u8; 16]) -> Result<Self, ReadRefusal> {
+        first.check_limits()?;
         let config = ProductConfig::from_home_snapshot(first.config.as_deref(), &first.templates)
             .map_err(|_| unavailable(ReadScope::Config, UnavailableCode::Configuration))?;
         let mut remaining = super::limits::DEPENDENCY_BYTES;
@@ -61,13 +81,6 @@ impl Snapshot {
         // Home definitions win only by their own exact logical names.
         for (id, template) in &config.templates {
             templates.insert(id.clone(), (TemplateSource::Home, template.clone()));
-        }
-        between_reads();
-        if first != files::Files::read(paths)? {
-            return Err(ReadRefusal::Busy {
-                scope: ReadScope::Config,
-                retry_after_ms: 50,
-            });
         }
         let mut hash = Sha256::new();
         hash.update(nonce);
@@ -99,6 +112,7 @@ impl Snapshot {
             .take(32)
             .collect();
         Ok(Self {
+            files: first,
             config,
             profiles,
             templates,
@@ -329,7 +343,16 @@ impl super::Console {
             HostResponse::ConsoleMetadata {
                 etag: snapshot.etag.clone(),
                 needs_setup: crate::product_onboarding::needs_setup(&snapshot.config),
-                settings: settings::rows(&snapshot.config),
+                settings: settings::rows(&snapshot.config)
+                    .into_iter()
+                    .map(|mut row| {
+                        row.read_only = !matches!(
+                            context.principal,
+                            plakous_hosted::host_service::wire::HostPrincipal::Socket(_)
+                        ) && !self.switches.web_config_write;
+                        row
+                    })
+                    .collect(),
                 catalog,
                 diagnostics: snapshot.diagnostics.clone(),
             }

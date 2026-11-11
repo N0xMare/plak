@@ -8,11 +8,12 @@ use std::fs::File;
 use std::io::Read as _;
 
 #[derive(Clone, Eq, PartialEq, Default)]
-pub(super) struct Files {
+pub(in super::super) struct Files {
     pub config: Option<String>,
     pub templates: BTreeMap<String, String>,
     pub profiles: BTreeMap<String, String>,
     pub unavailable: BTreeSet<String>,
+    pub entries: usize,
 }
 
 struct Budget {
@@ -54,7 +55,30 @@ impl Files {
             templates,
             profiles,
             unavailable,
+            entries: budget.entries,
         })
+    }
+
+    pub fn check_limits(&self) -> Result<(), ReadRefusal> {
+        if self.entries > limits::SCAN_ENTRIES {
+            return Err(failure(UnavailableCode::DependencyLimit));
+        }
+        let mut bytes = 0usize;
+        for body in self
+            .config
+            .iter()
+            .chain(self.templates.values())
+            .chain(self.profiles.values())
+        {
+            if body.len() > limits::DEFINITION_BYTES {
+                return Err(failure(UnavailableCode::DefinitionTooLarge));
+            }
+            bytes = bytes.saturating_add(body.len());
+        }
+        if bytes > limits::DEPENDENCY_BYTES {
+            return Err(failure(UnavailableCode::DependencyLimit));
+        }
+        Ok(())
     }
 
     pub fn hash_into(&self, hash: &mut impl sha2::Digest) {

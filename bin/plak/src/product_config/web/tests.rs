@@ -1,5 +1,30 @@
 use super::*;
 
+#[test]
+fn write_switches_require_matching_reads_at_host_startup() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (_root, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    for (write, read) in [
+        ("credentials_write", "accounts_read"),
+        ("config_write", "config_read"),
+    ] {
+        std::fs::write(paths.config_file(), format!("[web]\n{write} = true\n"))?;
+        let config = super::super::ProductConfig::load_config_file(&paths.config_file())?;
+        assert!(validate_switches(&config).is_err());
+        #[cfg(feature = "web")]
+        assert!(super::super::ProductConfig::console_switches(&paths).is_err());
+        std::fs::write(
+            paths.config_file(),
+            format!("[web]\n{write} = true\n{read} = true\n"),
+        )?;
+        let config = super::super::ProductConfig::load_config_file(&paths.config_file())?;
+        validate_switches(&config)?;
+        #[cfg(feature = "web")]
+        assert!(super::super::ProductConfig::console_switches(&paths).is_ok());
+    }
+    Ok(())
+}
+
 /// An origin is exactly its own serialization; anything else is refused.
 #[test]
 fn an_origin_is_exact() {

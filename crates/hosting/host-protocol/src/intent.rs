@@ -9,6 +9,12 @@ use std::fmt;
 /// an observation for eviction, which is what [`ObservationExtension`] says.
 /// [`Core`] is the extension-free protocol every external client speaks.
 pub trait ProtocolExtension: Clone + fmt::Debug + Eq + Send + Sync + 'static {
+    /// Applies narrower product payload bounds before decoding an
+    /// attachment-free request. The transport's outer cap still applies.
+    #[must_use]
+    fn host_request_size_allowed(_line: &str) -> bool {
+        true
+    }
     /// Driver-owned intent payload.
     type Intent: Clone + fmt::Debug + Eq + Send + 'static;
     /// Driver-owned observation payload.

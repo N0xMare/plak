@@ -126,7 +126,7 @@ fn kind(key: &ConfigKey) -> SettingKind {
     }
 }
 
-fn applies(key: &ConfigKey) -> SettingApplies {
+pub(super) fn applies(key: &ConfigKey) -> SettingApplies {
     match key.field {
         ConfigField::AutoContinue => SettingApplies::Immediate,
         ConfigField::MaxModelRounds

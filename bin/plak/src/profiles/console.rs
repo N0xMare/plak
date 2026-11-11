@@ -6,6 +6,15 @@ use super::{
 };
 use std::collections::BTreeMap;
 
+pub(crate) fn builtin_id(id: &str) -> bool {
+    builtins().any(|builtin| builtin.id == id)
+}
+
+pub(crate) fn validate_user(config: &ProductConfig, id: &str, text: &str) -> Result<(), String> {
+    let resolved = resolve_user(config, id, text)?;
+    super::prepare_resolved(config, resolved).map(|_| ())
+}
+
 pub(crate) fn hash_builtins(hash: &mut impl sha2::Digest) {
     for builtin in builtins() {
         hash.update(builtin.id.as_bytes());

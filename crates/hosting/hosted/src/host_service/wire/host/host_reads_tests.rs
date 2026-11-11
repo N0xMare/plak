@@ -17,6 +17,8 @@ impl ProtocolExtension for Reads {
 
 #[derive(Default)]
 struct State {
+    mutation_timeout: AtomicBool,
+    disconnected: AtomicUsize,
     ready: AtomicBool,
     started: AtomicUsize,
     polls: AtomicUsize,
@@ -83,6 +85,16 @@ fn fixture(policy: HostReadLimits) -> (Arc<SessionHost<Reads>>, Arc<State>) {
     )
 }
 impl HostSessions<Reads> for Stores {
+    fn host_disconnect(&self, _: &HostPrincipal, _: u64, _: u64) {
+        self.state.disconnected.fetch_add(1, Ordering::SeqCst);
+    }
+    fn host_request_timeout(&self, _: &u8) -> Result<u8, RequestRefusal> {
+        if self.state.mutation_timeout.load(Ordering::SeqCst) {
+            Ok(255)
+        } else {
+            Err(RequestRefusal::DeadlineExceeded)
+        }
+    }
     fn host_read_limits(&self) -> HostReadLimits {
         self.limits
     }
@@ -143,6 +155,23 @@ impl Output {
     }
 }
 type Connection = HostConnection<Reads, Output>;
+
+#[test]
+fn dropping_a_connection_retires_operator_authority_even_without_explicit_leave() {
+    let (host, state) = fixture(limits());
+    let mut connection = host.connect(
+        Output::default(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    request(&mut connection, 10, Op::Host { request: 0 });
+    connection.flush().unwrap();
+    assert_eq!(state.disconnected.load(Ordering::SeqCst), 0);
+    drop(connection);
+    assert_eq!(state.disconnected.load(Ordering::SeqCst), 1);
+    assert_eq!(state.dropped.load(Ordering::SeqCst), 1);
+}
 fn request(connection: &mut Connection, id: u64, op: Op<Reads>) {
     let line = plakous_host_protocol::wire::encode_line(&ClientFrame::<Reads>::Request { id, op })
         .unwrap();
@@ -354,6 +383,37 @@ fn expired_read_releases_permits_and_discards_late_completion() {
             outcome: Outcome::Ok(Answer::Host { response: 1 })
         }]
     ));
+}
+
+#[tokio::test]
+async fn a_mutation_deadline_answers_the_product_unknown_outcome_not_a_no_effect_refusal() {
+    let (host, state) = fixture(limits());
+    state.mutation_timeout.store(true, Ordering::SeqCst);
+    let out = Output::default();
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    request(&mut connection, 10, Op::Host { request: 0 });
+    connection.flush().unwrap();
+    connection.host_reads.get_mut(&10).unwrap().deadline = Instant::now();
+    connection.flush().unwrap();
+    assert!(matches!(
+        out.take().as_slice(),
+        [HostFrame::Response {
+            id: 10,
+            outcome: Outcome::Ok(Answer::Host { response: 255 })
+        }]
+    ));
+    assert_eq!(state.dropped.load(Ordering::SeqCst), 1);
+    state.complete();
+    connection.flush().unwrap();
+    assert!(
+        out.take().is_empty(),
+        "late work cannot produce another answer"
+    );
 }
 
 #[tokio::test]

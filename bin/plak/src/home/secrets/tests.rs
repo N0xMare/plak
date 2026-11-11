@@ -317,7 +317,7 @@ proptest! {
         paths.ensure_layout().unwrap();
         let key = format!("sk-test-{suffix}");
         if let Some(account) = unshadowed_api_key_account() {
-            set_api_key(&paths, account, zeroize::Zeroizing::new((key).to_string())).unwrap();
+            set_api_key(&paths, account, zeroize::Zeroizing::new(key.clone())).unwrap();
             let got = resolve_api_key(&paths, account).unwrap().unwrap();
             prop_assert_eq!(got, key.clone());
             let status = key_status(&paths, account).unwrap();
@@ -327,7 +327,7 @@ proptest! {
             prop_assert!(clear_api_key(&paths, account).unwrap());
             prop_assert!(resolve_api_key(&paths, account).unwrap().is_none());
         } else {
-            let error = set_api_key(&paths, "openai", zeroize::Zeroizing::new((key).to_string())).unwrap_err();
+            let error = set_api_key(&paths, "openai", zeroize::Zeroizing::new(key.clone())).unwrap_err();
             prop_assert!(error.contains("OPENAI_API_KEY"));
         }
     }

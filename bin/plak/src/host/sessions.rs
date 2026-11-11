@@ -371,6 +371,33 @@ const fn environment_of(held_elsewhere: bool) -> SessionEnvironment {
 }
 
 impl HostSessions<PlakExtension> for ProductSessions {
+    fn host_request_timeout(
+        &self,
+        request: &plakd_wire_types::console::HostRequest,
+    ) -> Result<plakd_wire_types::console::HostResponse, RequestRefusal> {
+        if super::console::is_write(request) {
+            Ok(plakd_wire_types::console::HostResponse::OperationOutcomeUnknown {})
+        } else {
+            Err(RequestRefusal::DeadlineExceeded)
+        }
+    }
+    fn host_request_refused(
+        &self,
+        context: plakous_hosted::host_service::wire::HostRequestContext,
+        reason: &RequestRefusal,
+    ) {
+        self.console.audit(
+            &context,
+            "console_admission",
+            None,
+            if matches!(reason, RequestRefusal::RateLimited { .. }) {
+                "rate_limited"
+            } else {
+                "refusal"
+            },
+            None,
+        );
+    }
     fn host_disconnect(
         &self,
         principal: &plakous_hosted::host_service::wire::HostPrincipal,

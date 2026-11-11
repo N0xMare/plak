@@ -2,7 +2,9 @@
 
 mod account_writes;
 mod accounts;
+mod audit;
 mod clock;
+mod config_writes;
 mod definitions;
 mod limits;
 mod operator;
@@ -43,12 +45,17 @@ pub(super) struct Console {
     switches: ConfiguredSwitches,
     operator: Mutex<operator::State>,
     logins: Mutex<account_writes::Logins>,
+    audit: Mutex<audit::State>,
     #[cfg(test)]
     native_fixture: Mutex<Option<plakous::subscriptions::NativeSubscriptions>>,
 }
 
 pub(super) fn admission_limits() -> HostReadLimits {
     limits::admission()
+}
+
+pub(super) fn is_write(request: &HostRequest) -> bool {
+    config_writes::action(request).is_some() || account_writes::is_request(request)
 }
 
 impl Console {
@@ -68,6 +75,7 @@ impl Console {
             switches,
             operator: Mutex::default(),
             logins: Mutex::default(),
+            audit: Mutex::default(),
             #[cfg(test)]
             native_fixture: Mutex::new(None),
         })
@@ -114,53 +122,105 @@ impl Console {
         context: HostRequestContext,
         request: HostRequest,
     ) -> HostReadTask<PlakExtension> {
-        if account_writes::is_request(&request) {
-            let this = Arc::clone(self);
-            let runtime = self.runtime.clone();
-            return Box::pin(async move {
-                let Some(runtime) = runtime else {
-                    return Ok(refused(unavailable(
-                        ReadScope::Accounts,
-                        UnavailableCode::Storage,
-                    )));
-                };
-                let task = runtime.spawn(async move { this.account_write(context, request).await });
-                let _cancel = Cancel {
-                    abort: task.abort_handle(),
-                    cancelled: Arc::new(AtomicBool::new(false)),
-                };
-                task.await.unwrap_or_else(|_| {
-                    Ok(refused(ReadRefusal::AccountOperationFailed {
-                        outcome_unknown: true,
-                    }))
-                })
-            });
+        let mut audit = audit::Guard::new(Arc::clone(self), context.clone(), &request);
+        let task = self.request_inner(context, request);
+        Box::pin(async move {
+            let result = task.await;
+            audit.finish(&result);
+            result
+        })
+    }
+
+    fn request_inner(
+        self: &Arc<Self>,
+        context: HostRequestContext,
+        request: HostRequest,
+    ) -> HostReadTask<PlakExtension> {
+        let config_write = config_writes::action(&request).is_some();
+        if config_write || account_writes::is_request(&request) {
+            return self.mutation_task(context, request, config_write);
         }
         if matches!(
             request,
             HostRequest::OperatorPrepare { .. } | HostRequest::OperatorConfirm { .. }
         ) {
-            let result = match request {
-                HostRequest::OperatorPrepare { action } => self.prepare(context.clone(), action),
-                HostRequest::OperatorConfirm { nonce } => self.confirm(&context, &nonce),
-                _ => unreachable!(),
-            };
-            operator::audit(
-                &context,
-                "consent",
-                None,
-                if matches!(
-                    result,
-                    Ok(HostResponse::OperatorPrepared { .. }
-                        | HostResponse::OperatorConfirmed { .. })
-                ) {
-                    "success"
-                } else {
-                    "refusal"
-                },
-            );
-            return Box::pin(async move { result });
+            return self.consent_task(context, request);
         }
+        self.read_task(context, request)
+    }
+
+    fn mutation_task(
+        self: &Arc<Self>,
+        context: HostRequestContext,
+        request: HostRequest,
+        config_write: bool,
+    ) -> HostReadTask<PlakExtension> {
+        let this = Arc::clone(self);
+        let runtime = self.runtime.clone();
+        Box::pin(async move {
+            let Some(runtime) = runtime else {
+                return Ok(refused(unavailable(
+                    ReadScope::Accounts,
+                    UnavailableCode::Storage,
+                )));
+            };
+            let task = runtime.spawn(async move {
+                if config_write {
+                    this.config_write(context, request).await
+                } else {
+                    this.account_write(context, request).await
+                }
+            });
+            let _cancel = Cancel {
+                abort: task.abort_handle(),
+                cancelled: Arc::new(AtomicBool::new(false)),
+            };
+            task.await
+                .unwrap_or_else(|_| Ok(HostResponse::OperationOutcomeUnknown {}))
+        })
+    }
+
+    fn consent_task(
+        self: &Arc<Self>,
+        context: HostRequestContext,
+        request: HostRequest,
+    ) -> HostReadTask<PlakExtension> {
+        let this = Arc::clone(self);
+        let runtime = self.runtime.clone();
+        Box::pin(async move {
+            match request {
+                HostRequest::OperatorConfirm { nonce } => this.confirm(&context, &nonce),
+                HostRequest::OperatorPrepare { action } => {
+                    this.write_capability(&context.principal, &action)?;
+                    let Some(runtime) = runtime else {
+                        return Ok(refused(unavailable(
+                            ReadScope::Accounts,
+                            UnavailableCode::Storage,
+                        )));
+                    };
+                    let task =
+                        runtime.spawn(async move { this.prepare_operator(context, action).await });
+                    let _cancel = Cancel {
+                        abort: task.abort_handle(),
+                        cancelled: Arc::new(AtomicBool::new(false)),
+                    };
+                    task.await.unwrap_or_else(|_| {
+                        Ok(refused(unavailable(
+                            ReadScope::Accounts,
+                            UnavailableCode::Storage,
+                        )))
+                    })
+                }
+                _ => unreachable!(),
+            }
+        })
+    }
+
+    fn read_task(
+        self: &Arc<Self>,
+        context: HostRequestContext,
+        request: HostRequest,
+    ) -> HostReadTask<PlakExtension> {
         let accounts = is_account_request(&request);
         let permitted = matches!(context.principal, HostPrincipal::Socket(_))
             || if accounts {
