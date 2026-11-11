@@ -114,6 +114,8 @@ pub enum Outbound<P: ProtocolExtension> {
 struct Attachment<P: ProtocolExtension> {
     /// Its connection's face: a remote one takes no local-only observation.
     face: Face,
+    /// Stable only across this connection's admitted `moved` handoffs.
+    reply_origin: AttachmentId,
     /// The session's mailbox sender tagged with this attachment, or `None`
     /// for a face, which holds its own.
     sender: Option<IntentSender<P>>,
@@ -136,6 +138,12 @@ struct Attachment<P: ProtocolExtension> {
     /// could not resolve: it takes nothing until the opening's binding ends
     /// it with `moved` or `resync_required`.
     waiting: bool,
+}
+
+#[derive(Clone, Copy)]
+struct MovedRequester {
+    origin: Option<AttachmentId>,
+    face: Face,
 }
 
 /// The transcript scopes an attachment holds.
@@ -597,6 +605,40 @@ impl<P: ProtocolExtension> HostService<P> {
         &self.root
     }
 
+    fn reply_recipient(&self, requester: AttachmentId) -> Option<AttachmentId> {
+        self.lock().reply_recipient(requester)
+    }
+
+    /// Only a connection following its own `moved` may continue its requester.
+    fn continue_requester(&self, attachment: AttachmentId, requester: MovedRequester) -> bool {
+        let Some(origin_id) = requester.origin else {
+            return true;
+        };
+        let mut state = self.lock();
+        if state
+            .reply_recipient(origin_id)
+            .is_some_and(|id| id != attachment)
+        {
+            return false;
+        }
+        let Some(held) = state
+            .attachments
+            .get_mut(&attachment)
+            .filter(|held| !held.dropped && held.node.is_none() && held.face == requester.face)
+        else {
+            return false;
+        };
+        held.reply_origin = origin_id;
+        held.sender = held
+            .sender
+            .take()
+            .map(|sender| sender.tagged(origin(origin_id)));
+        if state.requester == Some(origin_id) {
+            state.requester = Some(attachment);
+        }
+        true
+    }
+
     /// Ends every attachment with [`Outbound::Moved`] naming `node`, after
     /// what each already holds: the session was replaced by the one whose
     /// root that is. Each attachment's holder reroots its own handle.
@@ -609,6 +651,17 @@ impl<P: ProtocolExtension> HostService<P> {
         node: &NodeAddress,
         request: Option<(AttachmentId, &str)>,
     ) -> Vec<AttachmentId> {
+        self.move_attachment_requesters(node, request)
+            .into_iter()
+            .map(|(attachment, _)| attachment)
+            .collect()
+    }
+
+    fn move_attachment_requesters(
+        &self,
+        node: &NodeAddress,
+        request: Option<(AttachmentId, &str)>,
+    ) -> Vec<(AttachmentId, MovedRequester)> {
         let mut state = self.lock();
         state.requester = None;
         let mut moved = Vec::new();
@@ -619,7 +672,13 @@ impl<P: ProtocolExtension> HostService<P> {
                     node: node.clone(),
                     request: request.map(|(requester, id)| (requester, id.to_owned())),
                 });
-                moved.push(*id);
+                moved.push((
+                    *id,
+                    MovedRequester {
+                        origin: held.node.is_none().then_some(held.reply_origin),
+                        face: held.face,
+                    },
+                ));
             }
         }
         moved
@@ -686,6 +745,7 @@ impl<P: ProtocolExtension> HostService<P> {
         &self,
         attachment: AttachmentId,
         moved: AttachmentId,
+        requester: AttachmentId,
         observations: Vec<SessionObservation<P>>,
     ) {
         {
@@ -708,7 +768,7 @@ impl<P: ProtocolExtension> HostService<P> {
                         let answered = named.as_deref().and_then(attachment_of);
                         window = answered.as_ref().map(|(owner, _)| *owner);
                         match answered {
-                            Some((owner, _)) if owner != moved => continue,
+                            Some((owner, _)) if owner != moved && owner != requester => continue,
                             Some((_, client)) => SessionObservation::IntentStarted(client),
                             None => SessionObservation::IntentStarted(named),
                         }
@@ -719,7 +779,7 @@ impl<P: ProtocolExtension> HostService<P> {
                     Some(scope) => held.scopes.contains(scope),
                     None => {
                         class != ObservationClass::Addressed
-                            || window.is_none_or(|owner| owner == moved)
+                            || window.is_none_or(|owner| owner == moved || owner == requester)
                     }
                 };
                 if shown {
@@ -840,6 +900,7 @@ impl<P: ProtocolExtension> HostService<P> {
         let ask = sender.clone().filter(|_| needs_baseline);
         let mut attachment = Attachment {
             face,
+            reply_origin: id,
             sender,
             node: None,
             queue: VecDeque::new(),
@@ -1111,6 +1172,7 @@ impl<P: ProtocolExtension> HostService<P> {
                                 || state.attachments.contains_key(id)
                         });
                         if let Some((owner, client)) = owner {
+                            let owner = state.reply_recipient(owner).unwrap_or(owner);
                             // The attachment sees its own correlation.
                             observation = SessionObservation::IntentStarted(client);
                             let child = state
@@ -1364,6 +1426,19 @@ impl<P: ProtocolExtension> State<P> {
             .filter(|(_, held)| held.node.is_none())
             .map(|(id, _)| *id)
             .collect()
+    }
+
+    fn reply_recipient(&self, requester: AttachmentId) -> Option<AttachmentId> {
+        if self
+            .attachments
+            .get(&requester)
+            .is_some_and(|held| !held.dropped)
+        {
+            return Some(requester);
+        }
+        self.attachments
+            .iter()
+            .find_map(|(id, held)| (!held.dropped && held.reply_origin == requester).then_some(*id))
     }
 
     /// `attachment` stops holding `agent`'s transcript.

@@ -6,14 +6,14 @@
 //! moved connection's next root attachment gets the opening's events an
 //! attach snapshot does not carry, after its `attached` answer.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use plakous_host_protocol::views::transcript::TranscriptScope;
 use plakous_host_protocol::wire::{AttachmentId, NodeAddress};
 use plakous_host_protocol::{ProtocolExtension, SessionObservation};
 
-use super::super::{ChildNodes, HostService, TreeNodes, kept_for_attach};
+use super::super::{ChildNodes, HostService, MovedRequester, TreeNodes, kept_for_attach};
 use super::ATTACHMENT_CAPACITY;
 
 /// Finds a session's root node by its id.
@@ -36,7 +36,7 @@ pub(super) struct ServedSession<P: ProtocolExtension> {
     /// replaces it.
     replay: Vec<SessionObservation<P>>,
     /// The moved attachments still owed the replay.
-    owed: BTreeSet<AttachmentId>,
+    owed: BTreeMap<AttachmentId, MovedRequester>,
     /// An opening outgrew the hold before its binding: the service holds
     /// new attachments until the binding says whose it is.
     unresolved: bool,
@@ -71,7 +71,7 @@ impl<P: ProtocolExtension> ServedSession<P> {
             generation: 0,
             held: None,
             replay: Vec::new(),
-            owed: BTreeSet::new(),
+            owed: BTreeMap::new(),
             unresolved: false,
             requested: None,
             replay_lost: false,
@@ -111,7 +111,14 @@ impl<P: ProtocolExtension> ServedSession<P> {
             // A window opened inside a held opening is the next session's
             // own; the request that switches is the one before it.
             if let SessionObservation::IntentStarted(started) = &event {
-                self.requested = started.as_deref().and_then(super::session_request_of);
+                self.requested = started.as_deref().and_then(super::session_request_of).map(
+                    |(requester, id)| {
+                        (
+                            self.service.reply_recipient(requester).unwrap_or(requester),
+                            id,
+                        )
+                    },
+                );
             }
             if opening && !self.unresolved {
                 self.held = Some(vec![event]);
@@ -188,7 +195,7 @@ impl<P: ProtocolExtension> ServedSession<P> {
             .as_ref()
             .map(|(requester, id)| (*requester, id.as_str()));
         self.owed
-            .extend(self.service.move_attachments(&node, request));
+            .extend(self.service.move_attachment_requesters(&node, request));
         let nodes: Arc<dyn ChildNodes> = Arc::new(TreeNodes::new(node.tree_id.clone()));
         self.service.reroot(node, Some(nodes));
         self.session = next;
@@ -234,12 +241,17 @@ impl<P: ProtocolExtension> ServedSession<P> {
     /// given up, so the attachment must resync, as a slow consumer does,
     /// rather than miss events.
     pub(super) fn attached(&mut self, moved: AttachmentId, attachment: AttachmentId) -> bool {
-        if !self.owed.remove(&moved) {
+        let Some(requester) = self.owed.remove(&moved) else {
             return false;
-        }
-        let lost = self.replay_lost;
+        };
+        let lost = self.replay_lost || !self.service.continue_requester(attachment, requester);
         if !lost {
-            self.service.replay(attachment, moved, self.replay.clone());
+            self.service.replay(
+                attachment,
+                moved,
+                requester.origin.unwrap_or(moved),
+                self.replay.clone(),
+            );
         }
         self.settle();
         lost
@@ -248,13 +260,13 @@ impl<P: ProtocolExtension> ServedSession<P> {
     /// Whether the attachment `moved`, ended by a switch, is still owed
     /// that switch's replay.
     pub(super) fn owes(&self, moved: AttachmentId) -> bool {
-        self.owed.contains(&moved)
+        self.owed.contains_key(&moved)
     }
 
     /// The connection whose attachment `moved` was moved left without
     /// attaching again.
     pub(super) fn forget(&mut self, moved: AttachmentId) {
-        if self.owed.remove(&moved) {
+        if self.owed.remove(&moved).is_some() {
             self.settle();
         }
     }

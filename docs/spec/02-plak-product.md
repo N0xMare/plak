@@ -4555,6 +4555,14 @@ verdicts) are addressed, the session profile and workspace chrome states.
   and resume lists, tool-invocation origins and correlation resets, and the
   storage refusal of its own action) or its own presentation baseline
   (snapshots and keyed patches). An extension
+  verdict that finishes after `moved` follows only that requester's next root
+  attachment on the same live connection, in the same host generation. The
+  private requester identity continues across that handoff, not across an
+  ordinary detach, reconnect, another viewer or another host generation;
+  matching a session or node alone never transfers an answer. A requester
+  that leaves without following its handoff has no recipient for a late reply.
+  The replacement receives each reply once, whether it arrived before or
+  after the reattach. An extension
   observation is a state when it is latest-state and a droppable event
   otherwise, unless the extension says. Every v1 required kind is a state or
   a required event, except the navigator's answers, which are addressed.
@@ -4916,6 +4924,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
 <login>]` (§4.6) serves the host's sessions to browsers: wire v2 over a
 WebSocket at `/wire`, and the web UI's static build. Its security model is
 chapter 04 §2.10; its keys are `[web]` (chapter 07 §3).
+Addressed verdicts use §4.4's same-connection, same-generation requester
+handoff. A new WebSocket, even for the same authenticated user and session,
+does not inherit another connection's pending answers.
 
 - **Deployment.** The listener is a unix socket in a `0700` directory of the
   user (created so, or refused when it is anything else); `tailscale serve

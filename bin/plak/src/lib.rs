@@ -111,6 +111,8 @@ pub mod signals;
 mod storage_space;
 #[doc(hidden)]
 pub mod store;
+#[cfg(test)]
+mod wire_profile_reply_tests;
 /// Product telemetry: where it is written, what emits it, and the topology
 /// projection over it.
 #[doc(hidden)]

@@ -257,6 +257,7 @@ impl<P: ProtocolExtension> HostService<P> {
             id,
             Attachment {
                 face,
+                reply_origin: id,
                 sender: Some(sender),
                 node: Some(agent.to_owned()),
                 queue: VecDeque::new(),
