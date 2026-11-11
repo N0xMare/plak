@@ -143,7 +143,7 @@ fn host_plain_attach_reopens_after_a_failed_placement_is_fixed() {
                 blobs: Vec::new(),
             }
         ),
-        Outcome::Refused(_)
+        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::PlacementRefused { .. })
     ));
     assert_eq!(dispatches(&fixture), 1);
     std::fs::rename(unavailable, fixture.workspace()).unwrap();

@@ -2284,11 +2284,13 @@ async fn line_inspection_distinguishes_unsent_interrupted_and_refused_reads() {
             );
         }
         client.disconnect();
+        drop(held);
+        // Disconnect cancels the reader; it clears the send channel when polled.
+        tokio::task::yield_now().await;
         assert!(matches!(
             client.lines().await,
             Err(RunnerFailure::NotSent(_))
         ));
-        drop(held);
     }
 }
 
