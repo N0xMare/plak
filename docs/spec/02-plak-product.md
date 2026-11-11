@@ -7595,6 +7595,10 @@ the predecessor becomes a read-only branch of the line, and opening it follows
 to the successor (`session <old> switched profile and continues as <new>;
 resuming it`). The successor keeps the node, the tree, its children, their
 mailboxes and the line's processes; the root's optional tools are unchanged.
+The directory, wire welcome and `moved` advertise the same recorded
+`SessionRecord.node`, whether or not the tree has rows or a live hub; a
+successor session id never replaces that address merely because its tree is
+virtual. An attachment uses that recorded node after the switch and on reopen.
 Future root spawns use the profile's roster, and every existing child keeps the
 epoch, cards, bounds and spawn-parent inputs it was spawned under. The write
 order is the product `Switch` intent (§2.6), the tree's `epoch_pending` row

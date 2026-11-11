@@ -68,12 +68,11 @@ where
         .map_err(|_| CliFailure::new("stdout failed"))
 }
 
-/// The root node of the session `config` opens: its tree is the session's
-/// durable topology tree (not always the session id: a rebound session's
-/// tree is its lineage's), and the tree's root is named by the tree id.
+/// The recorded root node of the session `config` opens, shared with its
+/// directory entry even when its tree has no rows or live hub.
 #[must_use]
 pub fn session_root<P: ProtocolExtension>(config: &crate::runtime::HostConfig<P>) -> NodeAddress {
-    root_of(&config.state_roots, &config.session)
+    root_of(&config.session)
 }
 
 /// The root node of the session `session_id` in `roots`' store, or `None`
@@ -84,20 +83,13 @@ pub fn session_root_of(
     session_id: &str,
 ) -> Option<NodeAddress> {
     let session = roots.session_records().load(session_id).ok()?;
-    Some(root_of(roots, &session))
+    Some(root_of(&session))
 }
 
-fn root_of(
-    roots: &crate::agent::ProductStateRoots,
-    session: &crate::sessions::SessionRecord,
-) -> NodeAddress {
-    let tree_id = crate::runtime::durable_topology_tree_id(
-        &crate::runtime::HostRows::new(roots, roots.session_records().as_ref()),
-        session,
-    );
+fn root_of(session: &crate::sessions::SessionRecord) -> NodeAddress {
     NodeAddress {
-        tree_id: tree_id.clone(),
-        agent_id: tree_id,
+        tree_id: session.node.tree_id.clone(),
+        agent_id: session.node.agent_id.clone(),
     }
 }
 
