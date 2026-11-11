@@ -357,6 +357,22 @@ async fn a_rebind_moves_the_head(
     let record = store.load_line(line).await?;
     assert_eq!(record.head(), SessionRef::new(session_id, second));
     assert_eq!(record.generation(), 2);
+    assert_eq!(
+        store
+            .branch_line(SessionRef::new(session_id, first))
+            .await?,
+        line
+    );
+    assert_eq!(
+        store
+            .branch_line(SessionRef::new(session_id, second))
+            .await?,
+        line
+    );
+    assert_eq!(
+        store.branch_line(SessionRef::new(id(79_999)?, first)).await,
+        Err(SessionStoreError::NotFound)
+    );
     assert!(matches!(
         feed_changes(store, session_id).await?.last(),
         Some(FeedChange::Branched { line: published, new_head: true, generation: 2, .. })

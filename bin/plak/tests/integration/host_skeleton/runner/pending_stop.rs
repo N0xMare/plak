@@ -195,6 +195,82 @@ fn runner_deferred_bind_finishes_pending_stop_without_redispatch() {
     verify_repeated_stop(&fixture, &path, &session);
 }
 
+#[test]
+fn startup_retries_interrupted_inspection_and_continues_once_without_a_client() {
+    let Some(fixture) = fixture() else { return };
+    let (_runner, path, id) = remote(&fixture);
+    fixture.write_script(&json!({
+        "version": 1,
+        "steps": [{"stream": [{"text": PREFIX}, {"stall": 30000}]}]
+    }));
+    let mut host = start_env(&fixture, &[], &[("PATH", path.clone())]);
+    wait_local_runner_ready(&host);
+    let mut client = Client::connect(&host);
+    let mut request = new_session(&fixture.workspace());
+    if let Op::NewSession { runner, .. } = &mut request {
+        *runner = plakous_host_protocol::wire::RunnerLabel {
+            name: "remote".into(),
+            runner_id: id,
+        };
+    }
+    let Outcome::Ok(Answer::Created { session, node, .. }) = client.request(1, request) else {
+        panic!("remote creation refused")
+    };
+    let attachment = client.attach(2, &node);
+    client.prompt(3, attachment, "continue after inspection recovers", PREFIX);
+    drop(client);
+    stop(&mut host);
+    assert_eq!(
+        root_record(&fixture, &session).0,
+        [RootInterruptCause::Handoff]
+    );
+    let pid = std::fs::read_to_string(fixture.home().join(format!(
+        "host/runner/v{}/run/runner.lock",
+        plakous::runner::protocol::PROTOCOL_VERSION
+    )))
+    .unwrap()
+    .trim()
+    .parse()
+    .unwrap();
+    let mut asleep = Paused::new(pid);
+    let before = crash::dispatches(&fixture);
+    fixture.write_script(&json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [{"output": {"text": CONTINUED}}]
+    }));
+    let mut host = start_env(&fixture, &[], &[("PATH", path.clone())]);
+    loop {
+        let line = host.lines.recv_timeout(WAIT).unwrap();
+        if line.contains("did not continue") {
+            assert!(line.contains("embedded inspection"), "{line}");
+            break;
+        }
+    }
+    assert_eq!(crash::dispatches(&fixture), before);
+    assert_eq!(root_record(&fixture, &session).1, 0);
+    asleep.resume();
+    let deadline = std::time::Instant::now() + WAIT;
+    while crash::dispatches(&fixture) == before {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "startup retry never continued"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // Only now attach to observe completion; the startup scan did the retry.
+    let mut client = Client::connect(&host);
+    client.attach(4, &node);
+    while !serde_json::to_string(&client.next())
+        .unwrap()
+        .contains(CONTINUED)
+    {}
+    assert_eq!(root_record(&fixture, &session).1, 1);
+    assert_eq!(crash::dispatches(&fixture), before + 1);
+    drop(client);
+    stop(&mut host);
+}
+
 fn verify_repeated_stop(fixture: &Fixture, path: &str, session: &str) {
     for _ in 0..2 {
         let mut host = start_env(fixture, &[], &[("PATH", path.into())]);

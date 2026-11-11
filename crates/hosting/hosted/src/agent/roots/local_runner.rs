@@ -6,6 +6,7 @@ use super::ProductStateRoots;
 use crate::error::{CliFailure, CliResult};
 use plakous::runner::protocol::{Bind, PROTOCOL_VERSION, VersionTriple};
 use plakous::runner::{ClientWindows, ConnectError, RunnerClient};
+use plakous::tools::runner::RunnerFailure;
 
 #[cfg(test)]
 #[path = "local_runner_tests.rs"]
@@ -54,51 +55,68 @@ impl ProductStateRoots {
             .await
             {
                 Ok(connected) => connected,
-                Err(ConnectError::Closed) => return Ok(()),
+                Err(ConnectError::Closed) => {
+                    return Err(CliFailure::retryable_open(
+                        "the local runner closed the embedded inspection",
+                    ));
+                }
                 Err(error) => return Err(CliFailure::new(error.to_string())),
             };
             let lines = client.lines().await;
             client.disconnect();
             let lines = lines.map_err(|error| {
-                CliFailure::new(format!("the local runner inspection failed: {error:?}"))
-            })?;
-            let sessions = self.runtime_sessions()?;
-            let head = sessions.line_head_of(locator).await.map_err(|error| {
-                CliFailure::local_runner_inspection(tree_id, &locator.to_string(), error)
-            })?;
-            let mut tree_lines = BTreeSet::from([head.line().to_string()]);
-            if let Some(tree) = self
-                .tree_store()?
-                .load(tree_id)
-                .map_err(|error| CliFailure::new(error.to_string()))?
-            {
-                for (agent, node) in tree.rows().nodes() {
-                    if let Some(recorded) = &node.session_locator {
-                        let locator = recorded
-                            .parse::<plakous::sessions::SessionLocator>()
-                            .map_err(|error| {
-                                CliFailure::local_runner_inspection(agent, recorded, error)
-                            })?;
-                        let head = sessions.line_head_of(locator).await.map_err(|error| {
-                            CliFailure::local_runner_inspection(agent, recorded, error)
-                        })?;
-                        tree_lines.insert(head.line().to_string());
+                let message = format!("the local runner inspection failed: {error:?}");
+                match error {
+                    RunnerFailure::NotSent(_) | RunnerFailure::ReadInterrupted(_) => {
+                        CliFailure::retryable_open(message)
                     }
+                    _ => CliFailure::new(message),
                 }
-            }
-            if lines
-                .iter()
-                .any(|line| tree_lines.contains(&line.line) && has_processes(line))
-            {
-                return Err(CliFailure::local_runner_processes());
-            }
-            Ok(())
+            })?;
+            Ok(lines)
         };
-        tokio::time::timeout(std::time::Duration::from_secs(5), inspection)
+        let lines = tokio::time::timeout(std::time::Duration::from_secs(5), inspection)
             .await
             .map_err(|_| {
-                CliFailure::new("the local runner did not answer the embedded inspection")
-            })?
+                CliFailure::retryable_open(
+                    "the local runner did not answer the embedded inspection",
+                )
+            })??;
+        // The transport budget does not include storage work. Line identity
+        // reads use branch metadata, not the materialized conversation graph.
+        let sessions = self.runtime_sessions()?;
+        let head = sessions
+            .line_head_of(locator)
+            .await
+            .map_err(|error| CliFailure::inspection_read(tree_id, &locator.to_string(), error))?;
+        let mut tree_lines = BTreeSet::from([head.line().to_string()]);
+        if let Some(tree) = self
+            .tree_store()?
+            .load(tree_id)
+            .map_err(|error| CliFailure::new(error.to_string()))?
+        {
+            for (agent, node) in tree.rows().nodes() {
+                if let Some(recorded) = &node.session_locator {
+                    let locator = recorded
+                        .parse::<plakous::sessions::SessionLocator>()
+                        .map_err(|error| {
+                            CliFailure::local_runner_inspection(agent, recorded, error)
+                        })?;
+                    let head = sessions
+                        .line_head_of(locator)
+                        .await
+                        .map_err(|error| CliFailure::inspection_read(agent, recorded, error))?;
+                    tree_lines.insert(head.line().to_string());
+                }
+            }
+        }
+        if lines
+            .iter()
+            .any(|line| tree_lines.contains(&line.line) && has_processes(line))
+        {
+            return Err(CliFailure::local_runner_processes());
+        }
+        Ok(())
     }
 }
 

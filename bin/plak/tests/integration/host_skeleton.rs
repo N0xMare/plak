@@ -1470,10 +1470,23 @@ fn a_broken_tree_row_degrades_the_directory_but_does_not_admit_an_open() {
         }
         other => panic!("one broken row failed the directory: {other:?}"),
     }
+    let attachment = client.attach(4, &node);
     assert!(
-        matches!(client.request(4, Op::Attach { node }), Outcome::Refused(_)),
+        matches!(
+            client.request(
+                5,
+                Op::Intent {
+                    attachment,
+                    intent: SessionIntent::Prompt("must not execute".into()),
+                    client_id: None,
+                    blobs: Vec::new(),
+                }
+            ),
+            Outcome::Refused(_)
+        ),
         "degraded directory facts must never authorize execution"
     );
+    assert_eq!(crash::dispatches(&fixture), 0);
 }
 
 /// A root turn its host lost and an open held is continued by the next

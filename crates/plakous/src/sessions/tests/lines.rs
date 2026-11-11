@@ -69,6 +69,7 @@ async fn a_carry_waits_for_the_attached_source_and_deletion_ends_the_line() -> T
     let head = sessions.line_head(line).await?;
     assert_eq!(head.session_id(), carried.locator().session_id());
     assert_eq!(head.generation(), 2);
+    assert_eq!(sessions.line_head_of(before).await?, head);
     let loaded = store.load_branch(before.session_ref()).await?;
     assert_eq!(
         loaded.head().checkpoint().checkpoint_id(),
@@ -140,6 +141,7 @@ async fn predecessor_history_and_the_end_of_its_line(
     let fork_head = sessions.line_head(fork_line).await?;
     assert_eq!(fork_head.generation(), 1);
     assert_ne!(fork_line, line);
+    assert_eq!(sessions.line_head_of(fork).await?, fork_head);
     assert!(matches!(
         sessions.prune_history(carried_head).await?,
         PruneHistoryOutcome::Pruned(_)
@@ -170,6 +172,14 @@ async fn predecessor_history_and_the_end_of_its_line(
         .err()
         .ok_or("a predecessor of an ended line opened")?;
     assert_eq!(ended.kind(), AgentSessionsErrorKind::LineEnded);
+    assert_eq!(
+        sessions
+            .line_head_of(before)
+            .await
+            .expect_err("the predecessor's line ended")
+            .kind(),
+        AgentSessionsErrorKind::LineEnded
+    );
     assert_eq!(
         sessions.prune_history(before).await?,
         PruneHistoryOutcome::LineEnded

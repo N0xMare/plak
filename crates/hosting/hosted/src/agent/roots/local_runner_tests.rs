@@ -54,6 +54,10 @@ async fn an_unresolvable_child_refuses_embedded_daemon_inspection_with_a_remedy(
         roots.refuse_daemon_tree(root, &tree_id).await.unwrap();
         let daemon = inspection_daemon(home.path());
         let failure = roots.refuse_daemon_tree(root, &tree_id).await.unwrap_err();
+        assert!(
+            !failure.can_retry_open(),
+            "invalid identity is not transient"
+        );
         assert_eq!(failure.exit_code(), 7, "{}", failure.message());
         assert_eq!(failure.code(), Some("local_runner_inspection"));
         for expected in [
@@ -89,6 +93,40 @@ async fn an_unresolvable_child_refuses_embedded_daemon_inspection_with_a_remedy(
         let _ = daemon.await;
         std::fs::remove_file(inspection_socket(home.path())).unwrap();
     }
+}
+
+#[tokio::test]
+async fn interrupted_inspection_is_retryable_but_a_missing_identity_is_not() {
+    let home = tempfile::tempdir().unwrap();
+    let roots = ProductStateRoots::with_doubles(home.path().into(), home.path().join("state"));
+    let locator = plakous::sessions::SessionLocator::new(
+        uuid::Uuid::new_v4().try_into().unwrap(),
+        uuid::Uuid::new_v4().try_into().unwrap(),
+        uuid::Uuid::new_v4().try_into().unwrap(),
+    );
+    let socket = inspection_socket(home.path());
+    std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+    std::fs::write(home.path().join("host-id"), "inspection-home").unwrap();
+    for silent in [true, false] {
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            if silent {
+                std::future::pending::<()>().await;
+            }
+        });
+        let failure = roots.refuse_daemon_tree(locator, "root").await.unwrap_err();
+        assert!(failure.can_retry_open(), "{failure}");
+        server.abort();
+        let _ = server.await;
+        std::fs::remove_file(&socket).unwrap();
+    }
+    let daemon = inspection_daemon(home.path());
+    let failure = roots.refuse_daemon_tree(locator, "root").await.unwrap_err();
+    assert_eq!(failure.code(), Some("local_runner_inspection"));
+    assert!(!failure.can_retry_open());
+    daemon.abort();
+    let _ = daemon.await;
 }
 
 fn inspection_socket(home: &std::path::Path) -> std::path::PathBuf {

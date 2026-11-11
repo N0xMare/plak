@@ -127,6 +127,9 @@ impl<S: SessionStore> SessionStore for Metered<S> {
     fn feed_tail(&self, session_id: SessionId) -> StoreFuture<'_, FeedTail> {
         self.inner.feed_tail(session_id)
     }
+    fn branch_line(&self, session: SessionRef) -> StoreFuture<'_, plakous_model::LineId> {
+        self.inner.branch_line(session)
+    }
     fn load_line(&self, line: plakous_model::LineId) -> StoreFuture<'_, LineRecord> {
         self.inner.load_line(line)
     }

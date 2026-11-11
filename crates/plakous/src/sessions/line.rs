@@ -221,12 +221,11 @@ impl AgentSessions {
         &self,
         locator: SessionLocator,
     ) -> Result<LineHead, AgentSessionsError> {
-        let loaded = self
+        let line = self
             .store
-            .load_branch(locator.session_ref())
+            .branch_line(locator.session_ref())
             .await
             .map_err(|error| super::store_error(error).for_session(locator.session_id))?;
-        let line = loaded.checkpoint().checkpoint().manifest().topology().line;
         match self.line_head(line).await {
             Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => {
                 Err(AgentSessionsError::new(

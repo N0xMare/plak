@@ -299,18 +299,20 @@ impl HostSessions<Core> for Fake {
         })
     }
 
-    fn archived_view(
+    fn stored_view(
         &self,
         session: &str,
-    ) -> Result<Option<ArchivedSessionView<Core>>, RequestRefusal> {
+    ) -> Result<Option<StoredSessionView<Core>>, RequestRefusal> {
         let archived = self
             .0
             .rows
             .lock()
             .unwrap()
             .iter()
-            .any(|row| row.session == session && row.archived);
-        Ok(archived.then(|| ArchivedSessionView {
+            .find(|row| row.session == session)
+            .map(|row| row.archived);
+        Ok(archived.map(|archived| StoredSessionView {
+            archived,
             session: session.to_owned(),
             root: node(session),
             observations: vec![SessionObservation::PresentationSnapshot(
@@ -1132,6 +1134,129 @@ fn directory_filters_precede_the_cap_and_watch_visibility_has_separate_caches() 
         assert_eq!(rows[0].session, expected);
     }
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
+}
+
+fn assert_saved_history(frames: &[HostFrame<Core>]) {
+    assert!(frames.iter().any(|frame| {
+        let HostFrame::Snapshot(page) = frame else {
+            return false;
+        };
+        page.items.iter().any(|item| {
+            matches!(&item.row,
+            plakous_host_protocol::views::transcript::TranscriptRow::Notice(notice)
+                if notice.text.contains("Saved history only; session unavailable")
+                    && notice.text.contains("read-only")
+                    && notice.text.contains("refused by the script"))
+        })
+    }));
+    let facts = format!("{frames:?}");
+    assert!(facts.contains("AgentAttached(false)"), "{facts}");
+    assert!(facts.contains("SetBusy(false)"), "{facts}");
+}
+
+#[test]
+fn failed_open_keeps_history_readable_until_an_explicit_retry_and_stop_still_works() {
+    let (host, fake) = host(&["s1"]);
+    fake.0.stay.store(true, Ordering::SeqCst);
+    let refusal = RequestRefusal::SessionUnavailable {
+        detail: "inspection interrupted".into(),
+    };
+    fake.0
+        .refuse
+        .lock()
+        .unwrap()
+        .insert("s1".into(), refusal.clone());
+    fake.0.rows.lock().unwrap()[0].activity = SessionActivity::Continuing;
+    let out = Out::default();
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    assert!(row_of(&host, "s1").needs_operator);
+    // A reconnect reads the saved view without starting another open.
+    request(&mut connection, 2, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 2);
+    connection.flush().unwrap();
+    assert_saved_history(&out.take());
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    for (id, op) in [
+        (
+            3,
+            Op::Intent {
+                attachment,
+                intent: SessionIntent::Prompt("do not run".into()),
+                client_id: None,
+                blobs: Vec::new(),
+            },
+        ),
+        (
+            4,
+            Op::Rebind {
+                attachment,
+                request_id: "blocked".into(),
+                cause: "repair".into(),
+            },
+        ),
+    ] {
+        request(&mut connection, id, op);
+        assert_eq!(outcome(&out.take(), id), Outcome::Refused(refusal.clone()));
+    }
+    request(
+        &mut connection,
+        5,
+        Op::RetryAttach {
+            attachment: attachment + 1,
+            request_id: "stale".into(),
+        },
+    );
+    assert_eq!(
+        outcome(&out.take(), 5),
+        Outcome::Refused(RequestRefusal::NotAttached)
+    );
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    request(
+        &mut connection,
+        6,
+        Op::StopSession {
+            session: "s1".into(),
+        },
+    );
+    assert_eq!(
+        outcome(&out.take(), 6),
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
+    );
+    assert_eq!(fake.0.dormant_stops.load(Ordering::SeqCst), 1);
+    assert_eq!(row_of(&host, "s1").activity, SessionActivity::Stopped);
+    fake.0.refuse.lock().unwrap().clear();
+    request(
+        &mut connection,
+        7,
+        Op::RetryAttach {
+            attachment,
+            request_id: "retry".into(),
+        },
+    );
+    assert_eq!(
+        outcome(&out.take(), 7),
+        Outcome::Ok(Answer::Moved { node: node("s1") })
+    );
+    connection.flush().unwrap();
+    assert!(out.take().iter().any(
+        |frame| matches!(frame, HostFrame::Moved { request_id: Some(id), .. } if id == "retry")
+    ));
+    request(&mut connection, 8, Op::Attach { node: node("s1") });
+    attached(&out.take(), 8);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+    assert!(!row_of(&host, "s1").needs_operator);
+    connection.leave();
+    handed_off(&host);
 }
 
 #[test]

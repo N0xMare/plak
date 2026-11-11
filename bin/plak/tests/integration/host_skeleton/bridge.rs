@@ -396,7 +396,26 @@ fn auto_started_key_resolution_ignores_caller_only_keys_and_names_its_resolver()
         } else {
             outcome
         };
-        let text = format!("{outcome:?}");
+        let text = if matches!(outcome, Outcome::Ok(Answer::Attached { .. })) {
+            loop {
+                if let HostFrame::Event {
+                    observation:
+                        plakous_host_protocol::SessionObservation::Status {
+                            detail:
+                                Some(plakous_host_protocol::status::HostStatusDetail::Failure {
+                                    failure,
+                                }),
+                            ..
+                        },
+                    ..
+                } = bridge.next()
+                {
+                    break failure.diagnostic.as_str().to_owned();
+                }
+            }
+        } else {
+            format!("{outcome:?}")
+        };
         assert!(text.contains("OPENAI_API_KEY"), "{text}");
         assert!(
             text.contains("effective key resolver") && text.contains("auto-started host"),

@@ -42,7 +42,7 @@ pub fn project_session_snapshot(session: &sessions::SessionRecord) -> Presentati
     project_keyed_snapshot(items)
 }
 
-pub(super) fn project_keyed_snapshot(items: Vec<TranscriptItem>) -> PresentationSnapshot {
+pub(crate) fn project_keyed_snapshot(items: Vec<TranscriptItem>) -> PresentationSnapshot {
     use plakous_host_protocol::views::presentation::{
         MAX_PRESENTATION_BYTES, MAX_SNAPSHOT_ROWS, row_bytes,
     };

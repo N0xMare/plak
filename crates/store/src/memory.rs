@@ -1317,6 +1317,10 @@ impl SessionStore for MemorySessionStore {
         Box::pin(async move { self.feed_tail_sync(session_id) })
     }
 
+    fn branch_line(&self, session: SessionRef) -> StoreFuture<'_, plakous_agent::internal::LineId> {
+        Box::pin(async move { lines::branch_line(&*self.lock()?, session).map(|(line, _)| line) })
+    }
+
     fn load_line(
         &self,
         line: plakous_agent::internal::LineId,

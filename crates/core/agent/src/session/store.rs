@@ -200,6 +200,10 @@ pub trait SessionStore: Send + Sync + 'static {
     /// Reads one session's retained feed window without a lease or a write.
     fn feed_tail(&self, session_id: SessionId) -> StoreFuture<'_, FeedTail>;
 
+    /// Reads a branch's immutable line membership without materializing its
+    /// checkpoint. An unknown branch is `NotFound`; no lease is acquired.
+    fn branch_line(&self, session: SessionRef) -> StoreFuture<'_, LineId>;
+
     /// Reads one line's head without a lease or a write. A line whose head
     /// session was deleted is `NotFound`.
     fn load_line(&self, line: LineId) -> StoreFuture<'_, LineRecord>;

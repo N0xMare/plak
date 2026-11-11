@@ -60,8 +60,10 @@ pub struct Created {
     pub environment: SessionEnvironment,
 }
 
-/// Persisted attach facts for an archived session, without runtime ownership.
-pub struct ArchivedSessionView<P: ProtocolExtension> {
+/// Persisted attach facts, without runtime ownership.
+pub struct StoredSessionView<P: ProtocolExtension> {
+    /// Archived sessions cannot retry execution until unarchived.
+    pub archived: bool,
     /// The product session id.
     pub session: String,
     /// The persisted root address.
@@ -208,14 +210,11 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
     /// The request's refusal: nothing was created.
     fn create(&self, request: &Creation<'_>) -> Result<Created, RequestRefusal>;
 
-    /// Read archived attach facts without opening a runtime or taking a lease.
+    /// Read stored attach facts without opening a runtime or taking a lease.
     ///
     /// # Errors
     /// Product metadata or transcript facts could not be read.
-    fn archived_view(
-        &self,
-        _session: &str,
-    ) -> Result<Option<ArchivedSessionView<P>>, RequestRefusal> {
+    fn stored_view(&self, _session: &str) -> Result<Option<StoredSessionView<P>>, RequestRefusal> {
         Ok(None)
     }
 
@@ -491,7 +490,7 @@ where
         include_archived: bool,
     ) -> Result<Vec<SessionRow>, String> {
         let mut rows = self.sessions.rows(workspace, runner, include_archived)?;
-        let held: BTreeMap<String, SlotView<P>> = self
+        let held: BTreeMap<_, _> = self
             .lock()
             .iter()
             .map(|slot| {
@@ -502,11 +501,15 @@ where
                         id.clone()
                     }
                 };
-                (id, view)
+                (id, (view, slot.open_failure()))
             })
             .collect();
         for row in &mut rows {
-            match held.get(&row.session) {
+            let entry = held.get(&row.session);
+            if entry.is_some_and(|(_, failure)| failure.is_some()) {
+                row.needs_operator = true;
+            }
+            match entry.map(|(view, _)| view) {
                 None | Some(SlotView::Dormant(_)) => {}
                 Some(SlotView::Opening(_)) => row.residency = SessionResidency::Opening,
                 Some(SlotView::Releasing(_)) => row.residency = SessionResidency::Releasing,
@@ -660,6 +663,7 @@ struct NodeLink<P: ProtocolExtension, W: Write> {
 
 struct ReadOnlyLink<P: ProtocolExtension, W: Write> {
     session: String,
+    refusal: RequestRefusal,
     connection: WireConnection<P, W>,
     _mailbox: plakous_host_protocol::IntentReceiver<P>,
 }
@@ -760,17 +764,16 @@ where
         let answered = |outcome| Ok(Forwarded::Answered(outcome));
         let refused = |refusal| Ok(Forwarded::Answered(Outcome::Refused(refusal)));
         if let Some(link) = &self.readonly
-            && matches!(
-                &op,
-                Op::Intent { .. }
-                    | Op::RetryAttach { .. }
-                    | Op::ResumeSession { .. }
-                    | Op::Rebind { .. }
-            )
+            && let Op::Intent { attachment, .. }
+            | Op::ResumeSession { attachment, .. }
+            | Op::Rebind { attachment, .. } = &op
         {
-            return refused(RequestRefusal::SessionArchived {
-                session: link.session.clone(),
-            });
+            if link.connection.attachment() != Some(*attachment)
+                || !link.connection.service.attached(*attachment)
+            {
+                return refused(RequestRefusal::NotAttached);
+            }
+            return refused(link.refusal.clone());
         }
         match op {
             Op::Host { request } => Ok(self.start_host_read(request_id, request)),
@@ -886,9 +889,30 @@ where
         cause: Option<&str>,
     ) -> Outcome<P> {
         if let Some(link) = &self.readonly {
-            return Outcome::Refused(RequestRefusal::SessionArchived {
-                session: link.session.clone(),
-            });
+            if link.connection.attachment() != Some(attachment)
+                || !link.connection.service.attached(attachment)
+            {
+                return Outcome::Refused(RequestRefusal::NotAttached);
+            }
+            if cause.is_some() || matches!(link.refusal, RequestRefusal::SessionArchived { .. }) {
+                return Outcome::Refused(link.refusal.clone());
+            }
+            if self.host.closed() {
+                return Outcome::Refused(stopping());
+            }
+            let session = link.session.clone();
+            let result = self.host.slot(&session).resident_at_handoff();
+            self.host.changed();
+            return match result {
+                Ok((served, _hold, _releases)) => {
+                    let node = served.root();
+                    link.connection
+                        .service
+                        .move_attachments(&node, Some((attachment, request)));
+                    Outcome::Ok(Answer::Moved { node })
+                }
+                Err(failure) => Outcome::Refused(self.host.sessions.refusal(&session, &failure)),
+            };
         }
         let Some(link) = &self.node else {
             return Outcome::Refused(RequestRefusal::NotAttached);
@@ -940,11 +964,10 @@ where
 
     fn stop(&mut self, session: &str, text: &str) -> CliResult<Forwarded<P>> {
         let refused = |refusal| Ok(Forwarded::Answered(Outcome::Refused(refusal)));
-        if self
-            .readonly
-            .as_ref()
-            .is_some_and(|link| link.session == session)
-        {
+        if self.readonly.as_ref().is_some_and(|link| {
+            link.session == session
+                && matches!(link.refusal, RequestRefusal::SessionArchived { .. })
+        }) {
             return Ok(Forwarded::Answered(Outcome::Ok(Answer::Stopped {
                 runner_pending: false,
             })));
@@ -1105,7 +1128,10 @@ where
     /// as a new attach on one session's connection ends the one before it;
     /// a refused attach leaves it.
     fn attach(&mut self, node: &NodeAddress, text: &str) -> CliResult<Forwarded<P>> {
-        if let Some(readonly) = self.archived_attachment(node, text)? {
+        if self.host.closed() {
+            return Ok(Forwarded::Answered(Outcome::Refused(stopping())));
+        }
+        if let Some(readonly) = self.stored_attachment(node, text, None)? {
             return Ok(readonly);
         }
         if self.node.as_ref().is_some_and(|link| {
@@ -1123,6 +1149,9 @@ where
         let (session, hold, releases) = match resident {
             Ok(resident) => resident,
             Err(failure) => {
+                if let Some(readonly) = self.stored_attachment(node, text, Some(&failure))? {
+                    return Ok(readonly);
+                }
                 let refusal = self.host.sessions.refusal(&slot.known(), &failure);
                 return Ok(Forwarded::Answered(Outcome::Refused(refusal)));
             }

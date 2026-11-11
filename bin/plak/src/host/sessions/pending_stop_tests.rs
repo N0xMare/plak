@@ -3,6 +3,49 @@ use super::*;
 struct NoAdmission;
 
 #[test]
+fn continuation_retry_rechecks_loss_policy_archive_and_deletion() {
+    use plakous_hosted::sessions::projector::{
+        RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
+    };
+    let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let services = Services::for_home(paths.clone());
+    let mut store = ProductStore::open(&paths).unwrap();
+    let mut record = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
+    store.commit(&mut record).unwrap();
+    store
+        .write_root_loss_at_cursor(
+            &record.id,
+            &RootLossIntent::Interrupt(RootInterrupt {
+                anchor: RootStopAnchor::Turn {
+                    turn_id: "lost".into(),
+                },
+                cause: RootInterruptCause::OwnerLost,
+            }),
+        )
+        .unwrap();
+    assert!(!continuation_owed(&services, &record.id).unwrap());
+    std::fs::write(
+        paths.home().join("config.toml"),
+        "[host]\nresume_after_loss = \"continue\"\n",
+    )
+    .unwrap();
+    assert!(continuation_owed(&services, &record.id).unwrap());
+    store.set_archived(&record.id, true).unwrap();
+    assert!(!continuation_owed(&services, &record.id).unwrap());
+    store.set_archived(&record.id, false).unwrap();
+    assert!(continuation_owed(&services, &record.id).unwrap());
+    std::fs::write(
+        paths.home().join("config.toml"),
+        "[host]\nresume_after_loss = \"hold\"\n",
+    )
+    .unwrap();
+    assert!(!continuation_owed(&services, &record.id).unwrap());
+    let revision = store.load(&record.id).unwrap().store_revision;
+    store.delete_session(&record.id, revision).unwrap();
+    assert!(!continuation_owed(&services, &record.id).unwrap());
+}
+
+#[test]
 fn idle_debt_older_than_the_newest_256_rows_is_not_hidden() {
     use plakous_hosted::sessions::projector::{
         RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
@@ -45,6 +88,7 @@ fn idle_debt_older_than_the_newest_256_rows_is_not_hidden() {
     assert!(store.idle_debt().unwrap().0);
     let product = ProductSessions::new(&services, None, None).unwrap();
     assert_eq!(product.owed().unwrap(), vec![old.id.clone()]);
+    assert!(continuation_owed(&services, &old.id).unwrap());
     store
         .write_root_loss_at_cursor(
             &old.id,
@@ -57,6 +101,7 @@ fn idle_debt_older_than_the_newest_256_rows_is_not_hidden() {
         )
         .unwrap();
     assert!(!store.idle_debt().unwrap().0);
+    assert!(!continuation_owed(&services, &old.id).unwrap());
     // Only the recorded stop, not an ordinary offline placement, blocks exit.
     assert!(product.durable_idle_exit_blocked());
 }

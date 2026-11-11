@@ -1495,6 +1495,17 @@ impl SessionStore for TestCreateStore {
         Self::unsupported()
     }
 
+    fn branch_line(&self, session: SessionRef) -> crate::StoreFuture<'_, plakous_model::LineId> {
+        Box::pin(async move {
+            let state = lock_mutex(&self.state);
+            let loaded = state.loaded.as_ref().ok_or(SessionStoreError::NotFound)?;
+            if loaded.head().session() != session {
+                return Err(SessionStoreError::NotFound);
+            }
+            Ok(loaded.checkpoint().checkpoint().manifest().topology().line)
+        })
+    }
+
     fn load_line(
         &self,
         line: plakous_model::LineId,

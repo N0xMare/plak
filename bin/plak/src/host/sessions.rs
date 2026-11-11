@@ -325,6 +325,27 @@ impl ProductSessions {
     }
 }
 
+/// Re-read durable eligibility before retrying a startup continuation. A
+/// stopped, archived or deleted session must not be reopened by stale debt.
+pub(super) fn continuation_owed(services: &Services, id: &str) -> CliResult<bool> {
+    let paths = services.paths()?;
+    let mut product =
+        ProductStore::open(paths).map_err(|error| CliFailure::new(error.to_string()))?;
+    if !product.session_exists(id).map_err(CliFailure::new)? {
+        return Ok(false);
+    }
+    if product.load(id).map_err(CliFailure::new)?.archived {
+        return Ok(false);
+    }
+    let continue_losses = crate::product_config::ProductConfig::load(paths)
+        .map_err(CliFailure::new)?
+        .resume_after_loss
+        == Some(crate::product_config::ResumeAfterLoss::Continue);
+    let store = services.session_records()?;
+    let standing = plakous_hosted::runtime::root_standing(store.as_ref(), id)?;
+    Ok(owes_open(standing, continue_losses))
+}
+
 /// What a dormant row's activity is by its root's durable intents.
 const fn activity_of(standing: RootStanding) -> SessionActivity {
     match standing {
@@ -369,14 +390,14 @@ impl HostSessions<PlakExtension> for ProductSessions {
     fn contains(&self, session: &str) -> Result<bool, String> {
         self.with_product(|store| store.session_exists(session))
     }
-    fn archived_view(
+    fn stored_view(
         &self,
         session: &str,
     ) -> Result<
-        Option<plakous_hosted::host_service::wire::ArchivedSessionView<PlakExtension>>,
+        Option<plakous_hosted::host_service::wire::StoredSessionView<PlakExtension>>,
         RequestRefusal,
     > {
-        self.read_archived(session)
+        self.read_stored(session)
     }
 
     fn runner_label(&self, id: &str) -> plakous_host_protocol::wire::RunnerLabel {

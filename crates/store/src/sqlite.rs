@@ -1506,6 +1506,14 @@ impl SessionStore for SqliteSessionStore {
             feed::tail(&b.connection, session_id)
         })
     }
+    fn branch_line(&self, session: SessionRef) -> StoreFuture<'_, plakous_agent::internal::LineId> {
+        self.dispatch_read("branch_line", move |b| {
+            b.require_open()?;
+            lines::branch_line(&b.connection, session)?
+                .map(|(line, _)| line)
+                .ok_or(SessionStoreError::NotFound)
+        })
+    }
     fn load_line(
         &self,
         line: plakous_agent::internal::LineId,

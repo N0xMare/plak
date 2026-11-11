@@ -1716,6 +1716,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         'tools': {'runner::LocalDaemonBackend'},
     },
     ("plakous-hosted", "src/agent/roots/local_runner.rs"): {
+        "tools": {"runner::RunnerFailure"},
         "runner": {
             "ClientWindows",
             "ConnectError",

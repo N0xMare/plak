@@ -436,6 +436,10 @@ impl SessionStore for NotifyingStore {
         self.inner.feed_tail(session_id)
     }
 
+    fn branch_line(&self, session: SessionRef) -> StoreFuture<'_, plakous_model::LineId> {
+        self.inner.branch_line(session)
+    }
+
     fn load_line(
         &self,
         line: plakous_model::LineId,

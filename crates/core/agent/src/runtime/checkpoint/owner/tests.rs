@@ -184,6 +184,7 @@ impl SessionStore for SweepStore {
         delete(request: DeleteSession) -> DeleteReceipt;
         recover_delete(request: DeleteSession) -> DeleteReceipt;
         feed_tail(session: SessionId) -> feed::FeedTail;
+        branch_line(session: SessionRef) -> LineId;
         load_line(line: LineId) -> LineRecord;
         line_job_terminals(line: LineId) -> Vec<LineJobTerminal>;
         record_line_job_terminals(request: RecordLineJobTerminals) -> LineTerminalsReceipt;
@@ -419,6 +420,7 @@ impl SessionStore for FlakyRenewStore {
         delete(request: DeleteSession) -> DeleteReceipt;
         recover_delete(request: DeleteSession) -> DeleteReceipt;
         feed_tail(session: SessionId) -> feed::FeedTail;
+        branch_line(session: SessionRef) -> LineId;
         load_line(line: LineId) -> LineRecord;
         line_job_terminals(line: LineId) -> Vec<LineJobTerminal>;
         record_line_job_terminals(request: RecordLineJobTerminals) -> LineTerminalsReceipt;
@@ -584,6 +586,7 @@ impl SessionStore for SupersededStore {
         delete(request: DeleteSession) -> DeleteReceipt;
         recover_delete(request: DeleteSession) -> DeleteReceipt;
         feed_tail(session: SessionId) -> feed::FeedTail;
+        branch_line(session: SessionRef) -> LineId;
         load_line(line: LineId) -> LineRecord;
         line_job_terminals(line: LineId) -> Vec<LineJobTerminal>;
         record_line_job_terminals(request: RecordLineJobTerminals) -> LineTerminalsReceipt;

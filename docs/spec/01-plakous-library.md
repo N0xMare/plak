@@ -3053,6 +3053,9 @@ releases the head's lease it took. An exact retry of a published carry's
 operation is answered from its create receipt: the same session at the same
 genesis. `AgentSessions::line_head_of(locator)` reads where the line of a
 branch's head is now (`LineEnded` once its head session was deleted).
+It resolves membership through `SessionStore::branch_line(SessionRef)` and
+the line table, without materializing the branch's checkpoint or conversation.
+The locator's checkpoint is not needed to identify the branch's line.
 `AgentSessions::hold_branch(operation, locator)` holds one branch's lease
 without a driver, head or not, so a host can settle work that must not race
 the branch's owner or a carry from it; `lease_period_seconds` is how long an

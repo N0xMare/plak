@@ -1381,6 +1381,13 @@ impl SessionStore for LoseForkAckStore {
         self.inner.feed_tail(session_id)
     }
 
+    fn branch_line(
+        &self,
+        session: SessionRef,
+    ) -> plakous_agent::internal::StoreFuture<'_, plakous_model::LineId> {
+        self.inner.branch_line(session)
+    }
+
     fn load_line(
         &self,
         line: plakous_model::LineId,
@@ -2113,6 +2120,13 @@ impl SessionStore for CrashCutStore {
         session_id: SessionId,
     ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::FeedTail> {
         self.inner.feed_tail(session_id)
+    }
+
+    fn branch_line(
+        &self,
+        session: SessionRef,
+    ) -> plakous_agent::internal::StoreFuture<'_, plakous_model::LineId> {
+        self.inner.branch_line(session)
     }
 
     fn load_line(

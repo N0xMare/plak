@@ -1645,6 +1645,21 @@ runtime or running a continuation. Child-node attach refuses `UnknownNode`.
 `plak session gc <id>` refuses an archived session with an unarchive remedy;
 `gc --all` skips archived sessions.
 
+When a session open fails, root attach serves the same stored transcript and
+facts as a read-only attachment, with `not_ready`, `AgentAttached(false)` and
+`SetBusy(false)`. Its failure and a display-only transcript notice say that
+this is saved history, not live execution; historical in-progress transcript
+rows are not evidence of current work. The notice is never persisted.
+Routing/ownership refusals (such as `tree_hosted_elsewhere`) and a stopping
+host retain their refusals rather than creating a saved-history attachment.
+Subsequent reads of that failed slot do not attempt execution. The
+directory marks the failed open as needing operator attention. Execution
+intents, Resume and rebind are explicitly refused, not queued. `retry_attach`
+validates the current attachment and retries through the existing serialized
+slot; success returns `moved` for a fresh live attachment. Stop still durably
+withdraws pending continuation through the normal stop path. Archive retains
+its separate read-only refusal and no-op Stop semantics.
+
 `plak session delete <id> [--yes] [--abandon-children]` removes one session and all of its retained
 runtime history. It is a remedy when logical retention bounds are full; physical
 disk exhaustion may first require freeing disk space: Plakous never
@@ -5064,7 +5079,18 @@ check; it is never idle-released or evicted. An idle session on that placement
 alone blocks nothing. Blocking reasons are
 content-free and logged once per change. The startup scan uses the same uncapped
 continuation candidates as idle eligibility, including records older than the
-newest 256 directory rows. Uncertain runner-stop settlement is fail-safe, not
+newest 256 directory rows. Failed opens retry only when explicitly classified
+as transient before execution admission: an interrupted runner inspection or
+a busy/unavailable line-identity read. The delay doubles from one second to a
+30-second cap; runner changes wake the scan early. Every attempt rechecks
+Stop, archive/deletion and current loss policy. Unclassified, ownership,
+protocol and recovery-required failures stop automatic attempts. Eligibility
+read failures also stop rather than guessing permission to continue; failures
+remain reported. Retries reuse the same session slot and never replay prompt
+or tool-effect inputs. The embedded daemon guard still checks every recorded
+root and child line; its five-second timeout covers only runner communication,
+not checkpoint/storage work. A closed inspection connection is not proof of
+no running work. Uncertain runner-stop settlement is fail-safe, not
 proof of idleness. On expiry
 the host unlinks its socket before draining the nonblocking listen backlog.
 Any queued connection cancels exit, resets idle, and is served after rebind

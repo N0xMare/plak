@@ -57,6 +57,7 @@ pub struct CliFailure {
     wire_refusal: Option<Box<plakous_host_protocol::wire::RequestRefusal>>,
     kind: CliFailureKind,
     message: String,
+    retry_open: bool,
     shutdown: Option<Box<ShutdownFailures>>,
     source: Option<Box<LookupFailure>>,
     refusal: Option<StoreRefusal>,
@@ -384,12 +385,39 @@ impl CliFailure {
         Self::classified(CliFailureKind::Internal, message)
     }
 
+    /// A temporary preflight failure, before runtime ownership or execution.
+    pub(crate) fn retryable_open(message: impl Into<String>) -> Self {
+        let mut failure = Self::new(message);
+        failure.retry_open = true;
+        failure
+    }
+
+    /// Whether reopening may be retried without replaying admitted execution.
+    #[must_use]
+    pub const fn can_retry_open(&self) -> bool {
+        self.retry_open
+    }
+
+    pub(crate) fn inspection_read(
+        agent: &str,
+        locator: &str,
+        error: plakous::sessions::AgentSessionsError,
+    ) -> Self {
+        let mut failure = Self::local_runner_inspection(agent, locator, &error);
+        failure.retry_open = matches!(
+            StoreRefusal::of(&error),
+            Some(StoreRefusal::Busy | StoreRefusal::Unavailable)
+        );
+        failure
+    }
+
     /// Failure with an explicit category.
     pub fn classified(kind: CliFailureKind, message: impl Into<String>) -> Self {
         Self {
             wire_refusal: None,
             kind,
             message: message.into(),
+            retry_open: false,
             shutdown: None,
             source: None,
             refusal: None,

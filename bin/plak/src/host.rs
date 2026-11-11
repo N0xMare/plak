@@ -233,44 +233,80 @@ fn scan(
     let runtime = runtime.clone();
     std::thread::spawn(move || {
         let mut changed = services.runners().changes();
-        let mut pending = Vec::new();
-        continue_each(
-            owed,
-            || stop.stopped(),
-            |session| {
-                if !placement_ready(&services, session) {
-                    pending.push(session.to_owned());
-                    return;
-                }
-                eprintln!("plak host: continuing session {session}");
-                if let Err(failure) = host.slot(session).resident() {
-                    eprintln!(
-                        "plak host: session {session} did not continue: {}",
-                        failure.message()
-                    );
-                }
-                host.changed();
-            },
-        );
+        let mut pending: Vec<_> = owed.into_iter().map(PendingOpen::new).collect();
+        let mut runner_changed = false;
         while !pending.is_empty() && !stop.stopped() {
-            runtime.block_on(async { tokio::select! { _ = changed.changed() => {}, () = tokio::time::sleep(Duration::from_secs(1)) => {} } });
-            pending.retain(|session| {
-                if stop.stopped() || !placement_ready(&services, session) {
+            pending.retain_mut(|pending| {
+                if stop.stopped() || (!runner_changed && Instant::now() < pending.next) {
+                    return true;
+                }
+                let session = &pending.session;
+                // A Stop or changed loss policy wins over an earlier retry.
+                match sessions::continuation_owed(&services, session) {
+                    Ok(false) => return false,
+                    Err(failure) => {
+                        eprintln!(
+                            "plak host: cannot check continuation {session}: {}",
+                            failure.message()
+                        );
+                        return false;
+                    }
+                    Ok(true) => {}
+                }
+                if !placement_ready(&services, session) {
+                    pending.defer();
                     return true;
                 }
                 eprintln!("plak host: continuing session {session}");
-                if let Err(failure) = host.slot(session).resident() {
-                    eprintln!(
-                        "plak host: session {session} did not continue: {}",
-                        failure.message()
-                    );
-                }
+                let result = host.slot(session).resident();
                 host.changed();
-                false
+                match result {
+                    Ok(_) => false,
+                    Err(failure) => {
+                        eprintln!(
+                            "plak host: session {session} did not continue: {}",
+                            failure.message()
+                        );
+                        if !failure.can_retry_open() {
+                            return false;
+                        }
+                        pending.defer();
+                        true
+                    }
+                }
             });
+            if !pending.is_empty() && !stop.stopped() {
+                runner_changed = runtime.block_on(async {
+                    tokio::select! {
+                        result = changed.changed() => result.is_ok(),
+                        () = tokio::time::sleep(Duration::from_secs(1)) => false,
+                    }
+                });
+            }
         }
         scanning.store(false, std::sync::atomic::Ordering::Release);
     });
+}
+
+struct PendingOpen {
+    session: String,
+    next: Instant,
+    delay: Duration,
+}
+
+impl PendingOpen {
+    fn new(session: String) -> Self {
+        Self {
+            session,
+            next: Instant::now(),
+            delay: Duration::from_secs(1),
+        }
+    }
+
+    fn defer(&mut self) {
+        self.next = Instant::now() + self.delay;
+        self.delay = (self.delay * 2).min(Duration::from_secs(30));
+    }
 }
 
 fn placement_ready(services: &Services, session: &str) -> bool {
@@ -294,35 +330,4 @@ fn placement_ready(services: &Services, session: &str) -> bool {
         services.runners().require_connection(runner, true);
     }
     ready
-}
-
-/// Opens each of `owed` in turn with `open`, until `stopped`.
-fn continue_each(owed: Vec<String>, stopped: impl Fn() -> bool, mut open: impl FnMut(&str)) {
-    for session in owed {
-        if stopped() {
-            return;
-        }
-        open(&session);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::continue_each;
-
-    /// A stop ends the start scan before its next session.
-    #[test]
-    fn a_stop_ends_the_start_scan() {
-        let mut opened = Vec::new();
-        let stopped = std::cell::Cell::new(false);
-        continue_each(
-            vec!["a".into(), "b".into()],
-            || stopped.get(),
-            |session| {
-                opened.push(session.to_owned());
-                stopped.set(true);
-            },
-        );
-        assert_eq!(opened, ["a"]);
-    }
 }

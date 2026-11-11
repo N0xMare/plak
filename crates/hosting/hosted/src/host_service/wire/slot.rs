@@ -82,6 +82,8 @@ pub struct SessionSlot<P: ProtocolExtension> {
     busy: AtomicU8,
     /// The session the slot last served or opened, for the same reader.
     known: Mutex<String>,
+    /// Last open failure, visible without waiting for a retry's slot lock.
+    failure: Mutex<Option<CliFailure>>,
 }
 
 /// The slot's lock is held for no long step.
@@ -124,6 +126,7 @@ where
             release_join: RELEASE_JOIN,
             busy: AtomicU8::new(BUSY_NONE),
             known,
+            failure: Mutex::new(None),
         }
     }
 
@@ -141,7 +144,17 @@ where
             open: Box::new(open),
             release_join: RELEASE_JOIN,
             busy: AtomicU8::new(BUSY_NONE),
+            failure: Mutex::new(None),
         }
+    }
+
+    /// The most recent failed open, cleared by a successful open.
+    #[must_use]
+    pub(super) fn open_failure(&self) -> Option<CliFailure> {
+        self.failure
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// The slot as it stands, without waiting for an open or a release
@@ -243,6 +256,8 @@ where
                 self.busy.store(BUSY_OPENING, Ordering::Release);
                 let opened = self.open_on_thread(session_id);
                 self.busy.store(BUSY_NONE, Ordering::Release);
+                *self.failure.lock().unwrap_or_else(PoisonError::into_inner) =
+                    opened.as_ref().err().cloned();
                 *slot = resident(opened?);
             }
             if let Slot::Resident {

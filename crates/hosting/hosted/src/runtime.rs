@@ -134,7 +134,7 @@ mod host_loop;
 mod info;
 pub(crate) mod job_events;
 mod ledger;
-mod logging;
+pub(crate) mod logging;
 pub use logging::project_session_snapshot as session_restore_snapshot;
 mod models;
 pub mod network_watch;

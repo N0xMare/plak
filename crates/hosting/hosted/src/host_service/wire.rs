@@ -1343,8 +1343,8 @@ mod session;
 mod slot;
 
 pub use host::{
-    ArchivedSessionView, Created, Creation, HostConnection, HostPrincipal, HostReadLimits,
-    HostReadTask, HostRequestContext, HostSessions, PickerProgress, SessionHost,
+    Created, Creation, HostConnection, HostPrincipal, HostReadLimits, HostReadTask,
+    HostRequestContext, HostSessions, PickerProgress, SessionHost, StoredSessionView,
 };
 pub use lines::{Line, LineSender, Lines, lines};
 pub use session::WireSession;

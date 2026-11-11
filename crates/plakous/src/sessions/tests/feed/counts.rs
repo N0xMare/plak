@@ -30,6 +30,25 @@ impl CountingReads {
 }
 
 #[tokio::test]
+async fn line_identity_does_not_load_conversation_checkpoints() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let store = Arc::new(CountingReads::new()?);
+    let sessions = AgentSessions::new(SessionBackend::from_store(
+        store.clone(),
+        RuntimeDurability::Disabled,
+    ))?;
+    let locator = completed_session(&sessions, &workspace, "line-read").await?;
+    store.reset();
+    let head = sessions.line_head_of(locator).await?;
+    assert_eq!(head.session_id(), locator.session_id());
+    assert_eq!(head.branch_id(), locator.branch_id());
+    assert_eq!(store.branches.load(Ordering::SeqCst), 0);
+    assert_eq!(store.checkpoints.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
 async fn facade_placeholder_suffix_is_refused_before_any_receipt_read() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
@@ -221,6 +240,13 @@ impl SessionStore for CountingReads {
         session_id: SessionId,
     ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::FeedTail> {
         self.inner.feed_tail(session_id)
+    }
+
+    fn branch_line(
+        &self,
+        session: SessionRef,
+    ) -> plakous_agent::internal::StoreFuture<'_, plakous_model::LineId> {
+        self.inner.branch_line(session)
     }
 
     fn load_line(

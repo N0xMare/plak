@@ -1947,6 +1947,7 @@ impl SessionStore for LostPruneAckStore {
         create(CreateSession) -> plakous_agent::internal::CreateReceipt;
         recover_create(CreateSession) -> plakous_agent::internal::CreateReceipt;
         load_branch(SessionRef) -> plakous_agent::internal::LoadedBranch;
+        branch_line(SessionRef) -> plakous_agent::internal::LineId;
         load_checkpoint(CheckpointId) -> plakous_agent::internal::StoredCheckpoint;
         acquire(AcquireBranch) -> BranchLease;
         renew(BranchLease) -> BranchLease;
