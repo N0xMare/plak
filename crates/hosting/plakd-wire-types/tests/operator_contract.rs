@@ -19,9 +19,11 @@ fn protocol_seven_operator_fixtures_are_addressed_and_secret_debug_is_redacted()
             assert!(value["op"].get("attachment").is_none());
             serde_json::to_value(request)?
         } else {
-            serde_json::to_value(serde_json::from_value::<HostFrame<PlakExtension>>(
-                value.clone(),
-            )?)?
+            let response = serde_json::from_value::<HostFrame<PlakExtension>>(value.clone())?;
+            let debug = format!("{response:?}");
+            assert!(!debug.contains("https://example.invalid/fixture-authorization"));
+            assert!(!debug.contains("synthetic-device-code"));
+            serde_json::to_value(response)?
         };
         assert_eq!(encoded, value);
     }

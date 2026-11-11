@@ -826,14 +826,24 @@ fn host_login_preparation_requires_exact_notice_and_explicit_newer_build_consent
     let account = "codex/work".parse().unwrap();
     let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
     assert!(
-        commands::application::prepare_host_login(&mut backend, &account, "wrong-review", false)
-            .is_err()
+        commands::application::host::prepare_host_login(
+            &mut backend,
+            &account,
+            "wrong-review",
+            false
+        )
+        .is_err()
     );
     assert!(backend.calls.is_empty() && backend.selected_accounts.is_empty());
     backend.compatibility = CompatibilityState::Inactive;
     assert!(
-        commands::application::prepare_host_login(&mut backend, &account, "exact-review", false)
-            .is_err()
+        commands::application::host::prepare_host_login(
+            &mut backend,
+            &account,
+            "exact-review",
+            false
+        )
+        .is_err()
     );
     assert!(
         !backend
@@ -845,8 +855,13 @@ fn host_login_preparation_requires_exact_notice_and_explicit_newer_build_consent
     backend.credential = CredentialState::WrittenByNewerBuild;
     backend.calls.clear();
     assert!(
-        commands::application::prepare_host_login(&mut backend, &account, "exact-review", false)
-            .is_err()
+        commands::application::host::prepare_host_login(
+            &mut backend,
+            &account,
+            "exact-review",
+            false
+        )
+        .is_err()
     );
     assert!(
         !backend
@@ -855,7 +870,7 @@ fn host_login_preparation_requires_exact_notice_and_explicit_newer_build_consent
             .any(|call| matches!(call, Call::ReplaceNewerBuild(..) | Call::Acknowledge(..)))
     );
     backend.calls.clear();
-    commands::application::prepare_host_login(&mut backend, &account, "exact-review", true)
+    commands::application::host::prepare_host_login(&mut backend, &account, "exact-review", true)
         .unwrap();
     assert_eq!(
         backend.calls,
@@ -880,7 +895,9 @@ fn host_logout_never_falls_back_to_local_retirement_after_failed_remote_revoke()
     let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Revoked);
     backend.credential = CredentialState::Ready;
     backend.revoke_failed = true;
-    assert!(commands::application::logout_host_account(&mut backend, &account, false).is_err());
+    assert!(
+        commands::application::host::logout_host_account(&mut backend, &account, false).is_err()
+    );
     assert!(
         backend
             .calls
@@ -893,7 +910,7 @@ fn host_logout_never_falls_back_to_local_retirement_after_failed_remote_revoke()
     );
     backend.calls.clear();
     assert_eq!(
-        commands::application::logout_host_account(&mut backend, &account, true).unwrap(),
+        commands::application::host::logout_host_account(&mut backend, &account, true).unwrap(),
         Some(true)
     );
     assert!(

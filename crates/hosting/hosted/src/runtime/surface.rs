@@ -9,6 +9,29 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use plakous_host_protocol::views::{ProviderDef, ProviderSection};
 use plakous_host_protocol::{Core, ProtocolExtension};
 
+impl<P: ProtocolExtension> Sender<P> {
+    /// Whether this request belongs to a local face. Transport-stamped
+    /// attachment provenance precedes any client correlation; an untagged
+    /// in-process product call is local. Answering clones retain their source.
+    #[must_use]
+    pub fn is_local_request(&self) -> bool {
+        let window = self
+            .window
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.answers
+            .as_ref()
+            .or(window.as_ref())
+            .and_then(|started| started.0.as_deref())
+            .is_none_or(|origin| {
+                !origin
+                    .strip_prefix(crate::host_service::ANSWER)
+                    .unwrap_or(origin)
+                    .starts_with(crate::host_service::REMOTE_ATTACHMENT)
+            })
+    }
+}
+
 /// Why an extension intent could not be answered.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SurfaceRefusal {

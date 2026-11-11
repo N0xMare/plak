@@ -14,7 +14,7 @@
         "binary_id": "unknown",
         "caps": [],
         "frame": "hello",
-        "proto": 6
+        "proto": 7
       }
     },
     {
@@ -35,27 +35,50 @@
               "enabled": true,
               "remedy": null
             },
+            "config_write": {
+              "disabled_reason": null,
+              "enabled": true,
+              "remedy": null
+            },
             "configured_switches": {
               "web_accounts_read": false,
-              "web_config_read": false
+              "web_config_read": false,
+              "web_config_write": false,
+              "web_credentials_write": false
+            },
+            "credentials_write": {
+              "disabled_reason": null,
+              "enabled": true,
+              "remedy": null
             },
             "face": "socket",
             "limits": {
+              "config_mutations_per_minute": 30,
+              "confirmation_ttl_ms": 60000,
+              "confirmations_per_principal": 4,
+              "credential_mutations_per_minute": 10,
+              "credential_request_bytes": 65536,
               "cursor_ttl_ms": 30000,
               "dependency_bytes": 8388608,
               "dependency_definitions": 512,
               "inflight_host": 32,
               "inflight_per_connection": 2,
               "inflight_per_principal": 4,
+              "login_lifetime_ms": 900000,
+              "login_poll_ms": 1000,
+              "login_starts_per_minute": 3,
               "max_definition_bytes": 262144,
-              "max_request_bytes": 65536,
+              "max_request_bytes": 278528,
               "max_response_bytes": 262144,
               "message_burst": 12,
               "message_rate_per_second": 12,
               "page_rows": 100,
+              "pending_logins_host": 3,
+              "pending_logins_per_principal": 2,
               "provider_deadline_ms": 5000,
               "provider_reads_inflight_host": 1,
               "request_deadline_ms": 10000,
+              "secret_input_bytes": 16384,
               "usage_cache_ms": 30000,
               "usage_reread_ms": 30000
             }
@@ -63,7 +86,7 @@
         },
         "frame": "welcome",
         "host_generation": "@generation:0",
-        "proto": 6
+        "proto": 7
       }
     },
     {
@@ -354,28 +377,11 @@
       }
     },
     {
-      "barrier": "new-session-ready"
-    },
-    {
       "connection": 1,
       "direction": "client",
       "frame": {
         "frame": "request",
         "id": 9,
-        "op": {
-          "include_archived": false,
-          "op": "list_sessions",
-          "runner": "local",
-          "workspace": "@workspace"
-        }
-      }
-    },
-    {
-      "connection": 1,
-      "direction": "client",
-      "frame": {
-        "frame": "request",
-        "id": 10,
         "op": {
           "attachment": 1,
           "blobs": [],
@@ -392,6 +398,53 @@
       "frame": {
         "frame": "response",
         "id": 9,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "barrier": "new-session-ready"
+    },
+    {
+      "connection": 1,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 10,
+        "op": {
+          "include_archived": false,
+          "op": "list_sessions",
+          "runner": "local",
+          "workspace": "@workspace"
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 11,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "kind": "open_topology_navigator"
+          },
+          "op": "intent"
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 10,
         "outcome": {
           "ok": {
             "answer": "sessions",
@@ -469,7 +522,7 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 10,
+        "id": 11,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -483,7 +536,7 @@
       "direction": "client",
       "frame": {
         "frame": "request",
-        "id": 11,
+        "id": 12,
         "op": {
           "node": {
             "agent_id": "@uuid:0",
@@ -498,7 +551,7 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 11,
+        "id": 12,
         "outcome": {
           "ok": {
             "answer": "attached",
@@ -512,7 +565,7 @@
       "direction": "client",
       "frame": {
         "frame": "request",
-        "id": 12,
+        "id": 13,
         "op": {
           "attachment": 2,
           "blobs": [],
@@ -528,7 +581,37 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 12,
+        "id": 13,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 14,
+        "op": {
+          "attachment": 2,
+          "blobs": [],
+          "intent": {
+            "kind": "open_topology_navigator"
+          },
+          "op": "intent"
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 14,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -548,7 +631,7 @@
       "direction": "client",
       "frame": {
         "frame": "request",
-        "id": 13,
+        "id": 15,
         "op": {
           "op": "stop_session",
           "session": "@uuid:0"
@@ -560,7 +643,7 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 13,
+        "id": 15,
         "outcome": {
           "ok": {
             "answer": "stopped",
@@ -601,7 +684,7 @@
         "binary_id": "unknown",
         "caps": [],
         "frame": "hello",
-        "proto": 6
+        "proto": 7
       }
     },
     {
@@ -622,27 +705,50 @@
               "enabled": true,
               "remedy": null
             },
+            "config_write": {
+              "disabled_reason": null,
+              "enabled": true,
+              "remedy": null
+            },
             "configured_switches": {
               "web_accounts_read": false,
-              "web_config_read": false
+              "web_config_read": false,
+              "web_config_write": false,
+              "web_credentials_write": false
+            },
+            "credentials_write": {
+              "disabled_reason": null,
+              "enabled": true,
+              "remedy": null
             },
             "face": "socket",
             "limits": {
+              "config_mutations_per_minute": 30,
+              "confirmation_ttl_ms": 60000,
+              "confirmations_per_principal": 4,
+              "credential_mutations_per_minute": 10,
+              "credential_request_bytes": 65536,
               "cursor_ttl_ms": 30000,
               "dependency_bytes": 8388608,
               "dependency_definitions": 512,
               "inflight_host": 32,
               "inflight_per_connection": 2,
               "inflight_per_principal": 4,
+              "login_lifetime_ms": 900000,
+              "login_poll_ms": 1000,
+              "login_starts_per_minute": 3,
               "max_definition_bytes": 262144,
-              "max_request_bytes": 65536,
+              "max_request_bytes": 278528,
               "max_response_bytes": 262144,
               "message_burst": 12,
               "message_rate_per_second": 12,
               "page_rows": 100,
+              "pending_logins_host": 3,
+              "pending_logins_per_principal": 2,
               "provider_deadline_ms": 5000,
               "provider_reads_inflight_host": 1,
               "request_deadline_ms": 10000,
+              "secret_input_bytes": 16384,
               "usage_cache_ms": 30000,
               "usage_reread_ms": 30000
             }
@@ -650,7 +756,7 @@
         },
         "frame": "welcome",
         "host_generation": "@generation:1",
-        "proto": 6
+        "proto": 7
       }
     },
     {

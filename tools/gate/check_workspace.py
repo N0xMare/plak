@@ -824,6 +824,12 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # Typed SQLite binds only; neither projection admits or dispatches work.
     ("plak", "src/telemetry_store/recorded_usage.rs"): {"params"},
     ("plak", "src/host/console/recorded.rs"): {"params"},
+    # Private login cancellation races only; no process signal handler.
+    ("plak", "src/host/console/account_writes/login.rs"): {"select"},
+    ("plak", "src/commands/application/host.rs"): {"select"},
+    # Bounded categorical operator audit fields, never frames or secrets.
+    ("plak", "src/host/console/audit.rs"): {"json"},
+    ("plakd-wire-types", "src/console/secret.rs"): {"json_schema"},
     ("plak", "src/telemetry_sink.rs"): {"warn"},
     # Static panic notice; no payload, path or session data.
     ("plak", "src/shell/chrome_refresh.rs"): {"warn"},

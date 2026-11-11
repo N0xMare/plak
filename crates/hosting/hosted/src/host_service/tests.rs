@@ -244,7 +244,7 @@ fn an_attach_without_a_baseline_asks_for_one() {
     assert_eq!(
         delivery.started(),
         Some(plakous_host_protocol::ContentObservation::IntentStarted(
-            Some(format!("attachment:{id}"))
+            Some(format!("remote-attachment:{id}"))
         ))
     );
 }

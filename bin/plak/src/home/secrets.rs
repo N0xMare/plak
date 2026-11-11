@@ -237,10 +237,13 @@ pub fn key_status(paths: &PlakPaths, account: &str) -> Result<KeyStatus, String>
     }
 }
 
+#[must_use]
+pub(crate) fn overriding_env_var(account: &str) -> Option<&'static str> {
+    env_var_for_account(account).filter(|name| std::env::var_os(name).is_some())
+}
+
 fn refuse_env_override(account: &str) -> Result<(), String> {
-    if let Some(name) = env_var_for_account(account)
-        && std::env::var_os(name).is_some()
-    {
+    if let Some(name) = overriding_env_var(account) {
         return Err(format!(
             "{name} is set in the process environment and still wins over the file store; unset {name} (Plak never loads .env); no file change"
         ));

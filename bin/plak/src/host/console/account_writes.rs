@@ -225,7 +225,7 @@ impl Console {
             }
             HostRequest::AccountLogout { local_only, .. } => {
                 let mut app = self.application()?;
-                remote_grant_may_remain = crate::commands::application::logout_host_account(
+                remote_grant_may_remain = crate::commands::application::host::logout_host_account(
                     &mut app, &account, local_only,
                 )
                 .map_err(|_| failed(true))?;
@@ -253,9 +253,7 @@ fn worker<T: Send + 'static>(
 }
 
 fn env_override(account: &str) -> Result<(), AccountError> {
-    if let Some(variable) = crate::home::secrets::env_var_for_account(account)
-        && std::env::var_os(variable).is_some()
-    {
+    if let Some(variable) = crate::home::secrets::overriding_env_var(account) {
         return Err(ReadRefusal::EnvironmentOverride {
             proven_no_effect: true,
             variable: variable.into(),

@@ -86,12 +86,40 @@
       }
     },
     {
+      "read": "refresh_composer_chrome",
+      "reason": "timer-driven background chrome",
+      "connection": 1,
+      "request": {
+        "frame": "request",
+        "id": 12,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": "refresh_composer_chrome",
+            "kind": "extension"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 12,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
       "read": "resync_transcript",
       "reason": "resync at a reconnect sequence boundary",
       "connection": 1,
       "request": {
         "frame": "request",
-        "id": 11,
+        "id": 13,
         "op": {
           "attachment": 1,
           "blobs": [],
@@ -106,34 +134,6 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 11,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
-      "read": "refresh_composer_chrome",
-      "reason": "timer-driven background chrome",
-      "connection": 1,
-      "request": {
-        "frame": "request",
-        "id": 13,
-        "op": {
-          "attachment": 1,
-          "blobs": [],
-          "intent": {
-            "body": "refresh_composer_chrome",
-            "kind": "extension"
-          },
-          "op": "intent"
-        }
-      },
-      "acknowledgement": {
-        "frame": "response",
         "id": 13,
         "outcome": {
           "ok": {
@@ -149,7 +149,7 @@
       "connection": 1,
       "request": {
         "frame": "request",
-        "id": 18,
+        "id": 19,
         "op": {
           "attachment": 2,
           "blobs": [],
@@ -162,7 +162,37 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 18,
+        "id": 19,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "read": "resync_transcript",
+      "reason": "resync at a reconnect sequence boundary",
+      "connection": 1,
+      "request": {
+        "frame": "request",
+        "id": 20,
+        "op": {
+          "attachment": 2,
+          "blobs": [],
+          "intent": {
+            "body": {
+              "scope": "root"
+            },
+            "kind": "resync_transcript"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 20,
         "outcome": {
           "ok": {
             "answer": "accepted",

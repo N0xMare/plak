@@ -319,8 +319,8 @@ plak = [
     "uuid",
     "zeroize",
 ]
-plakous-host-protocol = ["base64", "schemars", "serde", "serde_json", "uuid"]
-plakd-wire-types = ["plakous-host-protocol", "schemars", "serde"]
+plakous-host-protocol = ["base64", "schemars", "serde", "serde_json", "uuid", "zeroize"]
+plakd-wire-types = ["plakous-host-protocol", "schemars", "serde", "serde_json", "zeroize"]
 plakous-workspace = ["futures", "gix", "jj-lib", "plakous-host-protocol", "pollster", "rustix", "serde", "sha2", "tempfile", "tokio"]
 plakous-recursive-subagents = [
     "futures-util",
@@ -360,6 +360,7 @@ plakous-hosted = [
     "serde_json",
     "time",
     "uuid",
+    "zeroize",
 ]
 
 [workspace.metadata.plakous.facade-features]

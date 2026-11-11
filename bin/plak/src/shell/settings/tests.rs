@@ -1416,6 +1416,71 @@ fn an_unattached_empty_session_binds_the_profile_and_reattaches() {
 /// Use now binds an unattached session but never replaces a default the home
 /// already loads; only a home without one gets the profile as its default.
 #[test]
+fn only_local_use_now_can_bootstrap_a_fresh_home_default() {
+    use plakous_host_protocol::{SessionIntent, intent_channel};
+    use plakous_hosted::host_service::{HostService, wire::Face};
+    for face in [Face::Local, Face::Remote] {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = profile_paths(dir.path());
+        let (actions, intents) = intent_channel::<PlakExtension>();
+        let node = plakous_host_protocol::wire::NodeAddress {
+            tree_id: "fixture".into(),
+            agent_id: "fixture".into(),
+        };
+        let service = HostService::new(actions, node.clone(), 64);
+        let attachment = service.attach(&node, face).unwrap();
+        while intents.try_recv().is_ok() {}
+        service
+            .intent_correlated(
+                attachment,
+                SessionIntent::Extension(SurfaceIntent::ApplyProfile {
+                    name: "mine".into(),
+                    apply: crate::surface_protocol::ProfileApply::Fork,
+                }),
+                Some("attachment:1:local"),
+            )
+            .unwrap();
+        let delivery = intents.try_recv().unwrap();
+        let (events, _observed) = host_event_sink();
+        assert!(events.send(delivery.started().unwrap()));
+        assert_eq!(events.is_local_request(), face == Face::Local);
+        let answering = events.answering();
+        assert!(events.send(ContentEvent::IntentStarted(None)));
+        assert_eq!(answering.is_local_request(), face == Face::Local);
+        let (SessionIntent::Extension(intent), _guard) = delivery.into_parts() else {
+            panic!("profile intent");
+        };
+        let catalog = codex_catalog();
+        let effect = ProductSurface::new(paths.clone()).dispatch(
+            intent,
+            SurfaceFacts {
+                session: None,
+                phase: SurfacePhase::Idle,
+                attached_one_shot: false,
+                catalog: &catalog,
+                queue_len: 0,
+                usage_reads: UsageReads::default(),
+            },
+            &answering,
+        );
+        let fork = effect
+            .profile_fork
+            .expect("session binding remains available");
+        (fork.finish)(ProfileForkOutcome::Bound);
+        assert_eq!(
+            ProductConfig::load(&paths).unwrap().root_agent.as_deref(),
+            if face == Face::Local {
+                Some("mine-root")
+            } else {
+                None
+            }
+        );
+        assert_eq!(paths.config_file().exists(), face == Face::Local);
+    }
+}
+
+/// A loadable home default is never replaced by Use now.
+#[test]
 fn use_now_keeps_a_loadable_home_default() {
     let dir = tempfile::tempdir().unwrap();
     let paths = profile_paths(dir.path());

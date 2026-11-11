@@ -7,7 +7,7 @@ pub(crate) fn with_write_lock<T>(
     paths: &crate::home::paths::PlakPaths,
     work: impl FnOnce() -> T,
 ) -> Result<T, super::ConfigSaveError> {
-    let _guard = super::publication::ConfigLock::try_take(paths)?;
+    let _guard = super::publication::ConfigLock::take_with(paths, true)?;
     Ok(work())
 }
 

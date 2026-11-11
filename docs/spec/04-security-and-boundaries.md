@@ -2058,6 +2058,11 @@ than unbounded repeated records. A dropped connection cancels pending login
 authority even without an explicit leave frame. The host never labels an
 admitted mutation's deadline or worker loss as proven no-effect; clients see
 `operation_outcome_unknown` and must reread, not replay.
+Remote session binding (Use now) never implicitly saves a home default.
+Its process-local request provenance is stamped by the transport before
+client correlation, so a local-looking correlation cannot authorize a write.
+The local face retains its bootstrap behavior; this introduces no persisted
+authority or serialized frame field.
 
 The portable runner dial core never formats keys, offers, pairing secrets,
 `K_pair`, proofs or cryptographic session state in `Debug`; these types have no

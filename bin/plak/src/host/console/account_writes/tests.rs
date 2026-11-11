@@ -26,6 +26,20 @@ fn secret(value: &str) -> SecretInput {
     SecretInput::new(Zeroizing::new(value.into())).expect("bounded fixture")
 }
 
+#[test]
+fn successful_key_writes_emit_audit_without_secret_values() -> Result<(), Box<dyn std::error::Error>>
+{
+    let output = std::process::Command::new(std::env::current_exe()?)
+        .args(["--exact", "host::console::account_writes::tests::wire_key_creation_is_write_only_exact_named_and_confirmation_is_consumed", "--nocapture"])
+        .output()?;
+    assert!(output.status.success(), "isolated key fixture failed");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("\"audit\":\"operator\""));
+    for bytes in [&output.stdout, &output.stderr] {
+        assert!(!String::from_utf8_lossy(bytes).contains("synthetic-console-secret"));
+    }
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn wire_key_creation_is_write_only_exact_named_and_confirmation_is_consumed()
 -> Result<(), Box<dyn std::error::Error>> {

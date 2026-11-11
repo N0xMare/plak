@@ -12,3 +12,4 @@
 {"frame":"response","id":7,"outcome":{"ok":{"answer":"host","response":{"response":"operation_outcome_unknown"}}}}
 {"frame":"response","id":8,"outcome":{"refused":{"refusal":"capability_disabled","capability":"credentials_write"}}}
 {"frame":"response","id":9,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"confirmation_expired"}}}}}
+{"frame":"response","id":10,"outcome":{"ok":{"answer":"host","response":{"response":"login_challenge","attempt":"fixture-attempt","method":"device_code","authorize_url":"https://example.invalid/fixture-authorization","user_code":"synthetic-device-code","expires_in_ms":900000,"warning":"This logs in the serving machine."}}}}

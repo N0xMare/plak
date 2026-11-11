@@ -5829,7 +5829,10 @@ Protocol-7 account write contracts use temporary isolated homes and synthetic
 secrets to verify write-only replies, Debug/input-bound redaction, exact named
 creation/removal and absent-slot isolation. Attempt-table contracts verify
 connection/principal/generation theft refusal, disconnect cancellation, fresh
-restart state, one-account exclusion and host-wide pending quotas. Existing
+restart state, one-account exclusion and host-wide pending quotas. A subprocess
+captures successful key-write audit output and checks that the synthetic key
+appears in neither output stream; pinned challenge frames separately verify
+that authorize URLs and device codes never appear in Debug. Existing
 facade callback/device/claim/CAS tests remain the provider workflow authority;
 no paid or live login is required by offline gates.
 
@@ -5847,3 +5850,7 @@ Publication SIGKILL cuts run in the durability lane; injected parent-sync
 failures run offline. Connection-drop and forced-deadline contracts verify
 retirement of pending authority and an explicit unknown outcome for admitted
 writes rather than a false no-effect refusal.
+Real local/remote attachment provenance contracts also verify that Use now
+can bind either session but bootstraps a fresh home default only locally,
+even with a local-looking client correlation and an intervening answer-window
+reset. Remote default publication remains a confirmed etag write.

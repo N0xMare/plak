@@ -178,7 +178,7 @@ fn a_child_attach_takes_its_nodes_scope_and_only_that() {
     assert_eq!(
         started,
         Some(Observation::IntentStarted(Some(format!(
-            "attachment:{child}"
+            "remote-attachment:{child}"
         ))))
     );
     let second = service.attach(&node("c1"), Face::Remote).unwrap();
@@ -288,7 +288,7 @@ fn a_child_attachments_intents_are_its_nodes_controls() {
             (
                 control,
                 Some(Observation::IntentStarted(Some(format!(
-                    "attachment:{child}:r1"
+                    "remote-attachment:{child}:r1"
                 ))))
             )
         );

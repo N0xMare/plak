@@ -153,7 +153,7 @@ impl<P: ProtocolExtension> HostService<P> {
             id
         };
         let sender = FaceSender {
-            actions: actions.tagged(origin(attachment)),
+            actions: actions.tagged(origin(attachment, Face::Local)),
             service: self.clone(),
             attachment,
         };

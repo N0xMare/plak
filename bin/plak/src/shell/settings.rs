@@ -294,7 +294,7 @@ fn refuse_profile(name: &str, reason: String, events: &Sender<PlakExtension>) {
 }
 
 /// Reports how a profile landed. Profile choice is per session: only the
-/// explicit default action writes the home's pointers, and Use now (offered
+/// explicit default action writes the home's pointers, and local Use now (offered
 /// only while no model is bound) when the home has no loadable default, so a
 /// fresh home's next `plak` has one. A fork never writes them.
 fn commit_profile(
@@ -302,12 +302,12 @@ fn commit_profile(
     id: String,
     config: &ProductConfig,
     outcome: ProfileOutcome,
-    home_has_default: bool,
+    bootstrap_default: bool,
     events: &Sender<PlakExtension>,
 ) {
     let saves = match outcome {
         ProfileOutcome::Saved => true,
-        ProfileOutcome::Bound => !home_has_default,
+        ProfileOutcome::Bound => bootstrap_default,
         ProfileOutcome::Forked | ProfileOutcome::Switched | ProfileOutcome::AlreadyActive => false,
     };
     if saves
@@ -358,7 +358,7 @@ fn apply_profile(
         );
         return None;
     }
-    let home_has_default = loaded.root_template().is_some();
+    let bootstrap_default = loaded.root_template().is_none() && events.is_local_request();
     let prepared = match crate::profiles::prepare(&loaded, paths.home(), name) {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -381,7 +381,7 @@ fn apply_profile(
             prepared.id,
             &prepared.config,
             ProfileOutcome::Saved,
-            home_has_default,
+            bootstrap_default,
             events,
         );
         return None;
@@ -427,7 +427,7 @@ fn apply_profile(
                     prepared.id,
                     &prepared.config,
                     outcome,
-                    home_has_default,
+                    bootstrap_default,
                     &events,
                 );
             }

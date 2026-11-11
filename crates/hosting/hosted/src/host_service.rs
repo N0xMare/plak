@@ -72,6 +72,8 @@ pub use tree_nodes::TreeNodes;
 /// The prefix marking an `IntentStarted` whose window holds only that
 /// intent's answer ([`crate::runtime::Sender::answering`]).
 pub(crate) const ANSWER: &str = "answer:";
+/// Transport-only provenance, before any untrusted client correlation.
+pub(crate) const REMOTE_ATTACHMENT: &str = "remote-attachment:";
 
 /// The most root patches the service keeps after the root snapshot for an
 /// attach; past it, a new attachment asks the session for a fresh one.
@@ -255,14 +257,21 @@ enum Unsent<P: ProtocolExtension> {
 
 /// The origin tag an attachment's intents carry, so the session's
 /// `IntentStarted` names the attachment its answers belong to.
-fn origin(attachment: AttachmentId) -> String {
-    format!("attachment:{attachment}")
+fn origin(attachment: AttachmentId, face: Face) -> String {
+    let prefix = if face == Face::Remote {
+        REMOTE_ATTACHMENT
+    } else {
+        "attachment:"
+    };
+    format!("{prefix}{attachment}")
 }
 
 /// The attachment a correlation names, and the client's own correlation
 /// inside it.
 fn attachment_of(correlation: &str) -> Option<(AttachmentId, Option<String>)> {
-    let rest = correlation.strip_prefix("attachment:")?;
+    let rest = correlation
+        .strip_prefix(REMOTE_ATTACHMENT)
+        .or_else(|| correlation.strip_prefix("attachment:"))?;
     let (id, client) = match rest.split_once(':') {
         Some((id, client)) => (id, Some(client.to_owned())),
         None => (rest, None),
@@ -634,7 +643,7 @@ impl<P: ProtocolExtension> HostService<P> {
         held.sender = held
             .sender
             .take()
-            .map(|sender| sender.tagged(origin(origin_id)));
+            .map(|sender| sender.tagged(origin(origin_id, requester.face)));
         if state.requester == Some(origin_id) {
             state.requester = Some(attachment);
         }
@@ -894,7 +903,7 @@ impl<P: ProtocolExtension> HostService<P> {
         items.extend(snapshot.approvals.iter().map(|(_, asked)| asked.clone()));
         items.extend(snapshot.credential_wait.iter().cloned());
         items.retain(|item| face.receives(item) && !waiting);
-        let sender = mailbox.map(|actions| actions.tagged(origin(id)));
+        let sender = mailbox.map(|actions| actions.tagged(origin(id, face)));
         let scopes = match self.actions {
             Some(_) => Scopes::Held(BTreeSet::from([TranscriptScope::Root])),
             None => Scopes::All,

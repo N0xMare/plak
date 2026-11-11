@@ -16,11 +16,7 @@ impl ConfigLock {
         Self::take_with(paths, false)
     }
 
-    pub(super) fn try_take(paths: &PlakPaths) -> Result<Self, ConfigSaveError> {
-        Self::take_with(paths, true)
-    }
-
-    fn take_with(paths: &PlakPaths, immediate: bool) -> Result<Self, ConfigSaveError> {
+    pub(super) fn take_with(paths: &PlakPaths, immediate: bool) -> Result<Self, ConfigSaveError> {
         let failed = |message: &str| ConfigSaveError::BeforePublication(message.to_owned());
         paths
             .ensure_layout()

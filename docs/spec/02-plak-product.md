@@ -4001,6 +4001,11 @@ Remote `SaveSettings`, `ApplyProfile {apply:default}` and the legacy
 write. Remote web and host-client TUI forms use the consented host requests.
 Switch/Fork/Use now remain explicit session binding actions. Local-face
 legacy behavior is unchanged.
+Remote Use now still binds its session, but never seeds a fresh home's
+default as a side effect. That publication uses the confirmed etag path.
+Only local Use now retains automatic default bootstrap. Transport-stamped
+request provenance, not the client's correlation text, distinguishes them
+and survives an asynchronous answer window.
 
 `plakd-wire-types` owns the serialized product extension DTOs and their
 protocol classification, over `plakous-host-protocol`. Product handlers,
@@ -7681,9 +7686,10 @@ change only that session: they never write `[root] agent` or `[roster]
 working_set`. Set as default is the explicit action that writes them (the
 documented config path, chapter 07 §3): it saves the pointers that brand-new
 sessions bind, and never changes an existing session. Use now is offered only
-while a session has no model; it saves its profile as the default only when the
+while a session has no model; the local face saves its profile as the default only when the
 home has no loadable default root template, so the next `plak` on a fresh home
-is bound and an existing default is never replaced.
+is bound and an existing default is never replaced. Remote Use now never saves
+home defaults; clients use the confirmed etag path for that separate action.
 
 **Switch now** continues this session's root node as the profile, on its own
 agent line (chapter 01 §5.1; chapter 03 §1.2). It needs an idle root, an empty

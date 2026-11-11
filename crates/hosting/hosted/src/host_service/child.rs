@@ -240,7 +240,7 @@ impl<P: ProtocolExtension> HostService<P> {
             return Err(RequestRefusal::NodeRetiring);
         }
         let id = state.next_attachment;
-        let sender = actions.tagged(origin(id));
+        let sender = actions.tagged(origin(id, face));
         let ask = if state.agent_holders.get(agent).copied().unwrap_or(0) > 0 {
             SessionIntent::ResyncTranscript {
                 scope: scope.clone(),

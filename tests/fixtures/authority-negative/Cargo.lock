@@ -1203,6 +1203,7 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -1222,6 +1223,7 @@ dependencies = [
  "toml",
  "tracing",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

@@ -5,7 +5,7 @@ use super::{
     HostResponse, OperatorAction, PlakousApplication, ReadRefusal, RequestRefusal, ValidationCode,
     failed, refused, validation, worker,
 };
-use crate::commands::application::{HostLoginStartError, LoginOutcome};
+use crate::commands::application::{LoginOutcome, host::HostLoginStartError};
 use crate::presentation::CredentialState;
 use plakd_wire_types::console::{LoginMethod, LoginPhase, SecretInput};
 use plakous::subscriptions::NativeLoginCompletion;
@@ -352,7 +352,7 @@ impl Console {
         let mut app = self.application()?;
         let account = super::super::accounts::exact(account)?;
         let start = (|| {
-            crate::commands::application::prepare_host_login(
+            crate::commands::application::host::prepare_host_login(
                 &mut app,
                 &account,
                 notice_revision,
