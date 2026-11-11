@@ -964,6 +964,7 @@ impl Fixture {
             rebind_target: target,
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
+            profile_route: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
         });
         let mut session = SessionRecord::new(workspace.clone());
@@ -2157,6 +2158,7 @@ pub(crate) fn refusal_config_with_controller(
         }),
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     config

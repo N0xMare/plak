@@ -81,6 +81,7 @@ fn gated<P: ProtocolExtension>(root: &std::path::Path) -> (HostConfig<P>, std::p
         }),
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: Mutex::new(Vec::new()),
     });
     (config, release)

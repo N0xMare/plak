@@ -415,10 +415,13 @@ fn composite_rebind_both_sides_obey_all_three_sqlite_laws() {
     // binding and submit the same keyed request the product rebind authors.
     let mut target_script = script.clone();
     target_script["maximum_projected_input"] = json!(30_000);
+    let mut plan: plakous_offline_crash_harness::script::ScriptPlan =
+        serde_json::from_value(target_script.clone()).unwrap();
+    plan.profile_effort = Some(plakous::model::ReasoningEffort::Medium);
     let runtime = plakous_offline_crash_harness::scripted_runtime_binding(
         &fixture.workspace(),
         controller,
-        Arc::new(serde_json::from_value(target_script.clone()).unwrap()),
+        Arc::new(plan),
     )
     .unwrap();
     let binding = runtime.target_binding();
@@ -650,7 +653,10 @@ fn record_failed_scheduled_compaction(fixture: &Fixture, source: &str, script: &
         fixture.root.join("scheduled-fork-evidence.jsonl"),
     )
     .unwrap();
-    let plan = Arc::new(serde_json::from_value(script.clone()).unwrap());
+    let mut plan: plakous_offline_crash_harness::script::ScriptPlan =
+        serde_json::from_value(script.clone()).unwrap();
+    plan.profile_effort = Some(plakous::model::ReasoningEffort::Medium);
+    let plan = Arc::new(plan);
     let normal = plakous_offline_crash_harness::scripted_runtime_binding(
         &fixture.workspace(),
         controller.clone(),

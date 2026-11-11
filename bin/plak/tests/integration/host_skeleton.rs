@@ -172,6 +172,7 @@ fn fixture() -> Option<Fixture> {
 struct Client {
     stream: UnixStream,
     reader: BufReader<UnixStream>,
+    retained: Option<std::collections::VecDeque<HostFrame<PlakExtension>>>,
 }
 
 impl Client {
@@ -186,6 +187,7 @@ impl Client {
         let mut client = Self {
             reader: BufReader::new(stream.try_clone().unwrap()),
             stream,
+            retained: None,
         };
         client.send(&ClientFrame::Hello(Hello {
             proto: WIRE_VERSION,
@@ -206,6 +208,22 @@ impl Client {
     }
 
     fn next(&mut self) -> HostFrame<PlakExtension> {
+        if let Some(frame) = self
+            .retained
+            .as_mut()
+            .and_then(std::collections::VecDeque::pop_front)
+        {
+            return frame;
+        }
+        self.read_frame()
+    }
+
+    /// Retains asynchronous observations that precede a request's response.
+    fn retain_observations(&mut self) {
+        self.retained = Some(std::collections::VecDeque::new());
+    }
+
+    fn read_frame(&mut self) -> HostFrame<PlakExtension> {
         let mut line = String::new();
         self.stream.set_read_timeout(Some(WAIT)).unwrap();
         assert_ne!(
@@ -217,17 +235,20 @@ impl Client {
     }
 
     /// Sends request `id` and returns its outcome, skipping what comes
-    /// before it.
+    /// before it unless observation retention was requested.
     fn request(&mut self, id: RequestId, op: Op<PlakExtension>) -> Outcome<PlakExtension> {
         self.send(&ClientFrame::Request { id, op });
         loop {
-            if let HostFrame::Response {
-                id: answered,
-                outcome,
-            } = self.next()
-                && answered == id
-            {
-                return outcome;
+            match self.read_frame() {
+                HostFrame::Response {
+                    id: answered,
+                    outcome,
+                } if answered == id => return outcome,
+                frame => {
+                    if let Some(held) = &mut self.retained {
+                        held.push_back(frame);
+                    }
+                }
             }
         }
     }
@@ -1608,6 +1629,7 @@ fn a_stop_is_answered_after_its_attachment_detaches() {
 
 mod bridge;
 mod crash;
+mod profiles;
 mod reload;
 mod requests;
 mod runner;

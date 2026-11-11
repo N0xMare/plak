@@ -1730,6 +1730,7 @@ fn context_capacity_restores_the_admitted_draft_without_a_rejection_receipt() {
         }),
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: Mutex::new(Vec::new()),
     });
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();

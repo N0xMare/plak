@@ -228,13 +228,12 @@ fn a_recorded_stop_of_a_predecessor_never_dispatches_on_its_successor_head() {
             fixture.root.join("carry-evidence"),
         )
         .unwrap();
-        let binding = scripted_runtime_binding(
-            &fixture.workspace(),
-            controller,
-            std::sync::Arc::new(ScriptPlan::read(&fixture.script()).unwrap()),
-        )
-        .unwrap()
-        .with_job_host(std::sync::Arc::new(plakous::tools::LocalJobHost::new()));
+        let mut plan = ScriptPlan::read(&fixture.script()).unwrap();
+        plan.profile_effort = Some(plakous::model::ReasoningEffort::Medium);
+        let binding =
+            scripted_runtime_binding(&fixture.workspace(), controller, std::sync::Arc::new(plan))
+                .unwrap()
+                .with_job_host(std::sync::Arc::new(plakous::tools::LocalJobHost::new()));
         let plakous::sessions::CreateSessionOutcome::Created { session: next, .. } = sessions
             .create(
                 plakous::sessions::CreateSessionRequest::new(

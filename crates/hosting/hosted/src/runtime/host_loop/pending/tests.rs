@@ -774,6 +774,7 @@ fn release_hook(
             observe(workflow, boundary);
         }),
         child_runtime: injection.child_runtime.clone(),
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
 }
@@ -1077,6 +1078,7 @@ fn a_quota_exhausted_root_turn_writes_one_live_pause_line() {
             }),
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
+            profile_route: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
         });
     };

@@ -119,6 +119,7 @@ impl LongWork {
             rebind_target: target,
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
+            profile_route: None,
             rebind_builds: Mutex::new(Vec::new()),
         }))
     }
@@ -354,6 +355,7 @@ fn exited_child_output_over_8192_commits_and_reopens_without_recovery_required()
         rebind_target: target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: Mutex::new(Vec::new()),
     });
     let events = drive_injected_binding_host(
@@ -440,6 +442,7 @@ fn account_injection(
         rebind_target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: Mutex::new(Vec::new()),
     }))
 }
@@ -953,23 +956,7 @@ fn profile_home(
 }
 
 fn profile_ready_catalog() -> plakous_host_protocol::views::ReadyCatalog {
-    vec![plakous_host_protocol::views::ProviderSection {
-        account: "codex".to_owned(),
-        label: "codex".to_owned(),
-        ready: true,
-        entries: ["offline-loopback-v1", "binding-b-model"]
-            .into_iter()
-            .map(|model| plakous_host_protocol::views::ModelEntry {
-                id: model.to_owned(),
-                tag: "offline exact binding".to_owned(),
-                reasoning: true,
-                effort_options: vec!["low".to_owned(), "medium".to_owned()],
-                extras: Vec::new(),
-                unavailable_reason: None,
-            })
-            .collect(),
-    }]
-    .into()
+    crate::profile_test_catalog::ready_catalog(&["offline-loopback-v1", "binding-b-model"])
 }
 
 fn profile_outcome(

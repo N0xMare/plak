@@ -546,6 +546,7 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                         scripted_runtime_binding(workspace, controller, plan)
                             .map_err(|error| error.to_string())
                     })),
+                    profile_route: None,
                     rebind_builds: std::sync::Mutex::new(Vec::new()),
                 });
             },
@@ -1438,6 +1439,7 @@ fn with_scripted_mail_fixture(
                 }),
                 observe: Arc::new(|_, _| {}),
                 child_runtime: None,
+                profile_route: None,
                 rebind_builds: std::sync::Mutex::new(Vec::new()),
             });
             config.compaction_enabled = true;

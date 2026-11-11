@@ -4,7 +4,7 @@ use super::crash::dispatches;
 use super::*;
 use std::time::Instant;
 
-fn seeded(fixture: &Fixture, host: &Host) -> (Client, String, NodeAddress, u64) {
+pub(super) fn seeded(fixture: &Fixture, host: &Host) -> (Client, String, NodeAddress, u64) {
     let mut client = Client::connect(host);
     let Outcome::Ok(Answer::Created { session, node, .. }) =
         client.request(1, new_session(&fixture.workspace()))
@@ -59,7 +59,7 @@ fn one_terminal(fixture: &Fixture, source: &str) {
     ));
 }
 
-fn history_preserved(fixture: &Fixture, target: &str) {
+pub(super) fn history_preserved(fixture: &Fixture, target: &str) {
     let document = fixture.root.join("rebound-export.json");
     let exported = fixture
         .command()
@@ -80,9 +80,14 @@ fn history_preserved(fixture: &Fixture, target: &str) {
 
 #[test]
 fn host_binding_requests_preserve_history_without_another_paid_turn() {
-    for rebind in [false, true] {
+    for (rebind, tree) in [(false, false), (true, false), (false, true), (true, true)] {
         let Some(fixture) = fixture() else { return };
-        fixture.write_script(&json!({"version":1,"steps":[{"output":{"text":ANSWER}}]}));
+        fixture.write_script(&json!({
+            "version": 1,
+            "tree": tree,
+            "durable_tree": tree,
+            "steps": [{"output": {"text": ANSWER}}]
+        }));
         let mut host = start(&fixture);
         let (mut client, source, _, attachment) = seeded(&fixture, &host);
         let outcome = client.request(5, change(attachment, rebind));
@@ -104,6 +109,7 @@ fn host_binding_requests_preserve_history_without_another_paid_turn() {
             .iter()
             .find(|row| row.residency == SessionResidency::Resident)
             .unwrap();
+        assert_eq!(target.node, node, "directory and moved disagree");
         assert_eq!(target.session == source, !rebind);
         history_preserved(&fixture, &target.session);
         assert_eq!(dispatches(&fixture), 1);

@@ -191,6 +191,7 @@ pub(super) fn fresh_injected_attached_host_for<P: plakous_host_protocol::Protoco
         rebind_target: target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let mut session = SessionRecord::new(workspace.clone());
@@ -298,6 +299,7 @@ pub(super) fn overflow_injected_attached_host(
         rebind_target: target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let mut session = SessionRecord::new(workspace.clone());

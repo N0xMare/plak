@@ -156,6 +156,7 @@ fn rebind_runtime(
         rebind_target: target,
         observe: std::sync::Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     })
 }

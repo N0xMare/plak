@@ -71,7 +71,7 @@ pub(super) fn script_descriptor(
         descriptor = adapted;
     }
     if script.omit_context_contract {
-        return Ok(ResolvedModelDescriptor::new_custom(
+        descriptor = ResolvedModelDescriptor::new_custom(
             descriptor.protocol().clone(),
             descriptor.route().clone(),
             descriptor.requested_model().clone(),
@@ -79,9 +79,62 @@ pub(super) fn script_descriptor(
             descriptor.model_family().cloned(),
             ModelAdapterProfileId::new("offline-loopback-adapter-v1")?,
             descriptor.capabilities().clone(),
-        ));
+        );
     }
-    Ok(descriptor)
+    profile_descriptor(descriptor, script)
+}
+
+pub(super) fn profile_descriptor(
+    descriptor: ResolvedModelDescriptor,
+    script: &ScriptPlan,
+) -> HarnessResult<ResolvedModelDescriptor> {
+    if script.profile_effort.is_none() {
+        return Ok(descriptor);
+    }
+    let mut features = descriptor.capabilities().features().clone();
+    features.insert(
+        Capability::Reasoning,
+        FeatureSupport::new(
+            Support::Native,
+            CapabilityConstraints::default(),
+            FactProvenance::new(FactSource::TestFixture, fixture_time()?, None),
+        ),
+    );
+    let namespace = NamespaceId::new("plakous.compaction")?;
+    let native = descriptor
+        .capabilities()
+        .native_namespace(&namespace)
+        .map(|support| (namespace, support.clone()))
+        .into_iter()
+        .collect();
+    let capabilities = CapabilitySet::new(features, native);
+    let mut profile =
+        if descriptor.integration_class() == plakous::model::IntegrationClass::Standard {
+            ResolvedModelDescriptor::new(
+                &plakous_model::StandardIntegrationAuthority::release_owned(),
+                descriptor.protocol().clone(),
+                descriptor.route().clone(),
+                descriptor.requested_model().clone(),
+                None,
+                descriptor.model_family().cloned(),
+                descriptor.profile().clone(),
+                capabilities,
+            )
+        } else {
+            ResolvedModelDescriptor::new_custom(
+                descriptor.protocol().clone(),
+                descriptor.route().clone(),
+                descriptor.requested_model().clone(),
+                None,
+                descriptor.model_family().cloned(),
+                descriptor.profile().clone(),
+                capabilities,
+            )
+        };
+    if let Some(contract) = descriptor.context_contract() {
+        profile = profile.with_context_contract(contract.clone());
+    }
+    Ok(profile)
 }
 
 /// [`descriptor_with_projected_input`] over a named protocol family.
@@ -357,6 +410,7 @@ pub fn exited_child_process_runtime_binding(
         account,
         None,
         plakous::model::ToolPresentationMode::Direct,
+        None,
     )?;
     let workspace = Arc::new(WorkspacePolicy::host(workspace, ".")?);
     let builder = AgentBuilder::new(configured, registry, workspace)
@@ -412,6 +466,7 @@ pub fn topology_runtime_binding(
         account,
         None,
         plakous::model::ToolPresentationMode::Direct,
+        None,
     )?;
     let workspace = Arc::new(WorkspacePolicy::host(workspace, ".")?);
     let builder = AgentBuilder::new(configured, registry, workspace)
@@ -528,10 +583,12 @@ pub(super) fn scripted_topology_runtime_binding_inner(
         account,
         None,
         plakous::model::ToolPresentationMode::Direct,
+        script.profile_effort,
     )?;
     let workspace = Arc::new(WorkspacePolicy::host(workspace, ".")?);
     let builder = AgentBuilder::new(configured, registry, workspace)
         .config(scripted_agent_config(script))
+        .request_policy(scripted_request_policy(script))
         .tool_policy(scripted_tool_policy(script))
         .identity_sources(clock, Arc::new(SystemIdGenerator));
     let builder = if script.scheduled_compaction {
@@ -699,6 +756,7 @@ fn loopback_builder(
         definition.clone(),
         account,
         None,
+        None,
     )?;
     let mut registry = ToolRegistryBuilder::default();
     registry.register(ToolRegistration::new(
@@ -854,7 +912,10 @@ pub(super) fn scripted_runtime_binding_with_cursor_inner(
 ) -> HarnessResult<SessionRuntimeBinding> {
     let account = b"offline-loopback-account";
     let descriptor = if matches!(&operation, ScriptedOperation::ArtifactTurn(_)) {
-        artifact_fixture_descriptor(account, script.maximum_projected_input)?
+        profile_descriptor(
+            artifact_fixture_descriptor(account, script.maximum_projected_input)?,
+            script,
+        )?
     } else {
         script_descriptor(account, script)?
     };
@@ -911,11 +972,13 @@ pub(super) fn scripted_runtime_binding_with_cursor_inner(
         account,
         None,
         plakous::model::ToolPresentationMode::Direct,
+        script.profile_effort,
     )?;
     let workspace = Arc::new(WorkspacePolicy::host(workspace, ".")?);
     let builder = AgentBuilder::new(configured, registry, workspace)
         .image_normalizer(Arc::new(ScriptImageNormalizer))
         .config(scripted_agent_config(script))
+        .request_policy(scripted_request_policy(script))
         .tool_policy(scripted_tool_policy(script))
         .identity_sources(
             Arc::new(FixedClock::new(fixture_time()?)),
@@ -992,10 +1055,12 @@ fn scripted_process_runtime_binding(
         account,
         None,
         plakous::model::ToolPresentationMode::Direct,
+        script.profile_effort,
     )?;
     let workspace = Arc::new(WorkspacePolicy::host(workspace, ".")?);
     let builder = AgentBuilder::new(configured, registry, workspace)
         .config(scripted_agent_config(script))
+        .request_policy(scripted_request_policy(script))
         .tool_policy(scripted_tool_policy(script))
         .identity_sources(
             Arc::new(FixedClock::new(fixture_time()?)),
@@ -1038,6 +1103,19 @@ pub(super) fn scripted_agent_config(script: &ScriptPlan) -> plakous::agent::Agen
         .map_or(config, |timeout| {
             config.with_model_cleanup_timeout(std::time::Duration::from_millis(timeout))
         })
+}
+
+pub(super) fn scripted_request_policy(script: &ScriptPlan) -> plakous::agent::AgentRequestPolicy {
+    let reasoning =
+        script
+            .profile_effort
+            .map_or(plakous::model::ReasoningPolicy::Disabled, |effort| {
+                plakous::model::ReasoningPolicy::Enabled {
+                    effort: Some(effort),
+                    requirement: plakous::model::CapabilityRequirement::Required,
+                }
+            });
+    plakous::agent::AgentRequestPolicy::default().with_reasoning(reasoning)
 }
 
 /// The scripted binding that attaches a real Code Mode profile.

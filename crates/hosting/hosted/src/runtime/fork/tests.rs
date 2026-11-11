@@ -63,6 +63,7 @@ fn interrupt_at_canonical_return_saves_resumable_fork_and_allows_another_fork() 
             }
         }),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let state = RefCell::new(InterruptWatchState::default());
@@ -341,6 +342,7 @@ fn a_fork_that_cannot_attach_is_saved_and_the_source_keeps_working() {
         rebind_target: injection.rebind_target.clone(),
         observe: std::sync::Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let store = std::sync::Arc::clone(&config.store);

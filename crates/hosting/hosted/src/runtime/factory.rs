@@ -11,6 +11,12 @@ use plakous::sessions::{
     SessionInputWindow, SessionLocator, SessionRuntimeBinding, SessionTargetBinding,
 };
 
+#[cfg(any(test, feature = "test-support"))]
+pub(super) mod test_rebind;
+#[cfg(not(any(test, feature = "test-support")))]
+#[path = "factory/test_rebind_unavailable.rs"]
+pub(super) mod test_rebind;
+
 /// A construction operation borrows the host only until its result is ready.
 pub type RuntimeFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 

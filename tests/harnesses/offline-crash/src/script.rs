@@ -48,6 +48,9 @@ mod gate_tests {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptPlan {
+    /// Product-selected effort for an offline profile binding, not script data.
+    #[serde(skip)]
+    pub profile_effort: Option<plakous::model::ReasoningEffort>,
     /// Fixture-only host runner windows, in milliseconds, for controlled
     /// link-loss proofs. Ordinary scripts keep production windows.
     #[serde(default)]

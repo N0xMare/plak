@@ -193,6 +193,7 @@ fn production_one_shot_stdout_uses_terminal_text_once_and_retains_exact_transcri
             rebind_target: target,
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
+            profile_route: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
         });
         let store = config.store.clone();
@@ -304,6 +305,7 @@ fn a_tool_bearing_one_shot_turn_reaches_its_answer_through_the_real_face() {
             rebind_target: target,
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
+            profile_route: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
         });
         let mut stdout = Vec::new();
@@ -365,6 +367,7 @@ fn a_run_always_says_which_composition_it_used() {
         rebind_target: target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let mut stdout = Vec::new();
@@ -415,6 +418,7 @@ fn failed_terminal_publication_never_reports_success_and_reopen_publishes_it() {
             runtime: injection.runtime.clone(),
             rebind_target: injection.rebind_target.clone(),
             child_runtime: None,
+            profile_route: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
             observe: Arc::new(move |workflow, boundary| {
                 if workflow == HostWorkflow::RootDelivery && boundary == HostBoundary::TerminalReady
@@ -501,6 +505,7 @@ fn failed_interactive_publication_recovers_in_place_on_the_next_prompt() {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
             if workflow == HostWorkflow::RootDelivery
@@ -699,6 +704,7 @@ fn refusal_one_shot_release_failure_keeps_stdout_empty_and_reports_release() {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
             if workflow == HostWorkflow::SendNow && boundary == HostBoundary::ProductCommitted {
@@ -780,6 +786,7 @@ fn one_shot_terminal_error_is_returned_once_and_keeps_failure_guidance() {
         rebind_target: target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let mut stdout = Vec::new();
@@ -848,6 +855,7 @@ fn one_shot_length_outputs_text_or_retries_empty_then_exits_five() {
             rebind_target: target,
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
+            profile_route: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
         });
         let mut stdout = Vec::new();
@@ -1098,6 +1106,7 @@ fn assistant_stdout_is_sanitized_on_a_terminal_and_exact_on_a_pipe() {
             rebind_target: target,
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
+            profile_route: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
         });
         let mut stdout = Vec::new();
@@ -1138,6 +1147,7 @@ fn failed_terminal_then_successful_quit_handoff_replays_exactly_once() {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
             if workflow == HostWorkflow::RootDelivery
@@ -1210,6 +1220,7 @@ fn inprocess_finalization_recovery(explicit: bool) {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
             if workflow == HostWorkflow::RootDelivery
@@ -1360,6 +1371,7 @@ fn recorded_terminal_uncertain_siblings_reopen_without_notice_or_second_terminal
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
             if workflow == HostWorkflow::RootDelivery && boundary == HostBoundary::TerminalReady {

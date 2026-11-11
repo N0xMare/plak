@@ -542,6 +542,7 @@ fn root_transient_canonical_failure_continues_in_a_new_turn() {
         }),
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let (sender, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();

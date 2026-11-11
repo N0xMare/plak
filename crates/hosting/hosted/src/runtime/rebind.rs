@@ -18,7 +18,7 @@ use crate::sessions::{self, SessionRecord};
 use crate::{CliFailure, CliResult};
 
 use super::admission::{emit_queue_snapshot, emit_unavailable_context};
-use super::factory::observe_boundary;
+use super::factory::{observe_boundary, test_rebind::registered_target};
 use super::info::{effort_label, send_binding, send_last_user_prompt_at};
 use super::models::{effort_from_config, native_compact_facet, oauth_provider_for_account};
 use super::shell::{api_root_binding, profile_target_selection};
@@ -172,7 +172,9 @@ pub(super) async fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExte
     topology_tree_id: &str,
 ) -> CliResult<ResolvedRebindTarget> {
     let topology_enabled = config.live_topology_enabled()?;
-    if let Some((provider, binding)) = config.runtime_factory.target_binding() {
+    if let Some((provider, binding)) =
+        registered_target(config, account, model, effort, target_selection)?
+    {
         let (parsed_effort, explicit) = effort_from_config(effort);
         if effort.is_some() && !explicit {
             return Err(CliFailure::new("rebind target effort is invalid"));
@@ -985,7 +987,7 @@ fn admit_rebind_effort(
     Ok(())
 }
 
-fn rebind_processing_tier(
+pub(super) fn rebind_processing_tier(
     target_selection: &TargetSelection,
     provider: NativeProvider,
     service_tiers: &[String],

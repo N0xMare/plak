@@ -75,6 +75,7 @@ fn drive_text_turn(
         }),
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let store = config.store.clone();
@@ -201,6 +202,7 @@ fn completed_terminal_wins_a_quit_whose_cancellation_is_refused() {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
             if workflow != HostWorkflow::SendNow {
@@ -360,6 +362,7 @@ fn canonical_release_failure_cannot_be_hidden_by_assistant_done() {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
             if workflow == super::super::HostWorkflow::SendNow
@@ -396,6 +399,7 @@ fn parent_and_child_release_failures_are_both_retained() {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
             if workflow == super::super::HostWorkflow::SendNow

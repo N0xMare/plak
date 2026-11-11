@@ -132,6 +132,7 @@ pub fn run_actual_host(
             );
         }),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let attached_one_shot = actions

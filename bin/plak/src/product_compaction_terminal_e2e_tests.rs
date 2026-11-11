@@ -122,6 +122,7 @@ impl TuiAttacher for CompactionAttacher {
             rebind_target: target,
             observe,
             child_runtime: None,
+            profile_route: None,
             rebind_builds: Mutex::new(Vec::new()),
         });
         crate::product_host::spawn_host_worker(HostConfig {

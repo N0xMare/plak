@@ -206,6 +206,7 @@ pub(super) fn scripted_host_with(
         rebind_target: target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     (config, evidence)

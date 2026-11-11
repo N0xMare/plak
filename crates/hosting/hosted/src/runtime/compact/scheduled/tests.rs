@@ -86,6 +86,7 @@ fn scheduled_length_failure_uses_live_paid_flag_after_a_real_placeholder_commit(
         }),
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     config.compaction_enabled = true;
@@ -621,6 +622,7 @@ fn scheduled_compaction_admits_a_fitting_successor_above_the_occupancy_trigger()
         }),
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     config.compaction_enabled = true;

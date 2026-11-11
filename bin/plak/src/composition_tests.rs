@@ -77,6 +77,7 @@ pub(crate) fn product_injected_attached_host(
         rebind_target: target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let mut session = SessionRecord::new(workspace.clone());
@@ -152,6 +153,7 @@ fn product_overflow_attached_host(
         rebind_target: target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     config.session.account = Some(
@@ -361,6 +363,7 @@ fn scheduled_compaction_failure_keeps_host_worker_alive() {
         rebind_target: target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let session_id = config.session.id.clone();
@@ -572,6 +575,7 @@ fn completed_terminal_outcome_remains_authoritative_when_exit_was_requested() {
             }
         }),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let (actions, events, worker) = spawn_host_worker(config).unwrap();
@@ -876,6 +880,7 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
         rebind_target: initial_target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let mut config = HostConfig {

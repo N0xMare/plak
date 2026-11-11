@@ -367,11 +367,7 @@ fn apply_profile(
         }
     };
     let root = &prepared.root;
-    let ready = facts
-        .catalog
-        .iter()
-        .any(|section| section.ready && section.account == root.account);
-    if !ready {
+    if !profile_route_ready(facts.catalog, &root.account, &root.model) {
         refuse_profile(
             &prepared.id,
             format!("{} is not ready; log in before applying it", root.account),
@@ -438,6 +434,18 @@ fn apply_profile(
         }),
     };
     Some(fork)
+}
+
+fn profile_route_ready(
+    catalog: &[plakous_host_protocol::views::ProviderSection],
+    account: &str,
+    model: &str,
+) -> bool {
+    crate::test_hooks::profile_route_ready(catalog, account, model).unwrap_or_else(|| {
+        catalog
+            .iter()
+            .any(|section| section.ready && section.account == account)
+    })
 }
 
 /// Why the profile cannot apply in this session now: a running turn, or for
@@ -1266,6 +1274,12 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
         let paths = self.paths.clone();
         Box::new(move || {
             crate::presentation::tui_presentation_values(&paths)
+                .map(|(providers, sections)| {
+                    (
+                        providers,
+                        crate::test_hooks::refresh_profile_ready_catalog(sections),
+                    )
+                })
                 .map_err(|error| error.message().to_owned())
         })
     }

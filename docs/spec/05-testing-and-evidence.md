@@ -2092,6 +2092,54 @@ A hook that is requested and unusable refuses the launch; it never falls through
 to a provider, because a gate run that silently tested nothing is worse than a
 failing one.
 
+The same selector on a real `plak host` admits the exact
+`account = "codex"`, `model = "offline-loopback-v1"` route in its Ready
+catalog, with `low` and `medium` effort and no priority tier (Fast is refused
+by the ordinary tier admission). Other routes retain their real
+credential readiness, including other models on `codex`; the injected row
+does not make an unready real model selectable. Profile Switch now, Fork now
+and `/agents <profile>` use the ordinary profile validation, canonical branch
+transition, line/epoch publication and exact reopen, with the scripted runtime
+as their provider transport. No credentials or network are needed. The
+profile's effort is frozen in the scripted provider configuration, so an
+effort change is a real canonical binding change rather than an admission
+shortcut; an unchanged exact runtime is still refused normally. For example,
+under an isolated `PLAK_HOME`, `agents/offline-low.toml` can contain:
+
+```toml
+account = "codex"
+model = "offline-loopback-v1"
+effort = "low"
+composition = "direct"
+description = "offline profile"
+```
+
+`profiles/offline-low.toml` then contains `root = "offline-low"` and
+`working_set = ["offline-worker"]`, with `agents/offline-worker.toml` also
+selecting that exact route (the same template shape suffices). A second
+profile can name another template on the same
+exact route, for example `offline-medium` with `effort = "medium"`. To start
+on that template with profile orchestration enabled, `config.toml` contains:
+
+```toml
+[root]
+agent = "offline-medium"
+[orchestration]
+subagents = true
+```
+
+Launch a binary built with
+the default product features plus `test-hooks`, with `PLAK_TEST_MODEL=offline-loopback-v1` and
+`PLAK_TEST_SCRIPT=/absolute/path/to/script.json`; a minimal script is
+`{"version":1,"repeat_last_step":true,"steps":[{"output":{"text":"offline answer"}}]}`.
+`PLAK_TEST_EVIDENCE=/absolute/path/to/evidence.jsonl` is optional. Isolated
+process fixtures also set `PLAK_TEST_RUNNER_DETACHED=1` so their home-local
+runner does not require an installed user service manager. The
+real-host socket tests cover successful switch/fork, successor reopen and
+unready-route/unsupported-effort refusals without changing the home default.
+These hooks and the scripted runtime factory are absent from the shipped
+default build; they add no persisted or wire vocabulary.
+
 The document is `plakous_offline_crash_harness::script::ScriptPlan`: a version,
 a list of assistant steps, and the fixture dials the compaction ladder needs.
 The test-only `tree_process_tools` dial explicitly adds the standard coding/process

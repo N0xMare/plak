@@ -799,6 +799,7 @@ fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
                 }
             }),
             child_runtime: None,
+            profile_route: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
         });
         let state = RefCell::new(InterruptWatchState::default());

@@ -3842,9 +3842,10 @@ fn assert_leftover_terminal_reopen(fixture: &Fixture, expected: plakous::tools::
         fixture.root.join("leftover-reopen-evidence.jsonl"),
     )
     .unwrap();
-    let plan = Arc::new(
-        serde_json::from_value(process_tool_answer_script("reopen must not dispatch")).unwrap(),
-    );
+    let mut plan: plakous_offline_crash_harness::script::ScriptPlan =
+        serde_json::from_value(process_tool_answer_script("reopen must not dispatch")).unwrap();
+    plan.profile_effort = Some(plakous::model::ReasoningEffort::Medium);
+    let plan = Arc::new(plan);
     let binding = plakous_offline_crash_harness::scripted_runtime_binding(
         &fixture.workspace(),
         controller,

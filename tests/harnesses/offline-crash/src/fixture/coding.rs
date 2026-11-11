@@ -65,7 +65,10 @@ fn scripted_code_mode_runtime_binding_inner(
     extensions: Vec<ToolRegistration>,
 ) -> HarnessResult<SessionRuntimeBinding> {
     let account = b"offline-scripted-code-mode-account";
-    let descriptor = scripted_code_mode_descriptor(account, script.maximum_projected_input)?;
+    let descriptor = super::profile_descriptor(
+        scripted_code_mode_descriptor(account, script.maximum_projected_input)?,
+        script,
+    )?;
     let model = operation.model(controller, account, descriptor.clone(), script)?;
 
     // The Codex minimal catalog plus the two outer markers, which is exactly
@@ -138,6 +141,7 @@ fn scripted_code_mode_runtime_binding_inner(
         account,
         None,
         plakous::model::ToolPresentationMode::LocalCompositionOnly,
+        script.profile_effort,
     )?;
     let attachment = scripted_local_composition_attachment(
         sidecar,
@@ -152,14 +156,17 @@ fn scripted_code_mode_runtime_binding_inner(
     // evaluator, never to the provider, so the harness plan's exposure strategy
     // is `None` and the derived exposure map is empty. The default plan exposes
     // the whole registry, which the agent then finds disagrees with a
-    // configuration that owns only the two markers. This is the same call
-    // `tests/fixtures/facade-consumer/src/embedded.rs` makes.
-    let plan = plakous::construction::compile_local_composition_plan(
-        plakous::agent::HarnessProfileId::new("offline.scripted.code-mode")?,
-        &model,
+    // configuration that owns only the two markers. The explicit profile also
+    // freezes the selected effort instead of the convenience plan's disabled
+    // reasoning default.
+    let plan = plakous::agent::compile_explicit_runtime_profile(
+        &code_mode_profile(script.profile_effort)?,
+        model.as_ref(),
         configured.configuration(),
         &registry,
         &workspace,
+        &plakous::tools::ExecutionBackendDescriptor::local_runner(),
+        Vec::new(),
     )?;
     let builder = AgentBuilder::new(configured, registry, workspace)
         .harness_plan(plan)
@@ -182,6 +189,22 @@ fn scripted_code_mode_runtime_binding_inner(
     Ok(SessionRuntimeBinding::new(
         plakous::agent::attach_local_composition(builder, Some(attachment))?,
     ))
+}
+
+fn code_mode_profile(
+    effort: Option<plakous::model::ReasoningEffort>,
+) -> HarnessResult<plakous::agent::HarnessProfileSpec> {
+    let mut profile = plakous::agent::HarnessProfileSpecBuilder::new()
+        .id(plakous::agent::HarnessProfileId::new(
+            "offline.scripted.code-mode",
+        )?)
+        .tool_exposure_strategy(plakous::agent::ToolExposureStrategy::None);
+    if let Some(effort) = effort {
+        profile = profile
+            .reasoning_strategy(plakous::agent::ReasoningPreferenceStrategy::PreferEffort)
+            .preferred_reasoning_effort(Some(effort));
+    }
+    Ok(profile.build()?)
 }
 
 fn scripted_local_composition_attachment(
@@ -520,6 +543,7 @@ fn text_scenario_runtime_binding_for_target(
         account,
         NonZeroU32::new(1_024),
         plakous::model::ToolPresentationMode::Direct,
+        None,
     )?;
     let builder = AgentBuilder::new(
         configured,
@@ -559,6 +583,7 @@ pub fn terminal_failure_runtime_binding(
         account,
         NonZeroU32::new(1_024),
         plakous::model::ToolPresentationMode::Direct,
+        None,
     )?;
     let builder = AgentBuilder::new(
         configured,
@@ -728,6 +753,7 @@ fn projected_coding_builder(
         account,
         None,
         plakous::model::ToolPresentationMode::Direct,
+        None,
     )?;
     let effective = configured.configuration().effective();
     let facts = effective.descriptor();
@@ -797,6 +823,7 @@ fn compaction_runtime_binding_with_projected_input_inner(
         )?,
         account,
         Some(SEMANTIC_COMPACTION_MAX_OUTPUT_TOKENS),
+        None,
     )?;
     let registry = ToolRegistryBuilder::default().freeze();
     let workspace = Arc::new(WorkspacePolicy::host(workspace, ".")?);
@@ -818,6 +845,7 @@ pub(super) fn configured_model(
     tool: ToolDefinition,
     account: &[u8],
     output_bound: Option<NonZeroU32>,
+    profile_effort: Option<plakous::model::ReasoningEffort>,
 ) -> HarnessResult<ConfiguredLanguageModel> {
     configured_model_with_tools(
         model,
@@ -826,6 +854,7 @@ pub(super) fn configured_model(
         account,
         output_bound,
         plakous::model::ToolPresentationMode::Direct,
+        profile_effort,
     )
 }
 
@@ -836,6 +865,7 @@ pub(super) fn configured_model_with_tools(
     account: &[u8],
     output_bound: Option<NonZeroU32>,
     tool_mode: plakous::model::ToolPresentationMode,
+    profile_effort: Option<plakous::model::ReasoningEffort>,
 ) -> HarnessResult<ConfiguredLanguageModel> {
     let tools = tools
         .into_iter()
@@ -854,6 +884,7 @@ pub(super) fn configured_model_with_tools(
         account,
         output_bound,
         tool_mode,
+        profile_effort,
     )
 }
 
@@ -896,6 +927,7 @@ pub(super) fn configured_model_with_configured_tools(
     account: &[u8],
     output_bound: Option<NonZeroU32>,
     tool_mode: plakous::model::ToolPresentationMode,
+    profile_effort: Option<plakous::model::ReasoningEffort>,
 ) -> HarnessResult<ConfiguredLanguageModel> {
     let (account_binding, credential_binding) = authority_bindings(account)?;
     let authority = RuntimeModelAuthority::new(
@@ -909,7 +941,10 @@ pub(super) fn configured_model_with_configured_tools(
     let behavior = ProviderBehaviorConfiguration {
         processing_tier: plakous::model::ProcessingTierDisposition::Standard,
         tool_mode,
-        reasoning_effort: ReasoningEffortDisposition::Disabled,
+        reasoning_effort: profile_effort.map_or(
+            ReasoningEffortDisposition::Disabled,
+            ReasoningEffortDisposition::Enabled,
+        ),
         reasoning_summary: ReasoningSummaryDisposition::Omit,
         reasoning_include: ReasoningIncludeDisposition::Omit,
         replay: ReplayDisposition::Disabled,

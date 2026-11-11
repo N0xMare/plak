@@ -56,6 +56,7 @@ fn compacting_config(
         }),
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: Mutex::new(Vec::new()),
     });
     config.compaction_enabled = true;
@@ -247,6 +248,7 @@ fn compaction_error_wins_over_a_deferred_quit_and_keeps_its_pause_cause() {
         }),
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
+        profile_route: None,
         rebind_builds: Mutex::new(Vec::new()),
     });
     let (wire, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();

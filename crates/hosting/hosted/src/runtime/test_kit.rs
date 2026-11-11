@@ -703,6 +703,9 @@ pub async fn child_feed(
 pub struct ScriptedRuntimeFactory {
     pub runtime: Arc<dyn Fn(RuntimeRole) -> Result<SessionRuntimeBinding, String> + Send + Sync>,
     pub rebind_target: SessionTargetBinding,
+    /// An exact account/model whose profile transitions use this transport.
+    /// `None` retains the unrestricted in-process fixture registration.
+    pub profile_route: Option<Arc<ScriptedProfileRoute>>,
     pub observe: Arc<dyn Fn(HostWorkflow, HostBoundary) + Send + Sync>,
     /// A child's binding, given the real binder's scoped construction roots.
     /// `None` retains the real child route rather than borrowing another host's
@@ -710,6 +713,35 @@ pub struct ScriptedRuntimeFactory {
     pub child_runtime: Option<Arc<ScriptedChildBinding>>,
     /// Topology attachment choices observed by scripted rebind builds.
     pub rebind_builds: Mutex<Vec<crate::topology_runtime::TopologyHubAttach>>,
+}
+
+/// One exact scripted profile route and its effort-aware transport builder.
+pub struct ScriptedProfileRoute {
+    account: String,
+    model: String,
+    runtime: Arc<ScriptedProfileRuntime>,
+    target_effort: Mutex<Option<plakous::agent::ReasoningEffort>>,
+}
+
+/// The runtime compiled for one profile's admitted effort.
+pub type ScriptedProfileRuntime = dyn Fn(
+        RuntimeRole,
+        Option<plakous::agent::ReasoningEffort>,
+    ) -> Result<SessionRuntimeBinding, String>
+    + Send
+    + Sync;
+
+impl ScriptedProfileRoute {
+    /// Register a credential-free route without changing other registrations.
+    #[must_use]
+    pub fn new(account: String, model: String, runtime: Arc<ScriptedProfileRuntime>) -> Arc<Self> {
+        Arc::new(Self {
+            account,
+            model,
+            runtime,
+            target_effort: Mutex::new(None),
+        })
+    }
 }
 
 impl ScriptedRuntimeFactory {
@@ -721,6 +753,7 @@ impl ScriptedRuntimeFactory {
         Arc::new(Self {
             runtime: Arc::clone(&self.runtime),
             rebind_target: self.rebind_target.clone(),
+            profile_route: self.profile_route.clone(),
             observe: Arc::new(move |workflow, boundary| {
                 if workflow == HostWorkflow::SourceRelease {
                     thread::sleep(delay);
@@ -824,6 +857,60 @@ pub fn take_scripted<P: plakous_host_protocol::ProtocolExtension>(
         .unwrap_or_else(|_| panic!("scripted route"))
 }
 impl ScriptedRuntimeFactory {
+    pub(super) fn target_binding_for(
+        &self,
+        account: &str,
+        model: &str,
+        selection: &crate::binding::TargetSelection,
+        effort: Option<plakous::agent::ReasoningEffort>,
+    ) -> CliResult<Option<(plakous::subscriptions::NativeProvider, SessionTargetBinding)>> {
+        if !self.accepts_profile_route(account, model) {
+            return Ok(None);
+        }
+        if let Some(route) = &self.profile_route {
+            super::rebind::rebind_processing_tier(
+                selection,
+                plakous::subscriptions::NativeProvider::Codex,
+                &[],
+            )?;
+            *route
+                .target_effort
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = effort;
+            let runtime = (route.runtime)(RuntimeRole::Rebind, effort).map_err(CliFailure::new)?;
+            return Ok(Some((
+                plakous::subscriptions::NativeProvider::Codex,
+                runtime.target_binding(),
+            )));
+        }
+        Ok(Some((
+            plakous::subscriptions::NativeProvider::Codex,
+            self.rebind_target.clone(),
+        )))
+    }
+    fn accepts_profile_route(&self, account: &str, model: &str) -> bool {
+        self.profile_route
+            .as_ref()
+            .is_none_or(|route| account == route.account && model == route.model)
+    }
+
+    fn serves_profile_spec(&self, spec: &ProductAgentSpec) -> bool {
+        self.profile_route.is_some()
+            && self.accepts_profile_route(
+                spec.account.as_str(),
+                spec.resolved.selected_model().as_str(),
+            )
+    }
+
+    fn remember_profile_effort(&self, effort: Option<plakous::agent::ReasoningEffort>) {
+        if let Some(route) = &self.profile_route {
+            *route
+                .target_effort
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = effort;
+        }
+    }
+
     fn role<P: plakous_host_protocol::ProtocolExtension>(config: &HostConfig<P>) -> RuntimeRole {
         if config.session.account.as_deref() == Some("offline-rebind") {
             RuntimeRole::Rebind
@@ -836,7 +923,21 @@ impl ScriptedRuntimeFactory {
         config: &HostConfig<P>,
         role: RuntimeRole,
     ) -> CliResult<SessionRuntimeBinding> {
-        (self.runtime)(role)
+        let runtime = match &self.profile_route {
+            Some(route) => {
+                let effort = if role == RuntimeRole::Rebind {
+                    *route
+                        .target_effort
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                } else {
+                    config.effort
+                };
+                (route.runtime)(role, effort)
+            }
+            None => (self.runtime)(role),
+        };
+        runtime
             .map(|runtime| {
                 runtime.with_job_host(config.state_roots.job_registry().for_agent("root", "root"))
             })
@@ -989,11 +1090,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
         locator: SessionLocator,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> {
-        if spec.is_some() {
+        if spec.is_some_and(|spec| !self.serves_profile_spec(spec)) {
             return super::ProductionRuntimeFactory
                 .open_rebind_target(config, record, spec, locator, stderr);
         }
-        Box::pin(self.open_binding(config, locator, RuntimeRole::Rebind))
+        Box::pin(async move {
+            if self.profile_route.is_some() {
+                let effort = if let Some(spec) = spec {
+                    spec.effort
+                } else {
+                    super::models::effort_from_record(record.effort.as_deref())?.or(config.effort)
+                };
+                self.remember_profile_effort(effort);
+            }
+            self.open_binding(config, locator, RuntimeRole::Rebind)
+                .await
+        })
     }
     fn fork_runtime<'a>(
         &'a self,
@@ -1013,7 +1125,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
         native_target: bool,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, (CliResult<SessionRuntimeBinding>, Option<String>)> {
-        if spec.is_some() {
+        if spec.is_some_and(|spec| !self.serves_profile_spec(spec)) {
             return super::ProductionRuntimeFactory.rebind_runtime(
                 config,
                 spec,
@@ -1021,6 +1133,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
                 native_target,
                 stderr,
             );
+        }
+        if let Some(spec) = spec {
+            self.remember_profile_effort(spec.effort);
         }
         if native_target {
             self.rebind_builds
@@ -1366,6 +1481,54 @@ pub fn stop_ticket() -> plakous_host_protocol::StopTicket {
 #[allow(clippy::unwrap_used, reason = "deterministic factory-boundary fixture")]
 mod factory_boundary_tests {
     use super::*;
+    #[test]
+    fn a_profile_registration_only_substitutes_its_exact_route() {
+        let home = tempfile::tempdir().unwrap();
+        let (_, scripted) = super::super::test_support::fresh_injected_attached_host(home.path());
+        let mut scoped = scripted.with_source_release_delay(Duration::ZERO);
+        let runtime = Arc::clone(&scripted.runtime);
+        Arc::get_mut(&mut scoped).unwrap().profile_route = Some(ScriptedProfileRoute::new(
+            "codex".to_owned(),
+            "offline-loopback-v1".to_owned(),
+            Arc::new(move |role, _| runtime(role)),
+        ));
+        let factory = &*scoped;
+        let standard = crate::binding::TargetSelection::Native;
+        assert!(
+            factory
+                .target_binding_for("codex", "offline-loopback-v1", &standard, None)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            factory
+                .target_binding_for("codex", "real-model", &standard, None)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            factory
+                .target_binding_for("claude", "offline-loopback-v1", &standard, None)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            factory
+                .target_binding_for(
+                    "codex",
+                    "offline-loopback-v1",
+                    &crate::binding::TargetSelection::NativePriority,
+                    None,
+                )
+                .is_err()
+        );
+        let cloned = scoped.with_source_release_delay(Duration::ZERO);
+        assert!(Arc::ptr_eq(
+            cloned.profile_route.as_ref().unwrap(),
+            scoped.profile_route.as_ref().unwrap()
+        ));
+    }
+
     #[test]
     fn absent_child_and_turn_observers_do_not_inherit_another_registration() {
         let home = tempfile::tempdir().unwrap();

@@ -186,6 +186,7 @@ impl TuiAttacher for OfflineAttacher {
             rebind_target: target,
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
+            profile_route: None,
             rebind_builds: Mutex::new(Vec::new()),
         });
         let model_id = if profile_fork {

@@ -138,6 +138,8 @@ mod product_subscription_usage;
 mod product_telemetry;
 #[cfg(all(test, unix, feature = "tui"))]
 mod product_terminal_e2e_tests;
+#[cfg(any(test, feature = "test-hooks"))]
+mod profile_test_catalog;
 #[doc(hidden)]
 pub mod shell;
 #[doc(hidden)]
@@ -148,6 +150,19 @@ pub mod telemetry_store;
 mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]
 mod test_hooks {
+    pub(crate) const fn profile_route_ready(
+        _catalog: &[plakous_host_protocol::views::ProviderSection],
+        _account: &str,
+        _model: &str,
+    ) -> Option<bool> {
+        None
+    }
+    pub(crate) fn refresh_profile_ready_catalog(
+        sections: Vec<plakous_host_protocol::views::ProviderSection>,
+    ) -> Vec<plakous_host_protocol::views::ProviderSection> {
+        sections
+    }
+
     #[allow(dead_code, reason = "only builds with the host select startup inputs")]
     pub(crate) fn host_start_environment() -> Vec<(&'static str, std::ffi::OsString)> {
         Vec::new()
