@@ -5762,10 +5762,18 @@ settles asynchronously after endpoint binding, before local admission.
   `plak host: continuing session <id>`; the open runs the continuation as
   any open does (chapter 03 §14.1), once, and the session stays resident
   while anything keeps it. A stop ends the scan. A stopped root, or one
-  holding for Resume under `hold`, is not opened. A sub-agent's handoff
-  under an idle root, and a crashed host's turn whose loss no open has
-  recorded yet, are not found by the scan: they continue, or hold, at the
-  session's next open.
+  holding for Resume under `hold`, is not opened for that root alone.
+  The scan also reads persisted trees, independently of root interrupt rows:
+  an eligible child handoff (held or pending, not already running) owes an
+  open of the tree's current product-session head even when its root is idle.
+  The normal parent-tree open continues that child once, with no client
+  attachment; the existing attempt ceiling and continuation authority still
+  decide eligibility. Archived heads are not opened, and predecessor sessions
+  are not substituted for them. The scan rechecks eligibility before every
+  retry, so a later stop or settled handoff withdraws the open. It reports
+  `plak host: continuation scan complete` after this pass. A child without a
+  recorded handoff does not itself cause an eager open; a crashed host's turn
+  whose loss no open has recorded yet is still found only at the next open.
 Standalone remote import composes the same runner registry and recovery probes on
 a process-owned executor. It retains exclusive home runner custody through the
 operation and its admitted probes; serving hosts retain shared custody across their

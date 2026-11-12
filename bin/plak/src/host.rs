@@ -335,6 +335,7 @@ fn scan(
     scanning: Arc<std::sync::atomic::AtomicBool>,
 ) {
     if owed.is_empty() {
+        eprintln!("plak host: continuation scan complete");
         return;
     }
     let host = Arc::clone(host);
@@ -403,6 +404,7 @@ fn scan(
         drop(pending);
         host.changed();
         scanning.store(false, std::sync::atomic::Ordering::Release);
+        eprintln!("plak host: continuation scan complete");
     });
 }
 

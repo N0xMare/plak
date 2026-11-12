@@ -1752,6 +1752,7 @@ fn a_stop_is_answered_after_its_attachment_detaches() {
 }
 
 mod bridge;
+mod child_continuation;
 mod crash;
 mod profiles;
 mod reload;

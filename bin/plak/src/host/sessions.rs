@@ -19,8 +19,10 @@ use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::host_service::AttachmentCount;
 use plakous_hosted::host_service::wire::{Created, HostSessions, OpenedSession, session_root_of};
 use plakous_hosted::runtime::{IDLE_RELEASE, IdleRelease, RootStanding, spawn_host_worker};
-use plakous_recursive_subagents::tree::holder_elsewhere;
-use plakous_recursive_subagents_store::SqliteTreeStore;
+use plakous_recursive_subagents::tree::{
+    ContinuationCause, LossContinuationState, ProductAgentTree, TreeStore, holder_elsewhere,
+};
+use plakous_recursive_subagents_store::{SqliteTreeStore, TreeInspection};
 
 use crate::shell::services::Services;
 use crate::store::ProductStore;
@@ -223,7 +225,7 @@ impl ProductSessions {
         let roster = tree
             .ok()
             .flatten()
-            .map(plakous_recursive_subagents::tree::ProductAgentTree::reopen)
+            .map(ProductAgentTree::reopen)
             .map(|tree| tree.current_epoch().clone());
         let profile = config
             .zip(record)
@@ -302,6 +304,23 @@ const fn owes_open(standing: RootStanding, continue_losses: bool) -> bool {
     }
 }
 
+/// Read the same bounded continuation authority the parent-tree open consumes;
+/// inspecting it never takes custody or admits a child turn.
+fn child_handoff_owed(paths: &crate::home::paths::PlakPaths, tree_id: &str) -> CliResult<bool> {
+    let observed = SqliteTreeStore::inspect(&paths.subagents_database(), tree_id)
+        .map_err(|error| CliFailure::new(error.message()))?;
+    let TreeInspection::Tree(persisted) = observed else {
+        return Ok(false);
+    };
+    Ok(ProductAgentTree::reopen(*persisted)
+        .loss_continuations()
+        .into_iter()
+        .any(|(_, continuation)| {
+            continuation.cause == ContinuationCause::Handoff
+                && continuation.state != LossContinuationState::Running
+        }))
+}
+
 impl ProductSessions {
     /// The sessions the host-start scan opens (spec 02 §4.6), among the
     /// uncapped recovery candidates, newest first.
@@ -315,16 +334,50 @@ impl ProductSessions {
             .resume_after_loss
             == Some(crate::product_config::ResumeAfterLoss::Continue);
         let store = self.services.session_records()?;
-        let entries = self
+        let mut entries = self
             .with_product(|product| product.continuation_candidates())
             .map_err(CliFailure::new)?;
-        Ok(entries
-            .into_iter()
-            .filter(|id| {
-                plakous_hosted::runtime::root_standing(store.as_ref(), id)
+        let paths = self.services.paths()?;
+        for tree_id in self
+            .tree
+            .ids()
+            .map_err(|error| CliFailure::new(error.detail))?
+        {
+            if child_handoff_owed(paths, &tree_id)?
+                && let Some(session) = self
+                    .with_product(|product| product.head_of_tree(&tree_id))
+                    .map_err(CliFailure::new)?
+            {
+                entries.push(session);
+            }
+        }
+        entries.sort();
+        entries.dedup();
+        let mut owed = Vec::new();
+        for id in entries {
+            let Ok(record) = store.load(&id) else {
+                continue;
+            };
+            if !record.archived
+                && (plakous_hosted::runtime::root_standing(store.as_ref(), &id)
                     .is_ok_and(|standing| owes_open(standing, continue_losses))
-            })
-            .collect())
+                    || (self
+                        .with_product(|product| product.head_of_tree(&record.node.tree_id))
+                        .map_err(CliFailure::new)?
+                        .as_deref()
+                        == Some(id.as_str())
+                        && child_handoff_owed(paths, &record.node.tree_id)?))
+            {
+                owed.push(record);
+            }
+        }
+        owed.sort_by(|left, right| {
+            right
+                .updated_at_unix
+                .cmp(&left.updated_at_unix)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Ok(owed.into_iter().map(|record| record.id).collect())
     }
 }
 
@@ -337,7 +390,8 @@ pub(super) fn continuation_owed(services: &Services, id: &str) -> CliResult<bool
     if !product.session_exists(id).map_err(CliFailure::new)? {
         return Ok(false);
     }
-    if product.load(id).map_err(CliFailure::new)?.archived {
+    let record = product.load(id).map_err(CliFailure::new)?;
+    if record.archived {
         return Ok(false);
     }
     let continue_losses = crate::product_config::ProductConfig::load(paths)
@@ -346,7 +400,13 @@ pub(super) fn continuation_owed(services: &Services, id: &str) -> CliResult<bool
         == Some(crate::product_config::ResumeAfterLoss::Continue);
     let store = services.session_records()?;
     let standing = plakous_hosted::runtime::root_standing(store.as_ref(), id)?;
-    Ok(owes_open(standing, continue_losses))
+    Ok(owes_open(standing, continue_losses)
+        || (product
+            .head_of_tree(&record.node.tree_id)
+            .map_err(CliFailure::new)?
+            .as_deref()
+            == Some(id)
+            && child_handoff_owed(paths, &record.node.tree_id)?))
 }
 
 /// What a dormant row's activity is by its root's durable intents.

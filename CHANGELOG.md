@@ -27,6 +27,10 @@ one cross-build carrier (a build imports its own and the previous version).
   request gains `acknowledge_recovery`, and the stored send receipt gains an
   optional `recovery_warning` field; no table, export-document or frame change.
 
+- Continue recorded child handoffs at host startup even when their parent
+  root was idle, without waiting for a client to attach. Unhanded-off children
+  do not cause an eager open.
+
 - Fixed workspace reads returning stale cached bytes after a same-size rewrite.
 - Fixed pending child decisions not being offered when the child's read model
   first attaches.

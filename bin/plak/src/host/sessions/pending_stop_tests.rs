@@ -3,6 +3,63 @@ use super::*;
 struct NoAdmission;
 
 #[test]
+fn child_handoff_selects_only_the_current_unarchived_head_without_root_intents() {
+    use plakous_hosted::agent_tree_protocol::{SpawnAgentRequest, WriterMode};
+    let (temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let services = Services::for_home(paths.clone());
+    let mut product = ProductStore::open(&paths).unwrap();
+    let mut record = crate::store::sessions::SessionRecord::new(temporary.path().join("workspace"));
+    std::fs::create_dir_all(&record.workspace_root).unwrap();
+    product.commit(&mut record).unwrap();
+    let mut tree = ProductAgentTree::bootstrap_root_for_test(
+        &record.id,
+        "root",
+        "owner",
+        record.workspace_root.clone(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    tree.pin_bind_hints_for_test(crate::roster_input::product_bind_hints());
+    let mut binding = plakous_hosted::orchestration::RosterBinding::leaf("codex", "selected-tuple");
+    binding.max_tier = plakous_hosted::agent_tree_protocol::Tier::ReadOnly;
+    tree.pin_template("review", binding);
+    let child = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .unwrap()
+        .agent_id;
+    tree.bind_session_locator(&child, "locator").unwrap();
+    tree.set_active_turn(&child, true).unwrap();
+    tree.bind_attempt_turn(&child, "00000000-0000-0000-0000-000000000001")
+        .unwrap();
+    tree.release_attempt_turn(&child).unwrap();
+    tree.park_child(&child, Vec::new()).unwrap();
+    crate::store::tree::save_tree(&paths, &mut tree).unwrap();
+    let sessions = ProductSessions::new(&services, None, None).unwrap();
+    assert_eq!(sessions.owed().unwrap(), Vec::<String>::new());
+    assert!(!continuation_owed(&services, &record.id).unwrap());
+    tree.record_handoff().unwrap();
+    crate::store::tree::save_tree(&paths, &mut tree).unwrap();
+    assert_eq!(
+        product.continuation_candidates().unwrap(),
+        Vec::<String>::new()
+    );
+    assert_eq!(sessions.owed().unwrap(), vec![record.id.clone()]);
+    assert!(continuation_owed(&services, &record.id).unwrap());
+    let mut successor = crate::store::sessions::SessionRecord::new(record.workspace_root.clone());
+    successor.node = record.node.clone();
+    successor.source_product_session_id = Some(record.id.clone());
+    successor.source_workflow_operation_id = Some("plak:switch:child-handoff-test".into());
+    product.commit(&mut successor).unwrap();
+    assert_eq!(sessions.owed().unwrap(), vec![successor.id.clone()]);
+    assert!(!continuation_owed(&services, &record.id).unwrap());
+    assert!(continuation_owed(&services, &successor.id).unwrap());
+    product.set_archived(&successor.id, true).unwrap();
+    assert_eq!(sessions.owed().unwrap(), Vec::<String>::new());
+    assert!(!continuation_owed(&services, &successor.id).unwrap());
+}
+
+#[test]
 fn continuation_retry_rechecks_loss_policy_archive_and_deletion() {
     use plakous_hosted::sessions::projector::{
         RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
