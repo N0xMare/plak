@@ -51,6 +51,7 @@ mod controller;
 mod driver;
 mod jobs;
 mod mail;
+mod parent_recovery;
 mod refresh;
 mod registrations;
 mod spawn;

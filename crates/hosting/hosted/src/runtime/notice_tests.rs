@@ -42,6 +42,7 @@ fn child_mail_preempts_a_waiting_process_in_a_root_turn() {
             tree.send_agent_message(
                 &child,
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: tree.root_agent_id.clone(),
                     purpose: Some(MessagePurpose::Question),
@@ -152,6 +153,7 @@ fn send_question(hub: &crate::topology_runtime::ProductTopologyRuntime) {
         tree.send_agent_message(
             &child,
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: tree.root_agent_id.clone(),
                 purpose: Some(MessagePurpose::Question),

@@ -18,6 +18,7 @@ mod cancel;
 mod driver;
 mod jobs;
 mod mail;
+mod parent_recovery;
 mod registrations;
 mod spawn;
 mod wait;
@@ -594,6 +595,7 @@ fn jj_persist_fixture() -> (tempfile::TempDir, Arc<dyn TreeStore>, ProductAgentT
 
 fn send_request(agent_id: &str, message: &str, priority: Option<MessagePriority>) -> Value {
     serde_json::to_value(SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: agent_id.into(),
         message: message.into(),

@@ -1099,6 +1099,7 @@ async fn sqlite_followup_open_save_and_withdrawal_cuts_rebuild_remaining_inputs(
         .send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: child.clone(),
                 message: "again".into(),
@@ -1202,6 +1203,7 @@ async fn sqlite_followup_open_save_and_withdrawal_cuts_rebuild_remaining_inputs(
         .send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: child.clone(),
                 message: "later Start".into(),
@@ -1315,6 +1317,7 @@ fn pruned_closed_attempt_result_is_not_pushed_again_after_view_deletion() {
                 .send_agent_message(
                     &sender.agent_id,
                     &SendAgentMessageRequest {
+                        acknowledge_recovery: None,
                         refresh: None,
                         agent_id: "root".to_owned(),
                         message: format!("later {index}"),
@@ -2288,6 +2291,7 @@ fn both_deletion_paths_reset_mail_and_return_receipts_and_rebuild_identically() 
             live.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: child.clone(),
                     message: text.to_owned(),

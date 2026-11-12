@@ -12,9 +12,10 @@ impl ProductAgentTree {
     /// its turn already ended (an interrupt cancels a turn,
     /// not the node). A running child is not re-tasked — `priority=urgent`
     /// steers the turn it is already in, and a second brief on a live turn
-    /// would silently replace the first. `Closed` and `RecoveryRequired` can
-    /// never run again, and neither can a failed spawn that never produced a
-    /// session: there is nothing to re-task.
+    /// would silently replace the first. A parent-acknowledged recovered hold
+    /// may be superseded only after session recovery settles and no owner or
+    /// pending continuation remains. Closed nodes and unresolved recovery are
+    /// refused, as is a spawn that never produced a session.
     #[allow(
         clippy::too_many_lines,
         reason = "followup admission validates schema, budget, workspace and prior attempt state before installing its rollback boundary"
@@ -25,6 +26,7 @@ impl ProductAgentTree {
         status: NodeStatus,
         active_turn: bool,
         output_schema_json: Option<&str>,
+        acknowledge_recovery: Option<&AttemptId>,
     ) -> Result<(String, String), TopologyError> {
         if self
             .nodes
@@ -57,9 +59,10 @@ impl ProductAgentTree {
             NodeStatus::Completed | NodeStatus::Failed if !active_turn => {}
             NodeStatus::Interrupted
                 if !active_turn
-                    && self
+                    && (self
                         .current_attempt(agent_id)
-                        .is_none_or(|attempt| attempt.turn_id.is_none()) => {}
+                        .is_none_or(|attempt| attempt.turn_id.is_none())
+                        || self.acknowledged_hold_is_settled(agent_id, acknowledge_recovery)) => {}
             NodeStatus::Closed => {
                 return Err(TopologyError::new(
                     TopologyErrorCode::FollowupClosed,
@@ -73,7 +76,28 @@ impl ProductAgentTree {
             NodeStatus::RecoveryRequired => {
                 return Err(TopologyError::new(
                     TopologyErrorCode::FollowupRecoveryRequired,
-                    "recipient requires recovery before another attempt can be admitted",
+                    "recipient requires recovery before another attempt can be admitted; its \
+                     parent may acknowledge that a tool may have changed this workspace by \
+                     setting acknowledge_recovery to the current attempt_id on a followup",
+                ));
+            }
+            NodeStatus::Interrupted
+                if acknowledge_recovery.is_none()
+                    && self.loss_for_fresh_attempt(agent_id).is_some_and(|held| {
+                        held.state == super::super::LossContinuationState::Held
+                    }) =>
+            {
+                return Err(TopologyError::new(
+                    TopologyErrorCode::FollowupNotIdle,
+                    format!(
+                        "recipient has a held lost turn; its parent may send purpose=followup \
+                         with acknowledge_recovery={} to admit a fresh attempt without replaying \
+                         uncertain work; a tool may have changed this workspace",
+                        self.node(agent_id)?
+                            .attempt_id
+                            .as_ref()
+                            .map_or("unknown", AttemptId::as_str),
+                    ),
                 ));
             }
             _ => {

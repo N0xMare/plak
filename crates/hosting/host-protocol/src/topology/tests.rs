@@ -245,6 +245,7 @@ fn followup_parses_and_result_purpose_is_refused_from_a_model() {
     assert_eq!(followup.purpose, Some(MessagePurpose::Followup));
     assert_eq!(followup.validate("root"), Ok(()));
     let result = SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: "root".into(),
         message: "done".into(),
@@ -258,6 +259,7 @@ fn followup_parses_and_result_purpose_is_refused_from_a_model() {
         Err(TopologyErrorCode::SchemaMismatch)
     );
     let schema_on_coordinate = SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: "c1".into(),
         message: "hi".into(),
@@ -275,6 +277,7 @@ fn followup_parses_and_result_purpose_is_refused_from_a_model() {
 #[test]
 fn reply_requires_in_reply_to() {
     let req = SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: "p".into(),
         message: "q".into(),
@@ -285,6 +288,7 @@ fn reply_requires_in_reply_to() {
     };
     assert_eq!(req.validate("c1"), Err(TopologyErrorCode::ReplyInvalid));
     let empty_ref = SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: "c1".into(),
         message: "hi".into(),
@@ -294,6 +298,27 @@ fn reply_requires_in_reply_to() {
         output_schema_json: None,
     };
     assert_eq!(empty_ref.validate("root"), Ok(()));
+}
+
+#[test]
+fn recovery_acknowledgement_is_only_a_followup_parameter() {
+    let mut request: SendAgentMessageRequest = serde_json::from_value(serde_json::json!({
+        "agent_id": "c1", "message": "inspect and continue", "purpose": "followup",
+        "acknowledge_recovery": "c1-a1"
+    }))
+    .unwrap();
+    assert_eq!(request.validate("root"), Ok(()));
+    request.purpose = Some(MessagePurpose::Coordinate);
+    assert_eq!(
+        request.validate("root"),
+        Err(TopologyErrorCode::SchemaMismatch)
+    );
+    request.purpose = Some(MessagePurpose::Reply);
+    request.in_reply_to = Some("mail-1".into());
+    assert_eq!(
+        request.validate("root"),
+        Err(TopologyErrorCode::SchemaMismatch)
+    );
 }
 
 #[test]

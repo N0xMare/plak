@@ -94,4 +94,33 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
     > {
         self.canceller.cancel_agents(agent_ids, signalled)
     }
+
+    fn recover_followup(
+        &self,
+        agent_id: String,
+        expected_attempt_id: crate::agent_tree_protocol::AttemptId,
+    ) -> Boxed<'_, Result<(), crate::agent_tree::TopologyError>> {
+        Box::pin(async move {
+            let port = crate::agent::recovery::ParentSessionPort {
+                parent: self.binder.parent.clone(),
+            };
+            crate::agent::recovery::recover_child(
+                &self.deliverer.runtime,
+                &port,
+                &agent_id,
+                Some(&expected_attempt_id),
+            )
+            .await?;
+            match self
+                .deliverer
+                .runtime
+                .read(|tree| tree.recovery_need(&agent_id))??
+            {
+                crate::agent_tree::RecoveryNeed::Workspace { code, reason } => {
+                    Err(crate::agent_tree::TopologyError::new(code, reason))
+                }
+                _ => Ok(()),
+            }
+        })
+    }
 }

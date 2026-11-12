@@ -138,6 +138,7 @@ pub(super) fn close_req(agent_id: &str) -> AttemptScopedRequest {
 
 pub(super) fn mail(agent_id: &str, message: &str) -> SendAgentMessageRequest {
     SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: agent_id.to_owned(),
         message: message.to_owned(),

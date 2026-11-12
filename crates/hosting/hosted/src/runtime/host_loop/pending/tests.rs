@@ -434,6 +434,7 @@ fn unread_questions_raise_and_clear_the_indicator() {
                     tree.send_agent_message(
                         &child.agent_id,
                         &SendAgentMessageRequest {
+                            acknowledge_recovery: None,
                             refresh: None,
                             agent_id: "root".into(),
                             message: "question".into(),

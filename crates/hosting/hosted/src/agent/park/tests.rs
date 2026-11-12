@@ -405,6 +405,7 @@ async fn placement_hold_cut_parked_mail_and_late_reservation_wait_without_claim_
             tree.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: fixture.child.clone(),
                     message: "wake mail".into(),
@@ -902,6 +903,7 @@ async fn parent_mail_wakes_a_parked_child_and_an_interrupt_keeps_its_job() {
             tree.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: fixture.child.clone(),
                     message: "also check the docs".into(),
@@ -1016,6 +1018,7 @@ async fn wake_turns_count_toward_max_turns() {
             tree.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: fixture.child.clone(),
                     message: "status?".into(),
@@ -1101,6 +1104,7 @@ async fn parent_mail(fixture: &Fixture, text: &str) {
             tree.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: fixture.child.clone(),
                     message: text.into(),
@@ -1349,6 +1353,7 @@ async fn an_interrupt_racing_the_park_decision_releases_the_bound_turn() {
             tree.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: fixture.child.clone(),
                     message: "resume".into(),
@@ -1463,6 +1468,7 @@ async fn an_interrupt_racing_the_wake_admission_keeps_the_attempt() {
             tree.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: fixture.child.clone(),
                     message: "resume".into(),
@@ -1519,6 +1525,7 @@ async fn mail_during_a_failed_wake_end_is_refused_not_started() {
                                 tree.send_agent_message(
                                     "root",
                                     &SendAgentMessageRequest {
+                                        acknowledge_recovery: None,
                                         refresh: None,
                                         agent_id: child.clone(),
                                         message: "one more thing".into(),

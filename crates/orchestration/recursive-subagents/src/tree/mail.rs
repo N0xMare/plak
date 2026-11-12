@@ -332,6 +332,7 @@ impl ProductAgentTree {
         request: &SendAgentMessageRequest,
         operation_id: Option<&str>,
     ) -> Result<SendMessageOutput, TopologyError> {
+        let _ = self.parent_followup_recovery(caller_id, request, operation_id)?;
         if let Some(prior) = self.replay_typed(operation_id, "send_agent_message", request)? {
             return Ok(prior);
         }
@@ -380,6 +381,7 @@ impl ProductAgentTree {
                 target_status,
                 target_active_turn,
                 request.output_schema_json.as_deref(),
+                request.acknowledge_recovery.as_ref(),
             )?)
         } else {
             if target_status == NodeStatus::Closed {
@@ -501,6 +503,10 @@ impl ProductAgentTree {
         self.messages.insert(message_id.clone(), mail);
         self.bump();
         let output = SendMessageOutput {
+            recovery_warning: request
+                .acknowledge_recovery
+                .as_ref()
+                .map(|_| super::text::PARENT_RECOVERY_WARNING.to_owned()),
             refresh,
             message_id,
             disposition,

@@ -27,6 +27,7 @@ use serde_json::json;
 use super::*;
 
 mod face;
+mod parent_followup;
 mod saturated_retask;
 use crate::agent::{ApiTopologyParent, NATIVE_RUN_MAX_MODEL_ROUNDS, ProductStateRoots};
 use crate::agent_tree::{
@@ -3411,6 +3412,7 @@ async fn automatic_recovery_interrupts_a_followup_hold_without_an_admitted_start
             tree.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: id.clone(),
                     message: "followup that never reached Start".into(),
@@ -3491,6 +3493,7 @@ async fn automatic_recovery_interrupts_a_followup_hold_without_an_admitted_start
             tree.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: id.clone(),
                     message: "new followup only".into(),
@@ -4976,6 +4979,7 @@ async fn a_withdrawn_wake_leaves_its_mail_for_one_continuation() {
                     tree.send_agent_message(
                         "root",
                         &SendAgentMessageRequest {
+                            acknowledge_recovery: None,
                             refresh: None,
                             agent_id: id,
                             message: "status?".into(),

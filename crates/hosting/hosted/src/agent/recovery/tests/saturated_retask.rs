@@ -95,7 +95,7 @@ async fn recovered_child_with_a_full_operation_ledger_accepts_followup() {
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
 
-async fn pin_native_template(fixture: &Fixture) {
+pub(super) async fn pin_native_template(fixture: &Fixture) {
     fixture
         .runtime
         .mutate_then_emit(false, |tree| {

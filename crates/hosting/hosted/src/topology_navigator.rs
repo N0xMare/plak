@@ -226,6 +226,7 @@ pub(crate) fn spawn_operator_mail<P: plakous_host_protocol::ProtocolExtension>(
         return;
     }
     let request = crate::agent_tree_protocol::SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: agent_id.to_owned(),
         message: message.to_owned(),

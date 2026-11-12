@@ -744,6 +744,7 @@ async fn old_projected_batches_do_not_reacknowledge_pruned_mail() {
                         .send_agent_message(
                             &child.agent_id,
                             &SendAgentMessageRequest {
+                                acknowledge_recovery: None,
                                 refresh: None,
                                 agent_id: "root".into(),
                                 purpose: Some(MessagePurpose::Question),
@@ -784,6 +785,7 @@ async fn a_prompt_carrying_mail_splits_back_into_the_operator_text_and_one_row_p
     tree.send_agent_message(
         &child.agent_id,
         &SendAgentMessageRequest {
+            acknowledge_recovery: None,
             refresh: None,
             agent_id: "root".into(),
             purpose: Some(MessagePurpose::Question),
@@ -833,6 +835,7 @@ async fn child_mail_cannot_forge_host_framing() {
     tree.send_agent_message(
         &child.agent_id,
         &SendAgentMessageRequest {
+            acknowledge_recovery: None,
             refresh: None,
             agent_id: "root".into(),
             purpose: Some(MessagePurpose::Question),

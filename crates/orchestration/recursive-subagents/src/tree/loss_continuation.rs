@@ -84,6 +84,20 @@ impl ProductAgentTree {
     /// `agent_id`'s continuation after a loss, if it has one.
     #[must_use]
     pub fn loss_continuation(&self, agent_id: &str) -> Option<LossContinuation> {
+        self.derive_loss_continuation(agent_id, false)
+    }
+
+    /// A fresh attempt may supersede a settled loss even when the previous
+    /// attempt spent its turn ceiling; it never grants that attempt a turn.
+    pub(super) fn loss_for_fresh_attempt(&self, agent_id: &str) -> Option<LossContinuation> {
+        self.derive_loss_continuation(agent_id, true)
+    }
+
+    fn derive_loss_continuation(
+        &self,
+        agent_id: &str,
+        fresh_attempt: bool,
+    ) -> Option<LossContinuation> {
         if agent_id == self.root_agent_id {
             return None;
         }
@@ -110,7 +124,9 @@ impl ProductAgentTree {
             });
         }
         // A spent attempt takes no more turns, a continuation included.
-        if node.status != NodeStatus::Interrupted || self.attempt_turns_spent(agent_id) {
+        if node.status != NodeStatus::Interrupted
+            || (!fresh_attempt && self.attempt_turns_spent(agent_id))
+        {
             return None;
         }
         let (interrupt, cause) = self.latest_interrupt(agent_id, &attempt.attempt_id)?;

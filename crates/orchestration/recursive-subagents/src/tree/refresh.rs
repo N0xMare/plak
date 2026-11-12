@@ -341,6 +341,7 @@ impl ProductAgentTree {
                 .is_some_and(|attempt| attempt.status.is_stopped())
                 && self.has_current_turn_owner(&node.agent_id),
             request.output_schema_json.as_deref(),
+            request.acknowledge_recovery.as_ref(),
         )?;
         self.queue_new_refresh(node, request, operation, request_digest, jobs_running)
     }

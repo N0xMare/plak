@@ -1502,6 +1502,7 @@ async fn owner_release_failure_fences_unstarted_followup() {
                     .send_agent_message(
                         "root",
                         &SendAgentMessageRequest {
+                            acknowledge_recovery: None,
                             refresh: None,
                             agent_id: id.clone(),
                             message: "again".into(),

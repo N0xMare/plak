@@ -39,6 +39,7 @@ async fn placement_hold_cut_prepared_wake_binding_withdraws_unread_batch_on_rele
                 tree.send_agent_message(
                     "root",
                     &SendAgentMessageRequest {
+                        acknowledge_recovery: None,
                         refresh: None,
                         agent_id: fixture.child.clone(),
                         message: "binding-cut mail".into(),

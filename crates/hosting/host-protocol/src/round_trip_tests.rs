@@ -46,6 +46,7 @@ fn every_topology_request_kind_round_trips() {
     );
     round_trip(
         &SendAgentMessageRequest {
+            acknowledge_recovery: None,
             refresh: None,
             agent_id: "a1".into(),
             message: "status?".into(),

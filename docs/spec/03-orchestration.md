@@ -585,7 +585,8 @@ set only alongside `spawns` naming another template, so a leaf child never
 carries it;
 `discard_workspace` requires `may_spawn`.
 
-Recovery is never a model tool: the host recovers children itself (§14), and
+There is no standalone model recovery tool: the host recovers children itself
+(§14), including before an explicitly acknowledged parent followup (§5.3), and
 the operator's per-child retry is the Agents list's `u` or a JSONL
 `invoke_tool` of `recover_agent` (§4.5a), which no catalog presents.
 
@@ -835,11 +836,15 @@ Required `agent_id` and `message`.
 | `in_reply_to` | required with `purpose=reply`, refused otherwise (`reply_invalid`) |
 | `output_schema_json` | admitted only with `purpose=followup`, else `schema_mismatch` |
 | `refresh` | followup only; default catches up live-fork copies when clean, `false` keeps their base; explicit `true` on a snapshot or candidate-minted copy is `schema_mismatch` |
+| `acknowledge_recovery` | followup only; the current child `attempt_id`, explicitly acknowledging uncertain workspace effects. Only the direct parent with message permission may use it. A stale attempt is `attempt_mismatch`; a non-parent is `grant_denied`. |
 
 `purpose=result` is host-authored and MUST be refused from a model. There is no
 `delegate` purpose: it would also replace a running task.
 
-Receipt: `{ message_id, disposition, refresh? }`. `refresh` reports
+Receipt: `{ message_id, disposition, refresh?, recovery_warning? }`. An acknowledged
+recovery followup retains `recovery_warning`: a tool may have changed this
+workspace; inspect the child workspace or candidate, and never replay the
+uncertain turn or effects. Ordinary sends omit it. `refresh` reports
 `status: refreshed | skipped | conflict`, the new `base` on success, or bounded
 `reason` / conflict `paths` and `paths_total` (at most 16 entries, with
 `paths_truncated` when cut). Unchanged and design-ineligible copies omit it.
@@ -1210,7 +1215,8 @@ again. The navigator's close, interrupt and stop-all have the same prompt-return
 contract. A
 `recovery_required` node whose session outcome is unresolved is not closed:
 its row reports `recovery_required`, keeps its attempt failure, and authorizes
-no retry: the host recovers it (§14.2). Two kinds of `recovery_required` node
+no ordinary retry: the host recovers it (§14.2), including before a parent's
+explicitly acknowledged fresh followup (section 5.3). Two kinds of `recovery_required` node
 are closed like any other: one whose only remaining blocker is an interrupted
 seal, adopt, or copy removal, once the operator has inspected the copy, and one
 whose recovery met a refusal no retry can get past (section 4.5a), whose
@@ -1237,7 +1243,10 @@ targets the child's current attempt, so it never refuses `attempt_mismatch`.
 
 ### 4.5a The operator's retry of one child's recovery
 
-Recovery is the host's job, and no model is granted a recovery tool. The
+Recovery is the host's job, and no model is granted a standalone recovery tool.
+A parent's acknowledged followup (section 5.3) composes this recovery before
+admitting new work; it does not expose the operator port or bypass its
+ownership/effect-evidence checks. The
 operator keeps one retry per child. JSONL `invoke_tool` of `recover_agent`,
 `{ agent_id, expected_attempt_id? }`, an operator-only name no catalog
 presents, settles a `recovery_required` child through the one supported path,
@@ -1610,7 +1619,9 @@ alone seals nothing and sends no result mail.
 
 A `followup` re-tasks an **idle** child on the same node with a fresh attempt,
 a rotated turn token, and an optionally new `output_schema_json`. The
-transition is `completed | failed | interrupted → running`. The previous
+transition is `completed | failed | interrupted → running`. With explicit
+parent recovery acknowledgement, a recovery hold is first settled as below,
+then follows this same fresh-attempt transition. The previous
 attempt keeps its own `output_json`, usage, and candidate — which is why the
 attempt is the unit.
 
@@ -1630,6 +1641,31 @@ content and backend errors skip catch-up with a bounded reason.
 
 An interrupted attempt is *superseded*: it ends `cancelled` with no result, so
 exactly one attempt of a node is ever live.
+
+A direct parent may send `purpose=followup` with `acknowledge_recovery` equal
+to the child's current `attempt_id`, for either `owner_lost` or `handoff`. This
+is explicit consent to recover an
+uncertain session and begin a **fresh attempt**, not to replay its old turn,
+model request or effects. The host first uses the same exact child recovery
+path as section 14.2, with no lease wait; active ownership, unsupported effect
+evidence, storage and workspace refusals still refuse the followup. It then
+revalidates the acknowledged attempt before ordinary followup admission,
+including refresh, workspace, schema, tier and attempt/capacity budgets.
+A settled held loss continuation may retain its old turn identity; with the
+matching acknowledgement it can be superseded only when no current turn
+owner, owed recovery or pending continuation remains. Its binding is never
+used as a resume Start. An old attempt that spent its turn ceiling still takes
+no continuation turn: only the explicitly admitted fresh attempt receives a
+new ceiling, under the ordinary attempt budget. Recovery alone admits no new turn and may settle even when later admission
+is refused; that refusal retains the workspace-uncertainty warning and says
+that recovery settled. Plain followup and failed steer refusals for an
+interrupted held child name `acknowledge_recovery` and its current attempt ID. An interrupted lost-turn continuation remains held until that
+fresh attempt supersedes it; acknowledgement never resumes the old turn.
+The success receipt and replay retain the warning that a tool may have changed
+this workspace. The old history and workspace effects remain inspectable;
+unknown conversation output is not manufactured. A replay of an admitted send
+returns its original receipt without recovering or starting the replacement
+again; a new send with the old acknowledgement is `attempt_mismatch`.
 
 `followup_not_idle` identifies a running turn, sealing, or adoption that must
 settle before another attempt. Use an urgent steer for an active turn.
@@ -2855,8 +2891,9 @@ explicit successor-epoch operation.
 refuse `attempt_mismatch` when it is not the child's current attempt.
 
 A `recovery_required` child with an unresolved session outcome is not closed
-by `close_agent` and cannot be re-tasked; the host's recovery (or the
-operator's retry, section 4.5a) settles it as section 14.2 describes: `failed` and idle, after
+by `close_agent` or an ordinary followup. The host's recovery, the
+operator's retry (section 4.5a), or its parent's explicitly acknowledged
+followup (section 5.3) settles it as section 14.2 describes: `failed` and idle, after
 which `followup` and `close_agent` work as for any failed attempt; `completed`
 for a retirement-only quiescent reopen with submitted output; or `closed`, with
 no result mail, when the parent had already closed it.
@@ -3858,8 +3895,10 @@ accepted command, which is the lost turn for a bound mark and the last turn for
 a parked one; with no accepted command on record it is the loss's interrupt
 intent. A held continuation ends through actions that already exist, with no
 record of its own: a close, another interrupt (whose cause then reads; a root
-stop records one on each held child, so stops stay stopped), or any later turn
-on the node (mail, a follow-up, a Resume).
+stop records one on each held child, so stops stay stopped), or a later
+explicitly admitted turn on the node. Operator Resume continues the held
+attempt; a parent followup supersedes it only with `acknowledge_recovery`
+(section 5.3). Ordinary mail or a plain followup does not clear the hold.
 
 Consent is the one durable continuation decision intent of kind
 `continuation` for the attempt, cause, host generation, round 1 and anchor,
@@ -4353,7 +4392,9 @@ fault, seal state and copy are left untouched: it stays `recovery_required`,
 the receipt's `workspace_recovery` names the remaining blocker, and
 `close_agent` ends the node once the operator has inspected the copy.
 
-The host settles a child by reopening its session exactly (§14.1). Here (for
+The host settles a child by reopening its session exactly (§14.1). A parent's
+acknowledged followup uses this same settlement with the acknowledged attempt
+fenced at reopen and again at fresh-attempt admission. Here (for
 the operator's retry and an unresolved session outcome; an owed child's
 `recover_node` cancels it the same way and marks the child, §14.1) a head that
 restores a resumable working turn is cancelled and released, never rejoined, and the child is interrupted

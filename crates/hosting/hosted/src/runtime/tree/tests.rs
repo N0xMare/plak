@@ -324,6 +324,7 @@ async fn a_question_before_the_first_tree_observation_is_announced_once() {
         .send_agent_message(
             &child.agent_id,
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 agent_id: "root".into(),
                 message: "which branch?".into(),
                 purpose: Some(MessagePurpose::Question),
@@ -799,6 +800,7 @@ async fn tree_snapshot_pushes_on_any_node_revision_and_drops_non_advancing() {
         tree.send_agent_message(
             &child,
             &crate::agent_tree_protocol::SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: "root".into(),
                 message: "which branch?\nmain or a2".into(),

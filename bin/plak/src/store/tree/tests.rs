@@ -779,6 +779,7 @@ fn agent_tree_duplicate_child_ids_across_trees_persist() {
     assert_eq!(grok_child.agent_id, "c1");
     assert_eq!(claude_child.agent_id, "c1");
     let mail = SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: "c1".into(),
         message: "coordinate once".into(),

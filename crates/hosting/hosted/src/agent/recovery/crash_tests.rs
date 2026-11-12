@@ -356,6 +356,7 @@ impl Fixture {
                         tree.send_agent_message(
                             "root",
                             &SendAgentMessageRequest {
+                                acknowledge_recovery: None,
                                 refresh: None,
                                 agent_id: id.clone(),
                                 message: "wake now".into(),

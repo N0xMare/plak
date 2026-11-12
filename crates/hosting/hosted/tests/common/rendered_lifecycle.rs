@@ -1523,6 +1523,7 @@ mod suite {
             .send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: child.clone(),
                     message: "follow-up on the review".into(),
@@ -1557,6 +1558,7 @@ mod suite {
             .send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: live.agent_id.clone(),
                     message: "start brief already applied; this is extra mail".into(),
@@ -1674,6 +1676,7 @@ mod suite {
         let mail_self = topology_mail_request_invalid_message(
             TopologyErrorCode::SelfSend,
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: "root".into(),
                 message: "hi".into(),
@@ -1693,6 +1696,7 @@ mod suite {
         let mail_bound = topology_mail_request_invalid_message(
             TopologyErrorCode::BoundExceeded,
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: "c1".into(),
                 message: String::new(),
@@ -1712,6 +1716,7 @@ mod suite {
         let mail_reply = topology_mail_request_invalid_message(
             TopologyErrorCode::ReplyInvalid,
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: "c1".into(),
                 message: "hi".into(),
@@ -1731,6 +1736,7 @@ mod suite {
         let mail_in_reply = topology_mail_request_invalid_message(
             TopologyErrorCode::ReplyInvalid,
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: "c1".into(),
                 message: "hi".into(),

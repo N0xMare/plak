@@ -1203,6 +1203,10 @@ impl SpawnAgentRequest {
 #[serde(deny_unknown_fields)]
 /// `send_agent_message` arguments.
 pub struct SendAgentMessageRequest {
+    /// Followup only: acknowledge uncertainty on this exact current attempt.
+    /// Only its parent may request recovery before admitting a fresh attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acknowledge_recovery: Option<AttemptId>,
     /// Follow-up only: merge the parent's live state when clean; false opts out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh: Option<bool>,
@@ -1228,7 +1232,7 @@ impl SendAgentMessageRequest {
     ///
     /// Refuses a self-send, a body outside 1..=[`MAX_MESSAGE_BYTES`], the
     /// host-only `result` purpose, a `reply`/`in_reply_to` mismatch, and a
-    /// schema on anything but a `followup`.
+    /// schema, refresh or recovery acknowledgement on anything but a `followup`.
     pub fn validate(&self, sender_id: &str) -> Result<(), TopologyErrorCode> {
         if self.agent_id == sender_id {
             return Err(TopologyErrorCode::SelfSend);
@@ -1252,7 +1256,9 @@ impl SendAgentMessageRequest {
             return Err(TopologyErrorCode::ReplyInvalid);
         }
         if purpose != MessagePurpose::Followup
-            && (self.output_schema_json.is_some() || self.refresh.is_some())
+            && (self.output_schema_json.is_some()
+                || self.refresh.is_some()
+                || self.acknowledge_recovery.is_some())
         {
             return Err(TopologyErrorCode::SchemaMismatch);
         }

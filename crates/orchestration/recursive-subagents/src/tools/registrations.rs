@@ -63,6 +63,10 @@ pub(super) fn schema(kind: TopologyKind, spawnable_templates: &[String]) -> Valu
         ),
         TopologyKind::Send => object_schema(
             json!({
+                "acknowledge_recovery": {
+                    "type": "string",
+                    "description": "Followup only, from the direct parent: the child's current attempt_id. Explicitly acknowledge that a tool may have changed this workspace. The host settles recovery without replaying uncertain work before starting a fresh attempt; ownership/effect-evidence refusals still block it."
+                },
                 "refresh": { "type": "boolean", "description": "Followup only; merge the parent's current state into a live-fork copy when clean. False keeps its base." },
                 "agent_id": { "type": "string" },
                 "message": { "type": "string" },

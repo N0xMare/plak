@@ -1210,6 +1210,7 @@ async fn followup_withdrawal_cas_refusal_restores_the_complete_opening() {
             .send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: spawned.agent_id.clone(),
                     message: "again".to_owned(),

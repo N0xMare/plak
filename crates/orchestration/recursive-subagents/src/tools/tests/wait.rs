@@ -72,6 +72,7 @@ async fn cancelled_topology_wait_does_not_acknowledge_ready_mail() {
         tree.send_agent_message(
             "c1",
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: "root".into(),
                 message: "synthetic finding".into(),
@@ -351,6 +352,7 @@ async fn abandoned_uncommitted_wait_receipt_restores_mail_even_after_history_pru
         .send_agent_message(
             "c1",
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: "root".into(),
                 message: "uncommitted question".into(),
@@ -373,6 +375,7 @@ async fn abandoned_uncommitted_wait_receipt_restores_mail_even_after_history_pru
                 .send_agent_message(
                     "c1",
                     &SendAgentMessageRequest {
+                        acknowledge_recovery: None,
                         refresh: None,
                         agent_id: "root".into(),
                         message: "later acknowledged mail".into(),
@@ -436,6 +439,7 @@ async fn committed_wait_evidence_retires_and_uncommitted_evidence_restores() {
         tree.send_agent_message(
             "c1",
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: "root".into(),
                 message: "uncommitted note".into(),
@@ -544,6 +548,7 @@ async fn five_hundred_waits_across_committed_turns_keep_receipts_bounded() {
             tree.send_agent_message(
                 "c1",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: "root".into(),
                     message: format!("question {turn}"),
@@ -595,6 +600,7 @@ async fn committed_child_completion_retires_only_its_own_wait_receipts() {
         tree.send_agent_message(
             sender,
             &SendAgentMessageRequest {
+                acknowledge_recovery: None,
                 refresh: None,
                 agent_id: recipient.into(),
                 message: "question".into(),
@@ -659,6 +665,7 @@ async fn child_receipts_retire_by_terminal_kind_and_never_at_followup() {
             .send_agent_message(
                 "c2",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: "c1".into(),
                     message: wait.into(),
@@ -695,6 +702,7 @@ async fn child_receipts_retire_by_terminal_kind_and_never_at_followup() {
     tree.send_agent_message(
         "root",
         &SendAgentMessageRequest {
+            acknowledge_recovery: None,
             refresh: None,
             agent_id: "c1".into(),
             message: "again".into(),
@@ -931,6 +939,7 @@ async fn withheld_mail_from_a_delivered_child_returns(submit: bool) {
             tree.send_agent_message(
                 "c1",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: "root".into(),
                     message: format!("{index:03}{}", "m".repeat(2000)),
@@ -1015,6 +1024,7 @@ async fn a_bare_wait_over_withheld_mail_does_not_resend_a_delivered_output() {
                 tree.send_agent_message(
                     "c1",
                     &SendAgentMessageRequest {
+                        acknowledge_recovery: None,
                         refresh: None,
                         agent_id: "root".into(),
                         message: format!("{index:03}{}", "m".repeat(2000)),
@@ -1293,6 +1303,7 @@ async fn a_failed_wait_receipt_publish_leaves_mail_unread() {
     let mut tree = bootstrap_tree("refused-wait-receipt", root.path());
     let child = tree.spawn_agent("root", &spawn_request(), None).unwrap();
     let request = SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: "root".into(),
         message: "question".into(),
@@ -1339,6 +1350,7 @@ async fn wait_returns_full_mail_and_blocks_again_until_new_mail() {
         .unwrap();
     let body = "€".repeat(682) + "ab";
     let send = |message: &str| SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: "root".into(),
         message: message.into(),

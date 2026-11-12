@@ -13,7 +13,9 @@
 //! Agents list's `u`, or JSONL `invoke_tool` of `recover_agent`), which may
 //! wait out a held lease, and each `recover_node` run over a tree (a custody
 //! take, `/recover`, a release with a recovery need), which never waits on a
-//! lease. Recovery is never a model tool.
+//! lease. Explicit parent acknowledgement in a followup uses the same exact
+//! recovery without waiting on a lease, before its separate fresh Start.
+//! `recover_agent` remains operator-only; no model receives a recovery tool.
 //! Each child is held by one run at a time ([`claim_child`]). A refusal
 //! may advance (or, for a replayed create, record) the node's session locator;
 //! it never settles the attempt. The session part of an interrupted seal or
@@ -692,7 +694,7 @@ fn owner_live() -> TopologyError {
     refusal(
         TopologyErrorCode::RecoveryOwnerLive,
         "this process still owns the child's turn, startup, retirement, or recovery; it \
-         settles on its own, and the operator's retry works after that",
+         settles on its own; retry the acknowledged followup or operator recovery after that",
     )
 }
 

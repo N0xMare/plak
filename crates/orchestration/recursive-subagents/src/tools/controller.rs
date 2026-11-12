@@ -11,6 +11,7 @@ pub struct ChildServices {
     /// [`ChildController::bind`] and its admission hooks.
     pub bind: bool,
     /// [`ChildController::deliver`] and [`ChildController::withdraw_followup`].
+    /// Explicit followup recovery also uses [`ChildController::recover_followup`].
     pub mail: bool,
     /// [`ChildController::cancel_agents`].
     pub cancel: bool,
@@ -157,6 +158,18 @@ pub trait ChildController: Send + Sync {
         receipt: Option<(String, TopologyErrorCode)>,
     ) -> Pin<Box<dyn Future<Output = Result<(), TopologyError>> + Send + '_>> {
         let _ = (driver, agent_id, message_id, receipt);
+        Box::pin(async { Err(unprovided()) })
+    }
+
+    /// Settles the exact attempt acknowledged by its parent before a fresh followup.
+    /// This must never replay uncertain work or start a replacement turn itself.
+    /// The tree checks parent/grant/attempt authority before calling with its lock released.
+    fn recover_followup(
+        &self,
+        agent_id: String,
+        expected_attempt_id: crate::protocol::AttemptId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), TopologyError>> + Send + '_>> {
+        let _ = (agent_id, expected_attempt_id);
         Box::pin(async { Err(unprovided()) })
     }
 

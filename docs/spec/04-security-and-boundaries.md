@@ -32,6 +32,18 @@ that mode or its subscription credential as an OpenAI Platform fallback.
 | Child copy → parent checkout | one sealed candidate, adopted explicitly | three-way, no commit, never destroys the only copy |
 | Consumer → Plakous | typed facade calls only | product read models never authorize runtime mutation |
 
+An acknowledged child-recovery followup is parent-authorized new work, not
+operator authority or evidence that uncertain effects did not happen. Only the
+direct parent with message permission may acknowledge the exact current
+attempt. The host settles that attempt through ordinary exact recovery, never
+replays its uncertain turn or effects, and revalidates the acknowledgement
+before fresh-attempt admission. Live ownership, unsupported effect evidence and
+ambiguous workspace operations still refuse. A settled held continuation may
+be superseded only without a live owner, owed recovery or pending continuation;
+it is not rejoined. Receipts retain the workspace-change warning. Ordinary
+followups do not grant this acknowledgement, and `recover_agent` stays
+operator-only (chapter 03 sections 5.3 and 14.2).
+
 The hosted `RuntimeFactory` construction port is sealed, not an embedder
 extension point. Only the production factory and the cfg'd scripted test kit
 implement it. Registered scripted authority requires a private token that only

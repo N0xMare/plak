@@ -82,6 +82,7 @@ impl Fixture {
             .send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: self.agent.clone(),
                     message: "next delta".into(),

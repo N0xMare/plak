@@ -1399,6 +1399,7 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
                     tree.send_agent_message(
                         "root",
                         &crate::agent_tree_protocol::SendAgentMessageRequest {
+                            acknowledge_recovery: None,
                             refresh: None,
                             agent_id: parent.agent_id.clone(),
                             message: "followup assignment".into(),
@@ -3211,6 +3212,7 @@ fn assert_late_caller_fault_is_scoped(site: &str) {
             tree.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     agent_id: child.clone(),
                     message: "replacement assignment".into(),
                     purpose: Some(MessagePurpose::Followup),
@@ -3320,6 +3322,7 @@ async fn stale_startup_caller_is_scoped_to_its_tree_and_attempt() {
                 tree.send_agent_message(
                     "root",
                     &SendAgentMessageRequest {
+                        acknowledge_recovery: None,
                         agent_id: child.clone(),
                         message: "next assignment".into(),
                         purpose: Some(MessagePurpose::Followup),

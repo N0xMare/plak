@@ -110,7 +110,9 @@ late, and the child keeps running.
 After a
 restart, a parked child is interrupted (owner lost), keeps its attempt and is
 held: it waits for your Resume (`r` on it in the Agents tab, or JSONL
-`resume`), which continues it once with a new turn, or for mail or a followup.
+`resume`), which continues it once with a new turn. Its parent can instead
+supersede the held attempt with `purpose=followup` and `acknowledge_recovery`
+set to its current `attempt_id`; plain mail or followup does not clear the hold.
 When the session opens, one warning lists everything the lost host left held
 (the root's turn and each held agent with what it was doing), and `Ctrl+R`
 resumes all of it. A parent's `wait_agent` rows say why a child stopped
@@ -252,8 +254,8 @@ required, is recovered rather than stranded: its session is reopened exactly,
 the unfinished turn is recorded once as abandoned (never re-sent or re-run), and
 the child is marked `interrupted` the same way. Either way its attempt, its
 sub-agents and its surviving processes are kept, nothing is retried by itself,
-and no result is sent for it; the parent can re-task it with a follow-up or
-close it, and a crash does not spend the tree's attempt budget. A lost turn
+and no result is sent for it; the parent can re-task it with an acknowledged
+follow-up or close it, and a crash does not spend the tree's attempt budget. A lost turn
 the reopen finds still waiting (at an approval, or admitted but not yet sent)
 is closed the same way, never rejoined, and its request is not marked as
 something not to act on. Until its recovery has run, a child takes
@@ -267,6 +269,10 @@ recovery tool, and `list_agents` says the host is recovering that child. It
 runs:
 
 - automatically, in the background, when the tree is reopened;
+- when a parent sends `purpose=followup` with `acknowledge_recovery` set to the
+  child's current `attempt_id`; this acknowledges that a tool may have changed
+  the workspace, settles recovery, and admits a fresh attempt rather than
+  replaying uncertain work;
 - when you run `/recover`;
 - when you retry one child: `u` on it in the Agents tab, or, from a JSONL
   client, `invoke_tool` with `recover_agent` and its `agent_id`.

@@ -183,6 +183,7 @@ fn jj_off_base_followup_seals_and_replays_the_whole_tree_notice() {
     tree.send_agent_message(
         "root",
         &SendAgentMessageRequest {
+            acknowledge_recovery: None,
             refresh: None,
             agent_id: child.agent_id.clone(),
             message: "follow up".into(),

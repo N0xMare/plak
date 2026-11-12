@@ -298,6 +298,7 @@ fn dormant_reclaim_crash_cuts_seal_remove_and_rehydrate() {
         assert!(!path.exists(), "cut {cut}");
         reopened.state = super::super::TreeAdmissionState::Live;
         let request = SendAgentMessageRequest {
+            acknowledge_recovery: None,
             refresh: None,
             agent_id: child.clone(),
             message: "continue".into(),
@@ -424,6 +425,7 @@ fn projected_view_names_retired_and_reclaimed_and_revival_clears_reclaimed() {
     assert!(!path.exists());
     tree.state = super::super::TreeAdmissionState::Live;
     let request = SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: child.clone(),
         message: "continue".into(),
@@ -482,6 +484,7 @@ fn an_unanswered_presence_question_never_remints_a_reviving_copy() {
     assert!(!path.exists());
     tree.state = super::super::TreeAdmissionState::Live;
     let request = SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: child.clone(),
         message: "continue".into(),

@@ -416,6 +416,7 @@ fn resolving_recovery_does_not_repush_a_pruned_result() {
             .send_agent_message(
                 &sender.agent_id,
                 &SendAgentMessageRequest {
+                    acknowledge_recovery: None,
                     refresh: None,
                     agent_id: "root".into(),
                     message: "later".into(),
@@ -453,6 +454,7 @@ fn scoped(agent_id: &str) -> AttemptScopedRequest {
 
 fn followup(agent_id: &str) -> SendAgentMessageRequest {
     SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: agent_id.to_owned(),
         message: "again".into(),

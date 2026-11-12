@@ -1591,6 +1591,7 @@ fn prompt_whose_mail_alone_overflows(
                     tree.send_agent_message(
                         &child.agent_id,
                         &SendAgentMessageRequest {
+                            acknowledge_recovery: None,
                             refresh: None,
                             agent_id: "root".into(),
                             message: format!("{index}{}", "f".repeat(1_900)),
@@ -3240,6 +3241,7 @@ fn finding_does_not_wake_but_question_does_and_resets_quiet_window() {
             .block()
             .unwrap();
         let mail = |purpose, body: &str| SendAgentMessageRequest {
+            acknowledge_recovery: None,
             refresh: None,
             agent_id: "root".into(),
             message: body.into(),

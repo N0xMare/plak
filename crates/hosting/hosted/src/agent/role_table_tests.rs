@@ -69,6 +69,7 @@ pub(crate) const COVERED: &[Covered] = &[
 
 fn mail(fixture: &Fixture, priority: Option<MessagePriority>) -> SendAgentMessageRequest {
     SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: fixture.child.clone(),
         message: "also check the docs".into(),

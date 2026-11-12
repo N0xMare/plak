@@ -371,21 +371,50 @@ impl TopologyTool {
     /// the send waits (behind a parked wait on the mail, or for an
     /// interrupted recipient's turn to unwind), never mid-delivery, and a
     /// cancelled send leaves its mail unread under its original receipt.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "mail admission and delivery retain the same attempt and independently owned operation receipt"
-    )]
     pub(super) async fn send_cancellable(
         &self,
         operation_id: String,
         value: &Value,
-        mut cancelled: SendCancelled<'_>,
+        cancelled: SendCancelled<'_>,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
         let caller = self
             .caller_id
             .lock()
             .map(|guard| guard.clone())
             .unwrap_or_default();
+        let recovered = if let Ok(request) = decode::<SendAgentMessageRequest>(value) {
+            match self
+                .recover_followup(&caller, &request, &operation_id)
+                .await?
+            {
+                parent_recovery::FollowupRecovery::Skipped => false,
+                parent_recovery::FollowupRecovery::Settled => true,
+                parent_recovery::FollowupRecovery::Refused(refusal) => return Ok(refusal),
+            }
+        } else {
+            false
+        };
+        let outcome = self
+            .send_after_recovery(operation_id, value, cancelled, caller)
+            .await?;
+        if recovered {
+            Self::warn_recovered_refusal(outcome)
+        } else {
+            Ok(outcome)
+        }
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "mail admission and delivery retain the same attempt and independently owned operation receipt"
+    )]
+    async fn send_after_recovery(
+        &self,
+        operation_id: String,
+        value: &Value,
+        mut cancelled: SendCancelled<'_>,
+        caller: String,
+    ) -> Result<ToolOutcome, ToolRuntimeError> {
         if let Ok(request) = decode::<SendAgentMessageRequest>(value)
             && request.purpose == Some(MessagePurpose::Followup)
         {

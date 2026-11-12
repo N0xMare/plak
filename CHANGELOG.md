@@ -17,6 +17,16 @@ one cross-build carrier (a build imports its own and the previous version).
   attempts, not frozen session bindings: existing sessions reopen exactly
   across that revision change without a carry or rebind.
 
+- Let a parent re-task a child held for recovery through
+  `send_agent_message` with `purpose=followup` and `acknowledge_recovery` set
+  to the child's current attempt ID. The host settles the old session without
+  replaying uncertain work before admitting a fresh attempt. The receipt's
+  `recovery_warning` preserves that a tool may have changed the workspace;
+  ownership, effect-evidence and workspace refusals still block admission.
+  The host-layer `ChildController` gains `recover_followup`, and the typed send
+  request gains `acknowledge_recovery`, and the stored send receipt gains an
+  optional `recovery_warning` field; no table, export-document or frame change.
+
 - Fixed workspace reads returning stale cached bytes after a same-size rewrite.
 - Fixed pending child decisions not being offered when the child's read model
   first attaches.

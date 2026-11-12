@@ -1228,7 +1228,15 @@ rejoin spec. They prove that the operator's retry (JSONL `invoke_tool` of
 `recover_agent`, on the host's operator port; no model catalog has it)
 and a `recover_node` run each interrupt the child (law L, attempt kept, no
 failure) with no additional provider dispatch, that close frees the slot, and
-that `/recover` shows the user which child it recovered. A lease another
+that `/recover` shows the user which child it recovered. Parent-followup
+regressions start with the same deterministic `OutcomeUnknown` child: plain
+followup refuses, while `acknowledge_recovery` naming its exact attempt settles
+recovery and admits a fresh attempt/token. Only the fresh task and its bounded
+submission nudges dispatch; the unknown turn is never redispatched, and the
+receipt retains the workspace-change warning. Refused recovery admits no new
+attempt. Tree tests pin direct-parent/grant/attempt checks, persisted receipt
+replay, stale consent, and refusal while ownership, recovery or a continuation
+is pending. A lease another
 session holds is refused `recovery_lease_held` exactly, by the operator's retry
 after a short injected lease wait, with the child not held between its polls,
 and by a run at once. Hub unit tests prove that a recovery claim excludes a

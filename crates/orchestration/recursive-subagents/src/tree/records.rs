@@ -409,6 +409,9 @@ pub struct WorkspaceReceipt {
 /// message did to the recipient's turn.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SendMessageOutput {
+    /// Explicit recovery consent never claims that uncertain workspace effects did not run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_warning: Option<String>,
     /// Automatic catch-up before a follow-up; omitted for unchanged/ineligible copies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh: Option<RefreshReport>,

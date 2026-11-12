@@ -881,6 +881,7 @@ mod mail;
 pub mod observer;
 mod operator_intents;
 pub use operator_intents::{InterruptCause, interrupt_cause, submitted_output};
+mod parent_recovery;
 mod park;
 mod projection;
 mod projector;

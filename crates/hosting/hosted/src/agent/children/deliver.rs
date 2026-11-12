@@ -527,10 +527,7 @@ impl ProductMailDeliverer {
         {
             ChildReopen::Attached { session, recovered } => (*session, recovered),
             ChildReopen::RecoveryRequired(_) => {
-                return Err(
-                    "child turn could not be rejoined after reopen; no replacement start was admitted"
-                        .into(),
-                );
+                return Err(self.rejoin_refusal(&request.agent_id).into());
             }
         };
         if let Some(recovered) = recovered {
@@ -562,9 +559,31 @@ impl ProductMailDeliverer {
         if unwinding {
             return Err(crate::agent_tree_tools::MailDeliveryFailure::TurnEnded);
         }
-        Err(
+        Err(self.rejoin_refusal(&request.agent_id).into())
+    }
+
+    fn rejoin_refusal(&self, agent_id: &str) -> String {
+        let mut message =
             "child turn could not be rejoined after reopen; no replacement start was admitted"
-                .into(),
-        )
+                .to_owned();
+        let attempt = self
+            .runtime
+            .read(|tree| {
+                tree.node(agent_id)
+                    .ok()
+                    .filter(|node| {
+                        node.status == crate::agent_tree_protocol::NodeStatus::Interrupted
+                    })
+                    .and_then(|node| node.attempt_id.clone())
+            })
+            .ok()
+            .flatten();
+        if let Some(attempt) = attempt {
+            message.push_str(&format!(
+                "; its parent may send purpose=followup with acknowledge_recovery={attempt} \
+                 for a fresh attempt without replaying uncertain work; a tool may have changed this workspace"
+            ));
+        }
+        message
     }
 }

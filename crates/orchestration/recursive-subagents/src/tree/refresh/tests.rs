@@ -88,6 +88,7 @@ impl Fixture {
 
     fn request(&self, refresh: Option<bool>) -> SendAgentMessageRequest {
         SendAgentMessageRequest {
+            acknowledge_recovery: None,
             refresh,
             agent_id: self.agent.clone(),
             message: "next task".into(),
@@ -206,6 +207,7 @@ fn jj_live_fork_followup_reports_refresh_skipped_without_blocking_the_next_attem
     tree.settle_for_test();
     std::fs::write(repo.path().join("PARENT.txt"), "parent work\n").unwrap();
     let request = SendAgentMessageRequest {
+        acknowledge_recovery: None,
         refresh: None,
         agent_id: child.agent_id.clone(),
         message: "next task".into(),

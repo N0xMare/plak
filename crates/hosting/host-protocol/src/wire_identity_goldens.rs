@@ -410,6 +410,7 @@ fn wire_identity_topology_payloads_are_pinned() {
         TOPOLOGY_PAYLOAD_PINS,
         "send_agent_message/full",
         &encoded(&SendAgentMessageRequest {
+            acknowledge_recovery: None,
             refresh: None,
             agent_id: "a2".into(),
             message: "follow up".into(),
@@ -425,6 +426,7 @@ fn wire_identity_topology_payloads_are_pinned() {
         TOPOLOGY_PAYLOAD_PINS,
         "send_agent_message/refresh",
         &encoded(&SendAgentMessageRequest {
+            acknowledge_recovery: None,
             refresh: Some(false),
             agent_id: "a2".into(),
             message: "follow up".into(),
