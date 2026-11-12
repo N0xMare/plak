@@ -154,7 +154,16 @@ pub(in crate::agent) async fn fixture_deciding(
     steps: serde_json::Value,
     setup: impl FnOnce(&mut ProductAgentTree) -> String,
 ) -> Fixture {
-    fixture_with(steps, setup, None, Some("decision_required")).await
+    fixture_with(steps, setup, None, Some("decision_required"), false).await
+}
+
+/// [`fixture_deciding`] whose child's actor gets the turn only once the
+/// turn waits on its first decision.
+pub(in crate::agent) async fn fixture_decided_late(
+    steps: serde_json::Value,
+    setup: impl FnOnce(&mut ProductAgentTree) -> String,
+) -> Fixture {
+    fixture_with(steps, setup, None, Some("decision_required"), true).await
 }
 
 async fn fixture_with_probe(
@@ -162,7 +171,7 @@ async fn fixture_with_probe(
     setup: impl FnOnce(&mut ProductAgentTree) -> String,
     probe: Option<plakous::model::ReachabilityProbe>,
 ) -> Fixture {
-    fixture_with(steps, setup, probe, None).await
+    fixture_with(steps, setup, probe, None, false).await
 }
 
 async fn fixture_with(
@@ -170,6 +179,7 @@ async fn fixture_with(
     setup: impl FnOnce(&mut ProductAgentTree) -> String,
     probe: Option<plakous::model::ReachabilityProbe>,
     tool_policy: Option<&str>,
+    decision_first: bool,
 ) -> Fixture {
     let root = tempfile::tempdir().unwrap();
     let runtime = Arc::new(ProductTopologyRuntime::new(
@@ -300,6 +310,22 @@ async fn fixture_with(
         topology_owner: None,
     };
     let feed = super::super::children::ChildFeedSource::of(&attached);
+    if decision_first {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while agent
+                .attach(plakous::agent::ViewRequest::content())
+                .await
+                .unwrap()
+                .snapshot()
+                .pending_effect_decisions()
+                .is_empty()
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the child's turn waits on its decision");
+    }
     let live = ChildActorHandle::new(&runtime.driver().release_owners(), attached, turn, control);
     let watcher = live.watcher();
     runtime

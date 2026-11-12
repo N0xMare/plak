@@ -75,9 +75,25 @@ struct Pending {
 
 enum Source {
     Admission(TurnEvents),
-    Recovered(EventSubscription),
+    /// A subscription from an attach, with the turn's decisions already
+    /// pending at it: its tail never repeats them, so they come first.
+    Recovered(EventSubscription, Option<Offered>),
     #[cfg(test)]
     Fixture(tokio::sync::mpsc::Receiver<Received>),
+}
+
+/// The decisions a turn waits on at an attach, as of that attach.
+struct Offered {
+    source_sequence: u64,
+    decisions: Vec<OfferedDecision>,
+}
+
+/// One decision pending at an attach, as its offer presents it.
+struct OfferedDecision {
+    decision: plakous::agent::EffectDecisionRef,
+    tool_name: String,
+    prompt: Option<String>,
+    expires_at_ms: u64,
 }
 
 impl Source {
@@ -88,11 +104,16 @@ impl Source {
                 Err(TurnEventError::Closed) => Received::Closed,
                 Err(_) => Received::Recover,
             },
-            Self::Recovered(events) => match events.recv_delivery().await {
-                Ok(delivery) => Received::delivery(delivery),
-                Err(SubscriptionEnd::AgentClosed { .. }) => Received::Closed,
-                Err(_) => Received::Recover,
-            },
+            Self::Recovered(events, offered) => {
+                if let Some(offered) = offered.take() {
+                    return Received::Pending(offered);
+                }
+                match events.recv_delivery().await {
+                    Ok(delivery) => Received::delivery(delivery),
+                    Err(SubscriptionEnd::AgentClosed { .. }) => Received::Closed,
+                    Err(_) => Received::Recover,
+                }
+            }
             #[cfg(test)]
             Self::Fixture(events) => events.recv().await.unwrap_or(Received::Closed),
         }
@@ -101,6 +122,7 @@ impl Source {
 
 enum Received {
     Event(Arc<AgentEvent>),
+    Pending(Offered),
     Lost,
     Recover,
     Closed,
@@ -129,7 +151,24 @@ async fn recover(agent: Option<&Agent>, turn: TurnId) -> Option<Source> {
             {
                 return None;
             }
-            return Some(Source::Recovered(events));
+            let decisions: Vec<_> = snapshot
+                .pending_effect_decisions()
+                .iter()
+                .filter(|pending| pending.decision().turn_id() == turn)
+                .map(|pending| OfferedDecision {
+                    decision: pending.decision().clone(),
+                    tool_name: pending.identity().canonical_name().as_str().to_owned(),
+                    prompt: pending.prompt().map(|prompt| {
+                        crate::session_log::redact_text_preview(prompt.description().as_str())
+                    }),
+                    expires_at_ms: super::events::timestamp_ms(pending.expires_at()),
+                })
+                .collect();
+            let offered = (!decisions.is_empty()).then(|| Offered {
+                source_sequence: snapshot.cursor().sequence().get(),
+                decisions,
+            });
+            return Some(Source::Recovered(events, offered));
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
@@ -214,6 +253,8 @@ struct ChildEvents {
 /// What a child turn's event stream yields.
 enum ChildEvent {
     Event(Arc<AgentEvent>),
+    /// Decisions the turn already waited on when its stream attached.
+    Pending(Offered),
     Lost,
     /// The stream broke and was resubscribed.
     Recovered,
@@ -226,6 +267,7 @@ impl crate::node::EventSource for ChildEvents {
     async fn recv(&mut self) -> ChildEvent {
         match self.source.recv().await {
             Received::Event(event) => ChildEvent::Event(event),
+            Received::Pending(offered) => ChildEvent::Pending(offered),
             Received::Lost => ChildEvent::Lost,
             Received::Recover => {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -349,6 +391,7 @@ impl<T> ChildPort<T> {
                 }
                 return Flow::Continue;
             }
+            ChildEvent::Pending(offered) => return self.offer(offered),
             ChildEvent::Closed => return Flow::Done,
         };
         if matches!(event.kind(), plakous::agent::AgentEventKind::AgentClosed) {
@@ -398,16 +441,7 @@ impl<T> ChildPort<T> {
             let terminal = projection.progress.terminal;
             state.progress = projection.progress.view.clone();
             state.terminal = terminal;
-            state.cursor = state.cursor.saturating_add(1);
-            let cursor = state.cursor;
-            state.updates.push_back(Update {
-                cursor,
-                source_sequence: event.cursor().sequence().get(),
-                ops: Arc::from(ops),
-            });
-            while state.updates.len() > RETAINED_UPDATES {
-                state.updates.pop_front();
-            }
+            let cursor = state.publish(event.cursor().sequence().get(), ops);
             self.observed.changed.send_replace(cursor);
             terminal
         };
@@ -415,6 +449,37 @@ impl<T> ChildPort<T> {
             return Flow::Done;
         }
         self.gap = false;
+        Flow::Continue
+    }
+
+    /// Offers the decisions the turn waited on at its attach that the read
+    /// model does not offer yet, exactly as their events would have.
+    fn offer(&self, offered: Offered) -> Flow {
+        let mut state = self.observed.lock();
+        let Some(projection) = state.projection.as_mut() else {
+            return Flow::Done;
+        };
+        let mut ops = Vec::new();
+        for pending in offered.decisions {
+            if projection
+                .approval_by_decision
+                .contains_key(&pending.decision)
+            {
+                continue;
+            }
+            ops.push(super::child_live::offer_decision(
+                projection,
+                &pending.decision,
+                Some(pending.decision.call_id().as_uuid().to_string()),
+                pending.tool_name,
+                pending.prompt,
+                pending.expires_at_ms,
+            ));
+        }
+        if !ops.is_empty() {
+            let cursor = state.publish(offered.source_sequence, ops);
+            self.observed.changed.send_replace(cursor);
+        }
         Flow::Continue
     }
 }
@@ -435,6 +500,22 @@ struct State {
     cursor: u64,
     updates: VecDeque<Update>,
     closed: bool,
+}
+
+impl State {
+    /// Retains one update for the faces; its cursor.
+    fn publish(&mut self, source_sequence: u64, ops: Vec<HostEvent<Core>>) -> u64 {
+        self.cursor = self.cursor.saturating_add(1);
+        self.updates.push_back(Update {
+            cursor: self.cursor,
+            source_sequence,
+            ops: Arc::from(ops),
+        });
+        while self.updates.len() > RETAINED_UPDATES {
+            self.updates.pop_front();
+        }
+        self.cursor
+    }
 }
 
 /// No decision with that handle is pending on this turn. An answered or
