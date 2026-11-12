@@ -386,7 +386,8 @@ commands that act for good, `/new`, `/compact`, `/fork-then-compact`,
 `/fork`, `/drop` and `/recover`, run from `Enter` only when you typed the
 full name: `Enter` on a shorter word (`/co`) completes it, as `Tab` does, and
 runs nothing, and an `Enter` within about 600 ms of that completion runs
-nothing either; look, then press `Enter` again. There are 25 commands:
+nothing either; look, then press `Enter` again. The catalog has 26 commands
+(host-only controls are hidden in embedded mode):
 
 | Command | Effect |
 | --- | --- |
@@ -409,6 +410,7 @@ nothing either; look, then press `Enter` again. There are 25 commands:
 | `/tree` | Open Activity: Agents · `[resume]` |
 | `/ps` | Open Activity: Processes |
 | `/stop-all` | Stop all non-root agents |
+| `/stop` | Stop this session's work, keeping it open (hosted only) |
 | `/fork` | Fork this conversation |
 | `/fork-then-compact` | Fork, then compact the new session |
 | `/drop` | Drop the last queued message |
@@ -416,8 +418,9 @@ nothing either; look, then press `Enter` again. There are 25 commands:
 | `/reload` | Restart on the installed Plak and resume this session |
 | `/quit` | Exit Plak |
 
-`/new` starts a new session in the same window: empty history, the same model,
-account and tools. The session you leave is not changed; `/resume` returns to
+`/new` starts a new session in the same window with empty history. Embedded
+mode keeps the current model, account and tools; hosted mode binds the host's
+default profile on the selected placement. The session you leave is not changed; `/resume` returns to
 it. If it still has running agents or background processes, `/new` asks
 first: the pop-up names them, and `[ Stop work + new ]` stops its background
 processes, waits for them to exit, and then starts the new session. Running
@@ -441,7 +444,7 @@ Notes worth knowing:
   the resumed history is rebuilt from the committed runtime feed.
 - `/providers` is read-only. Per vertical it names the account, its status, and
   the CLI command that connects it. In this public TUI, logging in and setting
-  keys use `plak login`, `plak logout`, `plak key set|clear`. Protocol-7 host
+  keys use `plak login`, `plak logout`, `plak key set|clear`. Current-protocol host
   clients can also offer confirmed Accounts forms; this TUI does not yet
   include those forms.
 - Templates, the roster and orchestration are config-only. `/config` opens
@@ -454,7 +457,9 @@ Notes worth knowing:
   the `plak mcp` commands that
   add, test and enable a server. Setup is CLI-only (`plak mcp`, see the CLI
   reference); a session keeps the tools it started with.
-- Skills and workflows are not implemented.
+- Skills are discovered at session creation; see
+  [configuration](configuration.md#agent-skills). There is no `/skills` command or
+  workflow editor.
 - There is no `/model`, `/account` or `/effort`. The session's account, model,
   effort, Fast mode, composition and protocol change only through profiles:
   the Agents tab's **Switch now** or **Fork now**, **Use now** on a fresh session with no
@@ -756,9 +761,11 @@ default (embedded local-face Use now also makes its profile the default when
 the home has none; socket-attached Use now does not).
 The session keeps its profile through `/reload`, resume, a carry and
 `/rebind`; if you edit one of its template files, its next `/reload` applies
-the edit to it. A session without sub-agents has no agent tree and records no
-profile, so its carried successor starts on the default profile and the
-transcript says so. A refused Fork now (an account that is not logged in,
+the edit to it. This also applies to sessions without sub-agents: their
+profile is still recorded. Only a missing or unloadable recorded profile,
+or a version-11 export that records none, falls back to the home default with
+a notice. See [profile persistence](../spec/02-plak-product.md#55-the-menu).
+A refused Fork now (an account that is not logged in,
 a running turn, an effort the model does not offer) changes nothing, and the
 transcript says why. The `default` mark moves only when the product confirms
 Set as default.

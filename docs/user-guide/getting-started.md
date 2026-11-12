@@ -16,7 +16,7 @@ It downloads the latest release tarball and `SHA256SUMS` from GitHub Releases
 the build attestation when `gh` is installed and signed in. It installs `plak`,
 `plakous-js-host` and `plakous-py-host` into the same snapshot layout as `just install release`
 below, with links in `~/.local/bin`, and never needs `sudo`. Any other platform
-is refused; build from source there.
+is refused; a source build does not make it a supported target.
 
 With a Rust 1.99.0 toolchain, Cargo installs the same three executables from
 crates.io into `~/.cargo/bin`, where Plak finds its workers beside itself:
@@ -141,14 +141,14 @@ commands). A running TUI shows `new build installed · /reload` once a new
 `just install release` snapshot is in place. Default builds
 include the Git CLI backend only; release tarballs also omit JJ. Add
 `--features plak/jj` to enable native JJ alongside Git (maintainer builds
-already enable it). To build only native JJ:
+already enable it). To add native JJ to the default product:
 
 ```sh
-cargo build --locked --release -p plak --no-default-features --features plak/jj
+cargo build --locked --release -p plak --features plak/jj
 cargo build --locked --release -p plakous-js-runtime -p plakous-py-worker
 ```
 
-Use `plak/git-cli` in place of `plak/jj` for a Git-only build. The root
+Without that extra feature the default product is Git-only. The root
 workspace's default member is only `plak`; build both workers separately. Native
 JJ workspace operations do not require the `jj` executable; the Git CLI backend
 requires `git`.
@@ -162,7 +162,8 @@ relinked by `just install`) and the release, maintainer and shared sidecar roots
 in `~/.local/lib/plak`. Preview these removals with
 `sh install.sh uninstall --dry-run`. Unrelated links and files stay in place. It never deletes
 the product home (`~/.plak` or `PLAK_HOME`) or credentials; there is no
-home-deletion flag. For a crates.io installation, use `cargo uninstall plak` instead.
+home-deletion flag. For a crates.io installation, use
+`cargo uninstall plak plakous-js-runtime plakous-py-worker` instead.
 
 ## Connect an account
 
@@ -179,8 +180,10 @@ plak key set openrouter
 callback by itself — do not paste the localhost URL back at it. Grok and Claude
 show you a code on the callback page and ask you to paste it in.
 
-Over SSH or on a headless box use `plak login <account> --remote`: Plak prints
-the URL and takes the pasted code. An SSH session refuses a local login and tells
+Over SSH or on a headless box use `plak login <account> --remote`. Codex prints
+a device-login URL and code, then waits for authorization; Grok and Claude use
+paste-back. See [remote login](providers-and-accounts.md#oauth).
+An SSH session refuses a local login and tells
 you to add `--remote` rather than switching mode silently.
 
 `plak key set` prompts for the key and writes it to `~/.plak/secrets/` with
@@ -189,7 +192,7 @@ mode `0600`. Environment variables (`OPENAI_API_KEY`, `XAI_API_KEY`,
 loads a `.env` file.
 
 Both use the CLI in the public TUI; its Providers tab shows status and names
-the command. Protocol-7 host clients can also offer confirmed Accounts forms
+the command. Current-protocol host clients can also offer confirmed Accounts forms
 for login and masked key entry; the public TUI does not yet include those forms.
 
 ## Check the setup
@@ -236,7 +239,9 @@ Result: 20 passed · 0 warnings · 0 failures
 Provider credentials: run `plak status`
 ```
 
-`doctor` always emits the same 21 checks. It exits 5 if any row is ERROR. Warnings alone do not fail it.
+The checks depend on the build, configuration and configured runners; the
+example is illustrative. `doctor` exits 5 if any row is ERROR. Warnings alone
+do not fail it.
 
 ## Your first run
 

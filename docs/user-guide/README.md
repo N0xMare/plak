@@ -11,7 +11,7 @@ Start here:
   the exit codes.
 - **[Run plak host as a service](host-service.md)** — Linux user units and macOS LaunchAgents,
   Tailscale Serve, upgrades and logs.
-- **[TUI](tui.md)** — the composer, the 25 slash commands, the key bindings, the
+- **[TUI](tui.md)** — the composer, the slash commands, the key bindings, the
   Menu, themes, and the Agents list.
 - **[Agents and orchestration](agents-and-orchestration.md)** — agent templates,
   the working set, tiers, spawning children, candidates and adoption, and the

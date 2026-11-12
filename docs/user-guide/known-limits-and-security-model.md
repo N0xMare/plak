@@ -12,8 +12,9 @@ can read every file you can read, write anywhere you can write, signal your
 processes, and use the network. There is no OS sandbox, no sandbox setting, and
 no degraded containment mode.
 
-Only the file tools are confined: they resolve paths relative to the workspace
-root and refuse symlinks and escapes. That confinement does not extend to
+File tools normally resolve paths relative to the workspace root and refuse
+symlinks and escapes. Explicit read allowlists also permit enrolled skill
+files and captured process output outside it. That confinement does not extend to
 commands a process tool runs. Worker isolation for JavaScript and Python
 evaluators is not workspace isolation.
 

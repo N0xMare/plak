@@ -219,11 +219,13 @@ flavor; follow the runner upgrade rules rather than substituting another build.
 On macOS, the UI-only reload command is
 `launchctl kill SIGUSR1 "gui/$(id -u)/com.plak.host"`.
 
-Before upgrading from runner protocol 4 to 5, finish or stop all home-local
-background jobs using the old build. A protocol-5 host does not see the live
-protocol-4 home-local daemon or its jobs, including during the embedded
-startup check. Settle those jobs before installing the new build and using
-`/reload`; reloading does not transfer them across protocol directories.
+Before an upgrade that changes the runner protocol, finish or stop all
+home-local background jobs using the old build. This build uses runner
+protocol 7 and does not see another protocol's home-local daemon or its jobs,
+including during the embedded startup check. Settle those jobs before
+installing the new build and using `/reload`; reloading does not transfer them
+across protocol directories. This is separate from the coordinated host
+upgrade described above, whose runner qualification checks the destination.
 
 The Linux unit leaves WorkingDirectory unset, using systemd's user-service
 default of `$HOME`; the LaunchAgent sets it to HOME explicitly. Neither chooses

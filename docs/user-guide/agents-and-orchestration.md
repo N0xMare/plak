@@ -77,8 +77,8 @@ template's own `spawns` only matters where that template is spawned as a
 child.
 
 `[orchestration]` holds the tree budget: `subagents`, `max_depth`,
-`max_children`, `max_nodes`, `max_attempts`, `require_review_evidence`,
-`turn.auto_continue`. Interactive roots may end a turn while children run;
+`max_children`, `max_nodes`, `max_attempts`, `require_review_evidence`.
+`[turn] auto_continue` controls idle wakes. Interactive roots may end a turn while children run;
 the host wakes them with results or questions when auto-continue is enabled.
 Use `wait_agent` when a result is needed before continuing the current turn.
 Children never need to sit in a wait either: a child whose turn ends without
@@ -247,7 +247,9 @@ a timeout does not mean the child was cancelled or that spawning it again is
 safe. A repeated identical `request_key` identifies the original admitted spawn,
 including its candidate inputs, even after its workspace changes.
 
-Nothing pauses after a crash: the agent tree reopens live. A child the lost
+Reopening reconciles the tree without replaying uncertain work. By default,
+lost work is held for your Resume; `[host] resume_after_loss = "continue"`
+instead admits one continuation instruction turn. A child the lost
 `plak` left parked between turns is marked `interrupted` (owner lost) when the
 tree reopens. A child that was mid-turn, or whose own turn ended recovery
 required, is recovered rather than stranded: its session is reopened exactly,
@@ -532,8 +534,9 @@ Nothing there is loaded automatically.
 ### Your first tree
 
 Use the annotated reference home, in a throwaway `PLAK_HOME` so nothing you
-already have is disturbed. Give it an absolute, non-symlinked path: on macOS
-`/tmp` is a symlink, and the SQLite stores refuse a symlinked parent.
+already have is disturbed. Give it an absolute path without operator-placed
+symlink ancestors. Plak accepts macOS system aliases such as `/tmp` and `/var`;
+using a directory directly under your home keeps the example portable.
 
 ```sh
 export PLAK_HOME="$HOME/plak-tree-demo"

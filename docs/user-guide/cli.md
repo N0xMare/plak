@@ -29,8 +29,8 @@ session. The runner name must be returned by that host's picker; local means
 the host machine, not the client. The host validates the workspace on the
 selected runner and returns its canonical spelling before creation. With no
 workspace flag, the picker uses that runner's most recent workspace or its
-default. New sessions use the host's default profile; embedded `/new` remains
-payload-free and also uses the home default. A placement or workspace refusal
+default. New hosted sessions use the host's default profile; embedded `/new`
+keeps the current binding and tools. A placement or workspace refusal
 creates no session.
 
 ## A persistent host and the stdio bridge
@@ -142,7 +142,7 @@ with `--remote` rather than switching mode silently.
 The SuperGrok account answers to `grok` and `supergrok`; bare `xai` is refused
 as ambiguous. API keys use `plak key set` instead. In the public TUI, login
 uses the CLI; its Providers tab shows status and names this command.
-Protocol-7 host clients can also offer confirmed Accounts login forms; the
+Current-protocol host clients can also offer confirmed Accounts login forms; the
 public TUI does not yet include those forms.
 
 ### `plak logout <codex|grok|claude> [--local]`
@@ -238,7 +238,7 @@ that one account cannot be read. The four columns stay put, so
 the file; `status` reports presence without printing the key. Environment
 variables override files, `plak key clear` cannot unset a process environment
 variable, and Plak never loads a `.env` file. In the public TUI, key entry uses
-the CLI; protocol-7 host clients can also offer masked, confirmed key forms.
+the CLI; current-protocol host clients can also offer masked, confirmed key forms.
 
 ### `plak secret set|rm <name>`, `plak secret list`
 
@@ -545,10 +545,13 @@ plak agent --session 0f2c…
 printf '{"v":1,"kind":"prompt","id":"1","text":"hi"}\n' | plak agent --account grok --model grok-4.6 --effort low
 ```
 
-Stdin commands: `prompt`, `interrupt`, `compact`, `resume_queue`, `tree`,
+Stdin commands: `prompt`, `interrupt`, `compact`, `resume_queue`, `resume`, `tree`,
 `interrupt_node`, `close_node`, `stop_all`, `clear`,
 `invoke_tool`, `fork`, `recover`, `background`, `resolve_approval`, `quit`.
 `clear` starts a new session, as `/new` does in the TUI.
+`resume` with `agent_id` resumes that loss-held child; without it, it resumes
+all held work and the restored queue. It admits continuation instructions,
+not a replay of the interrupted turn. `resume_queue` only resumes queue delivery.
 A `prompt` may carry `"images": ["shot.png", "~/..."]`: paths to png, jpeg,
 gif or webp files (relative ones resolve against the agent's working
 directory; `~` is not expanded), read with the same limits as `plak run
@@ -644,8 +647,9 @@ Result: 23 passed · 0 warnings · 0 failures
 Provider credentials: run `plak status`
 ```
 
-The same 23 checks are always emitted. Every failing row carries its own FIX
-column. `Runtime store` is an ERROR (`full`) once new work is refused for lack
+The checks depend on the build, configuration and configured runners; the
+example is illustrative. Every failing row carries its own FIX column.
+`Runtime store` is an ERROR (`full`) once new work is refused for lack
 of space and a WARNING (`nearly_full`) shortly before; its fix is
 `plak session gc --all`, then `plak session delete <id>`. The row also shows
 the database file size with its free bytes, and the change feed's retained

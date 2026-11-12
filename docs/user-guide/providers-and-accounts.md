@@ -40,7 +40,7 @@ informational blocks are skipped with a counted notice rather than failing the
 turn. Unknown tool-related or incomplete signed content still refuses when it
 cannot be continued faithfully; this does not enable additional hosted tools.
 
-In the public TUI, login and key entry use the CLI. Protocol-7 host clients
+In the public TUI, login and key entry use the CLI. Current-protocol host clients
 can instead use confirmed Accounts forms; the public TUI does not yet include
 those forms. Its Providers tab is read-only: per
 vertical it names the account, its status, and the command that connects it.
@@ -334,7 +334,7 @@ that calls the tools.
 
 | Composition | Available on | Meaning |
 | --- | --- | --- |
-| `direct` | every account | Ordinary tool calls |
+| `direct` | Direct-capable models/routes | Ordinary tool calls; refused for `CodeModeOnly` models |
 | `plakous-default` | every account | The per-model recommended composition (the default) |
 | `native-ptc` | where the vertical enrolls one: today **Codex and the OpenAI API** | The vertical's own PTC system; today only Codex Code Mode is enrolled |
 | `js-ptc` | every account | Plak's JavaScript harness PTC |

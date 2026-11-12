@@ -134,9 +134,15 @@ out a short outage: up to twelve proven-unsent requests, waiting about 2, 4, 8,
 16 then 30 seconds (randomized by up to half), with at most 240 seconds of
 network waiting. These do not spend the ordinary retry budget. The retry row
 says `provider unreachable (...); waiting for network, try N in Ns`.
-Your hard deadline and cancellation still bound the call. Incomplete uploads
-use the ordinary budget, not the outage allowance; compaction never replays a
-request that could have reached the provider whole. Retries never switch routes.
+Provably incomplete uploads have a separate allowance: up to sixteen incomplete
+physical requests and 900 seconds of waiting, with equal-jittered backoff bases
+of 10, 20, 40, then 60 seconds. They do not spend either the unreachable or
+ordinary allowance. An HTTP response or a request that may have been fully
+written cannot enter this allowance; a possible provider-hosted effect forbids
+replay. Your hard deadline and cancellation still bound every wait. This also
+covers proven-incomplete compaction uploads, never a second paid dispatch.
+Retries never switch routes. See the
+[retry contract](../spec/01-plakous-library.md#131-errors-and-retry).
 Each request gets a fresh connection/head budget; a long response does not
 consume the next request's budget. After a streamed generation longer than
 300 seconds fails, at most one replay is allowed. On Responses routes, after
@@ -170,7 +176,7 @@ to continue after reloading. `plak run` still obeys its timeout and turn limit.
 **Request corrupted in transit (TLS record rejected)** means the peer rejected
 a TLS record of the incomplete upload and closed that connection, not that the
 provider was unreachable. The first resend is immediate on a fresh connection;
-later resends retain normal backoff and the same four-request budget. Repeated
+later resends use the incomplete-upload allowance above. Repeated
 occurrences indicate in-path corruption. Try the same request from another
 network (for example a mobile hotspot), then compare with VPN/proxy disabled
 where permitted. If that network works, check the original router, VPN/proxy,
@@ -384,14 +390,19 @@ JavaScript or Python cell), even while a command the cell started was still
 running: the cell and that command are reported as **a tool may have run**
 (or **its pending work never started** when the cell had not begun), and
 neither is run again. Recovered child agents are marked `interrupted` (owner
-lost) with their attempt kept;
-the parent can re-task them with a follow-up, and a crash does not spend the
-tree's attempt budget.
+lost) with their attempt kept. This applies to children lost mid-turn as well
+as parked children. Resume the held child with `r` in the Agents tab, or have
+its direct parent send `purpose=followup` with `acknowledge_recovery` equal to
+the child's current `attempt_id`. That settles uncertainty before admitting
+fresh work; it never replays the old tools. A crash does not spend the tree's
+attempt budget. See [child recovery](agents-and-orchestration.md#what-a-spawned-child-sees).
 
 If prompts were queued behind the interrupted turn, they stay queued and
 paused, since they were written for a turn whose outcome nobody saw: review
-them, then press Tab and `r` in the TUI (or send `resume_queue` in
-`plak agent`) to deliver them. A prompt you type now runs at once.
+them, then focus the paused queue with `Tab` and press `Ctrl+R` in the TUI to
+resume held work and the queue. JSONL `resume_queue` resumes only queue
+delivery; `resume` is the explicit Resume
+for loss-held work. A prompt you type now runs at once.
 
 A `/fork` request a crash interrupted before it started is withdrawn on
 reopen with `fork did not start; run /fork again`. A fork that already landed
@@ -488,12 +499,16 @@ with `plak session list` and resume its newest carried session.
 
 ## A service stopped after the turn
 
-Process tools own the process sessions they start for the current root turn.
-When that turn ends, Plak terminates and reaps processes in those owned groups;
-`nohup` by itself does not keep such a service available afterward. Files
-written to the workspace remain. Within a turn, a polled or background command
-runs for up to 30 minutes, and a long build's output keeps its newest part: the
-result says how many earlier bytes were omitted.
+Process jobs can survive an individual turn. By default a foreground command
+is promoted after 30 seconds and has a ten-hour hard runtime cap, configurable
+under [jobs](configuration.md#process-job-bounds). Jobs remain owned: explicit
+stop, session release or the owning attempt ending cleans them up. `nohup`
+does not escape that ownership. Files written to the workspace remain.
+
+`plak run` waits for promoted work but not shell `&` leftovers, and stops owned
+jobs at exit unless `--leave-jobs-running` releases the leftovers as unowned.
+Redirect service output to a file if it must outlive capture closing. See
+[run lifetimes](cli.md#plak-run).
 
 If a later test or client needs a server, check its lifetime and network scope
 separately. A failed HTTP check alone does not distinguish an exited process
@@ -587,7 +602,8 @@ you to run a command that needs the invalid configuration to parse first.
 
 ## `… is signed out; run …` and other subscription remedies
 
-Subscription setup and model-admission failures exit 3 and name their remedy. A
+Authentication and subscription-consent failures exit 3 and name their remedy.
+An unsupported model, effort or composition is a usage error (exit 2). A
 signed-out, revoked or quarantined credential needs `plak login <account>`; a
 credential that needs a refresh names `plak refresh <account>` first. Catalog
 or token failures caused by the network say to check it and retry. Contract
@@ -792,9 +808,10 @@ inherits the current process environment and cannot clear this override.
 If the reason names a `sha256:` fingerprint, run `plak key set openrouter`.
 Plak refuses to change key files while an overriding environment variable is set.
 
-A Usage read never refreshes a token. For an expired Codex, Grok or Claude
+A Usage read does not refresh an already expired token. For an expired Codex, Grok or Claude
 token it reports that the credential needs a token refresh: the next turn
-refreshes it, or run `plak refresh <account>`. "Provider reported a
+refreshes it, or run `plak refresh <account>`. A still-fresh token rejected by
+the provider can trigger one forced refresh and retry. "Provider reported a
 usage window that has already ended" refers only to provider data; it does not
 mean the local access token expired. A Busy read is local writer or refresh
 contention (a credential write, or a token refresh in progress in this or
@@ -821,7 +838,7 @@ JavaScript host is unavailable: <error>; set PLAK_JS_HOST or place plakous-js-ho
 Python host is unavailable: <error>; set PLAK_PY_HOST or place plakous-py-host beside plak
 ```
 
-`native-ptc` and `js-ptc` need `plakous-js-host`; `py-ptc` needs the `plakous-py-host` worker.
+`native-ptc` and `js-ptc` need `plakous-js-host`; `py-ptc` and `py-sdk` need the `plakous-py-host` worker.
 A missing sidecar fails closed rather than degrading to `direct`.
 
 `just build debug` and `just build release` build `plakous-js-host` and `plakous-py-host`
@@ -890,8 +907,10 @@ any needed files before replacing it with a new agent workspace.
 
 ## Nothing from a child agent showed up in my checkout
 
-That is the design. A child's edits are sealed as a *candidate* and reach your
-working tree only when an agent with `may_adopt` adopts them — as uncommitted
+With the default `workspace = "inherit"`, child edits already affect the shared
+checkout. A child using `workspace = "fork"` instead seals its edits as a
+*candidate*, which reaches your working tree only when an agent with `may_adopt`
+adopts it — as uncommitted
 changes, never a commit. Check Activity's Agents tab (`/tree`; `Ctrl+T` opens
 the last Activity tab) for the child's
 status: `active`, `adopting`, `adopted`, `discarding`, `clean_removed`, `discarded`.
@@ -921,9 +940,12 @@ warning for debug binaries precisely because their cold start is visible.
 
 Reopening a session preserves queued prompts but pauses automatic delivery.
 In `plak agent`, send `{"v":1,"kind":"resume_queue","id":"resume-1"}` to
-resume the queue explicitly. In the TUI, focus the queue with `Tab` and press
-`r`. A reopened agent tree is never paused; resuming the queue does not touch
-it.
+resume queue delivery explicitly. In the TUI focus the paused queue with `Tab`
+and press `Ctrl+R`: this is the one Resume for loss-held root/child work and
+the restored queue. JSONL clients use `resume` for held work;
+`resume_queue` alone does not resume the tree.
+The default loss policy holds work even after recovery settles its old turn.
+See [host-loss policy](../spec/07-config-reference.md#3-configtoml).
 
 If scheduled compaction leaves a prompt queued, read the preceding compaction
 result and correct its cause before resuming. Retrying compaction is a new

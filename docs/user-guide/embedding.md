@@ -28,13 +28,16 @@ need `store`, which `sessions-sqlite` implies.
 
 | Feature | Adds |
 | --- | --- |
-| `composition` | Code Mode, JavaScript and Python PTC over the cell client; no credentials, HTTP or interpreter dependencies |
+| `composition` | Code Mode and JavaScript PTC over the cell client; no credentials, HTTP or interpreter dependencies |
+| `composition-python` | Python PTC and the typed Python SDK; implies `composition` |
 | `store` | `plakous::sessions` with `SessionBackend::memory` |
 | `sessions-sqlite` | `SessionBackend::sqlite`; implies `store` |
 | `anthropic`, `openrouter` | Provider integrations and explicit credential/model inputs |
 | `openai`, `xai` | Provider integration exports; the native `OpenAiLanguageModel`/`XaiLanguageModel` additionally require `codex`/`grok`, respectively |
-| `auth` | Credential store, OAuth, pins and account binding; implies `openai` and `xai` |
+| `auth` | Credential store, OAuth, pins and account binding; API exports remain explicit |
 | `codex`, `grok`, `claude` | Independent native subscription admission/authentication; evaluator and API re-export selection remain explicit |
+| `mcp` | MCP client integration |
+| `web-fetch` | Local page fetching |
 | `full` | All of these features, including Python and subscription dependencies |
 
 The always-on `application::run_once_until_signal` takes your cancellation
@@ -137,7 +140,7 @@ Custom models instead select `ProductJavaScriptCompositionV1` (`exec_js` and
 `ProductExtensionEvidence` with caller issuer and qualification-candidate
 identities. Such a receipt is self-attestation, not successful live qualification.
 `PythonPtcV1` is the explicit Python alternative with its own worker, using
-the same `composition` feature. Attach at most one profile/engine; there is no
+the `composition-python` feature. Attach at most one profile/engine; there is no
 language switching or fallback.
 
 Select the profile from its compiled descriptor, then verify the explicit
@@ -152,7 +155,7 @@ use that same builder and attach path but forbid product evidence.
 
 ## Typed Python SDK
 
-The SDK is an explicit embedding choice through `composition`. It uses the
+The SDK is an explicit embedding choice through `composition-python`. It uses the
 same `plakous-py-host` sidecar, but exposes only `run_py` and starts each cell
 with fresh globals. Plak selects it with `--composition py-sdk` or the root
 settings picker, on a Direct-capable single-agent route.

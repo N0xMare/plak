@@ -82,7 +82,7 @@ directive is an error, not a fallback.
 `PLAK_JS_HOST` and `PLAK_PY_HOST` are absolute paths to the evaluator sidecars.
 `PLAK_JS_HOST` names `plakous-js-host`, the JavaScript evaluator used by Code
 Mode and js-ptc. `PLAK_PY_HOST` names `plakous-py-host`, the Python cell worker
-used by py-ptc. By default Plak looks only for a sibling of the running `plak`
+used by py-ptc and py-sdk. By default Plak looks only for a sibling of the running `plak`
 binary; there is no `PATH` search. Each must name an existing regular file, or
 the lookup fails closed. Neither is a credential.
 
@@ -236,9 +236,11 @@ agent = "root-agent"
 one that account offers. Neither is checked when the file is read — they are
 checked when a session binds — so a typo shows up at launch, not at save.
 
-The Agents tab writes a profile's templates and points the root and the
-working set at them. Nothing else in a session changes the live root: there is
-no slash command that switches its account, model or effort.
+The Agents tab's **Set as default** writes a profile's templates and points
+the root and working set at them for new sessions. **Switch now** and
+**Fork now** change the attached session instead; `/agents <profile>` opens
+that choice. `/rebind` carries the conversation under the current configuration
+and login. See [agent profiles](tui.md#agent-profiles).
 
 For the typed Python SDK, select `py-sdk` in `/settings` or pass
 `--composition py-sdk` to `plak run` or `plak agent`. To save it for the root,
@@ -329,8 +331,9 @@ list adds more, by name:
 | `mcp:<id>` | Every tool an MCP server allows. |
 | `mcp:<id>/<tool>` | One tool of an MCP server. |
 
-None is on by default and no shipped profile turns one on. Options live in
-`config.toml`; a table there enables nothing by itself:
+None is on for a bare root by default. The shipped researcher templates
+explicitly enable route-appropriate web tools; other templates must opt in.
+Options live in `config.toml`; a table there enables nothing by itself:
 
 ```toml
 [tools.web_search]
@@ -418,8 +421,9 @@ the last one ends. Its tool list is frozen when the session is created; a
 server that later changes a tool answers that tool with an error telling you to
 start a new session. The root's tools are frozen the same way: editing the
 `[root] agent` template's `tools`, a `[tools.*]` table or an `[mcp_servers.*]`
-table changes new sessions only, never one you resume, replace with `/new` or
-switch models in. A session keeps its tools when you switch models: a session started on the
+table changes newly bound sessions, not an exact resume or a profile Switch now.
+Embedded `/new` retains the current tools; hosted `/new` binds the host's
+default profile afresh. A session keeps its tools when you switch models: a session started on the
 `[root] agent` template's account and model has the template's tools for its
 whole life, one started on any other model has none, and a switch to a model
 whose route cannot run one of the session's tools is refused (use `/new` or
@@ -530,9 +534,12 @@ trusted, the project config is skipped entirely and `plak config show` marks
 it `untrusted — ignored`.
 
 Orchestration controls (`[orchestration]`), `turn.auto_continue`,
-`tui.reload_requests` and `mcp.client_id_metadata_url` always come from your
-home config. Project values for them are ignored with a warning, even after
-trust. Use `plak config set <key> <value> --scope user` to change them.
+`tui.reload_requests`, `mcp.client_id_metadata_url`, `[host]`, `[runners]` and
+`[web]` always come from your home config. Project values for them are ignored
+with a warning, even after trust. Use
+`plak config set <key> <value> --scope user` for supported scalar keys;
+edit the home file for runner tables. See the
+[configuration reference](../spec/07-config-reference.md#3-configtoml).
 
 Once trusted, the merge is asymmetric by design: your global config can never
 accidentally name a project template (the global file is validated before the
@@ -587,9 +594,9 @@ to run, and `plak doctor` names each such role. **Set as default** writes
 `{name}-root`, `{name}-worker`, `{name}-reviewer`, and `{name}-researcher`
 under `~/.plak/agents/` (a file you already have under one of those names is
 kept as it is) and points `[root] agent` and `[roster] working_set` at those
-files, which is how new sessions pick a profile; **Fork now** changes only the
-session it runs in and leaves the default alone, and **Use now** sets the
-default only when the home has none yet. A refusal
+files, which is how new sessions pick a profile. **Switch now** and **Fork now**
+leave the default alone; embedded **Use now** sets the default only when the
+home has none yet, and hosted Use now never changes it. A refusal
 before dispatch changes nothing. A stop after publication can leave a saved,
 resumable successor without attaching it or applying the profile files; the
 notice names that session and its `/resume` command. Fork now branches the current session onto that profile,
