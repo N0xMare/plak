@@ -771,6 +771,8 @@ recover a lost open answer only on that runner instance; missing receipts never
 authorize replayed execution. Same-generation reconciliation precedes new input.
 Another host generation never adopts an old namespace: it requests cleanup and
 waits for the old pins before opening replacement work.
+Expired/closed namespaces and exhausted namespace-table admission refuse before
+changing another generation: a stale renewal cannot close its successor's terminals.
 
 Close and expiry supervise the entire independently identified PTY session, not
 only the shell's process group. Closing all master descriptors hangs up the PTY;

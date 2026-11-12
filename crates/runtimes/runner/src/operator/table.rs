@@ -108,6 +108,16 @@ impl OperatorTerminalService {
         connection: u64,
         now: Instant,
     ) -> Result<OperatorAnswer, OperatorRefusal> {
+        if table
+            .namespaces
+            .get(&key)
+            .is_some_and(|ns| ns.closed || now.duration_since(ns.renewed) >= NAMESPACE)
+        {
+            return Err(OperatorRefusal::NamespaceExpired);
+        }
+        if !table.namespaces.contains_key(&key) && table.namespaces.len() >= 128 {
+            return Err(OperatorRefusal::Quota);
+        }
         // A new generation never adopts old shells, even if its browser retained ids.
         for (old, ns) in &mut table.namespaces {
             if old.host == key.host
@@ -120,9 +130,6 @@ impl OperatorTerminalService {
                 }
             }
         }
-        if !table.namespaces.contains_key(&key) && table.namespaces.len() >= 128 {
-            return Err(OperatorRefusal::Quota);
-        }
         let ns = table.namespaces.entry(key).or_insert_with(|| Namespace {
             renewed: now,
             reconciled: connection,
@@ -130,9 +137,6 @@ impl OperatorTerminalService {
             terminals: HashMap::new(),
             refused_opens: HashMap::new(),
         });
-        if ns.closed || now.duration_since(ns.renewed) >= NAMESPACE {
-            return Err(OperatorRefusal::NamespaceExpired);
-        }
         ns.renewed = now;
         ns.reconciled = connection;
         Ok(self.rows(ns))

@@ -473,6 +473,97 @@ fn operator_namespace_visibility_generation_loss_and_restart_never_adopt() {
 }
 
 #[test]
+fn operator_expired_generation_renew_cannot_close_its_successors_terminals() {
+    let fixture = Fixture::new();
+    fixture.open(0);
+    lock(&fixture.fake).proof = true;
+    let renewed = fixture.service.execute(
+        "paired",
+        "successor",
+        2,
+        namespace(),
+        "renew",
+        OperatorOperation::Renew,
+    );
+    assert!(matches!(renewed, OperatorAnswer::Table { .. }));
+    fixture.service.tick();
+    let opened = fixture.service.execute(
+        "paired",
+        "successor",
+        2,
+        namespace(),
+        "open",
+        OperatorOperation::Open {
+            key: key(0),
+            workspace: "/workspace".into(),
+            dimensions: dimensions(),
+        },
+    );
+    assert!(
+        matches!(opened,OperatorAnswer::Terminal {terminal,..} if terminal.status==TerminalStatus::Running)
+    );
+    refused(
+        fixture.call(1, OperatorOperation::Renew),
+        OperatorRefusal::NamespaceExpired,
+    );
+    fixture.service.tick();
+    assert_eq!(
+        lock(&fixture.fake).closed,
+        1,
+        "a stale heartbeat must not signal the new generation"
+    );
+    let table = fixture.service.execute(
+        "paired",
+        "successor",
+        2,
+        namespace(),
+        "list",
+        OperatorOperation::List,
+    );
+    assert!(
+        matches!(table,OperatorAnswer::Table {terminals} if terminals.len()==1 && terminals[0].status==TerminalStatus::Running)
+    );
+}
+
+#[test]
+fn operator_namespace_quota_refusal_has_no_cross_generation_effect() {
+    let fixture = Fixture::new();
+    fixture.open(0);
+    for n in 1..128 {
+        let namespace = OperatorNamespace {
+            state_key: id(&format!("state-{n}")),
+            ..namespace()
+        };
+        let answer = fixture.service.execute(
+            "paired",
+            "generation",
+            1,
+            namespace,
+            "renew",
+            OperatorOperation::Renew,
+        );
+        assert!(matches!(answer, OperatorAnswer::Table { .. }));
+    }
+    refused(
+        fixture.service.execute(
+            "paired",
+            "successor",
+            2,
+            namespace(),
+            "renew",
+            OperatorOperation::Renew,
+        ),
+        OperatorRefusal::Quota,
+    );
+    assert_eq!(
+        lock(&fixture.fake).closed,
+        0,
+        "a refused reservation must not close another namespace"
+    );
+    assert!(fixture.service.workspace_pinned(Path::new("/workspace")));
+}
+
+#[test]
 fn operator_ring_is_raw_bounded_and_reports_exact_cursor() {
     let mut output = Output::default();
     output.push(&[0, 255, 1]);
