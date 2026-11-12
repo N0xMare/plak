@@ -853,107 +853,147 @@ struct CutExpect {
 }
 
 /// Idle and busy cuts, with a running child, a held child and a pending
-/// child result. Before the root record the root is an ordinary loss; after
-/// it nothing continues, the children are stopped once the tree cut has
-/// passed, and a child result does not wake the root once suppression is
-/// durable.
-#[test]
-fn a_stop_cut_with_children_decides_the_root_and_the_wake() {
-    let idle = [
-        CutExpect {
-            at: "wake",
-            suppression: false,
-            children_stopped: false,
-            root_stopped: false,
-            continues: true,
-            wakes: true,
-        },
-        CutExpect {
-            at: "tree",
-            suppression: true,
-            children_stopped: false,
-            root_stopped: false,
-            continues: true,
-            wakes: false,
-        },
-        CutExpect {
-            at: "queue",
-            suppression: true,
-            children_stopped: true,
-            root_stopped: false,
-            continues: true,
-            wakes: false,
-        },
-        CutExpect {
-            at: "process",
-            suppression: true,
-            children_stopped: true,
-            root_stopped: false,
-            continues: true,
-            wakes: false,
-        },
-        CutExpect {
-            at: "root",
-            suppression: true,
-            children_stopped: true,
-            root_stopped: false,
-            continues: true,
-            wakes: false,
-        },
-        CutExpect {
-            at: "after",
-            suppression: true,
-            children_stopped: true,
-            root_stopped: true,
-            continues: false,
-            wakes: false,
-        },
-    ];
-    for expect in idle {
+/// child result, one test per cut. Before the root record the root is an
+/// ordinary loss; after it nothing continues, the children are stopped once
+/// the tree cut has passed, and a child result does not wake the root once
+/// suppression is durable.
+mod a_stop_cut_with_children_decides_the_root_and_the_wake {
+    use super::{
+        Cancel, CutExpect, Release, assert_cut, crash_busy, crash_idle, release_a_running_root_turn,
+    };
+
+    fn idle(expect: CutExpect) {
         let root = tempfile::tempdir().unwrap();
         let lost =
             release_a_running_root_turn(root.path(), Release::Lost, Cancel::Deaf, |config| config);
         let (running, held) = crash_idle(root.path(), &lost, expect.at);
         assert_cut(root.path(), &lost, "idle", &expect, &running, &held);
     }
-    let busy = [
-        CutExpect {
+
+    fn busy(expect: CutExpect) {
+        let root = tempfile::tempdir().unwrap();
+        let (lost, running, held) = crash_busy(root.path(), expect.at);
+        assert_cut(root.path(), &lost, "busy", &expect, &running, &held);
+    }
+
+    #[test]
+    fn idle_wake() {
+        idle(CutExpect {
             at: "wake",
             suppression: false,
             children_stopped: false,
             root_stopped: false,
             continues: true,
             wakes: true,
-        },
-        CutExpect {
+        });
+    }
+
+    #[test]
+    fn idle_tree() {
+        idle(CutExpect {
             at: "tree",
             suppression: true,
             children_stopped: false,
             root_stopped: false,
             continues: true,
             wakes: false,
-        },
-        CutExpect {
+        });
+    }
+
+    #[test]
+    fn idle_queue() {
+        idle(CutExpect {
+            at: "queue",
+            suppression: true,
+            children_stopped: true,
+            root_stopped: false,
+            continues: true,
+            wakes: false,
+        });
+    }
+
+    #[test]
+    fn idle_process() {
+        idle(CutExpect {
+            at: "process",
+            suppression: true,
+            children_stopped: true,
+            root_stopped: false,
+            continues: true,
+            wakes: false,
+        });
+    }
+
+    #[test]
+    fn idle_root() {
+        idle(CutExpect {
             at: "root",
             suppression: true,
             children_stopped: true,
             root_stopped: false,
             continues: true,
             wakes: false,
-        },
-        CutExpect {
+        });
+    }
+
+    #[test]
+    fn idle_after() {
+        idle(CutExpect {
+            at: "after",
+            suppression: true,
+            children_stopped: true,
+            root_stopped: true,
+            continues: false,
+            wakes: false,
+        });
+    }
+
+    #[test]
+    fn busy_wake() {
+        busy(CutExpect {
+            at: "wake",
+            suppression: false,
+            children_stopped: false,
+            root_stopped: false,
+            continues: true,
+            wakes: true,
+        });
+    }
+
+    #[test]
+    fn busy_tree() {
+        busy(CutExpect {
+            at: "tree",
+            suppression: true,
+            children_stopped: false,
+            root_stopped: false,
+            continues: true,
+            wakes: false,
+        });
+    }
+
+    #[test]
+    fn busy_root() {
+        busy(CutExpect {
+            at: "root",
+            suppression: true,
+            children_stopped: true,
+            root_stopped: false,
+            continues: true,
+            wakes: false,
+        });
+    }
+
+    #[test]
+    fn busy_process() {
+        busy(CutExpect {
             at: "process",
             suppression: true,
             children_stopped: true,
             root_stopped: true,
             continues: false,
             wakes: false,
-        },
-    ];
-    for expect in busy {
-        let root = tempfile::tempdir().unwrap();
-        let (lost, running, held) = crash_busy(root.path(), expect.at);
-        assert_cut(root.path(), &lost, "busy", &expect, &running, &held);
+        });
     }
 }
 

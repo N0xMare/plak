@@ -32,6 +32,9 @@ impl Seams {
     }
 }
 
+// One slot for the whole process: a test that arms a seam, and its guard that
+// disarms it, assume nextest's one process per test. Threaded `cargo test`
+// lets concurrent stop-cut tests arm and disarm each other's seams.
 static SEAMS: Mutex<Seams> = Mutex::new(Seams::new());
 static IDLE: Condvar = Condvar::new();
 
