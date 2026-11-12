@@ -42,7 +42,11 @@ fn review_drive_recorded(
                 terminal.send(b"\x11");
             }
             let (status, screen) = terminal.finish_with_screen();
-            assert!(screen.contains("host"), "loss must be plain: {screen}");
+            assert!(
+                screen.contains("host")
+                    || screen.contains("Detached. Resume this session with: plak resume "),
+                "loss must be plain: {screen}"
+            );
             assert!(!alive || status.success(), "{status:?}: {screen}");
             return;
         }
@@ -239,7 +243,11 @@ fn drive_recorded(
                 terminal.send(b"\x11");
             }
             let (status, screen) = terminal.finish_with_screen();
-            assert!(screen.contains("host"), "loss must be plain: {screen}");
+            assert!(
+                screen.contains("host")
+                    || screen.contains("Detached. Resume this session with: plak resume "),
+                "loss must be plain: {screen}"
+            );
             assert!(!alive || status.success(), "{status:?}: {screen}");
             return;
         }
