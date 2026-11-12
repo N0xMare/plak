@@ -1,7 +1,4 @@
 {
-  "fixture": "host-control-stop-root",
-  "source": "real public TUI capture",
-  "seed_session": "@uuid:0",
   "entries": [
     {
       "connection": 1,
@@ -14,7 +11,7 @@
         "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
-        "proto": 7
+        "proto": 8
       }
     },
     {
@@ -44,7 +41,8 @@
               "web_accounts_read": false,
               "web_config_read": false,
               "web_config_write": false,
-              "web_credentials_write": false
+              "web_credentials_write": false,
+              "web_files_read": false
             },
             "credentials_write": {
               "disabled_reason": null,
@@ -52,6 +50,11 @@
               "remedy": null
             },
             "face": "socket",
+            "files_read": {
+              "disabled_reason": null,
+              "enabled": true,
+              "remedy": null
+            },
             "limits": {
               "config_mutations_per_minute": 30,
               "confirmation_ttl_ms": 60000,
@@ -81,12 +84,31 @@
               "secret_input_bytes": 16384,
               "usage_cache_ms": 30000,
               "usage_reread_ms": 30000
+            },
+            "workspace_limits": {
+              "changes_deadline_ms": 5000,
+              "changes_entries": 2000,
+              "changes_targets_per_principal": 4,
+              "changes_token_ttl_ms": 60000,
+              "file_bytes": 16777216,
+              "file_deadline_ms": 2000,
+              "hash_burst_bytes": 67108864,
+              "hash_bytes_per_second": 33554432,
+              "inflight_host": 16,
+              "output_burst_bytes": 8388608,
+              "output_bytes_per_second": 4194304,
+              "page_bytes": 262144,
+              "reads_inflight_per_principal": 2,
+              "request_burst": 20,
+              "requests_per_second": 10,
+              "search_inflight_per_principal": 1,
+              "search_starts_per_minute": 6
             }
           }
         },
         "frame": "welcome",
         "host_generation": "@generation:0",
-        "proto": 7
+        "proto": 8
       }
     },
     {
@@ -336,7 +358,7 @@
         "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
-        "proto": 7
+        "proto": 8
       }
     },
     {
@@ -366,7 +388,8 @@
               "web_accounts_read": false,
               "web_config_read": false,
               "web_config_write": false,
-              "web_credentials_write": false
+              "web_credentials_write": false,
+              "web_files_read": false
             },
             "credentials_write": {
               "disabled_reason": null,
@@ -374,6 +397,11 @@
               "remedy": null
             },
             "face": "socket",
+            "files_read": {
+              "disabled_reason": null,
+              "enabled": true,
+              "remedy": null
+            },
             "limits": {
               "config_mutations_per_minute": 30,
               "confirmation_ttl_ms": 60000,
@@ -403,12 +431,31 @@
               "secret_input_bytes": 16384,
               "usage_cache_ms": 30000,
               "usage_reread_ms": 30000
+            },
+            "workspace_limits": {
+              "changes_deadline_ms": 5000,
+              "changes_entries": 2000,
+              "changes_targets_per_principal": 4,
+              "changes_token_ttl_ms": 60000,
+              "file_bytes": 16777216,
+              "file_deadline_ms": 2000,
+              "hash_burst_bytes": 67108864,
+              "hash_bytes_per_second": 33554432,
+              "inflight_host": 16,
+              "output_burst_bytes": 8388608,
+              "output_bytes_per_second": 4194304,
+              "page_bytes": 262144,
+              "reads_inflight_per_principal": 2,
+              "request_burst": 20,
+              "requests_per_second": 10,
+              "search_inflight_per_principal": 1,
+              "search_starts_per_minute": 6
             }
           }
         },
         "frame": "welcome",
         "host_generation": "@generation:1",
-        "proto": 7
+        "proto": 8
       }
     },
     {
@@ -582,5 +629,8 @@
       "connection": 2,
       "eof": "host"
     }
-  ]
+  ],
+  "fixture": "host-control-stop-root",
+  "seed_session": "@uuid:0",
+  "source": "real public TUI capture"
 }

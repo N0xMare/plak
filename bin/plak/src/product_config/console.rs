@@ -138,6 +138,7 @@ impl ProductConfig {
             web_config_read: config.web_config_read,
             web_credentials_write: config.web_credentials_write,
             web_config_write: config.web_config_write,
+            web_files_read: config.web_files_read,
         })
     }
 

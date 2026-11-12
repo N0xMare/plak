@@ -16,8 +16,8 @@ use super::super::{RepositoryQueryLimits, RepositoryQueryMatch, validate_path_by
 use super::{
     ExecutionBackendError, FileObservation, IgnoreChain, OperationContext, QueryFileRead,
     RepositoryQuery, RepositoryQueryEntry, RepositoryQueryResult, RepositoryQueryStopReason,
-    WorkspaceContentIdentity, directory_ignores, is_ignored, open_directory_entry_for_query,
-    query_entry_kind_is_walkable, read_unchanged_query_file,
+    WorkspaceContentIdentity, check_workspace_control, directory_ignores, is_ignored,
+    open_directory_entry_for_query, query_entry_kind_is_walkable, read_unchanged_query_file,
 };
 
 pub(super) type OpenedRepositoryFile = (PathBuf, u64, FileObservation, fs::File);
@@ -39,7 +39,7 @@ pub(super) fn walk_repository_query_directories(
     let mut stop_reason = None;
     let mut tree_entries = 0_usize;
     while let Some((directory_path, (directory, parent_ignores))) = pending.pop_first() {
-        control.check_cancelled()?;
+        check_workspace_control(control)?;
         let ignores = directory_ignores(&directory, &directory_path, &parent_ignores);
         let remaining = limits.max_tree_entries.saturating_sub(tree_entries);
         let mut children = Vec::with_capacity(remaining.min(256));
@@ -48,21 +48,26 @@ pub(super) fn walk_repository_query_directories(
             continue;
         };
         for entry in &mut entries {
-            control.check_cancelled()?;
-            if children.len() == remaining {
+            check_workspace_control(control)?;
+            if tree_entries == limits.max_tree_entries {
                 stop_reason = Some(RepositoryQueryStopReason::TreeEntries);
                 break;
             }
             let Ok(entry) = entry else {
+                tree_entries = tree_entries.saturating_add(1);
                 entries_skipped = entries_skipped.saturating_add(1);
                 continue;
             };
             let name = entry.file_name().to_bytes();
+            if matches!(name, b"." | b"..") {
+                continue;
+            }
+            tree_entries = tree_entries.saturating_add(1);
             // Version-control metadata is never repository content. Other
             // dot entries (`.github`, `.cargo`) are walked unless ignored.
             if matches!(name, b"." | b".." | b".git" | b".jj")
-                || (query.list_depth.is_some()
-                    && (name.eq_ignore_ascii_case(b".git") || name.eq_ignore_ascii_case(b".jj")))
+                || name.eq_ignore_ascii_case(b".git")
+                || name.eq_ignore_ascii_case(b".jj")
             {
                 continue;
             }
@@ -80,10 +85,9 @@ pub(super) fn walk_repository_query_directories(
         if stop_reason.is_some() {
             break;
         }
-        tree_entries = tree_entries.saturating_add(children.len());
         children.sort();
         for child_name in children {
-            control.check_cancelled()?;
+            check_workspace_control(control)?;
             let relative = directory_path.join(&child_name);
             validate_path_bytes(&relative)?;
             let child = match open_directory_entry_for_query(&directory, &child_name) {
@@ -173,7 +177,7 @@ pub(super) fn list_repository_query_paths(
     let empty = WorkspaceContentIdentity::from_bytes(&[])?;
     let mut result_bytes = 0_usize;
     for (relative, _, _, file) in files.into_iter().take(files_considered) {
-        control.check_cancelled()?;
+        check_workspace_control(control)?;
         if matches.len() == limits.max_matches {
             stop_reason = Some(RepositoryQueryStopReason::Matches);
             break;
@@ -252,7 +256,7 @@ pub(super) fn scan_repository_query_files(
     'files: for (relative, reported_bytes, discovered, mut file) in
         files.into_iter().take(files_considered)
     {
-        control.check_cancelled()?;
+        check_workspace_control(control)?;
         if reported_bytes > limits.max_file_bytes {
             skipped_oversize = skipped_oversize.saturating_add(1);
             continue;
@@ -336,7 +340,7 @@ pub(super) fn scan_repository_query_files(
             let mut prefix_len = 0_usize;
             for (index, byte) in line.iter().copied().enumerate() {
                 if index.is_multiple_of(65_536) {
-                    control.check_cancelled()?;
+                    check_workspace_control(control)?;
                 }
                 while prefix_len > 0 && !pattern.matches(byte, prefix_len) {
                     prefix_len = pattern.failure[prefix_len - 1];

@@ -15,6 +15,8 @@ pub struct ConsoleWelcome {
     pub config_read: CapabilityState,
     pub credentials_write: CapabilityState,
     pub config_write: CapabilityState,
+    pub files_read: CapabilityState,
+    pub workspace_limits: WorkspaceReadLimits,
     pub configured_switches: ConfiguredSwitches,
     pub limits: ConsoleLimits,
 }
@@ -52,6 +54,7 @@ pub enum CapabilityRemedy {
     EnableWebConfigReadAndRestart,
     EnableWebCredentialsWriteAndRestart,
     EnableWebConfigWriteAndRestart,
+    EnableWebFilesReadAndRestart,
     UseMatchingBuild,
 }
 
@@ -66,6 +69,7 @@ pub struct ConfiguredSwitches {
     pub web_config_read: bool,
     pub web_credentials_write: bool,
     pub web_config_write: bool,
+    pub web_files_read: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -99,4 +103,26 @@ pub struct ConsoleLimits {
     pub usage_cache_ms: u64,
     pub usage_reread_ms: u64,
     pub cursor_ttl_ms: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceReadLimits {
+    pub page_bytes: u64,
+    pub file_bytes: u64,
+    pub reads_inflight_per_principal: u64,
+    pub requests_per_second: u64,
+    pub request_burst: u64,
+    pub output_bytes_per_second: u64,
+    pub output_burst_bytes: u64,
+    pub hash_bytes_per_second: u64,
+    pub hash_burst_bytes: u64,
+    pub inflight_host: u64,
+    pub search_starts_per_minute: u64,
+    pub search_inflight_per_principal: u64,
+    pub file_deadline_ms: u64,
+    pub changes_deadline_ms: u64,
+    pub changes_entries: u64,
+    pub changes_targets_per_principal: u64,
+    pub changes_token_ttl_ms: u64,
 }

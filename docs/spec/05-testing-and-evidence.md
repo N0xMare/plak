@@ -5944,6 +5944,18 @@ window remaining (chapter 06).
 
 ### Protocol-7 operator console evidence
 
+Protocol-8 Files evidence exercises exact binary bytes and UTF-8 page splits,
+digest-bound cursor mutation conflicts, principal/target/runner-generation
+ownership, no-follow paths, nonregular inputs, invalid names and the 16 MiB
+ceiling. Containment probes cover product and XDG state overlap both ways,
+including unrestricted local roots. Admission probes reserve whole-file hash
+work even for tiny pages and span connections of one principal. Ignored and
+skipped entries consume independent traversal budgets. Cancellation releases
+in-flight guards and stops shared-backend reads without retrying interrupted
+I/O indefinitely. Protocol fixtures round-trip attachment-free Files/Changes
+requests and product refusals, reject offset-only reads and arbitrary runner
+selection, and require the exact protocol-8 handshake.
+
 Protocol-7 consent contracts deterministically cover replay, expiry, changed
 principal/connection/generation/action, disconnect/restart, four-grant quota,
 mutation single-flight and aggregate per-principal quota with web writes off.

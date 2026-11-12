@@ -240,6 +240,7 @@ pub struct ProductConfig {
     pub web_credentials_write: bool,
     pub web_config_read: bool,
     pub web_config_write: bool,
+    pub web_files_read: bool,
     pub(super) forward: super::forward::ForwardPresence,
 }
 
@@ -563,6 +564,7 @@ impl ProductConfig {
             }
             ConfigField::WebConfigRead => self.web_config_read = source.web_config_read,
             ConfigField::WebConfigWrite => self.web_config_write = source.web_config_write,
+            ConfigField::WebFilesRead => self.web_files_read = source.web_files_read,
         }
     }
 
@@ -683,6 +685,7 @@ impl ProductConfig {
             web_credentials_write: false,
             web_config_read: false,
             web_config_write: false,
+            web_files_read: false,
             forward: super::forward::ForwardPresence::default(),
         }
     }
@@ -921,6 +924,7 @@ impl ProductConfig {
                 | ConfigField::WebConfigRead
                 | ConfigField::WebCredentialsWrite
                 | ConfigField::WebConfigWrite
+                | ConfigField::WebFilesRead
         ) && self.field_value(key.field)?.as_bool() == Some(false)
         {
             return None;
@@ -998,6 +1002,7 @@ impl ProductConfig {
             ConfigField::WebCredentialsWrite => Value::from(self.web_credentials_write),
             ConfigField::WebConfigRead => Value::from(self.web_config_read),
             ConfigField::WebConfigWrite => Value::from(self.web_config_write),
+            ConfigField::WebFilesRead => Value::from(self.web_files_read),
         })
     }
 
@@ -1495,6 +1500,7 @@ impl ProductConfig {
             ConfigField::WebCredentialsWrite => self.web_credentials_write = value.boolean()?,
             ConfigField::WebConfigRead => self.web_config_read = value.boolean()?,
             ConfigField::WebConfigWrite => self.web_config_write = value.boolean()?,
+            ConfigField::WebFilesRead => self.web_files_read = value.boolean()?,
         }
         Ok(())
     }

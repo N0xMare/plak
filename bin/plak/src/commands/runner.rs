@@ -141,8 +141,13 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         .collect::<Vec<_>>();
     let workspace_roots = roots.clone();
     let outside = excluded.clone();
+    let protected_state = crate::home::paths::application_state_home()
+        .map_err(CliFailure::new)?
+        .join("plak");
     let workspaces = Arc::new(move |root: &Path, cwd: &Path| {
-        if !home::admitted_workspace(&workspace_roots, &outside, root) {
+        if !home::admitted_workspace(&workspace_roots, &outside, root)
+            || home::overlaps_home(root, &protected_state)
+        {
             return Err(plakous::tools::runner::workspace_refusal());
         }
         ExecutionEnvironment::host(scope, root, cwd, ExecutionEnvironmentConfig::default())

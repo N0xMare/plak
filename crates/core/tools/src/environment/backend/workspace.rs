@@ -56,6 +56,20 @@ pub(super) fn verified_workspace_root(
     Ok(root)
 }
 
+fn check_workspace_control(control: &OperationContext) -> Result<(), ExecutionBackendError> {
+    control.check_cancelled()?;
+    if control.budget().is_some_and(|budget| {
+        u128::from(plakous_model::now_unix_millis()) * 1_000_000
+            >= u128::from(budget.seconds()) * 1_000_000_000 + u128::from(budget.nanoseconds())
+    }) {
+        return Err(backend_error(
+            ExecutionBackendErrorKind::TimedOut,
+            "workspace read deadline elapsed",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn workspace_descriptor_path(
     _workspace: &ExecutionWorkspace,
     relative: &Path,
@@ -477,7 +491,7 @@ pub(super) fn read_workspace_sync(
     control: &OperationContext,
     snapshots: &Mutex<WorkspaceSnapshotCache>,
 ) -> Result<WorkspaceReadSlice, ExecutionBackendError> {
-    control.check_cancelled()?;
+    check_workspace_control(control)?;
     // Opening precedes fstat: an untrusted FIFO must not wait for a writer.
     // NONBLOCK has no effect on the regular files admitted below.
     let flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOCTTY;
@@ -587,7 +601,7 @@ pub(super) fn query_repository_sync(
     query: &RepositoryQuery,
     control: &OperationContext,
 ) -> Result<RepositoryQueryResult, ExecutionBackendError> {
-    control.check_cancelled()?;
+    check_workspace_control(control)?;
     let limits = query.limits();
     // A glob with a literal leading directory prefix can only match
     // beneath that prefix, so the walk starts there instead of at the
@@ -918,10 +932,10 @@ pub(super) fn mutate_workspace_sync(
     transaction: &WorkspaceMutationTransaction,
     control: &OperationContext,
 ) -> Result<WorkspaceMutationTransactionResult, ExecutionBackendError> {
-    control.check_cancelled()?;
+    check_workspace_control(control)?;
     let mut preflight = Vec::with_capacity(transaction.mutations().len());
     for item in transaction.mutations() {
-        control.check_cancelled()?;
+        check_workspace_control(control)?;
         let mut observed = observe_workspace_file(workspace, item.path())?;
         let metadata = observed
             .as_ref()
@@ -964,7 +978,7 @@ pub(super) fn mutate_workspace_sync(
     // Revalidate every precondition after all fallible staging and before the
     // first external publication. A conflict here is therefore zero-effect.
     for (item, _prepared) in transaction.mutations().iter().zip(&preflight) {
-        control.check_cancelled()?;
+        check_workspace_control(control)?;
         let mut observed = observe_workspace_file(workspace, item.path())?;
         verify_expected_file_state(observed.as_mut(), item.expected(), control)
             .map_err(|error| error.at_workspace_path(item.path()))?;
@@ -972,7 +986,7 @@ pub(super) fn mutate_workspace_sync(
 
     // This is deliberately the last cancellation point. Returning Cancelled
     // after publication started would misrepresent a possibly committed effect.
-    control.check_cancelled()?;
+    check_workspace_control(control)?;
     let mut results = Vec::with_capacity(transaction.mutations().len());
     for (item, mut prepared) in transaction.mutations().iter().zip(preflight) {
         match prepared.disposition {
@@ -1120,10 +1134,10 @@ impl<'a> CancellationReader<'a> {
 
 impl Read for CancellationReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-        if self.control.cancellation().is_cancelled() {
+        if check_workspace_control(self.control).is_err() {
             self.cancelled = true;
             Err(std::io::Error::new(
-                std::io::ErrorKind::Interrupted,
+                std::io::ErrorKind::Other,
                 "workspace mutation preflight cancelled",
             ))
         } else {

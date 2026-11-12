@@ -16,7 +16,7 @@ pub(super) const fn phase(phase: ProbePhase) -> Option<wire::RunnerPhase> {
     })
 }
 
-pub(super) fn label(id: &str, rows: &[RunnerRow]) -> wire::RunnerLabel {
+pub(in super::super) fn label(id: &str, rows: &[RunnerRow]) -> wire::RunnerLabel {
     wire::RunnerLabel {
         name: rows
             .iter()
@@ -27,7 +27,7 @@ pub(super) fn label(id: &str, rows: &[RunnerRow]) -> wire::RunnerLabel {
     }
 }
 
-pub(super) fn refusal(
+pub(in super::super) fn refusal(
     runner: &wire::RunnerLabel,
     failure: PlacementFailure,
     rows: &[RunnerRow],

@@ -34,7 +34,7 @@ mod options;
 #[allow(clippy::unwrap_used, reason = "durable dormant-stop fixtures")]
 mod pending_stop_tests;
 mod placement;
-mod runner_views;
+pub(super) mod runner_views;
 use placement::Placement;
 
 /// This home's sessions, as `plak host` serves them.
@@ -44,7 +44,7 @@ pub(super) struct ProductSessions {
     services: Services,
     idle_release: Option<std::time::Duration>,
     product: Mutex<Option<ProductStore>>,
-    tree: SqliteTreeStore,
+    tree: std::sync::Arc<SqliteTreeStore>,
     placement: Box<dyn Placement>,
     idle_reason: Mutex<Option<&'static str>>,
 }
@@ -89,6 +89,7 @@ impl ProductSessions {
                     web_config_read: false,
                     web_credentials_write: false,
                     web_config_write: false,
+                    web_files_read: false,
                 }
             });
         Ok(Self {
@@ -106,7 +107,7 @@ impl ProductSessions {
             services: services.clone(),
             idle_release,
             product: Mutex::new(None),
-            tree,
+            tree: std::sync::Arc::new(tree),
             idle_reason: Mutex::new(None),
         })
     }
@@ -166,7 +167,7 @@ impl ProductSessions {
         tree_id: &str,
         locator: Option<plakous::sessions::SessionLocator>,
     ) -> Result<Option<HostedElsewhere>, String> {
-        let custody = holder_elsewhere(&self.tree, tree_id)
+        let custody = holder_elsewhere(self.tree.as_ref(), tree_id)
             .map_err(|error| format!("the tree store could not be read: {error}"))?;
         if let Some(holder) = custody {
             return Ok(Some(HostedElsewhere {
@@ -421,6 +422,14 @@ impl HostSessions<PlakExtension> for ProductSessions {
         context: plakous_hosted::host_service::wire::HostRequestContext,
         request: plakd_wire_types::console::HostRequest,
     ) -> plakous_hosted::host_service::wire::HostReadTask<PlakExtension> {
+        if super::console::files::target(&request).is_some() {
+            return self.console.workspace_request(
+                context,
+                request,
+                self.services.clone(),
+                std::sync::Arc::clone(&self.tree),
+            );
+        }
         self.console.request(context, request)
     }
     fn contains(&self, session: &str) -> Result<bool, String> {
@@ -1134,6 +1143,7 @@ mod tests {
                 web_config_read: false,
                 web_credentials_write: false,
                 web_config_write: false,
+                web_files_read: false,
             }
         );
         let rows = product.rows(None, None, false).unwrap();

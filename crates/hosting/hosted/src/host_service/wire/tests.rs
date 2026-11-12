@@ -546,7 +546,7 @@ fn protocol_six_is_explicitly_refused_before_any_attachment() {
     assert!(matches!(
         host_frames(&stdout).as_slice(),
         [HostFrame::Refused(HandshakeRefusal::VersionMismatch {
-            host: 7,
+            host: 8,
             client: 6
         })]
     ));

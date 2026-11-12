@@ -80,9 +80,9 @@ fn host_extension_has_private_request_response_and_required_nullable_welcome() {
 }
 
 #[test]
-fn protocol_seven_rejects_both_adjacent_versions_without_negotiation() {
-    assert_eq!(WIRE_VERSION, 7);
-    for proto in [6, 8] {
+fn protocol_eight_rejects_both_adjacent_versions_without_negotiation() {
+    assert_eq!(WIRE_VERSION, 8);
+    for proto in [7, 9] {
         let hello = Hello {
             proto,
             binary_id: "fixture".to_owned(),
@@ -91,13 +91,13 @@ fn protocol_seven_rejects_both_adjacent_versions_without_negotiation() {
         assert_eq!(
             admit_hello(&hello, welcome()),
             Err(HandshakeRefusal::VersionMismatch {
-                host: 7,
+                host: 8,
                 client: proto
             })
         );
     }
     let hello = Hello {
-        proto: 7,
+        proto: 8,
         binary_id: "fixture".to_owned(),
         caps: Vec::new(),
     };

@@ -119,6 +119,7 @@ async fn response_fence_refuses_config_and_template_changes() -> TestResult {
             web_config_read: false,
             web_credentials_write: false,
             web_config_write: false,
+            web_files_read: false,
         },
     );
     for file in [
@@ -307,6 +308,7 @@ async fn encoded_definition_refuses_response_overflow_without_opening_a_session(
             web_config_read: false,
             web_credentials_write: false,
             web_config_write: false,
+            web_files_read: false,
         },
     );
     let context = super::super::HostRequestContext {

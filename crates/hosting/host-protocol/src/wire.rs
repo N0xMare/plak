@@ -65,7 +65,7 @@ pub use tool::WireToolItem;
 /// session directory's requests and frames; 5 adds explicit placement,
 /// directory lifecycle and process-lifetime draft admission identity;
 /// 6 adds attachment-free host requests and principal-bound welcome extensions.
-pub const WIRE_VERSION: u32 = 7;
+pub const WIRE_VERSION: u32 = 8;
 
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
@@ -652,6 +652,8 @@ pub enum RequestRefusal {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConsoleCapability {
+    /// Read-only inspection of saved workspaces through the operator endpoint.
+    FilesRead,
     /// Confirmed selected-account credential changes.
     CredentialsWrite,
     /// Confirmed, etag-checked home definition changes.

@@ -46,6 +46,7 @@ impl PartialEq for ProductConfig {
             && self.web_credentials_write == other.web_credentials_write
             && self.web_config_read == other.web_config_read
             && self.web_config_write == other.web_config_write
+            && self.web_files_read == other.web_files_read
     }
 }
 

@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
+pub(super) mod files;
 mod pages;
 #[cfg(test)]
 mod tests;
@@ -46,6 +47,7 @@ pub(super) struct Console {
     operator: Mutex<operator::State>,
     logins: Mutex<account_writes::Logins>,
     audit: Mutex<audit::State>,
+    files: Mutex<files::State>,
     #[cfg(test)]
     native_fixture: Mutex<Option<plakous::subscriptions::NativeSubscriptions>>,
 }
@@ -76,6 +78,7 @@ impl Console {
             operator: Mutex::default(),
             logins: Mutex::default(),
             audit: Mutex::default(),
+            files: Mutex::default(),
             #[cfg(test)]
             native_fixture: Mutex::new(None),
         })
@@ -111,6 +114,11 @@ impl Console {
                     socket || self.switches.web_config_write,
                     CapabilityRemedy::EnableWebConfigWriteAndRestart,
                 ),
+                files_read: write_state(
+                    socket || self.switches.web_files_read,
+                    CapabilityRemedy::EnableWebFilesReadAndRestart,
+                ),
+                workspace_limits: files::welcome_limits(),
                 configured_switches: self.switches,
                 limits: limits::welcome(limits),
             },

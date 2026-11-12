@@ -64,6 +64,8 @@ one cross-build carrier (a build imports its own and the previous version).
   Placed environments route the same executor through their frozen backend
   identity, with matching local and paired-runner results and no local fallback.
 
+- Add protocol-8 saved-workspace Files and Changes inspection with exact byte pages, contained execution and bounded operator admission.
+
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.
   Profile switches keep their recorded attachable root address, and a late

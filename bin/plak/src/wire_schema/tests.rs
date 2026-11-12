@@ -2,6 +2,18 @@ use serde_json::Value;
 
 use super::*;
 
+#[test]
+fn protocol_eight_schema_has_an_exact_build_independent_pin() {
+    let mut schema = document();
+    schema.as_object_mut().unwrap().remove("binary_id");
+    let bytes = serde_json::to_vec(&schema).unwrap();
+    let digest = plakous::model::sha256_hex(&[&bytes]);
+    assert_eq!(
+        digest,
+        "49f5876f2aa0e0e4f16c9695bb782ecced0792edf8cf9eb6c43499ae6a29b5fb"
+    );
+}
+
 fn refs<'a>(value: &'a Value, found: &mut Vec<&'a str>) {
     match value {
         Value::Object(map) => {

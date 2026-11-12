@@ -128,6 +128,7 @@ fn captured_console_switches_gate_bind_and_survive_reload() {
             web_config_read: config,
             web_credentials_write: false,
             web_config_write: false,
+            web_files_read: false,
         };
         std::fs::write(dir.path().join("csp.json"), &legacy).unwrap();
         assert_eq!(

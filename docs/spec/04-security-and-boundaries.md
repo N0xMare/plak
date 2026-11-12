@@ -227,6 +227,22 @@ execution machine, including repository toplevel, Git and common directories.
 Their worktree content identities use the same descriptor-relative no-follow,
 nonblocking regular-file opens as contained file reads (§2.6).
 
+Operator Files/Changes are narrower than agent file tools: only the selected
+saved workspace is readable, without global-skills, job-output or home
+exceptions. Absolute paths, parent traversal, NUL, non-UTF-8 names and `.git`
+administrative paths are refused. All symlink traversal is refused through the
+descriptor-relative no-follow backend, including links back inside the root.
+Regular-file reads open nonblocking and fstat before reading, so FIFOs/devices
+cannot hold a viewer waiting for a writer. Execution deadlines and cancellation
+are checked during traversal and content reads; ignored entries still consume
+the traversal budget.
+
+Both the product home and resolved `$XDG_STATE_HOME/plak` (fallback
+`$HOME/.local/state/plak`) are protected against overlap in either direction.
+Local unrestricted roots are no exemption. Local inspection checks on the
+serving machine; paired inspection enforces protection on the execution
+machine. Equal path spellings on other machines confer no authority.
+
 Every workspace path a file or search tool names is lowered onto a
 **workspace-relative suffix** before I/O. A relative path must contain no
 `..`, root, or prefix component. An absolute path is accepted only when the
@@ -843,6 +859,13 @@ widens it.
   refused before anything is sent, and the runner answers no service spawn.
 
 ### 2.10 The web endpoint
+
+Protocol-8 `web.files_read` explicitly grants raw saved-workspace reads and
+fixed read-only Changes queries. It defaults off and is captured at startup;
+same-user socket reads remain trusted. No session attach or agent wake is
+required. Principal quotas span connections/tabs, and requests are refused
+before allocating bounded execution work. This does not sanitize workspace
+secrets or make an admitted shell a sandbox.
 
 An admitted web client is an operator acting with the serving user's authority.
 In addition to session and directory operations, enabled protocol-7 console
@@ -2140,6 +2163,13 @@ Changes refusals expose categorical stop reasons, never raw Git stderr.
 Workspace content, patches and content identities are authorized operator
 data, not log or model-channel material. No secret redactor can preserve exact
 diff bytes while guaranteeing removal of secrets already in the workspace.
+
+Workspace viewer bytes are authorized raw data and never logged or copied
+into model-visible channels. No redactor can preserve exact bytes while
+guaranteeing secret removal. Hardlinks and secret-containing workspace files
+remain readable to an authorized operator; protected-home containment is not
+a content secrecy claim. Debug output, errors and audit must not include
+file bodies or search literals.
 
 Protocol-7 operator audit records safe action/account IDs and categorical
 outcomes, never API keys, authorize URLs, codes, paste bodies, frames or raw

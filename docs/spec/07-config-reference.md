@@ -34,7 +34,7 @@ is a no-op; edited, unrelated or symlinked units are never overwritten.
 
 The current state directory is `state/r27.e37.p37.t10/`: runtime SQLite
 schema 27, runtime format epoch 37, product schema 37, and tree schema 10.
-These are format identities, not configuration keys. Client wire protocol 7
+These are format identities, not configuration keys. Client wire protocol 8
 and runner protocol 5 require separate exact matches, with no negotiation. Product schema 37 adds
 operator title overrides and archival state; it composes with runtime epoch
 37 without changing the runtime codec or tree encoding. Session export stays
@@ -329,6 +329,16 @@ repository can never grant web access.
 | `web.credentials_write` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed operator credential mutations. Requires accounts_read; home-only, default off and captured at host startup. Credentials replace this user's machine-wide selected account, not the browser's credentials. |
 | `web.config_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home profiles, templates and allowlisted configuration. Same-user sockets are trusted independently. Captured at host startup; restart to change it; a 0.0.3 build refuses a config.toml that sets it. |
 | `web.config_write` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed allowlisted home configuration, template and profile writes. Grants deferred execution through tools, on_mint and env. Requires config_read; home-only, default off and captured at host startup. |
+| `web.files_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to inspect saved workspaces and Changes. Exact file bytes may contain secrets. Same-user sockets are trusted independently; default off and captured at host startup. |
+
+`console.workspace_limits` advertises protocol-8 inspection bounds, independent
+of account/configuration limits: 256 KiB page/output, 16 MiB file ceiling,
+two reads/principal, 10 requests/s (burst 20), 4 MiB/s returned raw bytes
+(burst 8 MiB), 32 MiB/s hash work (burst 64 MiB), 16 in flight process-wide,
+one search/principal and six starts per rolling minute, 2 s file and 5 s
+Changes execution deadlines. Changes retains at most 2,000 entries/target,
+four targets/principal, for 60 s. These are fixed implementation bounds,
+not configurable keys. Viewer requests do not change session bindings.
 
 Telemetry retention applies to schema 22's frozen terminal facts as well as
 diagnostic rows. Recorded console values are measured retained subtotals,

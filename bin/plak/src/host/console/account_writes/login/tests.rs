@@ -26,6 +26,7 @@ fn console_at(root: &std::path::Path) -> Arc<Console> {
             web_config_read: false,
             web_credentials_write: false,
             web_config_write: false,
+            web_files_read: false,
         },
     )
 }
@@ -129,6 +130,7 @@ async fn forged_attempt_poll_and_cancel_never_reveal_another_connections_challen
             web_config_read: false,
             web_credentials_write: false,
             web_config_write: false,
+            web_files_read: false,
         },
     );
     let (cancel, receiver) = watch::channel(false);

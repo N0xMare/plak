@@ -15,10 +15,38 @@ mod secret;
 pub use secret::SecretInput;
 mod writes;
 pub use writes::*;
+mod files;
+pub use files::*;
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostRequest {
+    FilesList {
+        target: WorkspaceTarget,
+        path: String,
+    },
+    FilesRead {
+        target: WorkspaceTarget,
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_bytes: Option<u64>,
+    },
+    FilesSearch {
+        target: WorkspaceTarget,
+        path: String,
+        literal: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        match_case: Option<bool>,
+    },
+    ChangesStatus {
+        target: WorkspaceTarget,
+    },
+    ChangesDiff {
+        target: WorkspaceTarget,
+        entry: String,
+    },
     ConfigPatch {
         changes: Vec<ConfigChange>,
         if_match: String,
@@ -131,6 +159,25 @@ pub enum HostRequest {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "response", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostResponse {
+    FilesList {
+        entries: Vec<FileEntry>,
+        summary: FileQuerySummary,
+    },
+    FilesRead {
+        content: FileContent,
+    },
+    FilesSearch {
+        matches: Vec<FileMatch>,
+        summary: FileQuerySummary,
+    },
+    ChangesStatus {
+        status: ChangesStatus,
+    },
+    ChangesDiff {
+        bytes_b64: String,
+        binary: bool,
+        truncated: bool,
+    },
     /// Accepted work may have taken effect. Reread status; never auto-retry.
     OperationOutcomeUnknown {},
     Saved {
@@ -248,6 +295,10 @@ pub struct Diagnostic {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ReadRefusal {
+    WorkspaceUnavailable {},
+    WorkspaceReadFailed {
+        cause: WorkspaceReadFailure,
+    },
     EnvironmentOverride {
         proven_no_effect: bool,
         variable: String,

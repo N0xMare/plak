@@ -1,0 +1,14 @@
+{"frame":"request","id":1,"op":{"op":"host","request":{"request":"files_list","target":{"session":"fixture"},"path":"."}}}
+{"frame":"request","id":2,"op":{"op":"host","request":{"request":"files_read","target":{"session":"fixture","node":"child"},"path":"data","max_bytes":3}}}
+{"frame":"request","id":3,"op":{"op":"host","request":{"request":"files_read","target":{"session":"fixture"},"path":"data","cursor":"opaque-content-cursor"}}}
+{"frame":"request","id":4,"op":{"op":"host","request":{"request":"files_search","target":{"session":"fixture"},"path":".","literal":"needle","match_case":false}}}
+{"frame":"request","id":5,"op":{"op":"host","request":{"request":"changes_status","target":{"session":"fixture"}}}}
+{"frame":"request","id":6,"op":{"op":"host","request":{"request":"changes_diff","target":{"session":"fixture"},"entry":"opaque-status-entry"}}}
+{"frame":"response","id":1,"outcome":{"ok":{"answer":"host","response":{"response":"files_list","entries":[{"path":"src","kind":"directory","size":0}],"summary":{"skipped_entries":1,"skipped_binary":0,"skipped_oversize":0,"skipped_changed":0,"truncated":false,"stop_reason":null}}}}}
+{"frame":"response","id":2,"outcome":{"ok":{"answer":"host","response":{"response":"files_read","content":{"revision":"blob-digest","size":5,"offset":0,"bytes_b64":"AP/i","next":"opaque-content-cursor"}}}}}
+{"frame":"response","id":3,"outcome":{"ok":{"answer":"host","response":{"response":"files_read","content":{"revision":"blob-digest","size":5,"offset":3,"bytes_b64":"gqw=","next":null}}}}}
+{"frame":"response","id":4,"outcome":{"ok":{"answer":"host","response":{"response":"files_search","matches":[{"path":"data","line":1,"column":2,"bytes_b64":"bmVlZGxl","truncated":false}],"summary":{"skipped_entries":0,"skipped_binary":1,"skipped_oversize":1,"skipped_changed":1,"truncated":true,"stop_reason":"matches"}}}}}
+{"frame":"response","id":5,"outcome":{"ok":{"answer":"host","response":{"response":"changes_status","status":{"revision":"status-digest","base":"work tree against HEAD","git_view":false,"entries":[{"entry":"opaque-status-entry","path":"data","index":".","worktree":"M","untracked":false}],"truncated":false}}}}}
+{"frame":"response","id":6,"outcome":{"ok":{"answer":"host","response":{"response":"changes_diff","bytes_b64":"cGF0Y2g=","binary":false,"truncated":false}}}}
+{"frame":"response","id":7,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"workspace_unavailable"}}}}}
+{"frame":"response","id":8,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"workspace_read_failed","cause":"file_too_large"}}}}}

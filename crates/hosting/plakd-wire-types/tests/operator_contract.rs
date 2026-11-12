@@ -1,4 +1,4 @@
-//! Protocol-7 client frames and secret-safe envelope contracts.
+//! Protocol-8 client frames and secret-safe envelope contracts.
 
 use plakd_wire_types::PlakExtension;
 use plakous_host_protocol::{
@@ -8,10 +8,10 @@ use plakous_host_protocol::{
 use serde_json::{Value, json};
 
 #[test]
-fn protocol_seven_operator_fixtures_are_addressed_and_secret_debug_is_redacted()
+fn protocol_eight_operator_fixtures_are_addressed_and_secret_debug_is_redacted()
 -> Result<(), Box<dyn std::error::Error>> {
-    assert_eq!(WIRE_VERSION, 7);
-    for line in include_str!("fixtures/operator-v7.jsonl").lines() {
+    assert_eq!(WIRE_VERSION, 8);
+    for line in include_str!("fixtures/operator-v8.jsonl").lines() {
         let value: Value = serde_json::from_str(line)?;
         let encoded = if value["frame"] == "request" {
             let request: ClientFrame<PlakExtension> = serde_json::from_value(value.clone())?;
@@ -52,4 +52,36 @@ fn credential_and_config_patch_envelopes_are_bounded_before_decoding_secrets() {
     }
     let line = json!({"frame":"request","id":1,"op":{"op":"host","request":{"request":"template_put","id":"work","changes":[{"field":"description","value":large}],"if_match":"fixture","confirmation":"fixture"}}}).to_string();
     assert!(PlakExtension::host_request_size_allowed(&line));
+}
+
+#[test]
+fn protocol_eight_files_have_exact_bytes_and_only_saved_target_authority()
+-> Result<(), Box<dyn std::error::Error>> {
+    for line in include_str!("fixtures/files-v8.jsonl").lines() {
+        let value: Value = serde_json::from_str(line)?;
+        let encoded = if value["frame"] == "request" {
+            serde_json::to_value(serde_json::from_value::<ClientFrame<PlakExtension>>(
+                value.clone(),
+            )?)?
+        } else {
+            serde_json::to_value(serde_json::from_value::<HostFrame<PlakExtension>>(
+                value.clone(),
+            )?)?
+        };
+        assert_eq!(encoded, value);
+    }
+    for extra in [
+        json!({"offset":1}),
+        json!({"runner":"arbitrary"}),
+        json!({"regex":".*"}),
+    ] {
+        let mut request =
+            json!({"request":"files_read","target":{"session":"fixture"},"path":"data"});
+        request
+            .as_object_mut()
+            .ok_or("object")?
+            .extend(extra.as_object().ok_or("object")?.clone());
+        assert!(serde_json::from_value::<plakd_wire_types::console::HostRequest>(request).is_err());
+    }
+    Ok(())
 }

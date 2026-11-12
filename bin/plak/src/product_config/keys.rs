@@ -305,6 +305,7 @@ pub enum ConfigField {
     WebCredentialsWrite,
     WebConfigRead,
     WebConfigWrite,
+    WebFilesRead,
 }
 
 impl ConfigField {
@@ -330,6 +331,7 @@ impl ConfigField {
                 | Self::WebCredentialsWrite
                 | Self::WebConfigRead
                 | Self::WebConfigWrite
+                | Self::WebFilesRead
         )
     }
 
@@ -347,6 +349,7 @@ impl ConfigField {
                     | Self::WebCredentialsWrite
                     | Self::WebConfigRead
                     | Self::WebConfigWrite
+                    | Self::WebFilesRead
             )
     }
 }
@@ -748,6 +751,15 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         kind: "bool",
         constraint: "true or false; home-scoped; host restart required",
         doc: "Allow confirmed allowlisted home configuration, template and profile writes. Grants deferred execution through tools, on_mint and env. Requires config_read; home-only, default off and captured at host startup.",
+        example: "false",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "web.files_read",
+        field: ConfigField::WebFilesRead,
+        kind: "bool",
+        constraint: "true or false; home-scoped; host restart required",
+        doc: "Allow admitted web principals to inspect saved workspaces and Changes. Exact file bytes may contain secrets. Same-user sockets are trusted independently; default off and captured at host startup.",
         example: "false",
         scope: ConfigScope::Immediate,
     },

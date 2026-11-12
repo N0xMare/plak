@@ -3988,6 +3988,49 @@ latency, and nothing else. Prompt text never reaches a span.
 
 ### 4.4 Wire v2
 
+Protocol 8 adds attachment-free product requests `files_list {target,path}`,
+`files_read {target,path,cursor?,max_bytes?}`, literal-only
+`files_search {target,path,literal,match_case?}`, `changes_status {target}` and
+`changes_diff {target,entry}`. A target is `{session,node?}`; absent node means
+the saved root. Resolution reads session/tree records only, never opens a
+session, wakes an agent, creates an attachment or reclaims/recreates a child
+workspace. Unknown or retired workspaces answer product `workspace_unavailable`;
+unavailable saved runners keep the placement refusal, never a local fallback.
+Reads use BuildRead, not a tool effect or runtime journal entry.
+
+File content is `{revision,size,offset,bytes_b64,next}` with exact raw bytes.
+Opaque continuations bind principal, host generation, target, runner instance,
+path and whole-file digest. There is no offset-only continuation; changed
+content refuses rather than splicing versions. Pages cap at 256 KiB and whole
+files at 16 MiB (`file_too_large`). Lists use depth-one repository queries,
+with ignore rules, at most 1,000 entries, 10,000 traversed entries and 256 KiB.
+Literal search accepts at most 1 KiB and independently bounds 1,000 files,
+10,000 entries, 1 MiB/file, 16 MiB input, 200 matches, 2 KiB/match and 256 KiB
+output. Skipped counts and stop reasons distinguish incomplete from empty.
+The execution-side deadline is 2 s; cancellation drops pending I/O.
+
+All workspace inspection shares principal-scoped request and returned-byte
+budgets: 10 requests/s, burst 20; 4 MiB/s, burst 8 MiB; at most 16 in flight
+across the serving process. Two file reads may run per principal. Even tiny
+pages reserve 16 MiB of hash work against 32 MiB/s, burst 64 MiB; no cache
+assumption reduces it. Search admits one in flight and six starts per rolling
+minute. Work is refused before dispatch. These limits are advertised as
+`console.workspace_limits`; `files_read` is an independent effective welcome
+capability. Home-only `web.files_read` gates web inspection only; verified
+same-user sockets are trusted by default.
+
+Changes compares work tree against HEAD, reporting index state and opaque
+entry tokens, not caller-selected paths, revisions, options or argv. Tokens
+bind principal/target, runner instance, repository identity, observed HEAD,
+index and worktree contents and status revision; they expire after 60 s or
+changed inputs. One result of at most 2,000 entries is retained per target
+and principal, at most four per principal, and none survives restart. One
+Changes request runs per principal, sharing file budgets, with a 5 s execution
+deadline and 256 KiB output limit. Untracked files open through Files, never
+`diff --no-index`; binary patches expose bounded numstat only. Non-colocated
+repositories using jj answer `vcs_unsupported`; colocated ones say git view.
+The fixed execution policy is chapter 04 §2.6.
+
 Protocol-7 `config_patch`, `template_put` and `profile_put` use the P6
 attachment-free seam, typed allowlisted fields and mandatory if_match etags.
 Prepare/confirm binds the exact target/revision; conflict never auto-merges.
@@ -4041,7 +4084,7 @@ saved placement, decorated by the host. Clients pair the existing product
 workspace text with this label; a child never borrows its root's placement.
 This is in-process chrome, not a persisted/exported field or a JSONL v1 event.
 
-The client protocol number is **7**. It must match exactly; the runner
+The client protocol number is **8**. It must match exactly; the runner
 transport has its own independent version. Protocol 5 adds explicit placement,
 bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
@@ -6543,6 +6586,13 @@ one leaves them for the next.
 
 ### 5.4 The transcript grammar
 
+Workspace viewer content is inert exact data, never transcript markup, HTML,
+inline SVG, executable content or a navigable download. Clients retain UTF-8
+decoder state across byte pages and may render bounded hex for binary data;
+classification describes only the inspected extent. No same-origin blob
+navigation or download is part of this increment. Viewer reads are not agent
+observations or transcript rows.
+
 Host-protocol derives `ToolOperation` from each tool's canonical and exposed
 names, host-populated activity kind and input detail. Structured write input exactly
 ETX (`U+0003`), or a raw detail consisting of that exact byte, means interrupt for
@@ -8041,6 +8091,11 @@ Plakous context projection:
   holds.
 
 ### 5.7 Activity
+
+The web operator console may inspect the root or an explicitly selected
+child's saved workspace and Changes independently of Activity attachments.
+Selection never changes another workspace destination implicitly. This is not
+a public TUI file viewer and adds no TUI Files or Changes tab.
 
 One overlay has Agents and Processes tabs, one centered `Activity` title and
 the full-page frame Menu also uses (§5.5), with computed tab and close hits. Activity

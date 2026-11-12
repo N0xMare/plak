@@ -5,6 +5,7 @@ const DISABLED_SWITCHES: ConfiguredSwitches = ConfiguredSwitches {
     web_config_read: false,
     web_credentials_write: false,
     web_config_write: false,
+    web_files_read: false,
 };
 
 fn context(principal: HostPrincipal) -> HostRequestContext {
@@ -36,6 +37,7 @@ async fn welcome_and_dispatch_share_independent_startup_switches_without_session
                 web_config_read: config,
                 web_credentials_write: false,
                 web_config_write: false,
+                web_files_read: false,
             };
             let console = Console::new(
                 paths.clone(),

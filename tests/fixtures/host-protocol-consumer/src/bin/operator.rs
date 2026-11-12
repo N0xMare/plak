@@ -7,7 +7,11 @@ use plakd_wire_types::{
 use plakous_host_protocol::wire::{Answer, ClientFrame, HostFrame, Op, Outcome, WIRE_VERSION};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    assert_eq!(WIRE_VERSION, 7);
+    assert_eq!(WIRE_VERSION, 8);
+    let target = plakd_wire_types::console::WorkspaceTarget { session: "saved".into(), node: None };
+    let _ = HostRequest::FilesRead { target: target.clone(), path: "data".into(), cursor: None, max_bytes: Some(1) };
+    let _ = HostRequest::ChangesDiff { target, entry: "opaque".into() };
+    let _ = plakd_wire_types::console::ReadRefusal::WorkspaceReadFailed { cause: plakd_wire_types::console::WorkspaceReadFailure::ContentChanged };
     let action = OperatorAction::AccountKeySet {
         account_id: "openai/work".into(),
     };

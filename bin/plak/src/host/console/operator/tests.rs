@@ -10,6 +10,7 @@ fn new_console() -> std::sync::Arc<Console> {
             web_config_read: false,
             web_credentials_write: false,
             web_config_write: false,
+            web_files_read: false,
         },
     )
 }

@@ -31,6 +31,7 @@ pub(crate) fn refusal(reason: RequestRefusal) -> CliFailure {
             ConsoleCapability::ConfigWrite => "configuration writes are disabled by this host".into(),
             ConsoleCapability::AccountsRead => "account reads are disabled by this host".into(),
             ConsoleCapability::ConfigRead => "configuration reads are disabled by this host".into(),
+            ConsoleCapability::FilesRead => "workspace reads are disabled by this host".into(),
         },
         RequestRefusal::RateLimited { retry_after_ms } => format!("host console is busy; retry in {retry_after_ms} ms"),
         RequestRefusal::DeadlineExceeded => "the request took too long; retry".to_owned(),
