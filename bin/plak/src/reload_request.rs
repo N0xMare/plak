@@ -213,6 +213,7 @@ pub struct Listener {
 impl Listener {
     /// A hosted session leaves a live announcer in place. The service, not
     /// any client, owns its announcement and instance-bound request polling.
+    #[cfg(feature = "web")]
     pub(crate) fn announce_hosted(paths: &PlakPaths, session: &str) -> Option<Self> {
         use std::os::unix::fs::OpenOptionsExt as _;
         if !enabled(paths) {
