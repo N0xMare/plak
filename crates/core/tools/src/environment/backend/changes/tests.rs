@@ -12,6 +12,63 @@ mod unsupported;
 mod wire;
 
 #[tokio::test]
+async fn unmerged_inputs_keep_head_comparison_and_bound_every_index_stage() {
+    for large in [false, true] {
+        let root = checkout();
+        git(root.path(), &["checkout", "--quiet", "-b", "incoming"]);
+        let theirs = if large {
+            vec![b'x'; 2 * 1024 * 1024]
+        } else {
+            b"theirs\n".to_vec()
+        };
+        std::fs::write(root.path().join("collision"), theirs).unwrap();
+        git(root.path(), &["add", "collision"]);
+        git(root.path(), &["commit", "--quiet", "-m", "incoming"]);
+        git(
+            root.path(),
+            &["checkout", "--quiet", "-b", "current", "HEAD^"],
+        );
+        std::fs::write(root.path().join("collision"), "ours\n").unwrap();
+        git(root.path(), &["add", "collision"]);
+        git(root.path(), &["commit", "--quiet", "-m", "current"]);
+        let merge = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "merge",
+                "--no-edit",
+                "incoming",
+            ])
+            .current_dir(root.path())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(!merge.status.success());
+        std::fs::write(root.path().join("collision"), "resolved\n").unwrap();
+        let environment = environment(root.path());
+        let observed = status(&environment).await;
+        let index = observed
+            .entries
+            .iter()
+            .position(|entry| entry.path == "collision")
+            .unwrap();
+        assert_eq!(observed.entries[index].state, "AA");
+        let answer = ask(&environment, diff_request(&observed, index)).await;
+        if large {
+            assert_eq!(answer, ChangesAnswer::Refused(ChangesRefusal::TooLarge));
+        } else {
+            let ChangesAnswer::Diff(ChangesDiff::Patch { text }) = answer else {
+                panic!("{answer:?}");
+            };
+            assert!(text.contains("-ours\n+resolved"));
+        }
+    }
+}
+
+#[tokio::test]
 async fn diff_output_and_old_or_index_blob_inputs_are_bounded() {
     let root = checkout();
     std::fs::write(root.path().join("file"), "old\n".repeat(70_000)).unwrap();
@@ -82,6 +139,7 @@ async fn ask(environment: &ExecutionEnvironment, request: ChangesRequest) -> Cha
         environment,
         request,
         OperationContext::new(CancellationToken::new()),
+        true,
     )
     .await
     .unwrap()
@@ -189,6 +247,12 @@ async fn untracked_binary_deleted_and_unborn_have_fixed_semantics() {
     let root = checkout();
     std::fs::write(root.path().join("file"), b"binary\0bytes").unwrap();
     let environment = environment(root.path());
+    let observed = status(&environment).await;
+    assert!(matches!(
+        ask(&environment, diff_request(&observed, 0)).await,
+        ChangesAnswer::Diff(ChangesDiff::Binary { .. })
+    ));
+    std::fs::write(root.path().join("file"), b"invalid UTF-8: \xff\n").unwrap();
     let observed = status(&environment).await;
     assert!(matches!(
         ask(&environment, diff_request(&observed, 0)).await,

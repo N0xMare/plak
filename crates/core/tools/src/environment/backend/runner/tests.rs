@@ -412,7 +412,7 @@ fn every_verb_has_one_wire_name() {
             .iter()
             .filter(|verb| verb.family() == RunnerVerbFamily::Environment)
             .count(),
-        4
+        5
     );
 }
 

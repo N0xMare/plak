@@ -69,7 +69,13 @@ impl ExecutionBackend for HostExecutionBackend {
         request: super::changes::ChangesRequest,
         control: OperationContext,
     ) -> ExecutionBackendFuture<super::changes::ChangesAnswer> {
-        super::changes::execute(workspace, request, control)
+        let machine = super::changes::ChangesEnvironment {
+            path: std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into()),
+            home: std::env::var_os("HOME"),
+            product_home: std::env::var_os("PLAK_HOME"),
+            state_home: std::env::var_os("XDG_STATE_HOME"),
+        };
+        super::changes::execute(workspace, request, control, machine)
     }
 
     fn identity(&self) -> &ExecutionBackendIdentity {

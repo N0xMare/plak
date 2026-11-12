@@ -55,6 +55,7 @@ async fn old_git_and_a_build_ignoring_attribute_source_are_unavailable() {
         let executor = process::Executor::new(
             tokio::time::Instant::now() + std::time::Duration::from_secs(5),
             CancellationToken::new(),
+            std::env::var_os("PATH").unwrap(),
         )
         .test_program(program);
         assert_eq!(
@@ -64,26 +65,20 @@ async fn old_git_and_a_build_ignoring_attribute_source_are_unavailable() {
     }
 }
 
-#[test]
-fn disabled_git_is_unavailable_before_repository_discovery() {
-    const CHILD: &str = "PLAK_CHANGES_DISABLED_FIXTURE";
-    if std::env::var_os(CHILD).is_some() {
-        let root = tempfile::tempdir().unwrap();
-        let environment = environment(root.path());
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let answer = runtime.block_on(ask(&environment, ChangesRequest::status()));
-        assert_eq!(
-            answer,
-            ChangesAnswer::Refused(ChangesRefusal::VcsUnavailable)
-        );
-        return;
-    }
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "environment::backend::changes::tests::unsupported::disabled_git_is_unavailable_before_repository_discovery"])
-        .env(CHILD, "1").env("GIT_CLI_ENABLED", "false").output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+#[tokio::test]
+async fn disabled_git_build_is_unavailable_before_repository_discovery() {
+    let root = tempfile::tempdir().unwrap();
+    let environment = environment(root.path());
+    let answer = workspace_changes(
+        &environment,
+        ChangesRequest::status(),
+        OperationContext::new(CancellationToken::new()),
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        answer,
+        ChangesAnswer::Refused(ChangesRefusal::VcsUnavailable)
     );
 }

@@ -55,7 +55,7 @@ pub mod verbs {
 /// family only when the runner advertised it; anything else is answered
 /// [`Refusal::Unsupported`].
 pub mod capabilities {
-    /// The four request/response workspace and process verbs.
+    /// The fixed request/response workspace and process verbs.
     pub const WORKSPACE_VERBS: &str = "workspace-verbs";
     /// Process sessions and job control on the owner's line, and services
     /// whose stdio is a credit-paced stream.

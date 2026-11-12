@@ -1,6 +1,27 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 
+#[tokio::test]
+async fn mode_drift_conflicts_even_when_porcelain_state_and_content_bytes_are_unchanged() {
+    let root = checkout();
+    std::fs::write(root.path().join("file"), "changed\n").unwrap();
+    let environment = environment(root.path());
+    let observed = status(&environment).await;
+    std::fs::set_permissions(
+        root.path().join("file"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let current = status(&environment).await;
+    assert_eq!(observed.observation, current.observation);
+    assert_eq!(observed.entries[0].state, current.entries[0].state);
+    assert_ne!(observed.entries[0].content, current.entries[0].content);
+    assert_eq!(
+        ask(&environment, diff_request(&observed, 0)).await,
+        ChangesAnswer::Refused(ChangesRefusal::Conflict)
+    );
+}
+
 #[test]
 fn protected_roots_match_empty_variable_fallbacks_and_fail_closed_without_authority() {
     use crate::environment::backend::changes::repository::protected_roots_from;

@@ -22,12 +22,27 @@ mod tests;
 use super::{ExecutionBackendFuture, OperationContext};
 use crate::ExecutionEnvironment;
 
+#[cfg(unix)]
+pub(super) struct ChangesEnvironment {
+    pub path: std::ffi::OsString,
+    pub home: Option<std::ffi::OsString>,
+    pub product_home: Option<std::ffi::OsString>,
+    pub state_home: Option<std::ffi::OsString>,
+}
+
 /// Executes on the environment's frozen backend, never an equal local pathname.
+/// The caller supplies its compiled Git CLI gate, never a client-selected value.
 pub fn workspace_changes(
     environment: &ExecutionEnvironment,
     request: ChangesRequest,
     control: OperationContext,
+    git_cli_enabled: bool,
 ) -> ExecutionBackendFuture<ChangesAnswer> {
+    if !git_cli_enabled {
+        return Box::pin(std::future::ready(Ok(ChangesAnswer::Refused(
+            ChangesRefusal::VcsUnavailable,
+        ))));
+    }
     environment.workspace_changes(request, control)
 }
 
@@ -36,6 +51,7 @@ pub(super) fn execute(
     workspace: super::ExecutionWorkspace,
     request: ChangesRequest,
     control: OperationContext,
+    machine: ChangesEnvironment,
 ) -> ExecutionBackendFuture<ChangesAnswer> {
     Box::pin(async move {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -44,7 +60,7 @@ pub(super) fn execute(
             biased;
             () = cancellation.cancelled() => Err(ChangesRefusal::Cancelled),
             () = tokio::time::sleep_until(deadline) => Err(ChangesRefusal::Deadline),
-            answer = git::execute(workspace, request, deadline, cancellation.clone()) => answer,
+            answer = git::execute(workspace, request, deadline, cancellation.clone(), machine) => answer,
         };
         Ok(result.unwrap_or_else(ChangesAnswer::Refused))
     })

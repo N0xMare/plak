@@ -39,10 +39,14 @@ async fn cap_kills_the_whole_group_including_pipe_holders() {
     let executor = Executor::new(
         Instant::now() + Duration::from_secs(5),
         CancellationToken::new(),
+        std::env::var_os("PATH").unwrap(),
     );
     let error = executor
         .output(
-            shell(root.path(), "while :; do printf 0123456789; done"),
+            shell(
+                root.path(),
+                "n=0; while [ \"$((n += 1))\" -le 10000 ]; do printf 0123456789; done",
+            ),
             32,
         )
         .await
@@ -60,6 +64,7 @@ async fn deadline_and_cancellation_kill_stalled_groups() {
         let executor = Executor::new(
             Instant::now() + Duration::from_millis(200),
             cancellation.clone(),
+            std::env::var_os("PATH").unwrap(),
         );
         let answer = executor.output(shell(root.path(), "wait"), 1024);
         let cancel_task = async {
@@ -89,6 +94,7 @@ async fn dropping_a_request_kills_its_group() {
     let executor = Executor::new(
         Instant::now() + Duration::from_secs(5),
         CancellationToken::new(),
+        std::env::var_os("PATH").unwrap(),
     );
     {
         let answer = executor.output(shell(root.path(), "wait"), 1024);

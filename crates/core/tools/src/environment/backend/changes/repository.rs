@@ -42,8 +42,8 @@ impl Repository {
         workspace: ExecutionWorkspace,
         known: Option<PathBuf>,
         executor: Executor,
+        protected: Vec<PathBuf>,
     ) -> Result<Self, ChangesRefusal> {
-        let protected = blocking(protected_roots).await?;
         let copy = workspace.clone();
         let excluded = protected.clone();
         let identity = blocking(move || {
@@ -232,7 +232,11 @@ pub(super) async fn content(
         }
         Ok(ChangesContent::File {
             size,
-            digest: hash(file, MAX_CHANGES_INPUT_BYTES)?,
+            digest: sha256_hex(&[
+                b"git-worktree-input\0",
+                hash(file, MAX_CHANGES_INPUT_BYTES)?.as_bytes(),
+                &metadata.mode().to_be_bytes(),
+            ]),
         })
     })
     .await
@@ -362,13 +366,6 @@ fn canonical(path: &Path) -> Result<PathBuf, ChangesRefusal> {
         return Err(ChangesRefusal::UnsafeRepository);
     }
     Ok(resolved)
-}
-
-pub(super) fn protected_roots() -> Result<Vec<PathBuf>, ChangesRefusal> {
-    let home = std::env::var_os("HOME");
-    let product = std::env::var_os("PLAK_HOME");
-    let state = std::env::var_os("XDG_STATE_HOME");
-    protected_roots_from(home.as_deref(), product.as_deref(), state.as_deref())
 }
 
 pub(super) fn protected_roots_from(

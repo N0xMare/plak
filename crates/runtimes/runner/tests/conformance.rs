@@ -75,10 +75,10 @@ mod changes {
         std::fs::write(root.path().join("file"), "new\n").unwrap();
         let direct = host(root.path());
         let (_link, remote) = loopback(root.path()).await;
-        let local_status = workspace_changes(&direct, ChangesRequest::status(), unkeyed())
+        let local_status = workspace_changes(&direct, ChangesRequest::status(), unkeyed(), true)
             .await
             .unwrap();
-        let remote_status = workspace_changes(&remote, ChangesRequest::status(), unkeyed())
+        let remote_status = workspace_changes(&remote, ChangesRequest::status(), unkeyed(), true)
             .await
             .unwrap();
         assert_eq!(local_status, remote_status);
@@ -91,7 +91,7 @@ mod changes {
             observed.entries[0].clone(),
         )
         .unwrap();
-        let local_diff = workspace_changes(&direct, request.clone(), unkeyed())
+        let local_diff = workspace_changes(&direct, request.clone(), unkeyed(), true)
             .await
             .unwrap();
         assert!(matches!(
@@ -100,14 +100,14 @@ mod changes {
         ));
         assert_eq!(
             local_diff,
-            workspace_changes(&remote, request.clone(), unkeyed())
+            workspace_changes(&remote, request.clone(), unkeyed(), true)
                 .await
                 .unwrap()
         );
         git(root.path(), &["add", "file"]);
         for environment in [&direct, &remote] {
             assert_eq!(
-                workspace_changes(environment, request.clone(), unkeyed())
+                workspace_changes(environment, request.clone(), unkeyed(), true)
                     .await
                     .unwrap(),
                 ChangesAnswer::Refused(ChangesRefusal::Conflict)
@@ -116,7 +116,7 @@ mod changes {
         std::fs::write(root.path().join("file"), b"binary\0").unwrap();
         for environment in [&direct, &remote] {
             let ChangesAnswer::Status(status) =
-                workspace_changes(environment, ChangesRequest::status(), unkeyed())
+                workspace_changes(environment, ChangesRequest::status(), unkeyed(), true)
                     .await
                     .unwrap()
             else {
@@ -129,7 +129,7 @@ mod changes {
             )
             .unwrap();
             assert!(matches!(
-                workspace_changes(environment, request, unkeyed())
+                workspace_changes(environment, request, unkeyed(), true)
                     .await
                     .unwrap(),
                 ChangesAnswer::Diff(ChangesDiff::Binary { .. })
@@ -138,14 +138,48 @@ mod changes {
     }
 
     #[tokio::test]
+    async fn changes_are_unavailable_when_the_runner_build_gate_is_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let closed = RunnerService::new(
+            host(root.path()),
+            RunnerIdentity {
+                runner_id: RunnerId::new("loopback").unwrap(),
+                version: version(),
+                boot_id: "boot-1".into(),
+                binary_id: None,
+            },
+        )
+        .unwrap();
+        let link = Loopback::join(closed, bind("changes-disabled"), windows())
+            .await
+            .unwrap();
+        let payload = json!({"root": root.path(), "cwd": root.path(), "request": {"query": "status", "repository": null}});
+        let value = link
+            .backend()
+            .link()
+            .call(RunnerCall::unkeyed(RunnerVerb::WorkspaceChanges, payload))
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_value::<ChangesAnswer>(value).unwrap(),
+            ChangesAnswer::Refused(ChangesRefusal::VcsUnavailable)
+        );
+    }
+
+    #[tokio::test]
     async fn paired_changes_dispatches_build_reads_and_refuses_free_options() {
         let root = tempfile::tempdir().unwrap();
         let link = Loopback::join(service(root.path()), bind("changes"), windows())
             .await
             .unwrap();
-        let direct = workspace_changes(&host(root.path()), ChangesRequest::status(), unkeyed())
-            .await
-            .unwrap();
+        let direct = workspace_changes(
+            &host(root.path()),
+            ChangesRequest::status(),
+            unkeyed(),
+            true,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             direct,
             ChangesAnswer::Refused(ChangesRefusal::NotARepository)
@@ -890,13 +924,17 @@ fn version() -> VersionTriple {
 }
 
 fn service(root: &Path) -> RunnerService {
-    RunnerService::new(
+    RunnerService::with_options(
         host(root),
         RunnerIdentity {
             runner_id: RunnerId::new("loopback").unwrap(),
             version: version(),
             boot_id: "boot-1".into(),
             binary_id: None,
+        },
+        plakous_runner::RunnerOptions {
+            changes_git_enabled: true,
+            ..plakous_runner::RunnerOptions::default()
         },
     )
     .unwrap()

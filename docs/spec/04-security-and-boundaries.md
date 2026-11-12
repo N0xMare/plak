@@ -591,8 +591,12 @@ object alternates are refused. Ancestor queries always carry a literal
 workspace pathspec, and every metadata result must stay beneath that workspace.
 
 Git must be at least 2.43 and pass a known-fixture empty-tree attribute-source
-probe; an unsupported version/build or `GIT_CLI_ENABLED=false` answers
-`vcs_unavailable`. The empty tree is never written into the user's repository.
+probe; an unsupported version/build or the existing compile-time
+`GIT_CLI_ENABLED=false` gate answers `vcs_unavailable`. This is the `git-cli`
+build feature, not an environment escape or client-selected switch. The
+official host API receives that build gate explicitly, and paired dispatch
+checks the runner build's gate independently. The empty tree is never written
+into the user's repository.
 The child environment starts empty, retaining only PATH and fixed settings:
 system/global config disabled, fsmonitor off, hooks and attributes files at
 `/dev/null`, system attributes off, empty credential helper, all protocols
@@ -609,8 +613,10 @@ pipes are drained incrementally, never spooled or read whole without a bound.
 Cap, deadline, cancellation and dropped futures kill the owned process group.
 Status is at most 2,000 entries and 256 KiB; a truncated result is a refusal,
 never clean. Diff rejects old, index or worktree inputs over 1 MiB before
-diffing and caps output at 256 KiB. Binary output is bounded numstat. Status
-returns repository, observed HEAD/index and per-entry content identities;
+diffing and caps output at 256 KiB. Binary output is bounded numstat.
+Unmerged entries size-check HEAD and every index-stage object before diffing.
+Status returns repository, observed HEAD/index and per-entry identities binding both
+worktree bytes and file mode;
 before/after checks discard changing inputs with `conflict`, rather than
 splicing versions. These are observations for a host's opaque token map, not
 client-authorized paths or revisions.

@@ -48,6 +48,7 @@ pub struct RunnerService {
 
 struct Inner {
     environment: ExecutionEnvironment,
+    changes_git_enabled: bool,
     workspaces: Option<Arc<WorkspaceFactory>>,
     /// Environments registered for workspaces other than the default one,
     /// by root and cwd as requests name them.
@@ -180,6 +181,9 @@ pub type WorkspaceFactory =
 /// What a runner serves beyond its default environment.
 #[derive(Clone, Default)]
 pub struct RunnerOptions {
+    /// The embedding build's Git CLI gate. Product callers pass the existing
+    /// compile-time gate, never a client or environment value. Defaults closed.
+    pub changes_git_enabled: bool,
     /// Explicit lease clock; absent uses the platform's suspend-excluding clock.
     pub lease_clock: Option<Arc<RunnerLeaseClock>>,
     /// Stable physical-machine identity; unknown identities cannot be paired for placement.
@@ -291,6 +295,7 @@ impl RunnerService {
         Ok(Self {
             inner: Arc::new(Inner {
                 environment,
+                changes_git_enabled: options.changes_git_enabled,
                 workspaces: options.workspaces,
                 registered: Mutex::default(),
                 extension: options.extension,
@@ -783,10 +788,7 @@ impl RunnerService {
             RunnerVerbFamily::Workspace => {
                 crate::workspace::serve(self.inner.workspace_catalog.clone(), verb, payload)
             }
-            RunnerVerbFamily::Environment => match self.environment_for(&payload) {
-                Ok(environment) => serve(&environment, verb.as_str(), payload, control),
-                Err(failure) => Box::pin(std::future::ready(Err(failure))),
-            },
+            RunnerVerbFamily::Environment => self.serve_environment(verb, payload, control),
             RunnerVerbFamily::Probe => match &self.inner.probe_paths {
                 Some(admits) => serve_probe(payload, admits.as_ref()),
                 None => serve_probe(payload, &|_| true),
@@ -907,8 +909,26 @@ impl RunnerService {
         Box::pin(std::future::ready(Ok(service_spawned(stream))))
     }
 
-    /// The environment answering a request: the default one, or the one
-    /// registered for the workspace the request names, made on first use.
+    fn serve_environment(
+        &self,
+        verb: RunnerVerb,
+        payload: Value,
+        control: OperationContext,
+    ) -> ServeFuture {
+        if verb == RunnerVerb::WorkspaceChanges && !self.inner.changes_git_enabled {
+            use plakous_tools::internal::changes::{ChangesAnswer, ChangesRefusal};
+            return Box::pin(std::future::ready(
+                serde_json::to_value(ChangesAnswer::Refused(ChangesRefusal::VcsUnavailable))
+                    .map_err(|_| ServeFailure::Unsupported),
+            ));
+        }
+        match self.environment_for(&payload) {
+            Ok(environment) => serve(&environment, verb.as_str(), payload, control),
+            Err(failure) => Box::pin(std::future::ready(Err(failure))),
+        }
+    }
+
+    /// The default environment or the one admitted for this request's workspace.
     fn environment_for(&self, payload: &Value) -> Result<ExecutionEnvironment, ServeFailure> {
         let default = &self.inner.environment;
         let Some((root, cwd)) = requested_workspace(payload) else {

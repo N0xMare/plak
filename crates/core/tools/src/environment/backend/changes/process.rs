@@ -17,15 +17,21 @@ pub(super) struct Output {
 pub(super) struct Executor {
     pub deadline: Instant,
     pub cancellation: CancellationToken,
+    path: std::ffi::OsString,
     #[cfg(test)]
     program: Option<std::path::PathBuf>,
 }
 
 impl Executor {
-    pub const fn new(deadline: Instant, cancellation: CancellationToken) -> Self {
+    pub const fn new(
+        deadline: Instant,
+        cancellation: CancellationToken,
+        path: std::ffi::OsString,
+    ) -> Self {
         Self {
             deadline,
             cancellation,
+            path,
             #[cfg(test)]
             program: None,
         }
@@ -59,7 +65,7 @@ impl Executor {
         let program = Path::new("git");
         #[cfg(test)]
         let program = self.program.as_deref().unwrap_or(program);
-        let mut command = command(program, cwd);
+        let mut command = command(program, cwd, &self.path);
         if let Some(repo) = repository {
             command.env("GIT_DIR", &repo.git_dir);
             command.env("GIT_WORK_TREE", &repo.toplevel);
@@ -149,13 +155,11 @@ async fn drain(mut pipe: impl AsyncRead + Unpin, cap: usize) -> Result<Vec<u8>, 
     }
 }
 
-fn command(program: &Path, cwd: &Path) -> Command {
+fn command(program: &Path, cwd: &Path, path: &std::ffi::OsStr) -> Command {
     let mut command = Command::new(program);
     // Empty-then-curated also removes unknown future GIT_* steering variables.
     command.env_clear();
-    if let Some(path) = std::env::var_os("PATH") {
-        command.env("PATH", path);
-    }
+    command.env("PATH", path);
     command
         .current_dir(cwd)
         .env("LC_ALL", "C")

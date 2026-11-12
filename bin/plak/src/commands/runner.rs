@@ -181,6 +181,7 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
             lease_clock: crate::test_hooks::runner_lease_clock(home.root()),
             machine_id: plakous::runner::machine_id().ok(),
             workspace_catalog: Some(Arc::new(workspace_catalog)),
+            changes_git_enabled: plakous_hosted::occupancy_vcs::git_cli_enabled(),
             limits: RunnerLimits::default(),
             workspaces: Some(workspaces),
             extension: Some(extension),

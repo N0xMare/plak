@@ -18,17 +18,23 @@ pub(super) async fn execute(
     request: ChangesRequest,
     deadline: Instant,
     cancellation: CancellationToken,
+    machine: super::ChangesEnvironment,
 ) -> Result<ChangesAnswer, ChangesRefusal> {
-    if std::env::var("GIT_CLI_ENABLED").is_ok_and(|value| value.eq_ignore_ascii_case("false")) {
-        return Err(ChangesRefusal::VcsUnavailable);
-    }
-    let executor = Executor::new(deadline, cancellation);
+    let executor = Executor::new(deadline, cancellation, machine.path.clone());
     supported(&executor, workspace.root()).await?;
     let known = match &request.0 {
         Request::Status { repository } => repository.clone(),
         Request::Diff { repository, .. } => Some(repository.toplevel.clone()),
     };
-    let repo = Repository::discover(workspace.clone(), known, executor).await?;
+    let protected = blocking(move || {
+        super::repository::protected_roots_from(
+            machine.home.as_deref(),
+            machine.product_home.as_deref(),
+            machine.state_home.as_deref(),
+        )
+    })
+    .await?;
+    let repo = Repository::discover(workspace.clone(), known, executor, protected).await?;
     match request.0 {
         Request::Status { .. } => status(&workspace, &repo).await.map(ChangesAnswer::Status),
         Request::Diff {
@@ -302,19 +308,22 @@ async fn diff(
     entry: ChangesEntry,
 ) -> Result<ChangesDiff, ChangesRefusal> {
     matches_entry(workspace, repo, &observed, &entry).await?;
-    if entry.state == "??"
-        || entry.state.contains('U')
-        || matches!(entry.content, ChangesContent::Unsupported)
-    {
+    if entry.state == "??" || matches!(entry.content, ChangesContent::Unsupported) {
         return Err(ChangesRefusal::VcsUnsupported);
     }
     if matches!(entry.content, ChangesContent::TooLarge { .. }) {
         return Err(ChangesRefusal::TooLarge);
     }
-    for oid in [entry.head_object.as_deref(), entry.index_object.as_deref()]
-        .into_iter()
-        .flatten()
-    {
+    let path = repo.pathspec(Some(&entry.path))?;
+    let objects = if entry.state.contains('U') || matches!(entry.state.as_str(), "AA" | "DD") {
+        unmerged_objects(repo, observed.head.as_deref(), &path).await?
+    } else {
+        [entry.head_object.clone(), entry.index_object.clone()]
+            .into_iter()
+            .flatten()
+            .collect()
+    };
+    for oid in &objects {
         let size = repo.query(&["cat-file", "-s", oid], 128).await?;
         if !size.success {
             return Err(ChangesRefusal::VcsUnavailable);
@@ -327,7 +336,7 @@ async fn diff(
             return Err(ChangesRefusal::TooLarge);
         }
     }
-    let path = repo.pathspec(Some(&entry.path))?;
+    matches_entry(workspace, repo, &observed, &entry).await?;
     let base = observed.head.as_deref().unwrap_or(&repo.attributes);
     let fixed = [
         "diff",
@@ -343,11 +352,9 @@ async fn diff(
         return Err(ChangesRefusal::VcsUnavailable);
     }
     let binary = validate_numstat(&numstat.bytes, &path)?;
+    let numstat = String::from_utf8(numstat.bytes).map_err(|_| ChangesRefusal::UnsafeRepository)?;
     let result = if binary {
-        ChangesDiff::Binary {
-            numstat: String::from_utf8(numstat.bytes)
-                .map_err(|_| ChangesRefusal::UnsafeRepository)?,
-        }
+        ChangesDiff::Binary { numstat }
     } else {
         let mut args = fixed.to_vec();
         args.extend([
@@ -364,12 +371,61 @@ async fn diff(
         if !output.success {
             return Err(ChangesRefusal::VcsUnavailable);
         }
-        ChangesDiff::Patch {
-            text: String::from_utf8(output.bytes).map_err(|_| ChangesRefusal::VcsUnsupported)?,
+        match String::from_utf8(output.bytes) {
+            Ok(text) => ChangesDiff::Patch { text },
+            Err(_) => ChangesDiff::Binary { numstat },
         }
     };
     matches_entry(workspace, repo, &observed, &entry).await?;
     Ok(result)
+}
+
+async fn unmerged_objects(
+    repo: &Repository,
+    head: Option<&str>,
+    path: &str,
+) -> Result<Vec<String>, ChangesRefusal> {
+    let mut queries = Vec::new();
+    if let Some(head) = head {
+        queries.push((vec!["ls-tree", "-z", head, "--", path], 2, 1));
+    }
+    queries.push((vec!["ls-files", "--stage", "-z", "--", path], 1, 3));
+    let mut objects = Vec::new();
+    for (args, oid_column, maximum) in queries {
+        let result = repo.query(&args, 16 * 1024).await?;
+        if !result.success {
+            return Err(ChangesRefusal::VcsUnavailable);
+        }
+        if !result.bytes.is_empty() && !result.bytes.ends_with(&[0]) {
+            return Err(ChangesRefusal::OutputLimit);
+        }
+        let records = result
+            .bytes
+            .split(|byte| *byte == 0)
+            .filter(|record| !record.is_empty())
+            .collect::<Vec<_>>();
+        if records.len() > maximum {
+            return Err(ChangesRefusal::OutputLimit);
+        }
+        for record in records {
+            let record =
+                std::str::from_utf8(record).map_err(|_| ChangesRefusal::UnsafeRepository)?;
+            let (metadata, found_path) = record
+                .split_once('\t')
+                .ok_or(ChangesRefusal::UnsafeRepository)?;
+            let fields = metadata.split_ascii_whitespace().collect::<Vec<_>>();
+            if found_path != path || fields.len() != 3 || !object(fields[oid_column]) {
+                return Err(ChangesRefusal::UnsafeRepository);
+            }
+            if oid_column == 1 && !matches!(fields[2], "1" | "2" | "3") {
+                return Err(ChangesRefusal::Conflict);
+            }
+            objects.push(fields[oid_column].to_owned());
+        }
+    }
+    objects.sort();
+    objects.dedup();
+    Ok(objects)
 }
 
 fn validate_numstat(bytes: &[u8], expected: &str) -> Result<bool, ChangesRefusal> {

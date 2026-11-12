@@ -69,6 +69,11 @@ const GIT_CLI_ENABLED: bool = true;
 #[cfg(not(feature = "git-cli"))]
 const GIT_CLI_ENABLED: bool = false;
 
+/// Whether this build admits fixed Git CLI operations, including operator reads.
+pub const fn git_cli_enabled() -> bool {
+    GIT_CLI_ENABLED
+}
+
 /// One `snapshot(path)` result. For git `content` is the written
 /// tree id and `commit` is the `commit-tree` commit; for JJ `content` hashes
 /// the native merged tree IDs and conflict labels with explicit framing.

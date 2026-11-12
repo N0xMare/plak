@@ -51,6 +51,7 @@ async fn changes_stay_in_process_and_the_home_local_daemon_refuses_the_verb() {
         &environment,
         ChangesRequest::status(),
         OperationContext::new(CancellationToken::new()),
+        true,
     )
     .await
     .unwrap();
