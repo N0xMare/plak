@@ -130,7 +130,7 @@ mod product_compaction_terminal_e2e_tests;
 mod product_crash_tests;
 #[doc(hidden)]
 pub mod product_doctor;
-#[cfg(feature = "tui")]
+#[cfg(any(feature = "tui", feature = "web"))]
 mod product_onboarding;
 #[cfg(all(test, unix))]
 mod product_runtime_e2e_tests;
