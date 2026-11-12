@@ -22,6 +22,11 @@ one cross-build carrier (a build imports its own and the previous version).
   draft-reservation hold for deterministic host-client recovery and same-ID
   pending-admission tests. Default and maintainer behavior is unchanged.
 
+- Anchor successful Darwin PTY spawns through the owned, unreaped child handle,
+  including children that exit before their first observation. No Darwin waitid
+  result is required; Linux retains full-scan identity checks. Retire the shared
+  anchor before reaping and verify live members before every group signal.
+
 - Keep operator-terminal authority process-local on the runner and home-local
   daemon. The private host registry discovers surviving pin inventory on first
   bind, retains resident holds and authenticated controllers, and joins shutdown.

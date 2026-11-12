@@ -158,7 +158,6 @@ impl Worker {
             .slave
             .spawn_command(command)
             .map_err(|_| OperatorRefusal::Backpressure)?;
-        drop(pair.slave);
         let identity = child
             .process_id()
             .and_then(|pid| Identity::capture_child(pid).ok());
@@ -172,6 +171,10 @@ impl Worker {
             #[cfg(test)]
             observation_failures: 0,
         };
+        // Keep our slave reference through this bounded nonblocking drain so a
+        // fast-exiting child's startup bytes survive Darwin's terminal revoke.
+        let _ = worker.io_round(&mut VecDeque::new());
+        drop(pair.slave);
         if worker.identity.is_none() {
             worker.io.take();
             worker.master.take();
@@ -259,12 +262,7 @@ impl Worker {
         let mut code = None;
         let proven = cleanup.as_mut().is_some_and(|cleanup| {
             cleanup.finish(|| {
-                code = self
-                    .child
-                    .try_wait()
-                    .ok()
-                    .flatten()
-                    .map(|exit| exit.exit_code());
+                code = self.reap_child();
                 code.is_some()
             })
         });
@@ -302,7 +300,7 @@ impl Worker {
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             };
             // A reproof never signals: the leader may already have been reaped.
-            let _ = self.child.try_wait();
+            let _ = self.reap_child();
             let proven = cleanup.reprove();
             *lock(survivors) = cleanup.survivors();
             if proven || acknowledge_loss {
@@ -320,21 +318,18 @@ impl Worker {
     }
 
     fn leader_exited(&self) -> bool {
-        let Some(pid) = self
-            .child
-            .process_id()
-            .and_then(|pid| i32::try_from(pid).ok())
-            .and_then(rustix::process::Pid::from_raw)
-        else {
-            return false;
-        };
-        rustix::process::waitid(
-            rustix::process::WaitId::Pid(pid),
-            rustix::process::WaitIdOptions::EXITED
-                | rustix::process::WaitIdOptions::NOHANG
-                | rustix::process::WaitIdOptions::NOWAIT,
-        )
-        .is_ok_and(|status| status.is_some())
+        self.child.process_id().is_some_and(scan::child_exited)
+    }
+
+    fn reap_child(&mut self) -> Option<u32> {
+        if let Some(identity) = &self.identity {
+            identity.retire_anchor();
+        }
+        self.child
+            .try_wait()
+            .ok()
+            .flatten()
+            .map(|exit| exit.exit_code())
     }
 
     #[cfg_attr(
@@ -422,11 +417,10 @@ impl Drop for Worker {
         if !self.cleaned {
             self.io.take();
             self.master.take();
-            if let Some(identity) = self.identity.take() {
-                let _ = SessionCleanup::new(identity)
-                    .finish(|| self.child.try_wait().ok().flatten().is_some());
+            if let Some(identity) = self.identity.clone() {
+                let _ = SessionCleanup::new(identity).finish(|| self.reap_child().is_some());
             }
-            let _ = self.child.try_wait();
+            let _ = self.reap_child();
         }
     }
 }

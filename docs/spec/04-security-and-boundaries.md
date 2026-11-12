@@ -811,21 +811,21 @@ the runner's session against a fresh independent PTY child and disables the
 operator capability if isolation cannot be verified. Before each group signal,
 one complete fresh scan must put every group member in the anchored leader's
 session; current kernel session/group membership is checked again. Each stage
-checks every live member before signaling a deduplicated group. Darwin may
-return ESRCH for an unreaped zombie's getsid: only a PTY child whose successful
-spawn established SID/PGID equal to its PID may retain the direct-child anchor,
-confirmed with waitid(WNOWAIT). Such a zombie is never used as live group
-membership evidence. A changed start identity still refuses, and Linux retains
-its full scanned SID/start match with no missing-row fallback. Fast-exiting PTY
-children use this same unreaped-child capture even if already exited before
-their first scan and no row was captured: the successful PTY spawn and NOWAIT
-direct-child proof establish the anchor, which expires on reap. It never supplies
-live member evidence or permits a signal after reaping. Initial capture accepts
-the child only once it is its own session and group leader;
-transient non-leader or missing observations retry for a bounded half-second
-window, never become accepted live identities. Darwin may instead establish
-the already-exited unreaped direct-child anchor regardless of stale ps state,
-SID or PGID; it cannot turn that metadata into live signal authority. Cleanup
+checks every live member before signaling a deduplicated group. Successful PTY
+spawn returns only after setsid/pre_exec and exec succeeded: the leader's pid,
+sid and pgid are known by construction. On Darwin, the owned unreaped Child
+handle anchors them even if the child exited before any observation, ps omits
+it, getsid/getpgid return ESRCH, or waitid reports no ready child. Start time is
+recorded when observable; otherwise it is unobserved, not invented evidence.
+Darwin never requires waitid for capture, signal authority or exit observation.
+The handle cannot be reaped before the final group signal. Every clone shares
+an anchor retired before any reap attempt, so no remembered identity can later
+authorize a signal. A changed recorded start still refuses. Linux retains its
+full scanned SID/start requirement and has no missing-row fallback. An anchored
+Darwin leader is not live membership evidence: live members still require fresh
+kernel getsid/getpgid verification against that SID before each group signal.
+Master EOF/hangup or the owned child's kernel disappearance may trigger cleanup,
+never replace the two complete absence scans. Cleanup
 deduplicates groups. KILL repeats for newly forked members before reaping the
 leader and proving absence twice. Live observation failures retry without
 closing shells; incomplete cleanup scans retry within the cleanup deadline,

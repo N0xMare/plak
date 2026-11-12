@@ -5,62 +5,35 @@ use super::*;
 mod loss;
 
 #[test]
-#[ignore = "subprocess fixture for delayed session creation"]
-fn operator_pty_delayed_session_child() {
-    let directory = PathBuf::from(std::env::var_os("PLAK_TEST_SESSION_CAPTURE_DIR").unwrap());
-    std::fs::write(directory.join("ready"), b"ready").unwrap();
-    let mut command = [0; 1];
-    std::io::stdin().read_exact(&mut command).unwrap();
-    rustix::process::setsid().unwrap();
-    std::io::stdin().read_exact(&mut command).unwrap();
-}
-
-#[test]
-fn operator_pty_capture_waits_for_delayed_setsid_before_accepting_leader() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "operator::pty::tests::operator_pty_delayed_session_child",
-            "--ignored",
-        ])
-        .env("PLAK_TEST_SESSION_CAPTURE_DIR", directory.path())
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
+fn operator_pty_exited_before_first_observation_retains_only_unreaped_anchor() {
+    let pair = native_pty_system()
+        .openpty(size(TerminalDimensions::new(24, 80).unwrap()))
         .unwrap();
-    let mut input = child.stdin.take().unwrap();
+    let mut child = pair
+        .slave
+        .spawn_command(CommandBuilder::new("/bin/true"))
+        .unwrap();
+    let pid = child.process_id().unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !directory.path().join("ready").exists() {
+    // Completion witness only: no reap or start/session table observation.
+    while !scan::child_exited(pid) {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(5));
     }
-    let pid = child.id();
-    let mut attempts = 0;
-    let identity = Identity::capture_child_with(pid, || {
-        let row = Identity::capture(pid)?;
-        attempts += 1;
-        if attempts == 1 {
-            assert_ne!(
-                row.session,
-                pid.to_string(),
-                "first observation precedes setsid"
-            );
-            input.write_all(b"s").unwrap();
-        }
-        Ok(row)
-    })
-    .unwrap();
-    assert!(
-        attempts >= 2,
-        "a non-leader observation must retry, never be accepted"
-    );
+    let missing = Identity::from_child_capture(pid, Err(()));
+    assert_eq!(missing.is_ok(), cfg!(target_os = "macos"));
+    let identity = missing.unwrap_or_else(|()| Identity::capture_child(pid).unwrap());
     assert_eq!(identity.session, pid.to_string());
     assert_eq!(identity.group, pid);
-    assert!(!scan::child_exited(pid));
-    input.write_all(b"q").unwrap();
-    assert!(child.wait().unwrap().success());
+    assert_eq!(identity.started.is_empty(), cfg!(target_os = "macos"));
+    let mut cleanup = SessionCleanup::new(identity.clone());
+    drop(pair);
+    assert!(cleanup.finish(|| child.try_wait().ok().flatten().is_some()));
+    assert!(
+        !cleanup.leader_anchored(&[identity]),
+        "retired anchor cannot authorize even a matching stale row"
+    );
+    assert_eq!(child.wait().unwrap().exit_code(), 0);
 }
 
 #[test]
@@ -188,18 +161,24 @@ fn operator_pty_zombie_anchor_keeps_linux_scan_and_checks_unreaped_child_on_darw
         cfg!(target_os = "macos"),
         "only Darwin uses a missing live-SID row's unreaped child anchor"
     );
-    let mut reused = identity;
-    reused.started = "different-start".into();
-    assert!(
-        !cleanup.leader_anchored(&[reused]),
-        "a timestamp mismatch is never accepted as the old child"
-    );
+    if !identity.started.is_empty() {
+        let mut reused = identity.clone();
+        reused.started = "different-start".into();
+        assert!(
+            !cleanup.leader_anchored(&[reused]),
+            "a recorded start mismatch never grants kill authority"
+        );
+    }
     drop(pair);
+    identity.retire_anchor();
+    if let Ok(missing) = &missing {
+        missing.retire_anchor();
+    }
     child.wait().unwrap();
     if let Ok(missing) = missing {
         assert!(
             !SessionCleanup::new(missing).leader_anchored(&[]),
-            "reaping ends the direct-child anchor, never a remembered PID"
+            "retirement ends the direct-child anchor before reaping"
         );
     }
 }

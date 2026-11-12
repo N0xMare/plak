@@ -1,6 +1,7 @@
 //! Bounded whole-session scans. A remembered numeric PID never grants kill authority.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -25,7 +26,7 @@ pub(super) fn observation() -> Result<Arc<Vec<Identity>>, ()> {
     Ok(rows)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(super) struct Identity {
     pub(super) pid: u32,
     parent: u32,
@@ -33,63 +34,50 @@ pub(super) struct Identity {
     pub(super) session: String,
     pub(super) started: String,
     pub(super) zombie: bool,
-    owned_child: bool,
+    anchor: Option<Arc<AtomicBool>>,
 }
 
 impl Identity {
     pub(super) fn capture_child(pid: u32) -> Result<Self, ()> {
-        Self::capture_child_with(pid, || {
-            scan()?.into_iter().find(|row| row.pid == pid).ok_or(())
-        })
-    }
-
-    pub(super) fn capture_child_with(
-        pid: u32,
-        mut observe: impl FnMut() -> Result<Self, ()>,
-    ) -> Result<Self, ()> {
-        let deadline = Instant::now() + Duration::from_millis(500);
-        loop {
-            let captured = observe();
-            if let Ok(identity) = Self::from_child_capture(pid, captured.clone()) {
-                return Ok(identity);
-            }
-            if Instant::now() >= deadline {
-                #[cfg(all(test, target_os = "macos"))]
-                diagnose_capture(pid, &captured);
-                return Err(());
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        #[cfg(target_os = "linux")]
+        let captured = Self::capture(pid);
+        #[cfg(target_os = "macos")]
+        let captured = Err(());
+        Self::from_child_capture(pid, captured)
     }
 
     pub(super) fn from_child_capture(pid: u32, captured: Result<Self, ()>) -> Result<Self, ()> {
-        // Successful PTY spawn has completed setsid before exec. Once NOWAIT
-        // proves our direct child exited, Darwin's ps state/SID/PGID may already
-        // be missing or stale. They are not live membership evidence. Only the
-        // unreaped direct-child relation anchors this already-exited leader.
+        // std spawn returns success only after portable-pty's setsid/pre_exec
+        // and exec completed. The owned, unreaped Child prevents pid/sid/pgid
+        // recycling. Darwin need not expose the zombie through ps or waitid.
         #[cfg(target_os = "macos")]
-        if child_exited(pid) {
-            let mut row = captured.unwrap_or(Self {
+        let mut row = {
+            let mut observed = captured.unwrap_or(Self {
                 pid,
                 parent: std::process::id(),
                 group: pid,
                 session: pid.to_string(),
                 started: String::new(),
-                zombie: true,
-                owned_child: true,
+                zombie: false,
+                anchor: None,
             });
-            row.session = pid.to_string();
-            row.group = pid;
-            row.zombie = true;
-            row.owned_child = true;
-            return Ok(row);
-        }
+            observed.session = pid.to_string();
+            observed.group = pid;
+            observed
+        };
+        #[cfg(target_os = "linux")]
         let mut row = captured?;
         if row.session != pid.to_string() || row.group != pid {
             return Err(());
         }
-        row.owned_child = true;
+        row.anchor = Some(Arc::new(AtomicBool::new(true)));
         Ok(row)
+    }
+
+    pub(super) fn retire_anchor(&self) {
+        if let Some(anchor) = &self.anchor {
+            anchor.store(false, Ordering::Release);
+        }
     }
     pub(super) fn capture(pid: u32) -> Result<Self, ()> {
         let deadline = Instant::now() + Duration::from_millis(500);
@@ -105,28 +93,6 @@ impl Identity {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
-}
-
-#[cfg(all(test, target_os = "macos"))]
-fn diagnose_capture(pid: u32, captured: &Result<Identity, ()>) {
-    let pid_arg = i32::try_from(pid)
-        .ok()
-        .and_then(rustix::process::Pid::from_raw);
-    eprintln!(
-        "operator capture deadline: branch={}, scanned_leader={}, scanned_zombie={}, kernel_sid={:?}, kernel_pgid={:?}, waitid={:?}",
-        if captured.is_ok() {
-            "not_session_leader"
-        } else {
-            "missing_or_incomplete_scan"
-        },
-        captured
-            .as_ref()
-            .is_ok_and(|row| row.session == pid.to_string() && row.group == pid),
-        captured.as_ref().is_ok_and(|row| row.zombie),
-        pid_arg.map(|pid| rustix::process::getsid(Some(pid))),
-        pid_arg.map(|pid| rustix::process::getpgid(Some(pid))),
-        child_exit_status(pid),
-    );
 }
 
 pub(super) struct SessionCleanup {
@@ -147,6 +113,17 @@ impl SessionCleanup {
     }
 
     pub(super) fn observe(&mut self, rows: &[Identity]) {
+        if self.leader.started.is_empty()
+            && self
+                .leader
+                .anchor
+                .as_ref()
+                .is_some_and(|anchor| anchor.load(Ordering::Acquire))
+            && let Some(row) = rows.iter().find(|row| row.pid == self.leader.pid)
+        {
+            self.leader.started.clone_from(&row.started);
+            self.seen.insert(row.pid, row.started.clone());
+        }
         let current: HashSet<_> = rows
             .iter()
             .map(|row| (row.pid, row.started.as_str()))
@@ -215,6 +192,7 @@ impl SessionCleanup {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
+        self.leader.retire_anchor();
         if !reap() {
             return false;
         }
@@ -276,6 +254,9 @@ impl SessionCleanup {
             else {
                 return false;
             };
+            if !self.leader_anchored(rows) {
+                return false;
+            }
             if let Err(error) = rustix::process::kill_process_group(group, signal)
                 && error != rustix::io::Errno::SRCH
             {
@@ -289,26 +270,30 @@ impl SessionCleanup {
         if self.leader.session != self.leader.pid.to_string() {
             return false;
         }
-        if cfg!(target_os = "macos")
-            && self.leader.owned_child
-            && self.leader.started.is_empty()
-            && child_exited(self.leader.pid)
+        if self
+            .leader
+            .anchor
+            .as_ref()
+            .is_some_and(|anchor| !anchor.load(Ordering::Acquire))
         {
-            // No scan identity existed at initial capture. This anchor is valid
-            // only while waitid proves the direct child has not been reaped.
-            return true;
+            return false;
         }
         if let Some(row) = rows.iter().find(|row| row.pid == self.leader.pid) {
-            if row.started != self.leader.started {
+            if !self.leader.started.is_empty() && row.started != self.leader.started {
                 return false;
             }
-            if row.session == self.leader.session {
+            if cfg!(target_os = "linux") && row.session == self.leader.session {
                 return true;
             }
         }
-        // Linux still requires its original full SID/start scan match. Only
-        // Darwin may use the *unreaped direct child* when getsid returns ESRCH.
-        cfg!(target_os = "macos") && self.leader.owned_child && child_exited(self.leader.pid)
+        // Darwin uses the owned handle, never waitid's unreliable si_pid. Linux
+        // still requires the full scanned SID/start identity above.
+        cfg!(target_os = "macos")
+            && self
+                .leader
+                .anchor
+                .as_ref()
+                .is_some_and(|anchor| anchor.load(Ordering::Acquire))
     }
 
     pub(super) fn reprove(&mut self) -> bool {
@@ -368,23 +353,29 @@ fn complete_scan(deadline: Instant) -> Option<Vec<Identity>> {
 }
 
 pub(super) fn child_exited(pid: u32) -> bool {
-    child_exit_status(pid).unwrap_or(false)
-}
-
-fn child_exit_status(pid: u32) -> Result<bool, rustix::io::Errno> {
     let Some(pid) = i32::try_from(pid)
         .ok()
         .and_then(rustix::process::Pid::from_raw)
     else {
-        return Err(rustix::io::Errno::INVAL);
+        return false;
     };
-    rustix::process::waitid(
-        rustix::process::WaitId::Pid(pid),
-        rustix::process::WaitIdOptions::EXITED
-            | rustix::process::WaitIdOptions::NOHANG
-            | rustix::process::WaitIdOptions::NOWAIT,
-    )
-    .map(|status| status.is_some())
+    #[cfg(target_os = "macos")]
+    {
+        matches!(
+            rustix::process::getsid(Some(pid)),
+            Err(rustix::io::Errno::SRCH)
+        )
+    }
+    #[cfg(target_os = "linux")]
+    {
+        rustix::process::waitid(
+            rustix::process::WaitId::Pid(pid),
+            rustix::process::WaitIdOptions::EXITED
+                | rustix::process::WaitIdOptions::NOHANG
+                | rustix::process::WaitIdOptions::NOWAIT,
+        )
+        .is_ok_and(|status| status.is_some())
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -436,7 +427,7 @@ fn parse_stat(pid: u32, text: &str) -> Result<Identity, ()> {
         session: fields[3].into(),
         started: fields[19].into(),
         zombie: fields[0] == "Z",
-        owned_child: false,
+        anchor: None,
     })
 }
 
@@ -499,7 +490,7 @@ pub(super) fn scan() -> Result<Vec<Identity>, ()> {
                 // lstart has only one-second resolution on macOS. An unreaped
                 // direct-child leader, not this timestamp alone, anchors signals.
                 started: f[4..].join(" "),
-                owned_child: false,
+                anchor: None,
             });
         }
         Ok(rows)
@@ -532,7 +523,7 @@ mod tests {
             session: session.into(),
             started: format!("start-{pid}"),
             zombie: false,
-            owned_child: false,
+            anchor: None,
         }
     }
 
@@ -552,16 +543,16 @@ mod tests {
         let mut command = portable_pty::CommandBuilder::new("/bin/sleep");
         command.arg("1");
         let mut child = pair.slave.spawn_command(command).unwrap();
-        let mut current = Identity::capture(child.process_id().unwrap()).unwrap();
+        let mut current = Identity::capture_child(child.process_id().unwrap()).unwrap();
         assert_eq!(
             current.session,
             current.pid.to_string(),
             "a real PTY session leader exercises the start-identity fence"
         );
         current.started = "wrong-start-identity".into();
-        assert!(
-            !SessionCleanup::new(current).finish(|| panic!("stale identity must not even reap"))
-        );
+        let mut cleanup = SessionCleanup::new(current);
+        assert!(!cleanup.finish(|| panic!("stale identity must not even reap")));
+        cleanup.leader.retire_anchor();
         drop(pair);
         child.wait().unwrap();
     }

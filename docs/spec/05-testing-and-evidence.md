@@ -44,11 +44,12 @@ platform scan test compares the runner's own kernel session id against a fresh
 PTY child's before platform cleanup qualification. Injected observation failures
 must leave a shell running. A zombie-anchor regression keeps Linux's full scan
 requirement while checking Darwin's unreaped direct-child fallback and rejection
-of changed start identity. A deterministic child held before setsid verifies that
-capture rejects the initial non-leader observation and retries until SID/PGID
-match; Darwin's failed-capture test diagnostics retain only stage and kernel
-identity/status information, never commands or environment bytes. The fast-exit
-environment fixture also requires cleanup
+of changed start identity. A child exits before identity observation on both
+platforms: Darwin accepts its by-construction unreaped-child anchor without any
+start/session table row or waitid result, while Linux still requires its full
+scan. Cleanup must prove absence and every anchor clone must refuse even a
+matching stale row after retirement/reap. The exact-key environment assertion
+remains strict and also requires cleanup
 proof; job-control commands run from a short sourced script, disabling Bash
 history expansion before any job-id expansion rather than relying on shell-specific
 interactive parsing. Tests read the exact curated environment from `env`,
