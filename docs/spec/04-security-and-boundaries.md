@@ -512,6 +512,8 @@ not merely that the shell exited; zombies are not running work. On Linux,
 member scans read process names as bytes, so a non-UTF-8 name does not hide a
 live member. An incomplete directory scan or malformed status leaves group
 membership unknown and is treated as live, not as proof of completion.
+Unknown membership also cannot prove leftover children: only a positive
+observed live-member count publishes a leftover job after leader exit.
 Concurrent owners share process-group snapshots (Linux `/proc`, bounded macOS
 `ps`); only a complete successful scan can prove absence, on Linux only two
 consecutive ones begun at different times (a readdir is not point-in-time),

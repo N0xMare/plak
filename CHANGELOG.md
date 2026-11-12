@@ -31,6 +31,9 @@ one cross-build carrier (a build imports its own and the previous version).
   root was idle, without waiting for a client to attach. Unhanded-off children
   do not cause an eager open.
 
+- Fixed unavailable process-group scans classifying promoted jobs as leftovers
+  and allowing a run to exit before their completion notice.
+
 - Fixed workspace reads returning stale cached bytes after a same-size rewrite.
 - Fixed pending child decisions not being offered when the child's read model
   first attaches.

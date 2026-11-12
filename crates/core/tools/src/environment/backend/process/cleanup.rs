@@ -235,7 +235,7 @@ pub(super) fn peek_leader_exit(
 pub(in crate::environment::backend) struct GroupProbe {
     pub(super) group: rustix::process::Pid,
     pub(super) checked: Option<Instant>,
-    pub(super) count: usize,
+    count: Option<usize>,
 }
 
 impl GroupProbe {
@@ -243,11 +243,15 @@ impl GroupProbe {
         Self {
             group,
             checked: None,
-            count: 0,
+            count: None,
         }
     }
 
     pub(in crate::environment::backend) fn members(&mut self) -> usize {
+        self.known_members().unwrap_or(1)
+    }
+
+    fn known_members(&mut self) -> Option<usize> {
         match rustix::process::test_kill_process_group(self.group) {
             // Linux answers Ok for a group that holds only our unreaped
             // leader, so EPERM means only another user's members remain, and
@@ -255,9 +259,9 @@ impl GroupProbe {
             // the scan: the count is unknown, which counts as live. macOS
             // answers EPERM for that zombie-only group, and its `ps` scan
             // lists every user's processes, so the scan decides.
-            Err(Errno::PERM) if cfg!(target_os = "linux") => return self.count.max(1),
+            Err(Errno::PERM) if cfg!(target_os = "linux") => return None,
             Ok(()) | Err(Errno::PERM) => {}
-            Err(_) => return 0,
+            Err(_) => return Some(0),
         }
         if self
             .checked
@@ -268,7 +272,7 @@ impl GroupProbe {
             // delaying a short command by an entire polling interval.
             // Resetting `checked` for KILL also fences the new phase.
             let fresh_since = self.checked.unwrap_or_else(Instant::now);
-            self.count = group_snapshot::members(self.group, fresh_since).unwrap_or(1);
+            self.count = group_snapshot::members(self.group, fresh_since);
             self.checked = Some(Instant::now());
         }
         self.count
@@ -283,7 +287,11 @@ pub(super) fn observe_leftover_group(
     if !process_group_exists(group.group) {
         return false;
     }
-    let count = group.members();
+    // Unknown membership keeps supervision live, but does not prove that
+    // descendants outlived their leader: run-until-idle ignores such leftovers.
+    let Some(count) = group.known_members() else {
+        return true;
+    };
     if count == 0 {
         return false;
     }
@@ -322,6 +330,83 @@ mod tests {
                 let _ = child.wait();
             }
         }
+    }
+
+    #[test]
+    fn an_unknown_group_scan_does_not_publish_leftover_job_evidence() {
+        use super::super::{JoinedProcessStatus, JoinedSessionOutput, JoinedSessionShared};
+        use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
+        use std::sync::{Arc, Condvar, Mutex};
+
+        struct Restore(Rlimit);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = setrlimit(Resource::Nofile, self.0);
+            }
+        }
+
+        let child = Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn leader");
+        let group = i32::try_from(child.id())
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+            .expect("group pid");
+        let _reap = Reap(Some(child));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while super::peek_leader_exit(group)
+            .expect("peek leader")
+            .is_none()
+        {
+            assert!(std::time::Instant::now() < deadline, "leader did not exit");
+            std::thread::yield_now();
+        }
+        let shared = Mutex::new(JoinedSessionShared {
+            output: JoinedSessionOutput::default(),
+            status: JoinedProcessStatus::Running,
+            elapsed: None,
+            terminal_changes: None,
+            changes: tokio::sync::watch::channel(0).0,
+            terminal: Arc::new(Condvar::new()),
+            released: false,
+            spool: None,
+            pending_spool: None,
+            leftover: None,
+            disowned: false,
+        });
+        let original = getrlimit(Resource::Nofile);
+        let _restore = Restore(original);
+        setrlimit(
+            Resource::Nofile,
+            Rlimit {
+                current: Some(original.current.unwrap_or(64).min(64)),
+                maximum: original.maximum,
+            },
+        )
+        .expect("lower descriptor limit");
+        let mut files = Vec::new();
+        while let Ok(file) = std::fs::File::open("/dev/null") {
+            files.push(file);
+        }
+        assert_eq!(
+            std::fs::read_dir("/proc")
+                .expect_err("scan must be unavailable")
+                .raw_os_error(),
+            Some(rustix::io::Errno::MFILE.raw_os_error()),
+        );
+        let waiting =
+            super::observe_leftover_group(&mut super::GroupProbe::new(group), Some(0), &shared);
+        drop(files);
+        assert!(waiting, "an unknown scan must not prove group absence");
+        assert!(
+            super::lock(&shared).leftover.is_none(),
+            "an unknown scan must not prove leftover processes"
+        );
     }
 
     /// Kills a background member that outlives its reaped leader.

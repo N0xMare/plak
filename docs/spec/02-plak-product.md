@@ -3180,7 +3180,9 @@ process-row variant and no product-store field.
 Piped output is transferred to EOF-bound unowned drain processes, so an
 unredirected pipe writer does not die merely because `run` exits. Budget-promoted
 jobs still wait while their leaders live; when a leader exits with live group
-members, that job converts to leftover and no longer holds the run open. This is a CLI
+members, that job converts to leftover and no longer holds the run open. An
+unavailable group scan is not evidence of leftover members; a promoted job
+keeps the run waiting until membership or completion is observed. This is a CLI
 flag, not a configuration key. The TUI and JSONL `plak agent` keep leftover jobs
 owned until stop, session release, attempt end, or the hard runtime cap.
 There is no consecutive-wake limit; the explicit max-turns and timeout bounds
