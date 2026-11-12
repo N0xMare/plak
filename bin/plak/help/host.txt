@@ -5,6 +5,7 @@ USAGE:
   plak host install --web unix:<absolute socket> --ui <absolute dir> [--dry-run]
   plak host connect --stdio [--auto-start]
   plak host upgrade --expect-binary <id> [--wait <seconds>]
+  plak host upgrade --abandon <successor-uuid-or-runner-id>
   plak host --help
 
 The supported default build includes the host and web endpoint. A private
@@ -35,6 +36,11 @@ restores them on timeout. Retry the same command after an unknown outcome;
 receipts select the old owner before surrender or the destination after it.
 After surrender the old roots cannot reopen; destination startup alone imports
 under host custody before Ready. Partial imports reuse the reserved successors.
+For a permanently lost runner, --abandon irreversibly closes pending remote
+reservations selected by exact successor UUID or runner ID. Ready and local
+roots refuse. Once every mapping is Ready or abandoned, the operation completes;
+copy a printed retained export and use normal session import elsewhere to
+recover a fresh line. The abandoned reservation and old source never reopen.
 Never remove the old snapshot until the destination has acknowledged success.
 --ui serves a validated static build with csp.json. SIGUSR1 reloads that build
 atomically; invalid replacements keep the old build. SIGHUP and SIGTERM mean
