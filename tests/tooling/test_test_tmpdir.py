@@ -1,11 +1,13 @@
 """Every test entry point takes its scratch directory from one selector, which
 keeps it off the operator's HOME and on a physical, caller-owned path."""
 
+import json
 import os
 from pathlib import Path
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -169,8 +171,6 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             ["bash", str(script), "--json"], env=env, capture_output=True, text=True, timeout=20
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        import json
-
         values = json.loads(result.stdout)
         scratch = (self.base / "explicit-tmp").resolve()
         self.assertEqual(Path(values["TMPDIR"]), scratch)
@@ -181,6 +181,45 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.assertEqual(gitconfig, scratch / "gitconfig")
         self.assertEqual(gitconfig.read_text(), "")
         self.assertEqual(values["GIT_CONFIG_NOSYSTEM"], "1")
+
+    def test_test_env_unsets_overrides_and_provider_keys(self):
+        script = ROOT / "tools/gate/test-env.sh"
+        leaked = (
+            "PLAK_TEST_SESSION_LEASE_SECONDS",
+            "PLAK_TEST_CELL_HELLO_MS",
+            "OPENAI_API_KEY",
+            "XAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "OPENROUTER_API_KEY",
+        )
+        env = dict(
+            os.environ,
+            PLAK_TEST_TMPDIR=str(self.base / "unset-tmp"),
+            KEEP_ME="kept",
+            **{name: "leaked" for name in leaked},
+        )
+        report = "import json, os; print(json.dumps(dict(os.environ)))"
+        for command in (
+            ["bash", str(script), "--", sys.executable, "-c", report],
+            [
+                "bash",
+                "-c",
+                'set -euo pipefail; test_env="$("$1")"; eval "$test_env"; "$2" -c "$3"',
+                "snippet",
+                str(script),
+                sys.executable,
+                report,
+            ],
+        ):
+            with self.subTest(form=command[1]):
+                result = subprocess.run(
+                    command, env=env, capture_output=True, text=True, timeout=20
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                seen = json.loads(result.stdout)
+                self.assertEqual(seen["KEEP_ME"], "kept")
+                for name in leaked:
+                    self.assertNotIn(name, seen)
 
     def test_nextest_filter_expression_reaches_cargo_as_one_argument(self):
         copy = self.base / "repo"

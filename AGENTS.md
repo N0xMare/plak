@@ -116,8 +116,10 @@ filter and the `offline` exclusion. Contract fixture builds use a persistent
 Hand-run nextest is `just nextest`. It exports the isolated test environment
 from `tools/gate/test-env.sh`: per-checkout `TMPDIR` (`tools/gate/test-tmpdir.sh`,
 `PLAK_TEST_TMPDIR` overrides), `PLAK_HOME` under that directory (mode 0700), an
-empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. The gate, coverage, the
-crash sweep, perf smoke and the live drivers use the same helper (spec 05 §1).
+empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`, and it unsets the
+provider API keys. The gate, coverage, the crash sweep, perf smoke and the live
+drivers use the same helper; the live drivers' `--json` form keeps the keys
+(spec 05 §1).
 There is no CI: the only workflow,
 `.github/workflows/release.yml`, builds, attests and releases a pushed `v*` tag, and a manual run on `main` is the pre-tag dry run that releases nothing
 (`tools/release/package-release.sh`, `install.sh`; spec 06 §6.6).

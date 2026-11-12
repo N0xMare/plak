@@ -764,7 +764,12 @@ gate does not qualify the supported musl platform.
 
 `tools/gate/test-env.sh` is the one test environment. It exports `TMPDIR` from
 `tools/gate/test-tmpdir.sh`, `PLAK_HOME` (`$TMPDIR/plak-isolated-home`, mode
-0700), an empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. `dev-check.sh`
+0700), an empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. Its shell and
+command forms also unset the test-hook overrides `PLAK_TEST_SESSION_LEASE_SECONDS`
+and `PLAK_TEST_CELL_HELLO_MS` and the provider keys `OPENAI_API_KEY`,
+`XAI_API_KEY`, `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`, so an operator's
+exported key never reaches an offline test. Its `--json` form names only the
+four exported variables; the live drivers keep their real keys. `dev-check.sh`
 (with `--fresh`), `just dev coverage`, `perf-smoke.sh`, `crash-sweep.py`,
 `jj-tools.py compat` and the live drivers use it. `just nextest` runs the
 pinned cargo-nextest under it and passes recipe arguments as positional
