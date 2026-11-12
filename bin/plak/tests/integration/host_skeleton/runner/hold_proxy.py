@@ -108,3 +108,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # The stdin reader is a daemon thread that can still hold the stdin buffer
+    # lock, and interpreter shutdown then aborts with a non-zero exit. Exit
+    # without finalization; an exception from main() still exits non-zero.
+    sys.stdout.flush()
+    os._exit(0)
