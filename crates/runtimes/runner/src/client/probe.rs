@@ -8,8 +8,12 @@ pub(super) struct PendingProbe<'a> {
 }
 impl<'a> PendingProbe<'a> {
     pub(super) fn new(client: &'a Inner, request: &'a str, call: &RunnerCall) -> Option<Self> {
-        (call.verb() == RunnerVerb::ProbeWorkspace && matches!(call.class(), RunnerClass::Unkeyed))
-            .then_some(Self { client, request })
+        if call.verb() == RunnerVerb::ProbeWorkspace && matches!(call.class(), RunnerClass::Unkeyed)
+        {
+            Some(Self { client, request })
+        } else {
+            None
+        }
     }
 }
 impl Drop for PendingProbe<'_> {
@@ -116,14 +120,17 @@ mod tests {
                 .unwrap(),
             id
         );
-        assert!(
-            PendingProbe::new(
-                &client.inner,
-                "unused",
-                &RunnerCall::unkeyed(RunnerVerb::ReadWorkspace, serde_json::Value::Null)
-            )
-            .is_none()
-        );
+        let ordinary = tokio::spawn(client.call(RunnerCall::unkeyed(
+            RunnerVerb::ReadWorkspace,
+            serde_json::Value::Null,
+        )));
+        let id = requests.recv().await.unwrap();
+        assert!(lock(&client.inner.state).pending.contains_key(&id));
+        assert!(cancellations.try_recv().is_err());
+        ordinary.abort();
+        assert!(ordinary.await.unwrap_err().is_cancelled());
+        assert!(lock(&client.inner.state).pending.contains_key(&id));
+        lock(&client.inner.state).pending.remove(&id);
         serving.abort();
     }
 }
