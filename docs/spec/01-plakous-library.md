@@ -6086,11 +6086,15 @@ processes or line controls. The client handshake is unchanged by this runner inc
 The validating codec bounds identity components to 128 printable, non-control bytes and dimensions to rows
 1..=500, columns 1..=1000. Open accepts a workspace and dimensions, never a bootstrap
 command or browser environment. Attach takes an instance-qualified output cursor and
-never spawns. Stream envelopes retain gap-free directional sequence numbers; terminal
+never spawns. Its explicit takeover flag replaces a controller only within the same
+reconciled namespace; an unconfirmed second attach remains terminal-busy. Replacing
+a controller does not consume another controller quota slot or replay input.
+Stream envelopes retain gap-free directional sequence numbers; terminal
 Data payloads carry `{terminal_event:"data", offset, bytes_b64}`, strict RFC 4648 base64,
 at most 16 KiB decoded. Input acceptance is queue admission, not command execution;
-input-accepted, output-gap and exit are separate typed terminal events, never agent
-observations. Byte credit is capped at 64 KiB outstanding. Ambiguous input is never
+input-accepted, output-gap, runner-awake idle-warning and exit are separate typed
+terminal events, never agent observations. Byte credit is capped at 64 KiB
+outstanding. Ambiguous input is never
 replayed; an ambiguous open resolves only from the same instance's reservation and
 matching digest, never by spawning a replacement after a missing receipt.
 
@@ -6154,8 +6158,9 @@ operator resolution, never process-death proof. Closed/expired namespaces permit
 and close for resolution. Results use the control channel; output production reserves
 remaining bulk-frame capacity before advancing any cursor or directional sequence.
 
-Product request/confirmation, residency-refusal rendering and client scheduling belong
-to the separate client-protocol increment; this runner increment changes no client DTO.
+Client protocol 9 maps these operations through consented product requests,
+independent terminal streams and explicit operator-terminal residency outcomes
+(chapter 02 §4.4); runner versioning remains independent.
 `operator.scope.inventory` is paired-host recovery metadata, not a client listing:
 it returns bounded live-pin inventory for the authenticated host and state key,
 including original namespaces/generations/workspaces and states, but no raw output.

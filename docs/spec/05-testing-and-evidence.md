@@ -63,6 +63,21 @@ evidence alone is not macOS process-supervision qualification. The product clien
 terminal scheduler and browser transport-loss evidence belong to their later
 client-protocol increment, not these runner-side tests.
 
+Client-9 terminal contracts pin independent stream frames, raw bytes, instance
+cursors, consent/takeover scope, product refusals and the exact schema. Four-stream
+contracts verify round-robin bytes/seq, atomic 64 KiB grants, wrong-owner and
+unsent-byte rejection, aggregate rate limits across runners, response-before-stream
+ordering and controller queue release. Rejected input cannot change offsets or
+enqueue bytes; acknowledgment loss reports unknown and never replays input. CSP
+contracts permit WASM only under the captured terminal switch and retain script
+and Trusted Types boundaries. Browser rendering/scheduler qualification remains
+separate client evidence, not inferred from these host contracts. A real-PTY
+product-wire test covers one-use consent, lookup-only open retry, preserved grants
+on no-effect busy refusal, confirmed takeover, a one-time execution marker,
+disconnect/reattach without input replay, runner replacement and acknowledged
+loss without killing the old shell. Runner-clock tests pin once-per-idle-period
+warnings and output-capacity behavior without advancing wall time.
+
 Host-internal terminal tests cover memory-only pin/hold acquisition, original
 product-37 schema/state-key identity, both pin/reclamation orders, authenticated
 controller exclusion, reconnect-before-input and joined shutdown without agent

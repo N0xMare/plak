@@ -1,4 +1,4 @@
-//! Protocol-8 client frames and secret-safe envelope contracts.
+//! Protocol-9 client frames and secret-safe envelope contracts.
 
 use plakd_wire_types::PlakExtension;
 use plakous_host_protocol::{
@@ -8,10 +8,10 @@ use plakous_host_protocol::{
 use serde_json::{Value, json};
 
 #[test]
-fn protocol_eight_operator_fixtures_are_addressed_and_secret_debug_is_redacted()
+fn protocol_nine_operator_fixtures_are_addressed_and_secret_debug_is_redacted()
 -> Result<(), Box<dyn std::error::Error>> {
-    assert_eq!(WIRE_VERSION, 8);
-    for line in include_str!("fixtures/operator-v8.jsonl").lines() {
+    assert_eq!(WIRE_VERSION, 9);
+    for line in include_str!("fixtures/operator-v9.jsonl").lines() {
         let value: Value = serde_json::from_str(line)?;
         let encoded = if value["frame"] == "request" {
             let request: ClientFrame<PlakExtension> = serde_json::from_value(value.clone())?;

@@ -66,6 +66,7 @@ async fn wire_key_creation_is_write_only_exact_named_and_confirmation_is_consume
             web_credentials_write: false,
             web_config_write: false,
             web_files_read: false,
+            web_terminal: false,
         },
     );
     let account_id = "openai/work".to_owned();
@@ -190,6 +191,7 @@ async fn environment_override_proves_no_effect_for_wire_set_and_clear()
             web_credentials_write: false,
             web_config_write: false,
             web_files_read: false,
+            web_terminal: false,
         },
     );
     for set in [true, false] {
@@ -245,6 +247,7 @@ async fn key_store_path_refusals_are_no_effect_not_unknown()
             web_credentials_write: false,
             web_config_write: false,
             web_files_read: false,
+            web_terminal: false,
         },
     );
     for set in [true, false] {

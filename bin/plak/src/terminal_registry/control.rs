@@ -21,6 +21,17 @@ pub(super) struct Placement {
 }
 
 impl TerminalRegistry {
+    pub(crate) fn revoke_controller(
+        &self,
+        context: &HostRequestContext,
+        handle: &TerminalHandle,
+    ) -> Result<(), TerminalError> {
+        self.owned(context, handle)?;
+        if let Some(owner) = self.lock().controllers.remove(&handle.identity) {
+            let _ = owner.cancel.send(true);
+        }
+        Ok(())
+    }
     fn placement(&self, key: &TerminalKey) -> Result<Placement, TerminalError> {
         use plakous_recursive_subagents::tree::TreeStore as _;
         let mut store = self.store()?;
@@ -67,6 +78,62 @@ impl TerminalRegistry {
         let placement = self.placement(&key)?;
         self.open_placement(context, key, dimensions, placement, hold)
             .await
+    }
+
+    pub(crate) async fn recover_open(
+        &self,
+        context: &HostRequestContext,
+        key: &TerminalKey,
+        dimensions: TerminalDimensions,
+    ) -> Result<Option<TerminalView>, TerminalError> {
+        let _operation = self.operations.lock().await;
+        self.authenticate(context)?;
+        let namespace = self.namespace(&context.principal)?;
+        let prior = self
+            .lock()
+            .entries
+            .iter()
+            .find(|(_, entry)| entry.pin.namespace == namespace && entry.pin.key == *key)
+            .map(|(identity, entry)| (identity.clone(), entry.pin.clone(), entry.lost));
+        let Some((identity, pin, lost)) = prior else {
+            return Ok(None);
+        };
+        let binding = self.binding(&pin.runner)?;
+        if lost
+            || pin.generation != self.runner_generation
+            || pin.instance != binding.client.instance()
+        {
+            return Err(TerminalError::Lost);
+        }
+        let operation = OperatorOperation::Open {
+            key: key.clone(),
+            dimensions,
+            workspace: pin
+                .workspace
+                .to_str()
+                .ok_or(TerminalError::Conflict)?
+                .into(),
+        };
+        let digest = plakous_hosted::workspace_maintenance::digest_text(
+            &serde_json::to_string(&operation).map_err(|_| TerminalError::Conflict)?,
+        );
+        if digest != pin.digest {
+            return Err(TerminalError::Conflict);
+        }
+        let answer = binding
+            .client
+            .operator_recover_open(namespace, operation)
+            .await
+            .map_err(|_| TerminalError::Unavailable)?;
+        if !binding.revision.is_current() {
+            return Err(TerminalError::Unavailable);
+        }
+        match answer {
+            OperatorAnswer::Terminal { terminal, .. } => self.observe(&identity, terminal)?,
+            OperatorAnswer::Refused { refusal } => return Err(TerminalError::Refused(refusal)),
+            _ => return Err(TerminalError::Lost),
+        }
+        self.view(&identity).map(Some)
     }
 
     pub(super) async fn open_placement(
@@ -142,6 +209,7 @@ impl TerminalRegistry {
                 self.release_proven(&identity)?;
                 return Err(TerminalError::Refused(refusal));
             }
+            Err(TerminalError::OutcomeUnknown) => return Err(TerminalError::OutcomeUnknown),
             _ => return Err(TerminalError::Unavailable),
         }
         self.view(&identity)
@@ -168,13 +236,25 @@ impl TerminalRegistry {
     ) -> Result<Vec<TerminalView>, TerminalError> {
         self.authenticate(context)?;
         let namespace = self.namespace(&context.principal)?;
-        let identities: Vec<_> = self
-            .lock()
-            .entries
-            .iter()
-            .filter(|(_, e)| e.pin.namespace == namespace)
-            .map(|(id, _)| id.clone())
-            .collect();
+        let identities = {
+            let state = self.lock();
+            let mut live = Vec::new();
+            let mut completed = Vec::new();
+            for (id, entry) in state
+                .entries
+                .iter()
+                .filter(|(_, e)| e.pin.namespace == namespace)
+            {
+                if entry.pinned {
+                    live.push(id.clone());
+                } else {
+                    completed.push(id.clone());
+                }
+            }
+            // Keep replay fences even when an old receipt leaves the visible table.
+            live.extend(completed.into_iter().rev().take(8));
+            live
+        };
         identities
             .iter()
             .map(|identity| self.view(identity))
@@ -230,6 +310,7 @@ impl TerminalRegistry {
         context: &HostRequestContext,
         handle: &TerminalHandle,
         cursor: TerminalCursor,
+        takeover: bool,
     ) -> Result<TerminalController, TerminalError> {
         let _operation = self.operations.lock().await;
         let pin = self.owned(context, handle)?;
@@ -256,6 +337,7 @@ impl TerminalRegistry {
             &binding,
             pin.namespace.clone(),
             OperatorOperation::Attach {
+                takeover,
                 key: pin.key.clone(),
                 cursor,
             },
@@ -273,7 +355,7 @@ impl TerminalRegistry {
             binding
                 .client
                 .operator_stream(stream)
-                .map_err(|_| TerminalError::Unavailable)?,
+                .map_err(|_| TerminalError::OutcomeUnknown)?,
         )));
         let (cancel, cancelled) = tokio::sync::watch::channel(false);
         let token = uuid::Uuid::new_v4().to_string();

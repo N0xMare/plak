@@ -17,6 +17,7 @@ fn product_host_responses_route_by_id_without_attaching_a_session() {
         type Observation = crate::Never;
         type HostRequest = u8;
         type HostResponse = u8;
+        type HostStreamEvent = crate::Never;
         type WelcomeExtension = Option<crate::Never>;
     }
 

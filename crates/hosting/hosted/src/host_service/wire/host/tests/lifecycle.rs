@@ -25,6 +25,7 @@ fn operator_host_hold_requires_an_existing_exact_resident_without_opening() {
     handed_off(&host);
 }
 
+#[test]
 fn a_same_node_switch_reopens_one_dormant_successor_slot_from_a_fresh_client() {
     let Switched {
         host,

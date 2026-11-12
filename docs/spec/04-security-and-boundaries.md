@@ -847,6 +847,17 @@ or claim they died. Closed/expired namespaces still allow list and close for
 this resolution. Fast double-fork escapes reparented before observation remain
 an explicit unsandboxed-shell residual, even when the original SID is absent.
 
+Client protocol 9 applies the startup-captured `web.terminal` switch to every
+terminal request and its prepare/confirm flow. Verified same-user sockets are
+trusted independently of web switches, but use the same one-shot consent and
+principal/connection/generation binding. Open and attach/takeover cannot borrow a
+credential/config grant. A client cannot choose its authenticated owner or the
+runner shell environment. Byte/credit/queue refusal is typed and precedes enqueue;
+a malformed stream ends that stream, not unrelated transcript/directory traffic.
+Input acceptance is not execution proof, and a lost acknowledgment grants no
+replay authority. Batched grants validate every owner and byte bound before any
+stream receives credit. Raw terminal bytes never enter audit logs or Debug output.
+
 Memory-only terminal tables and 1 MiB raw output rings never become agent output
 or disk spools. Input acknowledgments prove queue admission only. Reattachment
 does not replay ambiguous keyboard bytes. Runner-enforced awake input-idle,
@@ -1004,7 +1015,7 @@ before allocating bounded execution work. This does not sanitize workspace
 secrets or make an admitted shell a sandbox.
 
 An admitted web client is an operator acting with the serving user's authority.
-In addition to session and directory operations, console capabilities introduced in protocol 7 (current client protocol 8)
+In addition to session and directory operations, console capabilities introduced in protocol 7 (current client protocol 9)
 manage provider accounts and publish allowlisted home configuration.
 These are real credential and deferred-execution powers, not cosmetic settings.
 Capability switches and confirmations are product controls, not an OS sandbox
@@ -1055,9 +1066,11 @@ not write authority. Catalog metadata never refreshes, logs in or opens sessions
 If any web console read or write switch is enabled, a served UI must carry an
 enforced CSP with no unsafe-inline/eval, same-origin connection sources,
 Trusted Types for script, no framing/objects/base URLs, and restricted script
-sources (only `'self'`, hashes and `'none'`). Nonces, `'strict-dynamic'` and
-`'wasm-unsafe-eval'` are refused in P6; WASM evaluation is reserved for the
-protocol-9 terminal UI. Cold load and every reload validate this same captured
+sources (only `'self'`, hashes and `'none'`). Nonces and `'strict-dynamic'`
+remain refused. `'wasm-unsafe-eval'` is allowed only when the startup-captured
+terminal switch is enabled. Protocol 9 permits only WASM evaluation in that
+case, never script unsafe-eval/inline or a relaxed Trusted Types requirement.
+Cold load and every reload validate this same captured
 policy; an invalid reload retains the previous immutable files-and-CSP build.
 A report-only header is insufficient. A headless host serves no document.
 
@@ -1751,7 +1764,7 @@ Chapter 03 §6.1 holds the exact list.
 
 Native login, logout, explicit refresh and API-key management are explicit
 operator operations on CLI or host console, introduced in protocol 7
-(current client protocol 8). Web writes require the
+(current client protocol 9). Web writes require the
 startup-captured credentials-write capability; verified same-user sockets are
 trusted, with identical consent and quota checks. Private clients own forms,
 not credential authority; the retained embedded Providers view remains

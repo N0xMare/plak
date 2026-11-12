@@ -53,6 +53,7 @@ fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
                     TerminalEvent::OutputGap { .. } => "output_gap",
                     TerminalEvent::Exit { .. } => "exit",
                     TerminalEvent::Refused { .. } => "refused",
+                    TerminalEvent::IdleWarning { .. } => "idle_warning",
                 });
             }
             "answer" => {
@@ -99,6 +100,6 @@ fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
             statuses.len(),
             refusals.len()
         ),
-        (10, 5, 5, 6, 10)
+        (10, 6, 5, 6, 10)
     );
 }

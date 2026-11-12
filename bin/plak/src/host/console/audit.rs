@@ -86,6 +86,16 @@ pub(super) struct Guard {
 impl Guard {
     pub fn new(console: Arc<Console>, context: HostRequestContext, request: &HostRequest) -> Self {
         let action = match request {
+            HostRequest::TerminalOpen { .. } => "terminal_open",
+            HostRequest::TerminalList { .. } => "terminal_list",
+            HostRequest::TerminalAttach { takeover: true, .. } => "terminal_takeover",
+            HostRequest::TerminalAttach { .. } => "terminal_attach",
+            HostRequest::TerminalResize { .. } => "terminal_resize",
+            HostRequest::TerminalClose { .. } => "terminal_close",
+            HostRequest::TerminalDetach { .. } => "terminal_detach",
+            HostRequest::TerminalInput { .. } => "terminal_input",
+            HostRequest::TerminalCreditBatch { .. } => "terminal_credit_batch",
+            HostRequest::TerminalReleaseSession { .. } => "terminal_release_session",
             HostRequest::FilesList { .. } => "files_list",
             HostRequest::FilesRead { .. } => "files_read",
             HostRequest::FilesSearch { .. } => "files_search",

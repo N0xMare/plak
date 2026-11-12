@@ -104,6 +104,7 @@ impl ProductConfig {
             (ConfigField::WebConfigRead, "[web] config_read"),
             (ConfigField::WebConfigWrite, "[web] config_write"),
             (ConfigField::WebFilesRead, "[web] files_read"),
+            (ConfigField::WebTerminal, "[web] terminal"),
         ];
         let set = web.iter().filter(|(field, _)| self.present.contains(field));
         let before = keys.len();

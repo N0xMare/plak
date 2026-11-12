@@ -179,7 +179,8 @@ async fn loss_cut(cut: &str, replacement: bool) {
                 TerminalCursor {
                     instance: id(forgotten.instance.clone()).unwrap(),
                     offset: 0
-                }
+                },
+                false
             )
             .await,
         Err(TerminalError::Lost)
@@ -206,7 +207,7 @@ async fn loss_cut(cut: &str, replacement: bool) {
             assert!(old.lost);
             assert!(matches!(
                 registry
-                    .attach(&owner, &old.handle, old.row.unwrap().oldest)
+                    .attach(&owner, &old.handle, old.row.unwrap().oldest, false)
                     .await,
                 Err(TerminalError::Lost)
             ));

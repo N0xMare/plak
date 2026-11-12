@@ -72,6 +72,22 @@ fn operator_host_memory_pin_keeps_residency_and_reclamation_until_proof() {
 }
 
 #[test]
+fn operator_host_listing_bounds_completed_receipts_without_forgetting_open_fences() {
+    let (directory, registry, count) = fixture();
+    for n in 0..13 {
+        let mut terminal = pin(&registry, directory.path().to_owned());
+        terminal.key.terminal_id = id(format!("complete-{n:02}")).unwrap();
+        let identity = registry.reserve(terminal, count.hold().unwrap()).unwrap();
+        registry.release_proven(&identity).unwrap();
+    }
+    assert_eq!(registry.list(&context("operator")).unwrap().len(), 8);
+    assert_eq!(registry.lock().entries.len(), 13);
+    assert_eq!(registry.list(&context("other")).unwrap().len(), 0);
+    assert_eq!(count.get(), 0);
+    assert!(!registry.paths.product_database().exists());
+}
+
+#[test]
 fn operator_host_reclaim_admission_blocks_new_pins_without_persisting_them() {
     let (directory, registry, count) = fixture();
     let workspace = directory.path().join("workspace");

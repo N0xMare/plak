@@ -130,8 +130,11 @@ fn load_ui(
     let console = console_switches.web_accounts_read
         || console_switches.web_config_read
         || console_switches.web_credentials_write
-        || console_switches.web_config_write;
-    root.map(|root| ui::Builds::load(root, console)).transpose()
+        || console_switches.web_config_write
+        || console_switches.web_files_read
+        || console_switches.web_terminal;
+    root.map(|root| ui::Builds::load(root, console, console_switches.web_terminal))
+        .transpose()
 }
 
 /// Who the listener admits: the tailnet logins `[web] allow` names, at

@@ -14,7 +14,7 @@ Operator-facing instructions live in
 ## 1. Files and discovery
 
 Host operators may edit a home template through confirmed, typed
-`template_put`, introduced in protocol 7 (current client protocol 8). This is
+`template_put`, introduced in protocol 7 (current client protocol 9). This is
 the explicit exception to file-authored template
 bodies: ordinary config saves and `config_patch` still refuse body changes.
 User-profile writes use root/working_set only; built-ins are read-only. No
@@ -35,7 +35,7 @@ is a no-op; edited, unrelated or symlinked units are never overwritten.
 
 The current state directory is `state/r27.e37.p37.t10/`: runtime SQLite
 schema 27, runtime format epoch 37, product schema 37, and tree schema 10.
-These are format identities, not configuration keys. Client wire protocol 8
+These are format identities, not configuration keys. Client wire protocol 9
 and runner protocol 7 require separate exact matches, with no negotiation. Product schema 37 adds
 operator title overrides and archival state; it composes with runtime epoch
 37 without changing the runtime codec or tree encoding. Session export stays
@@ -198,7 +198,7 @@ set` and the file); Fork now never writes them, and local Use now, offered only
 while a session has no model and the home has no loadable default, also records
 its profile as the default. Remote Use now binds only its session; publishing
 home defaults requires the confirmed etag path introduced in protocol 7
-(current client protocol 8). Changing the
+(current client protocol 9). Changing the
 default never changes an existing session, which keeps the root template and
 working set its tree froze, re-resolved against the template files at its next
 `/reload` (chapter 02 §5.5).
@@ -337,6 +337,7 @@ repository can never grant web access.
 | `web.config_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home profiles, templates and allowlisted configuration. Same-user sockets are trusted independently. Captured at host startup; restart to change it; a 0.0.3 build refuses a config.toml that sets it. |
 | `web.config_write` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed allowlisted home configuration, template and profile writes. Grants deferred execution through tools, on_mint and env. Requires config_read; home-only, default off and captured at host startup. |
 | `web.files_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to inspect saved workspaces and Changes. Exact file bytes may contain secrets. Same-user sockets are trusted independently; default off and captured at host startup. |
+| `web.terminal` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed interactive operator shells as the runner user. Shells are not confined to the workspace. Same-user sockets are trusted independently; default off and captured at host startup. |
 
 `console.workspace_limits` advertises protocol-8 inspection bounds, independent
 of account/configuration limits: 256 KiB page/output, 16 MiB file ceiling,
@@ -410,6 +411,11 @@ error in §5.
 
 ### Console limits
 
+Client protocol 9 adds `console.terminal` and `console.terminal_limits`. Socket
+peers are trusted independently; web terminal authority is default-off and captured
+at startup. Terminal DTOs cannot edit this switch. Matching runner protocol 7 is
+required; no automatic install or cross-version negotiation occurs.
+
 The console welcome advertises these enforced defaults (byte counts are
 encoded bytes; durations are milliseconds). They are product limits, not
 additional configuration keys. Capability denial happens before work;
@@ -445,6 +451,38 @@ capacity and rate refusals do not open a session or close the connection.
 | `usage_cache_ms` | `30000` | Exact-fenced console observation freshness. |
 | `usage_reread_ms` | `30000` | Suggested explicit refresh interval, not automatic retry. |
 | `cursor_ttl_ms` | `30000` | Immutable page-snapshot lifetime. |
+
+Terminal welcome bounds count decoded bytes, not base64 characters. The client
+shares one scheduler across all console operations: 12 messages/s, burst 12,
+32 pending actions, latest-only resize, round-robin input, adaptive 50–100 ms
+coalescing and one batched grant per 64 KiB consumed. At most 64 KiB unsent input
+per terminal; backpressure never truncates keyboard bytes. The host enforces its
+independent console and stream budgets even for unscheduled clients.
+The host retains at most 32 stream records and 16 pending events per stream;
+outstanding output credit still caps raw queued data at 64 KiB per terminal.
+Principal output-rate records cap at 1,024 and retain consumed budgets across
+disconnect until replenished; reconnect cannot mint a new burst.
+
+| Terminal limit | Default |
+| --- | --- |
+| `chunk_bytes` | `16384` |
+| `credit_bytes` | `65536` |
+| `unsent_input_bytes` | `65536` |
+| `ring_bytes` | `1048576` |
+| `terminals_per_session` | `2` |
+| `terminals_per_principal` | `4` |
+| `terminals_host` | `16` |
+| `input_bytes_per_second` | `65536` |
+| `output_bytes_per_second` | `262144` |
+| `principal_output_bytes_per_second` | `524288` |
+| `scheduler_messages_per_second` | `12` |
+| `scheduler_burst` | `12` |
+| `scheduler_actions` | `32` |
+| `input_coalesce_min_ms` | `50` |
+| `input_coalesce_max_ms` | `100` |
+| `idle_ms` | `900000` |
+| `detach_ms` | `300000` |
+| `namespace_ms` | `90000` |
 
 The process-local login table also has a host-wide cap of 128 attempt records,
 including settled attempts retained for terminal polling until their original
@@ -902,11 +940,11 @@ fresh unshared name (`default`, `default-2`, and so on), preserving its other
 fields and leaving the previous template file untouched. Saves preflight all
 existing template bodies and refuse changes to them; edit user or project
 files directly, or use the confirmed home `template_put` exception introduced
-in protocol 7 (current client protocol 8).
+in protocol 7 (current client protocol 9).
 `config_patch` never edits a body. Unrelated settings saves do not rewrite templates.
 
 `config_patch`, `template_put` and `profile_put`, introduced in protocol 7
-(current client protocol 8), publish one file per request. All require a matching content etag and one-use consent; stale
+(current client protocol 9), publish one file per request. All require a matching content etag and one-use consent; stale
 etags return conflict and no write. The shared home publication lock covers
 read-current, comparison, complete candidate validation and atomic publication;
 CLI home key edits reread under this lock as well. Recheck actual bytes before

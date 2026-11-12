@@ -56,24 +56,10 @@ impl OperatorTerminalService {
             return Err(OperatorRefusal::ReconcileRequired);
         }
         if matches!(operation, OperatorOperation::Attach { .. }) {
-            let (mut total, mut host, mut principal) = (0, 0, 0);
-            for (owner, ns) in &table.namespaces {
-                let count = ns
-                    .terminals
-                    .values()
-                    .filter(|t| t.controller.is_some())
-                    .count();
-                total += count;
-                if owner.host == key.host {
-                    host += count;
-                    if owner.namespace.principal == key.namespace.principal {
-                        principal += count;
-                    }
-                }
-            }
-            if total >= 32 || host >= 16 || principal >= 4 {
-                return Err(OperatorRefusal::Quota);
-            }
+            let replacing = usize::from(
+                matches!(&operation, OperatorOperation::Attach { key, takeover: true, .. } if namespace.terminals.get(key).is_some_and(|t| t.controller.is_some())),
+            );
+            Self::attach_quota(&table, &key, replacing)?;
         }
         if let OperatorOperation::Open {
             key: terminal,
@@ -120,6 +106,35 @@ impl OperatorTerminalService {
             .get_mut(&key)
             .ok_or(OperatorRefusal::NamespaceExpired)?;
         self.existing(ns, connection, stream, operation, now)
+    }
+
+    fn attach_quota(
+        table: &Table,
+        key: &NamespaceKey,
+        replacing: usize,
+    ) -> Result<(), OperatorRefusal> {
+        let (mut total, mut host, mut principal) = (0_usize, 0_usize, 0_usize);
+        for (owner, ns) in &table.namespaces {
+            let count = ns
+                .terminals
+                .values()
+                .filter(|t| t.controller.is_some())
+                .count();
+            total += count;
+            if owner.host == key.host {
+                host += count;
+                if owner.namespace.principal == key.namespace.principal {
+                    principal += count;
+                }
+            }
+        }
+        if total.saturating_sub(replacing) >= 32
+            || host.saturating_sub(replacing) >= 16
+            || principal.saturating_sub(replacing) >= 4
+        {
+            return Err(OperatorRefusal::Quota);
+        }
+        Ok(())
     }
 
     fn renew(
@@ -365,14 +380,16 @@ impl OperatorTerminalService {
             .get_mut(&key)
             .ok_or(OperatorRefusal::TerminalLost)?;
         let attached = match operation {
-            OperatorOperation::Attach { cursor, .. } => {
+            OperatorOperation::Attach {
+                cursor, takeover, ..
+            } => {
                 if cursor.instance != self.inner.instance {
                     return Err(OperatorRefusal::TerminalLost);
                 }
                 if cursor.offset > lock(&terminal.output).next {
                     return Err(OperatorRefusal::OffsetGap);
                 }
-                if terminal.controller.is_some() {
+                if terminal.controller.is_some() && !takeover {
                     return Err(OperatorRefusal::TerminalBusy);
                 }
                 terminal.controller = Some(Controller {
@@ -387,6 +404,7 @@ impl OperatorTerminalService {
                         0,
                     ),
                     exit_status: None,
+                    warned_at: None,
                 });
                 terminal.detached = None;
                 Some(stream)

@@ -181,6 +181,8 @@ pub enum OperatorOperation {
         key: TerminalKey,
         /// Output position, qualified by runner instance.
         cursor: TerminalCursor,
+        /// Explicit paired-host confirmation permits revoking the prior controller.
+        takeover: bool,
     },
     /// Coalesces the latest requested size of the current controller.
     Resize {
@@ -351,6 +353,11 @@ pub enum OperatorAnswer {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "terminal_event", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TerminalEvent {
+    /// Runner-awake input idle is within one minute of policy closure.
+    IdleWarning {
+        /// Remaining awake milliseconds, never a wall-clock death claim.
+        remaining_ms: u64,
+    },
     /// Input or merged PTY output; strict base64, at most 16 KiB decoded.
     Data {
         /// Absolute raw byte offset.

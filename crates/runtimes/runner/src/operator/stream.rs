@@ -167,6 +167,7 @@ impl OperatorTerminalService {
                         .min(controller.output_rate.available(now, period, share));
                     let mut room = usize::try_from(allowed).unwrap_or(0);
                     terminal.output(
+                        now,
                         &self.inner.instance,
                         &mut controller,
                         &mut room,
@@ -243,6 +244,7 @@ impl Terminal {
 
     fn output(
         &self,
+        now: Instant,
         instance: &OperatorId,
         controller: &mut Controller,
         budget: &mut usize,
@@ -250,6 +252,20 @@ impl Terminal {
         capacity: usize,
     ) {
         let output = lock(&self.output);
+        if frames.len() >= capacity {
+            return;
+        }
+        let idle = now.saturating_duration_since(self.last_input);
+        if self.status == TerminalStatus::Running
+            && idle >= super::IDLE.saturating_sub(Duration::from_secs(60))
+            && controller.warned_at != Some(self.last_input)
+        {
+            frames.push(controller.event(TerminalEvent::IdleWarning {
+                remaining_ms:
+                    u64::try_from(super::IDLE.saturating_sub(idle).as_millis()).unwrap_or(u64::MAX),
+            }));
+            controller.warned_at = Some(self.last_input);
+        }
         if frames.len() >= capacity {
             return;
         }

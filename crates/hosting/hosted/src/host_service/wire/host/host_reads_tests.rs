@@ -12,6 +12,7 @@ impl ProtocolExtension for Reads {
     type Observation = Never;
     type HostRequest = u8;
     type HostResponse = u8;
+    type HostStreamEvent = Never;
     type WelcomeExtension = Option<bool>;
 }
 

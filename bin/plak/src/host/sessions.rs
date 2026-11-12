@@ -90,6 +90,7 @@ impl ProductSessions {
                     web_credentials_write: false,
                     web_config_write: false,
                     web_files_read: false,
+                    web_terminal: false,
                 }
             });
         Ok(Self {
@@ -433,6 +434,13 @@ impl HostSessions<PlakExtension> for ProductSessions {
         context: plakous_hosted::host_service::wire::HostRequestContext,
         request: plakd_wire_types::console::HostRequest,
     ) -> plakous_hosted::host_service::wire::HostReadTask<PlakExtension> {
+        if super::console::terminals::is_request(&request) {
+            return self.console.terminal_request(
+                context,
+                request,
+                self.services.terminal_registry().cloned(),
+            );
+        }
         if super::console::files::target(&request).is_some() {
             return self.console.workspace_request(
                 context,
@@ -442,6 +450,25 @@ impl HostSessions<PlakExtension> for ProductSessions {
             );
         }
         self.console.request(context, request)
+    }
+    fn host_stream(
+        &self,
+        context: &plakous_hosted::host_service::wire::HostRequestContext,
+    ) -> Option<plakous_host_protocol::wire::HostFrame<PlakExtension>> {
+        self.console.terminal_output(context)
+    }
+    fn host_response_sent(
+        &self,
+        context: &plakous_hosted::host_service::wire::HostRequestContext,
+        response: &plakd_wire_types::console::HostResponse,
+    ) {
+        self.console.terminal_response_sent(context, response);
+    }
+    fn host_stream_notify(
+        &self,
+        context: &plakous_hosted::host_service::wire::HostRequestContext,
+    ) -> Option<std::sync::Arc<tokio::sync::Notify>> {
+        self.console.terminal_notify(context)
     }
     fn contains(&self, session: &str) -> Result<bool, String> {
         self.with_product(|store| store.session_exists(session))
@@ -1167,6 +1194,7 @@ mod tests {
                 web_credentials_write: false,
                 web_config_write: false,
                 web_files_read: false,
+                web_terminal: false,
             }
         );
         let rows = product.rows(None, None, false).unwrap();

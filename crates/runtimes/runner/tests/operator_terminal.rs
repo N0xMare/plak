@@ -101,6 +101,7 @@ async fn operator_pty_wire_and_home_local_have_no_agent_jobs_or_lines() {
         } = call(
             &client,
             OperatorOperation::Attach {
+                takeover: false,
                 key: key(),
                 cursor: terminal.oldest,
             },

@@ -16,6 +16,8 @@ pub struct ConsoleWelcome {
     pub credentials_write: CapabilityState,
     pub config_write: CapabilityState,
     pub files_read: CapabilityState,
+    pub terminal: CapabilityState,
+    pub terminal_limits: super::TerminalLimits,
     pub workspace_limits: WorkspaceReadLimits,
     pub configured_switches: ConfiguredSwitches,
     pub limits: ConsoleLimits,
@@ -55,6 +57,7 @@ pub enum CapabilityRemedy {
     EnableWebCredentialsWriteAndRestart,
     EnableWebConfigWriteAndRestart,
     EnableWebFilesReadAndRestart,
+    EnableWebTerminalAndRestart,
     UseMatchingBuild,
 }
 
@@ -70,6 +73,7 @@ pub struct ConfiguredSwitches {
     pub web_credentials_write: bool,
     pub web_config_write: bool,
     pub web_files_read: bool,
+    pub web_terminal: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

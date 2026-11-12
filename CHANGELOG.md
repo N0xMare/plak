@@ -22,6 +22,15 @@ one cross-build carrier (a build imports its own and the previous version).
   draft-reservation hold for deterministic host-client recovery and same-ID
   pending-admission tests. Default and maintainer behavior is unchanged.
 
+- Add client protocol 9 operator-terminal requests, fresh action-bound consent,
+  independent credited stream frames, confirmed controller takeover and explicit
+  residency/loss outcomes. Credit batches validate atomically; bounded per-stream
+  and aggregate output budgets preserve control/transcript progress. The default-off
+  terminal switch enables the strict-CSP WASM seam without permitting script eval.
+  Product DTOs own terminal events; generic host streams remain attachment-free.
+  Runner protocol 7 includes the preceding Changes contract and operator controls.
+  Terminal state remains process-local; product schema and state key are unchanged.
+
 - Anchor successful Darwin PTY spawns through the owned, unreaped child handle,
   including children that exit before their first observation. No Darwin waitid
   result is required; Linux retains full-scan identity checks. Retire the shared
@@ -34,7 +43,7 @@ one cross-build carrier (a build imports its own and the previous version).
   Runner-owned leases guard workspace removal/trim; precise lost-instance pins
   remain while host memory survives. Simultaneous host/runner loss is unlocalized
   unknown loss, not cleanup proof. Product schema stays 37 and the state key is
-  unchanged. Host-internal APIs add no client requests; client protocol remains 7.
+  unchanged. Client protocol 9 exposes the private registry without adding persisted state.
 
 - Fixed native-client exits losing `bye`: last-handle drop now waits up to two
   seconds for the sole writer to drain and finish, even after explicit goodbye.
@@ -98,7 +107,7 @@ one cross-build carrier (a build imports its own and the previous version).
 
 - Add a separate operator-terminal runner protocol with validated namespace,
   terminal identity, dimensions and raw-byte stream vocabulary. Runner protocol
-  7 is an exact-version cut; the product client handshake is unchanged.
+  7 is an exact-version cut, independent of client protocol 9.
   Runner and home-local daemon PTYs use principal-private, bounded in-memory
   tables and output rings, independent quotas and awake deadlines, single
   controllers and session-wide identity-checked cleanup. Unproven cleanup keeps

@@ -127,6 +127,8 @@ pub struct HostedElsewhere {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ResidentReason {
+    /// An operator terminal retains a residency hold until cleanup or acknowledged loss.
+    OperatorTerminal,
     /// A turn, a queued or deferred command, recovery debt, a pending
     /// continuation or a resident child in its tree.
     Work,

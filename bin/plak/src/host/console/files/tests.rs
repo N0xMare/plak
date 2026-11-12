@@ -36,6 +36,7 @@ pub(super) fn console(root: &std::path::Path) -> Arc<Console> {
             web_credentials_write: false,
             web_config_write: false,
             web_files_read: false,
+            web_terminal: false,
         },
     )
 }

@@ -105,17 +105,21 @@ async fn operator_host_controller_principal_fences_disconnect_reattach_and_shutd
         Err(TerminalError::Lost)
     ));
     assert!(matches!(
-        registry.attach(&other, &view.handle, cursor.clone()).await,
+        registry
+            .attach(&other, &view.handle, cursor.clone(), false)
+            .await,
         Err(TerminalError::Lost)
     ));
     let controller = registry
-        .attach(&owner, &view.handle, cursor.clone())
+        .attach(&owner, &view.handle, cursor.clone(), false)
         .await
         .unwrap();
     let mut second = owner.clone();
     second.connection_id = 2;
     assert!(matches!(
-        registry.attach(&second, &view.handle, cursor.clone()).await,
+        registry
+            .attach(&second, &view.handle, cursor.clone(), false)
+            .await,
         Err(TerminalError::Busy)
     ));
     assert!(matches!(
@@ -133,7 +137,10 @@ async fn operator_host_controller_principal_fences_disconnect_reattach_and_shutd
     // Detach sends Close before the next Attach on the same client sender.
     let until = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
     let mut controller = loop {
-        match registry.attach(&second, &view.handle, cursor.clone()).await {
+        match registry
+            .attach(&second, &view.handle, cursor.clone(), false)
+            .await
+        {
             Ok(controller) => break controller,
             Err(TerminalError::Refused(OperatorRefusal::TerminalBusy)) => {}
             Err(error) => panic!("reattach refused: {error:?}"),
@@ -185,7 +192,7 @@ async fn operator_host_same_generation_reconciliation_fences_old_stream_before_i
     let owner = context("operator");
     let view = open(&registry, &count, &owner, &workspace).await;
     let controller = registry
-        .attach(&owner, &view.handle, view.row.unwrap().oldest)
+        .attach(&owner, &view.handle, view.row.unwrap().oldest, false)
         .await
         .unwrap();
     let (host, runner) = tokio::io::duplex(64 * 1024);

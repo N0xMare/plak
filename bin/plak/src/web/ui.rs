@@ -53,14 +53,16 @@ pub(crate) struct Builds {
     root: PathBuf,
     current: RwLock<Arc<Ui>>,
     console: bool,
+    terminal: bool,
 }
 
 impl Builds {
-    pub(crate) fn load(root: &Path, console: bool) -> CliResult<Self> {
+    pub(crate) fn load(root: &Path, console: bool, terminal: bool) -> CliResult<Self> {
         Ok(Self {
             root: root.to_path_buf(),
-            current: RwLock::new(Arc::new(Ui::load(root, console)?)),
+            current: RwLock::new(Arc::new(Ui::load(root, console, terminal)?)),
             console,
+            terminal,
         })
     }
 
@@ -69,7 +71,7 @@ impl Builds {
     }
 
     pub(crate) fn reload(&self) -> CliResult<()> {
-        let next = Arc::new(Ui::load(&self.root, self.console)?);
+        let next = Arc::new(Ui::load(&self.root, self.console, self.terminal)?);
         *self.current.write().unwrap_or_else(PoisonError::into_inner) = next;
         Ok(())
     }
@@ -92,7 +94,7 @@ impl Ui {
     ///
     /// A directory that does not exist; a missing or malformed CSP, or one
     /// that allows framing; a build past its file or byte caps.
-    pub(crate) fn load(root: &Path, console: bool) -> CliResult<Self> {
+    pub(crate) fn load(root: &Path, console: bool, terminal: bool) -> CliResult<Self> {
         let root = std::fs::canonicalize(root).map_err(|_| {
             CliFailure::new(format!(
                 "plak host --web: no UI directory {}",
@@ -112,7 +114,7 @@ impl Ui {
                 "plak host --web: csp.json's header must carry frame-ancestors 'none'",
             ));
         }
-        if console && !csp::console_policy(&file.header) {
+        if console && !csp::console_policy(&file.header, terminal) {
             return Err(CliFailure::new(
                 "plak host --web: console reads require a restrictive enforced CSP: scripts without unsafe-inline/eval, connect-src 'self', require-trusted-types-for 'script', frame-ancestors 'none', object-src 'none', base-uri 'none'",
             ));

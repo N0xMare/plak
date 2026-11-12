@@ -160,6 +160,7 @@ struct Controller {
     cursor: u64,
     output_rate: RateBudget,
     exit_status: Option<TerminalStatus>,
+    warned_at: Option<Instant>,
 }
 
 struct RateBudget {

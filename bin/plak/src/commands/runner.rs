@@ -161,13 +161,7 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
     .map_err(|error| CliFailure::new(format!("runner workspace policy: {error:?}")))?;
     let probe_paths =
         Arc::new(move |candidate: &Path| home::admitted_probe_path(&roots, &excluded, candidate));
-    let allowlist_home = home.clone();
-    let hosts = Arc::new(move |host_id: &str| {
-        // Read at every bind, so a pairing made while the daemon runs holds.
-        allowlist_home
-            .config()
-            .is_ok_and(|config| config.hosts.iter().any(|allowed| allowed == host_id))
-    });
+    let hosts = host_allowlist(home.clone());
     let floors = FileOwnerFloors::open(home.floors_path())
         .map_err(|error| CliFailure::new(error.to_string()))?;
     let runner_id = RunnerId::new(home.runner_id()?)
@@ -209,6 +203,14 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         Err(daemon::DaemonError::AlreadyServing(_)) => Ok(()),
         Err(error) => Err(CliFailure::new(error.to_string())),
     }
+}
+
+fn host_allowlist(home: RunnerHome) -> Arc<dyn Fn(&str) -> bool + Send + Sync> {
+    Arc::new(move |host_id| {
+        // Pairings made while the daemon runs take effect at the next bind.
+        home.config()
+            .is_ok_and(|config| config.hosts.iter().any(|allowed| allowed == host_id))
+    })
 }
 
 fn initial_environment(

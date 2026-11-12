@@ -43,6 +43,7 @@ impl ProtocolExtension for Overlay {
     type Observation = OpenOverlay;
     type HostRequest = crate::Never;
     type HostResponse = crate::Never;
+    type HostStreamEvent = crate::Never;
     type WelcomeExtension = Option<crate::Never>;
 }
 

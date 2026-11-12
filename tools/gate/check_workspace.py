@@ -680,6 +680,7 @@ ALLOWED_CLI_MACROS = {
 # Per-source additions to ALLOWED_CLI_MACROS.
 ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/terminal_registry/control.rs"): {"select"},
+    ("plak", "src/host/console/terminals/stream.rs"): {"select"},
     ("plakous-hosted", "src/agent/roots.rs"): {"warn"},
     ("plak", "src/commands/runner/local.rs"): {"warn"},
     ("plak", "src/host.rs"): {"select"},
@@ -1696,7 +1697,22 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "OperatorRefusal",
         }
     },
+    ("plak", "src/host/console/terminals.rs"): {
+        "runner": {
+            "protocol",
+            "operator",
+            "TerminalDimensions",
+            "TerminalCursor",
+            "TerminalEvent",
+            "TerminalKey",
+            "TerminalStatus",
+            "TerminalProcessIdentity",
+            "OperatorId",
+            "OperatorRefusal",
+        }
+    },
     ("plak", "src/terminal_registry.rs"): {
+        "tools": {"runner", "RunnerFailure"},
         "runner": {
             "protocol",
             "operator",
@@ -1710,7 +1726,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "TerminalKey",
             "TerminalRow",
             "TerminalStatus",
-        }
+        },
     },
     ("plak", "src/terminal_registry/control.rs"): {
         "runner": {

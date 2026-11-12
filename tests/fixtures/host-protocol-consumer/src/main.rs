@@ -12,6 +12,7 @@ impl ProtocolExtension for Product {
     type Observation = Never;
     type HostRequest = bool;
     type HostResponse = u8;
+    type HostStreamEvent = u8;
     type WelcomeExtension = Option<bool>;
 }
 
@@ -19,6 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use plakous_host_protocol::client::{Transport, WireReceiver, WireSender};
     let _: fn(&WireSender<Product>) = WireSender::goodbye;
     let _: fn(&WireReceiver<Product>) = WireReceiver::goodbye;
+    let _: fn(&WireReceiver<Product>) -> Option<HostFrame<Product>> = WireReceiver::try_host_stream;
     let _transport =
         Transport::new(std::io::empty(), std::io::sink()).with_write_shutdown(|| Ok(()));
     let request = ClientFrame::<Product>::Request {
@@ -49,6 +51,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(
         serde_json::from_value::<Welcome<Product>>(serde_json::to_value(&welcome)?)?,
         welcome
+    );
+    let stream = HostFrame::<Product>::TerminalStream {
+        terminal: "terminal".into(),
+        stream: 1,
+        seq: 0,
+        event: 7,
+    };
+    assert_eq!(
+        serde_json::from_value::<HostFrame<Product>>(serde_json::to_value(&stream)?)?,
+        stream
     );
     Ok(())
 }

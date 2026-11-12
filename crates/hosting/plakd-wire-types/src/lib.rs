@@ -173,6 +173,7 @@ pub type SettingsUpdate = SettingsView;
 pub struct PlakExtension;
 
 impl ProtocolExtension for PlakExtension {
+    type HostStreamEvent = console::TerminalEvent;
     fn host_request_size_allowed(line: &str) -> bool {
         #[derive(serde::Deserialize)]
         struct Frame {

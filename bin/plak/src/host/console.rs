@@ -9,6 +9,7 @@ mod definitions;
 mod limits;
 mod operator;
 mod recorded;
+pub(super) mod terminals;
 
 use crate::home::paths::PlakPaths;
 use plakd_wire_types::{
@@ -48,6 +49,7 @@ pub(super) struct Console {
     logins: Mutex<account_writes::Logins>,
     audit: Mutex<audit::State>,
     files: Mutex<files::State>,
+    terminals: Mutex<terminals::State>,
     #[cfg(test)]
     native_fixture: Mutex<Option<plakous::subscriptions::NativeSubscriptions>>,
 }
@@ -57,7 +59,9 @@ pub(super) fn admission_limits() -> HostReadLimits {
 }
 
 pub(super) fn is_write(request: &HostRequest) -> bool {
-    config_writes::action(request).is_some() || account_writes::is_request(request)
+    config_writes::action(request).is_some()
+        || account_writes::is_request(request)
+        || (terminals::is_request(request) && !matches!(request, HostRequest::TerminalList {}))
 }
 
 impl Console {
@@ -79,6 +83,7 @@ impl Console {
             logins: Mutex::default(),
             audit: Mutex::default(),
             files: Mutex::default(),
+            terminals: Mutex::default(),
             #[cfg(test)]
             native_fixture: Mutex::new(None),
         })
@@ -119,6 +124,11 @@ impl Console {
                     CapabilityRemedy::EnableWebFilesReadAndRestart,
                 ),
                 workspace_limits: files::welcome_limits(),
+                terminal: write_state(
+                    socket || self.switches.web_terminal,
+                    CapabilityRemedy::EnableWebTerminalAndRestart,
+                ),
+                terminal_limits: terminals::limits(),
                 configured_switches: self.switches,
                 limits: limits::welcome(limits),
             },

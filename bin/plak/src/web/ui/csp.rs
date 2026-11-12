@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-pub(super) fn console_policy(header: &str) -> bool {
+pub(super) fn console_policy(header: &str, terminal: bool) -> bool {
     let mut directives = BTreeMap::new();
     for directive in header.split(';') {
         let mut words = directive.split_ascii_whitespace();
@@ -40,12 +40,12 @@ pub(super) fn console_policy(header: &str) -> bool {
     let scripts = directives
         .get("script-src")
         .or_else(|| directives.get("default-src"));
-    if !scripts.is_some_and(|values| script_sources(values)) {
+    if !scripts.is_some_and(|values| script_sources(values, terminal)) {
         return false;
     }
     if directives
         .get("script-src-elem")
-        .is_some_and(|values| !script_sources(values))
+        .is_some_and(|values| !script_sources(values, false))
     {
         return false;
     }
@@ -54,10 +54,11 @@ pub(super) fn console_policy(header: &str) -> bool {
         .is_none_or(|values| values.as_slice() == ["'none'"])
 }
 
-fn script_sources(values: &[&str]) -> bool {
+fn script_sources(values: &[&str], terminal: bool) -> bool {
     !values.is_empty()
         && values.iter().all(|value| {
             matches!(*value, "'none'" | "'self'")
+                || (terminal && *value == "'wasm-unsafe-eval'")
                 || ["'sha256-", "'sha384-", "'sha512-"]
                     .iter()
                     .any(|prefix| value.starts_with(prefix) && value.ends_with('\''))
@@ -78,17 +79,17 @@ mod tests {
             STRICT.replace("connect-src 'self'", "connect-src 'self' https:"),
             STRICT.replace("object-src 'none'", "object-src 'none' 'self'"),
         ] {
-            assert!(!console_policy(&invalid), "{invalid}");
+            assert!(!console_policy(&invalid, false), "{invalid}");
         }
     }
 
     #[test]
     fn static_console_scripts_allow_only_self_none_and_hashes() {
         for source in ["'strict-dynamic'", "'nonce-example'", "'wasm-unsafe-eval'"] {
-            assert!(!console_policy(&STRICT.replace(
-                "script-src 'self'",
-                &format!("script-src 'self' {source}")
-            )));
+            assert!(!console_policy(
+                &STRICT.replace("script-src 'self'", &format!("script-src 'self' {source}")),
+                false
+            ));
         }
         for source in [
             "'none'",
@@ -97,14 +98,15 @@ mod tests {
             "'sha512-example'",
         ] {
             assert!(console_policy(
-                &STRICT.replace("script-src 'self'", &format!("script-src {source}"))
+                &STRICT.replace("script-src 'self'", &format!("script-src {source}")),
+                false
             ));
         }
     }
 
     #[test]
     fn enforced_console_policy_requires_every_boundary_without_unsafe_escape_hatches() {
-        assert!(console_policy(STRICT));
+        assert!(console_policy(STRICT, false));
         for invalid in [
             STRICT.replace("connect-src 'self'", "connect-src https:"),
             STRICT.replace("require-trusted-types-for 'script';", ""),
@@ -117,7 +119,29 @@ mod tests {
             format!("{STRICT}; script-src-elem https:"),
             format!("connect-src *; {STRICT}"),
         ] {
-            assert!(!console_policy(&invalid), "{invalid}");
+            assert!(!console_policy(&invalid, false), "{invalid}");
         }
+    }
+
+    #[test]
+    fn terminal_wasm_permission_does_not_allow_script_evaluation_or_unsafe_dom() {
+        let wasm = STRICT.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'");
+        assert!(console_policy(&wasm, true));
+        assert!(!console_policy(&wasm, false));
+        for token in [
+            "'unsafe-eval'",
+            "'unsafe-inline'",
+            "'strict-dynamic'",
+            "'nonce-example'",
+        ] {
+            assert!(!console_policy(
+                &STRICT.replace("script-src 'self'", &format!("script-src 'self' {token}")),
+                true
+            ));
+        }
+        assert!(!console_policy(
+            &wasm.replace("require-trusted-types-for 'script'", ""),
+            true
+        ));
     }
 }

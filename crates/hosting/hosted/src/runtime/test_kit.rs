@@ -115,6 +115,7 @@ impl plakous_host_protocol::ProtocolExtension for TestExtension {
     type Observation = ProbeObservation;
     type HostRequest = plakous_host_protocol::Never;
     type HostResponse = plakous_host_protocol::Never;
+    type HostStreamEvent = plakous_host_protocol::Never;
     type WelcomeExtension = Option<plakous_host_protocol::Never>;
 
     fn reads_usage(intent: &ProbeIntent) -> bool {

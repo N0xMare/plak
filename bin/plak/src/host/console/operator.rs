@@ -19,6 +19,11 @@ struct Grant {
     confirmed: bool,
 }
 
+pub(super) struct ReservedConsent {
+    token: String,
+    grant: Grant,
+}
+
 #[derive(Default)]
 pub(super) struct State {
     grants: BTreeMap<String, Grant>,
@@ -144,6 +149,14 @@ impl Console {
         principal: &HostPrincipal,
         action: &OperatorAction,
     ) -> Result<(), RequestRefusal> {
+        if matches!(
+            action,
+            OperatorAction::TerminalOpen { .. }
+                | OperatorAction::TerminalAttach { .. }
+                | OperatorAction::TerminalRelease { .. }
+        ) {
+            return self.terminal_capability(principal);
+        }
         let (enabled, capability) = if credentials(action) {
             (
                 self.switches.web_credentials_write,
@@ -234,7 +247,6 @@ impl Console {
         })
     }
 
-    #[cfg(test)]
     pub(super) fn consume(
         &self,
         context: &HostRequestContext,
@@ -245,6 +257,34 @@ impl Console {
         state.check_grant(context, action, confirmation)?;
         state.grants.remove(confirmation);
         Ok(())
+    }
+
+    pub(super) fn reserve_consent(
+        &self,
+        context: &HostRequestContext,
+        action: &OperatorAction,
+        confirmation: &str,
+    ) -> Result<ReservedConsent, ReadRefusal> {
+        let mut state = self.operator.lock().unwrap_or_else(PoisonError::into_inner);
+        state.check_grant(context, action, confirmation)?;
+        let grant = state
+            .grants
+            .remove(confirmation)
+            .ok_or(ReadRefusal::ConfirmationRequired {})?;
+        Ok(ReservedConsent {
+            token: confirmation.into(),
+            grant,
+        })
+    }
+
+    pub(super) fn restore_consent(&self, reservation: ReservedConsent) {
+        let mut state = self.operator.lock().unwrap_or_else(PoisonError::into_inner);
+        if Instant::now() < reservation.grant.expires && state.grants.len() < 4096 {
+            state
+                .grants
+                .entry(reservation.token)
+                .or_insert(reservation.grant);
+        }
     }
 
     pub(super) fn admit_mutation(
@@ -278,6 +318,12 @@ impl Console {
     }
 
     pub fn disconnect(&self, principal: &HostPrincipal, connection: u64, generation: u64) {
+        self.terminal_disconnect(&HostRequestContext {
+            principal: principal.clone(),
+            connection_id: connection,
+            host_generation: generation,
+            request_id: 0,
+        });
         self.logins
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -411,6 +457,15 @@ fn validate(action: &OperatorAction) -> Result<(), ReadRefusal> {
 }
 
 fn summary(action: &OperatorAction) -> String {
+    if matches!(
+        action,
+        OperatorAction::TerminalOpen { .. } | OperatorAction::TerminalAttach { .. }
+    ) {
+        return "Grant interactive shell control on the selected runner as its user. The shell is not confined to the workspace and may read that user's files, network and credentials. Input acceptance is not command completion. A confirmed takeover revokes the previous controller; never replay uncertain input.".into();
+    }
+    if matches!(action, OperatorAction::TerminalRelease { .. }) {
+        return "Close only your operator terminals and wait for cleanup before releasing this session. Another principal's terminal is never implicitly closed. Unproven termination retains its pin.".into();
+    }
     if let Some(id) = account(action) {
         return match action {
             OperatorAction::AccountKeySet { .. } | OperatorAction::AccountKeyClear { .. } => {

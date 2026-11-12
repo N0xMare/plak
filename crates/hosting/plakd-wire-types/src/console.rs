@@ -17,10 +17,49 @@ mod writes;
 pub use writes::*;
 mod files;
 pub use files::*;
+mod terminal;
+pub use terminal::*;
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostRequest {
+    TerminalOpen {
+        session: String,
+        node: String,
+        terminal_id: String,
+        dimensions: TerminalDimensions,
+        confirmation: String,
+    },
+    TerminalList {},
+    TerminalReleaseSession {
+        session: String,
+        confirmation: String,
+    },
+    TerminalAttach {
+        terminal: TerminalRef,
+        cursor: TerminalCursor,
+        takeover: bool,
+        confirmation: String,
+    },
+    TerminalResize {
+        stream: u64,
+        dimensions: TerminalDimensions,
+    },
+    TerminalClose {
+        terminal: TerminalRef,
+        acknowledge_loss: bool,
+    },
+    TerminalDetach {
+        stream: u64,
+    },
+    TerminalInput {
+        stream: u64,
+        offset: u64,
+        bytes_b64: String,
+    },
+    TerminalCreditBatch {
+        grants: Vec<TerminalCredit>,
+    },
     FilesList {
         target: WorkspaceTarget,
         path: String,
@@ -159,6 +198,18 @@ pub enum HostRequest {
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "response", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostResponse {
+    Terminal {
+        terminal: TerminalView,
+    },
+    TerminalList {
+        terminals: Vec<TerminalView>,
+    },
+    TerminalAttached {
+        terminal: TerminalView,
+        stream: u64,
+        input_credit: u64,
+    },
+    TerminalAccepted {},
     FilesList {
         entries: Vec<FileEntry>,
         summary: FileQuerySummary,
@@ -295,6 +346,10 @@ pub struct Diagnostic {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ReadRefusal {
+    TerminalBusy {},
+    TerminalLost {},
+    TerminationUnknown {},
+    TerminalBackpressure {},
     WorkspaceUnavailable {},
     WorkspaceReadFailed {
         cause: WorkspaceReadFailure,

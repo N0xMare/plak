@@ -643,8 +643,8 @@ an already resident session and its recorded node workspace; acquiring its
 `ResidencyHold` must not open an agent or admit a turn. Every live or unresolved
 terminal retains that hold and prevents dormancy and host idle exit, including
 when another principal requests release. The private residency outcome is
-`OperatorTerminal`; until the terminal client increment, existing client protocol
-7 renders the conservative `Work` refusal without new DTO vocabulary.
+`operator_terminal` on client protocol 9. Release never implicitly closes another
+principal's shell; confirmed close of the requester's terminals precedes normal release.
 
 Terminal tables, host mirrors, workspace pins, quotas and output rings are process-local.
 There is no terminal table or pin file in the product store, no persisted-format
@@ -4028,6 +4028,59 @@ latency, and nothing else. Prompt text never reaches a span.
 
 ### 4.4 Wire v2
 
+Protocol 9 adds attachment-free `terminal_open`, `terminal_list`,
+`terminal_attach`, `terminal_resize`, `terminal_close`, `terminal_detach`,
+`terminal_input`, `terminal_credit_batch` and `terminal_release_session` through
+`Op::Host`. Every envelope has its original request id and exactly one response.
+DTOs belong to `plakd-wire-types`; the generic protocol owns only the independent
+`terminal_stream {terminal,stream,seq,event}` envelope and the associated
+`ProtocolExtension::HostStreamEvent`. Stream sequences start at zero, never enter
+attachment sequence numbers, snapshots, agent observations, jobs or accounting.
+Native receivers expose a separately bounded stream queue.
+
+Open selects an existing resident session, recorded node, client terminal id and
+validated dimensions, never an arbitrary command, environment or workspace. Open
+and attach effects consume fresh P7 consent for the exact typed action and authenticated
+principal/connection/generation. A duplicate open can recover only a known same-id,
+same-digest receipt without another grant; that path cannot spawn. Proven-no-effect
+admission refusals preserve the grant, while ambiguous dispatch consumes it and
+reports `operation_outcome_unknown`. Attach includes an instance-qualified cursor and
+explicit takeover flag. Without takeover, a second controller is `terminal_busy`.
+Confirmed takeover revokes only that principal's previous controller. Old-generation
+ids return `terminal_lost`; runner link loss sends `suspended` while preserving the
+host connection. A changed instance is loss, never a replacement shell or permission
+to signal remembered PIDs. Unproven cleanup remains `termination_unknown` in rows;
+release refuses while proof is missing. Close can explicitly acknowledge lost
+survivors without claiming death. `terminal_release_session` closes the caller's
+own terminals before an ordinary `release_session`; it neither kills another
+principal's terminal nor stops an agent as a side effect.
+
+Terminal input/output uses strict RFC 4648 `{offset,bytes_b64}`, at most 16 KiB
+decoded per chunk. Queue acceptance is not execution/completion proof. Ambiguous
+input is never replayed; a proven-no-effect rate or backpressure refusal may be
+rescheduled on the same live stream. Duplicate/gap offsets never write again.
+Each direction has at most 64 KiB outstanding decoded bytes. Output grants are
+`terminal_credit_batch {grants:[{stream,bytes}]}`, at most four distinct streams
+owned by this principal and connection; validate the entire batch before any
+grant. Credit cannot exceed output actually sent and not acknowledged. A slow
+viewer exhausts its credit, not a growing host spool. A runner ring gap sends
+`output_gap {oldest}`; reset the emulator before replay, never show discontinuous
+bytes as a continuous screen. Exit status and unresolved survivor identities are
+separate terminal events. Idle warnings originate from the runner's awake input
+clock, once within the last minute before policy closure, not a host wall timer.
+Lists show pinned entries and at most eight completed receipts without discarding
+their replay fences. Raw bytes are redacted from Debug and audit output.
+
+The host round-robins credited terminals, after response, transcript and directory
+traffic. Output is limited to 256 KiB/s per stream and 512 KiB/s per principal
+across runners; input is 64 KiB/s per stream. Blocked output does not advance seq
+or byte accounting, and another eligible terminal can progress. Stream output
+becomes visible only after its attach response is written. Disconnect drops input
+and resize controllers, not the shell; hidden tabs explicitly detach. The same
+principal may reattach after fresh confirmation, without lost-input retries.
+`console.terminal` advertises face-effective availability; `console.terminal_limits`
+provides fixed byte, quota, lifetime and client scheduling bounds (chapter 07).
+
 Protocol 8 adds attachment-free product requests `files_list {target,path}`,
 `files_read {target,path,cursor?,max_bytes?}`, literal-only
 `files_search {target,path,literal,match_case?}`, `changes_status {target}` and
@@ -4091,7 +4144,7 @@ repositories using jj answer `vcs_unsupported`; colocated ones say git view.
 The fixed execution policy is chapter 04 §2.6.
 
 `config_patch`, `template_put` and `profile_put`, introduced in protocol 7
-(current client protocol 8), use the P6
+(current client protocol 9), use the P6
 attachment-free seam, typed allowlisted fields and mandatory if_match etags.
 Prepare/confirm binds the exact target/revision; conflict never auto-merges.
 Publication replies distinguish Saved from published/durability-uncertain
@@ -4144,13 +4197,13 @@ saved placement, decorated by the host. Clients pair the existing product
 workspace text with this label; a child never borrows its root's placement.
 This is in-process chrome, not a persisted/exported field or a JSONL v1 event.
 
-The client protocol number is **8**. It must match exactly; the runner
+The client protocol number is **9**. It must match exactly; the runner
 transport has its own independent version. Protocol 5 adds explicit placement,
 bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
 
-The protocol-8 schema pin is SHA-256
-`841ffd7c0526dd56e1c227e00dc980c155e262f7159a4ecc8547628eff428490`:
+The protocol-9 schema pin is SHA-256
+`e0fd019acb0af0bc4fa31f82848869d3a188af970520973bfd878d281e1c035f`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
 checks this build-independent pin.
@@ -5116,7 +5169,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
 
 ### 4.5 The web endpoint
 
-Console operations introduced in protocol 7 (current client protocol 8)
+Console operations introduced in protocol 7 (current client protocol 9)
 have structured host audit evidence: time,
 verified login or socket uid, face, connection/request ID, action and safe
 target, outcome category and applicable revision. This is an ordinary bounded
@@ -5230,7 +5283,7 @@ does not inherit another connection's pending answers.
 
 ### 4.6 `plak host`
 
-Native login, introduced in protocol 7 (current client protocol 8), runs in
+Native login, introduced in protocol 7 (current client protocol 9), runs in
 a dedicated account-service worker, never the
 session intent mailbox or host action loop. Only the owning authenticated
 connection receives its challenge; poll returns sanitized phase, not a replay
@@ -7638,7 +7691,7 @@ These are in-process host observations, not new JSONL v1 lines.
 ### 5.5 The Menu
 
 Host-client Accounts/Providers/login and config-builder presentation belongs
-to the private clients. Both use host operator requests introduced in protocol 7 (current client protocol 8), host
+to the private clients. Both use host operator requests introduced in protocol 7 (current client protocol 9), host
 identity, consequence/Confirm affordance, masked secret input and typed
 remedies. No credential form uses the chat composer. The retained embedded
 menu's local-face operations remain unchanged; this public increment does not
@@ -7656,7 +7709,7 @@ vertical whose credential needs a refresh (an expired access token, a
 `RefreshRequired` posture, or SuperGrok's reclaimable quarantine), refreshes it
 and re-reads Usage; the retained embedded view offers CLI login repair.
 Private host clients use Accounts/Providers operator forms introduced in
-protocol 7 (current client protocol 8) instead. The label is muted until the pointer
+protocol 7 (current client protocol 9) instead. The label is muted until the pointer
 hovers it or Up/Down has focused it.
 
 No Menu read blocks the host's action loop. A subscription posture read takes
@@ -10029,7 +10082,7 @@ product observations without moving product vocabulary into the agent sink.
 
 ### 7.2 Usage and allowances
 
-`account_refresh`, introduced in protocol 7 (current client protocol 8), is
+`account_refresh`, introduced in protocol 7 (current client protocol 9), is
 a confirmed, explicit claimed refresh, not
 `accounts_status`/`accounts_usage` or automatic login. The exact account is
 selected throughout; an unaccepted/inactive integration refuses before provider
@@ -10488,7 +10541,7 @@ caller-supplied endpoint, discovered client id, or copied token can promote a
 profile's provenance.
 
 **Login, logout and API keys are explicit operator operations:** the CLI and
-authenticated host console (introduced in protocol 7; current client protocol 8)
+authenticated host console (introduced in protocol 7; current client protocol 9)
 share the account service. Private TUI
 and web forms consume that wire contract; they do not own credentials. The
 retained embedded TUI does not run an OAuth flow or capture key material; the Providers tab reads status

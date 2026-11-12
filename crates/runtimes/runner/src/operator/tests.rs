@@ -154,6 +154,7 @@ impl Fixture {
         } = self.call(
             connection,
             OperatorOperation::Attach {
+                takeover: false,
                 key: key(n),
                 cursor: TerminalCursor {
                     instance: id("instance"),
@@ -453,6 +454,7 @@ fn operator_input_ack_loss_offsets_binary_and_single_controller() {
         fixture.call(
             1,
             OperatorOperation::Attach {
+                takeover: false,
                 key: key(0),
                 cursor: TerminalCursor {
                     instance: id("instance"),
@@ -467,6 +469,7 @@ fn operator_input_ack_loss_offsets_binary_and_single_controller() {
         fixture.call(
             2,
             OperatorOperation::Attach {
+                takeover: false,
                 key: key(0),
                 cursor: TerminalCursor {
                     instance: id("instance"),
@@ -498,6 +501,55 @@ fn operator_stream_sequence_corruption_detaches_without_killing_shell() {
 }
 
 #[test]
+fn operator_confirmed_takeover_recovers_a_lost_attach_answer_without_replaying_input() {
+    let fixture = Fixture::new();
+    fixture.open(0);
+    let old = fixture.attach(0, 1);
+    let operation = OperatorOperation::Attach {
+        key: key(0),
+        cursor: TerminalCursor {
+            instance: id("instance"),
+            offset: 0,
+        },
+        takeover: true,
+    };
+    let OperatorAnswer::Terminal {
+        stream: Some(current),
+        ..
+    } = fixture.call(1, operation)
+    else {
+        panic!("takeover")
+    };
+    assert_ne!(old, current);
+    assert!(
+        fixture
+            .service
+            .receive(
+                "paired",
+                "generation",
+                1,
+                StreamFrame {
+                    stream: old,
+                    seq: 0,
+                    event: StreamEvent::Data {
+                        payload: serde_json::to_value(TerminalEvent::Data {
+                            offset: 0,
+                            bytes_b64: STANDARD.encode(b"stale")
+                        })
+                        .unwrap()
+                    }
+                }
+            )
+            .is_none()
+    );
+    assert_eq!(lock(&fixture.fake).input, Vec::<Vec<u8>>::new());
+    fixture.input(current, 0, 0, b"current");
+    assert_eq!(lock(&fixture.fake).input, vec![b"current".to_vec()]);
+    let state = lock(&fixture.fake);
+    assert_eq!((state.spawned, state.closed), (1, 0));
+}
+
+#[test]
 fn operator_idle_is_awake_input_time_not_output_resize_or_credit() {
     let fixture = Fixture::new();
     fixture.open(0);
@@ -518,6 +570,46 @@ fn operator_idle_is_awake_input_time_not_output_resize_or_credit() {
             .service
             .workspace_pinned(Path::new("/workspace/child"))
     );
+}
+
+#[test]
+fn operator_idle_warning_uses_awake_input_time_once_and_respects_frame_capacity() {
+    let fixture = Fixture::new();
+    fixture.open(0);
+    let stream = fixture.attach(0, 1);
+    for _ in 0..100 {
+        assert_eq!(
+            fixture.service.output_round("paired", "generation", 1, 1),
+            Vec::<StreamFrame>::new()
+        );
+    }
+    for _ in 0..28 {
+        fixture.advance(30);
+        fixture.call(1, OperatorOperation::Renew);
+    }
+    assert_eq!(
+        fixture.service.output_round("paired", "generation", 1, 0),
+        Vec::<StreamFrame>::new()
+    );
+    let frames = fixture.service.output_round("paired", "generation", 1, 1);
+    assert_eq!(frames.len(), 1);
+    assert!(
+        matches!(&frames[0].event, StreamEvent::Data { payload } if payload["terminal_event"] == "idle_warning" && payload["remaining_ms"] == 60_000)
+    );
+    assert_eq!(
+        fixture.service.output_round("paired", "generation", 1, 1),
+        Vec::<StreamFrame>::new()
+    );
+    fixture.input(stream, 0, 0, b"input resets the deadline");
+    for _ in 0..28 {
+        fixture.advance(30);
+        fixture.call(1, OperatorOperation::Renew);
+    }
+    let frames = fixture.service.output_round("paired", "generation", 1, 1);
+    assert!(
+        matches!(&frames[0].event, StreamEvent::Data { payload } if payload["terminal_event"] == "idle_warning")
+    );
+    assert_eq!(lock(&fixture.fake).closed, 0);
 }
 
 #[test]
@@ -795,6 +887,7 @@ fn operator_namespace_visibility_generation_loss_and_restart_never_adopt() {
         restarted.call(
             1,
             OperatorOperation::Attach {
+                takeover: false,
                 key: key(0),
                 cursor: TerminalCursor {
                     instance: id("old-instance"),
@@ -1064,6 +1157,7 @@ fn operator_four_streams_share_decoded_output_budget_without_starvation() {
         } = fixture.call(
             1,
             OperatorOperation::Attach {
+                takeover: false,
                 key,
                 cursor: terminal.oldest,
             },

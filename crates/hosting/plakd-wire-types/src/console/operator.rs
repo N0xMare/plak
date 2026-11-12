@@ -4,6 +4,20 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OperatorAction {
+    TerminalOpen {
+        session: String,
+        node: String,
+        terminal_id: String,
+        dimensions: super::TerminalDimensions,
+    },
+    TerminalAttach {
+        terminal: super::TerminalRef,
+        cursor: super::TerminalCursor,
+        takeover: bool,
+    },
+    TerminalRelease {
+        session: String,
+    },
     AccountKeySet {
         account_id: String,
     },

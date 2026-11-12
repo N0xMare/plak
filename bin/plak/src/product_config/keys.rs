@@ -306,6 +306,7 @@ pub enum ConfigField {
     WebConfigRead,
     WebConfigWrite,
     WebFilesRead,
+    WebTerminal,
 }
 
 impl ConfigField {
@@ -332,6 +333,7 @@ impl ConfigField {
                 | Self::WebConfigRead
                 | Self::WebConfigWrite
                 | Self::WebFilesRead
+                | Self::WebTerminal
         )
     }
 
@@ -350,6 +352,7 @@ impl ConfigField {
                     | Self::WebConfigRead
                     | Self::WebConfigWrite
                     | Self::WebFilesRead
+                    | Self::WebTerminal
             )
     }
 }
@@ -760,6 +763,15 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         kind: "bool",
         constraint: "true or false; home-scoped; host restart required",
         doc: "Allow admitted web principals to inspect saved workspaces and Changes. Exact file bytes may contain secrets. Same-user sockets are trusted independently; default off and captured at host startup.",
+        example: "false",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "web.terminal",
+        field: ConfigField::WebTerminal,
+        kind: "bool",
+        constraint: "true or false; home-scoped; host restart required",
+        doc: "Allow confirmed interactive operator shells as the runner user. Shells are not confined to the workspace. Same-user sockets are trusted independently; default off and captured at host startup.",
         example: "false",
         scope: ConfigScope::Immediate,
     },

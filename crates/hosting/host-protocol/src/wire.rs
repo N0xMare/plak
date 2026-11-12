@@ -67,7 +67,7 @@ pub use tool::WireToolItem;
 /// 6 adds attachment-free host requests and principal-bound welcome extensions.
 /// 7 adds consented account/configuration writes; 8 adds bounded saved-workspace
 /// Files/Changes reads and per-account credential-refresh observations.
-pub const WIRE_VERSION: u32 = 8;
+pub const WIRE_VERSION: u32 = 9;
 
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
@@ -654,6 +654,8 @@ pub enum RequestRefusal {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConsoleCapability {
+    /// Confirmed operator shell authority, independent of agent tools.
+    Terminal,
     /// Read-only inspection of saved workspaces through the operator endpoint.
     FilesRead,
     /// Confirmed selected-account credential changes.
@@ -762,15 +764,26 @@ pub enum ClientFrame<P: ProtocolExtension> {
     rename_all = "snake_case",
     deny_unknown_fields,
     bound(
-        serialize = "P::Intent: Serialize, P::Observation: Serialize",
-        deserialize = "P::Intent: DeserializeOwned, P::Observation: DeserializeOwned"
+        serialize = "P::Intent: Serialize, P::Observation: Serialize, P::HostStreamEvent: Serialize",
+        deserialize = "P::Intent: DeserializeOwned, P::Observation: DeserializeOwned, P::HostStreamEvent: DeserializeOwned"
     )
 )]
 #[schemars(
     rename = "HostFrame",
-    bound = "P::Intent: schemars::JsonSchema, P::Observation: schemars::JsonSchema"
+    bound = "P::Intent: schemars::JsonSchema, P::Observation: schemars::JsonSchema, P::HostStreamEvent: schemars::JsonSchema"
 )]
 pub enum HostFrame<P: ProtocolExtension> {
+    /// Private operator output, with an independent gap-free stream sequence.
+    TerminalStream {
+        /// Process-local terminal identity.
+        terminal: String,
+        /// Connection-scoped controller stream.
+        stream: u64,
+        /// Sequence from zero, independent of attachments.
+        seq: u64,
+        /// Product-owned raw-byte or lifecycle event.
+        event: P::HostStreamEvent,
+    },
     /// The handshake's answer.
     Welcome(Welcome<P>),
     /// The handshake was refused; the host closes.

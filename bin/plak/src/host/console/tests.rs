@@ -6,6 +6,7 @@ const DISABLED_SWITCHES: ConfiguredSwitches = ConfiguredSwitches {
     web_credentials_write: false,
     web_config_write: false,
     web_files_read: false,
+    web_terminal: false,
 };
 
 #[tokio::test]
@@ -71,6 +72,7 @@ async fn welcome_and_dispatch_share_independent_startup_switches_without_session
                 web_credentials_write: false,
                 web_config_write: false,
                 web_files_read: false,
+                web_terminal: false,
             };
             let console = Console::new(
                 paths.clone(),

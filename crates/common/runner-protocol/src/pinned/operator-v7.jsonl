@@ -2,7 +2,7 @@
 {"kind":"operation","value":{"operation":"namespace_close"}}
 {"kind":"operation","value":{"dimensions":{"columns":80,"rows":24},"key":{"node":"node","session":"session","terminal_id":"terminal"},"operation":"open","workspace":"/workspace"}}
 {"kind":"operation","value":{"operation":"list"}}
-{"kind":"operation","value":{"cursor":{"instance":"instance","offset":0},"key":{"node":"node","session":"session","terminal_id":"terminal"},"operation":"attach"}}
+{"kind":"operation","value":{"cursor":{"instance":"instance","offset":0},"key":{"node":"node","session":"session","terminal_id":"terminal"},"operation":"attach","takeover":false}}
 {"kind":"operation","value":{"dimensions":{"columns":80,"rows":24},"key":{"node":"node","session":"session","terminal_id":"terminal"},"operation":"resize"}}
 {"kind":"operation","value":{"acknowledge_loss":false,"generation":null,"key":{"node":"node","session":"session","terminal_id":"terminal"},"operation":"close"}}
 {"kind":"event","value":{"bytes_b64":"AP8BAg==","offset":0,"terminal_event":"data"}}
@@ -35,3 +35,4 @@
 {"kind":"answer","value":{"outcome":"reclamation","stream":42}}
 {"kind":"answer","value":{"outcome":"reclamation","stream":null}}
 {"kind":"operation","value":{"operation":"reconcile_scope"}}
+{"kind":"event","value":{"remaining_ms":60000,"terminal_event":"idle_warning"}}

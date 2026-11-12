@@ -95,6 +95,15 @@ where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
+    pub(super) fn host_context(&self) -> HostRequestContext {
+        HostRequestContext {
+            principal: self.principal.clone(),
+            connection_id: self.connection_id,
+            host_generation: self.host.generation,
+            request_id: 0,
+        }
+    }
+
     /// Peeks at the envelope without allocating the product payload. Web
     /// transports apply the legacy close bucket only to non-console frames.
     #[must_use]
@@ -231,7 +240,17 @@ where
                     Outcome::Refused(refusal)
                 }
             };
-            write_frame(&mut self.out, &HostFrame::<P>::Response { id, outcome })?;
+            let frame = HostFrame::<P>::Response { id, outcome };
+            write_frame(&mut self.out, &frame)?;
+            if let HostFrame::Response {
+                outcome: Outcome::Ok(Answer::Host { response }),
+                ..
+            } = frame
+            {
+                let mut context = self.host_context();
+                context.request_id = id;
+                self.host.sessions.host_response_sent(&context, &response);
+            }
         }
         Ok(())
     }

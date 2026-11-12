@@ -18,6 +18,7 @@ fn fixture() -> (tempfile::TempDir, Arc<Console>) {
             web_credentials_write: false,
             web_config_write: false,
             web_files_read: false,
+            web_terminal: false,
         },
     );
     (root, console)
@@ -98,6 +99,7 @@ async fn settings_metadata_follows_effective_write_capability() -> TestResult {
                 web_config_read: true,
                 web_config_write: web_write,
                 web_files_read: web_write,
+                web_terminal: false,
             },
         );
         let mut context = owner(1);

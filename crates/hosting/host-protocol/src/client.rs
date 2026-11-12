@@ -331,6 +331,7 @@ struct State<P: ProtocolExtension> {
     operations: BTreeSet<RequestId>,
     selections: BTreeMap<RequestId, NodeAddress>,
     responses: VecDeque<(RequestId, Outcome<P>)>,
+    host_streams: VecDeque<HostFrame<P>>,
     /// Intents sent on an attachment, by request id, until their verdict.
     sent: BTreeMap<RequestId, Sent<P>>,
     /// Intents waiting for the next attachment, in the order sent.
@@ -358,6 +359,16 @@ struct State<P: ProtocolExtension> {
 }
 
 impl<P: ProtocolExtension> State<P> {
+    fn host_stream(&mut self, frame: HostFrame<P>) -> std::io::Result<bool> {
+        if self.host_streams.len() >= 64 {
+            return Err(std::io::Error::other(
+                "operator stream receiver fell behind",
+            ));
+        }
+        self.host_streams.push_back(frame);
+        Ok(true)
+    }
+
     fn clear_control_retry(&mut self) {
         self.control_retry = None;
         self.control_error = None;
@@ -610,6 +621,7 @@ impl<P: ProtocolExtension> Inner<P> {
                 operations: BTreeSet::new(),
                 selections: BTreeMap::new(),
                 responses: VecDeque::new(),
+                host_streams: VecDeque::new(),
                 sent: BTreeMap::new(),
                 unsent: VecDeque::new(),
                 unsent_bytes: 0,
@@ -938,6 +950,12 @@ impl<P: ProtocolExtension> WireReceiver<P> {
     #[must_use]
     pub fn try_response(&self) -> Option<(RequestId, Outcome<P>)> {
         lock(&self.connection.inner.state).responses.pop_front()
+    }
+
+    /// Takes private operator output, independent of the attached transcript.
+    #[must_use]
+    pub fn try_host_stream(&self) -> Option<HostFrame<P>> {
+        lock(&self.connection.inner.state).host_streams.pop_front()
     }
 
     /// A deferred internal control write hit the full control budget.
@@ -1383,6 +1401,7 @@ impl<P: ProtocolExtension> Inner<P> {
         P::Intent: Serialize,
     {
         match frame {
+            frame @ HostFrame::TerminalStream { .. } => state.host_stream(frame),
             HostFrame::Response { id, outcome } => {
                 if let Some(root) = state.selections.remove(&id) {
                     self.selected(state, root, &outcome);

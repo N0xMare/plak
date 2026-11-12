@@ -33,6 +33,7 @@ fn fixture() -> Result<(tempfile::TempDir, Arc<Console>), Box<dyn std::error::Er
             web_credentials_write: false,
             web_config_write: false,
             web_files_read: false,
+            web_terminal: false,
         },
     );
     Ok((root, console))

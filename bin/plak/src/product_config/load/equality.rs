@@ -47,6 +47,7 @@ impl PartialEq for ProductConfig {
             && self.web_config_read == other.web_config_read
             && self.web_config_write == other.web_config_write
             && self.web_files_read == other.web_files_read
+            && self.web_terminal == other.web_terminal
     }
 }
 

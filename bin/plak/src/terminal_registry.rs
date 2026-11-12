@@ -17,6 +17,7 @@ use crate::home::paths::PlakPaths;
 use crate::store::ProductStore;
 
 mod control;
+pub(crate) use control::TerminalController;
 mod lifecycle;
 mod pins;
 mod placement;
@@ -87,6 +88,7 @@ pub(crate) enum TerminalError {
     Lost,
     Busy,
     Unavailable,
+    OutcomeUnknown,
     Storage,
     Conflict,
     Refused(OperatorRefusal),
@@ -169,9 +171,14 @@ impl TerminalRegistry {
             .client
             .operator_control(namespace, operation)
             .await
-            .map_err(|_| TerminalError::Unavailable)?;
+            .map_err(|failure| match failure {
+                plakous::tools::runner::RunnerFailure::OutcomeUnknown(_) => {
+                    TerminalError::OutcomeUnknown
+                }
+                _ => TerminalError::Unavailable,
+            })?;
         if !binding.revision.is_current() {
-            return Err(TerminalError::Unavailable);
+            return Err(TerminalError::OutcomeUnknown);
         }
         match answer {
             OperatorAnswer::Refused { refusal } => Err(TerminalError::Refused(refusal)),
@@ -243,9 +250,9 @@ impl TerminalRegistry {
 
 #[derive(Clone, Debug)]
 pub(crate) struct TerminalHandle {
-    identity: String,
-    host_generation: u64,
-    instance: String,
+    pub(crate) identity: String,
+    pub(crate) host_generation: u64,
+    pub(crate) instance: String,
 }
 
 pub(crate) struct TerminalView {

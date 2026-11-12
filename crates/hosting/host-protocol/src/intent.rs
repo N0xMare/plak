@@ -37,6 +37,15 @@ pub trait ProtocolExtension: Clone + fmt::Debug + Eq + Send + Sync + 'static {
         + serde::de::DeserializeOwned
         + schemars::JsonSchema
         + 'static;
+    /// Product stream events, independent of session observations and sequences.
+    type HostStreamEvent: Clone
+        + fmt::Debug
+        + Eq
+        + Send
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + schemars::JsonSchema
+        + 'static;
     /// Face-effective product capabilities included in the handshake.
     type WelcomeExtension: Clone
         + fmt::Debug
@@ -120,6 +129,7 @@ impl ProtocolExtension for Core {
     type Observation = Never;
     type HostRequest = Never;
     type HostResponse = Never;
+    type HostStreamEvent = Never;
     type WelcomeExtension = Option<Never>;
 }
 

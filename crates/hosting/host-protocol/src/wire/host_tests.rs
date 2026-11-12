@@ -8,6 +8,7 @@ impl ProtocolExtension for Extension {
     type Observation = crate::Never;
     type HostRequest = bool;
     type HostResponse = u8;
+    type HostStreamEvent = crate::Never;
     type WelcomeExtension = Option<bool>;
 }
 
@@ -80,9 +81,9 @@ fn host_extension_has_private_request_response_and_required_nullable_welcome() {
 }
 
 #[test]
-fn protocol_eight_rejects_both_adjacent_versions_without_negotiation() {
-    assert_eq!(WIRE_VERSION, 8);
-    for proto in [7, 9] {
+fn protocol_nine_rejects_both_adjacent_versions_without_negotiation() {
+    assert_eq!(WIRE_VERSION, 9);
+    for proto in [8, 10] {
         let hello = Hello {
             proto,
             binary_id: "fixture".to_owned(),
@@ -91,13 +92,13 @@ fn protocol_eight_rejects_both_adjacent_versions_without_negotiation() {
         assert_eq!(
             admit_hello(&hello, welcome()),
             Err(HandshakeRefusal::VersionMismatch {
-                host: 8,
+                host: 9,
                 client: proto
             })
         );
     }
     let hello = Hello {
-        proto: 8,
+        proto: 9,
         binary_id: "fixture".to_owned(),
         caps: Vec::new(),
     };

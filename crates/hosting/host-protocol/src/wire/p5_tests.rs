@@ -84,7 +84,7 @@ fn pin_host(value: &str) {
 
 #[test]
 fn protocol_five_directory_requests_have_exact_closed_shapes() {
-    assert_eq!(WIRE_VERSION, 8);
+    assert_eq!(WIRE_VERSION, 9);
     for request in [
         r#"{"frame":"request","id":1,"op":{"op":"new_session","runner":{"name":"machine","runner_id":"pinned-id"},"workspace":"/work","profile":"claude-default","request_id":"00000000-0000-4000-8000-000000000001"}}"#,
         r#"{"frame":"request","id":2,"op":{"op":"session_options","workspace":{"runner":{"name":"machine","runner_id":"pinned-id"},"path":"/work"}}}"#,
