@@ -128,17 +128,6 @@ pub struct SessionHost<P: ProtocolExtension> {
 /// rows.
 type DirectoryRead = (Instant, u64, Arc<Vec<SessionRow>>);
 
-/// A reversible host-upgrade admission pause. It never cancels running work.
-pub struct AdmissionPause {
-    gate: Arc<std::sync::RwLock<bool>>,
-}
-
-impl Drop for AdmissionPause {
-    fn drop(&mut self) {
-        *self.gate.write().unwrap_or_else(PoisonError::into_inner) = false;
-    }
-}
-
 /// Whether this nonblocking slot view names `session`. Busy views use a
 /// cached peek label, not an authority for selecting a session to open.
 fn serves<P: ProtocolExtension>(slot: &SessionSlot<P>, session: &str) -> bool {
@@ -200,25 +189,6 @@ where
 
     fn closed(&self) -> bool {
         self.closing.load(Ordering::SeqCst)
-    }
-
-    /// Refuses new client requests after previously admitted frame handlers
-    /// return. Running work continues. Dropping the permit restores admissions.
-    ///
-    /// # Errors
-    /// Another upgrade already paused this host, or the host is stopping.
-    pub fn pause_admissions(&self) -> CliResult<AdmissionPause> {
-        let mut paused = self
-            .upgrade_admission
-            .write()
-            .unwrap_or_else(PoisonError::into_inner);
-        if *paused || self.closed() {
-            return Err(CliFailure::new("the host is already upgrading or stopping"));
-        }
-        *paused = true;
-        Ok(AdmissionPause {
-            gate: Arc::clone(&self.upgrade_admission),
-        })
     }
 
     /// The whole directory, read at most once per host revision and per
@@ -486,61 +456,6 @@ where
     pub fn changed(&self) {
         self.changes
             .send_modify(|revision| *revision = revision.wrapping_add(1));
-    }
-
-    /// Stops the host, so no session opens or is created from here on, then
-    /// releases every resident session as a planned handoff, all at once,
-    /// each joined within `deadline`; the sessions that did not release in
-    /// time, or failed to, with why.
-    pub fn hand_off_all(&self, deadline: Duration) -> Vec<(String, CliFailure)> {
-        // Closed first, so the slots below are every session this host holds.
-        self.close();
-        self.hand_off_residents(deadline)
-    }
-
-    /// Drains already accepted mailboxes and releases residents under an
-    /// upgrade pause, without permanently closing the session directory.
-    /// Failed preparation can drop the pause and open the old sessions again.
-    ///
-    /// # Errors
-    /// The permit belongs to another host or admissions are not paused.
-    pub fn hand_off_paused(
-        &self,
-        pause: &AdmissionPause,
-        deadline: Duration,
-    ) -> CliResult<Vec<(String, CliFailure)>> {
-        if !Arc::ptr_eq(&pause.gate, &self.upgrade_admission)
-            || !*self
-                .upgrade_admission
-                .read()
-                .unwrap_or_else(PoisonError::into_inner)
-        {
-            return Err(CliFailure::new(
-                "host handoff requires its own upgrade admission pause",
-            ));
-        }
-        Ok(self.hand_off_residents(deadline))
-    }
-
-    fn hand_off_residents(&self, deadline: Duration) -> Vec<(String, CliFailure)> {
-        let slots = self.slots();
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = slots
-                .iter()
-                .map(|slot| scope.spawn(move || (slot.known(), slot.hand_off(deadline))))
-                .collect();
-            handles
-                .into_iter()
-                .filter_map(|handle| match handle.join() {
-                    Ok((_, Ok(()))) => None,
-                    Ok((session, Err(failure))) => Some((session, failure)),
-                    Err(_) => Some((
-                        String::new(),
-                        CliFailure::new("a session's handoff panicked"),
-                    )),
-                })
-                .collect()
-        })
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Arc<SessionSlot<P>>>> {
@@ -1484,7 +1399,7 @@ enum Forwarded<P: ProtocolExtension> {
 
 mod operator;
 mod reads;
-pub use admission::HostReadLimits;
+pub use admission::{AdmissionPause, HostReadLimits};
 pub use reads::{HostPrincipal, HostReadTask, HostRequestContext};
 mod admission;
 

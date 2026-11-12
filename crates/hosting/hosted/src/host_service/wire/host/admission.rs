@@ -1,6 +1,7 @@
 //! Principal-wide console budgets shared by every connection of a host.
 
 use super::reads::HostPrincipal;
+use crate::error::{CliFailure, CliResult};
 use plakous_host_protocol::wire::RequestRefusal;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -108,5 +109,99 @@ impl Rate {
                 * f64::from(limits.messages_per_second))
         .min(f64::from(limits.burst));
         self.updated = now;
+    }
+}
+
+/// A reversible host-upgrade admission pause. It never cancels running work.
+pub struct AdmissionPause {
+    gate: Arc<std::sync::RwLock<bool>>,
+}
+
+impl Drop for AdmissionPause {
+    fn drop(&mut self) {
+        *self.gate.write().unwrap_or_else(PoisonError::into_inner) = false;
+    }
+}
+
+impl<P: plakous_host_protocol::ProtocolExtension> super::SessionHost<P>
+where
+    P: 'static,
+    P::Intent: Send,
+    P::Observation: Send,
+    plakous_host_protocol::wire::HostFrame<P>: serde::Serialize,
+    plakous_host_protocol::wire::ClientFrame<P>: serde::de::DeserializeOwned,
+{
+    /// Refuses new client requests after previously admitted frame handlers
+    /// return. Running work continues. Dropping the permit restores admissions.
+    ///
+    /// # Errors
+    /// Another upgrade already paused this host, or the host is stopping.
+    pub fn pause_admissions(&self) -> CliResult<AdmissionPause> {
+        let mut paused = self
+            .upgrade_admission
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        if *paused || self.closed() {
+            return Err(CliFailure::new("the host is already upgrading or stopping"));
+        }
+        *paused = true;
+        Ok(AdmissionPause {
+            gate: Arc::clone(&self.upgrade_admission),
+        })
+    }
+
+    /// Stops the host, so no session opens or is created from here on, then
+    /// releases every resident session as a planned handoff, all at once,
+    /// each joined within `deadline`; the sessions that did not release in
+    /// time, or failed to, with why.
+    pub fn hand_off_all(&self, deadline: Duration) -> Vec<(String, CliFailure)> {
+        // Closed first, so the slots below are every session this host holds.
+        self.close();
+        self.hand_off_residents(deadline)
+    }
+
+    /// Drains already accepted mailboxes and releases residents under an
+    /// upgrade pause, without permanently closing the session directory.
+    /// Failed preparation can drop the pause and open the old sessions again.
+    ///
+    /// # Errors
+    /// The permit belongs to another host or admissions are not paused.
+    pub fn hand_off_paused(
+        &self,
+        pause: &AdmissionPause,
+        deadline: Duration,
+    ) -> CliResult<Vec<(String, CliFailure)>> {
+        if !Arc::ptr_eq(&pause.gate, &self.upgrade_admission)
+            || !*self
+                .upgrade_admission
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+        {
+            return Err(CliFailure::new(
+                "host handoff requires its own upgrade admission pause",
+            ));
+        }
+        Ok(self.hand_off_residents(deadline))
+    }
+
+    fn hand_off_residents(&self, deadline: Duration) -> Vec<(String, CliFailure)> {
+        let slots = self.slots();
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = slots
+                .iter()
+                .map(|slot| scope.spawn(move || (slot.known(), slot.hand_off(deadline))))
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|handle| match handle.join() {
+                    Ok((_, Ok(()))) => None,
+                    Ok((session, Err(failure))) => Some((session, failure)),
+                    Err(_) => Some((
+                        String::new(),
+                        CliFailure::new("a session's handoff panicked"),
+                    )),
+                })
+                .collect()
+        })
     }
 }
