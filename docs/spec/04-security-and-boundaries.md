@@ -780,6 +780,7 @@ HUP, TERM and KILL cover each freshly identity-checked member group, including
 background, stopped and foreground jobs. The unreaped leader anchors session
 identity through the last signal. Cleanup reaps that leader, sends no later
 signals, and requires two complete session-id absence scans. Incomplete scans,
+exhausted live-identity tracking (at most 4,096; exited/reused identities are pruned),
 identity loss or observed setsid escape yield `termination_unknown`, retaining
 quota and workspace pins; a vanished table after runner restart is not death
 evidence. Arbitrary daemonized escape is still the ordinary unsandboxed-shell

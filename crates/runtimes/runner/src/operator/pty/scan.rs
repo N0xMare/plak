@@ -1,10 +1,11 @@
 //! Bounded whole-session scans. A remembered numeric PID never grants kill authority.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 type Snapshot = Option<(Instant, Arc<Vec<Identity>>)>;
+const MAX_TRACKED_PROCESSES: usize = 4096;
 
 /// Running PTYs share observation work. Cleanup deliberately bypasses this
 /// cache: both absence proofs and each pre-signal validation are fresh scans.
@@ -56,10 +57,21 @@ impl SessionCleanup {
     }
 
     pub(super) fn observe(&mut self, rows: &[Identity]) {
+        let current: HashSet<_> = rows
+            .iter()
+            .map(|row| (row.pid, row.started.as_str()))
+            .collect();
+        self.seen
+            .retain(|pid, start| current.contains(&(*pid, start.as_str())));
         for _ in 0..rows.len().min(32) {
             let prior = self.seen.len();
             for row in rows {
                 if row.session == self.leader.session || self.seen.contains_key(&row.parent) {
+                    if self.seen.len() >= MAX_TRACKED_PROCESSES && !self.seen.contains_key(&row.pid)
+                    {
+                        self.uncertain = true;
+                        continue;
+                    }
                     self.seen
                         .entry(row.pid)
                         .or_insert_with(|| row.started.clone());
@@ -291,6 +303,28 @@ mod tests {
         current.started = "wrong-start-identity".into();
         assert!(
             !SessionCleanup::new(current).finish(|| panic!("stale identity must not even reap"))
+        );
+    }
+
+    #[test]
+    fn operator_cleanup_tracking_drops_old_identities_and_bounds_live_members() {
+        let leader = row(10, 1, "10");
+        let mut cleanup = SessionCleanup::new(leader.clone());
+        for pid in 100..5000 {
+            cleanup.observe(&[leader.clone(), row(pid, 10, "10")]);
+            assert_eq!(
+                cleanup.seen.len(),
+                2,
+                "exited child identities must not accumulate"
+            );
+        }
+        let mut crowded = vec![leader];
+        crowded.extend((100..4300).map(|pid| row(pid, 10, "10")));
+        cleanup.observe(&crowded);
+        assert_eq!(cleanup.seen.len(), MAX_TRACKED_PROCESSES);
+        assert!(
+            cleanup.uncertain,
+            "a tracking limit is not proof that untracked descendants died"
         );
     }
 }
