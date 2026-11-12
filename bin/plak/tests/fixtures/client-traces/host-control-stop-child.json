@@ -1,4 +1,7 @@
 {
+  "fixture": "host-control-stop-child",
+  "source": "real public TUI capture",
+  "seed_session": "@uuid:0",
   "entries": [
     {
       "connection": 1,
@@ -656,8 +659,5 @@
       "connection": 2,
       "eof": "host"
     }
-  ],
-  "fixture": "host-control-stop-child",
-  "seed_session": "@uuid:0",
-  "source": "real public TUI capture"
+  ]
 }

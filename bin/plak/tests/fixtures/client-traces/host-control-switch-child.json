@@ -1,4 +1,7 @@
 {
+  "fixture": "host-control-switch-child",
+  "source": "real public TUI capture",
+  "seed_session": "@uuid:0",
   "entries": [
     {
       "connection": 1,
@@ -1025,14 +1028,11 @@
     },
     {
       "connection": 2,
-      "eof": "client"
+      "eof": "host"
     },
     {
       "connection": 2,
-      "eof": "host"
+      "eof": "client"
     }
-  ],
-  "fixture": "host-control-switch-child",
-  "seed_session": "@uuid:0",
-  "source": "real public TUI capture"
+  ]
 }

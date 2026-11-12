@@ -2,19 +2,9 @@
   "fixture": "host-control-stop-root",
   "pairs": [
     {
-      "acknowledgement": {
-        "frame": "response",
-        "id": 4,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      },
-      "connection": 1,
       "read": "refresh_composer_chrome",
       "reason": "timer-driven background chrome",
+      "connection": 1,
       "request": {
         "frame": "request",
         "id": 4,
@@ -27,22 +17,22 @@
           },
           "op": "intent"
         }
-      }
-    },
-    {
+      },
       "acknowledgement": {
         "frame": "response",
-        "id": 7,
+        "id": 4,
         "outcome": {
           "ok": {
             "answer": "accepted",
             "duplicate": false
           }
         }
-      },
-      "connection": 1,
+      }
+    },
+    {
       "read": "refresh_composer_chrome",
       "reason": "timer-driven background chrome",
+      "connection": 1,
       "request": {
         "frame": "request",
         "id": 7,
@@ -55,22 +45,22 @@
           },
           "op": "intent"
         }
-      }
-    },
-    {
+      },
       "acknowledgement": {
         "frame": "response",
-        "id": 8,
+        "id": 7,
         "outcome": {
           "ok": {
             "answer": "accepted",
             "duplicate": false
           }
         }
-      },
+      }
+    },
+    {
+      "read": "refresh_composer_chrome",
+      "reason": "timer-driven background chrome",
       "connection": 1,
-      "read": "refresh_composer_chrome",
-      "reason": "timer-driven background chrome",
       "request": {
         "frame": "request",
         "id": 8,
@@ -83,22 +73,22 @@
           },
           "op": "intent"
         }
-      }
-    },
-    {
+      },
       "acknowledgement": {
         "frame": "response",
-        "id": 4,
+        "id": 8,
         "outcome": {
           "ok": {
             "answer": "accepted",
             "duplicate": false
           }
         }
-      },
-      "connection": 2,
+      }
+    },
+    {
       "read": "refresh_composer_chrome",
       "reason": "timer-driven background chrome",
+      "connection": 2,
       "request": {
         "frame": "request",
         "id": 4,
@@ -111,30 +101,10 @@
           },
           "op": "intent"
         }
-      }
-    },
-    {
-      "read": "resync_transcript",
-      "reason": "resync at a reconnect sequence boundary",
-      "connection": 2,
-      "request": {
-        "frame": "request",
-        "id": 5,
-        "op": {
-          "attachment": 1,
-          "blobs": [],
-          "intent": {
-            "body": {
-              "scope": "root"
-            },
-            "kind": "resync_transcript"
-          },
-          "op": "intent"
-        }
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 5,
+        "id": 4,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -147,8 +117,8 @@
   "excluded_connections": [],
   "provenance": {
     "capture": {
-      "client_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce",
-      "host_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce"
+      "client_sha256": "f7d14410b687fe42347e44fc52a195277fe083d34c40620df68a804ea909b69a",
+      "host_sha256": "f7d14410b687fe42347e44fc52a195277fe083d34c40620df68a804ea909b69a"
     },
     "connections": [
       {

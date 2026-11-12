@@ -42,7 +42,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "4d313f6b-1c12-5feb-9c5b-47a344a5e6dd"
+                "tree_id": "12e00732-c103-50c8-bc38-643661f45fef"
               }
             },
             "kind": "extension"
@@ -146,49 +146,19 @@
       }
     },
     {
-      "read": "resync_transcript",
-      "reason": "resync at a reconnect sequence boundary",
-      "connection": 2,
-      "request": {
-        "frame": "request",
-        "id": 5,
-        "op": {
-          "attachment": 1,
-          "blobs": [],
-          "intent": {
-            "body": {
-              "scope": "root"
-            },
-            "kind": "resync_transcript"
-          },
-          "op": "intent"
-        }
-      },
-      "acknowledgement": {
-        "frame": "response",
-        "id": 5,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
       "read": "list_agent_acknowledgements",
       "reason": "acknowledgements read",
       "connection": 2,
       "request": {
         "frame": "request",
-        "id": 7,
+        "id": 6,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "4d313f6b-1c12-5feb-9c5b-47a344a5e6dd"
+                "tree_id": "12e00732-c103-50c8-bc38-643661f45fef"
               }
             },
             "kind": "extension"
@@ -198,7 +168,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 7,
+        "id": 6,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -211,8 +181,8 @@
   "excluded_connections": [],
   "provenance": {
     "capture": {
-      "client_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce",
-      "host_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce"
+      "client_sha256": "f7d14410b687fe42347e44fc52a195277fe083d34c40620df68a804ea909b69a",
+      "host_sha256": "f7d14410b687fe42347e44fc52a195277fe083d34c40620df68a804ea909b69a"
     },
     "connections": [
       {

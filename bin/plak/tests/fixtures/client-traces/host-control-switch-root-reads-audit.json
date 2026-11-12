@@ -30,27 +30,25 @@
       }
     },
     {
-      "read": "resync_transcript",
-      "reason": "resync at a reconnect sequence boundary",
+      "read": "refresh_composer_chrome",
+      "reason": "timer-driven background chrome",
       "connection": 1,
       "request": {
         "frame": "request",
-        "id": 5,
+        "id": 7,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
-            "body": {
-              "scope": "root"
-            },
-            "kind": "resync_transcript"
+            "body": "refresh_composer_chrome",
+            "kind": "extension"
           },
           "op": "intent"
         }
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 5,
+        "id": 7,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -93,7 +91,7 @@
       "connection": 1,
       "request": {
         "frame": "request",
-        "id": 9,
+        "id": 12,
         "op": {
           "attachment": 1,
           "blobs": [],
@@ -106,7 +104,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 9,
+        "id": 12,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -116,8 +114,8 @@
       }
     },
     {
-      "read": "refresh_composer_chrome",
-      "reason": "timer-driven background chrome",
+      "read": "resync_transcript",
+      "reason": "resync at a reconnect sequence boundary",
       "connection": 1,
       "request": {
         "frame": "request",
@@ -126,8 +124,10 @@
           "attachment": 1,
           "blobs": [],
           "intent": {
-            "body": "refresh_composer_chrome",
-            "kind": "extension"
+            "body": {
+              "scope": "root"
+            },
+            "kind": "resync_transcript"
           },
           "op": "intent"
         }
@@ -149,9 +149,9 @@
       "connection": 1,
       "request": {
         "frame": "request",
-        "id": 14,
+        "id": 16,
         "op": {
-          "attachment": 1,
+          "attachment": 2,
           "blobs": [],
           "intent": {
             "body": {
@@ -164,7 +164,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 14,
+        "id": 16,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -193,36 +193,6 @@
       "acknowledgement": {
         "frame": "response",
         "id": 18,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
-      "read": "resync_transcript",
-      "reason": "resync at a reconnect sequence boundary",
-      "connection": 1,
-      "request": {
-        "frame": "request",
-        "id": 19,
-        "op": {
-          "attachment": 2,
-          "blobs": [],
-          "intent": {
-            "body": {
-              "scope": "root"
-            },
-            "kind": "resync_transcript"
-          },
-          "op": "intent"
-        }
-      },
-      "acknowledgement": {
-        "frame": "response",
-        "id": 19,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -263,8 +233,8 @@
   "excluded_connections": [],
   "provenance": {
     "capture": {
-      "client_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce",
-      "host_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce"
+      "client_sha256": "f7d14410b687fe42347e44fc52a195277fe083d34c40620df68a804ea909b69a",
+      "host_sha256": "f7d14410b687fe42347e44fc52a195277fe083d34c40620df68a804ea909b69a"
     },
     "connections": [
       {
