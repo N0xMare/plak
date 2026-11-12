@@ -34,6 +34,10 @@ fn scope() -> ExecutionEnvironmentScope {
     ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000061".parse().unwrap())
 }
 
+fn state_roots(directory: &Path) -> crate::agent::ProductStateRoots {
+    crate::agent::ProductStateRoots::with_doubles(directory.to_path_buf(), directory.join("state"))
+}
+
 fn version() -> VersionTriple {
     VersionTriple::current("readoption", "debug")
 }
@@ -155,19 +159,14 @@ async fn start_job_and_lose_the_link(directory: &Path, workspace: &Path, owner: 
 /// same runner: the line is not its own, so it is skipped, neither
 /// transferred nor reported, and stays held by its owner at `fence`.
 async fn another_store_skips_the_line(directory: &Path, client: &RunnerClient, fence: u64) {
-    let other = AgentSessions::new(
-        SessionBackend::sqlite(directory.join("other-runtime.sqlite3")).unwrap(),
-    )
-    .unwrap();
+    let other_home = directory.join("other");
+    std::fs::create_dir_all(&other_home).unwrap();
+    let other = state_roots(&other_home);
     let (sibling, _) = bind(directory, "instance-3").await;
-    let (readopted, failed) = crate::runner_adoption::readopt_lines(
-        &sibling,
-        &other,
-        &directory.join("other-runtime.sqlite3"),
-        "plak:readopt",
-    )
-    .await
-    .unwrap();
+    let (readopted, failed) =
+        crate::runner_adoption::readopt_lines(&sibling, &other, "plak:readopt")
+            .await
+            .unwrap();
     assert_eq!((readopted, failed), (Vec::new(), Vec::new()));
     let lines = client.lines().await.unwrap();
     assert!(lines[0].adopted);
@@ -180,6 +179,7 @@ async fn another_store_skips_the_line(directory: &Path, client: &RunnerClient, f
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_returning_host_readopts_its_line_under_a_lease_only_head() {
     let directory = tempfile::tempdir().unwrap();
+    let roots = state_roots(directory.path());
     let workspace = directory.path().join("workspace");
     std::fs::create_dir(&workspace).unwrap();
     let mut runner = std::process::Command::new(std::env::current_exe().unwrap())
@@ -226,14 +226,10 @@ async fn a_returning_host_readopts_its_line_under_a_lease_only_head() {
 
     // The same host identity returns.
     let (client, backend) = bind(directory.path(), "instance-2").await;
-    let (readopted, failed) = crate::runner_adoption::readopt_lines(
-        &client,
-        &sessions,
-        &directory.path().join("runtime.sqlite3"),
-        "plak:readopt",
-    )
-    .await
-    .unwrap();
+    let (readopted, failed) =
+        crate::runner_adoption::readopt_lines(&client, &roots, "plak:readopt")
+            .await
+            .unwrap();
     assert_eq!(failed, Vec::new());
     assert_eq!(readopted.len(), 1);
     let adopted = &readopted[0];
@@ -316,6 +312,7 @@ async fn obsolete_inspection_preserves_jobs(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_held_line_does_not_prevent_the_next_lines_sweep() {
     let directory = tempfile::tempdir().unwrap();
+    let roots = state_roots(directory.path());
     let workspace = directory.path();
     let sessions =
         AgentSessions::new(SessionBackend::sqlite(workspace.join("runtime.sqlite3")).unwrap())
@@ -375,14 +372,9 @@ async fn a_held_line_does_not_prevent_the_next_lines_sweep() {
     let free_line = free.line();
     free.release().await.unwrap();
     let held = heads.pop().unwrap();
-    let (readopted, failed) = crate::runner_adoption::readopt_lines(
-        &client,
-        &sessions,
-        &workspace.join("runtime.sqlite3"),
-        "sweep:retry",
-    )
-    .await
-    .unwrap();
+    let (readopted, failed) = crate::runner_adoption::readopt_lines(&client, &roots, "sweep:retry")
+        .await
+        .unwrap();
     assert_eq!(failed.len(), 1);
     assert_eq!(failed[0].line, held.line().to_string());
     assert!(

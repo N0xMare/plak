@@ -426,8 +426,7 @@ impl ProductStateRoots {
                     .map_err(|error| CliFailure::new(error.to_string()))?;
                 let stopped = crate::runner_adoption::finish_recorded_stop(
                     client,
-                    &sessions,
-                    self.runtime_database(),
+                    self,
                     head.line(),
                     &intent,
                 )
@@ -535,6 +534,11 @@ impl ProductStateRoots {
             return true;
         }
         false
+    }
+
+    pub(crate) fn runner_reconciliation_retry(&self) -> Option<Box<dyn FnOnce() + Send>> {
+        let (registry, id) = self.runner_readiness.as_deref()?.clone();
+        Some(Box::new(move || registry.reconcile_when_available(&id)))
     }
 
     /// A durable stop must remain pending while its runner barrier/link is

@@ -144,9 +144,10 @@ fn pause(fixture: &Fixture, daemon: i32) -> Paused {
     paused
 }
 
-fn terminal(client: &mut Client) {
+fn terminal(client: &mut Client, mode: WakeMode) {
     let mut terminal = false;
     let mut idle = false;
+    let mut recovery_failed = matches!(mode, WakeMode::Live);
     loop {
         match client.next() {
             HostFrame::Event {
@@ -157,15 +158,26 @@ fn terminal(client: &mut Client) {
                 observation: plakous_host_protocol::SessionObservation::SetBusy(busy),
                 ..
             } => idle = !busy,
+            HostFrame::Event {
+                observation:
+                    plakous_host_protocol::SessionObservation::Status {
+                        detail:
+                            Some(plakous_host_protocol::status::HostStatusDetail::RecoveryIncomplete),
+                        ..
+                    },
+                ..
+            } => recovery_failed = true,
             _ => {}
         }
-        if terminal && idle {
+        // A live eager reopen may still fold this outcome on reconnect. Pin
+        // its failed read while paused, rather than racing the terminal's idle.
+        if terminal && idle && recovery_failed {
             return;
         }
     }
 }
 
-fn following_effect(fixture: &Fixture, client: &mut Client, session: &str) {
+fn following_effect(fixture: &Fixture, client: &mut Client, session: &str, delays: &[u64]) {
     let node = client
         .rows(40)
         .into_iter()
@@ -175,22 +187,46 @@ fn following_effect(fixture: &Fixture, client: &mut Client, session: &str) {
     let attachment = client.attach(41, &node);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     client.read_deadline = Some(deadline);
-    // At most four refusals, spaced by the documented reconnect backoff.
-    for (attempt, delay) in [0, 1, 2, 5, 15].into_iter().enumerate() {
+    for (attempt, &delay) in delays.iter().enumerate() {
         std::thread::sleep(std::time::Duration::from_secs(delay));
         assert!(
             std::time::Instant::now() < deadline,
             "runner recovery exceeded its deadline"
         );
         let id = 42 + u64::try_from(attempt).unwrap();
-        if client.try_prompt(id, attachment, &format!("following effect {id}"), ANSWER) {
-            assert!(
-                fixture.root.join("next-effect").exists(),
-                "the prompt answered without its effect"
-            );
-            break;
+        match client.try_prompt(id, attachment, &format!("following effect {id}"), ANSWER) {
+            Ok(()) => {
+                assert!(
+                    fixture.root.join("next-effect").exists(),
+                    "the prompt answered without its effect"
+                );
+                break;
+            }
+            Err(reason) => {
+                assert!(
+                    ![
+                        "lease is held",
+                        "branch is held",
+                        "could not be confirmed gone",
+                        "still reconciling",
+                        "newer owner",
+                        "StaleOwner"
+                    ]
+                    .iter()
+                    .any(|text| reason.contains(text)),
+                    "a prompt was refused for ownership: {reason}"
+                );
+                assert!(
+                    reason.contains("runner did not reconnect")
+                        || (reason.contains("runner placement") && reason.contains("not ready")),
+                    "unexpected prompt refusal: {reason}"
+                );
+                assert!(
+                    attempt + 1 < delays.len(),
+                    "runner recovery exceeded its refusal budget: {reason}"
+                );
+            }
         }
-        assert!(attempt < 4, "runner recovery exceeded four prompt refusals");
     }
     client.read_deadline = None;
     assert!(fixture.root.join("next-effect").exists());
@@ -236,7 +272,7 @@ fn runner_reopen_waits_for_its_readoption() {
     );
     let (pid, daemon) = job(&fixture);
     let mut paused = pause(&fixture, daemon);
-    terminal(&mut client);
+    terminal(&mut client, WakeMode::Settled);
     std::thread::sleep(std::time::Duration::from_millis(2500));
     paused.resume();
     let deadline = std::time::Instant::now() + WAIT;
@@ -265,7 +301,7 @@ fn runner_reopen_waits_for_its_readoption() {
         client.try_prompt(42, attachment, "following effect", ANSWER)
     });
     assert!(
-        answered,
+        answered.is_ok(),
         "a prompt racing this host's readoption was rejected: {:?}",
         host.lines.try_iter().collect::<Vec<_>>()
     );
@@ -285,12 +321,21 @@ fn settled_foreground(resume_delay: std::time::Duration) {
     let (mut host, mut client, session) = begin(&fixture, WakeMode::Settled);
     let (pid, daemon) = job(&fixture);
     let mut paused = pause(&fixture, daemon);
-    terminal(&mut client);
+    terminal(&mut client, WakeMode::Settled);
     assert!(alive(pid), "frozen awake time expired the owner lease");
-    let settled = effect_settlements(&fixture, &session, false);
-    assert!(
-        settled > 0,
-        "the driver did not settle its unavailable effect"
+    let transitions = effect_transitions(&fixture, &session);
+    let operation = transitions
+        .first()
+        .expect("the effect was never dispatched")
+        .0;
+    let settled = effect_counts(&transitions, operation);
+    assert_eq!(
+        settled,
+        EffectCounts {
+            physical: 1,
+            folds: 0
+        },
+        "the driver must settle the effect before failed eager recovery"
     );
     std::thread::sleep(resume_delay);
     paused.resume();
@@ -299,9 +344,25 @@ fn settled_foreground(resume_delay: std::time::Duration) {
         !fixture.root.join("foreground-completed").exists(),
         "the process exited naturally instead of keyed cleanup"
     );
-    assert_eq!(effect_settlements(&fixture, &session, false), settled);
+    assert_eq!(
+        effect_counts(&effect_transitions(&fixture, &session), operation),
+        settled
+    );
     no_job_terminals(&fixture);
-    following_effect(&fixture, &mut client, &session);
+    let delays: &[u64] = if resume_delay.is_zero() {
+        &[0, 0]
+    } else {
+        &[0, 1, 2, 5, 15]
+    };
+    following_effect(&fixture, &mut client, &session, delays);
+    assert_eq!(
+        effect_counts(&effect_transitions(&fixture, &session), operation),
+        EffectCounts {
+            physical: 1,
+            folds: 1
+        },
+        "reopen folds the same physical outcome exactly once"
+    );
     job(&fixture);
     stop(&mut host);
 }
@@ -316,7 +377,7 @@ fn runner_wake_live_foreground() {
     assert!(alive(pid));
     paused.resume();
     std::fs::write(fixture.root.join("foreground-release"), b"release").unwrap();
-    terminal(&mut client);
+    terminal(&mut client, WakeMode::Live);
     assert_eq!(
         std::fs::read(fixture.root.join("foreground-completed")).unwrap(),
         b"done"
@@ -333,7 +394,7 @@ fn runner_lease_lapse_reports_foreground() {
     let (mut host, mut client, session) = begin(&fixture, WakeMode::Settled);
     let (pid, daemon) = job(&fixture);
     let mut paused = pause(&fixture, daemon);
-    terminal(&mut client);
+    terminal(&mut client, WakeMode::Settled);
     let unknown = unknown_effects(&fixture, &session);
     clock(&fixture, 301_000);
     paused.resume();

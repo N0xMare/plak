@@ -5425,7 +5425,11 @@ keeps its separate readiness path.
   not the host. A prompt whose full reopen races this process's own lease-only
   readoption waits up to two seconds behind it instead of rejecting the draft
   as foreign-held. A timeout identifies this host's reconciliation and asks for
-  a short retry; other instances still receive the ordinary fenced lease refusal.
+  a short retry; this scheduling timeout is not classified as a held store
+  lease. Other instances still receive the ordinary fenced lease refusal.
+  Dormant stops and stop-only retries participate in the same local gate;
+  a sweep skipped for a local open requests one fresh pass after its last
+  permit drops, even if that open failed before acquiring its lease.
   Needed connections retry with 1, 2, 5 and then 15 second backoff;
   idle remote picker rows do not keep an SSH connection alive. Recorded stop debt
   skipped under a live holder retains the required connection and one coalesced

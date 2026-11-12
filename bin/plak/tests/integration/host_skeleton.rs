@@ -230,6 +230,7 @@ impl Client {
         let timeout = self.read_deadline.map_or(WAIT, |deadline| {
             deadline
                 .checked_duration_since(std::time::Instant::now())
+                .filter(|remaining| !remaining.is_zero())
                 .expect("host observation deadline expired")
         });
         self.stream.set_read_timeout(Some(timeout)).unwrap();
@@ -284,13 +285,19 @@ impl Client {
     /// Waits for `answer`, failing if this prompt is refused.
     fn prompt(&mut self, id: RequestId, attachment: u64, text: &str, answer: &str) {
         assert!(
-            self.try_prompt(id, attachment, text, answer),
+            self.try_prompt(id, attachment, text, answer).is_ok(),
             "prompt {id} was refused: {text:?}"
         );
     }
 
-    /// Returns true for `answer`, or false for a refusal of this prompt.
-    fn try_prompt(&mut self, id: RequestId, attachment: u64, text: &str, answer: &str) -> bool {
+    /// Returns the answer or the error notice explaining this prompt's refusal.
+    fn try_prompt(
+        &mut self,
+        id: RequestId,
+        attachment: u64,
+        text: &str,
+        answer: &str,
+    ) -> Result<(), String> {
         self.retained.get_or_insert_with(Default::default);
         let accepted = self.request(
             id,
@@ -303,6 +310,7 @@ impl Client {
         );
         assert_eq!(accepted, Outcome::Ok(Answer::Accepted { duplicate: false }));
         let mut draft_accepted = false;
+        let mut refusal = None;
         loop {
             if let HostFrame::Event {
                 attachment: observed,
@@ -311,11 +319,20 @@ impl Client {
             } = self.next()
                 && observed == attachment
             {
+                if let plakous_host_protocol::SessionObservation::Row(
+                    plakous_hosted::sessions::TranscriptRow::Notice(notice),
+                ) = &observation
+                    && notice.tone == plakous_hosted::sessions::NoticeTone::Error
+                {
+                    refusal = Some(notice.text.clone());
+                }
                 if matches!(&observation,
                     plakous_host_protocol::SessionObservation::DraftRejected(SessionIntent::Prompt(draft))
                     if draft.text == text)
                 {
-                    return false;
+                    return Err(refusal.unwrap_or_else(|| {
+                        "the host rejected the draft without an error notice".into()
+                    }));
                 }
                 if matches!(&observation,
                     plakous_host_protocol::SessionObservation::DraftAccepted(SessionIntent::Prompt(draft))
@@ -325,7 +342,7 @@ impl Client {
                     continue;
                 }
                 if draft_accepted && format!("{observation:?}").contains(answer) {
-                    return true;
+                    return Ok(());
                 }
             }
         }
@@ -336,7 +353,7 @@ const ANSWER: &str = "the host answer";
 const REQUEST: &str = "00000000-0000-4000-8000-0000000000a1";
 
 #[test]
-fn prompt_refusals_fail_strict_callers_and_return_false_for_retry_callers() {
+fn prompt_refusals_fail_strict_callers_and_report_errors_to_retry_callers() {
     for (before_response, strict) in [(false, false), (true, false), (false, true), (true, true)] {
         let (stream, mut peer) = UnixStream::pair().unwrap();
         let mut client = Client {
@@ -397,7 +414,11 @@ fn prompt_refusals_fail_strict_callers_and_return_false_for_retry_callers() {
                 "prompt 42 was refused: \"retry this prompt\""
             );
         } else {
-            assert!(!client.try_prompt(42, 7, "retry this prompt", "no answer will arrive"));
+            assert!(
+                client
+                    .try_prompt(42, 7, "retry this prompt", "no answer will arrive")
+                    .is_err()
+            );
         }
     }
 }

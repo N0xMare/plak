@@ -13,6 +13,17 @@ one cross-build carrier (a build imports its own and the previous version).
 - Fixed native-client exits losing `bye`: last-handle drop now waits up to two
   seconds for the sole writer to drain and finish, even after explicit goodbye.
 
+- Wait up to two seconds when a root reopen races this process's runner
+  readoption or lease-only stop, without weakening another process's lease
+  fence. A local timeout now says that this host is still reconciling the
+  session's runner and asks for a short retry, rather than claiming another
+  process holds it. Skipped readoption is retried after the local open ends.
+  The host-layer `readopt_lines` and `finish_recorded_stop` functions now take
+  `ProductStateRoots` instead of a standalone session service, so their
+  coordination identity comes from the actual runtime database.
+  `try_lease_only` and `ReconciliationPermit` expose the same scheduling gate
+  to product-owned stop retries. No persisted, wire or binding format changes.
+
 - Add consented host-console writes for named accounts, masked write-only keys,
   cancellable subscription login, logout and explicit refresh, plus etag-checked
   home configuration, template and profile publication. Client protocol 6 becomes

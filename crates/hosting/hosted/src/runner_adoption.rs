@@ -17,6 +17,7 @@ use std::str::FromStr as _;
 
 mod admission;
 pub(crate) use admission::admit_open;
+pub use admission::{ReconciliationPermit, try_lease_only};
 
 use plakous::model::LineId;
 use plakous::runner::RunnerClient;
@@ -66,7 +67,7 @@ impl From<String> for AdoptionFailure {
 }
 
 /// The host-mode start sweep: re-adopts every line `client`'s runner holds
-/// for this home that `sessions`' store knows. Only the process that will
+/// for this home that `roots`' runtime store knows. Only the process that will
 /// serve the lines runs it: a host process at its start, never an embedded
 /// instance, which re-adopts a session's line by opening that session (its
 /// first runner call transfers the line to the session's newer owner) and
@@ -78,16 +79,18 @@ impl From<String> for AdoptionFailure {
 ///
 /// # Errors
 ///
-/// The runner could not list its lines.
+/// The runtime store could not open, or the runner could not list its lines.
 pub async fn readopt_lines(
     client: &RunnerClient,
-    sessions: &AgentSessions,
-    database: &std::path::Path,
+    roots: &crate::agent::ProductStateRoots,
     operation_prefix: &str,
 ) -> Result<(Vec<Readopted>, Vec<ReadoptFailure>), RunnerFailure> {
     if crate::test_support_runner::selected("skip-readopt") {
         return Ok((Vec::new(), Vec::new()));
     }
+    let sessions = roots
+        .runtime_sessions()
+        .map_err(|error| RunnerFailure::Unavailable(error.to_string()))?;
     let mut readopted = Vec::new();
     let mut failed = Vec::new();
     for status in client.lines().await? {
@@ -101,8 +104,8 @@ pub async fn readopt_lines(
         }
         match readopt_line(
             client,
-            sessions,
-            database,
+            &sessions,
+            roots,
             operation_prefix,
             &status.line,
             None,
@@ -163,15 +166,17 @@ pub async fn report_obsolete_lines(
 /// The lease, transfer, stop or terminal recording failed.
 pub async fn finish_recorded_stop(
     client: &RunnerClient,
-    sessions: &AgentSessions,
-    database: &std::path::Path,
+    roots: &crate::agent::ProductStateRoots,
     line: LineId,
     intent: &str,
 ) -> Result<Readopted, String> {
+    let sessions = roots
+        .runtime_sessions()
+        .map_err(|error| error.to_string())?;
     readopt_line(
         client,
-        sessions,
-        database,
+        &sessions,
+        roots,
         "plak:host:stop",
         &line.to_string(),
         Some(intent),
@@ -198,16 +203,19 @@ pub async fn finish_recorded_stop_held(
 async fn readopt_line(
     client: &RunnerClient,
     sessions: &AgentSessions,
-    database: &std::path::Path,
+    roots: &crate::agent::ProductStateRoots,
     operation_prefix: &str,
     line: &str,
     stop: Option<&str>,
 ) -> Result<Readopted, AdoptionFailure> {
     let line = LineId::from_str(line).map_err(|error| format!("line id: {error}"))?;
-    let _admission = admission::try_readoption(database, line).ok_or_else(|| AdoptionFailure {
-        reason: "this host is opening the line's runtime".into(),
-        held_elsewhere: true,
-    })?;
+    let Some(_admission) = try_lease_only(roots, line).map_err(|error| error.to_string())? else {
+        admission::retry_after_open(roots, line).map_err(|error| error.to_string())?;
+        return Err(AdoptionFailure {
+            reason: "this host is opening the line's runtime".into(),
+            held_elsewhere: true,
+        });
+    };
     let operation = SessionOperationId::new(format!("{operation_prefix}:{line}"))
         .map_err(|error| format!("operation id: {error}"))?;
     let head = sessions

@@ -42,7 +42,10 @@ pub async fn stop_dormant_session(
 enum StopHead {
     Absent,
     Pending,
-    Held(Box<LeaseOnlyHead>),
+    Held {
+        head: Box<LeaseOnlyHead>,
+        permit: crate::runner_adoption::ReconciliationPermit,
+    },
 }
 
 async fn stop_head(
@@ -64,6 +67,10 @@ async fn stop_head(
         if roots.runner_pending() && recorded_stop_ordinal(store, session)?.is_some() {
             return Ok(StopHead::Pending);
         }
+        let permit =
+            crate::runner_adoption::try_lease_only(roots, line.line())?.ok_or_else(|| {
+                CliFailure::new("this host is opening or reconciling the session; retry shortly")
+            })?;
         sessions
             .open_lease_only(
                 &SessionOperationId::new(format!("plak:stop:{}", session.id))
@@ -71,7 +78,10 @@ async fn stop_head(
                 line.line(),
             )
             .await
-            .map(|head| StopHead::Held(Box::new(head)))
+            .map(|head| StopHead::Held {
+                head: Box::new(head),
+                permit,
+            })
             .map_err(|error| CliFailure::new(error.to_string()))
     } else {
         Ok(StopHead::Absent)
@@ -83,7 +93,7 @@ async fn stop(
     store: &dyn SessionRecordStore,
     session: &mut SessionRecord,
 ) -> CliResult<()> {
-    let head = match stop_head(roots, store, session).await? {
+    let (head, _permit) = match stop_head(roots, store, session).await? {
         StopHead::Pending => {
             let recorded = record(roots, store, session).await?;
             if recorded.new_descendant_debt {
@@ -97,7 +107,7 @@ async fn stop(
             record(roots, store, session).await?;
             return Ok(());
         }
-        StopHead::Held(head) => *head,
+        StopHead::Held { head, permit } => (*head, permit),
     };
     // A lease-only owner has no agent heartbeat. Keep the operation
     // strictly inside its lease; an unfinished recorded stop is retried

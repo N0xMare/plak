@@ -6142,7 +6142,16 @@ of that line within the process and runtime database. An open waits at most
 two seconds for an active readoption, retaining its queued prompt; a sweep skips
 an in-progress root open instead of waiting. Timeout names this host's runner
 reconciliation, not a foreign process or a 30-second lease expiry. Fresh workflow
-handles and storage-interrupt views share that database-scoped ordering.
+handles and storage-interrupt views share that database-scoped ordering, keyed
+by the runtime file's device and inode read from product state roots; missing
+identity is an explicit refusal, never a raw-path fallback. Readoption, dormant
+stops and stop-only followups take the same try-write permit before their
+ordinary head lease and keep it through release. A sweep skipped for a local
+open retains one coalesced reconciliation request: releasing the last local
+permit requests the next owned pass, including when construction failed before
+lease acquisition. Registration also checks an already-released permit, so the
+retry has no lost-wakeup window. Stop-only followups retain their existing
+stop-only retry cadence rather than closing runner readiness.
 This is scheduling only: every open still acquires the ordinary store lease,
 and another process keeps the existing lease refusal. No facade or persistence
 identity grants authority through this process-local gate.

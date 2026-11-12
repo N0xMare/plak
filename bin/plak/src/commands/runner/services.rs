@@ -383,9 +383,14 @@ async fn stop_only_followup(
     pending: &[LineId],
 ) -> CliResult<Vec<LineId>> {
     use plakous::sessions::{AgentSessionsErrorKind, SessionOperationId};
-    let sessions = services.state_roots()?.runtime_sessions()?;
+    let roots = services.state_roots()?;
+    let sessions = roots.runtime_sessions()?;
     let mut remaining = Vec::new();
     for &line in pending {
+        let Some(_permit) = plakous_hosted::runner_adoption::try_lease_only(&roots, line)? else {
+            remaining.push(line);
+            continue;
+        };
         let operation = SessionOperationId::new(format!("plak:host:stop-retry:{line}"))
             .map_err(|error| CliFailure::new(error.to_string()))?;
         let head = match sessions.open_lease_only(&operation, line).await {
@@ -562,21 +567,15 @@ async fn reconcile_remote(
         .begin_reconcile(id, services.now_unix_seconds());
     let roots = services
         .state_roots()
-        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?
+        .with_runner_readiness(services.runners().clone(), id);
     let sessions = roots
         .runtime_sessions()
         .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
-    let (readopted, failures) = plakous_hosted::runner_adoption::readopt_lines(
-        client,
-        &sessions,
-        &services
-            .paths()
-            .map_err(|_| unavailable(ProbePhase::Reconcile, false))?
-            .runtime_database(),
-        "plak:host:readopt",
-    )
-    .await
-    .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    let (readopted, failures) =
+        plakous_hosted::runner_adoption::readopt_lines(client, &roots, "plak:host:readopt")
+            .await
+            .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
     if let Some(failure) = failures.iter().find(|failure| !failure.held_elsewhere) {
         tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
         return Err(unavailable(ProbePhase::Reconcile, false));
@@ -713,8 +712,7 @@ async fn finish_stops(
             }
             plakous_hosted::runner_adoption::finish_recorded_stop(
                 client,
-                sessions,
-                &paths.runtime_database(),
+                &services.state_roots()?,
                 line,
                 intent,
             )

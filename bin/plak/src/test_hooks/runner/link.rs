@@ -57,7 +57,6 @@ impl RunnerLink for CutLink {
             if lose_answer && answer.is_ok() && claim(&directory.join("lose-answer.entered")) {
                 release(&directory.join("lose-answer.release"), None, None).await?;
                 client.disconnect();
-                tokio::time::sleep(super::runner_windows().effect).await;
                 return Err(RunnerFailure::OutcomeUnknown(
                     "injected lost foreground answer".into(),
                 ));

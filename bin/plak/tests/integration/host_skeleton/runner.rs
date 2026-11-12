@@ -651,14 +651,49 @@ fn a_runner_restart_leaves_an_unpromoted_call_unknown_without_restarting_it() {
 }
 
 fn unknown_effects(fixture: &Fixture, session: &str) -> usize {
-    effect_settlements(fixture, session, true)
+    effect_transitions(fixture, session)
+        .iter()
+        .filter(|(_, state)| *state == plakous::sessions::feed::FeedOperationState::OutcomeUnknown)
+        .count()
 }
 
-fn effect_settlements(fixture: &Fixture, session: &str, unknown_only: bool) -> usize {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct EffectCounts {
+    physical: usize,
+    folds: usize,
+}
+
+fn effect_counts(
+    transitions: &[(u64, plakous::sessions::feed::FeedOperationState)],
+    operation: u64,
+) -> EffectCounts {
+    use plakous::sessions::feed::FeedOperationState;
+    let mut counts = EffectCounts {
+        physical: 0,
+        folds: 0,
+    };
+    for &(observed, state) in transitions {
+        if observed != operation {
+            continue;
+        }
+        match state {
+            FeedOperationState::Completed
+            | FeedOperationState::OutcomeUnknown
+            | FeedOperationState::ProvenNotDispatched => counts.physical += 1,
+            FeedOperationState::Finalized => counts.folds += 1,
+            _ => {}
+        }
+    }
+    counts
+}
+
+fn effect_transitions(
+    fixture: &Fixture,
+    session: &str,
+) -> Vec<(u64, plakous::sessions::feed::FeedOperationState)> {
     use plak::store::session_records::SessionRecordStore as _;
     use plakous::sessions::feed::{
-        FeedCursor, FeedFact, FeedOperationKind, FeedOperationState, FeedPage, FeedPageRequest,
-        FeedSeq,
+        FeedCursor, FeedFact, FeedOperationKind, FeedPage, FeedPageRequest, FeedSeq,
     };
     use plakous::sessions::{AgentSessions, SessionBackend};
     let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
@@ -672,7 +707,7 @@ fn effect_settlements(fixture: &Fixture, session: &str, unknown_only: bool) -> u
         .unwrap()
         .block_on(async {
             let mut cursor = FeedSeq::new(0);
-            let mut count = 0;
+            let mut transitions = Vec::new();
             loop {
                 let FeedPage::Records { records, .. } = sessions
                     .feed_page(FeedPageRequest::after(FeedCursor::new(
@@ -685,25 +720,20 @@ fn effect_settlements(fixture: &Fixture, session: &str, unknown_only: bool) -> u
                     panic!("unexpected trimmed feed")
                 };
                 if records.is_empty() {
-                    return count;
+                    return transitions;
                 }
                 for record in records {
-                    count += record
-                        .facts()
-                        .iter()
-                        .filter(|fact| {
-                            matches!(
-                                fact,
-                                FeedFact::OperationAdvanced {
-                                    kind: FeedOperationKind::Effect { .. },
-                                    state,
-                                    ..
-                                } if if unknown_only { *state == FeedOperationState::OutcomeUnknown } else {
-                                    matches!(state, FeedOperationState::Completed | FeedOperationState::OutcomeUnknown | FeedOperationState::Finalized)
-                                }
-                            )
-                        })
-                        .count();
+                    for fact in record.facts() {
+                        if let FeedFact::OperationAdvanced {
+                            operation_id,
+                            kind: FeedOperationKind::Effect { .. },
+                            state,
+                            ..
+                        } = fact
+                        {
+                            transitions.push((*operation_id, *state));
+                        }
+                    }
                     cursor = record.header().seq;
                 }
             }
