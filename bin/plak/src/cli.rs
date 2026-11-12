@@ -543,6 +543,12 @@ enum TopCommand {
         action: Option<TelemetryAction>,
     },
     Version {
+        #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe", "host_upgrade_capacity"])]
+        host_upgrade_probe: bool,
+        #[arg(long, hide = true, requires = "host_upgrade_probe")]
+        host_upgrade_service: Option<std::path::PathBuf>,
+        #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe"])]
+        host_upgrade_capacity: Option<std::path::PathBuf>,
         /// Hidden: print only this build's state key (`/reload` asks it).
         #[arg(long = "state-key", action = ArgAction::SetTrue, hide = true)]
         state_key: bool,
@@ -576,6 +582,16 @@ enum AccountAction {
 
 #[derive(Debug, clap::Subcommand)]
 enum HostAction {
+    /// Upgrade the running host; cross-key carry requires settled work.
+    Upgrade {
+        #[arg(long)]
+        expect_binary: String,
+        /// Wait for settled work for this many seconds (at most 3600).
+        #[arg(long, default_value = "0", value_parser = clap::value_parser!(u64).range(0..=3600))]
+        wait: u64,
+    },
+    #[command(name = "__upgrade-import", hide = true)]
+    UpgradeImport { receipt: std::path::PathBuf },
     /// Relay wire bytes to this home's host without consuming its handshake.
     Connect {
         #[arg(long, required = true)]

@@ -11,6 +11,19 @@ composition, and protocol it named — nothing adjacent. The second is that
 symbol that is nameable, a command that parses, and a route that renders are all
 accessibility facts. None of them is a support or correctness promise.
 
+Settled host-upgrade regressions use isolated real-binary homes and a
+test-hooks-only `PLAK_TEST_STATE_KEY` override to make producer and destination
+keys differ without changing the v12 carrier. Production builds ignore that
+variable. The durability profile owns `host_skeleton::upgrade::`, excluded
+from offline: named state and paused queue round trips, source reopen refusal,
+recorded-root redirects, lost-ack retry, precommit rollback, postcommit-only
+destination recovery, wait timeout and preflight failures. Receipt cuts cover
+initial publication, export publication, mapping publication, imported seeds,
+surrender, reply loss and destination acknowledgement. None authorizes prompt
+replay or proves live-tree/job migration. Dedicated input-limit/import-refusal
+hooks model unknown/smaller windows and unsupported readers only in test-hooks
+probes. New remote-root transfer evidence is separate from this local slice.
+
 Offline runner fault injection targets only the recorded daemon that still
 has the fixture home's lock file open, never a host's transient startup probe.
 Its exit wait tracks the killed daemon, not a replacement the live host may

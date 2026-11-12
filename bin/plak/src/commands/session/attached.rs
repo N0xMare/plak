@@ -99,6 +99,63 @@ pub(crate) fn probe_prepared_capacity(
     ))
 }
 
+/// Upgrade admission cannot defer a capacity or credential refusal until the
+/// source has surrendered. This probe never opens the source store or a turn.
+pub(crate) fn probe_upgrade_capacity(
+    services: &crate::shell::services::Services,
+    path: &Path,
+) -> CliResult<crate::carry::CarryCapacityProbe> {
+    let document =
+        crate::carry::read_document(path).map_err(|error| CliFailure::new(error.to_string()))?;
+    let mut prepared = PreparedImport::new(document, false)?;
+    let record = &mut prepared.carried.record;
+    if record.runner.is_some() {
+        return Err(CliFailure::new(
+            "host_upgrade_unsupported_runner: retain the source build to inspect and drain its runner before carrying this session",
+        ));
+    }
+    let paths = session_paths(services, record)?;
+    if let Some(profile) = &prepared.carried.profile {
+        let home = product_config::ProductConfig::load(&paths).map_err(CliFailure::new)?;
+        crate::profiles::selection_config(&home, profile).map_err(CliFailure::new)?;
+        record.root_profile = Some(plakous_hosted::sessions::RootProfile {
+            root_template: profile.root.clone(),
+            working_set: profile.working_set.clone(),
+        });
+    }
+    let config =
+        build_attached_host_config(services, prepared.carried.record, AttachedPurpose::Verify)
+            .map_err(|error| match error {
+                AttachedConfigError::Answered(verdict) => CliFailure::new(format!(
+                    "host_upgrade_credentials: destination cannot verify credentials: {verdict:?}"
+                )),
+                error => error.into(),
+            })?;
+    let capacity = carry_capacity_from_window(
+        product_host::carry_input_window(&config)?,
+        prepared.estimated_tokens,
+        prepared.messages,
+    );
+    #[cfg(feature = "test-hooks")]
+    let capacity = {
+        let mut capacity = capacity;
+        if let Ok(limit) = std::env::var("PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT") {
+            capacity.admitted_input = if limit == "unknown" {
+                None
+            } else {
+                Some(
+                    limit
+                        .parse()
+                        .map_err(|_| CliFailure::new("invalid upgrade input-limit test hook"))?,
+                )
+            };
+        }
+        capacity
+    };
+    crate::carry::upgrade::require_capacity(&capacity)?;
+    Ok(capacity)
+}
+
 /// Whether an exact reopen of `record` would attach on this build, answered
 /// without owning it: the attach's own binding resolution, then the open's
 /// verification at `head` (spec 02 §2.5.1).

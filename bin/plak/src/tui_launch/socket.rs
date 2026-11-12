@@ -180,8 +180,19 @@ impl SocketFace {
                 ));
             };
             let ids: Vec<&str> = rows.iter().map(|row| row.session.as_str()).collect();
-            let id = crate::commands::session::match_session_id_prefix(requested, &ids)
-                .map_err(CliFailure::new)?;
+            let id = match crate::commands::session::match_session_id_prefix(requested, &ids) {
+                Ok(id) => id,
+                Err(_) if uuid::Uuid::parse_str(requested).is_ok() => {
+                    return self.select_root(
+                        requested.to_owned(),
+                        plakous_host_protocol::wire::NodeAddress {
+                            tree_id: requested.to_owned(),
+                            agent_id: requested.to_owned(),
+                        },
+                    );
+                }
+                Err(error) => return Err(CliFailure::new(error)),
+            };
             let row = rows
                 .iter()
                 .find(|row| row.session == id)
@@ -230,6 +241,18 @@ impl SocketFace {
         session: String,
         node: plakous_host_protocol::wire::NodeAddress,
     ) -> CliResult<()> {
+        self.select_root_redirects(session, node, 8)
+    }
+
+    fn select_root_redirects(
+        &self,
+        session: String,
+        node: plakous_host_protocol::wire::NodeAddress,
+        remaining: usize,
+    ) -> CliResult<()> {
+        if remaining == 0 {
+            return Err(CliFailure::new("too many recorded session successors"));
+        }
         let id = self.sender.attach_to(node).map_err(io_failure)?;
         let (answered, outcome) = self.receiver.recv_response(DEADLINE).map_err(|error| {
             CliFailure::new(format!("the host did not answer the attach: {error}"))
@@ -241,6 +264,9 @@ impl SocketFace {
             Outcome::Ok(Answer::Attached { .. }) => {
                 self.state().session = Some(session);
                 Ok(())
+            }
+            Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::Moved { node }) => {
+                self.select_root_redirects(node.tree_id.clone(), node, remaining - 1)
             }
             other => Err(CliFailure::new(format!("attach refused: {other:?}"))),
         }
@@ -480,6 +506,13 @@ impl SocketFace {
             if let Some((session, _)) = attachment {
                 match outcome {
                     Outcome::Ok(Answer::Attached { .. }) => self.state().session = Some(session),
+                    Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::Moved {
+                        node,
+                    }) => {
+                        if let Err(error) = self.attach(node.tree_id.clone(), node) {
+                            self.note(error.message().to_owned());
+                        }
+                    }
                     other => self.note(format!("attach refused: {other:?}")),
                 }
                 continue;

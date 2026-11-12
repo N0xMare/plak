@@ -31,6 +31,19 @@ use crate::surface_protocol::PlakExtension;
 pub(crate) use auth::{WebAccess, WebOrigin};
 use listen::Listen;
 
+pub(crate) fn preflight(services: &Services, args: &crate::command::HostWeb) -> CliResult<()> {
+    let listen = Listen::parse(&args.listen).map_err(CliFailure::new)?;
+    let paths = services.paths()?;
+    let config = ProductConfig::load(paths).map_err(CliFailure::new)?;
+    access(&listen, &config, args.dev_login.clone())?;
+    load_ui(
+        args.ui.as_deref(),
+        ProductConfig::console_switches(paths).map_err(CliFailure::new)?,
+    )?;
+    let _ = auth::CookieKey::load(paths)?;
+    Ok(())
+}
+
 /// What every request to the endpoint shares.
 pub(crate) struct Served {
     /// The sessions the host serves.

@@ -3,7 +3,8 @@
 static HOST_KEY_RESOLVER: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 #[allow(dead_code, reason = "only hosted transports render the restart remedy")]
-pub(crate) const HOST_RESTART_REMEDY: &str = "send SIGTERM to the plak host process, or run `systemctl --user restart plak-host.service` if it runs as the installed unit";
+pub(crate) const HOST_RESTART_REMEDY: &str =
+    "run the installed build's `plak host upgrade --expect-binary <id>` with its binary id";
 
 #[derive(Clone, Copy)]
 pub(crate) enum KeyResolver {

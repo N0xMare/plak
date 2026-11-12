@@ -20,11 +20,14 @@ mod interactive;
 pub(crate) mod rebind;
 mod reference;
 mod reload;
+pub(crate) mod upgrade;
 
 pub(crate) use document::{
     CarryDocument, IMPORTABLE_VERSIONS, VERSION, read_document, write_document,
 };
 
+#[cfg(feature = "web")]
+pub(crate) use export::ExportRefusal;
 pub(crate) use export::{export_session, new_carry_file};
 pub(crate) use handoff::take_reload_handoff;
 pub(crate) use reload::{

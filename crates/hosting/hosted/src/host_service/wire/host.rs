@@ -103,6 +103,7 @@ pub use product::HostSessions;
 
 /// The sessions one host serves.
 pub struct SessionHost<P: ProtocolExtension> {
+    upgrade_admission: Arc<std::sync::RwLock<bool>>,
     admission: admission::Admission,
     next_connection: AtomicU64,
     drafts: super::super::drafts::DraftRegistry,
@@ -126,6 +127,17 @@ pub struct SessionHost<P: ProtocolExtension> {
 /// One shared read of the directory: when, at which host revision, and its
 /// rows.
 type DirectoryRead = (Instant, u64, Arc<Vec<SessionRow>>);
+
+/// A reversible host-upgrade admission pause. It never cancels running work.
+pub struct AdmissionPause {
+    gate: Arc<std::sync::RwLock<bool>>,
+}
+
+impl Drop for AdmissionPause {
+    fn drop(&mut self) {
+        *self.gate.write().unwrap_or_else(PoisonError::into_inner) = false;
+    }
+}
 
 /// Whether this nonblocking slot view names `session`. Busy views use a
 /// cached peek label, not an authority for selecting a session to open.
@@ -163,6 +175,7 @@ where
         let (changes, _) = watch::channel(0);
         let admission = admission::Admission::new(sessions.host_read_limits());
         Arc::new(Self {
+            upgrade_admission: Arc::default(),
             admission,
             next_connection: AtomicU64::new(1),
             drafts: super::super::drafts::DraftRegistry::default(),
@@ -187,6 +200,25 @@ where
 
     fn closed(&self) -> bool {
         self.closing.load(Ordering::SeqCst)
+    }
+
+    /// Refuses new client requests after previously admitted frame handlers
+    /// return. Running work continues. Dropping the permit restores admissions.
+    ///
+    /// # Errors
+    /// Another upgrade already paused this host, or the host is stopping.
+    pub fn pause_admissions(&self) -> CliResult<AdmissionPause> {
+        let mut paused = self
+            .upgrade_admission
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        if *paused || self.closed() {
+            return Err(CliFailure::new("the host is already upgrading or stopping"));
+        }
+        *paused = true;
+        Ok(AdmissionPause {
+            gate: Arc::clone(&self.upgrade_admission),
+        })
     }
 
     /// The whole directory, read at most once per host revision and per
@@ -463,6 +495,34 @@ where
     pub fn hand_off_all(&self, deadline: Duration) -> Vec<(String, CliFailure)> {
         // Closed first, so the slots below are every session this host holds.
         self.close();
+        self.hand_off_residents(deadline)
+    }
+
+    /// Drains already accepted mailboxes and releases residents under an
+    /// upgrade pause, without permanently closing the session directory.
+    /// Failed preparation can drop the pause and open the old sessions again.
+    ///
+    /// # Errors
+    /// The permit belongs to another host or admissions are not paused.
+    pub fn hand_off_paused(
+        &self,
+        pause: &AdmissionPause,
+        deadline: Duration,
+    ) -> CliResult<Vec<(String, CliFailure)>> {
+        if !Arc::ptr_eq(&pause.gate, &self.upgrade_admission)
+            || !*self
+                .upgrade_admission
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+        {
+            return Err(CliFailure::new(
+                "host handoff requires its own upgrade admission pause",
+            ));
+        }
+        Ok(self.hand_off_residents(deadline))
+    }
+
+    fn hand_off_residents(&self, deadline: Duration) -> Vec<(String, CliFailure)> {
         let slots = self.slots();
         std::thread::scope(|scope| {
             let handles: Vec<_> = slots
@@ -571,6 +631,8 @@ where
     ///
     /// A lost output.
     pub fn frame(&mut self, line: Result<String, WireError>) -> CliResult<bool> {
+        let gate = Arc::clone(&self.host.upgrade_admission);
+        let paused = gate.read().unwrap_or_else(PoisonError::into_inner);
         let Ok(text) = line else {
             self.leave();
             return Ok(false);
@@ -588,6 +650,21 @@ where
             }
             Ok(frame) => frame,
         };
+        if *paused {
+            if let ClientFrame::Request { id, .. } = frame {
+                write_frame(
+                    &mut self.out,
+                    &HostFrame::<P>::Response {
+                        id,
+                        outcome: Outcome::Refused(RequestRefusal::SessionUnavailable {
+                            detail: "the host is preparing an upgrade; retry after it finishes"
+                                .to_owned(),
+                        }),
+                    },
+                )?;
+            }
+            return Ok(true);
+        }
         let ClientFrame::Request { id, op } = frame else {
             // A blob precedes the intent that names it, on the node
             // attachment; with none it is no one's.
@@ -979,6 +1056,16 @@ where
     /// as a new attach on one session's connection ends the one before it;
     /// a refused attach leaves it.
     fn attach(&mut self, node: &NodeAddress, text: &str) -> CliResult<Forwarded<P>> {
+        if let Some(successor) = self
+            .host
+            .sessions
+            .successor_node(node)
+            .map_err(CliFailure::new)?
+        {
+            return Ok(Forwarded::Answered(Outcome::Refused(
+                RequestRefusal::Moved { node: successor },
+            )));
+        }
         if self.host.closed() {
             return Ok(Forwarded::Answered(Outcome::Refused(stopping())));
         }

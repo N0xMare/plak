@@ -160,6 +160,7 @@ pub(crate) fn launch_tui_with_attacher(
     if let Some(face) = socket::SocketFace::discover(services.paths()?)? {
         return hosted::run(services, face, session_id, resume_picker, opening_note);
     }
+    let _upgrade_admission = carry::upgrade::admission(services.paths()?, false)?;
     let (launch, rounds) =
         prepare_tui_launch(services, session_id, resume_picker, opening_note, attacher)?;
     supervisor::run_tui_rounds(services, launch, rounds, attacher)

@@ -405,7 +405,7 @@ fn job_script(fixture: &Fixture, busy: bool) -> serde_json::Value {
     ]})
 }
 
-fn job(fixture: &Fixture) -> (i32, i32) {
+pub(super) fn job(fixture: &Fixture) -> (i32, i32) {
     // The tool call returns once the process starts, before its shell has
     // written the marker line.
     let path = fixture.root.join("local-job.marker");
@@ -427,7 +427,7 @@ fn job(fixture: &Fixture) -> (i32, i32) {
     (pid.parse().unwrap(), parent.parse().unwrap())
 }
 
-fn alive(pid: i32) -> bool {
+pub(super) fn alive(pid: i32) -> bool {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
 }
 
@@ -457,7 +457,7 @@ fn cut_exit(child: &mut Child) -> std::process::ExitStatus {
     }
 }
 
-fn start_job(fixture: &Fixture, busy: bool) -> (Host, String, NodeAddress) {
+pub(super) fn start_job(fixture: &Fixture, busy: bool) -> (Host, String, NodeAddress) {
     start_job_env(fixture, busy, &[])
 }
 

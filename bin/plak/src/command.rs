@@ -85,6 +85,13 @@ impl Command {
                 directory: at(directory),
             },
             Self::CarryProbe { path } => Self::CarryProbe { path: at(path) },
+            Self::HostUpgradeProbe { service } => Self::HostUpgradeProbe {
+                service: service.map(at),
+            },
+            Self::HostUpgradeCapacity { path } => Self::HostUpgradeCapacity { path: at(path) },
+            Self::HostUpgradeImport { receipt } => Self::HostUpgradeImport {
+                receipt: at(receipt),
+            },
             Self::Host(mut host) => {
                 if let Some(web) = &mut host.web {
                     web.ui = web.ui.take().map(at);
@@ -250,6 +257,12 @@ pub(crate) enum Command {
         directory: PathBuf,
     },
     ReloadProbe,
+    HostUpgradeProbe {
+        service: Option<PathBuf>,
+    },
+    HostUpgradeCapacity {
+        path: PathBuf,
+    },
     /// Hidden `plak version --reopen-probe <id>`.
     ReopenProbe {
         session: String,
@@ -356,6 +369,13 @@ pub(crate) enum Command {
     /// `plak host`: the per-user host process.
     Host(HostCommand),
     HostInstall(HostInstall),
+    HostUpgrade {
+        expect_binary: String,
+        wait: std::time::Duration,
+    },
+    HostUpgradeImport {
+        receipt: PathBuf,
+    },
     /// A byte-transparent bridge to the home's existing host.
     HostConnect {
         auto_start: bool,
@@ -459,6 +479,8 @@ impl Command {
             Self::Version
             | Self::StateKey
             | Self::ReloadProbe
+            | Self::HostUpgradeProbe { .. }
+            | Self::HostUpgradeCapacity { .. }
             | Self::WriteBinaryManifest { .. }
             | Self::CarryProbe { .. }
             | Self::ReopenProbe { .. }
@@ -517,7 +539,11 @@ impl Command {
             | Self::RunPlatform { .. }
             | Self::ContinueSession { .. } => "run",
             Self::Agent { .. } => "agent",
-            Self::Host(_) | Self::HostInstall(_) | Self::HostConnect { .. } => "host",
+            Self::Host(_)
+            | Self::HostInstall(_)
+            | Self::HostConnect { .. }
+            | Self::HostUpgrade { .. }
+            | Self::HostUpgradeImport { .. } => "host",
             Self::WireSchema => "wire",
         }
     }

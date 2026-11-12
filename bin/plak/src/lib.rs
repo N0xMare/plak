@@ -402,6 +402,8 @@ fn log_start(binary: &str, command: &str) {
 fn log_command_start(command: &Command) {
     match command {
         Command::StateKey
+        | Command::HostUpgradeProbe { .. }
+        | Command::HostUpgradeCapacity { .. }
         | Command::ReloadProbe
         | Command::ReopenProbe { .. }
         | Command::WriteBinaryManifest { .. }
@@ -478,9 +480,33 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let services = Services::from_env(Some(otel_extra_telemetry_sink), launch.as_deref());
     #[cfg(not(feature = "otel"))]
     let services = Services::from_env(None, launch.as_deref());
+    if matches!(
+        command,
+        Command::HostUpgradeProbe { .. } | Command::HostUpgradeCapacity { .. }
+    ) {
+        let capacity = match &command {
+            Command::HostUpgradeCapacity { path } => Some(path.as_path()),
+            _ => None,
+        };
+        let service = match &command {
+            Command::HostUpgradeProbe { service } => service.as_deref(),
+            _ => None,
+        };
+        return carry::upgrade::print_probe(&services, capacity, service, &mut io::stdout().lock());
+    }
     if let Command::HostInstall(install) = &command {
         return commands::host_install::run(install, services.paths(), &mut io::stdout().lock());
     }
+    let _upgrade_admission = if (command_needs_product_state(&command)
+        && !matches!(command, Command::Host(_)))
+        || matches!(
+            command,
+            Command::StatePruneLegacy { .. } | Command::TreeRelease { .. }
+        ) {
+        Some(carry::upgrade::admission(services.paths()?, false)?)
+    } else {
+        None
+    };
     // Diagnostic setup must not recreate a local daemon's deleted home.
     if matches!(
         &command,
@@ -612,6 +638,13 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         command @ Command::Agent { .. } => return run_agent_command(&services, command),
         Command::Host(command) => return host::run_host_command(&services, &command),
         Command::HostConnect { auto_start } => return host::connect_stdio(&services, auto_start),
+        Command::HostUpgrade {
+            expect_binary,
+            wait,
+        } => return host::upgrade(&services, &expect_binary, wait),
+        Command::HostUpgradeImport { receipt } => {
+            return carry::upgrade::import(&services, &receipt);
+        }
         Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
         // The runner bridge owns raw stdin and stdout, so it runs before the
         // process takes their locks.
@@ -699,7 +732,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             writeln!(stdout, "{}", carry::VERSION).map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }
-        Command::WriteBinaryManifest { .. } => {
+        Command::WriteBinaryManifest { .. }
+        | Command::HostUpgradeProbe { .. }
+        | Command::HostUpgradeCapacity { .. } => {
             Err(CliFailure::new("internal command dispatch error"))
         }
         Command::StateKey => {
@@ -1360,6 +1395,8 @@ fn execute_command(
         | Command::Host(_)
         | Command::HostInstall(_)
         | Command::HostConnect { .. }
+        | Command::HostUpgrade { .. }
+        | Command::HostUpgradeImport { .. }
         | Command::WireSchema
         | Command::Help
         | Command::CommandHelp { .. }
@@ -1370,6 +1407,8 @@ fn execute_command(
         | Command::StateKey
         | Command::WriteBinaryManifest { .. }
         | Command::ReloadProbe
+        | Command::HostUpgradeProbe { .. }
+        | Command::HostUpgradeCapacity { .. }
         | Command::ReopenProbe { .. }
         | Command::CarryProbe { .. }
         | Command::ExportVersion

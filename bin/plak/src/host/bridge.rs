@@ -17,14 +17,16 @@ pub(super) fn connect(paths: &PlakPaths, auto_start: bool) -> CliResult<ProcessO
         } else {
             DISCOVERY_WINDOW
         };
-    let key = crate::home::state::state_key();
+    let key =
+        crate::carry::upgrade::receipt::successor_key(paths, &crate::home::state::state_key())?;
+    let socket = paths.host_run_dir().join(format!("{key}.sock"));
     let mut started = false;
     loop {
         let live = hosts::live_until(paths, deadline)?;
         if live.len() > 1 || live.iter().any(|host| host.key != key) {
             return Err(hosts::conflict(&live));
         }
-        match hosts::socket_until(&paths.host_socket(), deadline) {
+        match hosts::socket_until(&socket, deadline) {
             Ok(stream) => return relay(stream),
             Err(error)
                 if matches!(

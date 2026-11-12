@@ -68,6 +68,14 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
     /// # Errors
     /// The product store could not be read.
     fn contains(&self, session: &str) -> Result<bool, String>;
+    /// The recorded successor of a carried root. This is an address redirect,
+    /// never permission to replay a client submission or revive a child.
+    ///
+    /// # Errors
+    /// Successor authority cannot be verified.
+    fn successor_node(&self, _node: &NodeAddress) -> Result<Option<NodeAddress>, String> {
+        Ok(None)
+    }
     /// Decorate a saved runner identity without probing or changing its authority.
     fn runner_label(&self, id: &str) -> plakous_host_protocol::wire::RunnerLabel {
         plakous_host_protocol::wire::RunnerLabel {

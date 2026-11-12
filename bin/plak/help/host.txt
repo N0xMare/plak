@@ -4,6 +4,7 @@ USAGE:
   plak host [--web <unix:path|127.0.0.1:port>] [--ui <dir>]
   plak host install --web unix:<absolute socket> --ui <absolute dir> [--dry-run]
   plak host connect --stdio [--auto-start]
+  plak host upgrade --expect-binary <id> [--wait <seconds>]
   plak host --help
 
 The supported default build includes the host and web endpoint. A private
@@ -22,6 +23,15 @@ embedded; it does not start a host.
   other-key host requires an explicit stop/upgrade, not a second service.
 
 --web adds the web endpoint; loopback development also requires --dev-login.
+
+Upgrade is invoked using the destination build and its exact binary id.
+Same-key upgrades use planned handoff. Cross-key upgrade carries settled local
+roots as new lines, with paused text queues and committed named state; live or
+held work and nonterminal jobs block it. Remote-placed roots are refused in
+this local-only slice. --wait closes admissions for at most 3600 seconds and
+restores them on timeout. Retry the same command after an unknown outcome;
+receipts select the old owner before commit or the recorded successor after it.
+Never remove the old snapshot until the destination has acknowledged success.
 --ui serves a validated static build with csp.json. SIGUSR1 reloads that build
 atomically; invalid replacements keep the old build. SIGHUP and SIGTERM mean
 planned handoff, not UI reload. A control-only host needs no --web.

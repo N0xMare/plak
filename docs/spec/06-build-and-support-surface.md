@@ -751,6 +751,21 @@ Layout and test helpers do not become a public TUI API for the benchmark.
 
 ### 4.1 The `maintainer` feature
 
+Host upgrade uses the invoked destination image's binary identity, not the
+workspace revision or a stable link's name. Its private
+`version --host-upgrade-probe` reports host availability, state key, import
+versions, local-runner protocol and configuration verdict;
+`version --host-upgrade-capacity <export>` adds strict settled-carry admission.
+The coordinator adds `--host-upgrade-service <file>` to its capability probe to
+validate the resolved service arguments and web assets without binding them.
+These probes dispatch no turn and do not open a foreign state key as session
+authority. The source hashes the destination and retains its own executable
+path in the ownership receipt; startup/retry verifies the selected image again.
+Keep both immutable snapshots with matching sidecars through acknowledgement.
+Installation alone does not execute an upgrade, and old snapshots/state are not
+automatically removed. The local settled-root slice refuses remote placements;
+it does not relax remote exact-triple matching or qualify a remote upgrade.
+
 `maintainer` gates these verbs:
 
 ```text

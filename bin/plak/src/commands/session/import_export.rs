@@ -73,6 +73,7 @@ pub(crate) fn import_session(
 }
 
 pub(crate) struct PreparedImport {
+    pub(crate) upgrade_successor: Option<String>,
     pub(super) carried: crate::carry::CarriedImport,
     pub(super) estimated_tokens: u64,
     pub(super) messages: usize,
@@ -109,6 +110,7 @@ impl PreparedImport {
             .map_err(|e| CliFailure::new(e.to_string()))?;
         crate::build_features::admit_session(&carried.record)?;
         Ok(Self {
+            upgrade_successor: None,
             carried,
             estimated_tokens,
             messages,
@@ -147,6 +149,7 @@ pub(crate) fn import_reload_handoff(
     import_prepared(
         services,
         PreparedImport {
+            upgrade_successor: None,
             carried,
             estimated_tokens,
             messages,
@@ -169,6 +172,7 @@ pub(super) fn import_prepared_with_fallback(
     root_fallback: Option<&product_config::ProductConfig>,
 ) -> CliResult<(product_sessions::SessionRecord, String)> {
     let PreparedImport {
+        upgrade_successor,
         carried,
         estimated_tokens,
         messages,
@@ -194,42 +198,52 @@ pub(super) fn import_prepared_with_fallback(
     if let Some(intent) = resumed {
         resume_identity(&mut record, &mut note, intent);
     }
+    if let Some(successor) = &upgrade_successor
+        && let Some(saved) = upgrade_identity(services, &mut record, &mut note, successor)?
+    {
+        return Ok((saved, note));
+    }
     let paths = super::attached::session_paths(services, &record)?;
     product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
     let (source_id, source_key) = record
         .carried_forward_from()
         .ok_or_else(|| CliFailure::new("missing carry lineage"))?;
     let (source_id, source_key) = (source_id.to_owned(), source_key.to_owned());
-    refuse_carried_twice(services, &record, &source_id, &source_key, resumed)?;
+    if upgrade_successor.is_none() {
+        refuse_carried_twice(services, &record, &source_id, &source_key, resumed)?;
+    }
     record.validate_for_store().map_err(CliFailure::new)?;
-    let mut config = import_host_config(services, record, root_fallback, &mut history, &mut note)?;
     let profile = profile.or(document_profile);
-    keep_source_profile(&paths, &mut config, profile.as_ref(), &mut note);
+    if upgrade_successor.is_some() {
+        let (_, selected) = successor_profile(&paths, profile.as_ref()).map_err(CliFailure::new)?;
+        record.root_profile = Some(plakous_hosted::sessions::RootProfile {
+            root_template: selected.root.clone(),
+            working_set: selected.working_set.clone(),
+        });
+    }
+    let mut config = import_host_config(services, record, root_fallback, &mut history, &mut note)?;
+    if upgrade_successor.is_none() {
+        keep_source_profile(&paths, &mut config, profile.as_ref(), &mut note);
+    }
     config.seed_history = Some(history);
     let line = seed_line(services, carry.is_some(), &source_id, &source_key);
     if let (Some(carry), plakous_hosted::agent::SeededLine::Continue(source)) = (&carry, &line) {
         write_ahead(&mut config, carry, *source)?;
     }
     config.seed_line = Some(line);
+    if upgrade_successor.is_some() {
+        config
+            .store
+            .save(&mut config.session)
+            .map_err(CliFailure::new)?;
+    }
     let created = product_host::create_seeded_session_with_preflight(config, move |window| {
-        let capacity =
-            super::attached::carry_capacity_from_window(window, estimated_tokens, messages);
-        let message = capacity.warning().unwrap_or_else(|| {
-            if capacity.admitted_input.is_none() {
-                "destination window unknown; carry will be checked at first prompt".to_owned()
-            } else {
-                String::new()
-            }
-        });
-        if !message.is_empty() {
-            writeln!(
-                io::stderr(),
-                "warning: {}",
-                crate::cli_output::safe_terminal_block(&message)
-            )
-            .map_err(|_| CliFailure::new("stderr failed"))?;
-        }
-        Ok(())
+        import_capacity(
+            window,
+            estimated_tokens,
+            messages,
+            upgrade_successor.is_some(),
+        )
     })?;
     if let Some(error) = &created.completion_error {
         note.push_str(&format!(
@@ -252,6 +266,64 @@ pub(super) fn import_prepared_with_fallback(
         );
     }
     Ok((record, note))
+}
+
+fn import_capacity(
+    window: plakous::sessions::SessionInputWindow,
+    estimated_tokens: u64,
+    messages: usize,
+    strict: bool,
+) -> CliResult<()> {
+    let capacity = super::attached::carry_capacity_from_window(window, estimated_tokens, messages);
+    if strict {
+        crate::carry::upgrade::require_capacity(&capacity)?;
+        return Ok(());
+    }
+    let message = capacity.warning().unwrap_or_else(|| {
+        if capacity.admitted_input.is_none() {
+            "destination window unknown; carry will be checked at first prompt".to_owned()
+        } else {
+            String::new()
+        }
+    });
+    if !message.is_empty() {
+        writeln!(
+            io::stderr(),
+            "warning: {}",
+            crate::cli_output::safe_terminal_block(&message)
+        )
+        .map_err(|_| CliFailure::new("stderr failed"))?;
+    }
+    Ok(())
+}
+
+fn upgrade_identity(
+    services: &crate::shell::services::Services,
+    record: &mut product_sessions::SessionRecord,
+    note: &mut String,
+    successor: &str,
+) -> CliResult<Option<product_sessions::SessionRecord>> {
+    let old_id = record.id.clone();
+    record.id = successor.to_owned();
+    record.node = product_sessions::SessionNode::genesis(successor);
+    record.create_operation_id = format!("plak:create:{successor}");
+    *note = note.replace(&old_id, successor);
+    match services.session_records()?.load(successor) {
+        Ok(saved) => {
+            if saved.carried_forward_from() != record.carried_forward_from() {
+                return Err(CliFailure::new(
+                    "host upgrade successor identity conflicts with an existing record",
+                ));
+            }
+            if saved.plakous_locator.is_some() {
+                return Ok(Some(saved));
+            }
+            *record = saved;
+        }
+        Err(error) if error == "session not found" => {}
+        Err(error) => return Err(CliFailure::new(error)),
+    }
+    Ok(None)
 }
 
 fn project_imported_session(

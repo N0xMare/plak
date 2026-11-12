@@ -147,7 +147,7 @@ impl CookieKey {
     }
 
     /// The stored key, `None` when the shelf holds none.
-    fn load(paths: &PlakPaths) -> CliResult<Option<Self>> {
+    pub(super) fn load(paths: &PlakPaths) -> CliResult<Option<Self>> {
         let stored =
             crate::home::secrets::read_shelf_secret(paths, SecretShelf::Web, COOKIE_KEY_NAME)
                 .map_err(CliFailure::new)?;

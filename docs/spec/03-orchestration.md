@@ -4050,6 +4050,15 @@ reads as a loss. `/reload` hands off a running root turn and running or
 parked sub-agents when it resumes the same session; it still refuses while
 background processes run (chapter 02 §5.1).
 
+The host's settled cross-key upgrade (chapter 02 §4.6) first pauses client
+admissions and joins these releases, including already accepted mailboxes,
+then rechecks quiescence before exporting under source branch leases. It may
+reopen the old directory after a failed preparation. This operation carries
+settled roots as new lines, not live tree custody: old children remain inert
+references and cannot be resumed in the successor. Same-key upgrade remains
+the planned handoff above, with its existing once-only continuation law.
+Runner transfer rules and the embedded daemon-process refusal are unchanged.
+
 **Stops.** Every interrupt intent records its cause: a parent's
 `interrupt_agent` records `parent`, the operator's interrupt of a node
 `operator`, the root's interrupt reaching its descendants `cascade`, and an

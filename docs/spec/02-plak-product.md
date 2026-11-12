@@ -1652,7 +1652,45 @@ user whose directory and `plak` are not group- or world-writable are used.
 Without such a snapshot the incompatible-session refusal above stands. When no
 snapshot exists, a paid compaction fallback is not offered.
 
+**Host-owned settled carry.** `plak host upgrade --expect-binary <id>` uses
+this same v12 producer and importer, not a database copy or live-tree export
+(§4.6). The local settled-root slice carries the newest unarchived record of
+each tree, across the whole home rather than the directory's row limit.
+Archived roots remain in their original key. A root with no canonical runtime,
+an unsettled submission/workflow, a running or held turn, a live/sealing child,
+a held child continuation, an in-flight workspace operation, or nonterminal
+daemon jobs blocks cross-key carry. **Remote-placed roots are refused before
+drain in this slice**, with an old-build inspection/drain remedy. This is not
+live migration and does not satisfy the remote-root upgrade prerequisite.
+
+Carried roots start new agent lines and retain committed named state, portable
+conversation, bounded transcript, generated title and paused queued text under
+the ordinary carry law. Finished children and unresolved source facts remain
+inert references; their tree, candidates, job registry, leases and continuation
+authority are not imported or revived. Queued images and provider replay are
+not transported, and historical prompts/tools are never re-executed.
+
+Version-1 private ownership receipts under `host/upgrades/<operation>/` name
+source instance/key/binary/executable, destination identity, monotonically
+ordered operation sequence, original host argv, export digests and reserved
+successor IDs. They carry no session encodings. Imports use the reserved product
+ID and create operation, with a write-ahead target record: retry finishes that
+same seed. Prepared or aborted seeds cannot open and are not served as ordinary
+directory entries. Before source surrender the source remains authoritative;
+an interrupted preparation is withdrawn and the old host is restored. Aborted
+seeds remain non-authoritative, including after a later successful attempt.
+
+A committed receipt simultaneously fences the source tree's records against
+reopen and authorizes its imported successors. After this boundary there is no
+fallback to the old owner: startup and retry follow the recorded destination.
+The destination acknowledges once its host endpoints and startup context are
+prepared. A lost acknowledgement never creates another successor or replays
+input; the same upgrade invocation reports the existing mappings. Source stores,
+exports and executable remain available for reference, not automatic deletion.
+Keep both installed snapshots and their sidecars through acknowledged success.
+
 #### 2.5.2 Session lifecycle: rename, archive, delete
+
 
 Session lifecycle metadata is home-local. A nullable `title_override` sets or
 clears the operator's label without changing the generated `title`, history or
@@ -5329,6 +5367,56 @@ does not inherit another connection's pending answers.
   with a count of the rest; never a cookie, the key, or a frame.
 
 ### 4.6 `plak host`
+
+`plak host upgrade --expect-binary <id> [--wait <seconds>]` is an explicit
+same-user operator action, invoked using the destination executable and its own
+binary ID. It discovers exactly one live source host across keys, then echoes
+that host's key and instance on its private upgrade control socket. Missing or
+older unsupported coordinators refuse without signalling or stopping anything.
+The source independently hashes the destination image and probes its host
+capability, key, import versions and configuration. Cross-key capacity and
+credential probes must give a usable known input window; an insufficient or
+unknown window refuses rather than warning and surrendering. No credential
+renewal or paid request is used to obtain a native-login verdict.
+The source retains resolved service arguments, not a working-directory-relative
+invocation. Destination service preflight parses those arguments and verifies
+web access settings, UI/CSP assets and any existing cookie key without binding
+a listener or creating a key. A known service-configuration failure refuses
+before draining sessions.
+
+A same-key upgrade uses planned handoff of the same sessions, not export/import.
+Its exact-reopen probe refuses known binding/configuration/credential changes;
+an unfinished-turn verdict retains the existing planned-handoff recovery law.
+A changed local-runner protocol refuses before handoff. There is no promise to
+preserve jobs across incompatible worker protocols.
+
+Cross-key upgrade is the local **settled-root** operation of §2.5.1. Without
+`--wait`, blockers are returned before stopping admissions, as a list with
+session ID, closed kind and detail. The optional wait is bounded to 3600 seconds
+and closes new client and standalone-writer admissions while work settles;
+timeout restores them without surrender. Capacity is verified before draining.
+The paused host joins resident planned handoffs to persist already accepted
+mailboxes, then rechecks settlement and holds source branch leases while the
+old producer exports. This second check catches input accepted just before
+the pause. A failed preparation restores the old directory's admissions;
+released old sessions can be attached again under normal handoff recovery.
+No shell stop-then-import sequence or client-owned runtime performs this work.
+
+The destination imports only dormant local seeds before the commit. A commit
+or acknowledgement lost to process failure is resolved from receipts before
+serving either side. Restarting with the destination executable after a
+precommit crash restores the retained source executable; after commit it can
+only start the destination. An executable/configuration failure after commit
+requires repairing and retrying that destination, not reopening the source.
+`host connect --stdio` follows recorded successor keys, and attaching a carried
+root (or its full former session UUID) receives the existing `moved` refusal
+with its current root address. Children receive no revival alias. Bare public
+TUI discovery keeps its current-key attach-or-embedded rule.
+
+Client `/reload` still replaces only the client. It does not run this command,
+read ownership receipts, acquire custody or resend an ambiguously accepted
+submission. The upgrade command reports success only after destination
+acknowledgement; a timeout names an unknown outcome and the retry remedy.
 
 Native login, introduced in protocol 7 (current client protocol 9), runs in
 a dedicated account-service worker, never the

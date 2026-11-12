@@ -527,13 +527,16 @@ impl HostSessions<PlakExtension> for ProductSessions {
             .services
             .session_records()
             .map_err(|failure| failure.message().to_owned())?;
-        let entries = self.with_product(|store| {
+        let mut entries = self.with_product(|store| {
             store.directory_filtered(workspace.map(Path::new), runner, include_archived)
         })?;
         let paths = self
             .services
             .paths()
             .map_err(|failure| failure.message().to_owned())?;
+        let withheld = crate::carry::upgrade::receipt::withheld_targets(paths)
+            .map_err(|error| error.message().to_owned())?;
+        entries.retain(|entry| !withheld.contains(&entry.id));
         let records = entries
             .iter()
             .map(|entry| store.load(&entry.id).ok())
@@ -601,6 +604,16 @@ impl HostSessions<PlakExtension> for ProductSessions {
 
     fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
         self.with_product(|store| store.head_of_tree(&node.tree_id))
+    }
+
+    fn successor_node(&self, node: &NodeAddress) -> Result<Option<NodeAddress>, String> {
+        crate::carry::upgrade::receipt::successor_node(
+            self.services
+                .paths()
+                .map_err(|error| error.message().to_owned())?,
+            node,
+        )
+        .map_err(|error| error.message().to_owned())
     }
 
     fn open(&self, session: &str) -> CliResult<OpenedSession<PlakExtension>> {

@@ -2207,8 +2207,8 @@ running interactive session to reload onto the installed build (chapter 02
   `/reload` replaces only the client, even with running
   processes; embedded reload's process refusal is unchanged. A persistent
   build-mismatch notice names both builds and the shared host-level remedy:
-  "send SIGTERM to the plak host process, or run
-  `systemctl --user restart plak-host.service` if it runs as the installed unit",
+  "run the installed build's `plak host upgrade --expect-binary <id>` with its
+  binary id",
   without granting the TUI
   authority to restart the host. A request that replaces one the host has not yet taken gives the replaced one
   a `superseded` outcome. Outcomes nobody collected are pruned after seven
@@ -2231,6 +2231,31 @@ running interactive session to reload onto the installed build (chapter 02
   wants agents to restart its sessions is not asked.
 
 ### 4.7 The host socket is a same-user local channel
+
+An explicit `plak host upgrade --expect-binary <id>` is operator authority,
+not a frontend reload request or a browser capability. Its separate control
+socket is `host/upgrade.sock`, mode 0600 under the owned private host directory;
+the serving process holds the home guard and rejects other-user peers before
+reading a bounded control frame. Requests echo the source instance and key.
+The source hashes the absolute destination executable independently, and the
+destination's probes and importer must agree on its exact binary and key.
+Nothing is selected through a client role, relative executable, shell string
+or arbitrary source-store path.
+
+Ownership receipts are private bounded regular files opened without following
+links, atomically published and synced. Their directories and operation IDs
+are validated; corrupt or ambiguous receipts never grant execution authority.
+They contain identities and export digests, not another session carrier.
+Prepared/aborted targets cannot execute; source records are fenced only by a
+committed surrender. The host pause and an exclusive home admission guard
+exclude new client and embedded/headless writes during preparation; ordinary
+standalone writers hold that guard shared before construction. The joined
+handoff drains accepted mailboxes before the final quiescence check. A crash
+before commit leaves source authority intact; after commit recovery follows
+the destination receipt and never falls back to source execution. Same-user
+control files are not a boundary against the home owner's deliberate edits.
+Remote-placed roots are refused before drain by the local settled-root slice.
+Embedded daemon-held-process refusals remain in force.
 
 Protocol-7 console writes trust transport-verified same-user socket peers by
 default, independently of `web.*`; they still enforce consent, exact targets,

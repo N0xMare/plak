@@ -1759,3 +1759,4 @@ mod requests;
 mod runner;
 mod singleton;
 pub(crate) mod sweep;
+mod upgrade;

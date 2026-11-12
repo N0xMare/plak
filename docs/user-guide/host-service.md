@@ -69,16 +69,47 @@ and only HOME and the user-manager runtime-directory and bus variables.
 
 ## Upgrade, reload and logs
 
-Install a tested matching snapshot, then restart the host:
+Install a tested matching snapshot. For a host already supporting the upgrade
+coordinator, invoke the destination build with its binary ID (shown by
+`plak version`):
 
 ```sh
 just install maintainer
-systemctl --user restart plak-host.service
+plak version
+plak host upgrade --expect-binary <id>
 systemctl --user status plak-host.service
 journalctl --user -u plak-host.service -f
 ```
 
 Use `just install release` instead for a qualified release-flavor source build.
+Keep the old and new snapshots, including sidecars, until the command confirms
+success. Installation does not itself replace the running host.
+
+Same-key upgrade uses planned handoff and the existing session identities.
+Cross-key upgrade in this first slice supports **settled local roots only**.
+Let turns, children, workspace operations and daemon jobs finish; resolve held
+work first. `--wait 60` closes admissions while waiting up to 60 seconds and
+restores them on timeout. Unsupported destination/configuration/capacity
+refusals leave the old owner authoritative. Remote-placed roots are refused
+before drain: this slice is not a remote-host/runner upgrade procedure. A source
+build without the coordinator is refused, never silently stopped.
+
+The command prints source-to-successor session IDs. Cross-key successors are
+new agent lines with committed named state, conversation, generated title and
+paused queued text. Explicit title overrides and queued images do not survive.
+Children, candidates and live jobs are not moved; source children remain inert
+references and cannot be revived in the new root. Workspace files stay in place.
+No historical prompt or tool is replayed.
+
+If interrupted, retry the same destination command and expected binary ID.
+Before surrender, recovery withdraws the preparation and restores the retained
+old host; retry then starts a new attempt. After surrender, the old records
+cannot reopen: repair the destination if needed and recover only through its
+receipts. A lost success answer reports the existing successors, not another
+import. Do not delete or edit `host/upgrades` to force an old owner to resume.
+Client reload remains separate and never performs this operation or resends
+ambiguously accepted input.
+
 For a UI-only deployment, replace the UI files and use
 `systemctl --user reload plak-host.service`. Reload sends SIGUSR1 and keeps
 sessions running; SIGTERM and SIGHUP instead perform a planned host handoff.

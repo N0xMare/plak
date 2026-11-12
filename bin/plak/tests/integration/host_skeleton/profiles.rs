@@ -104,7 +104,7 @@ fn receive_application(client: &mut Client) -> Result<Application, String> {
     }
 }
 
-fn wait_idle(client: &mut Client, session: &str) {
+pub(super) fn wait_idle(client: &mut Client, session: &str) {
     let deadline = std::time::Instant::now() + WAIT;
     loop {
         let rows = client.rows(20);

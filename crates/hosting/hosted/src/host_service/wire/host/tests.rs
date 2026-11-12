@@ -2790,6 +2790,29 @@ fn a_closed_host_opens_and_creates_nothing() {
     assert!(fake.0.creates.lock().unwrap().is_empty());
 }
 
+#[test]
+fn a_host_upgrade_pause_refuses_new_work_and_drop_restores_the_old_owner() {
+    let (host, fake) = host(&["s1"]);
+    let out = Out::default();
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    let pause = host.pause_admissions().unwrap();
+    assert!(host.pause_admissions().is_err());
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    assert!(matches!(
+        outcome(&out.take(), 1),
+        Outcome::Refused(RequestRefusal::SessionUnavailable { .. })
+    ));
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
+    drop(pause);
+    request(&mut connection, 2, Op::Attach { node: node("s1") });
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+}
+
 fn binding(session: &str) -> SessionObservation<Core> {
     SessionObservation::Binding {
         session_id: Some(session.to_owned()),

@@ -257,8 +257,10 @@ with the host or its daemon and do not refuse a hand reload. If the host
 stops before the replacement client connects, reload refuses with a
 start-host-and-resume remedy; it never silently embeds and takes custody.
 A persistent, non-blocking notice names the host and installed builds when
-their binary identities differ. Restart the host unit, or send the foreground
-host SIGTERM and start it again, to move it onto the installed build. The TUI never
+their binary identities differ. Use the installed build's
+`plak host upgrade --expect-binary <id>` with its binary ID to move the host.
+The initial cross-key slice requires settled local roots and refuses remote
+placements; see the host-service guide. The TUI never
 restarts the host itself. A requested `plak session reload --expect-binary`
 receives an immediate local refusal explaining that this session runs in
 `plak host`: restart the host to move its sessions to another build. This

@@ -27,6 +27,12 @@ use crate::home::paths::PlakPaths;
 /// bump of one of these four versions.
 #[must_use]
 pub fn state_key() -> String {
+    #[cfg(feature = "test-hooks")]
+    if let Ok(key) = std::env::var("PLAK_TEST_STATE_KEY")
+        && crate::carry::upgrade::state_key_valid(&key)
+    {
+        return key;
+    }
     format!(
         "r{}.e{}.p{}.t{}",
         plakous::sessions::RUNTIME_STORE_SCHEMA_VERSION,

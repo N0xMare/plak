@@ -213,6 +213,7 @@ them on 0.0.2 or start new ones. 0.0.2 state is left untouched for the 0.0.2 bin
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **10** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **22**, disposable, never recovery authority |
 | Session export document | Plak | version **12** (adds the session's runner and profile), imports **12** and **11** |
+| Host-upgrade ownership receipt | Plak | version **1**, outside state keys; operation identities, export digests and source/successor mappings only |
 
 Tree schema 10 adds the node's line, epoch and runner placement, successor
 epochs, fork provenance, runner ancestors and the tree custody record (chapter
@@ -237,6 +238,11 @@ state, the session's runner and its profile, not tree seal outcomes. Its
 history preserves exact account/model replay scope. The v11 importer preserves
 named state and imports onto the local runner under the home default profile;
 v10 and older are refused. Export v12 is this build's document.
+
+Host-upgrade receipts do not carry history, bindings, topology or job registries.
+They coordinate the unchanged export carrier and record surrender/reconnect
+authority; no destination opens the source key's databases (chapter 02 §4.6).
+Their introduction changes no state-key component or export encoding.
 
 There are no released persisted-format obligations. Each store has exactly one
 supported version, and nothing is migrated. The session export document is the

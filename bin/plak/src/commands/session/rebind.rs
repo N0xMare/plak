@@ -26,6 +26,7 @@ pub(crate) fn rebind_document(
     import_prepared_with_fallback(
         services,
         PreparedImport {
+            upgrade_successor: None,
             carried,
             estimated_tokens,
             messages,

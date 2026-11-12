@@ -277,6 +277,10 @@ impl CarryDocument {
         (&self.source.session_id, &self.source.state_key)
     }
 
+    pub(crate) fn read_digest(&self) -> Option<&str> {
+        self.local_digest.as_deref()
+    }
+
     /// The workspace the exported session belonged to.
     pub(crate) fn workspace_root(&self) -> &Path {
         &self.workspace_root

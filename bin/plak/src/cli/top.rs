@@ -361,6 +361,21 @@ impl TopCommand {
                 ..crate::command::HostCommand::default()
             })),
             Self::Host {
+                action:
+                    Some(HostAction::Upgrade {
+                        expect_binary,
+                        wait,
+                    }),
+                ..
+            } => Ok(Command::HostUpgrade {
+                expect_binary,
+                wait: std::time::Duration::from_secs(wait),
+            }),
+            Self::Host {
+                action: Some(HostAction::UpgradeImport { receipt }),
+                ..
+            } => Ok(Command::HostUpgradeImport { receipt }),
+            Self::Host {
                 action: None,
                 web,
                 ui,
@@ -378,6 +393,17 @@ impl TopCommand {
             Self::Wire {
                 action: WireAction::Schema,
             } => Ok(Command::WireSchema),
+            Self::Version {
+                host_upgrade_probe: true,
+                host_upgrade_service,
+                ..
+            } => Ok(Command::HostUpgradeProbe {
+                service: host_upgrade_service,
+            }),
+            Self::Version {
+                host_upgrade_capacity: Some(path),
+                ..
+            } => Ok(Command::HostUpgradeCapacity { path }),
             Self::Version {
                 write_binary_manifest: Some(directory),
                 ..

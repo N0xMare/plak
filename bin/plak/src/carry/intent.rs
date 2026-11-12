@@ -99,6 +99,7 @@ pub(crate) fn resume(
     note: &mut Option<String>,
 ) -> CliResult<SessionRecord> {
     let mut notes = note.take().into_iter().collect::<Vec<_>>();
+    super::upgrade::receipt::ensure_open(services.paths()?, &record)?;
     if record.archived {
         return Err(CliFailure::new(
             "session_archived: unarchive this session before settling a carry",
@@ -128,6 +129,7 @@ pub(crate) fn resolve_open(
     let mut record = record;
     let mut notes = Vec::new();
     for _ in 0..MAX_FOLLOWED {
+        super::upgrade::receipt::ensure_open(services.paths()?, &record)?;
         if record.archived {
             return Err(CliFailure::new(
                 "session_archived: unarchive this session before settling a carry",

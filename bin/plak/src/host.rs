@@ -20,6 +20,7 @@ pub(crate) mod send;
 mod sessions;
 mod socket;
 mod starter;
+mod upgrade;
 use crate::terminal_registry as terminals;
 
 #[cfg(test)]
@@ -52,6 +53,14 @@ fn host_read_limits() -> plakous_hosted::host_service::wire::HostReadLimits {
 
 pub(crate) fn connect_stdio(services: &Services, auto_start: bool) -> CliResult<ProcessOutcome> {
     bridge::connect(services.paths()?, auto_start)
+}
+
+pub(crate) fn upgrade(
+    services: &Services,
+    expect_binary: &str,
+    wait: Duration,
+) -> CliResult<ProcessOutcome> {
+    upgrade::request(services, expect_binary, wait)
 }
 
 fn startup_runtime() -> CliResult<(tokio::runtime::Runtime, tokio::signal::unix::Signal)> {
@@ -88,6 +97,7 @@ pub(crate) fn run_host_command(
 }
 
 fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOutcome> {
+    let host_arguments = Arc::new(upgrade::host_argv(command)?);
     // Arm reload before any startup I/O, even for a control-only host.
     let (runtime, reload) = startup_runtime()?;
     // A stop that arrives during the start still ends the
@@ -99,12 +109,20 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
     let (home_lock, lock) = lock::HostLock::take_home(paths, &binary)?;
+    if let Some(replacement) = upgrade::startup_replacement(paths)? {
+        drop(lock);
+        drop(home_lock);
+        runtime.shutdown_timeout(Duration::from_secs(1));
+        return replacement.exec(paths);
+    }
     crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     let environment = environment::HostEnvironment::capture();
     let entered = runtime.enter();
     let mut bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
+    let upgrade_listener = upgrade::bind(paths)?;
     drop(entered);
+    let restart_services = services.clone();
     let (services, terminals) = terminals::TerminalRegistry::compose(services, host_generation())?;
     let (services, local) = runner::host::prepare(&services, None)?;
     let sessions = sessions::ProductSessions::new(
@@ -118,36 +136,23 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     let console_switches = sessions.console_switches();
     let host = SessionHost::new(sessions, binary.clone(), terminals.generation());
     terminals.serve(&host, runtime.handle())?;
-    let mut idle_reload = None;
-    let web = if let Some(args) = &command.web {
-        let bound_web = runtime.block_on(crate::web::WebEndpoint::bind(
-            &services,
-            args,
-            Arc::clone(&host),
-            stop,
-            reload,
-            console_switches,
-        ));
-        match bound_web {
-            Ok(endpoint) => {
-                eprintln!("plak host: web on {}", endpoint.listener());
-                Some(endpoint)
-            }
-            Err(failure) => {
-                bound.remove();
-                return Err(failure);
-            }
+    let (web, idle_reload) = match bind_web(
+        &runtime,
+        &services,
+        command,
+        &host,
+        stop,
+        reload,
+        console_switches,
+    ) {
+        Ok(endpoint) => endpoint,
+        Err(failure) => {
+            bound.remove();
+            return Err(failure);
         }
-    } else {
-        idle_reload = Some(runtime.spawn(async move {
-            let mut reload = reload;
-            while reload.recv().await.is_some() {
-                eprintln!("plak host: no UI build to reload");
-            }
-        }));
-        None
     };
     runner::host::start(&services, local, &environment, &runtime);
+    upgrade::acknowledge(services.paths()?)?;
     crate::shell::catalog_refresh::hook(services.paths()?.clone(), None)(None);
     eprintln!(
         "plak host: serving on {} (host {}, instance {}); tools get {}",
@@ -173,15 +178,22 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     // The web endpoint serves beside the control socket and stops with it.
     let web = web.map(|web| runtime.spawn(web.serve()));
     let idle = (command.start == crate::command::HostStart::Detached).then(idle::IdleExit::default);
-    runtime.block_on(bound.serve(&host, move || stop.stopped(), idle, scanning));
-    reload_requests.abort();
-    let _ = runtime.block_on(reload_requests);
-    if let Some(web) = web {
-        let _ = runtime.block_on(web);
-    }
-    if let Some(reload) = idle_reload {
-        reload.abort();
-    }
+    let upgrades = upgrade::Coordinator::start(
+        &runtime,
+        upgrade_listener,
+        &host,
+        &services,
+        Arc::clone(&host_arguments),
+    );
+    let pending = upgrades.pending();
+    runtime.block_on(bound.serve(
+        &host,
+        move || stop.stopped() || upgrade::has_ready(&pending),
+        idle,
+        scanning,
+    ));
+    let ready = upgrades.stop(&runtime, services.paths()?);
+    stop_listeners(&runtime, reload_requests, web, idle_reload, ready.is_some());
     let stopping = Instant::now();
     // The socket goes first, so no client reaches a host that is handing
     // its sessions off, and before the lock: a host that takes the lock
@@ -198,7 +210,61 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     drop(lock);
     runtime.shutdown_timeout(Duration::from_secs(1));
     drop(home_lock);
-    Ok(ProcessOutcome::Success)
+    upgrade::replace(ready, &restart_services, command, stop, &host_arguments)
+}
+
+fn stop_listeners(
+    runtime: &tokio::runtime::Runtime,
+    reload_requests: tokio::task::JoinHandle<()>,
+    web: Option<tokio::task::JoinHandle<()>>,
+    idle_reload: Option<tokio::task::JoinHandle<()>>,
+    upgrading: bool,
+) {
+    reload_requests.abort();
+    let _ = runtime.block_on(reload_requests);
+    if let Some(web) = web {
+        if upgrading {
+            web.abort();
+        }
+        let _ = runtime.block_on(web);
+    }
+    if let Some(reload) = idle_reload {
+        reload.abort();
+    }
+}
+
+fn bind_web(
+    runtime: &tokio::runtime::Runtime,
+    services: &Services,
+    command: &HostCommand,
+    host: &Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
+    stop: crate::web::StopProbe,
+    reload: tokio::signal::unix::Signal,
+    switches: plakd_wire_types::console::ConfiguredSwitches,
+) -> CliResult<(
+    Option<crate::web::WebEndpoint>,
+    Option<tokio::task::JoinHandle<()>>,
+)> {
+    if let Some(args) = &command.web {
+        let endpoint = runtime.block_on(crate::web::WebEndpoint::bind(
+            services,
+            args,
+            Arc::clone(host),
+            stop,
+            reload,
+            switches,
+        ))?;
+        eprintln!("plak host: web on {}", endpoint.listener());
+        Ok((Some(endpoint), None))
+    } else {
+        let idle_reload = runtime.spawn(async move {
+            let mut reload = reload;
+            while reload.recv().await.is_some() {
+                eprintln!("plak host: no UI build to reload");
+            }
+        });
+        Ok((None, Some(idle_reload)))
+    }
 }
 
 fn hand_off(host: &SessionHost<crate::surface_protocol::PlakExtension>) {
