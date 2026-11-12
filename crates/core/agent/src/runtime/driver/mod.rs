@@ -304,8 +304,7 @@ impl Driver {
                 if self.recovery_gated {
                     return self.wait_recovery_gate().await;
                 }
-                self.cancel_queued().await?;
-                return Ok(());
+                return self.stop_without_active_root().await;
             };
             self.active_root = Some(command.clone());
             #[cfg(test)]
@@ -317,8 +316,7 @@ impl Driver {
                 )
                 .await?;
                 self.active_root = None;
-                self.cancel_queued().await?;
-                return Ok(());
+                return self.stop_without_active_root().await;
             }
             match command.shared.start() {
                 Ok(true) => {}
@@ -398,10 +396,22 @@ impl Driver {
                 return Err(error);
             }
             if self.shutdown.is_cancelled() {
-                self.cancel_queued().await?;
-                return Ok(());
+                return self.stop_without_active_root().await;
             }
         }
+    }
+
+    /// A stop with no active root (a shutdown, or an ingress whose last
+    /// sender is gone) settles the queue, then runs the due retention, so
+    /// whether its prune commits does not depend on when the stop landed
+    /// relative to the last terminal. A driver gated for recovery before or
+    /// while settling the queue writes nothing more and skips the prune.
+    async fn stop_without_active_root(&mut self) -> Result<(), AgentError> {
+        self.cancel_queued().await?;
+        if !self.recovery_gated {
+            self.retain_due_history_when_idle().await;
+        }
+        Ok(())
     }
 
     fn conversation(&self) -> ConversationView {

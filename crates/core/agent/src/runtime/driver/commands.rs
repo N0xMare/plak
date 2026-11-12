@@ -200,9 +200,7 @@ impl Driver {
                     }
                 }
                 () = std::future::ready(()), if self.retention_due.is_some() => {
-                    if let Some(turn_id) = self.retention_due.take() {
-                        self.retain_history_when_idle(turn_id).await;
-                    }
+                    self.retain_due_history_when_idle().await;
                 }
             }
             if self.recovery_gated {

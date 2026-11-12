@@ -1201,7 +1201,14 @@ After every successful terminal publication of a root or child turn, the
 runtime records retention due. It drains ready control ingress and starts
 queued roots first, and prunes its own branch best-effort only when idle,
 once at least 64 checkpoints are
-superseded. The owner remembers the horizon of its last prune receipt, seeded
+superseded. A shutdown of a driver with no active root settles its queued
+roots, then runs that due prune before the driver stops, so whether it commits
+does not depend on when the shutdown landed relative to the last terminal or a
+control the driver answered first. A closed control ingress stops it the same
+way. A driver gated for recovery, or one whose lease is lost or abandoned,
+still skips it.
+The stop then waits for that prune, which holds the lease gate and is bounded
+by the store operation deadline. The owner remembers the horizon of its last prune receipt, seeded
 at open from the horizon the store persisted for the branch (`LoadedBranch`
 carries it), and asks the store only when the revisions between that horizon
 and the prune frontier could number 64 (the head's parent, or for a Working head the lower of that and 64 revisions before the head), so most turns cost no store
