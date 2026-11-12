@@ -94,7 +94,8 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
-  test(placement_hold_cut_nonrunnable_resident_is_retired_before_or_after_instruction_preparation)
+  test(changes::tests::process_stops::)
+  | test(placement_hold_cut_nonrunnable_resident_is_retired_before_or_after_instruction_preparation)
   | test(placement_hold_cut_nudge_drain_keeps_owner_loss_debt_without_result_mail)
   | test(placement_hold_cut_parked_mail_and_late_reservation_wait_without_claim_or_turn)
   | test(placement_hold_cut_prepared_wake_binding_withdraws_unread_batch_on_release_and_stop)
@@ -378,7 +379,8 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(placement_hold_cut_nonrunnable_resident_is_retired_before_or_after_instruction_preparation)
+  test(changes::tests::process_stops::)
+  | test(placement_hold_cut_nonrunnable_resident_is_retired_before_or_after_instruction_preparation)
   | test(placement_hold_cut_nudge_drain_keeps_owner_loss_debt_without_result_mail)
   | test(placement_hold_cut_parked_mail_and_late_reservation_wait_without_claim_or_turn)
   | test(placement_hold_cut_prepared_wake_binding_withdraws_unread_batch_on_release_and_stop)

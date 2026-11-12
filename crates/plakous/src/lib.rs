@@ -1337,6 +1337,9 @@ pub mod tools {
     /// only line starts with.
     #[doc(hidden)]
     pub use plakous_tools::internal::JOB_TAIL_FRAGMENT;
+    /// Unsupported fixed Changes execution seam for official hosting.
+    #[doc(hidden)]
+    pub use plakous_tools::internal::changes;
     /// Unsupported preview-minimization seam for official observation and hosting.
     #[doc(hidden)]
     pub use plakous_tools::internal::preview as preview_redaction;

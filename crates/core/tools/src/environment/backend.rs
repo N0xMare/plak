@@ -1,5 +1,6 @@
 //! Sealed execution backends and bounded provider-neutral operations.
 
+pub(crate) mod changes;
 mod process_types;
 pub use process_types::{
     JoinedProcessCommand, JoinedProcessCursorPollResult, JoinedProcessInputDisposition,
@@ -433,6 +434,19 @@ pub trait ExecutionBackend: sealed::Sealed + Send + Sync + 'static {
     /// Returns immutable backend identity.
     fn identity(&self) -> &ExecutionBackendIdentity;
 
+    /// Fixed operator-only VCS reads; unsupported backends fail closed.
+    #[doc(hidden)]
+    fn workspace_changes(
+        &self,
+        _workspace: ExecutionWorkspace,
+        _request: changes::ChangesRequest,
+        _control: OperationContext,
+    ) -> ExecutionBackendFuture<changes::ChangesAnswer> {
+        Box::pin(std::future::ready(Ok(changes::ChangesAnswer::Refused(
+            changes::ChangesRefusal::VcsUnavailable,
+        ))))
+    }
+
     /// Resolves a value only for one exact configured non-credential binding.
     fn resolve_environment(
         &self,
@@ -487,6 +501,26 @@ pub trait ExecutionBackend: sealed::Sealed + Send + Sync + 'static {
 }
 
 impl ExecutionEnvironment {
+    /// Fixed operator-only VCS reads through the exact live backend.
+    #[doc(hidden)]
+    pub fn workspace_changes(
+        &self,
+        request: changes::ChangesRequest,
+        control: OperationContext,
+    ) -> ExecutionBackendFuture<changes::ChangesAnswer> {
+        if let Err(error) = self.verify_operation_backend() {
+            return ready_error(error);
+        }
+        if control.class() != OperationClass::Unkeyed || control.owner().is_some() {
+            return ready_error(invalid_request("changes requires an ownerless build read"));
+        }
+        self.operation_backend.workspace_changes(
+            ExecutionWorkspace::from_environment(self),
+            request,
+            control,
+        )
+    }
+
     /// Reads one slice of a job output file this environment's process service
     /// issued. A path lexically under the bound jobs root that this service
     /// does not hold issued is refused without I/O. Returns `None` for every

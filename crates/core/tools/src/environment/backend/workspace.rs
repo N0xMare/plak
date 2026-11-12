@@ -382,7 +382,7 @@ fn confined_link_errno(root: &fs::File, relative: &Path, flags: OFlags, errno: E
     link_errno(&parent, *final_name, flags, errno)
 }
 
-fn open_workspace_beneath(
+pub(super) fn open_workspace_beneath(
     workspace: &ExecutionWorkspace,
     relative: &Path,
     flags: OFlags,

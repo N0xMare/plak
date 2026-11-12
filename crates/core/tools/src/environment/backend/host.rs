@@ -63,6 +63,15 @@ impl HostExecutionBackend {
 impl sealed::Sealed for HostExecutionBackend {}
 
 impl ExecutionBackend for HostExecutionBackend {
+    fn workspace_changes(
+        &self,
+        workspace: ExecutionWorkspace,
+        request: super::changes::ChangesRequest,
+        control: OperationContext,
+    ) -> ExecutionBackendFuture<super::changes::ChangesAnswer> {
+        super::changes::execute(workspace, request, control)
+    }
+
     fn identity(&self) -> &ExecutionBackendIdentity {
         &self.identity
     }

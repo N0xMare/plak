@@ -13,6 +13,12 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
+/// Fixed operator Changes reads through the frozen execution backend.
+#[doc(hidden)]
+pub mod changes {
+    pub use crate::environment::changes::*;
+}
+
 pub use plakous_model::redaction as preview;
 
 /// The runner seam: a backend whose operations run on a runner, and the

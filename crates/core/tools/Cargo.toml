@@ -43,6 +43,7 @@ zeroize.workspace = true
 filedescriptor.workspace = true
 portable-pty.workspace = true
 rustix = { workspace = true, features = ["event", "fs", "process"] }
+tempfile.workspace = true
 tokio = { workspace = true, features = ["process"] }
 
 [dev-dependencies]

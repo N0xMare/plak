@@ -220,6 +220,13 @@ effects retains the existing reconciliation requirement.
 
 ### 2.1 File tools are path-contained
 
+Operator Changes reads are a separate fixed-query authority, not shell or
+file-tool requests. They exclude both the product home and the resolved
+`$XDG_STATE_HOME/plak` (or `$HOME/.local/state/plak`) in either direction on the
+execution machine, including repository toplevel, Git and common directories.
+Their worktree content identities use the same descriptor-relative no-follow,
+nonblocking regular-file opens as contained file reads (§2.6).
+
 Every workspace path a file or search tool names is lowered onto a
 **workspace-relative suffix** before I/O. A relative path must contain no
 `..`, root, or prefix component. An absolute path is accepted only when the
@@ -571,6 +578,41 @@ These are the known limits of the security model:
   the whole home directory, filesystem, or VM.
 
 ### 2.6 Plak's own git steps
+
+The operator Changes executor does **not** reuse the occupancy query executor.
+It performs only fixed status and single-entry worktree-versus-HEAD diff reads.
+Discovery has a workspace-parent ceiling; a containing repository is admitted
+only from explicitly supplied trusted placement metadata, after ancestor and
+protected-root validation. Canonical workspace, toplevel, Git and common
+directories are pinned and revalidated for every query. Later commands use
+explicit `GIT_DIR` and `GIT_WORK_TREE` and check `rev-parse --show-toplevel`;
+disagreeing `core.worktree`, symlinked metadata, nonempty `info/attributes` and
+object alternates are refused. Ancestor queries always carry a literal
+workspace pathspec, and every metadata result must stay beneath that workspace.
+
+Git must be at least 2.43 and pass a known-fixture empty-tree attribute-source
+probe; an unsupported version/build or `GIT_CLI_ENABLED=false` answers
+`vcs_unavailable`. The empty tree is never written into the user's repository.
+The child environment starts empty, retaining only PATH and fixed settings:
+system/global config disabled, fsmonitor off, hooks and attributes files at
+`/dev/null`, system attributes off, empty credential helper, all protocols
+disabled, quotePath false, no terminal prompt or askpass, empty-tree attributes,
+no lazy fetch, literal pathspecs and no optional locks. Diff also fixes
+`--no-ext-diff --no-textconv --ignore-submodules=all --no-renames`. No `jj`
+process runs: non-colocated repositories answer `vcs_unsupported`, and colocated
+repositories are labelled a Git view. Untracked entries are listed with
+porcelain v2 `-z --untracked-files=normal`, never diffed with `--no-index`.
+
+Each request has a five-second execution deadline. Byte-capped stdout/stderr
+pipes are drained incrementally, never spooled or read whole without a bound.
+Cap, deadline, cancellation and dropped futures kill the owned process group.
+Status is at most 2,000 entries and 256 KiB; a truncated result is a refusal,
+never clean. Diff rejects old, index or worktree inputs over 1 MiB before
+diffing and caps output at 256 KiB. Binary output is bounded numstat. Status
+returns repository, observed HEAD/index and per-entry content identities;
+before/after checks discard changing inputs with `conflict`, rather than
+splicing versions. These are observations for a host's opaque token map, not
+client-authorized paths or revisions.
 
 Mint, seal, adopt, unpin and unmint run `git` as Plak itself, against the
 operator's repository, so repository-controlled code must not run inside them.
@@ -2086,6 +2128,11 @@ the product home. Its authority is exactly the user's own:
   it is refused the intents that exec or hand off the host's build (§4.6).
 
 ## 5. Redaction
+
+Changes refusals expose categorical stop reasons, never raw Git stderr.
+Workspace content, patches and content identities are authorized operator
+data, not log or model-channel material. No secret redactor can preserve exact
+diff bytes while guaranteeing removal of secrets already in the workspace.
 
 Protocol-7 operator audit records safe action/account IDs and categorical
 outcomes, never API keys, authorize URLs, codes, paste bodies, frames or raw

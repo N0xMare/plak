@@ -3844,6 +3844,14 @@ never enables the feature and that `test-hooks` does.
 
 ## 3. Evidence classes
 
+The Changes executor's offline fixtures exercise stale worktree/index inputs,
+fixed HEAD comparison, binary/untracked/deleted/unborn cases, literal containing
+repository pathspecs, hostile filters and Git helpers, protected administrative
+directories, oversized inputs/output and entry counts. Serial process-stop
+fixtures verify byte-cap, deadline, cancellation and dropped-future group
+cleanup, including descendants retaining pipes. These tests never invoke `jj`
+or a provider, and production probes never write an object into the user's repo.
+
 Two classes of evidence exist. Each answers a different question, and neither
 substitutes for the other. Offline tests are never a substitute for live
 protocol or model behavior, and live observation is never a substitute for an

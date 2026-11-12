@@ -56,6 +56,10 @@ one cross-build carrier (a build imports its own and the previous version).
   once and half-close writes while retaining the receiver to drain replies and
   exact delivery dispositions, without stopping session work.
 
+- Add fixed, bounded read-only Changes execution: contained Git status and
+  worktree-versus-HEAD diff, revision preconditions, disabled repository helpers
+  and network/lazy fetch, and explicit refusals on unsafe repositories or limits.
+
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.
   Profile switches keep their recorded attachable root address, and a late
