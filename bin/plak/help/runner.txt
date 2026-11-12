@@ -2,7 +2,7 @@ plak runner — run tools on other machines
 
 USAGE:
   plak runner serve
-  plak runner connect --stdio
+  plak runner connect --stdio [--binary <id>]
   plak runner allow <host-id>
   plak runner ps [<name>]
   plak runner pair <name>
@@ -17,6 +17,12 @@ USAGE:
   a runner secret (read from a hidden prompt) in <home>/secrets/runner/: an MCP
   server with placement = "runner" reads its secret_env names from there,
   never from the host's plak secret store.
+
+  --binary selects an already installed immutable snapshot by its exact
+  12-digit binary ID, verifies its owned, non-shared-writable paths and image,
+  then execs its ordinary connect. Missing or unsafe images refuse with an
+  install remedy; it never downloads, moves links, rewrites config, or relaxes
+  native runner version/pairing checks. It does not adopt old-daemon jobs.
 
   On a host, pair <name> pairs this host with [runners.<name>] in config.toml:
   it runs plak runner allow there over ssh with strict options, binds to prove

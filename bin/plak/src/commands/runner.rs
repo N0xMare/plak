@@ -67,7 +67,7 @@ const START_WAIT: Duration = Duration::from_secs(10);
 pub(crate) enum RunnerCommand {
     Serve,
     ServeLocal,
-    Connect,
+    Connect { binary: Option<String> },
     Allow { host_id: String },
     Ps { name: Option<String> },
     Pair { name: String },
@@ -87,7 +87,7 @@ pub(crate) fn run(
     match command {
         RunnerCommand::Serve => runtime.block_on(serve(paths)),
         RunnerCommand::ServeLocal => runtime.block_on(serve_local(paths)),
-        RunnerCommand::Connect => {
+        RunnerCommand::Connect { binary: None } => {
             let bridged = runtime.block_on(connect(paths));
             // The bridge's stdin copy may still sit in a blocking read of
             // the host's input; waiting for it would keep stdout open after
@@ -95,12 +95,27 @@ pub(crate) fn run(
             runtime.shutdown_background();
             return bridged.map(|()| ProcessOutcome::Success);
         }
+        RunnerCommand::Connect { binary: Some(_) } => {
+            unreachable!("binary selection execs before runner runtime construction")
+        }
         RunnerCommand::Allow { host_id } => allow(paths, &host_id, stdout),
         RunnerCommand::Ps { name: None } => runtime.block_on(ps_local(paths, stdout)),
         RunnerCommand::Ps { name: Some(name) } => runtime.block_on(ps_remote(paths, &name, stdout)),
         RunnerCommand::Pair { name } => runtime.block_on(pair(paths, &name, stdout)),
     }?;
     Ok(ProcessOutcome::Success)
+}
+
+/// Execs the exact installed build before any runner or product-state setup.
+pub(crate) fn connect_binary(binary: &str) -> CliResult<ProcessOutcome> {
+    use std::os::unix::process::CommandExt as _;
+    let executable = crate::build_identity::installed_for_binary(binary)?;
+    let error = std::process::Command::new(executable)
+        .args(["runner", "connect", "--stdio"])
+        .exec();
+    Err(CliFailure::new(format!(
+        "runner_binary_exec_failed: {error}; reinstall the matching runner snapshot and retry --binary",
+    )))
 }
 
 /// `plak runner serve`: the daemon, in the foreground, until it is idle.

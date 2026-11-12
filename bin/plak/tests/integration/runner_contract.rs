@@ -20,6 +20,8 @@ use plakous::runner::protocol::{Bind, Refusal, VersionTriple};
 use plakous::runner::{ClientWindows, ConnectError, RunnerClient};
 use plakous::tools::runner::{RunnerCall, RunnerFailure, RunnerLink as _, RunnerVerb};
 
+mod binary;
+
 fn plak_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_plak"))
 }
@@ -55,8 +57,21 @@ async fn bridge(
     host_id: &str,
     version: VersionTriple,
 ) -> (Result<RunnerClient, ConnectError>, tokio::process::Child) {
-    let mut child = tokio::process::Command::new(plak_bin())
-        .args(["runner", "connect", "--stdio"])
+    selected_bridge(home, host_id, version, None).await
+}
+
+async fn selected_bridge(
+    home: &Path,
+    host_id: &str,
+    version: VersionTriple,
+    binary: Option<&str>,
+) -> (Result<RunnerClient, ConnectError>, tokio::process::Child) {
+    let mut command = tokio::process::Command::new(plak_bin());
+    command.args(["runner", "connect", "--stdio"]);
+    if let Some(binary) = binary {
+        command.args(["--binary", binary]);
+    }
+    let mut child = command
         .env("PLAK_TEST_STORAGE_CAPACITY", "available")
         .env("PLAK_HOME", home)
         .env("HOME", home)

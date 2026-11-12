@@ -9,9 +9,11 @@ use sha2::{Digest as _, Sha256};
 mod interactive;
 #[cfg(any(test, feature = "tui"))]
 pub(crate) use interactive::installed_executable;
+mod snapshot;
 #[cfg(feature = "tui")]
 pub(crate) use interactive::invocation_argv0;
 pub(crate) use interactive::newer_build_installed;
+pub(crate) use snapshot::installed_for_binary;
 
 pub(crate) const JJ_ENABLED: bool = cfg!(feature = "jj");
 

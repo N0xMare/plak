@@ -1037,9 +1037,13 @@ fn product_command_argv_matrix() {
         (&["runner", "connect", "--stdio"], |c| {
             matches!(
                 c,
-                Command::Runner(crate::commands::runner::RunnerCommand::Connect)
+                Command::Runner(crate::commands::runner::RunnerCommand::Connect { binary: None })
             )
         }),
+        (
+            &["runner", "connect", "--stdio", "--binary", "abcdef012345"],
+            |c| matches!(c, Command::Runner(crate::commands::runner::RunnerCommand::Connect { binary: Some(binary) }) if binary == "abcdef012345"),
+        ),
         (
             &["runner", "connect"],
             |c| matches!(c, Command::CommandHelp { command } if command == "runner"),

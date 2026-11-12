@@ -2719,6 +2719,23 @@ never a recovery fence and never needs a reopen.
 
 ### 3.1 Grammar
 
+`plak runner connect --stdio --binary <id>` selects an already installed
+immutable image before runner runtime or product-home setup. The ID is exactly
+twelve lowercase hexadecimal SHA-256 digits, not a source revision or state
+key. Search both installed maintainer/release roots (06 §6.1), only 64-hex
+snapshot directories, owned non-shared-writable install paths, regular executable
+images and matching safe install manifests. Verify the actual image hash too;
+an absent, unsafe or mismatched image refuses with an install-and-retry remedy
+before starting a daemon. Multiple safe cohorts of the same image select newest
+snapshot-directory modification time, breaking ties by path. Staging directories
+and links are not candidates. The selector execs the immutable executable's
+ordinary `runner connect --stdio` without forwarding `--binary`, preserving
+stdio and the caller environment. Its hello/bind keeps that image's exact
+protocol/revision/flavor, pairing and endpoint admission. It never downloads,
+updates links, rewrites config, adopts another daemon's jobs or relaxes versions.
+Without `--binary`, behavior is unchanged; missing selections never fall back to
+the current command. This adds no retention endpoint or cross-build exception.
+
 Hidden machine forms `version --reload-probe` and `version --export-version`
 report respectively a JSON reload verdict for the current workspace and the
 integer export version. The probe contains `state_key`, `export_versions`, and

@@ -711,6 +711,9 @@ enum RunnerAction {
         /// ssh runs).
         #[arg(long, action = ArgAction::SetTrue)]
         stdio: bool,
+        /// Select an already installed immutable runner binary before connecting.
+        #[arg(long, requires = "stdio")]
+        binary: Option<String>,
     },
     Allow {
         host_id: Option<String>,
@@ -745,9 +748,12 @@ impl RunnerAction {
             Self::Secret { action: None } => return help(),
             Self::Serve { local: false } => RunnerCommand::Serve,
             Self::Serve { local: true } => RunnerCommand::ServeLocal,
-            Self::Connect { stdio: true } => RunnerCommand::Connect,
+            Self::Connect {
+                stdio: true,
+                binary,
+            } => RunnerCommand::Connect { binary },
             // A bare leaf routes to the parent group's help.
-            Self::Connect { stdio: false }
+            Self::Connect { stdio: false, .. }
             | Self::Allow { host_id: None }
             | Self::Pair { name: None } => {
                 return help();

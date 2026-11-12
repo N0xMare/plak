@@ -606,8 +606,10 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ],
     # `plak runner connect` starts `plak runner serve` detached with a cleared
     # environment, asks the login shell for PATH once, bounded, and reads the
-    # macOS boot time for the daemon's boot id.
+    # macOS boot time for the daemon's boot id. Explicit --binary execs a
+    # verified installed image before constructing that runner runtime.
     ("plak", "src/commands/runner.rs"): [
+        ("std::process::Command", (("identifier", "executable"),)),
         ("std::process::Command", (("identifier", "executable"),)),
         ("std::process::Command", (("identifier", "shell"),)),
         ("std::process::Command", (("string", "sysctl"),)),

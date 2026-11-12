@@ -44,6 +44,11 @@ one cross-build carrier (a build imports its own and the previous version).
 - Publish `plak wire schema` as a supported command and attach target-specific
   JSON Schemas to releases.
 
+- Add `plak runner connect --stdio --binary <id>` to select and verify an
+  already installed immutable runner image without moving command links.
+  Unsafe, missing or mismatched snapshots refuse with an install remedy;
+  ordinary exact-triple and pairing admission remain unchanged.
+
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.
 

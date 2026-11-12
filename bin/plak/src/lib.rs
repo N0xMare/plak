@@ -470,6 +470,13 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         return wire_schema::print(&mut io::stdout().lock());
     }
 
+    if let Command::Runner(commands::runner::RunnerCommand::Connect {
+        binary: Some(binary),
+    }) = &command
+    {
+        return commands::runner::connect_binary(binary);
+    }
+
     if let Command::WriteBinaryManifest { directory } = &command {
         build_identity::write_binary_manifest(directory).map_err(|error| {
             CliFailure::new(format!("could not write binary manifest: {error}"))
