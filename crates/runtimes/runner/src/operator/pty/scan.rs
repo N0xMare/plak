@@ -38,7 +38,28 @@ pub(super) struct Identity {
 
 impl Identity {
     pub(super) fn capture_child(pid: u32) -> Result<Self, ()> {
-        let mut row = Self::capture(pid)?;
+        Self::from_child_capture(pid, Self::capture(pid))
+    }
+
+    pub(super) fn from_child_capture(pid: u32, captured: Result<Self, ()>) -> Result<Self, ()> {
+        let Ok(mut row) = captured else {
+            // Darwin can omit an already-exited child from ps before the first
+            // capture. Successful PTY spawn established setsid/pgid, and NOWAIT
+            // proves this is still our unreaped child, so its pid cannot be reused.
+            #[cfg(target_os = "macos")]
+            if child_exited(pid) {
+                return Ok(Self {
+                    pid,
+                    parent: std::process::id(),
+                    group: pid,
+                    session: pid.to_string(),
+                    started: String::new(),
+                    zombie: true,
+                    owned_child: true,
+                });
+            }
+            return Err(());
+        };
         if cfg!(target_os = "macos") && row.zombie && row.session.is_empty() && child_exited(pid) {
             // Successful PTY spawn already completed setsid before exec. Darwin
             // no longer exposes that SID through getsid once the child is a zombie.
@@ -226,6 +247,15 @@ impl SessionCleanup {
     pub(super) fn leader_anchored(&self, rows: &[Identity]) -> bool {
         if self.leader.session != self.leader.pid.to_string() {
             return false;
+        }
+        if cfg!(target_os = "macos")
+            && self.leader.owned_child
+            && self.leader.started.is_empty()
+            && child_exited(self.leader.pid)
+        {
+            // No scan identity existed at initial capture. This anchor is valid
+            // only while waitid proves the direct child has not been reaped.
+            return true;
         }
         if let Some(row) = rows.iter().find(|row| row.pid == self.leader.pid) {
             if row.started != self.leader.started {

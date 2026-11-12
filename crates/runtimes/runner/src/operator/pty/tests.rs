@@ -111,11 +111,17 @@ fn operator_pty_zombie_anchor_keeps_linux_scan_and_checks_unreaped_child_on_darw
     let mut command = CommandBuilder::new("/bin/sleep");
     command.arg("0.01");
     let mut child = pair.slave.spawn_command(command).unwrap();
-    let identity = Identity::capture_child(child.process_id().unwrap()).unwrap();
+    let pid = child.process_id().unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
-    while !scan::child_exited(identity.pid) {
+    while !scan::child_exited(pid) {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(5));
+    }
+    let identity = Identity::capture_child(pid).unwrap();
+    let missing = Identity::from_child_capture(pid, Err(()));
+    assert_eq!(missing.is_ok(), cfg!(target_os = "macos"));
+    if let Ok(missing) = &missing {
+        assert!(SessionCleanup::new(missing.clone()).leader_anchored(&[]));
     }
     let cleanup = SessionCleanup::new(identity.clone());
     assert_eq!(
@@ -131,6 +137,12 @@ fn operator_pty_zombie_anchor_keeps_linux_scan_and_checks_unreaped_child_on_darw
     );
     drop(pair);
     child.wait().unwrap();
+    if let Ok(missing) = missing {
+        assert!(
+            !SessionCleanup::new(missing).leader_anchored(&[]),
+            "reaping ends the direct-child anchor, never a remembered PID"
+        );
+    }
 }
 
 #[test]

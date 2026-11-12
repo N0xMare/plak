@@ -798,8 +798,10 @@ spawn established SID/PGID equal to its PID may retain the direct-child anchor,
 confirmed with waitid(WNOWAIT). Such a zombie is never used as live group
 membership evidence. A changed start identity still refuses, and Linux retains
 its full scanned SID/start match with no missing-row fallback. Fast-exiting PTY
-children use this same unreaped-child capture, rather than losing ownership
-before their first scan. Each stage
+children use this same unreaped-child capture even if already exited before
+their first scan and no row was captured: the successful PTY spawn and NOWAIT
+direct-child proof establish the anchor, which expires on reap. It never supplies
+live member evidence or permits a signal after reaping. Each stage
 deduplicates groups. KILL repeats for newly forked members before reaping the
 leader and proving absence twice. Live observation failures retry without
 closing shells; incomplete cleanup scans retry within the cleanup deadline,
