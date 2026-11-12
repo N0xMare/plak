@@ -40,7 +40,7 @@ plakous-host-protocol.workspace = true
 plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash", optional = true }
 tracing-subscriber.workspace = true
 plakous = { workspace = true, features = ["sessions-sqlite"] }
-nix.workspace = true
+nix = { workspace = true, features = ["signal"] }
 rusqlite = { workspace = true, features = ["hooks"] }
 rustix = { workspace = true, features = ["event", "fs", "process", "system", "termios", "time"] }
 # The TUI module's terminal stack: match Ratatui's current Crossterm backend so
