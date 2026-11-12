@@ -437,29 +437,30 @@ impl FileObservation {
 struct WorkspaceSnapshot {
     path: PathBuf,
     content: WorkspaceContentIdentity,
-    observation: FileObservation,
     bytes: Arc<[u8]>,
 }
 
+/// Recent read contents with their identities, so a resumed read whose bytes
+/// are unchanged skips rehashing the whole file.
 #[derive(Default)]
 pub(super) struct WorkspaceSnapshotCache {
     entries: VecDeque<WorkspaceSnapshot>,
 }
 
 impl WorkspaceSnapshotCache {
-    fn get(
-        &mut self,
-        path: &Path,
-        content: WorkspaceContentIdentity,
-        observation: FileObservation,
-    ) -> Option<Arc<[u8]>> {
-        let position = self.entries.iter().position(|entry| {
-            entry.path == path && entry.content == content && entry.observation == observation
-        })?;
-        let entry = self.entries.remove(position)?;
-        let bytes = Arc::clone(&entry.bytes);
-        self.entries.push_back(entry);
-        Some(bytes)
+    /// Whether `bytes` are exactly a snapshot of `path` with `content`. Only the
+    /// bytes prove it: a same-length rewrite inside one timestamp tick leaves
+    /// every metadata field unchanged.
+    fn holds(&mut self, path: &Path, content: WorkspaceContentIdentity, bytes: &[u8]) -> bool {
+        let Some(position) = self.entries.iter().position(|entry| {
+            entry.path == path && entry.content == content && *entry.bytes == *bytes
+        }) else {
+            return false;
+        };
+        if let Some(entry) = self.entries.remove(position) {
+            self.entries.push_back(entry);
+        }
+        true
     }
 
     fn insert(&mut self, snapshot: WorkspaceSnapshot) {
@@ -517,44 +518,41 @@ pub(super) fn read_workspace_sync(
         .saturating_add(request.max_bytes())
         .min(metadata.len());
     let opened = FileObservation::capture(&metadata);
-    let expected = request.expected_content();
-    let cached = expected.and_then(|content| lock(snapshots).get(request.path(), content, opened));
-    let (content, complete_bytes) = if let Some(bytes) = cached {
-        (
-            expected.ok_or_else(|| conflict_error("workspace read cache was inconsistent"))?,
-            bytes,
-        )
-    } else {
-        let mut reader = CancellationReader::new(&mut file, control);
-        let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or(0));
-        reader.read_to_end(&mut bytes).map_err(|_| {
-            if reader.cancelled {
-                backend_error(
-                    ExecutionBackendErrorKind::Cancelled,
-                    "execution environment operation was cancelled",
-                )
-            } else {
-                io_error("workspace file read failed")
-            }
-        })?;
-        let after = reader
-            .inner
-            .metadata()
-            .map_err(|_| io_error("workspace file metadata failed"))?;
-        if opened != FileObservation::capture(&after)
-            || u64::try_from(bytes.len()).unwrap_or(u64::MAX) != metadata.len()
-        {
-            return Err(conflict_error("workspace file changed while reading"));
+    let mut reader = CancellationReader::new(&mut file, control);
+    let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or(0));
+    reader.read_to_end(&mut bytes).map_err(|_| {
+        if reader.cancelled {
+            backend_error(
+                ExecutionBackendErrorKind::Cancelled,
+                "execution environment operation was cancelled",
+            )
+        } else {
+            io_error("workspace file read failed")
         }
+    })?;
+    let after = reader
+        .inner
+        .metadata()
+        .map_err(|_| io_error("workspace file metadata failed"))?;
+    if opened != FileObservation::capture(&after)
+        || u64::try_from(bytes.len()).unwrap_or(u64::MAX) != metadata.len()
+    {
+        return Err(conflict_error("workspace file changed while reading"));
+    }
+    let bytes: Arc<[u8]> = bytes.into();
+    let cached = request
+        .expected_content()
+        .filter(|&expected| lock(snapshots).holds(request.path(), expected, &bytes));
+    let content = if let Some(content) = cached {
+        content
+    } else {
         let content = WorkspaceContentIdentity::from_bytes(&bytes)?;
-        let bytes: Arc<[u8]> = bytes.into();
         lock(snapshots).insert(WorkspaceSnapshot {
             path: request.path.clone(),
             content,
-            observation: opened,
             bytes: Arc::clone(&bytes),
         });
-        (content, bytes)
+        content
     };
     if request
         .expected_content()
@@ -568,7 +566,7 @@ pub(super) fn read_workspace_sync(
         .map_err(|_| resource_error("workspace read offset is not addressable"))?;
     let end = usize::try_from(slice_end)
         .map_err(|_| resource_error("workspace read end is not addressable"))?;
-    let retained: Arc<[u8]> = complete_bytes[start..end].to_vec().into();
+    let retained: Arc<[u8]> = bytes[start..end].to_vec().into();
     let next = (slice_end < metadata.len()).then(|| WorkspaceReadCursor {
         path: request.path.clone(),
         content,
