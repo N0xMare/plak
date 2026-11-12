@@ -112,7 +112,7 @@ impl RunnerService {
         };
         let Some(operator) = &self.inner.operator else {
             return match operation {
-                OperatorOperation::Inventory => {
+                OperatorOperation::Inventory | OperatorOperation::ReconcileScope => {
                     match self.inner.hello.instance.clone().try_into() {
                         Ok(instance) => OperatorAnswer::Inventory {
                             instance,

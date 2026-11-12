@@ -25,6 +25,7 @@ impl OperatorTerminalService {
         let now = (self.inner.clock)();
         let mut table = lock(&self.inner.table);
         match &operation {
+            OperatorOperation::ReconcileScope => return self.reconcile_scope(&mut table, &key),
             OperatorOperation::Inventory => return self.inventory(&table, &key),
             OperatorOperation::Reclaim { workspace } => {
                 return Self::reclaim_stream(&mut table, key, connection, workspace);
@@ -140,19 +141,7 @@ impl OperatorTerminalService {
         }
         super::collection::admit_generation(table, &key)?;
         // A new generation never adopts old shells, even if its browser retained ids.
-        let mut prior_live = false;
-        for (old, ns) in &mut table.namespaces {
-            if old.host == key.host
-                && old.namespace.state_key == key.namespace.state_key
-                && old.generation != key.generation
-            {
-                ns.closed = true;
-                for terminal in ns.terminals.values_mut() {
-                    terminal.close();
-                    prior_live |= terminal.pinned();
-                }
-            }
-        }
+        let prior_live = Self::close_prior(table, &key);
         let ns = table.namespaces.entry(key).or_insert_with(|| Namespace {
             loss_reported: super::HashSet::new(),
             evicted: super::HashSet::new(),
@@ -164,8 +153,7 @@ impl OperatorTerminalService {
         });
         ns.renewed = now;
         ns.reconciled = connection;
-        // A successful new-generation renewal is the first-bind cleanup proof.
-        // An empty replacement instance cannot supply proof about its predecessor.
+        // Namespace renewal cannot admit replacement shells while prior pins remain.
         if prior_live {
             return Err(OperatorRefusal::TerminalBusy);
         }

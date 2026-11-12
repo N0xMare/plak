@@ -77,22 +77,17 @@ impl TerminalRegistry {
             }
             state.bindings.insert(runner.to_owned(), binding.clone());
         }
-        let namespaces = self.synchronize_inventory(runner, &binding).await?;
-        Self::namespace_table(
-            &binding,
-            super::OperatorNamespace {
-                state_key: self.state_key.clone(),
-                principal: id("host-inventory".into())?,
-            },
-        )
-        .await?;
+        let namespaces = self
+            .synchronize_inventory(runner, &binding, OperatorOperation::ReconcileScope)
+            .await?;
         for namespace in namespaces {
             if let Some(rows) = Self::namespace_table(&binding, namespace.clone()).await? {
                 self.observe_table(runner, &namespace, rows)?;
             }
         }
         self.clean_discovered(runner, &binding).await?;
-        self.synchronize_inventory(runner, &binding).await?;
+        self.synchronize_inventory(runner, &binding, OperatorOperation::Inventory)
+            .await?;
         self.refresh_completed_rows(runner, &binding).await;
         // Retained lost pins fence their own workspaces, not unrelated work.
         self.lock().bindings.insert(

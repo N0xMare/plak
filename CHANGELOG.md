@@ -30,6 +30,7 @@ one cross-build carrier (a build imports its own and the previous version).
 - Keep operator-terminal authority process-local on the runner and home-local
   daemon. The private host registry discovers surviving pin inventory on first
   bind, retains resident holds and authenticated controllers, and joins shutdown.
+  Scope reconciliation is independent of terminal namespace expiry and quota.
   Runner-owned leases guard workspace removal/trim; precise lost-instance pins
   remain while host memory survives. Simultaneous host/runner loss is unlocalized
   unknown loss, not cleanup proof. Product schema stays 37 and the state key is

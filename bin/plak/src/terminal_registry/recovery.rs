@@ -10,6 +10,7 @@ impl TerminalRegistry {
         &self,
         runner: &str,
         binding: &Binding,
+        operation: OperatorOperation,
     ) -> Result<Vec<OperatorNamespace>, TerminalError> {
         let answer = Self::request(
             binding,
@@ -17,7 +18,7 @@ impl TerminalRegistry {
                 state_key: self.state_key.clone(),
                 principal: id("host-inventory".into())?,
             },
-            OperatorOperation::Inventory,
+            operation,
         )
         .await?;
         let OperatorAnswer::Inventory {
@@ -49,7 +50,7 @@ impl TerminalRegistry {
                 digest: item.digest,
             };
             let identity = pin.identity().map_err(|_| TerminalError::Conflict)?;
-            if !namespaces.contains(&pin.namespace) {
+            if pin.generation == self.runner_generation && !namespaces.contains(&pin.namespace) {
                 namespaces.push(pin.namespace.clone());
             }
             present.push(identity.clone());

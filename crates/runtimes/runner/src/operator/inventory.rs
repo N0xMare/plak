@@ -6,6 +6,33 @@ use super::{
 };
 
 impl OperatorTerminalService {
+    pub(super) fn reconcile_scope(
+        &self,
+        table: &mut Table,
+        key: &NamespaceKey,
+    ) -> Result<OperatorAnswer, OperatorRefusal> {
+        super::collection::admit_scope_generation(table, key)?;
+        Self::close_prior(table, key);
+        self.inventory(table, key)
+    }
+
+    pub(super) fn close_prior(table: &mut Table, key: &NamespaceKey) -> bool {
+        let mut prior_live = false;
+        for (old, ns) in &mut table.namespaces {
+            if old.host == key.host
+                && old.namespace.state_key == key.namespace.state_key
+                && old.generation != key.generation
+            {
+                ns.closed = true;
+                for terminal in ns.terminals.values_mut() {
+                    terminal.close();
+                    prior_live |= terminal.pinned();
+                }
+            }
+        }
+        prior_live
+    }
+
     pub(super) fn inventory(
         &self,
         table: &Table,

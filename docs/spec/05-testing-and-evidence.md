@@ -67,7 +67,8 @@ Host-internal terminal tests cover memory-only pin/hold acquisition, original
 product-37 schema/state-key identity, both pin/reclamation orders, authenticated
 controller exclusion, reconnect-before-input and joined shutdown without agent
 line/job records. Inventory tests distinguish paired hosts and state scopes and
-include no raw output. Lease tests reject another owner and retain the guard until
+include no raw output. Repeated scope reconciliation across namespace expiry
+uses no terminal namespace quota and cannot reopen an expired principal. Lease tests reject another owner and retain the guard until
 Close/disconnect. A VCS wrapper checks admission at the actual removal.
 Host-loss durability cuts kill the authority subprocess after memory reservation
 and live PTY open. Restart discovers surviving runner pins before reclaim and

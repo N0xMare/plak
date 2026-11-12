@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Fixed operator verbs, independent of agent process/session verbs.
 pub const VERBS: &[&str] = &[
     "operator.scope.inventory",
+    "operator.scope.reconcile",
     "operator.workspace.reclaim",
     "operator.namespace.renew",
     "operator.namespace.close",
@@ -152,6 +153,8 @@ pub struct TerminalCursor {
 pub enum OperatorOperation {
     /// Paired-host recovery metadata for this host/state scope; never client output.
     Inventory,
+    /// Fences prior host generations and returns inventory without a terminal namespace.
+    ReconcileScope,
     /// Holds workspace exclusion until this connection's stream closes.
     Reclaim {
         /// Absolute workspace removal/trim target, validated on the runner.
@@ -204,6 +207,7 @@ impl OperatorOperation {
     pub const fn verb(&self) -> &'static str {
         match self {
             Self::Inventory => "operator.scope.inventory",
+            Self::ReconcileScope => "operator.scope.reconcile",
             Self::Reclaim { .. } => "operator.workspace.reclaim",
             Self::Renew => "operator.namespace.renew",
             Self::NamespaceClose => "operator.namespace.close",

@@ -265,6 +265,44 @@ fn operator_inventory_recovers_only_its_paired_host_and_state_without_output() {
 }
 
 #[test]
+fn operator_scope_reconciliation_has_no_terminal_lifetime_or_namespace_quota() {
+    let fixture = Fixture::new();
+    fixture.advance(91);
+    fixture.service.tick();
+    for _ in 0..129 {
+        assert!(
+            matches!(fixture.call(1, OperatorOperation::ReconcileScope), OperatorAnswer::Inventory { pins, .. } if pins.is_empty())
+        );
+        fixture.advance(91);
+    }
+    refused(
+        fixture.call(1, OperatorOperation::Renew),
+        OperatorRefusal::NamespaceExpired,
+    );
+    assert!(matches!(
+        fixture.call(1, OperatorOperation::ReconcileScope),
+        OperatorAnswer::Inventory { pins, .. } if pins.is_empty()
+    ));
+    for n in 0..128 {
+        assert!(matches!(
+            fixture.service.execute(
+                "paired",
+                "generation",
+                1,
+                OperatorNamespace {
+                    principal: id(&format!("principal-{n}")),
+                    ..namespace()
+                },
+                "renew",
+                OperatorOperation::Renew
+            ),
+            OperatorAnswer::Table { .. }
+        ));
+    }
+    assert_eq!(lock(&fixture.fake).spawned, 0);
+}
+
+#[test]
 fn operator_reclamation_stream_holds_until_owned_close_or_disconnect() {
     let fixture = Fixture::new();
     let OperatorAnswer::Reclamation {

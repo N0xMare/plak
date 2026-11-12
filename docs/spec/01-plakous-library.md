@@ -6160,6 +6160,10 @@ to the separate client-protocol increment; this runner increment changes no clie
 it returns bounded live-pin inventory for the authenticated host and state key,
 including original namespaces/generations/workspaces and states, but no raw output.
 The host uses it before first-bind reclaim and mirrors surviving pins only in memory.
+`operator.scope.reconcile` first fences superseded generations and starts their
+cleanup, then returns that inventory. Scope reconciliation allocates no terminal
+namespace, consumes no terminal quota and has no terminal idle deadline; it does
+not reopen an expired principal namespace.
 `operator.workspace.reclaim` reserves runner-owned workspace exclusion and returns
 a connection-scoped Close-only stream. Drop/disconnect releases it; invalid traffic
 terminates it. Leases prevent idle exit while held and exclude opens through actual

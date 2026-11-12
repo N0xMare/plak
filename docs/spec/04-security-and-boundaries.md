@@ -774,10 +774,13 @@ waits for the old pins before opening replacement work.
 Terminal namespace, quota, ring and pin state is memory-only. The runner and the
 home-local daemon own their live tables; the host owns only an ephemeral mirror.
 After host-only loss, paired-host scope inventory discovers surviving pins before
-reclaim, and old namespaces close rather than being adopted. Runner-only loss
+reclaim, and old namespaces close rather than being adopted. Scope reconciliation
+fences the generation independently of terminal namespace lifetime and quota:
+an empty recovery scope cannot expire into a permanent first-bind refusal, and
+reconciliation does not reopen a closed principal namespace. Runner-only loss
 retains precise known pins in surviving host memory. Cleanup-only Close requires
-a current renewed generation, a superseded target and the exact paired host/state/
-principal; it grants no old input or cross-principal authority. An authenticated
+a current reconciled scope generation, a superseded target and the exact paired
+host/state/principal; it grants no old input or cross-principal authority. An authenticated
 owner may acknowledge known lost-instance uncertainty without signaling remembered
 PIDs or claiming death. Runner leases guard actual host-local removal/trim futures
 without a persisted host pin or state-key change.

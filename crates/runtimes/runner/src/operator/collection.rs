@@ -27,12 +27,25 @@ pub(super) fn admit_generation(
     table: &mut Table,
     key: &NamespaceKey,
 ) -> Result<(), OperatorRefusal> {
+    if table
+        .scopes
+        .get(&(key.host.clone(), key.namespace.state_key.clone()))
+        .is_some_and(|generations| generations.closed.contains(&namespace_hash(key)))
+    {
+        return Err(OperatorRefusal::NamespaceExpired);
+    }
+    admit_scope_generation(table, key)
+}
+
+pub(super) fn admit_scope_generation(
+    table: &mut Table,
+    key: &NamespaceKey,
+) -> Result<(), OperatorRefusal> {
     let scope = (key.host.clone(), key.namespace.state_key.clone());
     if let Some(generations) = table.scopes.get(&scope)
-        && (generations
+        && generations
             .superseded
             .contains(&hash(key.generation.as_bytes()))
-            || generations.closed.contains(&namespace_hash(key)))
     {
         return Err(OperatorRefusal::NamespaceExpired);
     }

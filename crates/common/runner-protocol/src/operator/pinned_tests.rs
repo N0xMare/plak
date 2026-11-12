@@ -35,6 +35,7 @@ fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
             "operation" => {
                 operations.insert(match roundtrip::<OperatorOperation>(value) {
                     OperatorOperation::Inventory => "inventory",
+                    OperatorOperation::ReconcileScope => "reconcile_scope",
                     OperatorOperation::Reclaim { .. } => "reclaim",
                     OperatorOperation::Renew => "renew",
                     OperatorOperation::NamespaceClose => "namespace_close",
@@ -98,6 +99,6 @@ fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
             statuses.len(),
             refusals.len()
         ),
-        (9, 5, 5, 6, 10)
+        (10, 5, 5, 6, 10)
     );
 }
