@@ -1,4 +1,4 @@
-//! `plak wire schema` (hidden): the JSON Schema (draft 2020-12) of this
+//! `plak wire schema`: the supported JSON Schema (draft 2020-12) of this
 //! build's wire v2 frames, both directions, with Plak's extension traffic,
 //! and the protocol version and binary they belong to. A client checks its
 //! own frames against the exact build it speaks to.

@@ -495,11 +495,10 @@ enum TopCommand {
         #[arg(long, hide = true)]
         idle_release: Option<u64>,
     },
-    /// Wire v2 tools (maintainer builds).
-    #[command(hide = true)]
+    /// Inspect this build's wire v2 integration contract.
     Wire {
         #[command(subcommand)]
-        action: WireAction,
+        action: Option<WireAction>,
     },
     #[cfg(feature = "maintainer")]
     Fork {

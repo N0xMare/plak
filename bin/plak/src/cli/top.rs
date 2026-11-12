@@ -389,8 +389,11 @@ impl TopCommand {
                 idle_release: idle_release.map(std::time::Duration::from_secs),
             })),
             Self::Wire {
-                action: WireAction::Schema,
+                action: Some(WireAction::Schema),
             } => Ok(Command::WireSchema),
+            Self::Wire { action: None } => Ok(Command::CommandHelp {
+                command: "wire".into(),
+            }),
             Self::Version {
                 host_upgrade_probe: true,
                 host_upgrade_service,

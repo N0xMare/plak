@@ -22,6 +22,7 @@ COMMANDS:
   host        Serve the home's sessions on a private socket and optional web endpoint
   run         Non-interactive one-shot agent run
   agent       Long-lived JSONL host client (stdio; same host as TUI)
+  wire        Export this build's wire v2 JSON Schema
   resume      Resume session (cwd picker or UUID)
   config      Show/set/edit product config (~/.plak)
   doctor      Local health diagnosis

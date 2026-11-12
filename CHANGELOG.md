@@ -38,6 +38,9 @@ one cross-build carrier (a build imports its own and the previous version).
 - Pin release binding facts across the offline route matrix and require exact
   reopen of predecessor-authored native root and child sessions.
 
+- Publish `plak wire schema` as a supported command and attach target-specific
+  JSON Schemas to releases.
+
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.
 

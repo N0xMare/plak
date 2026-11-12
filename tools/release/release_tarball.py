@@ -16,7 +16,7 @@ dev-dependencies into those edges, which pulls in jj-lib (and the gix family)
 and test-support that the git-only release does not link. The archive is
 deterministic: sorted entries, fixed owner and modes, and one modification
 time (the release commit's).
-`SHA256SUMS` in the output directory is rewritten over every release tarball
+`SHA256SUMS` in the output directory is rewritten over every release tarball and wire schema
 there, so tarballs built on different hosts can be collected into one
 directory and summed together.
 
@@ -295,8 +295,8 @@ def pack(
 
 
 def write_sums(out: Path) -> None:
-    tarballs = sorted(out.glob("plak-*.tar.gz"))
-    (out / "SHA256SUMS").write_text("".join(f"{sha256(path)}  {path.name}\n" for path in tarballs))
+    assets = sorted([*out.glob("plak-*.tar.gz"), *out.glob("plak-*-wire-schema.json")])
+    (out / "SHA256SUMS").write_text("".join(f"{sha256(path)}  {path.name}\n" for path in assets))
 
 
 def main(argv: list[str]) -> int:

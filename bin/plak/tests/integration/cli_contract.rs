@@ -183,6 +183,7 @@ fn publication_read_only_commands_leave_missing_home_untouched() {
         vec!["key", "status"],
         vec!["config", "show"],
         vec!["session", "check-binding", "--all"],
+        vec!["wire", "schema"],
     ] {
         let root = tempfile::tempdir().unwrap();
         let out = publication_command(root.path(), &args).output().unwrap();
@@ -1031,6 +1032,7 @@ fn bare_product_commands_print_their_help_and_exit_zero() {
         (&["logout"], "logout"),
         (&["refresh"], "refresh"),
         (&["run"], "run"),
+        (&["wire"], "wire"),
         (&["login"], "login"),
         (&["key"], "key"),
         (&["key", "set"], "key"),

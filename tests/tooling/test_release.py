@@ -15,6 +15,7 @@ import http.server
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import struct
 import subprocess
@@ -229,13 +230,18 @@ class ReleaseTarballTests(unittest.TestCase):
             (out / "SHA256SUMS").read_text(), f"{sha(first)}  plak-{VERSION}-{LINUX}.tar.gz\n"
         )
 
-    def test_sums_cover_every_tarball_in_the_directory(self) -> None:
+    def test_sums_cover_every_tarball_and_wire_schema_in_the_directory(self) -> None:
         make_release(self.base)
         out = make_release(self.base, "aarch64-apple-darwin")
         names = [line.split()[1] for line in (out / "SHA256SUMS").read_text().splitlines()]
         self.assertEqual(
             names, [f"plak-{VERSION}-aarch64-apple-darwin.tar.gz", f"plak-{VERSION}-{LINUX}.tar.gz"]
         )
+        schema = out / f"plak-{VERSION}-{LINUX}-wire-schema.json"
+        schema.write_text('{"wire_version":9,"binary_id":"release-fixture"}\n')
+        release_tarball.write_sums(out)
+        sums = (out / "SHA256SUMS").read_text()
+        self.assertIn(f"{hashlib.sha256(schema.read_bytes()).hexdigest()}  {schema.name}\n", sums)
 
     def test_require_static_refuses_an_elf_with_a_program_interpreter(self) -> None:
         def elf(interp: bool) -> bytes:
@@ -665,8 +671,12 @@ class PackageReleaseTests(unittest.TestCase):
             'case "$1" in status) printf "%s" "${FAKE_DIRTY:-}" ;; '
             'tag) echo "${FAKE_TAG:-}" ;; log) echo 1700000000 ;; esac',
         )
+        schema_script = (
+            '#!/bin/sh\n[ "$*" = "wire schema" ] || exit 2\n'
+            + "echo '{\"wire_version\":9,\"binary_id\":\"release-fixture\"}'\n"
+        )
         writer = "".join(
-            f"printf '#!/bin/sh\\n# {name}\\n' >\"$out/{name}\"; chmod 755 \"$out/{name}\"; "
+            f"printf %s {shlex.quote(schema_script if name == 'plak' else '#!/bin/sh' + chr(10))} >\"$out/{name}\"; chmod 755 \"$out/{name}\"; "
             for name in EXECUTABLES
         )
         self.stub(
@@ -737,6 +747,12 @@ esac""",
                 dist = self.base / "target/release-dist"
                 tarball = dist / f"plak-{VERSION}-{triple}.tar.gz"
                 self.assertEqual(result.stdout.strip(), str(tarball))
+                schema = dist / f"plak-{VERSION}-{triple}-wire-schema.json"
+                self.assertEqual(json.loads(schema.read_text())["binary_id"], "release-fixture")
+                self.assertIn(
+                    f"{hashlib.sha256(schema.read_bytes()).hexdigest()}  {schema.name}",
+                    (dist / "SHA256SUMS").read_text(),
+                )
                 with tarfile.open(tarball) as archive:
                     third_party = (
                         archive.extractfile(f"plak-{VERSION}-{triple}/THIRD-PARTY").read().decode()
@@ -759,7 +775,7 @@ esac""",
                     )
                     self.assertNotIn("maintainer", line)
         sums = (self.base / "target/release-dist/SHA256SUMS").read_text().splitlines()
-        self.assertEqual(len(sums), 2)
+        self.assertEqual(len(sums), 4)
 
     def test_a_missing_cargo_home_is_created_and_remapped(self) -> None:
         env = {key: value for key, value in self.env.items() if key != "CARGO_HOME"}

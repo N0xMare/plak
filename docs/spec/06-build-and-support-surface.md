@@ -223,7 +223,7 @@ by whatever happens to be `pub`.
 | `plakous-agent` | The explicit construction, prompt/turn, control and acknowledgement, result, observation and atomic attach contract, context-source, profile and policy, usage, and telemetry reexports. Hosts own presentation; no raw checkpoint, store, or runtime authority | `crates/core/agent/src/lib.rs` and `tests/fixtures/agent-consumer` |
 | `plakous-model` | The Custom-model construction and registration seam: `LanguageModel`, validated preparation inputs and results, Custom descriptor and implementation identity, the identifiers and capability values needed to build them, and the typed preparation error | `tests/fixtures/model-consumer` |
 | `plakous-tools` | The Custom-tool construction and registration seam: executor, future and context, invocation and outcome, registry builder and frozen registry, registration and executor identifiers, plus the model-owned definition, schema, effect, and concurrency values | `tests/fixtures/tools-consumer` |
-| `plak` | The installed process behaviors of the binary: version, help and recursive help; `config init/set/show`; `doctor`, `session list`, key status; confirmation and no-guessed-context failures; non-TTY bare invocation; missing-auth exit 3; malformed-argv exit 2. There is no supported direct Rust library API | `bin/plak/tests/integration/cli_contract.rs`. `cli.rs` is implementation grammar, not output or exit authority |
+| `plak` | The installed process behaviors of the binary: version, help and recursive help; `wire schema` (chapter 02 §4.4); `config init/set/show`; `doctor`, `session list`, key status; confirmation and no-guessed-context failures; non-TTY bare invocation; missing-auth exit 3; malformed-argv exit 2. There is no supported direct Rust library API | `bin/plak/tests/integration/cli_contract.rs`. `cli.rs` is implementation grammar, not output or exit authority |
 
 A direct-package symbol outside the corresponding fixture is nameable, not
 supported — even when a facade reexport of the same name is separately
@@ -1643,7 +1643,11 @@ locations nor vendored C assertions carry build-host paths; caller rustc flags
 go in that variable too, and `RUSTFLAGS` is refused because Cargo would ignore
 it. `tools/release/release_tarball.py` then writes
 `plak-<version>-<triple>.tar.gz` and rewrites `SHA256SUMS` over every release
-tarball in the output directory (default `<target dir>/release-dist`). The
+tarball and wire schema in the output directory (default `<target dir>/release-dist`).
+The packaging script also runs the built target's supported `plak wire schema`
+and writes `plak-<version>-<triple>-wire-schema.json`. This standalone asset
+names that binary and its exact wire version; target-qualified names avoid
+conflating different binary identities. No wire negotiation is introduced. The
 tarball holds one directory `plak-<version>-<triple>/` with `plak`,
 `plakous-js-host`, `plakous-py-host`, the repository `LICENSE`, `THIRD-PARTY` (each
 package outside this repository, vendored ones included, that the three
@@ -1656,13 +1660,13 @@ static: an ELF program interpreter fails packaging.
 
 `.github/workflows/release.yml` is the repository's only workflow. A pushed
 `v*` tag runs `package-release.sh --tag <tag>` on a GitHub macOS arm64 runner
-and an Ubuntu x86_64 runner with `musl-tools`, attests each tarball with
+and an Ubuntu x86_64 runner with `musl-tools`, attests each tarball and schema with
 `actions/attest-build-provenance`, and creates the GitHub Release with both
-tarballs and their combined `SHA256SUMS`, marked as a prerelease for a
+tarballs, their target-specific JSON Schemas and combined `SHA256SUMS`, marked as a prerelease for a
 `-rc.<n>` tag so `releases/latest` never resolves to a candidate. A manual run
 of the workflow on a branch (`gh workflow run release.yml --ref main`) is the
 pre-tag dry run: the same two builds, `package-release.sh --untagged` and the
-attestations, with the tarballs kept as workflow artifacts and no release
+attestations, with the tarballs and schemas kept as workflow artifacts and no release
 created, so a release is cut by tagging a commit whose dry run passed. It never publishes crates: a runner
 has no full-gate evidence for the tree (§6.5). Every action is pinned to a full
 commit SHA.

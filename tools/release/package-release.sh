@@ -2,7 +2,7 @@
 # Build and pack the release tarball for this host's supported target:
 # x86_64-unknown-linux-musl on Linux x86_64 (the native musl toolchain of
 # tools/musl/musl-toolchain.sh, static PIE), aarch64-apple-darwin on Apple Silicon.
-# Writes plak-<version>-<triple>.tar.gz and SHA256SUMS into the output
+# Writes plak-<version>-<triple>.tar.gz, its wire-schema.json and SHA256SUMS into the output
 # directory (default: <target dir>/release-dist).
 #
 # The tree must be clean and HEAD must carry the tag v<version>, or the tag
@@ -95,6 +95,9 @@ done
 export CARGO_ENCODED_RUSTFLAGS "${c_flags_var?}" "${cxx_flags_var?}"
 
 artifacts="$(bash tools/build/build-plak.sh --artifacts)"
+release_out="${out:-$target_dir/release-dist}"
+mkdir -p "$release_out"
+"$artifacts/plak" wire schema >"$release_out/plak-$release-$triple-wire-schema.json"
 python3 tools/release/release_tarball.py --version "$release" --triple "$triple" \
-  --artifacts "$artifacts" --out "${out:-$target_dir/release-dist}" \
+  --artifacts "$artifacts" --out "$release_out" \
   --mtime "$(git log -1 --format=%ct HEAD)" ${static[@]+"${static[@]}"}

@@ -1,0 +1,15 @@
+plak wire - Inspect this build's wire v2 integration contract
+
+USAGE:
+  plak wire schema
+
+SUBCOMMANDS:
+  schema      Print the JSON Schema (draft 2020-12) for both frame directions
+
+The document includes wire_version, binary_id, client_frame, host_frame and $defs.
+Use the schema of the exact binary you connect to. Wire versions match exactly;
+there is no negotiation or downgrade. No session, credential or network is needed.
+
+  plak wire schema > wire-schema.json
+
+See docs/user-guide/integrating.md for transports and the Python socket example.
