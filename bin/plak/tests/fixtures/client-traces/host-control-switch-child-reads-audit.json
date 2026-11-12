@@ -42,7 +42,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "1dca392f-6ca9-52bf-acdb-11c98c5188a9"
+                "tree_id": "fdbe1a30-205a-5757-bad5-121448b5d1ee"
               }
             },
             "kind": "extension"
@@ -188,7 +188,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "095e4ad1-e126-58ed-bc0f-5a18b2f85373"
+                "tree_id": "14044989-897b-58c7-80f3-31166abd155e"
               }
             },
             "kind": "extension"
@@ -248,7 +248,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "1dca392f-6ca9-52bf-acdb-11c98c5188a9"
+                "tree_id": "fdbe1a30-205a-5757-bad5-121448b5d1ee"
               }
             },
             "kind": "extension"
@@ -273,43 +273,13 @@
       "connection": 2,
       "request": {
         "frame": "request",
-        "id": 3,
+        "id": 4,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": "refresh_composer_chrome",
             "kind": "extension"
-          },
-          "op": "intent"
-        }
-      },
-      "acknowledgement": {
-        "frame": "response",
-        "id": 3,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
-      "read": "resync_transcript",
-      "reason": "resync at a reconnect sequence boundary",
-      "connection": 2,
-      "request": {
-        "frame": "request",
-        "id": 4,
-        "op": {
-          "attachment": 1,
-          "blobs": [],
-          "intent": {
-            "body": {
-              "scope": "root"
-            },
-            "kind": "resync_transcript"
           },
           "op": "intent"
         }
@@ -331,14 +301,14 @@
       "connection": 2,
       "request": {
         "frame": "request",
-        "id": 7,
+        "id": 6,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "1dca392f-6ca9-52bf-acdb-11c98c5188a9"
+                "tree_id": "fdbe1a30-205a-5757-bad5-121448b5d1ee"
               }
             },
             "kind": "extension"
@@ -348,7 +318,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 7,
+        "id": 6,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -357,5 +327,45 @@
         }
       }
     }
-  ]
+  ],
+  "excluded_connections": [],
+  "provenance": {
+    "capture": {
+      "client_sha256": "a607a16ac90bd5922f1b77e25bee71bdda88339fbb70a5a001b0cbbb438a3e53",
+      "host_sha256": "a607a16ac90bd5922f1b77e25bee71bdda88339fbb70a5a001b0cbbb438a3e53"
+    },
+    "connections": [
+      {
+        "connection": 1,
+        "alias": 1
+      },
+      {
+        "connection": 2,
+        "alias": 2
+      }
+    ],
+    "binaries": [
+      {
+        "binary_id": "unknown",
+        "roles": [
+          {
+            "role": "client",
+            "alias": "<client-binary:1>",
+            "connections": [
+              1,
+              2
+            ]
+          },
+          {
+            "role": "host",
+            "alias": "<host-binary:1>",
+            "connections": [
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }

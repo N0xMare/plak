@@ -11,7 +11,7 @@
       "connection": 1,
       "direction": "client",
       "frame": {
-        "binary_id": "unknown",
+        "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
         "proto": 7
@@ -21,7 +21,7 @@
       "connection": 1,
       "direction": "host",
       "frame": {
-        "binary_id": "unknown",
+        "binary_id": "<host-binary:1>",
         "caps": [],
         "extension": {
           "console": {
@@ -316,11 +316,11 @@
     },
     {
       "connection": 1,
-      "eof": "host"
+      "eof": "client"
     },
     {
       "connection": 1,
-      "eof": "client"
+      "eof": "host"
     },
     {
       "barrier": "host-restarted"
@@ -333,7 +333,7 @@
       "connection": 2,
       "direction": "client",
       "frame": {
-        "binary_id": "unknown",
+        "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
         "proto": 7
@@ -343,7 +343,7 @@
       "connection": 2,
       "direction": "host",
       "frame": {
-        "binary_id": "unknown",
+        "binary_id": "<host-binary:1>",
         "caps": [],
         "extension": {
           "console": {
@@ -576,11 +576,11 @@
     },
     {
       "connection": 2,
-      "eof": "host"
+      "eof": "client"
     },
     {
       "connection": 2,
-      "eof": "client"
+      "eof": "host"
     }
   ]
 }

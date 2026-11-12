@@ -113,5 +113,45 @@
         }
       }
     }
-  ]
+  ],
+  "excluded_connections": [],
+  "provenance": {
+    "capture": {
+      "client_sha256": "a607a16ac90bd5922f1b77e25bee71bdda88339fbb70a5a001b0cbbb438a3e53",
+      "host_sha256": "a607a16ac90bd5922f1b77e25bee71bdda88339fbb70a5a001b0cbbb438a3e53"
+    },
+    "connections": [
+      {
+        "connection": 1,
+        "alias": 1
+      },
+      {
+        "connection": 2,
+        "alias": 2
+      }
+    ],
+    "binaries": [
+      {
+        "binary_id": "unknown",
+        "roles": [
+          {
+            "role": "client",
+            "alias": "<client-binary:1>",
+            "connections": [
+              1,
+              2
+            ]
+          },
+          {
+            "role": "host",
+            "alias": "<host-binary:1>",
+            "connections": [
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }
