@@ -86,7 +86,9 @@ async fn invalid_utf8_rows_are_skipped_without_hiding_valid_list_or_search_resul
         .is_err()
     );
     std::fs::write(root.path().join("valid"), "needle").unwrap();
-    std::fs::write(root.path().join(invalid), "needle\nneedle").unwrap();
+    if !write_non_utf8(&root.path().join(invalid), "needle\nneedle") {
+        return;
+    }
     let console = console(root.path());
     let HostResponse::FilesList { entries, summary } = console
         .inspect(

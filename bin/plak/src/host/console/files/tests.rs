@@ -215,11 +215,12 @@ async fn nonregular_symlinks_invalid_names_and_oversized_files_refuse_promptly()
     };
     assert_eq!(content.size, INPUT);
     assert!(content.next.is_some());
-    std::fs::write(
-        root.path().join(std::ffi::OsString::from_vec(vec![0xff])),
+    if !write_non_utf8(
+        &root.path().join(std::ffi::OsString::from_vec(vec![0xff])),
         "data",
-    )
-    .unwrap();
+    ) {
+        return;
+    }
     let result = console
         .inspect(
             &context(),
@@ -996,4 +997,16 @@ async fn disconnect_drops_pending_runner_io_and_cancels_the_read_control() {
             .unwrap()
             .is_cancelled()
     );
+}
+
+/// Writes a file whose name is not UTF-8. Filesystems that only store UTF-8
+/// names (APFS) refuse it with EILSEQ; there the invariant is vacuous.
+pub(super) fn write_non_utf8(path: &std::path::Path, contents: &str) -> bool {
+    match std::fs::write(path, contents) {
+        Ok(()) => true,
+        Err(error) if error.raw_os_error() == Some(rustix::io::Errno::ILSEQ.raw_os_error()) => {
+            false
+        }
+        Err(error) => panic!("non-UTF-8 fixture: {error}"),
+    }
 }
