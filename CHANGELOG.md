@@ -7,6 +7,11 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Fixed workspace reads returning stale cached bytes after a same-size rewrite.
+- Fixed pending child decisions not being offered when the child's read model
+  first attaches.
+- Fixed due idle retention being skipped when an idle driver stops.
+
 - Fixed duplicate topology refreshes from split binding/attach observations and
   made topology precede the terminal's initial promptable notification.
 
