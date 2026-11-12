@@ -87,7 +87,7 @@ fn terminal_records(
 /// Restores a provider-programmatic tool batch whose probe has started and
 /// not been observed, then abandons or cancels it.
 async fn restored_parking_batch(end_with_abandonment: bool) -> TestResult<Arc<TurnResult>> {
-    restored_batch_ended(end_with_abandonment, true).await
+    restored_batch_ended(end_with_abandonment, true, false).await
 }
 
 /// Restores the same batch and ends it with an abandon (or a plain cancel)
@@ -96,6 +96,7 @@ async fn restored_parking_batch(end_with_abandonment: bool) -> TestResult<Arc<Tu
 async fn restored_batch_ended(
     end_with_abandonment: bool,
     wait_for_probe: bool,
+    hold_before_start: bool,
 ) -> TestResult<Arc<TurnResult>> {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
@@ -153,6 +154,18 @@ async fn restored_batch_ended(
     else {
         return Err("hosted tool-batch frame did not restore as working".into());
     };
+    if hold_before_start {
+        let mut hold = agent.session_endpoint().hold_step_boundary()?;
+        while !matches!(hold.progress()?, crate::control::boundary::BoundaryProgress::Held {turn:Some(id),..} if id==turn.turn_id())
+        {
+            hold.changed().await?;
+        }
+        assert!(
+            !probe.started.load(Ordering::Acquire),
+            "restored undispatched slot crossed a held boundary"
+        );
+        hold.release().await?;
+    }
     if wait_for_probe {
         tokio::time::timeout(Duration::from_secs(30), async {
             while !probe.started.load(Ordering::Acquire) {
@@ -263,7 +276,7 @@ async fn restored_tool_batch_plain_cancel_keeps_the_operator_note_and_null_repor
 #[tokio::test]
 async fn a_restored_tool_batch_abandoned_before_it_starts_closes_with_one_terminal() -> TestResult {
     for abandon in [true, false] {
-        let result = restored_batch_ended(abandon, false).await?;
+        let result = restored_batch_ended(abandon, false, false).await?;
         let TurnResultOutcome::Cancelled(_) = result.outcome() else {
             let detail = match result.outcome() {
                 TurnResultOutcome::RecoveryRequired(error) | TurnResultOutcome::Failed(error) => {
@@ -366,6 +379,16 @@ async fn hosted_batch_cut(
         .map(|record| OperationId(record.operation_id()))
         .ok_or("the cut has no open tool-batch baton")?;
     Ok((checkpoint, turn_id, baton))
+}
+
+/// Restored slots do not run while the driver is held; release still joins cancellation.
+#[tokio::test]
+async fn boundary_hold_restored_batch_parks_before_its_first_undispatched_slot() -> TestResult {
+    let result = restored_batch_ended(false, true, true).await?;
+    assert!(matches!(result.outcome(), TurnResultOutcome::Cancelled(_)));
+    assert_one_finalized_baton(result.as_ref());
+    assert_eq!(terminal_records(result.as_ref()).len(), 1);
+    Ok(())
 }
 
 /// A restored batch whose slots never started: nothing ran.

@@ -281,6 +281,7 @@ enum JobStopState {
 }
 
 struct AgentInner {
+    boundary: Arc<crate::control::boundary::BoundaryState>,
     #[cfg(test)]
     provider_dispatch_gate: Arc<tokio::sync::Mutex<()>>,
     #[cfg(test)]

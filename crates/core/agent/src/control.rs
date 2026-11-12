@@ -16,6 +16,8 @@ use tokio::sync::{mpsc, oneshot};
 
 const SESSION_ENDPOINT_REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 
+pub(crate) mod boundary;
+
 use crate::feed::FeedSeq;
 use crate::input::UserInput;
 use crate::runtime::{AgentBuilder, Turn, TurnResultHandle, TurnShared};
@@ -819,11 +821,25 @@ pub enum AgentSessionEndpointError {
 #[derive(Clone)]
 pub struct AgentSessionEndpoint {
     controls: mpsc::Sender<ActorControl>,
+    boundary: Arc<boundary::BoundaryState>,
 }
 
 impl AgentSessionEndpoint {
-    pub(crate) const fn new(controls: mpsc::Sender<ActorControl>) -> Self {
-        Self { controls }
+    pub(crate) fn new(
+        controls: mpsc::Sender<ActorControl>,
+        boundary: Arc<boundary::BoundaryState>,
+    ) -> Self {
+        Self { controls, boundary }
+    }
+
+    /// Unsupported host-layer hold; neither admission nor a turn command.
+    ///
+    /// # Errors
+    /// Returns busy for a second hold or unavailable after the owner exits.
+    pub(crate) fn hold_step_boundary(
+        &self,
+    ) -> Result<boundary::BoundaryHold, boundary::BoundaryError> {
+        self.boundary.request()
     }
 
     /// Creates a non-owning registry entry.
@@ -831,6 +847,7 @@ impl AgentSessionEndpoint {
     pub fn downgrade(&self) -> WeakAgentSessionEndpoint {
         WeakAgentSessionEndpoint {
             controls: self.controls.downgrade(),
+            boundary: Arc::downgrade(&self.boundary),
         }
     }
 
@@ -909,13 +926,17 @@ impl fmt::Debug for AgentSessionEndpoint {
 #[derive(Clone, Debug)]
 pub struct WeakAgentSessionEndpoint {
     controls: mpsc::WeakSender<ActorControl>,
+    boundary: std::sync::Weak<boundary::BoundaryState>,
 }
 
 impl WeakAgentSessionEndpoint {
     /// Upgrades while the private driver still owns its bounded ingress.
     #[must_use]
     pub fn upgrade(&self) -> Option<AgentSessionEndpoint> {
-        self.controls.upgrade().map(AgentSessionEndpoint::new)
+        Some(AgentSessionEndpoint::new(
+            self.controls.upgrade()?,
+            self.boundary.upgrade()?,
+        ))
     }
 }
 

@@ -23,6 +23,7 @@ mod admitted_round;
 mod artifact_prefix_tests;
 #[path = "../atomic_transition_tests.rs"]
 mod atomic_transition_tests;
+mod boundary_hold;
 mod cancel_ack;
 mod cancelled_steer;
 mod cleanup_precedence;

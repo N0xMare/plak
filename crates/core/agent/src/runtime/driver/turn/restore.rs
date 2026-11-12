@@ -132,6 +132,11 @@ impl Driver {
         command: &PromptCommand,
         restored: RestoredHostedFrame<AwaitServerPauseV1>,
     ) -> Result<TurnResult, AgentError> {
+        self.hold_step_boundary(command).await?;
+        let activity = self.boundary.0.activity(
+            Some(command.turn_id),
+            crate::control::boundary::BoundaryPhase::Effect,
+        );
         let continuation_operation = restored.continuation_operation;
         let promoted = restored.promoted;
         let frame = restored.frame;
@@ -152,6 +157,7 @@ impl Driver {
             .await?;
         }
         let _ = self.apply_steering(command).await?;
+        drop(activity);
         command.shared.continue_after_model()?;
         let tool_calls = usize::try_from(frame.tool_calls)
             .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
@@ -168,6 +174,11 @@ impl Driver {
         command: &PromptCommand,
         restored: RestoredHostedFrame<AwaitToolBatchV2>,
     ) -> Result<TurnResult, AgentError> {
+        self.hold_step_boundary(command).await?;
+        let activity = self.boundary.0.activity(
+            Some(command.turn_id),
+            crate::control::boundary::BoundaryPhase::Effect,
+        );
         let continuation_operation = restored.continuation_operation;
         let promoted = restored.promoted;
         let recovered_dispatched = restored.recovered_dispatched;
@@ -362,6 +373,7 @@ impl Driver {
         let tool_calls = usize::try_from(frame.tool_calls)
             .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?
             .saturating_add(dispatched);
+        drop(activity);
         self.run_turn_from_state(command, false, tool_calls, Some(continuation_operation))
             .await
     }
@@ -379,6 +391,14 @@ impl Driver {
         pending: PendingEffectDecision,
         provider_plan: &ValidatedRequestPlan,
     ) -> Result<ToolBatchResult, AgentError> {
+        let parked = self.hold_step_boundary(command).await?;
+        let mut frame = frame.clone();
+        frame.decision_expires_at =
+            crate::runtime::config::timestamp_after(frame.decision_expires_at, parked);
+        let _activity = self.boundary.0.activity(
+            Some(command.turn_id),
+            crate::control::boundary::BoundaryPhase::Effect,
+        );
         let pending_index = usize::try_from(frame.pending_index)
             .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
         let calls = frame
@@ -424,7 +444,7 @@ impl Driver {
             .collect::<Vec<_>>();
         let pending_call = &calls[pending_index];
         let authorization =
-            Box::pin(self.drive_restored_effect_decision(command, pending_call, pending, frame))
+            Box::pin(self.drive_restored_effect_decision(command, pending_call, pending, &frame))
                 .await?;
         let mut dispatched = 0usize;
         Box::pin(self.execute_restored_authorization(

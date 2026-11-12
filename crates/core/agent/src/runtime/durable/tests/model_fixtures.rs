@@ -5,6 +5,8 @@
 
 use super::*;
 
+type PreparationObserver = Box<dyn FnMut(&ValidatedRequestPlan) + Send>;
+
 pub(super) type PrepareContextObservation = (
     AttemptId,
     Option<ModelCacheAffinity>,
@@ -85,6 +87,7 @@ pub(super) enum SummaryCapacityRefusal {
     reason = "the private poison fixture exposes independent orthogonal failure switches to prove Driver fences"
 )]
 pub(super) struct ArtifactModel {
+    pub(super) observe_scheduling_prepare: Mutex<Option<PreparationObserver>>,
     pub(super) descriptor: ResolvedModelDescriptor,
     pub(super) authority: RuntimeModelAuthority,
     pub(super) dispatch_authority: Option<RuntimeModelAuthority>,
@@ -237,6 +240,7 @@ impl ArtifactModel {
         tamper_coverage: bool,
     ) -> Self {
         Self {
+            observe_scheduling_prepare: Mutex::new(None),
             descriptor,
             authority,
             dispatch_authority: None,
@@ -658,6 +662,11 @@ impl LanguageModel for ArtifactModel {
                 })
                 .collect(),
         );
+        if scheduling_measurement
+            && let Some(observer) = lock_mutex(&self.observe_scheduling_prepare).as_mut()
+        {
+            observer(&plan);
+        }
         if self.response_provenance {
             lock_mutex(&self.observed_provenance).push((plan.clone(), context.clone()));
         }

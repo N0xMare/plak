@@ -412,7 +412,10 @@ impl Agent {
     }
 
     pub(crate) fn session_endpoint(&self) -> AgentSessionEndpoint {
-        AgentSessionEndpoint::new(self.inner.controls.clone())
+        AgentSessionEndpoint::new(
+            self.inner.controls.clone(),
+            Arc::clone(&self.inner.boundary),
+        )
     }
 
     /// Recovers an exact typed control capability for a currently known turn.

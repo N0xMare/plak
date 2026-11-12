@@ -293,6 +293,10 @@ impl Driver {
             return Err(AgentSessionEndpointError::Busy);
         }
         self.compaction_in_flight = true;
+        let _activity = self.boundary.0.activity(
+            active.map(|command| command.turn_id),
+            crate::control::boundary::BoundaryPhase::Compaction,
+        );
         let outcome = Box::pin(self.compact_session_admitted(
             active,
             request,

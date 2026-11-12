@@ -16,6 +16,146 @@ use crate::runtime::{
 const WINDOW_END: u64 = 20;
 const PAST_WINDOW: u64 = 30;
 
+#[tokio::test]
+async fn boundary_hold_during_preparation_reresolves_expired_admission_before_the_next_dispatch()
+-> TestResult {
+    use crate::control::boundary::BoundaryProgress;
+    let durable = Durable::new()?;
+    let current = Arc::new(
+        windowed_model(1, 9, WINDOW_END, 1, b"artifact-account", 400_000)?.with_tool_first(),
+    );
+    let fresh = fresh_model(410_000)?;
+    let registry = one_tool_registry()?;
+    let resolver = ScriptedReresolver::new([Ok(reresolved(
+        &fresh,
+        &registry,
+        LocalDurabilityDisposition::DurableRequired,
+        100,
+    )?)]);
+    let agent = durable
+        .sessions
+        .create(
+            "create:held-preparation",
+            durable
+                .builder(&current, Some(Arc::clone(&resolver)))?
+                .with_scheduled_compaction_enabled(true),
+        )
+        .await?;
+    let mut endpoint = Some(agent.session_endpoint());
+    let requested = Arc::new(Mutex::new(None));
+    let capture = Arc::clone(&requested);
+    let observing = Arc::downgrade(&current);
+    *lock_mutex(&current.observe_scheduling_prepare) = Some(Box::new(move |_| {
+        if observing
+            .upgrade()
+            .is_some_and(|model| model.calls.load(Ordering::Acquire) > 0)
+            && let Some(endpoint) = endpoint.take()
+        {
+            *lock_mutex(&capture) = Some(endpoint.hold_step_boundary());
+        }
+    }));
+    let prompting = tokio::spawn({
+        let agent = agent.clone();
+        async move { agent.prompt("hold the prepared admission").await }
+    });
+    let mut hold = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Some(hold) = lock_mutex(&requested).take() {
+                return hold;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await??;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !matches!(
+            hold.progress()?,
+            BoundaryProgress::Held { turn: Some(_), .. }
+        ) {
+            hold.changed().await?;
+        }
+        Ok::<_, crate::control::boundary::BoundaryError>(())
+    })
+    .await??;
+    assert_eq!(current.calls.load(Ordering::Acquire), 1);
+    durable.clock.set(PAST_WINDOW);
+    hold.release().await?;
+    let result = prompting.await??.result().await?;
+    assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+    assert_eq!(resolver.calls(), 1);
+    assert_eq!(current.calls.load(Ordering::Acquire), 1);
+    assert_eq!(fresh.calls.load(Ordering::Acquire), 1);
+    agent.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn boundary_hold_requested_during_reresolution_never_parks_a_prepared_request() -> TestResult
+{
+    use crate::control::boundary::{BoundaryPhase, BoundaryProgress};
+    let durable = Durable::new()?;
+    let current = Arc::new(windowed_model(
+        1,
+        9,
+        WINDOW_END,
+        1,
+        b"artifact-account",
+        420_000,
+    )?);
+    let fresh = fresh_model(430_000)?;
+    let release = hold_first_call(&fresh);
+    let registry = one_tool_registry()?;
+    let resolver = ScriptedReresolver::new([Ok(reresolved(
+        &fresh,
+        &registry,
+        LocalDurabilityDisposition::DurableRequired,
+        100,
+    )?)]);
+    let agent = durable
+        .sessions
+        .create(
+            "create:hold-during-resolution",
+            durable.builder(&current, Some(Arc::clone(&resolver)))?,
+        )
+        .await?;
+    let endpoint = agent.session_endpoint();
+    let captured = Arc::new(Mutex::new(None));
+    let capture = Arc::clone(&captured);
+    *lock_mutex(&resolver.before_answer) = Some(Box::new(move || {
+        *lock_mutex(&capture) = Some(endpoint.hold_step_boundary());
+    }));
+    durable.clock.set(PAST_WINDOW);
+    let turn = agent
+        .prompt("do not hold a request after its resolution")
+        .await?;
+    tokio::time::timeout(Duration::from_secs(5), fresh.held_call_started.notified()).await?;
+    let mut hold = lock_mutex(&captured)
+        .take()
+        .ok_or("resolution callback")??;
+    assert!(matches!(
+        hold.progress()?,
+        BoundaryProgress::Draining {
+            phase: BoundaryPhase::Model,
+            ..
+        }
+    ));
+    release.notify_one();
+    assert!(matches!(
+        turn.result().await?.outcome(),
+        TurnResultOutcome::Completed(_)
+    ));
+    while !matches!(hold.progress()?, BoundaryProgress::Held { turn: None, .. }) {
+        hold.changed().await?;
+    }
+    durable.clock.set(200);
+    hold.release().await?;
+    assert_eq!(current.calls.load(Ordering::Acquire), 0);
+    assert_eq!(fresh.calls.load(Ordering::Acquire), 1);
+    assert_eq!(resolver.calls(), 1);
+    agent.shutdown().await?;
+    Ok(())
+}
+
 struct SettableClock(AtomicU64);
 
 impl SettableClock {
@@ -83,6 +223,7 @@ struct ScriptedReresolver {
     answers: Mutex<VecDeque<Result<ReresolvedModel, ModelReresolutionError>>>,
     calls: AtomicUsize,
     accepted: Mutex<Vec<Timestamp>>,
+    before_answer: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl ScriptedReresolver {
@@ -93,6 +234,7 @@ impl ScriptedReresolver {
             answers: Mutex::new(answers.into_iter().collect()),
             calls: AtomicUsize::new(0),
             accepted: Mutex::new(Vec::new()),
+            before_answer: Mutex::new(None),
         })
     }
 
@@ -118,6 +260,9 @@ impl ModelReresolver for ScriptedReresolver {
         });
         Box::pin(async move {
             assert!(expired_until.seconds() > 0);
+            if let Some(hook) = lock_mutex(&self.before_answer).take() {
+                hook();
+            }
             answer
         })
     }

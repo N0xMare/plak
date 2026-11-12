@@ -48,7 +48,7 @@ async fn lost_command_reply_is_unknown_not_a_definite_refusal() -> Result<(), Bo
 #[tokio::test]
 async fn compact_endpoint_lost_reply_is_not_unavailable() -> Result<(), Box<dyn Error>> {
     let (controls, mut receiver) = mpsc::channel(1);
-    let endpoint = AgentSessionEndpoint::new(controls);
+    let endpoint = AgentSessionEndpoint::new(controls, Arc::default());
     let task = tokio::spawn(async move {
         drop(receiver.recv().await);
     });
@@ -74,7 +74,7 @@ async fn compact_endpoint_full_and_closed_never_ingress() -> Result<(), Box<dyn 
             })
             .is_ok()
     );
-    let endpoint = AgentSessionEndpoint::new(controls);
+    let endpoint = AgentSessionEndpoint::new(controls, Arc::default());
     assert_eq!(
         endpoint.compact_session(compact_endpoint_request()?).await,
         Err(AgentSessionEndpointError::Backpressure)
@@ -104,7 +104,7 @@ fn compact_endpoint_request() -> Result<AgentCompactSessionRequest, Box<dyn Erro
 async fn external_placeholder_suffix_is_refused_before_endpoint_ingress()
 -> Result<(), Box<dyn Error>> {
     let (controls, mut receiver) = mpsc::channel(1);
-    let endpoint = AgentSessionEndpoint::new(controls);
+    let endpoint = AgentSessionEndpoint::new(controls, Arc::default());
     let mut request = compact_endpoint_request()?;
     request.operation_id = "x:placeholders".to_owned();
     // A liveness bound only: generous, so load never trips it.
@@ -140,7 +140,7 @@ async fn session_endpoint_reports_bounded_ingress_backpressure() -> Result<(), B
             })
             .is_ok()
     );
-    let endpoint = AgentSessionEndpoint::new(controls);
+    let endpoint = AgentSessionEndpoint::new(controls, Arc::default());
     assert_eq!(
         endpoint
             .context_status(session_id, branch_id, checkpoint_id, None)

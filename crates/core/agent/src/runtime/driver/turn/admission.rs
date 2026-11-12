@@ -96,8 +96,11 @@ impl Driver {
             self.context_anchor = None;
         }
         let outcome = AssertUnwindSafe(async {
+            let parked = self.hold_step_boundary(&command).await?;
             match frame {
-                RestoredContinuationFrame::EffectDecision(frame) => {
+                RestoredContinuationFrame::EffectDecision(mut frame) => {
+                    frame.decision_expires_at =
+                        crate::runtime::config::timestamp_after(frame.decision_expires_at, parked);
                     command.shared.begin_tools()?;
                     self.observation_budget = frame.observation_budget;
                     let RestoredEffectDecision {

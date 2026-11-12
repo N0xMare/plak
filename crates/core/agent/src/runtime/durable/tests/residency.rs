@@ -399,6 +399,69 @@ async fn prompt_crossing_the_window_defers_residency_to_the_round_start_ladder()
     Ok(())
 }
 
+#[tokio::test]
+async fn boundary_hold_deferred_residency_parks_before_the_first_paid_fold() -> TestResult {
+    use crate::control::boundary::{BoundaryError, BoundaryProgress};
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let (builder, model) = image_builder(workspace, 40_000)?;
+    let (source, prompt) = prompt_crossing_source()?;
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let agent = sessions
+        .create_seeded(
+            "create:boundary-residency",
+            builder.with_scheduled_compaction_enabled(true),
+            source,
+        )
+        .await?;
+    let mut endpoint = Some(agent.session_endpoint());
+    let requested = Arc::new(Mutex::new(None));
+    let capture = Arc::clone(&requested);
+    *lock_mutex(&model.observe_scheduling_prepare) = Some(Box::new(move |plan| {
+        if plan.request().input().items().iter().flat_map(ConversationItem::blocks).any(
+            |block| matches!(block, ContentBlock::Text(text) if text.text().starts_with("follow-up ")),
+        ) && let Some(endpoint) = endpoint.take() {
+            *lock_mutex(&capture) = Some(endpoint.hold_step_boundary());
+        }
+    }));
+    let prompting = tokio::spawn({
+        let agent = agent.clone();
+        async move { agent.prompt(prompt).await }
+    });
+    let mut hold = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Some(hold) = lock_mutex(&requested).take() {
+                return hold;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await??;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !matches!(
+            hold.progress()?,
+            BoundaryProgress::Held { turn: Some(_), .. }
+        ) {
+            hold.changed().await?;
+        }
+        Ok::<_, BoundaryError>(())
+    })
+    .await??;
+    assert_eq!(model.calls.load(Ordering::Acquire), 0);
+    assert!(lock_mutex(&model.paid_compaction_rounds).is_empty());
+    hold.release().await?;
+    let result = prompting.await??.result().await?;
+    assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+    assert_eq!(lock_mutex(&model.paid_compaction_rounds).len(), 1);
+    assert_eq!(model.calls.load(Ordering::Acquire), 2);
+    agent.shutdown().await?;
+    Ok(())
+}
+
 /// Round-start fold cuts: halting the store after every accepted commit of
 /// the prompt-crossing turn reopens exactly, without a provider dispatch, a
 /// second paid fold or a republished compaction.

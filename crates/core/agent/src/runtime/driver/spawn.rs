@@ -37,6 +37,7 @@ impl PreparedAgent {
             .prompt_queue_capacity
             .saturating_add(self.config.control_queue_capacity);
         let (controls, control_receiver) = mpsc::channel(ingress_capacity);
+        let boundary = Arc::new(crate::control::boundary::BoundaryState::default());
         let shutdown = CancellationToken::new();
         let pending_output_bound_rederived = self.output_bound_rederived;
         let events = self.events;
@@ -238,6 +239,7 @@ impl PreparedAgent {
             known_turns: Arc::clone(&known_turns),
             provider_dispatch_gate: Arc::clone(&provider_dispatch_gate),
             control_sender: controls.clone(),
+            boundary: crate::control::boundary::BoundaryOwner(Arc::clone(&boundary)),
             control_receiver,
             #[cfg(test)]
             exit_probe: Arc::clone(&exit_probe),
@@ -313,6 +315,7 @@ impl PreparedAgent {
 
         Agent {
             inner: Arc::new(AgentInner {
+                boundary,
                 #[cfg(test)]
                 provider_dispatch_gate,
                 #[cfg(test)]

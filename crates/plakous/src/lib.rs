@@ -172,6 +172,21 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// use plakous::agent::facade_support;
 /// ```
 pub mod agent {
+    /// Unsupported host-layer coordination, with no embedder stability claim.
+    #[doc(hidden)]
+    pub mod host_control {
+        pub use plakous_agent::internal::{
+            BoundaryError, BoundaryHold, BoundaryPhase, BoundaryProgress,
+        };
+
+        /// Requests a generation-scoped hold from this agent's sole driver.
+        ///
+        /// # Errors
+        /// Returns busy for a second hold or unavailable after the owner exits.
+        pub fn hold_step_boundary(agent: &super::Agent) -> Result<BoundaryHold, BoundaryError> {
+            plakous_agent::internal::facade_support::hold_step_boundary(agent)
+        }
+    }
     #[cfg(feature = "composition")]
     pub use crate::local_composition::{
         LocalCompositionAttachment, LocalCompositionAttachmentBuilder, LocalCompositionContainment,

@@ -226,6 +226,17 @@ pub fn agent_session_endpoint(agent: &Agent) -> AgentSessionEndpoint {
     agent.session_endpoint()
 }
 
+/// Requests an unsupported host-layer hold without exporting the endpoint method.
+///
+/// # Errors
+/// Refuses a competing generation or an unavailable sole driver.
+#[doc(hidden)]
+pub fn hold_step_boundary(
+    agent: &Agent,
+) -> Result<crate::control::boundary::BoundaryHold, crate::control::boundary::BoundaryError> {
+    agent.session_endpoint().hold_step_boundary()
+}
+
 /// Classifies an agent failure's semantic-store origin, when present.
 #[must_use]
 pub fn agent_store_origin(error: &AgentError) -> Option<SessionStoreOrigin> {

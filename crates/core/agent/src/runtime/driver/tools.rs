@@ -117,6 +117,11 @@ impl Driver {
         provider_plan: &ValidatedRequestPlan,
         provider_response: &ModelResponse,
     ) -> Result<ToolBatchResult, AgentError> {
+        self.hold_step_boundary(command).await?;
+        let _activity = self.boundary.0.activity(
+            Some(command.turn_id),
+            crate::control::boundary::BoundaryPhase::Effect,
+        );
         let batch = ToolBatchInput {
             command,
             attempt_id,

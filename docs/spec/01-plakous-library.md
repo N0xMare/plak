@@ -497,6 +497,50 @@ handle, or event subscription does not cancel work.
 At most one root turn executes at a time. No control operation starts a hidden
 parallel turn.
 
+**Host-layer boundary hold.** The doc-hidden
+`plakous::agent::host_control` seam is for official host coordination only,
+with no supported embedder surface or stability claim. It requests a reversible,
+process-local hold from the existing sole driver; it acquires no lease, admits
+no command, publishes no terminal, and creates no continuation. A second active
+hold on that driver is a typed `Busy` refusal. Each guard names a fresh local
+generation. Dropping it revokes only that generation, independently of bounded
+command ingress; a cancelled or late coordinator cannot pause a resumed driver.
+Explicit release waits for the owner to observe revocation. Owner shutdown wakes
+waiters with `Unavailable` and makes retained endpoints unusable.
+
+The owner reports `Requested`, `Draining { turn, phase }`, or
+`Held { turn, checkpoint }`; acknowledgement or a running operation is never
+`Held`. Model generations (including retries), compaction and effect batches
+must join before holding. An idle driver acknowledges `Held { turn: None }`
+without waiting for input. An internally admitted instruction or wake while held
+is still admitted normally, then parks as `Held { turn: Some(..) }` before its
+first model dispatch. The owner continues exact-turn cancellation, shutdown and
+read-only controls while held; a new endpoint compaction is refused `Busy`.
+The gate precedes normal model dispatch, tool batches and turn compaction
+selection, including deferred-residency compaction. Each round's hold precedes
+fresh re-resolution, never interposing a pause between a prepared request and
+its dispatch. A request arriving during that resolution drains the generation
+and waits for its next boundary; a request already pending for the next round
+holds before re-resolution, so expired admission is resolved afresh on release. Restored effect frames also
+park before their first undispatched slot; restored pending decisions extend
+their in-memory approval expiry by the actually parked monotonic duration,
+not the requested drain allowance. This does not extend ordinary running
+approval waits. Their joined batch reports `Effect`,
+not `Held`. Existing result folding completes before the next round is held.
+A held checkpoint is not an exportability verdict: existing pending decisions
+and planned-interrupt settlement still own their ordinary durable rules.
+
+Holds sit strictly between operations, outside model-operation, semantic-stall,
+retry-wait, per-generation and foreground-tool clocks; those clocks are not
+running while `Held` and arm normally for the next operation. A running
+operation remains `Draining` under its ordinary clocks. The hold never cancels
+paid compaction, even when an external coordinator's deadline expires: that
+coordinator must wait or withdraw before surrender. Already-running background
+jobs remain runner-owned and their execution hard caps continue in real time.
+No turn-wide timeout is introduced, and the one-terminal-per-admitted-turn law
+is unchanged. Spawn, wake and admission barriers compose in the host layer,
+not as topology or provider vocabulary in the agent runtime.
+
 ### 3.2 Steering and follow-up
 
 Steering targets the active turn and enters a bounded ordered queue. It becomes

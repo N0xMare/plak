@@ -57,6 +57,11 @@ one cross-build carrier (a build imports its own and the previous version).
 - Publish `plak wire schema` as a supported command and attach target-specific
   JSON Schemas to releases.
 
+- Add an internal, generation-scoped runtime step hold for host coordination.
+  It parks at joined operation boundaries, preserves ordinary timeout budgets,
+  and revokes on coordinator drop without occupying command ingress. It does
+  not yet enable live upgrade or change session and runner custody.
+
 - Add `plak runner connect --stdio --binary <id>` to select and verify an
   already installed immutable runner image without moving command links.
   Unsafe, missing or mismatched snapshots refuse with an install remedy;

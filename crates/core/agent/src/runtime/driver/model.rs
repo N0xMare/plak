@@ -211,6 +211,10 @@ impl Driver {
         attempt_id: AttemptId,
         request: RoundRequest,
     ) -> ModelOperationResult {
+        let _activity = self.boundary.0.activity(
+            Some(command.turn_id),
+            crate::control::boundary::BoundaryPhase::Model,
+        );
         self.request_slot = match self.take_request_slot(command).await {
             Ok(slot) => slot,
             Err(error) => {

@@ -43,6 +43,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 mod admitted_round;
+mod boundary;
 mod cleanup;
 mod commands;
 mod compaction;
@@ -86,6 +87,7 @@ pub use turn::OPERATION_BUDGET_WRAP_UP_NOTE;
     reason = "independent per-turn recovery and paid-fold guards must persist separately"
 )]
 struct Driver {
+    boundary: crate::control::boundary::BoundaryOwner,
     agent_id: DriverInstanceId,
     model: Arc<dyn LanguageModel>,
     provider_configuration: Arc<CompiledProviderConfiguration>,

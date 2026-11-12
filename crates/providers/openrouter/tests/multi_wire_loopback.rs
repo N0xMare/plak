@@ -47,6 +47,9 @@ use uuid::Uuid;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
+#[path = "multi_wire_loopback/step_hold.rs"]
+mod step_hold;
+
 const PRE_DISPATCH_DEADLINE: Duration = Duration::from_millis(400);
 
 #[test]
@@ -500,6 +503,7 @@ struct HoldOneReply {
     index: usize,
     release: Arc<Notify>,
     body_prefix: Option<usize>,
+    close_without_tail: bool,
 }
 
 /// The same loopback with an explicit status line per reply.
@@ -572,6 +576,9 @@ async fn loopback_with_status_holding(
                 stream.write_all(&response.as_bytes()[..split]).await?;
                 if let Some(hold) = hold.as_ref() {
                     hold.release.notified().await;
+                    if hold.close_without_tail {
+                        continue;
+                    }
                 }
                 stream.write_all(&response.as_bytes()[split..]).await?;
             } else {
@@ -1715,6 +1722,7 @@ async fn an_in_band_gateway_overload_is_replayed_for_the_turn() -> TestResult {
                 index: 2,
                 release: Arc::clone(&release),
                 body_prefix: Some(body_prefix),
+                close_without_tail: false,
             }),
             None,
         )
@@ -1896,6 +1904,7 @@ async fn chat_replay_wait_gets_a_fresh_generation_head_budget() -> TestResult {
             index: 2,
             release: Arc::clone(&release),
             body_prefix: None,
+            close_without_tail: false,
         }),
         None,
     )
