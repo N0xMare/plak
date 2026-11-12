@@ -61,6 +61,8 @@ fn last_handle_drop_flushes_a_queued_frame_and_bye_before_immediate_process_exit
                 Err(error) => panic!("accept: {error}"),
             }
         };
+        // BSD sockets inherit the listener's O_NONBLOCK on accept; Linux does not.
+        socket.set_nonblocking(false).unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
