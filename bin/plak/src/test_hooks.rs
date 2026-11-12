@@ -64,13 +64,8 @@ pub(crate) fn upgrade_crash_cut(name: &str) {
     }
 }
 
-pub(crate) fn upgrade_preparation_checkpoint(name: &str) -> crate::CliResult<()> {
-    if std::env::var("PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE").is_ok_and(|cut| cut == name) {
-        return Err(crate::CliFailure::new(
-            "injected host upgrade preparation failure",
-        ));
-    }
-    Ok(())
+pub(crate) fn upgrade_preparation_refused(name: &str) -> bool {
+    std::env::var("PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE").is_ok_and(|cut| cut == name)
 }
 
 pub(crate) fn upgrade_key_environment(key: &str) -> impl Iterator<Item = (&'static str, String)> {

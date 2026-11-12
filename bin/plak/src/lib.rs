@@ -169,8 +169,8 @@ mod test_hooks {
     #[allow(dead_code, reason = "only the optional host coordinates upgrades")]
     pub(crate) fn upgrade_crash_cut(_name: &str) {}
     #[allow(dead_code, reason = "only the optional host prepares upgrades")]
-    pub(crate) const fn upgrade_preparation_checkpoint(_name: &str) -> crate::CliResult<()> {
-        Ok(())
+    pub(crate) const fn upgrade_preparation_refused(_name: &str) -> bool {
+        false
     }
     #[allow(dead_code, reason = "only the optional host starts replacement images")]
     pub(crate) fn upgrade_key_environment(

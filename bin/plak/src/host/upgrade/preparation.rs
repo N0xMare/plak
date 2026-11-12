@@ -54,7 +54,9 @@ pub(super) fn exports(
         });
         receipt.save(paths)?;
         crash_cut("after-mapping");
-        crate::test_hooks::upgrade_preparation_checkpoint("after-mapping")?;
+        if crate::test_hooks::upgrade_preparation_refused("after-mapping") {
+            return Err(CliFailure::new("injected host upgrade preparation failure"));
+        }
     }
     process::verify_image(&receipt.destination, &receipt.destination_binary)?;
     check_cancel(cancelled)?;
