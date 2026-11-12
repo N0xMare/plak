@@ -35,7 +35,7 @@ is a no-op; edited, unrelated or symlinked units are never overwritten.
 The current state directory is `state/r27.e37.p37.t10/`: runtime SQLite
 schema 27, runtime format epoch 37, product schema 37, and tree schema 10.
 These are format identities, not configuration keys. Client wire protocol 8
-and runner protocol 5 require separate exact matches, with no negotiation. Product schema 37 adds
+and runner protocol 6 require separate exact matches, with no negotiation. Product schema 37 adds
 operator title overrides and archival state; it composes with runtime epoch
 37 without changing the runtime codec or tree encoding. Session export stays
 version 12, with the version 11 importer retained for the previous version.
@@ -880,7 +880,7 @@ existing template bodies and refuse changes to them; edit user or project
 files directly, or use the protocol-8 confirmed home `template_put` exception.
 `config_patch` never edits a body. Unrelated settings saves do not rewrite templates.
 
-Protocol-7 `config_patch`, `template_put` and `profile_put` publish one file
+Protocol-8 `config_patch`, `template_put` and `profile_put` publish one file
 per request. All require a matching content etag and one-use consent; stale
 etags return conflict and no write. The shared home publication lock covers
 read-current, comparison, complete candidate validation and atomic publication;
