@@ -78,6 +78,26 @@ class TouchedPackagesTests(unittest.TestCase):
             [],
         )
 
+    def test_files_a_package_reads_outside_it_select_that_package(self):
+        for path in (
+            "docs/spec/07-config-reference.md",
+            "docs/reference-config/config.toml",
+            "docs/reference-config/agents/worker.toml",
+            "tests/fixtures/config-scenarios/tree-mixed-oauth/config.toml",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    self.touched(path, "crates/core/model/src/lib.rs"), ["plak", "plakous-model"]
+                )
+        self.assertEqual(
+            self.touched(
+                "docs/reference-configs/config.toml",
+                "tests/fixtures/config-scenarios-old/config.toml",
+                "docs/spec/05-testing-and-evidence.md",
+            ),
+            [],
+        )
+
     def test_workspace_inputs_select_the_whole_workspace(self):
         for path in (
             "Cargo.toml",

@@ -683,7 +683,9 @@ walk excluding `.git`, `.jj` and `target`; changed-package discovery requires a
 repository or explicit packages. A root Cargo input (manifest, lockfile, toolchain,
 lint, format or nextest config, `.cargo/`), or any path under `vendor/`
 (vendored members and the patched `monty-typeshed` source), selects every
-package. Its parallel
+package. A file outside every package that a package's tests read selects that
+package: chapter 07, `docs/reference-config/` and
+`tests/fixtures/config-scenarios/` select `plak`. Its parallel
 lane passes `-E 'rdeps(=<pkg>) | ...'`, which nextest intersects with the
 profile's own filter; an empty selection passes, and no touched package runs
 only static. Fast is worker evidence, not a substitute for the integration
