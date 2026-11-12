@@ -466,6 +466,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let command = cli::parse(arguments)?.resolved_against(launch.as_deref());
     build_features::admit_command(&command)?;
 
+    if matches!(command, Command::WireSchema) {
+        return wire_schema::print(&mut io::stdout().lock());
+    }
+
     if let Command::WriteBinaryManifest { directory } = &command {
         build_identity::write_binary_manifest(directory).map_err(|error| {
             CliFailure::new(format!("could not write binary manifest: {error}"))
@@ -681,7 +685,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
                 abandon.as_deref(),
             );
         }
-        Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
         // The runner bridge owns raw stdin and stdout, so it runs before the
         // process takes their locks.
         Command::Runner(command) => {

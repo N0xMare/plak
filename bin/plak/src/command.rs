@@ -590,6 +590,7 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
     matches!(
         command,
         Command::StatusAll
+            | Command::WireSchema
             | Command::HostConnect { .. }
             | Command::AccountsList
             | Command::AuthStatus(_)

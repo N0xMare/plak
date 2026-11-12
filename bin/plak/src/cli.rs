@@ -286,6 +286,7 @@ fn is_known_command(name: &str) -> bool {
             | "host"
             | "run"
             | "agent"
+            | "wire"
             | "resume"
             | "session"
             | "state"
