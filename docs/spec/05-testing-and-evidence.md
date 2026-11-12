@@ -83,7 +83,16 @@ product-wire test covers one-use consent, lookup-only open retry, preserved gran
 on no-effect busy refusal, confirmed takeover, a one-time execution marker,
 disconnect/reattach without input replay, runner replacement and acknowledged
 loss without killing the old shell. Runner-clock tests pin once-per-idle-period
-warnings and output-capacity behavior without advancing wall time. A minimal
+warnings and output-capacity behavior without advancing wall time. A renewal regression polls a real runner refresh to Pending,
+then proves controller input is acknowledged before refresh completion. A small-chunk
+PTY test stalls the reader beyond sixteen frames, then proves input still works,
+Exit remains deliverable and ended command admission refuses without effect. Mutant
+checks distinguish same-principal wrong-connection input, correct-next-offset input
+before acknowledgment, and unreachable non-acknowledged close retaining its pin.
+Host tests collect over 1,024 completed receipts, import live runner inventory even
+with 4,096 exhausted receipt fences without creating an agent line, enforce quotas across runners,
+refill the six-open rolling minute and isolate runner/namespace operation locks;
+shutdown of a healthy runner must complete even while another operation is stalled. A minimal
 test-only client shares one bounded request cadence between four streaming
 terminals, typing and file-tree expansion, returning consumed output in four-row
 64 KiB credit batches. Its deliberate unscheduled overrun must return typed

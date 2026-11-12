@@ -201,22 +201,23 @@ impl Console {
         if output_bytes(&event).is_none() {
             return false;
         }
-        if matches!(event, dto::TerminalEvent::InputAccepted { .. }) {
-            stream
-                .events
-                .retain(|event| !matches!(event, dto::TerminalEvent::InputAccepted { .. }));
+        let ended = matches!(
+            event,
+            dto::TerminalEvent::Exit { .. } | dto::TerminalEvent::Suspended {}
+        );
+        if stream.ended {
+            return ended;
         }
-        if stream.events.len() >= 16 {
+        if !ended && !queue_terminal_event(stream, &event) {
             return false;
         }
         if let dto::TerminalEvent::InputAccepted { next } = event {
             stream.acknowledged_input = next;
         }
-        stream.ended |= matches!(
-            event,
-            dto::TerminalEvent::Exit { .. } | dto::TerminalEvent::Suspended { .. }
-        );
-        stream.events.push_back(event);
+        stream.ended = ended;
+        if ended || !coalesce_data(&mut stream.events, &event) {
+            stream.events.push_back(event);
+        }
         let owner = stream.owner.clone();
         if let Some(notify) = state.notifications.get(&owner) {
             notify.notify_one();
@@ -235,6 +236,7 @@ impl Console {
         type Pending = Option<(u64, u64, oneshot::Sender<Result<(), dto::ReadRefusal>>)>;
         let mut pending: Pending = None;
         if controller.credit(&context, WINDOW).await.is_err() {
+            close_commands(&mut commands);
             self.publish_terminal(id, dto::TerminalEvent::Suspended {});
             return;
         }
@@ -318,6 +320,7 @@ impl Console {
                 }
             }
         }
+        close_commands(&mut commands);
         self.finish_terminal(id, controller).await;
     }
 
@@ -363,4 +366,68 @@ impl Console {
             .get(&id)
             .is_some_and(|s| !s.events.is_empty())
     }
+}
+
+fn close_commands(commands: &mut mpsc::Receiver<Command>) {
+    commands.close();
+    while let Ok(command) = commands.try_recv() {
+        if let Command::Input { reply, .. } = command {
+            let _ = reply.send(Err(dto::ReadRefusal::TerminalLost {}));
+        }
+    }
+}
+
+fn queue_terminal_event(stream: &mut Stream, event: &dto::TerminalEvent) -> bool {
+    let bytes = stream
+        .events
+        .iter()
+        .filter_map(output_bytes)
+        .map(u64::from)
+        .sum::<u64>();
+    if bytes + u64::from(output_bytes(event).unwrap_or(0)) > WINDOW {
+        return false;
+    }
+    // Control state is latest-only until assigned a sequence by the sole writer.
+    if matches!(event, dto::TerminalEvent::OutputGap { .. }) {
+        // A reset preceding queued bytes cannot be moved behind those bytes.
+        let after_data = stream
+            .events
+            .iter()
+            .rposition(|event| matches!(event, dto::TerminalEvent::Data { .. }))
+            .map_or(0, |index| index + 1);
+        let mut index = 0;
+        stream.events.retain(|queued| {
+            let keep =
+                index < after_data || !matches!(queued, dto::TerminalEvent::OutputGap { .. });
+            index += 1;
+            keep
+        });
+    } else if !matches!(event, dto::TerminalEvent::Data { .. }) {
+        stream
+            .events
+            .retain(|queued| std::mem::discriminant(queued) != std::mem::discriminant(event));
+    }
+    true
+}
+
+fn coalesce_data(events: &mut VecDeque<dto::TerminalEvent>, event: &dto::TerminalEvent) -> bool {
+    let Some(dto::TerminalEvent::Data {
+        offset: prior,
+        bytes_b64: encoded,
+    }) = events.back_mut()
+    else {
+        return false;
+    };
+    let dto::TerminalEvent::Data { offset, bytes_b64 } = event else {
+        return false;
+    };
+    let (Ok(mut bytes), Ok(next)) = (STANDARD.decode(&*encoded), STANDARD.decode(bytes_b64)) else {
+        return false;
+    };
+    if *prior + bytes.len() as u64 != *offset || bytes.len() + next.len() > CHUNK {
+        return false;
+    }
+    bytes.extend(next);
+    *encoded = STANDARD.encode(bytes);
+    true
 }

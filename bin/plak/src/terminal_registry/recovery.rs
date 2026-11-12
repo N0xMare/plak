@@ -59,21 +59,31 @@ impl TerminalRegistry {
                 .get()
                 .and_then(|hold| hold(pin.key.session.as_str()).ok());
             let mut state = self.lock();
-            if state.entries.len() >= 1024 && !state.entries.contains_key(&identity) {
-                return Err(TerminalError::Refused(super::OperatorRefusal::Quota));
-            }
+            Self::collect_receipts(&mut state);
             let hold = state
                 .residents
                 .get(pin.key.session.as_str())
                 .and_then(plakous_hosted::host_service::AttachmentCount::hold)
                 .or(hold);
-            state.entries.entry(identity.clone()).or_insert(Entry {
-                lost: true,
-                pin,
-                pinned: true,
-                row: None,
-                hold,
-            });
+            if let Some(entry) = state.entries.get_mut(&identity) {
+                // A same-instance live inventory always restores its pin and hold.
+                entry.pinned = true;
+                if entry.hold.is_none() {
+                    entry.hold = hold;
+                }
+            } else {
+                state.entries.insert(
+                    identity.clone(),
+                    Entry {
+                        lost: true,
+                        pin,
+                        pinned: true,
+                        row: None,
+                        hold,
+                        completed: 0,
+                    },
+                );
+            }
             drop(state);
             self.observe(&identity, item.terminal)?;
         }

@@ -166,6 +166,19 @@ async fn operator_console_input_refusals_accept_no_bytes_or_offsets_and_never_re
         panic!("input")
     };
     assert_eq!((offset, bytes), (0, vec![0, 255]));
+    assert!(matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            console.terminal_input(&context(), 1, 2, "YQ==")
+        )
+        .await
+        .unwrap(),
+        Err(dto::ReadRefusal::TerminalBackpressure {})
+    ));
+    assert!(
+        commands.try_recv().is_err(),
+        "a correct next offset still waits for acknowledgment"
+    );
     assert!(
         console
             .terminal_input(&context(), 1, 0, "AP8=")
@@ -185,6 +198,107 @@ async fn operator_console_input_refusals_accept_no_bytes_or_offsets_and_never_re
     );
     assert!(commands.try_recv().is_err());
     assert_eq!(console.terminals.lock().unwrap().streams[&1].next_input, 2);
+}
+
+#[tokio::test]
+async fn operator_console_small_chunks_are_byte_bounded_and_terminal_end_is_never_dropped() {
+    let console = fixture();
+    let _commands = add(&console, 1);
+    for offset in (0..WINDOW).step_by(256) {
+        assert!(console.publish_terminal(
+            1,
+            dto::TerminalEvent::Data {
+                offset,
+                bytes_b64: STANDARD.encode(vec![0xff; 256]),
+            }
+        ));
+    }
+    assert_eq!(
+        console.terminals.lock().unwrap().streams[&1].events.len(),
+        4
+    );
+    assert!(console.publish_terminal(
+        1,
+        dto::TerminalEvent::Exit {
+            status: dto::TerminalStatus::Exited,
+            code: Some(0),
+            survivors: Vec::new(),
+        }
+    ));
+    assert!(console.terminals.lock().unwrap().streams[&1].ended);
+    assert!(matches!(
+        console.terminal_input(&context(), 1, 0, "YQ==").await,
+        Err(dto::ReadRefusal::TerminalLost {})
+    ));
+    assert!(matches!(
+        console.terminal_credit(
+            &context(),
+            vec![dto::TerminalCredit {
+                stream: 1,
+                bytes: 1
+            }]
+        ),
+        Err(dto::ReadRefusal::TerminalLost {})
+    ));
+    let mut bytes = 0;
+    for seq in 0..=4 {
+        let Some(HostFrame::TerminalStream {
+            seq: actual, event, ..
+        }) = console.terminal_output(&context())
+        else {
+            panic!("missing queued data or terminal end")
+        };
+        assert_eq!(actual, seq);
+        match event {
+            dto::TerminalEvent::Data { offset, bytes_b64 } => {
+                assert_eq!(offset, bytes);
+                bytes += STANDARD.decode(bytes_b64).unwrap().len() as u64;
+            }
+            dto::TerminalEvent::Exit { .. } => assert_eq!(seq, 4),
+            _ => panic!("unexpected event"),
+        }
+    }
+    assert_eq!(bytes, WINDOW);
+}
+
+#[test]
+fn operator_console_gap_resets_stay_before_their_queued_replay_bytes() {
+    let console = fixture();
+    let _commands = add(&console, 1);
+    for offset in [10, 20, 30] {
+        assert!(console.publish_terminal(
+            1,
+            dto::TerminalEvent::OutputGap {
+                oldest: dto::TerminalCursor {
+                    instance: "instance".into(),
+                    offset
+                },
+            }
+        ));
+        if offset != 20 {
+            assert!(console.publish_terminal(
+                1,
+                dto::TerminalEvent::Data {
+                    offset,
+                    bytes_b64: STANDARD.encode(b"x"),
+                }
+            ));
+        }
+    }
+    for (seq, offset) in [10, 10, 30, 30].into_iter().enumerate() {
+        let Some(HostFrame::TerminalStream {
+            seq: actual, event, ..
+        }) = console.terminal_output(&context())
+        else {
+            panic!("missing gap or replay")
+        };
+        assert_eq!(actual, seq as u64);
+        match event {
+            dto::TerminalEvent::OutputGap { oldest } => assert_eq!(oldest.offset, offset),
+            dto::TerminalEvent::Data { offset: actual, .. } => assert_eq!(actual, offset),
+            _ => panic!("unexpected event"),
+        }
+    }
 }
 
 #[test]

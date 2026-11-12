@@ -80,8 +80,37 @@ impl TerminalRegistry {
     ) -> Result<String, TerminalError> {
         let identity = pin.identity().map_err(|_| TerminalError::Conflict)?;
         let mut state = self.lock();
-        if state.closing || state.entries.len() >= 1024 || state.entries.contains_key(&identity) {
+        Self::collect_receipts(&mut state);
+        if state.closing || state.entries.contains_key(&identity) {
             return Err(TerminalError::Busy);
+        }
+        let live: Vec<_> = state.entries.values().filter(|e| e.pinned).collect();
+        if live.len() >= 16
+            || live
+                .iter()
+                .filter(|e| e.pin.namespace == pin.namespace)
+                .count()
+                >= 4
+            || live
+                .iter()
+                .filter(|e| e.pin.key.session == pin.key.session)
+                .count()
+                >= 2
+        {
+            return Err(TerminalError::Refused(super::OperatorRefusal::Quota));
+        }
+        let key = Self::receipt_key(&pin.generation, &pin.key)?;
+        if let Some(fences) = state.fences.get(pin.namespace.principal.as_str()) {
+            if let Some(prior) = fences.get(&key) {
+                return Err(if prior == &pin.digest {
+                    TerminalError::Lost
+                } else {
+                    TerminalError::Conflict
+                });
+            }
+            if fences.len() >= 4096 {
+                return Err(TerminalError::Refused(super::OperatorRefusal::Quota));
+            }
         }
         if state
             .reclaiming
@@ -98,6 +127,7 @@ impl TerminalRegistry {
                 lost: false,
                 row: None,
                 hold: Some(hold),
+                completed: 0,
             },
         );
         Ok(identity)

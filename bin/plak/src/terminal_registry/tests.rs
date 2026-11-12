@@ -2,6 +2,7 @@
 
 use super::*;
 use plakous_hosted::host_service::AttachmentCount;
+mod admission;
 mod linked;
 mod loss;
 
@@ -81,7 +82,16 @@ fn operator_host_listing_bounds_completed_receipts_without_forgetting_open_fence
         registry.release_proven(&identity).unwrap();
     }
     assert_eq!(registry.list(&context("operator")).unwrap().len(), 8);
-    assert_eq!(registry.lock().entries.len(), 13);
+    assert_eq!(registry.lock().entries.len(), 8);
+    assert_eq!(
+        registry
+            .lock()
+            .fences
+            .values()
+            .map(BTreeMap::len)
+            .sum::<usize>(),
+        5
+    );
     assert_eq!(registry.list(&context("other")).unwrap().len(), 0);
     assert_eq!(count.get(), 0);
     assert!(!registry.paths.product_database().exists());

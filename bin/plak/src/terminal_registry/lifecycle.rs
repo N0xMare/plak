@@ -49,11 +49,16 @@ impl TerminalRegistry {
         runner: &str,
         client: &RunnerClient,
     ) -> Result<(), TerminalError> {
-        let _operation = self.operations.lock().await;
+        let _operation = self.runner_operation(runner).write_owned().await;
+        let renewed = self.lock().bindings.get(runner).is_some_and(|prior| {
+            prior.reconciled
+                && prior.revision.is_current()
+                && prior.client.instance() == client.instance()
+        });
         let binding = Binding {
             client: client.clone(),
             revision: Arc::new(client.connection_revision()),
-            reconciled: false,
+            reconciled: renewed,
         };
         {
             let mut state = self.lock();
@@ -77,9 +82,18 @@ impl TerminalRegistry {
             }
             state.bindings.insert(runner.to_owned(), binding.clone());
         }
-        let namespaces = self
+        let mut namespaces = self
             .synchronize_inventory(runner, &binding, OperatorOperation::ReconcileScope)
             .await?;
+        for entry in self.lock().entries.values().filter(|entry| {
+            entry.pin.runner == runner
+                && entry.pin.generation == self.runner_generation
+                && entry.pin.instance == binding.client.instance()
+        }) {
+            if !namespaces.contains(&entry.pin.namespace) {
+                namespaces.push(entry.pin.namespace.clone());
+            }
+        }
         for namespace in namespaces {
             if let Some(rows) = Self::namespace_table(&binding, namespace.clone()).await? {
                 self.observe_table(runner, &namespace, rows)?;
@@ -108,9 +122,12 @@ impl TerminalRegistry {
         {
             Ok(OperatorAnswer::Table { terminals }) => Some(terminals),
             Err(TerminalError::Refused(OperatorRefusal::TerminalBusy)) => None,
+            Err(TerminalError::Refused(OperatorRefusal::Quota)) => None,
             Err(TerminalError::Refused(OperatorRefusal::NamespaceExpired)) => {
-                match Self::request(binding, namespace, OperatorOperation::List).await? {
-                    OperatorAnswer::Table { terminals } => Some(terminals),
+                match Self::request(binding, namespace, OperatorOperation::List).await {
+                    Ok(OperatorAnswer::Table { terminals }) => Some(terminals),
+                    Err(TerminalError::Refused(OperatorRefusal::ReconcileRequired)) => None,
+                    Err(error) => return Err(error),
                     _ => return Err(TerminalError::Unavailable),
                 }
             }
@@ -148,7 +165,14 @@ impl TerminalRegistry {
                     .map(|(runner, binding)| (runner.clone(), binding.client.clone()))
                     .collect();
                 for (runner, client) in bindings {
-                    let _ = registry.reconcile(&runner, &client).await;
+                    if !registry.lock().renewing.insert(runner.clone()) {
+                        continue;
+                    }
+                    let registry = registry.clone();
+                    tokio::spawn(async move {
+                        let _ = registry.reconcile(&runner, &client).await;
+                        registry.lock().renewing.remove(&runner);
+                    });
                 }
             }
         });
@@ -182,69 +206,100 @@ impl TerminalRegistry {
             }
             namespaces
         };
-        let closing = async {
-            let _operation = self.operations.lock().await;
-            loop {
-                let pins: Vec<_> = self
-                    .lock()
-                    .entries
-                    .iter()
-                    .filter(|(_, e)| e.pinned)
-                    .map(|(id, e)| (id.clone(), e.pin.clone()))
-                    .collect();
-                if pins.is_empty() {
-                    for (_, binding, namespace) in &namespaces {
-                        let _ = Self::request(
-                            binding,
-                            namespace.clone(),
-                            OperatorOperation::NamespaceClose,
-                        )
-                        .await;
-                    }
-                    return;
+        let mut runners = std::collections::BTreeMap::new();
+        for (runner, binding, namespace) in namespaces {
+            let entry = runners
+                .entry(runner)
+                .or_insert_with(|| (binding, Vec::new()));
+            entry.1.push(namespace);
+        }
+        let mut pending: Vec<_> = runners
+            .into_iter()
+            .map(|(runner, (binding, namespaces))| {
+                Some(Box::pin(self.close_runner(runner, binding, namespaces)))
+            })
+            .collect();
+        let closing = std::future::poll_fn(|cx| {
+            for task in &mut pending {
+                if task
+                    .as_mut()
+                    .is_some_and(|task| task.as_mut().poll(cx).is_ready())
+                {
+                    *task = None;
                 }
-                for (identity, pin) in pins {
-                    let binding = self.lock().bindings.get(&pin.runner).cloned();
-                    let Some(binding) =
-                        binding.filter(|binding| binding.client.instance() == pin.instance)
-                    else {
-                        continue;
-                    };
-                    let _ = Self::request(&binding, pin.namespace.clone(), OperatorOperation::List)
-                        .await;
-                    let Ok(generation) = id(pin.generation.clone()) else {
-                        continue;
-                    };
-                    if let Ok(OperatorAnswer::Terminal { terminal, .. }) = Self::request(
-                        &binding,
-                        pin.namespace.clone(),
-                        OperatorOperation::Close {
-                            key: pin.key.clone(),
-                            generation: Some(generation),
-                            acknowledge_loss: false,
-                        },
-                    )
-                    .await
-                    {
-                        if terminal.status == TerminalStatus::TerminationUnknown {
-                            let _ = Self::request(
-                                &binding,
-                                pin.namespace.clone(),
-                                OperatorOperation::NamespaceClose,
-                            )
-                            .await;
-                        }
-                        let _ = self.observe(&identity, terminal);
-                    }
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
-        };
+            if pending.iter().all(Option::is_none) {
+                std::task::Poll::Ready(())
+            } else {
+                std::task::Poll::Pending
+            }
+        });
         let _ = tokio::time::timeout_at(until, closing).await;
         let mut state = self.lock();
         for entry in state.entries.values_mut().filter(|entry| entry.pinned) {
             entry.lost = true;
         }
         state.entries.values().filter(|entry| entry.pinned).count()
+    }
+
+    async fn close_runner(
+        &self,
+        runner: String,
+        binding: Binding,
+        namespaces: Vec<super::OperatorNamespace>,
+    ) {
+        let _operation = self.runner_operation(&runner).write_owned().await;
+        loop {
+            let pins: Vec<_> = self
+                .lock()
+                .entries
+                .iter()
+                .filter(|(_, e)| e.pinned && e.pin.runner == runner)
+                .map(|(id, e)| (id.clone(), e.pin.clone()))
+                .collect();
+            if pins.is_empty() {
+                for namespace in &namespaces {
+                    let _ = Self::request(
+                        &binding,
+                        namespace.clone(),
+                        OperatorOperation::NamespaceClose,
+                    )
+                    .await;
+                }
+                return;
+            }
+            for (identity, pin) in pins {
+                if binding.client.instance() != pin.instance {
+                    continue;
+                }
+                let _ =
+                    Self::request(&binding, pin.namespace.clone(), OperatorOperation::List).await;
+                let Ok(generation) = id(pin.generation.clone()) else {
+                    continue;
+                };
+                if let Ok(OperatorAnswer::Terminal { terminal, .. }) = Self::request(
+                    &binding,
+                    pin.namespace.clone(),
+                    OperatorOperation::Close {
+                        key: pin.key.clone(),
+                        generation: Some(generation),
+                        acknowledge_loss: false,
+                    },
+                )
+                .await
+                {
+                    if terminal.status == TerminalStatus::TerminationUnknown {
+                        let _ = Self::request(
+                            &binding,
+                            pin.namespace.clone(),
+                            OperatorOperation::NamespaceClose,
+                        )
+                        .await;
+                    }
+                    let _ = self.observe(&identity, terminal);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
     }
 }

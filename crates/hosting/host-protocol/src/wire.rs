@@ -67,6 +67,7 @@ pub use tool::WireToolItem;
 /// 6 adds attachment-free host requests and principal-bound welcome extensions.
 /// 7 adds consented account/configuration writes; 8 adds bounded saved-workspace
 /// Files/Changes reads and per-account credential-refresh observations.
+/// 9 adds consented operator terminals, independent credited streams and residency.
 pub const WIRE_VERSION: u32 = 9;
 
 /// The most bytes one line holds, newline included.

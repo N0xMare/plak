@@ -70,7 +70,7 @@ pub(crate) mod surface_protocol;
 pub(crate) mod terminal_application;
 #[allow(
     dead_code,
-    reason = "host-internal terminal API; client requests arrive in the next protocol increment"
+    reason = "host terminal authority also compiles without the web transport"
 )]
 mod terminal_registry;
 pub(crate) mod tui_preferences;

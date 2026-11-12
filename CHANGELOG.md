@@ -28,8 +28,16 @@ one cross-build carrier (a build imports its own and the previous version).
   and aggregate output budgets preserve control/transcript progress. The default-off
   terminal switch enables the strict-CSP WASM seam without permitting script eval.
   Product DTOs own terminal events; generic host streams remain attachment-free.
-  Runner protocol 6 becomes 7 for OperatorControl, preserving the preceding Changes contract.
+  Runner protocol 6 becomes 7 for OperatorControl, preserving the preceding
+  Changes contract.
   Terminal state remains process-local; product schema and state key are unchanged.
+
+- Preserve terminal controller authority across same-instance renewals. Bound slow-reader
+  queues by decoded bytes, coalesce adjacent data, retain terminal end notices and
+  close command admission before draining. Enforce host-wide quotas and six opens
+  per principal per minute; collect completed host receipts behind principal-local
+  fences without blocking runner inventory. Isolate operation locks and shutdown
+  work across runners, and retain pins during same-instance disconnects.
 
 - Collect refused terminal opens behind compact exact-outcome fences. Reserve
   bulk-channel capacity for terminal control responses and gate reads without

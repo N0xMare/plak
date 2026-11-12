@@ -83,7 +83,7 @@ fn output_bytes(event: &dto::TerminalEvent) -> Option<u32> {
     match event {
         dto::TerminalEvent::Data { bytes_b64, .. } if bytes_b64.len() <= CHUNK.div_ceil(3) * 4 => {
             let bytes = STANDARD.decode(bytes_b64).ok()?;
-            (bytes.len() <= CHUNK && STANDARD.encode(&bytes) == *bytes_b64)
+            (!bytes.is_empty() && bytes.len() <= CHUNK && STANDARD.encode(&bytes) == *bytes_b64)
                 .then(|| u32::try_from(bytes.len()).ok())
                 .flatten()
         }

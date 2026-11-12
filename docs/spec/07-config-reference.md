@@ -750,7 +750,14 @@ with which `plak runner serve` refuses to start. Any other key is a load error.
 
 Operator terminal limits are fixed policy, not new configuration keys: two live
 terminals/session, four/principal, sixteen/host and thirty-two/runner, counting
-reservations and unresolved cleanup. Input idle expires after 15 awake minutes,
+reservations and unresolved cleanup. Session/principal/host limits are enforced
+host-wide across runners as well as by each runner. New confirmed opens are limited
+to six per authenticated principal in a rolling minute; lookup-only retries do not
+count. This is fixed policy, not a configurable key; exhaustion returns proven-no-effect
+terminal_backpressure. Host completed receipts collect to eight per principal namespace,
+with at most 4,096 replay fences; namespace exhaustion never refuses inventory import
+or runner binding. Independent runner and namespace operation locks isolate stalls,
+and periodic same-instance renewal does not invalidate a controller. Input idle expires after 15 awake minutes,
 detach after five awake minutes, and a host-generation namespace after 90 awake
 seconds without renewal. Output, resize and credits do not refresh input idle.
 The shell comes from the runner account, never a `runner.toml` shell setting.

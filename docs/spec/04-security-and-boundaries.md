@@ -792,7 +792,13 @@ There is no claim of cleanup or death, no automatic terminal adoption and no glo
 barrier on first use or unrelated workspaces. Those processes are in the operator's
 hands, consistent with host restart ending terminal namespaces. Wherever runner
 state or host memory survives, precise workspace and lost-instance barriers remain
-mandatory.
+mandatory. A transient disconnect from the same runner instance cannot be
+acknowledged as lost-instance proof; same-instance inventory reasserts live pins and
+residency holds. Host-wide terminal quotas and six-open/minute/principal admission
+span runners. Receipt exhaustion remains principal-local and never blocks inventory
+import or agent binding. Namespace operations are serialized only within their
+runner/principal authority; runner reconciliation and shutdown do not share a global
+round-trip lock.
 Expired/closed namespaces and exhausted namespace-table admission refuse before
 changing another generation: a stale renewal cannot close its successor's terminals.
 

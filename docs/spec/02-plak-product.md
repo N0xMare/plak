@@ -645,6 +645,30 @@ terminal retains that hold and prevents dormancy and host idle exit, including
 when another principal requests release. The private residency outcome is
 `operator_terminal` on client protocol 9. Release never implicitly closes another
 principal's shell; confirmed close of the requester's terminals precedes normal release.
+Completed unpinned rows
+are skipped, and ambiguous close dispatch reports `operation_outcome_unknown`.
+
+The host enforces two pinned terminals/session, four/authenticated principal and
+sixteen total across all runners, including reservations and lost-instance pins.
+New confirmed open attempts admit at most six per principal in a rolling minute;
+lookup-only retries do not spend that budget. Exhaustion is proven-no-effect
+`terminal_backpressure` and preserves confirmation for a later attempt. Eight
+completed receipts remain per principal namespace; older key/digest identities move
+to at most 4,096 compact fences. Fence exhaustion affects only that namespace's
+new opens, never authoritative inventory import, runner bind or agent work.
+
+A periodic same-instance/current-revision renewal preserves reconciled authority
+throughout its round trips, including namespaces with only retained receipts.
+A new open reserves host quota before creating or renewing its runner namespace.
+Closed or quota-exhausted principal namespace receipts do not invalidate a complete
+scope inventory or block agent binding; their own terminal operations remain refused.
+First-bind/replacement barriers remain strict. Runner operations use per-runner
+reconciliation exclusion and per-principal namespace
+serialization; unrelated runners and namespaces do not share an operation mutex.
+Shutdown joins runner cleanup concurrently within its existing overall deadline.
+Acknowledging an unreachable terminal can release a host pin only after an instance
+change is established, not merely because its current instance disconnected.
+A same-instance inventory reporting a live terminal restores both its pin and hold.
 
 Terminal tables, host mirrors, workspace pins, quotas and output rings are process-local.
 There is no terminal table or pin file in the product store, no persisted-format
@@ -4083,7 +4107,12 @@ The host round-robins credited terminals, after response, transcript and directo
 traffic. Output is limited to 256 KiB/s per stream and 512 KiB/s per principal
 across runners; input is 64 KiB/s per stream. Blocked output does not advance seq
 or byte accounting, and another eligible terminal can progress. Stream output
-becomes visible only after its attach response is written. Disconnect drops input
+becomes visible only after its attach response is written. Queues are bounded by
+64 KiB decoded bytes, not the number of small data frames; adjacent bytes coalesce
+without crossing an output-gap reset. Terminal Exit/Suspended always marks the
+stream ended and remains deliverable. The pump closes command admission before
+waiting for queued output to drain, refusing later input and credit with no effect.
+Disconnect drops input
 and resize controllers, not the shell; hidden tabs explicitly detach. The same
 principal may reattach after fresh confirmation, without lost-input retries.
 `console.terminal` advertises face-effective availability; `console.terminal_limits`

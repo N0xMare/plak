@@ -254,6 +254,121 @@ async fn opened(linked: &Linked) -> (dto::TerminalView, u64) {
     (terminal, first)
 }
 
+#[tokio::test]
+async fn operator_console_pty_wire_small_chunk_stall_keeps_stream_live_and_closes_admission() {
+    let linked = Linked::new();
+    let service = linked.service();
+    let (client, serving) = linked.connect(&service).await;
+    let (terminal, stream) = opened(&linked).await;
+    let command = b"n=0; while [ \"$n\" -lt 60 ]; do printf x; n=$((n+1)); sleep 0.03; done\n";
+    assert!(matches!(
+        linked
+            .call(
+                &context(),
+                HostRequest::TerminalInput {
+                    stream,
+                    offset: 0,
+                    bytes_b64: STANDARD.encode(command),
+                }
+            )
+            .await,
+        HostResponse::TerminalAccepted {}
+    ));
+    tokio::time::sleep(std::time::Duration::from_millis(2300)).await;
+    assert!(!linked.console.terminals.lock().unwrap().streams[&stream].ended);
+    assert!(matches!(
+        linked
+            .call(
+                &context(),
+                HostRequest::TerminalInput {
+                    stream,
+                    offset: command.len() as u64,
+                    bytes_b64: STANDARD.encode(b"printf 'SMALL''-DONE\\n'\n"),
+                }
+            )
+            .await,
+        HostResponse::TerminalAccepted {}
+    ));
+    let mut output = Vec::new();
+    while !output.windows(10).any(|bytes| bytes == b"SMALL-DONE") {
+        match linked.event(&context()).await {
+            dto::TerminalEvent::Data { bytes_b64, .. } => {
+                output.extend(STANDARD.decode(bytes_b64).unwrap());
+            }
+            dto::TerminalEvent::InputAccepted { .. } => {}
+            _ => panic!("slow reader lost the controller"),
+        }
+    }
+    assert!(matches!(
+        linked
+            .call(
+                &context(),
+                HostRequest::TerminalClose {
+                    terminal: terminal.terminal,
+                    acknowledge_loss: false,
+                }
+            )
+            .await,
+        HostResponse::Terminal { .. }
+    ));
+    closed_admission(&linked, stream).await;
+    linked.registry.reconcile("local", &client).await.unwrap();
+    client.disconnect();
+    serving.await.unwrap();
+    let confirmation = linked.grant(
+        &context(),
+        dto::OperatorAction::TerminalRelease {
+            session: linked.record.id.clone(),
+        },
+    );
+    assert!(
+        matches!(
+            linked
+                .call(
+                    &context(),
+                    HostRequest::TerminalReleaseSession {
+                        session: linked.record.id.clone(),
+                        confirmation,
+                    }
+                )
+                .await,
+            HostResponse::TerminalAccepted {}
+        ),
+        "completed unpinned rows need no live runner"
+    );
+}
+
+async fn closed_admission(linked: &Linked, stream: u64) {
+    let until = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let closed = {
+            let state = linked.console.terminals.lock().unwrap();
+            let stream = &state.streams[&stream];
+            stream.ended && stream.commands.is_closed()
+        };
+        if closed {
+            break;
+        }
+        assert!(Instant::now() < until);
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(matches!(
+        linked
+            .call(
+                &context(),
+                HostRequest::TerminalInput {
+                    stream,
+                    offset: 0,
+                    bytes_b64: STANDARD.encode(b"not-admitted"),
+                }
+            )
+            .await,
+        HostResponse::Refused {
+            reason: dto::ReadRefusal::TerminalLost {}
+        }
+    ));
+}
+
 async fn executed(linked: &Linked, terminal: &dto::TerminalView, first: u64) -> HostRequestContext {
     let next = HostRequestContext {
         connection_id: 8,

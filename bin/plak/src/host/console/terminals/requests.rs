@@ -100,8 +100,7 @@ impl Console {
                     },
                     &confirmation,
                 )?;
-                self.release_terminals(context, registry, &session).await?;
-                Ok(HostResponse::TerminalAccepted {})
+                self.release_terminals(context, registry, &session).await
             }
             HostRequest::TerminalDetach { stream } => {
                 let mut state = self
@@ -308,19 +307,22 @@ impl Console {
         context: &HostRequestContext,
         registry: &TerminalRegistry,
         session: &str,
-    ) -> Result<(), dto::ReadRefusal> {
+    ) -> Result<HostResponse, dto::ReadRefusal> {
         let deadline = Instant::now() + std::time::Duration::from_secs(4);
         loop {
             let rows = registry.list(context).map_err(refusal)?;
             let mut remaining = false;
             for row in rows
                 .into_iter()
-                .filter(|row| row.key.session.as_str() == session)
+                .filter(|row| row.pinned && row.key.session.as_str() == session)
             {
-                let row = registry
-                    .close(context, &row.handle, false)
-                    .await
-                    .map_err(refusal)?;
+                let row = match registry.close(context, &row.handle, false).await {
+                    Ok(row) => row,
+                    Err(TerminalError::OutcomeUnknown) => {
+                        return Ok(HostResponse::OperationOutcomeUnknown {});
+                    }
+                    Err(error) => return Err(refusal(error)),
+                };
                 remaining |= !matches!(
                     view(row).status,
                     dto::TerminalStatus::Exited | dto::TerminalStatus::Lost
@@ -328,7 +330,7 @@ impl Console {
             }
             if !remaining {
                 return if registry.resident_reason(session).is_none() {
-                    Ok(())
+                    Ok(HostResponse::TerminalAccepted {})
                 } else {
                     Err(dto::ReadRefusal::TerminalBusy {})
                 };

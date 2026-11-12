@@ -16,6 +16,7 @@ use plakous_hosted::workspace_reclamation::{ReclamationAdmission, ReclamationFen
 use crate::home::paths::PlakPaths;
 use crate::store::ProductStore;
 
+mod admission;
 mod control;
 pub(crate) use control::TerminalController;
 mod lifecycle;
@@ -33,6 +34,8 @@ pub(crate) use reclamation::{RunnerFence, session_pinned};
 mod tests;
 
 type Hold = dyn Fn(&str) -> Result<ResidencyHold, String> + Send + Sync;
+type NamespaceOperations =
+    Mutex<BTreeMap<(String, String), std::sync::Weak<tokio::sync::Mutex<()>>>>;
 
 pub(crate) struct TerminalRegistry {
     paths: PlakPaths,
@@ -41,7 +44,8 @@ pub(crate) struct TerminalRegistry {
     host_id: String,
     state_key: OperatorId,
     state: Arc<Mutex<State>>,
-    operations: tokio::sync::Mutex<()>,
+    operations: Mutex<BTreeMap<String, std::sync::Weak<tokio::sync::RwLock<()>>>>,
+    namespace_operations: NamespaceOperations,
     hold: std::sync::OnceLock<Arc<Hold>>,
 }
 
@@ -53,6 +57,10 @@ struct State {
     bindings: BTreeMap<String, Binding>,
     reclaiming: BTreeMap<(String, PathBuf), usize>,
     controllers: BTreeMap<String, ControllerOwner>,
+    fences: BTreeMap<String, BTreeMap<String, String>>,
+    completed_serial: u64,
+    opened: BTreeMap<String, std::collections::VecDeque<std::time::Instant>>,
+    renewing: std::collections::BTreeSet<String>,
 }
 
 struct Entry {
@@ -61,6 +69,7 @@ struct Entry {
     lost: bool,
     row: Option<TerminalRow>,
     hold: Option<ResidencyHold>,
+    completed: u64,
 }
 
 #[derive(Clone)]
@@ -108,7 +117,8 @@ impl TerminalRegistry {
             paths,
             generation,
             state: Arc::default(),
-            operations: tokio::sync::Mutex::new(()),
+            operations: Mutex::default(),
+            namespace_operations: Mutex::default(),
             hold: std::sync::OnceLock::new(),
         }))
     }
@@ -217,12 +227,16 @@ impl TerminalRegistry {
 
     fn release_proven(&self, identity: &str) -> Result<(), TerminalError> {
         let mut state = self.lock();
+        state.completed_serial += 1;
+        let serial = state.completed_serial;
         let entry = state.entries.get_mut(identity).ok_or(TerminalError::Lost)?;
         if !entry.pinned {
             return Ok(());
         }
         entry.pinned = false;
         entry.hold = None;
+        entry.completed = serial;
+        Self::collect_receipts(&mut state);
         Ok(())
     }
 
@@ -260,6 +274,7 @@ pub(crate) struct TerminalView {
     pub key: TerminalKey,
     pub row: Option<TerminalRow>,
     pub lost: bool,
+    pub pinned: bool,
 }
 
 fn id(value: String) -> Result<OperatorId, TerminalError> {

@@ -86,7 +86,6 @@ impl TerminalRegistry {
         key: &TerminalKey,
         dimensions: TerminalDimensions,
     ) -> Result<Option<TerminalView>, TerminalError> {
-        let _operation = self.operations.lock().await;
         self.authenticate(context)?;
         let namespace = self.namespace(&context.principal)?;
         let prior = self
@@ -96,8 +95,11 @@ impl TerminalRegistry {
             .find(|(_, entry)| entry.pin.namespace == namespace && entry.pin.key == *key)
             .map(|(identity, entry)| (identity.clone(), entry.pin.clone(), entry.lost));
         let Some((identity, pin, lost)) = prior else {
+            self.receipt_fence(&namespace, key, None)?;
             return Ok(None);
         };
+        let _operation = self.namespace_operation(&pin.runner, &namespace).await;
+        self.authenticate(context)?;
         let binding = self.binding(&pin.runner)?;
         if lost
             || pin.generation != self.runner_generation
@@ -144,10 +146,13 @@ impl TerminalRegistry {
         placement: Placement,
         hold: ResidencyHold,
     ) -> Result<TerminalView, TerminalError> {
-        let _operation = self.operations.lock().await;
+        self.authenticate(context)?;
+        let namespace = self.namespace(&context.principal)?;
+        let _operation = self
+            .namespace_operation(&placement.runner, &namespace)
+            .await;
         self.authenticate(context)?;
         let binding = self.binding(&placement.runner)?;
-        let namespace = self.namespace(&context.principal)?;
         let operation = OperatorOperation::Open {
             key: key.clone(),
             workspace: placement
@@ -190,7 +195,8 @@ impl TerminalRegistry {
             }
             return self.view(&identity);
         }
-        Self::request(&binding, namespace.clone(), OperatorOperation::Renew).await?;
+        self.receipt_fence(&namespace, &key, Some(&digest))?;
+        self.admit_open(&namespace)?;
         let pin = TerminalPin {
             host_generation: self.generation,
             host_id: self.host_id.clone(),
@@ -203,6 +209,13 @@ impl TerminalRegistry {
             digest,
         };
         let identity = self.reserve(pin, hold)?;
+        if let Err(error) =
+            Self::request(&binding, namespace.clone(), OperatorOperation::Renew).await
+        {
+            // Renewal cannot spawn this reservation; its failed wait has no open effect.
+            self.release_proven(&identity)?;
+            return Err(error);
+        }
         match Self::request(&binding, namespace, operation).await {
             Ok(OperatorAnswer::Terminal { terminal, .. }) => self.observe(&identity, terminal)?,
             Err(TerminalError::Refused(refusal)) => {
@@ -227,6 +240,7 @@ impl TerminalRegistry {
             key: entry.pin.key.clone(),
             row: entry.row.clone(),
             lost: entry.lost,
+            pinned: entry.pinned,
         })
     }
 
@@ -267,13 +281,17 @@ impl TerminalRegistry {
         handle: &TerminalHandle,
         acknowledge_loss: bool,
     ) -> Result<TerminalView, TerminalError> {
-        let _operation = self.operations.lock().await;
+        let pin = self.owned(context, handle)?;
+        let _operation = self.namespace_operation(&pin.runner, &pin.namespace).await;
         let pin = self.owned(context, handle)?;
         let binding = self.lock().bindings.get(&pin.runner).cloned();
+        let lost_instance = binding
+            .as_ref()
+            .is_some_and(|binding| binding.client.instance() != pin.instance);
         let Some(binding) = binding.filter(|binding| {
             binding.client.instance() == pin.instance && binding.client.is_connected()
         }) else {
-            if !acknowledge_loss {
+            if !acknowledge_loss || !lost_instance {
                 return Err(TerminalError::Unavailable);
             }
             self.release_proven(&handle.identity)?;
@@ -312,7 +330,8 @@ impl TerminalRegistry {
         cursor: TerminalCursor,
         takeover: bool,
     ) -> Result<TerminalController, TerminalError> {
-        let _operation = self.operations.lock().await;
+        let pin = self.owned(context, handle)?;
+        let _operation = self.namespace_operation(&pin.runner, &pin.namespace).await;
         let pin = self.owned(context, handle)?;
         if handle.host_generation != self.generation
             || pin.generation != self.runner_generation
