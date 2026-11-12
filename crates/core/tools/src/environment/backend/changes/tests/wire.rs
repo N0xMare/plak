@@ -40,8 +40,8 @@ fn sample_status() -> ChangesStatus {
 }
 
 #[test]
-fn protocol_six_changes_payloads_are_pinned() {
-    assert_eq!(plakous_runner_protocol::PROTOCOL_VERSION, 6);
+fn protocol_seven_changes_payloads_are_pinned() {
+    assert_eq!(plakous_runner_protocol::PROTOCOL_VERSION, 7);
     let status = sample_status();
     let mut samples = vec![
         serde_json::to_value(ChangesRequest::status()).unwrap(),
@@ -84,7 +84,7 @@ fn protocol_six_changes_payloads_are_pinned() {
         .into_iter()
         .map(|reason| serde_json::to_value(ChangesAnswer::Refused(reason)).unwrap()),
     );
-    let pinned = include_str!("../pinned/v6.jsonl")
+    let pinned = include_str!("../pinned/v7.jsonl")
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .collect::<Vec<_>>();

@@ -98,7 +98,7 @@ one cross-build carrier (a build imports its own and the previous version).
 
 - Add a separate operator-terminal runner protocol with validated namespace,
   terminal identity, dimensions and raw-byte stream vocabulary. Runner protocol
-  6 is an exact-version cut; the product client handshake is unchanged.
+  7 is an exact-version cut; the product client handshake is unchanged.
   Runner and home-local daemon PTYs use principal-private, bounded in-memory
   tables and output rings, independent quotas and awake deadlines, single
   controllers and session-wide identity-checked cleanup. Unproven cleanup keeps

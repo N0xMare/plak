@@ -1,4 +1,4 @@
-//! Runner protocol, version 6: what a Plakous host and a runner say to each
+//! Runner protocol, version 7: what a Plakous host and a runner say to each
 //! other over one byte stream (spec 01 §8.4).
 //!
 //! A connection carries length-prefixed JSON frames ([`frame`]). The runner
@@ -29,7 +29,7 @@ pub use owner::LineOwner;
 /// A home-local runner binds any build of it, so every change to the
 /// runner's semantics bumps it (spec 01 §8.4); the frames of each version
 /// are pinned by a test.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Stable stopped-foreground receipt identity, independent of the connection
 /// and owner generation. Another call reusing the PID cannot match it.

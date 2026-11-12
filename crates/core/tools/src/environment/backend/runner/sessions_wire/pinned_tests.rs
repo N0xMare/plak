@@ -35,6 +35,7 @@ const PINNED: &[(u32, &str)] = &[
     (4, include_str!("pinned/v4.jsonl")),
     (5, include_str!("pinned/v5.jsonl")),
     (6, include_str!("pinned/v6.jsonl")),
+    (7, include_str!("pinned/v7.jsonl")),
 ];
 
 fn session() -> JoinedProcessSessionId {

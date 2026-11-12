@@ -6068,12 +6068,12 @@ agent named on its execution environment at construction
 (`ExecutionEnvironment::with_line_owner`, from the job owner of §8.5). The
 direct local backend carries the owner, class and budget without reading them;
 they are the fence and idempotency key a runner checks once execution leaves
-the process (runner protocol v6, below). The owner a runner checks comes from
+the process (runner protocol v7, below). The owner a runner checks comes from
 the session's current job owner (§8.5), not from an owner a joined process
 service stored when it started. `LineOwner` lives in `plakous-tools`; it never
 enters `plakous-model`.
 
-**Operator terminal wire.** Protocol 6 adds `OperatorControl { namespace }`,
+**Operator terminal wire.** Protocol 7 adds `OperatorControl { namespace }`,
 with no `LineOwner`. The authenticated paired connection supplies host id and host
 process generation; namespace adds state key and principal. Terminal identity adds
 session, node and a client-generated terminal id. Inspecting connections cannot use it.
@@ -6172,7 +6172,7 @@ needs no stream because that instance can spawn no terminals. All terminal state
 is process-local; product schema and state key are unchanged (chapter 02 §2.2). `RunnerConnectionRevision::is_current` is a read-only connection
 fence for that registry, not permission to skip namespace table reconciliation.
 
-**Runner protocol v6.** `plakous-runner-protocol` defines what a host and a
+**Runner protocol v7.** `plakous-runner-protocol` defines what a host and a
 runner say to each other over one byte stream, and `plakous-runner` implements
 both ends over an `ExecutionEnvironment` and joins them in process as a
 loopback (both published internal, chapter 06 §3, and reached from the facade

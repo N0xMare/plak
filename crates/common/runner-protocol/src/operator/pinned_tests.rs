@@ -16,7 +16,7 @@ fn roundtrip<T: DeserializeOwned + Serialize>(value: &Value) -> T {
 
 #[test]
 fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
-    let pins = [(6, include_str!("../pinned/operator-v6.jsonl"))];
+    let pins = [(7, include_str!("../pinned/operator-v7.jsonl"))];
     let (_, text) = pins
         .iter()
         .find(|(version, _)| *version == crate::PROTOCOL_VERSION)

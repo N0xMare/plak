@@ -19,7 +19,7 @@ kills that home's daemons until none remain. A real-daemon regression places
 a successor and a startup probe before the exit observation, on both supported
 platforms.
 
-Runner placement contracts pin protocol 6 frames, process payloads and read-only
+Runner placement contracts pin protocol 7 frames, process payloads and read-only
 root-identity probes without modifying earlier version pins. Deterministic runner
 tests distinguish an answered/Acked start from a committed terminal driver operation:
 same-owner live reconnect preserves foreground work, terminal cleanup stops only the
@@ -6144,7 +6144,7 @@ never partial publication or false no-effect after rename. New template
 exclusive-link and replacement-rename paths are checked separately. The
 legacy remote settings/default/credential-refresh path refuses at role
 classification; local-face dispatch remains available. Schema/DTO and public
-compile contracts follow exact client protocol 8 and runner protocol 6.
+compile contracts follow exact client protocol 8 and runner protocol 7.
 Publication SIGKILL cuts run in the durability lane; injected parent-sync
 failures run offline. Connection-drop and forced-deadline contracts verify
 retirement of pending authority and an explicit unknown outcome for admitted
