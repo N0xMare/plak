@@ -354,7 +354,9 @@ async fn pending_foreground_cleanup_prevents_idle_exit_and_releases_its_gate() {
     drop(guard);
     drop(gate);
     tokio::time::timeout(Duration::from_secs(5), async {
-        while !service.is_idle() {
+        // Cleanup can finish after is_idle() prunes the weak gate registry,
+        // so an idle result may need another poll to remove its dead entry.
+        while !service.is_idle() || !lock(&service.inner.foreground.gates).is_empty() {
             tokio::task::yield_now().await;
         }
     })
