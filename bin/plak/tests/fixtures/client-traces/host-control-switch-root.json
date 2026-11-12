@@ -377,36 +377,6 @@
       }
     },
     {
-      "connection": 1,
-      "direction": "client",
-      "frame": {
-        "frame": "request",
-        "id": 9,
-        "op": {
-          "attachment": 1,
-          "blobs": [],
-          "intent": {
-            "kind": "open_topology_navigator"
-          },
-          "op": "intent"
-        }
-      }
-    },
-    {
-      "connection": 1,
-      "direction": "host",
-      "frame": {
-        "frame": "response",
-        "id": 9,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
       "barrier": "new-session-ready"
     },
     {
@@ -414,7 +384,7 @@
       "direction": "client",
       "frame": {
         "frame": "request",
-        "id": 10,
+        "id": 9,
         "op": {
           "include_archived": false,
           "op": "list_sessions",
@@ -428,7 +398,7 @@
       "direction": "client",
       "frame": {
         "frame": "request",
-        "id": 11,
+        "id": 10,
         "op": {
           "attachment": 1,
           "blobs": [],
@@ -444,7 +414,7 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 10,
+        "id": 9,
         "outcome": {
           "ok": {
             "answer": "sessions",
@@ -522,7 +492,7 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 11,
+        "id": 10,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -536,7 +506,7 @@
       "direction": "client",
       "frame": {
         "frame": "request",
-        "id": 12,
+        "id": 11,
         "op": {
           "node": {
             "agent_id": "@uuid:0",
@@ -551,7 +521,7 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 12,
+        "id": 11,
         "outcome": {
           "ok": {
             "answer": "attached",
@@ -565,7 +535,7 @@
       "direction": "client",
       "frame": {
         "frame": "request",
-        "id": 13,
+        "id": 12,
         "op": {
           "attachment": 2,
           "blobs": [],
@@ -581,37 +551,7 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 13,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
-      "connection": 1,
-      "direction": "client",
-      "frame": {
-        "frame": "request",
-        "id": 14,
-        "op": {
-          "attachment": 2,
-          "blobs": [],
-          "intent": {
-            "kind": "open_topology_navigator"
-          },
-          "op": "intent"
-        }
-      }
-    },
-    {
-      "connection": 1,
-      "direction": "host",
-      "frame": {
-        "frame": "response",
-        "id": 14,
+        "id": 12,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -631,7 +571,7 @@
       "direction": "client",
       "frame": {
         "frame": "request",
-        "id": 15,
+        "id": 13,
         "op": {
           "op": "stop_session",
           "session": "@uuid:0"
@@ -643,7 +583,7 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 15,
+        "id": 13,
         "outcome": {
           "ok": {
             "answer": "stopped",

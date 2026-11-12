@@ -240,14 +240,35 @@ fn offline_profile_readiness_does_not_admit_other_routes_or_efforts() {
     let mut host = start(&fixture);
     let (mut client, source, _, attachment) = requests::seeded(&fixture, &host);
     client.retain_observations();
-    for mode in [
-        ProfileApply::Switch,
-        ProfileApply::Fork,
-        ProfileApply::Default,
-    ] {
+    let defaults = std::fs::read(fixture.home().join("config.toml")).unwrap();
+    for mode in [ProfileApply::Switch, ProfileApply::Fork] {
         let reason = apply(&mut client, attachment, "unready", mode).unwrap_err();
         assert!(reason.contains("codex is not ready"), "{reason}");
     }
+    assert_eq!(
+        client.request(
+            10,
+            Op::Intent {
+                client_id: None,
+                attachment,
+                intent: SessionIntent::Extension(SurfaceIntent::ApplyProfile {
+                    name: "unready".into(),
+                    apply: ProfileApply::Default,
+                }),
+                blobs: Vec::new(),
+            }
+        ),
+        Outcome::Refused(
+            plakous_host_protocol::wire::RequestRefusal::RefusedForRole {
+                row: "local_face".into()
+            }
+        )
+    );
+    assert_eq!(
+        std::fs::read(fixture.home().join("config.toml")).unwrap(),
+        defaults,
+        "remote default refusal cannot rewrite the home"
+    );
     let reason = apply(&mut client, attachment, "bad-effort", ProfileApply::Fork).unwrap_err();
     assert!(reason.contains("effort"), "{reason}");
     let reason = apply(

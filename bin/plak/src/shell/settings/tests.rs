@@ -1484,6 +1484,147 @@ fn only_local_use_now_can_bootstrap_a_fresh_home_default() {
     }
 }
 
+#[test]
+fn moved_remote_requester_use_now_never_bootstraps_a_fresh_home_default() {
+    use plakous_host_protocol::wire::{ClientFrame, NodeAddress, Op, encode_line};
+    use plakous_host_protocol::{
+        SessionIntent, SessionObservation, intent_channel, observation_channel,
+    };
+    use plakous_hosted::host_service::wire::{Face, WireSession};
+
+    for same_tree in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = profile_paths(dir.path());
+        assert!(!paths.config_file().exists());
+        let (actions, intents) = intent_channel::<PlakExtension>();
+        let (published, observed) = observation_channel::<PlakExtension>();
+        let node = |id: &str| NodeAddress {
+            tree_id: id.into(),
+            agent_id: id.into(),
+        };
+        let session = WireSession::start(
+            node("before"),
+            "before".into(),
+            actions,
+            observed,
+            move |id| Some(node(if same_tree { "before" } else { id })),
+        );
+        let mut connection = session.connect(std::io::sink(), Face::Remote, || false);
+        let attached = ClientFrame::<PlakExtension>::Request {
+            id: 1,
+            op: Op::Attach {
+                node: node("before"),
+            },
+        };
+        assert!(
+            connection
+                .frame(Ok(encode_line(&attached).unwrap()))
+                .unwrap()
+        );
+        let original = connection.attachment().unwrap();
+        let clock = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let publish = |event| {
+            let mut changed = session.changes();
+            changed.borrow_and_update();
+            published.send(event).unwrap();
+            clock.block_on(async {
+                tokio::time::timeout(std::time::Duration::from_secs(10), changed.changed())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            });
+        };
+        publish(SessionObservation::SessionOpening);
+        publish(SessionObservation::Binding {
+            session_id: Some("after".into()),
+            account: None,
+            model: None,
+            effort: None,
+            extra: None,
+            composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
+            protocol: plakous_host_protocol::ProtocolSelection::Auto,
+            effective_presentation: "direct".into(),
+        });
+        connection.flush().unwrap();
+        assert!(
+            connection.attachment().is_none(),
+            "the old requester received moved"
+        );
+        assert_eq!(session.session_id(), "after");
+        let attached = ClientFrame::<PlakExtension>::Request {
+            id: 2,
+            op: Op::Attach {
+                node: session.root(),
+            },
+        };
+        assert!(
+            connection
+                .frame(Ok(encode_line(&attached).unwrap()))
+                .unwrap()
+        );
+        let successor = connection.attachment().unwrap();
+        assert_ne!(successor, original);
+        while intents.try_recv().is_ok() {}
+        let request = ClientFrame::<PlakExtension>::Request {
+            id: 3,
+            op: Op::Intent {
+                attachment: successor,
+                client_id: None,
+                blobs: Vec::new(),
+                intent: SessionIntent::Extension(SurfaceIntent::ApplyProfile {
+                    name: "mine".into(),
+                    apply: crate::surface_protocol::ProfileApply::Fork,
+                }),
+            },
+        };
+        assert!(
+            connection
+                .frame(Ok(encode_line(&request).unwrap()))
+                .unwrap()
+        );
+        let delivery = intents.try_recv().unwrap();
+        let started = delivery.started().unwrap();
+        let remote_origin = matches!(&started, ContentEvent::IntentStarted(Some(origin)) if origin.starts_with("remote-attachment:"));
+        let (events, _observed) = host_event_sink();
+        assert!(events.send(started));
+        let local_request = events.is_local_request();
+        let (SessionIntent::Extension(intent), _guard) = delivery.into_parts() else {
+            panic!("profile intent")
+        };
+        let catalog = codex_catalog();
+        let effect = ProductSurface::new(paths.clone()).dispatch(
+            intent,
+            SurfaceFacts {
+                session: None,
+                phase: SurfacePhase::Idle,
+                attached_one_shot: false,
+                catalog: &catalog,
+                queue_len: 0,
+                usage_reads: UsageReads::default(),
+            },
+            &events,
+        );
+        (effect
+            .profile_fork
+            .expect("remote Use now still binds")
+            .finish)(ProfileForkOutcome::Bound);
+        assert!(
+            !paths.config_file().exists(),
+            "a moved remote requester cannot save defaults"
+        );
+        assert!(ProductConfig::load(&paths).unwrap().root_agent.is_none());
+        assert!(
+            remote_origin,
+            "the moved requester retains remote provenance"
+        );
+        assert!(!local_request);
+        connection.leave();
+    }
+}
+
 /// A loadable home default is never replaced by Use now.
 #[test]
 fn use_now_keeps_a_loadable_home_default() {

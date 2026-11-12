@@ -4003,6 +4003,8 @@ Switch/Fork/Use now remain explicit session binding actions. Local-face
 legacy behavior is unchanged.
 Remote Use now still binds its session, but never seeds a fresh home's
 default as a side effect. That publication uses the confirmed etag path.
+This remains true after a wire `moved` handoff, including one that preserves
+the virtual tree address: the continued requester retains its held face.
 Only local Use now retains automatic default bootstrap. Transport-stamped
 request provenance, not the client's correlation text, distinguishes them
 and survives an asynchronous answer window.

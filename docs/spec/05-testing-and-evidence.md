@@ -5868,4 +5868,9 @@ Real local/remote attachment provenance contracts also verify that Use now
 can bind either session but bootstraps a fresh home default only locally,
 even with a local-looking client correlation and an intervening answer-window
 reset. Remote default publication remains a confirmed etag write.
+The production wire handoff is covered separately for both changed physical
+roots and preserved virtual tree addresses: a remote requester follows `moved`,
+reattaches, and invokes Use now on a fresh home without publishing a default.
+Its continued sender retains remote provenance. Addressed profile-verdict tests
+retain both local and remote faces.
 Missing request provenance fails closed; local faces carry an explicit stamp.

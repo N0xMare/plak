@@ -35,14 +35,14 @@
       "connection": 1,
       "request": {
         "frame": "request",
-        "id": 7,
+        "id": 6,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "fb9cd938-79e9-530b-b19b-ebd63381c0ec"
+                "tree_id": "788e319e-460f-5192-8280-2dd79caca8cb"
               }
             },
             "kind": "extension"
@@ -52,7 +52,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 7,
+        "id": 6,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -158,7 +158,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "fb9cd938-79e9-530b-b19b-ebd63381c0ec"
+                "tree_id": "788e319e-460f-5192-8280-2dd79caca8cb"
               }
             },
             "kind": "extension"

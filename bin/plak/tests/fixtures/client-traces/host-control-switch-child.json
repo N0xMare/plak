@@ -946,7 +946,7 @@
           "attachment": 1,
           "blobs": [],
           "intent": {
-            "kind": "open_topology_navigator"
+            "kind": "promptable"
           },
           "op": "intent"
         }
@@ -976,7 +976,7 @@
           "attachment": 1,
           "blobs": [],
           "intent": {
-            "kind": "promptable"
+            "kind": "open_topology_navigator"
           },
           "op": "intent"
         }

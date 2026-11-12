@@ -103,14 +103,15 @@ impl Fixture {
         });
     }
 
-    fn verdict(&self, requester: u64, name: &str) {
-        self.begin_verdict(requester);
+    fn verdict(&self, requester: u64, name: &str, face: Face) {
+        self.begin_verdict(requester, face);
         self.finish_verdict(name);
     }
 
-    fn begin_verdict(&self, requester: u64) {
+    fn begin_verdict(&self, requester: u64, face: Face) {
         self.publish(SessionObservation::IntentStarted(Some(format!(
-            "answer:attachment:{requester}"
+            "answer:{}",
+            origin(requester, face)
         ))));
     }
 
@@ -130,6 +131,15 @@ fn node(id: &str) -> NodeAddress {
         tree_id: id.into(),
         agent_id: id.into(),
     }
+}
+
+fn origin(requester: u64, face: Face) -> String {
+    let prefix = if face == Face::Local {
+        "local-attachment:"
+    } else {
+        "remote-attachment:"
+    };
+    format!("{prefix}{requester}")
 }
 
 type Connection = WireConnection<PlakExtension, Bytes>;
@@ -198,7 +208,7 @@ fn late_verdict(same_tree: bool, face: Face, started_before: bool) {
     }
     connections[3].leave();
     if started_before {
-        fixture.begin_verdict(1);
+        fixture.begin_verdict(1, face);
     }
     let next = fixture.session.root();
     let requester = attach(&mut connections[0], &outputs[0], next.clone());
@@ -213,9 +223,9 @@ fn late_verdict(same_tree: bool, face: Face, started_before: bool) {
     if started_before {
         fixture.finish_verdict("offline-low");
     } else {
-        fixture.verdict(1, "offline-low");
+        fixture.verdict(1, "offline-low", face);
     }
-    fixture.verdict(4, "unattached");
+    fixture.verdict(4, "unattached", face);
     for (connection, out) in connections[..3].iter_mut().zip(&outputs) {
         request(connection, out, 3, Op::Ping);
     }
@@ -231,7 +241,7 @@ fn late_verdict(same_tree: bool, face: Face, started_before: bool) {
     for out in outputs.iter().chain([&fresh_out]) {
         assert_eq!(out.applied("unattached"), [] as [u64; 0]);
     }
-    next_switch(&fixture, &mut connections, &outputs, requester);
+    next_switch(&fixture, &mut connections, &outputs, requester, face);
     for connection in &mut connections {
         connection.leave();
     }
@@ -243,6 +253,7 @@ fn next_switch(
     connections: &mut [Connection],
     outputs: &[Bytes],
     requester: u64,
+    face: Face,
 ) {
     while fixture.intents.try_recv().is_ok() {}
     request(
@@ -256,20 +267,20 @@ fn next_switch(
             blobs: Vec::new(),
         },
     );
-    let Some(plakous_host_protocol::ContentObservation::IntentStarted(origin)) =
+    let Some(plakous_host_protocol::ContentObservation::IntentStarted(started)) =
         fixture.intents.try_recv().unwrap().started()
     else {
         panic!("no requester origin");
     };
-    assert_eq!(origin.as_deref(), Some("attachment:1"));
-    fixture.publish(SessionObservation::IntentStarted(origin));
+    assert_eq!(started.as_deref(), Some(origin(1, face).as_str()));
+    fixture.publish(SessionObservation::IntentStarted(started));
     fixture.switched("s3");
     for (connection, out) in connections[..3].iter_mut().zip(outputs) {
         request(connection, out, 5, Op::Ping);
     }
     let root = fixture.session.root();
     let next = attach(&mut connections[0], &outputs[0], root.clone());
-    fixture.verdict(1, "offline-medium");
+    fixture.verdict(1, "offline-medium", face);
     // Viewers that attach after the reply must not get it through replay either.
     for index in [1, 2] {
         attach(&mut connections[index], &outputs[index], root.clone());

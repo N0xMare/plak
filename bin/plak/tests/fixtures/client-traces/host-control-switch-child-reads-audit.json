@@ -42,7 +42,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "059109d7-ebe5-5b88-8c0f-529c36785edf"
+                "tree_id": "1dca392f-6ca9-52bf-acdb-11c98c5188a9"
               }
             },
             "kind": "extension"
@@ -188,7 +188,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "cd2f99de-abed-5a03-a350-e3b2b078f40f"
+                "tree_id": "095e4ad1-e126-58ed-bc0f-5a18b2f85373"
               }
             },
             "kind": "extension"
@@ -248,7 +248,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "059109d7-ebe5-5b88-8c0f-529c36785edf"
+                "tree_id": "1dca392f-6ca9-52bf-acdb-11c98c5188a9"
               }
             },
             "kind": "extension"
@@ -273,13 +273,43 @@
       "connection": 2,
       "request": {
         "frame": "request",
-        "id": 4,
+        "id": 3,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": "refresh_composer_chrome",
             "kind": "extension"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 3,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "read": "resync_transcript",
+      "reason": "resync at a reconnect sequence boundary",
+      "connection": 2,
+      "request": {
+        "frame": "request",
+        "id": 4,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": {
+              "scope": "root"
+            },
+            "kind": "resync_transcript"
           },
           "op": "intent"
         }
@@ -301,14 +331,14 @@
       "connection": 2,
       "request": {
         "frame": "request",
-        "id": 6,
+        "id": 7,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "059109d7-ebe5-5b88-8c0f-529c36785edf"
+                "tree_id": "1dca392f-6ca9-52bf-acdb-11c98c5188a9"
               }
             },
             "kind": "extension"
@@ -318,7 +348,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 6,
+        "id": 7,
         "outcome": {
           "ok": {
             "answer": "accepted",
