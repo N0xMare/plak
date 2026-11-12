@@ -167,7 +167,8 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
         include_archived: bool,
     ) -> Result<Vec<SessionRow>, String>;
 
-    /// The newest session of the tree `node` is in, or `None`.
+    /// The head of the tree's root line, or `None`. A successor that kept
+    /// its source's node supersedes it independently of directory ordering.
     ///
     /// # Errors
     ///
@@ -311,9 +312,8 @@ pub struct SessionHost<P: ProtocolExtension> {
 /// rows.
 type DirectoryRead = (Instant, u64, Arc<Vec<SessionRow>>);
 
-/// Whether `slot` is `session`. A resident slot is the session it serves
-/// now, which a switch can change while `known` still names the one it
-/// opened; every other state is the id it names.
+/// Whether this nonblocking slot view names `session`. Busy views use a
+/// cached peek label, not an authority for selecting a session to open.
 fn serves<P: ProtocolExtension>(slot: &SessionSlot<P>, session: &str) -> bool {
     match slot.peek() {
         SlotView::Resident(served) => served.session_id() == session,
@@ -559,7 +559,7 @@ where
     }
 
     /// The slot of the session whose tree `node` is in: the resident one
-    /// serving that tree, or the newest session of that tree.
+    /// serving that tree, or the head session of that tree's root line.
     fn resolve(&self, node: &NodeAddress) -> Result<Arc<SessionSlot<P>>, RequestRefusal> {
         let mut slots = self.lock();
         for slot in slots.iter() {
@@ -593,11 +593,7 @@ where
         closing: &Arc<std::sync::atomic::AtomicBool>,
         session: &str,
     ) -> Arc<SessionSlot<P>> {
-        if let Some(slot) = slots
-            .iter()
-            .find(|slot| slot.serves_current(session))
-            .or_else(|| slots.iter().find(|slot| slot.known() == session))
-        {
+        if let Some(slot) = slots.iter().find(|slot| slot.serves_current(session)) {
             return Arc::clone(slot);
         }
         let (opener, closing) = (Arc::clone(sessions), Arc::clone(closing));

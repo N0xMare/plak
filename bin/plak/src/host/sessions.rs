@@ -553,7 +553,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
     }
 
     fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
-        self.with_product(|store| store.newest_of_tree(&node.tree_id))
+        self.with_product(|store| store.head_of_tree(&node.tree_id))
     }
 
     fn open(&self, session: &str) -> CliResult<OpenedSession<PlakExtension>> {

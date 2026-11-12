@@ -122,14 +122,47 @@ fn wait_idle(client: &mut Client, session: &str) {
     }
 }
 
-fn transition(mode: ProfileApply, expected: ProfileOutcome) {
-    let Some(fixture) = profile_fixture() else {
-        return;
-    };
-    let config = std::fs::read(fixture.home().join("config.toml")).unwrap();
-    let mut host = start(&fixture);
-    let (mut client, source, node, attachment) = requests::seeded(&fixture, &host);
-    client.retain_observations();
+fn attach_history(host: &Host, node: &NodeAddress, answer: &str) -> String {
+    let mut client = Client::connect(host);
+    let attachment = client.attach(1, node);
+    let mut snapshot = plakous_host_protocol::wire::SnapshotAssembler::default();
+    let mut transcript = plakous_host_protocol::views::transcript::TranscriptState::default();
+    loop {
+        match client.next() {
+            HostFrame::Snapshot(page) if page.attachment == attachment => {
+                if let Some(snapshot) = snapshot.push(page).unwrap() {
+                    transcript.replace(snapshot).unwrap();
+                }
+            }
+            HostFrame::Event {
+                attachment: held,
+                observation: SessionObservation::TranscriptPatch(patch),
+                ..
+            } if held == attachment => transcript.apply(patch).unwrap(),
+            _ => continue,
+        }
+        let history = format!("{transcript:?}");
+        if history.contains(answer) {
+            return history;
+        }
+    }
+}
+
+fn source_preserved(host: &Host, client: &mut Client, source: &str, node: &NodeAddress) {
+    let rows = client.rows(21);
+    let row = rows.iter().find(|row| row.session == source).unwrap();
+    assert_eq!(&row.node, node, "the source address changed after a fork");
+    let history = attach_history(host, &row.node, ANSWER);
+    assert!(history.contains("one admitted turn"), "{history}");
+    assert!(history.contains(ANSWER), "{history}");
+    assert!(!history.contains(TARGET_ANSWER), "{history}");
+    assert!(
+        !history.contains("after the profile transition"),
+        "{history}"
+    );
+}
+
+fn refresh_readiness(client: &mut Client, attachment: u64) {
     assert_eq!(
         client.request(
             5,
@@ -153,6 +186,17 @@ fn transition(mode: ProfileApply, expected: ProfileOutcome) {
             break;
         }
     }
+}
+
+fn transition(mode: ProfileApply, expected: ProfileOutcome) {
+    let Some(fixture) = profile_fixture() else {
+        return;
+    };
+    let config = std::fs::read(fixture.home().join("config.toml")).unwrap();
+    let mut host = start(&fixture);
+    let (mut client, source, node, attachment) = requests::seeded(&fixture, &host);
+    client.retain_observations();
+    refresh_readiness(&mut client, attachment);
     let moved = match apply(&mut client, attachment, "offline-low", mode).unwrap() {
         Application::Applied(outcome) => {
             assert_eq!(outcome, expected);
@@ -188,6 +232,12 @@ fn transition(mode: ProfileApply, expected: ProfileOutcome) {
         TARGET_ANSWER,
     );
     wait_idle(&mut client, &target_session);
+    if mode == ProfileApply::Fork {
+        source_preserved(&host, &mut client, &source, &node);
+        let history = attach_history(&host, &target_node, TARGET_ANSWER);
+        assert!(history.contains(ANSWER), "{history}");
+        assert!(history.contains(TARGET_ANSWER), "{history}");
+    }
     drop(client);
     stop(&mut host);
     assert_eq!(
@@ -214,6 +264,9 @@ fn transition(mode: ProfileApply, expected: ProfileOutcome) {
     let mut host = start(&fixture);
     let mut client = Client::connect(&host);
     client.retain_observations();
+    if mode == ProfileApply::Fork {
+        source_preserved(&host, &mut client, &source, &node);
+    }
     let attachment = client.attach(14, &target_node);
     client.prompt(15, attachment, "after exact reopen", REOPENED_ANSWER);
     wait_idle(&mut client, &target_session);

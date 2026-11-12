@@ -22,6 +22,10 @@ one cross-build carrier (a build imports its own and the previous version).
   `ConsoleCapability::{CredentialsWrite, ConfigWrite}` and a redacted
   `LineReader` Debug implementation. No persisted format changes.
 
+- Fixed reattaching the original session after Fork now: the source and fork
+  remain independently attachable at their directory addresses with their own
+  transcripts.
+
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.
   Profile switches keep their recorded attachable root address, and a late

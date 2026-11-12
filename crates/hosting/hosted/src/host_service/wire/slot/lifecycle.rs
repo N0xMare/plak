@@ -35,13 +35,11 @@ where
                     return Err(failure);
                 }
             }
+            self.set_known(&source);
             self.busy.store(BUSY_RELEASING, Ordering::Release);
-            let Slot::Resident { worker, .. } = std::mem::replace(
-                &mut *slot,
-                Slot::Dormant {
-                    session_id: self.known(),
-                },
-            ) else {
+            let Slot::Resident { worker, .. } =
+                std::mem::replace(&mut *slot, Slot::Dormant { session_id: source })
+            else {
                 unreachable!("the slot lock retains its worker");
             };
             let result = join(worker, self.release_join);

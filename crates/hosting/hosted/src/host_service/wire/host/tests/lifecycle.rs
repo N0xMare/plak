@@ -1,7 +1,207 @@
 use super::*;
 
 #[test]
-fn lifecycle_slot_predecessor_mutation_keeps_successor_serving() {
+fn a_same_node_switch_reopens_one_dormant_successor_slot_from_a_fresh_client() {
+    let Switched {
+        host,
+        fake,
+        slot,
+        mut connection,
+        ..
+    } = switched_on_node(true);
+    let SlotView::Resident(served) = slot.peek() else {
+        panic!("not resident")
+    };
+    assert_eq!(served.root(), node("s1"));
+    connection.leave();
+    let out = Out::default();
+    let mut fresh = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    release_session(&mut fresh, 1, "s9");
+    assert_eq!(outcome(&out.take(), 1), Outcome::Ok(Answer::Released));
+    release_session(&mut fresh, 2, "s1");
+    assert_eq!(outcome(&out.take(), 2), Outcome::Ok(Answer::Released));
+    assert!(matches!(slot.peek(), SlotView::Dormant(id) if id == "s9"));
+    assert_eq!(host.slots().len(), 1);
+    request(&mut fresh, 3, Op::Attach { node: node("s1") });
+    attached(&out.take(), 3);
+    assert_eq!(host.slots().len(), 1);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+    assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 1);
+    assert_eq!(row_of(&host, "s9").residency, SessionResidency::Resident);
+    assert_eq!(row_of(&host, "s1").residency, SessionResidency::Dormant);
+    fresh.leave();
+    handed_off(&host);
+}
+
+#[test]
+fn same_node_switch_stop_and_archive_use_the_addressed_record_not_a_cached_label() {
+    for session in ["s1", "s9"] {
+        let Switched {
+            host,
+            fake,
+            slot,
+            mut connection,
+            out,
+        } = switched_on_node(true);
+        request(
+            &mut connection,
+            2,
+            Op::StopSession {
+                session: session.into(),
+            },
+        );
+        assert_eq!(
+            answer(&mut connection, &out, 2),
+            Outcome::Ok(Answer::Stopped {
+                runner_pending: false
+            })
+        );
+        assert_eq!(
+            fake.0.stop_intents.load(Ordering::SeqCst),
+            usize::from(session == "s9")
+        );
+        assert_eq!(
+            fake.0.dormant_stops.load(Ordering::SeqCst),
+            usize::from(session == "s1")
+        );
+        request(
+            &mut connection,
+            3,
+            Op::ArchiveSession {
+                session: session.into(),
+                archived: true,
+            },
+        );
+        assert_eq!(
+            outcome(&out.take(), 3),
+            Outcome::Ok(Answer::ArchiveUpdated {
+                session: session.into(),
+                archived: true
+            })
+        );
+        assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+        if session == "s1" {
+            assert!(
+                matches!(slot.peek(), SlotView::Resident(served) if served.session_id() == "s9")
+            );
+            // The historical record has its own dormant metadata slot, not another line owner.
+            assert_eq!(host.slots().len(), 2);
+            request(
+                &mut connection,
+                4,
+                Op::DeleteSession {
+                    session: session.into(),
+                    abandon_children: false,
+                },
+            );
+            assert_eq!(
+                outcome(&out.take(), 4),
+                Outcome::Ok(Answer::Deleted {
+                    session: session.into()
+                })
+            );
+        } else {
+            assert!(matches!(slot.peek(), SlotView::Dormant(id) if id == "s9"));
+            assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 0);
+        }
+        assert_eq!(host.slots().len(), 1);
+        connection.leave();
+        handed_off(&host);
+    }
+}
+
+#[test]
+fn a_same_node_attach_waits_for_the_successors_release_instead_of_opening_another_slot() {
+    let Switched {
+        host,
+        fake,
+        slot,
+        mut connection,
+        ..
+    } = switched_on_node(true);
+    fake.0.linger.store(150, Ordering::SeqCst);
+    let SlotView::Resident(served) = slot.peek() else {
+        panic!("not resident")
+    };
+    connection.leave();
+    served.request_release();
+    let until = Instant::now() + Duration::from_secs(3);
+    while !matches!(slot.peek(), SlotView::Releasing(_)) {
+        assert!(
+            Instant::now() < until,
+            "the successor did not begin releasing"
+        );
+        std::thread::yield_now();
+    }
+    let out = Out::default();
+    let mut fresh = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    request(&mut fresh, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    assert_eq!(host.slots().len(), 1);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+    assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 1);
+    assert_eq!(row_of(&host, "s9").residency, SessionResidency::Resident);
+    fresh.leave();
+    handed_off(&host);
+}
+
+#[test]
+fn concurrent_same_node_attaches_share_the_opening_successor_slot() {
+    let Switched {
+        host,
+        fake,
+        slot,
+        mut connection,
+        ..
+    } = switched_on_node(true);
+    connection.leave();
+    slot.quit(Duration::from_secs(3)).unwrap();
+    let (open, gate) = std::sync::mpsc::channel();
+    *fake.0.gate.lock().unwrap() = Some(gate);
+    let first_host = Arc::clone(&host);
+    let first = std::thread::spawn(move || {
+        let out = Out::default();
+        let mut fresh = first_host.connect(
+            out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        );
+        request(&mut fresh, 1, Op::Attach { node: node("s1") });
+        attached(&out.take(), 1);
+        fresh
+    });
+    let until = Instant::now() + Duration::from_secs(3);
+    while !matches!(slot.peek(), SlotView::Opening(id) if id == "s9") {
+        assert!(
+            Instant::now() < until,
+            "the successor did not begin opening"
+        );
+        std::thread::yield_now();
+    }
+    let second_host = Arc::clone(&host);
+    let second = std::thread::spawn(move || second_host.resolve(&node("s1")).unwrap());
+    open.send(()).unwrap();
+    let mut first = first.join().unwrap();
+    assert!(Arc::ptr_eq(&second.join().unwrap(), &slot));
+    assert_eq!(host.slots().len(), 1);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+    first.leave();
+    handed_off(&host);
+}
+
+#[test]
+fn lifecycle_on_a_fork_source_keeps_the_forks_slot_serving() {
     let Switched {
         host,
         fake,
@@ -9,7 +209,7 @@ fn lifecycle_slot_predecessor_mutation_keeps_successor_serving() {
         mut connection,
         out,
     } = switched();
-    assert!(Arc::ptr_eq(&host.slot("s1"), &slot));
+    assert!(!Arc::ptr_eq(&host.slot("s1"), &slot));
     request(
         &mut connection,
         3,
@@ -36,7 +236,7 @@ fn lifecycle_slot_predecessor_mutation_keeps_successor_serving() {
 }
 
 #[test]
-fn lifecycle_slot_successor_releases_the_actor_through_its_predecessor_slot() {
+fn lifecycle_parks_a_fork_under_its_served_id_not_its_sources_label() {
     let Switched {
         host,
         fake,
@@ -63,8 +263,8 @@ fn lifecycle_slot_successor_releases_the_actor_through_its_predecessor_slot() {
     assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 0);
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
     assert_eq!(host.slots().len(), 1);
-    assert_eq!(slot.known(), "s1");
-    assert!(matches!(slot.peek(),SlotView::Dormant(id) if id=="s1"));
+    assert_eq!(slot.known(), "s9");
+    assert!(matches!(slot.peek(),SlotView::Dormant(id) if id=="s9"));
     connection.leave();
     handed_off(&host);
 }

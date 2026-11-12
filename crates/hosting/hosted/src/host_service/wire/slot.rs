@@ -80,7 +80,7 @@ pub struct SessionSlot<P: ProtocolExtension> {
     /// What the slot is doing while its lock is held for an open or a
     /// release join, for a reader that must not wait ([`Self::peek`]).
     busy: AtomicU8,
-    /// The session the slot last served or opened, for the same reader.
+    /// A cached label for a busy peek, not session-resolution authority.
     known: Mutex<String>,
     /// Last open failure, visible without waiting for a retry's slot lock.
     failure: Mutex<Option<CliFailure>>,
@@ -208,7 +208,8 @@ where
         }
     }
 
-    /// The session the slot last served or opened, without waiting.
+    /// A cached label for [`Self::peek`] while the slot lock is held.
+    /// It may still name a predecessor; never use it to select a session.
     #[must_use]
     pub fn known(&self) -> String {
         self.known

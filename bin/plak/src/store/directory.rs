@@ -1,7 +1,7 @@
 //! What a host's session directory reads of the product store (spec 02
-//! §4.4): every session's identity and labels, newest first, and the newest
-//! session of a tree. Lean on purpose: no transcript previews, so a host can
-//! read it every second while a client watches.
+//! §4.4): every session's identity and labels, newest first, and each tree's
+//! current root-line head. Lean on purpose: no transcript previews, so a host
+//! can read it every second while a client watches.
 
 use std::path::{Path, PathBuf};
 
@@ -283,15 +283,16 @@ impl ProductStore {
         Ok(rows)
     }
 
-    /// The newest session whose node is in the tree `tree_id`.
+    /// The head session of `tree_id`'s root line. A successor that retained
+    /// its source's node supersedes it regardless of directory timestamps.
     ///
     /// # Errors
     ///
     /// The read failed.
-    pub fn newest_of_tree(&mut self, tree_id: &str) -> Result<Option<String>, String> {
+    pub fn head_of_tree(&mut self, tree_id: &str) -> Result<Option<String>, String> {
         self.connection
             .query_row(
-                "SELECT id FROM sessions WHERE node_tree_id=?1 ORDER BY updated_at DESC, id ASC LIMIT 1",
+                "SELECT s.id FROM sessions s WHERE s.node_tree_id=?1 AND NOT EXISTS (SELECT 1 FROM sessions successor WHERE successor.source_session_id=s.id AND successor.node_tree_id=s.node_tree_id AND successor.node_agent_id=s.node_agent_id) ORDER BY s.updated_at DESC, s.id ASC LIMIT 1",
                 [tree_id],
                 |row| row.get(0),
             )
@@ -605,10 +606,10 @@ mod tests {
     }
 
     /// The directory lists the newest sessions first, across workspaces or
-    /// of one, and a tree's newest session is the one an attach of its root
+    /// of one, and a tree's head session is the one an attach of its root
     /// opens.
     #[test]
-    fn the_directory_lists_newest_first_and_finds_a_trees_newest_session() {
+    fn the_directory_lists_newest_first_and_finds_a_trees_head_session() {
         let root = tempfile::tempdir().unwrap();
         let paths = crate::home::paths::PlakPaths::explicit(root.path().join("home"));
         let (one, two) = (root.path().join("one"), root.path().join("two"));
@@ -642,9 +643,43 @@ mod tests {
         assert_eq!(of_one[1].title.as_deref(), Some("older"));
         assert_eq!(of_one[1].workspace_root, one);
         assert_eq!(
-            store.newest_of_tree(&older.node.tree_id).unwrap(),
+            store.head_of_tree(&older.node.tree_id).unwrap(),
             Some(successor.id.clone())
         );
-        assert_eq!(store.newest_of_tree("nowhere").unwrap(), None);
+        assert_eq!(store.head_of_tree("nowhere").unwrap(), None);
+    }
+
+    #[test]
+    fn a_same_node_successor_wins_over_its_newer_or_tied_predecessor_but_not_a_fork() {
+        for source_updated in [20, 30] {
+            let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+            let mut store = ProductStore::open(&paths).unwrap();
+            let mut records = [
+                sessions::SessionRecord::new(paths.home().to_owned()),
+                sessions::SessionRecord::new(paths.home().to_owned()),
+            ];
+            records.sort_by(|left, right| left.id.cmp(&right.id));
+            let [mut source, mut successor] = records;
+            source.updated_at_unix = source_updated;
+            store.commit(&mut source).unwrap();
+            successor.node = source.node.clone();
+            successor.source_product_session_id = Some(source.id.clone());
+            successor.source_workflow_operation_id = Some("plak:switch:fixture".into());
+            successor.updated_at_unix = 20;
+            store.commit(&mut successor).unwrap();
+            let mut fork = sessions::SessionRecord::new(paths.home().to_owned());
+            fork.source_product_session_id = Some(successor.id.clone());
+            fork.source_workflow_operation_id = Some("plak:fork:fixture".into());
+            fork.updated_at_unix = 40;
+            store.commit(&mut fork).unwrap();
+            assert_eq!(
+                store.head_of_tree(&source.node.tree_id).unwrap(),
+                Some(successor.id)
+            );
+            assert_eq!(
+                store.head_of_tree(&fork.node.tree_id).unwrap(),
+                Some(fork.id)
+            );
+        }
     }
 }

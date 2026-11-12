@@ -159,6 +159,16 @@ struct Script {
 struct Fake(Arc<Script>);
 
 impl Script {
+    fn root(&self, session: &str) -> NodeAddress {
+        node(
+            self.trees
+                .lock()
+                .unwrap()
+                .get(session)
+                .map_or(session, String::as_str),
+        )
+    }
+
     fn release_reopen(
         &self,
         intents: &plakous_host_protocol::IntentReceiver<Core>,
@@ -371,13 +381,17 @@ impl HostSessions<Core> for Fake {
     }
 
     fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
-        Ok(self
-            .0
-            .rows
-            .lock()
-            .unwrap()
+        let rows = self.0.rows.lock().unwrap();
+        let successors = self.0.successors.lock().unwrap();
+        Ok(rows
             .iter()
-            .find(|row| row.node.tree_id == node.tree_id)
+            .find(|row| {
+                row.node.tree_id == node.tree_id
+                    && !successors.get(&row.session).is_some_and(|id| {
+                        rows.iter()
+                            .any(|next| &next.session == id && next.node == row.node)
+                    })
+            })
             .map(|row| row.session.clone()))
     }
 
@@ -465,23 +479,18 @@ impl HostSessions<Core> for Fake {
             script.active_workers.fetch_sub(1, Ordering::SeqCst);
             Ok(())
         });
-        let tree = self
-            .0
-            .trees
-            .lock()
-            .unwrap()
-            .get(session)
-            .cloned()
-            .unwrap_or_else(|| session.to_owned());
         Ok(OpenedSession {
             runner_pending: None,
-            root: node(&tree),
+            root: self.0.root(session),
             session_id: session.to_owned(),
             actions,
             events,
             worker,
             attachments,
-            roots: Box::new(|id| Some(node(id))),
+            roots: {
+                let script = Arc::clone(&self.0);
+                Box::new(move |id| Some(script.root(id)))
+            },
         })
     }
 
@@ -2803,10 +2812,22 @@ struct Switched {
     out: Out,
 }
 
-/// Attaches `s1` and publishes a binding that switches the served session
-/// to `s9`. The slot is the one that opened `s1`.
+/// A service handoff to an independent tree, as for a fork.
 fn switched() -> Switched {
+    switched_on_node(false)
+}
+
+/// A service handoff with either a continued or an independent root node.
+fn switched_on_node(same_node: bool) -> Switched {
     let (host, fake) = host(&["s1", "s9"]);
+    if same_node {
+        fake.0
+            .trees
+            .lock()
+            .unwrap()
+            .insert("s9".into(), "s1".into());
+        fake.0.rows.lock().unwrap()[1].node = node("s1");
+    }
     let out = Out::default();
     let mut connection = host.connect(
         out.clone(),
