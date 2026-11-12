@@ -1912,8 +1912,9 @@ bounded executor teardown can cut that release short. Before exact reopen, the
 fixtures read the lease row without acquiring or changing authority, wait for
 release when it completes, and otherwise wait out the existing lease period
 plus two seconds. The still-live test process is never treated as a dead holder.
-Both root-stop and child-stop matrices have the long hang watchdog that covers
-these waits; they retain all continuation, cancellation and wake assertions.
+The root-stop matrix retains its long hang watchdog across repeated cuts.
+Each child-stop cut runs as a separate test under the normal per-test watchdog;
+both retain all continuation, cancellation and wake assertions.
 
 The real-binary `real_*quit_releases*` checks accept exactly the two specified
 quit statuses: joined release (0) and lease-only abandonment (130), never a

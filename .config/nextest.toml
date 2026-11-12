@@ -85,7 +85,7 @@ filter = 'test(a_reader_within_the_recency_margin_projects_exactly_across_an_in_
 slow-timeout = { period = "240s", terminate-after = 2 }
 
 # The root-stop test still iterates cuts and may wait for lease expiry at each.
-# Children stop cuts are separate tests and use the normal per-test watchdog.
+# Child-stop cuts are separate tests with the normal per-test watchdog.
 [[profile.default.overrides]]
 filter = 'test(a_crash_around_the_root_stop_record)'
 slow-timeout = { period = "300s", terminate-after = 2 }
