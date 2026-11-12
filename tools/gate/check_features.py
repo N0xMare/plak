@@ -739,7 +739,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",
     # Independent operator PTYs use the existing PTY/descriptor and account
     # lookup dependencies directly; authority is specified in chapter 04 §2.9.
-    "plakous-runner": "e10e862f09b231f166c0f15043286384d20d32bfe25a8f871626b03e672b2f0d",
+    "plakous-runner": "47732e5fdc890e8ed7d66ef1e866487468e5129cbdf4b255857a392540672198",
 }
 
 

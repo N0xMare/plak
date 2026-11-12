@@ -13,7 +13,7 @@ struct Fake {
 }
 
 struct FakeBackend(Arc<Mutex<Fake>>);
-struct FakeProcess(Arc<Mutex<Fake>>, bool);
+struct FakeProcess(Arc<Mutex<Fake>>, bool, bool);
 
 impl Backend for FakeBackend {
     fn spawn(
@@ -25,7 +25,7 @@ impl Backend for FakeBackend {
         let mut state = lock(&self.0);
         state.spawned += 1;
         state.outputs.push(output);
-        Ok(Box::new(FakeProcess(Arc::clone(&self.0), false)))
+        Ok(Box::new(FakeProcess(Arc::clone(&self.0), false, false)))
     }
 }
 
@@ -41,7 +41,9 @@ impl Process for FakeProcess {
     fn poll(&mut self) -> Option<(TerminalStatus, Option<u32>)> {
         self.1.then(|| {
             (
-                if lock(&self.0).proof {
+                if self.2 {
+                    TerminalStatus::Lost
+                } else if lock(&self.0).proof {
                     TerminalStatus::Exited
                 } else {
                     TerminalStatus::TerminationUnknown
@@ -53,6 +55,11 @@ impl Process for FakeProcess {
     fn close(&mut self) {
         self.1 = true;
         lock(&self.0).closed += 1;
+    }
+    fn reprove(&mut self, acknowledge_loss: bool) {
+        if acknowledge_loss {
+            self.2 = true;
+        }
     }
 }
 
@@ -370,15 +377,162 @@ fn operator_detach_and_namespace_deadlines_are_independent_of_clock_suspension()
 fn operator_close_requires_proof_before_releasing_pin_or_quota() {
     let fixture = Fixture::new();
     fixture.open(0);
-    fixture.call(1, OperatorOperation::Close { key: key(0) });
+    fixture.call(
+        1,
+        OperatorOperation::Close {
+            key: key(0),
+            acknowledge_loss: false,
+        },
+    );
     fixture.service.tick();
     assert!(fixture.service.workspace_pinned(Path::new("/workspace")));
-    fixture.call(1, OperatorOperation::Close { key: key(0) });
+    fixture.call(
+        1,
+        OperatorOperation::Close {
+            key: key(0),
+            acknowledge_loss: false,
+        },
+    );
     assert_eq!(lock(&fixture.fake).closed, 1, "close is idempotent");
     lock(&fixture.fake).proof = true;
     fixture.service.tick();
     assert!(!fixture.service.workspace_pinned(Path::new("/workspace")));
     assert!(!fixture.service.has_live_terminals());
+}
+
+#[test]
+fn operator_expired_unknown_close_reports_acknowledged_loss_before_collection() {
+    let fixture = Fixture::new();
+    fixture.open(0);
+    fixture.advance(90);
+    assert!(fixture.service.workspace_pinned(Path::new("/workspace")));
+    fixture.call(1, OperatorOperation::List);
+    fixture.call(
+        1,
+        OperatorOperation::Close {
+            key: key(0),
+            acknowledge_loss: true,
+        },
+    );
+    fixture.service.tick();
+    assert!(!fixture.service.has_live_terminals());
+    assert!(!fixture.service.workspace_pinned(Path::new("/workspace")));
+    assert!(
+        matches!(fixture.call(1, OperatorOperation::List), OperatorAnswer::Table { terminals } if terminals[0].status == TerminalStatus::Lost)
+    );
+    fixture.service.tick();
+    assert!(lock(&fixture.service.inner.table).namespaces.is_empty());
+}
+
+#[test]
+fn operator_exited_receipts_collect_without_ever_respawning_evicted_ids() {
+    let fixture = Fixture::new();
+    lock(&fixture.fake).proof = true;
+    for n in 0..100 {
+        fixture.open(n);
+        fixture.call(
+            1,
+            OperatorOperation::Close {
+                key: key(n),
+                acknowledge_loss: false,
+            },
+        );
+        fixture.service.tick();
+        assert!(
+            lock(&fixture.service.inner.table)
+                .namespaces
+                .values()
+                .all(|ns| ns.terminals.len() <= 8)
+        );
+    }
+    refused(
+        fixture.call(
+            1,
+            OperatorOperation::Open {
+                key: key(0),
+                workspace: "/workspace".into(),
+                dimensions: dimensions(),
+            },
+        ),
+        OperatorRefusal::TerminalLost,
+    );
+    assert_eq!(lock(&fixture.fake).spawned, 100);
+}
+
+#[test]
+fn operator_collected_namespaces_fence_129_superseded_generations() {
+    let fixture = Fixture::new();
+    lock(&fixture.fake).proof = true;
+    for n in 0..140 {
+        let generation = format!("generation-{n}");
+        assert!(matches!(
+            fixture.service.execute(
+                "paired",
+                &generation,
+                1,
+                namespace(),
+                "renew",
+                OperatorOperation::Renew
+            ),
+            OperatorAnswer::Table { .. }
+        ));
+        let _ = fixture.service.execute(
+            "paired",
+            &generation,
+            1,
+            namespace(),
+            "close",
+            OperatorOperation::NamespaceClose,
+        );
+        fixture.service.tick();
+        assert!(lock(&fixture.service.inner.table).namespaces.is_empty());
+    }
+    refused(
+        fixture.service.execute(
+            "paired",
+            "generation-0",
+            1,
+            namespace(),
+            "renew",
+            OperatorOperation::Renew,
+        ),
+        OperatorRefusal::NamespaceExpired,
+    );
+}
+
+#[test]
+fn operator_output_capacity_never_consumes_unsent_gap_data_or_sequence() {
+    use plakous_runner_protocol::{StreamEvent, StreamFrame};
+    let fixture = Fixture::new();
+    fixture.open(0);
+    let stream = fixture.attach(0, 1);
+    lock(&lock(&fixture.fake).outputs[0]).push(&vec![7; RING_BYTES + 1]);
+    let _ = fixture.service.receive(
+        "paired",
+        "generation",
+        1,
+        StreamFrame {
+            stream,
+            seq: 0,
+            event: StreamEvent::Credit {
+                bytes: WINDOW_BYTES,
+            },
+        },
+    );
+    assert_eq!(
+        fixture.service.output_round("paired", "generation", 1, 0),
+        []
+    );
+    let gap = fixture.service.output_round("paired", "generation", 1, 1);
+    assert_eq!(gap.len(), 1);
+    assert_eq!(gap[0].seq, 0);
+    assert!(
+        matches!(&gap[0].event, StreamEvent::Data { payload } if payload["terminal_event"] == "output_gap")
+    );
+    let data = fixture.service.output_round("paired", "generation", 1, 1);
+    assert_eq!(data.len(), 1);
+    assert_eq!(data[0].seq, 1);
+    assert!(matches!(&data[0].event, StreamEvent::Data { payload } if payload["offset"] == 1));
 }
 
 #[test]
@@ -402,7 +556,7 @@ fn operator_ring_overflow_reports_gap_before_binary_replay_and_exit() {
             },
         )
         .unwrap();
-    let frames = fixture.service.output_round("paired", "generation", 1);
+    let frames = fixture.service.output_round("paired", "generation", 1, 64);
     assert!(
         matches!(&frames[0].event,StreamEvent::Data {payload} if payload["terminal_event"]=="output_gap" && payload["oldest"]["offset"]==9)
     );
@@ -683,7 +837,7 @@ fn operator_four_streams_share_decoded_output_budget_without_starvation() {
     for output in &lock(&fixture.fake).outputs {
         lock(output).push(&vec![255; 64 * 1024]);
     }
-    let frames = fixture.service.output_round("paired", "generation", 1);
+    let frames = fixture.service.output_round("paired", "generation", 1, 64);
     assert_eq!(frames.len(), 4);
     let mut bytes = 0;
     for frame in frames {
@@ -700,7 +854,7 @@ fn operator_four_streams_share_decoded_output_budget_without_starvation() {
     assert!(
         fixture
             .service
-            .output_round("paired", "generation", 1)
+            .output_round("paired", "generation", 1, 64)
             .is_empty(),
         "caller cannot bypass the awake rate budget"
     );
@@ -708,7 +862,7 @@ fn operator_four_streams_share_decoded_output_budget_without_starvation() {
     assert_eq!(
         fixture
             .service
-            .output_round("paired", "generation", 1)
+            .output_round("paired", "generation", 1, 64)
             .len(),
         4
     );

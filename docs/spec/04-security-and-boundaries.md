@@ -440,7 +440,7 @@ read-only file tools and not a sandbox at the initial workspace. The runner
 selects the uid's passwd shell, falling back to an absolute executable `SHELL`
 only when account lookup is unavailable. It starts interactive mode with normal
 SIGHUP disposition and an empty environment, adding only runner-owned PATH,
-account HOME/USER/LOGNAME, TERM and LANG plus the established copy shim/discovery
+account HOME/USER/LOGNAME, validated SHELL, TERM and LANG plus the established copy shim/discovery
 fence. No browser bootstrap command, arbitrary environment, provider key or host
 credential is delegated. Startup files remain the runner user's authority; a
 local shell can read the same user's host credentials. Workspace roots and the
@@ -785,6 +785,30 @@ identity loss or observed setsid escape yield `termination_unknown`, retaining
 quota and workspace pins; a vanished table after runner restart is not death
 evidence. Arbitrary daemonized escape is still the ordinary unsandboxed-shell
 residual, not a promise of descendant containment.
+
+Session scans obtain POSIX session ids from the kernel on macOS, never from
+`ps sess`; its `lstart` identity has one-second resolution. Construction probes
+the runner's session against a fresh independent PTY child and disables the
+operator capability if isolation cannot be verified. Before each group signal,
+one complete fresh scan must put every group member in the anchored leader's
+session; current kernel session/group membership is checked again. Each stage
+deduplicates groups. KILL repeats for newly forked members before reaping the
+leader and proving absence twice. Live observation failures retry without
+closing shells; incomplete cleanup scans retry within the cleanup deadline,
+then retain unknown. Linux scans assume visibility of the runner user's
+processes: hidepid and privilege-changing descendants can restrict evidence,
+not establish containment or grant kill authority over invisible processes.
+
+Unknown cleanup is not an unrecoverable pin: close requests a fresh two-scan
+absence proof of the old session and tracked escaped `(pid,start)` identities,
+without signaling a remembered pid after reaping; a low-frequency worker also
+re-proves it. An escaped zombie is terminated, not a live survivor. Only proven
+absence becomes `exited`. A close with explicit `acknowledge_loss` may instead
+become `lost`, releasing pins, quota and idle-exit accounting while reporting
+last-observed surviving escaped identities. It does not kill those escapees
+or claim they died. Closed/expired namespaces still allow list and close for
+this resolution. Fast double-fork escapes reparented before observation remain
+an explicit unsandboxed-shell residual, even when the original SID is absent.
 
 Memory-only terminal tables and 1 MiB raw output rings never become agent output
 or disk spools. Input acknowledgments prove queue admission only. Reattachment

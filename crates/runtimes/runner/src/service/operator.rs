@@ -62,12 +62,12 @@ impl RunnerService {
         generation: &str,
         connection: u64,
         request: Request,
-        sender: &mpsc::Sender<RunnerFrame>,
+        sender: &mpsc::UnboundedSender<RunnerFrame>,
     ) {
         let request_id = request.request_id.clone();
         let answer = self.apply_operator(host, generation, connection, request);
         let payload = serde_json::to_value(answer).unwrap_or_default();
-        let _ = sender.try_send(RunnerFrame::Result {
+        let _ = sender.send(RunnerFrame::Result {
             request_id,
             payload,
         });
@@ -127,11 +127,9 @@ impl RunnerService {
         let Some(operator) = &self.inner.operator else {
             return;
         };
-        // Existing control/agent frames drain ahead of the next bulk output round.
-        if sender.capacity() < 32 {
-            return;
-        }
-        for frame in operator.output_round(host, generation, connection) {
+        // This connection's single producer reserves its remaining frame capacity
+        // before output can advance a cursor or sequence. The consumer only frees it.
+        for frame in operator.output_round(host, generation, connection, sender.capacity()) {
             let _ = sender.try_send(RunnerFrame::Stream(frame));
         }
     }

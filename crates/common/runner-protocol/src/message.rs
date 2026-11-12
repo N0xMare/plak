@@ -140,8 +140,6 @@ pub enum RequestClass {
     OperatorControl {
         /// Principal-private namespace; Bind supplies host id and generation.
         namespace: crate::operator::OperatorNamespace,
-        /// Caller-generated control identity.
-        control_id: crate::operator::OperatorId,
     },
     /// One model tool call: effect verbs are keyed by the owner's line, the
     /// call and its attempt, and run at most once per key. Read verbs keep

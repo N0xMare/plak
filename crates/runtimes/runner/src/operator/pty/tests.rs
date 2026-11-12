@@ -2,6 +2,7 @@ use super::super::{
     OperatorAnswer, OperatorId, OperatorNamespace, OperatorTerminalService, TerminalKey,
 };
 use super::*;
+mod loss;
 
 #[test]
 #[ignore = "subprocess fixture, invoked by operator PTY tests"]
@@ -39,16 +40,23 @@ fn operator_pty_child() {
                 let pair = native_pty_system()
                     .openpty(size(TerminalDimensions::new(24, 80).unwrap()))
                     .unwrap();
-                let mut command = CommandBuilder::new(std::env::current_exe().unwrap());
-                command.args([
-                    "--exact",
-                    "operator::pty::tests::operator_pty_child",
-                    "--ignored",
-                    "--nocapture",
-                ]);
+                let mut command = CommandBuilder::new("/bin/sh");
+                command.args(["-c", "trap '' HUP TERM; exec /bin/sleep 600"]);
                 let child = pair.slave.spawn_command(command).unwrap();
                 writeln!(stdout, "ESCAPED {}", child.process_id().unwrap()).unwrap();
                 nested.push((pair, child));
+            }
+            b'F' => {
+                let escaped = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "operator::pty::tests::loss::operator_fast_escape_broker",
+                        "--ignored",
+                        "--nocapture",
+                    ])
+                    .output()
+                    .unwrap();
+                stdout.write_all(&escaped.stdout).unwrap();
             }
             _ => panic!("invalid fixture instruction"),
         }
@@ -71,6 +79,137 @@ fn worker() -> Worker {
         Arc::default(),
     )
     .unwrap()
+}
+
+#[test]
+fn operator_pty_platform_scan_distinguishes_runner_and_child_sessions() {
+    probe_sessions().unwrap();
+    let worker = worker();
+    let rows = scan().unwrap();
+    let own = rows
+        .iter()
+        .find(|row| row.pid == std::process::id())
+        .unwrap();
+    let child = worker.identity.as_ref().unwrap();
+    assert_eq!(
+        own.session,
+        rustix::process::getsid(None)
+            .unwrap()
+            .as_raw_nonzero()
+            .get()
+            .to_string()
+    );
+    assert_ne!(own.session, child.session);
+    assert_eq!(child.session, child.pid.to_string());
+}
+
+#[test]
+fn operator_pty_env_has_exact_curated_keys_without_inherited_secrets() {
+    let directory = tempfile::tempdir().unwrap();
+    for ceiling in [false, true] {
+        let mut launch =
+            account_launch(directory.path().to_owned(), "/usr/bin:/bin".into(), None).unwrap();
+        launch.discovery_ceiling = ceiling.then(|| directory.path().to_owned());
+        let mut command = CommandBuilder::new("/usr/bin/env");
+        curate(&mut command, launch);
+        let mut worker = Worker::spawn_command(
+            command,
+            TerminalDimensions::new(24, 80).unwrap(),
+            Arc::default(),
+        )
+        .unwrap();
+        until_output(&mut worker, b"LANG=C.UTF-8");
+        let bytes: Vec<_> = lock(&worker.output).bytes.iter().copied().collect();
+        let text = String::from_utf8(bytes).unwrap();
+        let keys: std::collections::BTreeSet<_> = text
+            .lines()
+            .map(|line| line.split_once('=').unwrap().0)
+            .collect();
+        let mut expected = std::collections::BTreeSet::from([
+            "PATH", "HOME", "SHELL", "USER", "LOGNAME", "TERM", "LANG",
+        ]);
+        if ceiling {
+            expected.insert("GIT_CEILING_DIRECTORIES");
+        }
+        assert_eq!(keys, expected);
+    }
+}
+
+#[test]
+fn operator_pty_passwd_shell_precedes_fallback_and_invalid_fallback_refuses() {
+    let cwd = PathBuf::from("/workspace");
+    let fallback = OperatorAccountFallback {
+        shell: "/bin/sh".into(),
+        home: "/home".into(),
+        user: "fallback".into(),
+    };
+    let launch = launch_with_account(
+        cwd.clone(),
+        "/bin".into(),
+        Some(("/bin/sh".into(), "/passwd-home".into(), "passwd".into())),
+        Some(fallback.clone()),
+    )
+    .unwrap();
+    assert_eq!(launch.user, "passwd");
+    assert_eq!(launch.home, PathBuf::from("/passwd-home"));
+    assert_eq!(
+        launch_with_account(cwd.clone(), "/bin".into(), None, Some(fallback.clone()))
+            .unwrap()
+            .user,
+        "fallback"
+    );
+    assert!(launch_with_account(cwd.clone(), "/bin".into(), None, None).is_err());
+    for shell in ["relative", "/no-such-shell"] {
+        let mut invalid = fallback.clone();
+        invalid.shell = shell.into();
+        assert!(launch_with_account(cwd.clone(), "/bin".into(), None, Some(invalid)).is_err());
+    }
+    let system = account_launch(cwd, "/bin".into(), Some(fallback)).unwrap();
+    let passwd = nix::unistd::User::from_uid(nix::unistd::getuid())
+        .unwrap()
+        .unwrap();
+    assert_eq!(system.shell, passwd.shell);
+}
+
+#[test]
+fn operator_pty_transient_observation_failure_does_not_close_live_shell() {
+    let mut worker = worker();
+    until_output(&mut worker, b"PTY-READY\n");
+    worker.observation_failures = 2;
+    let (send, receive) = sync_channel(3);
+    let close = Arc::new(AtomicBool::new(false));
+    let result = Arc::new(Mutex::new(None));
+    let ending = close.clone();
+    let answer = result.clone();
+    let output = worker.output.clone();
+    let thread = std::thread::spawn(move || {
+        worker.run(
+            &receive,
+            &ending,
+            &answer,
+            &Mutex::new(None),
+            &Mutex::new(Vec::new()),
+        );
+    });
+    std::thread::sleep(Duration::from_millis(2300));
+    assert!(
+        lock(&result).is_none(),
+        "a failed observation is not a cleanup request"
+    );
+    send.send(Command::Input(b"EOKAY".to_vec())).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !lock(&output)
+        .bytes
+        .make_contiguous()
+        .windows(4)
+        .any(|bytes| bytes == b"OKAY")
+    {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    close.store(true, Ordering::Release);
+    thread.join().unwrap();
+    assert_eq!(lock(&result).unwrap().0, TerminalStatus::Exited);
 }
 
 fn until_output(worker: &mut Worker, needle: &[u8]) {
@@ -157,12 +296,21 @@ fn operator_pty_close_kills_background_stopped_and_foreground_job_groups() {
         groups.len() >= 4,
         "shell, background, stopped and full-screen job groups must be distinct"
     );
-    let mut cleanup = SessionCleanup::new(identity.clone());
-    cleanup.observe(&rows);
-    worker.io.take();
-    worker.master.take();
-    assert!(cleanup.finish(|| worker.child.try_wait().ok().flatten().is_some()));
-    worker.cleaned = true;
+    let (sender, receive) = sync_channel(3);
+    drop(sender);
+    let result = Mutex::new(None);
+    worker.run(
+        &receive,
+        &AtomicBool::new(true),
+        &result,
+        &Mutex::new(None),
+        &Mutex::new(Vec::new()),
+    );
+    assert_eq!(
+        lock(&result).unwrap().0,
+        TerminalStatus::Exited,
+        "closing flag, master hangup and whole-session cleanup must join"
+    );
     assert!(!scan().unwrap().iter().any(|r| r.pid == identity.pid));
 }
 
@@ -172,10 +320,11 @@ fn operator_pty_setsid_escape_is_termination_unknown_even_after_master_hangup() 
     until_output(&mut worker, b"PTY-READY\n");
     worker.io_round(&mut VecDeque::from(b"D".to_vec())).unwrap();
     until_output(&mut worker, b"ESCAPED ");
+    let _escape = loss::Escape::from_output(&worker.output);
     let mut cleanup = SessionCleanup::new(worker.identity.clone().unwrap());
     cleanup.observe(&scan().unwrap());
     assert!(
-        cleanup.uncertain,
+        !cleanup.escaped.is_empty(),
         "different-session descendant is not cleanup proof"
     );
     worker.io.take();

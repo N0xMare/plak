@@ -6073,17 +6073,17 @@ the session's current job owner (§8.5), not from an owner a joined process
 service stored when it started. `LineOwner` lives in `plakous-tools`; it never
 enters `plakous-model`.
 
-**Operator terminal wire.** Protocol 6 adds `OperatorControl { namespace, control_id }`,
+**Operator terminal wire.** Protocol 6 adds `OperatorControl { namespace }`,
 with no `LineOwner`. The authenticated paired connection supplies host id and host
 process generation; namespace adds state key and principal. Terminal identity adds
 session, node and a client-generated terminal id. Inspecting connections cannot use it.
 Fixed verbs are `operator.namespace.renew`, `operator.namespace.close`, and
 `operator.terminal.open`, `.list`, `.attach`, `.resize`, `.close`; the typed operation
 must match its verb. `operator-pty` is advertised only with an explicit runner-owned
-workspace policy. These are not model tools, tree operations, agent jobs, promoted
+workspace policy and a successful kernel session-isolation probe. These are not model tools, tree operations, agent jobs, promoted
 processes or line controls. The client handshake is unchanged by this runner increment.
 
-The validating codec bounds identity components to 128 bytes and dimensions to rows
+The validating codec bounds identity components to 128 printable, non-control bytes and dimensions to rows
 1..=500, columns 1..=1000. Open accepts a workspace and dimensions, never a bootstrap
 command or browser environment. Attach takes an instance-qualified output cursor and
 never spawns. Stream envelopes retain gap-free directional sequence numbers; terminal
@@ -6109,7 +6109,12 @@ Quota includes starting, closing and unknown shells: two/session, four/principal
 sixteen/host, thirty-two/runner. Tables are bounded to 128 namespaces with at most 64
 terminal reservations and 64 refused-open receipts each; saturation refuses rather than
 forgetting an id and spawning it again. Attach never spawns and acquires one input/resize
-controller. Resize coalesces the latest valid dimensions. The raw merged stdout/stderr
+controller. Eight unattached completed receipts remain per namespace; compact SHA-256
+identity fences (at most 4,096 per namespace) make an evicted id answer terminal_lost,
+never spawn. Closed/expired namespaces whose pins ended are collected behind compact
+closed/superseded-generation fences, bounded to 4,096 facts over 128 home/state scopes.
+Fence exhaustion refuses new reservations/generations without forgetting old authority.
+Resize coalesces the latest valid dimensions. The raw merged stdout/stderr
 ring is 1 MiB per terminal, continues draining without viewer credit and never spools.
 Slow readers receive output_gap before replay from the oldest retained cursor. Closed,
 unattached terminals retain lightweight receipts rather than archived output; a later
@@ -6130,6 +6135,17 @@ reclamation checks and disposable-target trims through `reclamation_path`; they 
 reclaim a live terminal's workspace or its descendants. The host-local embedding uses
 the same `reclaim` guard for its own removals. `workspace_pinned` is the host's residency
 and delete/handoff admission query, not authority to close another principal's shell.
+Close carries `acknowledge_loss: false` for ordinary cleanup or fresh proof of an
+unknown result. A ten-second low-frequency worker also re-proves unknown termination.
+Proof uses two complete fresh scans of the old SID and tracked escaped `(pid,start)`
+identities; it never signals after releasing the unreaped leader anchor. Successful
+proof becomes Exited. Explicit `acknowledge_loss: true`, applied to an unknown terminal,
+may instead become Lost: pins, quota and idle accounting end, escaped processes are
+not killed, and the row and separate exit event report surviving identities. This is
+operator resolution, never process-death proof. Closed/expired namespaces permit list
+and close for resolution. Results use the control channel; output production reserves
+remaining bulk-frame capacity before advancing any cursor or directional sequence.
+
 Product request/confirmation, residency-refusal rendering and client scheduling belong
 to the separate client-protocol increment; this runner increment changes no client DTO.
 

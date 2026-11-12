@@ -296,17 +296,14 @@ impl RunnerService {
         let tables = options
             .floors
             .map_or_else(Tables::default, Tables::with_floors);
-        let operator = options
-            .operator_workspace
-            .map(|workspace| {
-                crate::operator::OperatorTerminalService::new(
-                    hello.instance.clone(),
-                    workspace,
-                    options.lease_clock.clone(),
-                )
-            })
-            .transpose()
-            .map_err(|_| plakous_tools::internal::runner::workspace_refusal())?;
+        let operator = options.operator_workspace.and_then(|workspace| {
+            crate::operator::OperatorTerminalService::new(
+                hello.instance.clone(),
+                workspace,
+                options.lease_clock.clone(),
+            )
+            .ok()
+        });
         if operator.is_some() {
             hello.capabilities.push(capabilities::OPERATOR_PTY.into());
         }
@@ -446,16 +443,6 @@ impl RunnerService {
         let mut terminal_tick = tokio::time::interval(Duration::from_millis(64));
         let mut read_deadline = tokio::time::Instant::now() + self.inner.dead;
         loop {
-            if self.inner.operator.is_some() && terminal_sender.capacity() < 32 {
-                if tokio::time::Instant::now() >= read_deadline {
-                    break;
-                }
-                tokio::select! {
-                    () = tokio::time::sleep(Duration::from_millis(5)) => {},
-                    () = closer.cancelled() => break,
-                }
-                continue;
-            }
             let frame = tokio::select! {
                 frame = tokio::time::timeout_at(read_deadline, reader.next::<HostFrame>()) => frame,
                 () = closer.cancelled() => break,
@@ -727,7 +714,7 @@ impl RunnerService {
         match frame {
             HostFrame::Request(request) => {
                 if matches!(request.class, RequestClass::OperatorControl { .. }) {
-                    self.operator_request(host, instance, connection, request, terminal_sender);
+                    self.operator_request(host, instance, connection, request, sender);
                 } else {
                     self.admit(host, instance, connection, request, sender);
                 }

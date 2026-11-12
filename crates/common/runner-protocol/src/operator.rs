@@ -30,7 +30,12 @@ impl TryFrom<String> for OperatorId {
     type Error = &'static str;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.is_empty() || value.len() > 128 || value.bytes().any(|b| b.is_ascii_control()) {
+        if value.is_empty()
+            || value.len() > 128
+            || value
+                .chars()
+                .any(|c| c.is_control() || c.escape_debug().to_string().starts_with("\\u{"))
+        {
             return Err("operator identity must contain 1..=128 non-control bytes");
         }
         Ok(Self(value))
@@ -176,6 +181,8 @@ pub enum OperatorOperation {
     Close {
         /// Existing terminal.
         key: TerminalKey,
+        /// Explicit informed release of unresolved pins, never a claim of death.
+        acknowledge_loss: bool,
     },
 }
 
@@ -209,12 +216,26 @@ pub enum TerminalStatus {
     Exited,
     /// Cleanup cannot be proven; quota and workspace pin remain held.
     TerminationUnknown,
+    /// Operator acknowledged unresolved survivors; no remaining kill authority.
+    Lost,
+}
+
+/// A last-observed escaped process identity; never permission to kill a bare PID.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalProcessIdentity {
+    /// Process number on this runner.
+    pub pid: u32,
+    /// Platform start identity (one-second lstart resolution on macOS).
+    pub started: String,
 }
 
 /// One row of the bounded principal-private terminal table.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TerminalRow {
+    /// Unresolved escaped identities, reported on unknown or acknowledged loss.
+    pub survivors: Vec<TerminalProcessIdentity>,
     /// Client identity.
     pub key: TerminalKey,
     /// Lifecycle state.
@@ -303,6 +324,8 @@ pub enum TerminalEvent {
     },
     /// Shell status, after cleanup, separate from terminal bytes.
     Exit {
+        /// Last-observed unresolved escaped identities; not kill authority.
+        survivors: Vec<TerminalProcessIdentity>,
         /// Cleanup disposition.
         status: TerminalStatus,
         /// Shell code when known.
@@ -329,6 +352,10 @@ mod tests {
         assert!(TerminalDimensions::new(500, 1000).is_ok());
         assert!(OperatorId::try_from("a".repeat(129)).is_err());
         assert!(OperatorId::try_from("bad\n".to_owned()).is_err());
+        for value in ["bad\u{0085}", "bad\u{200b}", "bad\u{202e}"] {
+            assert!(OperatorId::try_from(value.to_owned()).is_err());
+        }
+        assert!(OperatorId::try_from("printable-é-终端".to_owned()).is_ok());
         assert!(OperatorId::try_from(String::new()).is_err());
     }
 

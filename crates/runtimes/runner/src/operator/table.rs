@@ -31,7 +31,14 @@ impl OperatorTerminalService {
             .namespaces
             .get(&key)
             .ok_or(OperatorRefusal::ReconcileRequired)?;
-        if namespace.closed || now.duration_since(namespace.renewed) >= NAMESPACE {
+        if (namespace.closed || now.duration_since(namespace.renewed) >= NAMESPACE)
+            && !matches!(
+                operation,
+                OperatorOperation::List
+                    | OperatorOperation::Close { .. }
+                    | OperatorOperation::NamespaceClose
+            )
+        {
             return Err(OperatorRefusal::NamespaceExpired);
         }
         if namespace.reconciled != connection && !matches!(operation, OperatorOperation::List) {
@@ -69,6 +76,9 @@ impl OperatorTerminalService {
                 } else {
                     OperatorRefusal::Conflict
                 });
+            }
+            if namespace.refused_opens.len() >= 64 && !namespace.terminals.contains_key(&terminal) {
+                return Err(OperatorRefusal::Quota);
             }
             let result = self.open(
                 &mut table,
@@ -118,6 +128,7 @@ impl OperatorTerminalService {
         if !table.namespaces.contains_key(&key) && table.namespaces.len() >= 128 {
             return Err(OperatorRefusal::Quota);
         }
+        super::collection::admit_generation(table, &key)?;
         // A new generation never adopts old shells, even if its browser retained ids.
         for (old, ns) in &mut table.namespaces {
             if old.host == key.host
@@ -131,6 +142,8 @@ impl OperatorTerminalService {
             }
         }
         let ns = table.namespaces.entry(key).or_insert_with(|| Namespace {
+            loss_reported: super::HashSet::new(),
+            evicted: super::HashSet::new(),
             renewed: now,
             reconciled: connection,
             closed: false,
@@ -142,13 +155,19 @@ impl OperatorTerminalService {
         Ok(self.rows(ns))
     }
 
-    fn rows(&self, ns: &Namespace) -> OperatorAnswer {
+    fn rows(&self, ns: &mut Namespace) -> OperatorAnswer {
         let mut terminals: Vec<_> = ns
             .terminals
             .iter()
             .map(|(key, t)| t.row(key, &self.inner.instance))
             .collect();
         terminals.sort_by(|a, b| a.key.terminal_id.as_str().cmp(b.key.terminal_id.as_str()));
+        ns.loss_reported.extend(
+            terminals
+                .iter()
+                .filter(|row| row.status == TerminalStatus::Lost)
+                .map(|row| row.key.clone()),
+        );
         OperatorAnswer::Table { terminals }
     }
 
@@ -169,6 +188,12 @@ impl OperatorTerminalService {
             .namespaces
             .get(namespace)
             .ok_or(OperatorRefusal::NamespaceExpired)?;
+        if ns.evicted.contains(&super::collection::terminal_hash(key)) {
+            return Err(OperatorRefusal::TerminalLost);
+        }
+        if ns.evicted.len() >= 4096 {
+            return Err(OperatorRefusal::Quota);
+        }
         if let Some(terminal) = ns.terminals.get(key) {
             if terminal.digest != digest {
                 return Err(OperatorRefusal::Conflict);
@@ -296,7 +321,7 @@ impl OperatorTerminalService {
             }
             OperatorOperation::Attach { key, .. }
             | OperatorOperation::Resize { key, .. }
-            | OperatorOperation::Close { key } => key.clone(),
+            | OperatorOperation::Close { key, .. } => key.clone(),
             _ => return Err(OperatorRefusal::InvalidRequest),
         };
         let terminal = ns
@@ -325,7 +350,7 @@ impl OperatorTerminalService {
                         now.checked_sub(Duration::from_millis(64)).unwrap_or(now),
                         0,
                     ),
-                    exit_sent: false,
+                    exit_status: None,
                 });
                 terminal.detached = None;
                 Some(stream)
@@ -341,12 +366,23 @@ impl OperatorTerminalService {
                 terminal.pending_size = Some(dimensions);
                 None
             }
-            OperatorOperation::Close { .. } => {
-                terminal.close();
+            OperatorOperation::Close {
+                acknowledge_loss, ..
+            } => {
+                if terminal.status == TerminalStatus::TerminationUnknown {
+                    if let Some(process) = &mut terminal.process {
+                        process.reprove(acknowledge_loss);
+                    }
+                } else {
+                    terminal.close();
+                }
                 None
             }
             _ => return Err(OperatorRefusal::InvalidRequest),
         };
+        if terminal.status == TerminalStatus::Lost {
+            ns.loss_reported.insert(key.clone());
+        }
         Ok(OperatorAnswer::Terminal {
             terminal: terminal.row(&key, &self.inner.instance),
             stream: attached,

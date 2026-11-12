@@ -90,6 +90,10 @@ one cross-build carrier (a build imports its own and the previous version).
   controllers and session-wide identity-checked cleanup. Unproven cleanup keeps
   workspace pins and blocks idle exit; agent lines, jobs and accounting are
   unchanged. Product terminal requests and browser integration are separate.
+  Session-id isolation is probed before enabling PTYs, and transient observation
+  failures never close live shells. Unknown termination supports fresh absence
+  proof or explicit acknowledged loss with surviving identities. Completed
+  receipts and retired namespaces are collected behind bounded replay fences.
 
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.

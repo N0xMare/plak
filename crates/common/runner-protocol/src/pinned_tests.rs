@@ -134,7 +134,6 @@ fn classes() -> Vec<RequestClass> {
                 state_key: crate::operator::OperatorId::try_from("state".to_owned()).unwrap(),
                 principal: crate::operator::OperatorId::try_from("principal".to_owned()).unwrap(),
             },
-            control_id: crate::operator::OperatorId::try_from("control".to_owned()).unwrap(),
         },
         RequestClass::EffectCall {
             call_id: "call".into(),

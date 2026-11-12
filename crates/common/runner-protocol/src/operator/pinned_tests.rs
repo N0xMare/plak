@@ -66,6 +66,7 @@ fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
                     TerminalStatus::Closing => "closing",
                     TerminalStatus::Exited => "exited",
                     TerminalStatus::TerminationUnknown => "termination_unknown",
+                    TerminalStatus::Lost => "lost",
                 });
             }
             "refusal" => {
@@ -93,6 +94,6 @@ fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
             statuses.len(),
             refusals.len()
         ),
-        (7, 5, 3, 5, 10)
+        (7, 5, 3, 6, 10)
     );
 }

@@ -171,7 +171,7 @@ struct State {
     /// host.
     refusal: Option<Refusal>,
     streams: HashMap<u64, StreamEnds>,
-    operator_streams: HashMap<u64, mpsc::Sender<StreamFrame>>,
+    operator_streams: HashMap<u64, operator::OperatorInbound>,
 }
 
 struct Pending {

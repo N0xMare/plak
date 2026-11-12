@@ -4,14 +4,14 @@
 {"kind":"operation","value":{"operation":"list"}}
 {"kind":"operation","value":{"cursor":{"instance":"instance","offset":0},"key":{"node":"node","session":"session","terminal_id":"terminal"},"operation":"attach"}}
 {"kind":"operation","value":{"dimensions":{"columns":80,"rows":24},"key":{"node":"node","session":"session","terminal_id":"terminal"},"operation":"resize"}}
-{"kind":"operation","value":{"key":{"node":"node","session":"session","terminal_id":"terminal"},"operation":"close"}}
+{"kind":"operation","value":{"acknowledge_loss":false,"key":{"node":"node","session":"session","terminal_id":"terminal"},"operation":"close"}}
 {"kind":"event","value":{"bytes_b64":"AP8BAg==","offset":0,"terminal_event":"data"}}
 {"kind":"event","value":{"next":4,"terminal_event":"input_accepted"}}
 {"kind":"event","value":{"oldest":{"instance":"instance","offset":0},"terminal_event":"output_gap"}}
-{"kind":"event","value":{"code":0,"status":"exited","terminal_event":"exit"}}
+{"kind":"event","value":{"code":0,"status":"exited","survivors":[],"terminal_event":"exit"}}
 {"kind":"event","value":{"refusal":"offset_gap","terminal_event":"refused"}}
-{"kind":"answer","value":{"outcome":"table","terminals":[{"attached":false,"exit_code":null,"input_next":0,"key":{"node":"node","session":"session","terminal_id":"terminal"},"next":{"instance":"instance","offset":4},"oldest":{"instance":"instance","offset":0},"status":"running"}]}}
-{"kind":"answer","value":{"outcome":"terminal","stream":9223372036854775808,"terminal":{"attached":false,"exit_code":null,"input_next":0,"key":{"node":"node","session":"session","terminal_id":"terminal"},"next":{"instance":"instance","offset":4},"oldest":{"instance":"instance","offset":0},"status":"running"}}}
+{"kind":"answer","value":{"outcome":"table","terminals":[{"attached":false,"exit_code":null,"input_next":0,"key":{"node":"node","session":"session","terminal_id":"terminal"},"next":{"instance":"instance","offset":4},"oldest":{"instance":"instance","offset":0},"status":"running","survivors":[]}]}}
+{"kind":"answer","value":{"outcome":"terminal","stream":9223372036854775808,"terminal":{"attached":false,"exit_code":null,"input_next":0,"key":{"node":"node","session":"session","terminal_id":"terminal"},"next":{"instance":"instance","offset":4},"oldest":{"instance":"instance","offset":0},"status":"running","survivors":[]}}}
 {"kind":"answer","value":{"outcome":"refused","refusal":"terminal_lost"}}
 {"kind":"status","value":"starting"}
 {"kind":"status","value":"running"}
@@ -28,3 +28,4 @@
 {"kind":"refusal","value":"conflict"}
 {"kind":"refusal","value":"offset_gap"}
 {"kind":"refusal","value":"backpressure"}
+{"kind":"status","value":"lost"}

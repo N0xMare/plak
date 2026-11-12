@@ -1,6 +1,6 @@
 //! Operator PTYs: private namespaces, bounded byte rings and no agent line state.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -8,13 +8,15 @@ use std::time::{Duration, Instant};
 use base64::engine::general_purpose::STANDARD;
 use plakous_runner_protocol::operator::{
     OperatorAnswer, OperatorId, OperatorNamespace, OperatorOperation, OperatorRefusal,
-    TerminalCursor, TerminalDimensions, TerminalEvent, TerminalKey, TerminalRow, TerminalStatus,
+    TerminalCursor, TerminalDimensions, TerminalEvent, TerminalKey, TerminalProcessIdentity,
+    TerminalRow, TerminalStatus,
 };
 
 #[cfg(unix)]
 mod pty;
 #[cfg(unix)]
 pub use pty::account_launch;
+mod collection;
 mod stream;
 mod table;
 #[cfg(test)]
@@ -81,6 +83,8 @@ struct NamespaceKey {
 }
 
 struct Namespace {
+    loss_reported: HashSet<TerminalKey>,
+    evicted: HashSet<[u8; 32]>,
     renewed: Instant,
     reconciled: u64,
     closed: bool,
@@ -89,6 +93,7 @@ struct Namespace {
 }
 
 struct Table {
+    scopes: HashMap<(String, OperatorId), collection::Generations>,
     namespaces: HashMap<NamespaceKey, Namespace>,
     next_stream: u64,
     reclaiming: HashMap<PathBuf, usize>,
@@ -98,6 +103,7 @@ struct Table {
 impl Default for Table {
     fn default() -> Self {
         Self {
+            scopes: HashMap::new(),
             namespaces: HashMap::new(),
             next_stream: 1 << 63,
             reclaiming: HashMap::new(),
@@ -150,7 +156,7 @@ struct Controller {
     credit: u64,
     cursor: u64,
     output_rate: RateBudget,
-    exit_sent: bool,
+    exit_status: Option<TerminalStatus>,
 }
 
 struct RateBudget {
@@ -179,7 +185,6 @@ impl RateBudget {
 struct Output {
     bytes: VecDeque<u8>,
     next: u64,
-    failed: bool,
 }
 
 impl Output {
@@ -212,6 +217,10 @@ trait Process: Send {
     fn poll(&mut self) -> Option<(TerminalStatus, Option<u32>)>;
     /// Starts cleanup; never reports exited without the two absence scans.
     fn close(&mut self);
+    fn reprove(&mut self, _acknowledge_loss: bool) {}
+    fn survivors(&self) -> Vec<TerminalProcessIdentity> {
+        Vec::new()
+    }
 }
 
 impl OperatorTerminalService {
@@ -225,6 +234,7 @@ impl OperatorTerminalService {
         workspace: Arc<OperatorWorkspace>,
         clock: Option<Arc<crate::RunnerLeaseClock>>,
     ) -> Result<Self, &'static str> {
+        pty::probe_sessions()?;
         let service = Self {
             inner: Arc::new(Inner {
                 instance: OperatorId::try_from(instance)?,
@@ -328,6 +338,7 @@ impl OperatorTerminalService {
         let mut table = lock(&self.inner.table);
         for namespace in table.namespaces.values_mut() {
             let expired = namespace.closed || now.duration_since(namespace.renewed) >= NAMESPACE;
+            namespace.closed = expired;
             for terminal in namespace.terminals.values_mut() {
                 if expired
                     || now.duration_since(terminal.last_input) >= IDLE
@@ -340,6 +351,7 @@ impl OperatorTerminalService {
                 terminal.poll();
             }
         }
+        collection::collect(&mut table);
     }
 
     /// Detaches only this connection's controllers; shells retain bounded lifetime.
@@ -422,7 +434,7 @@ impl OperatorTerminalService {
 
 impl Terminal {
     fn pinned(&self) -> bool {
-        self.status != TerminalStatus::Exited
+        !matches!(self.status, TerminalStatus::Exited | TerminalStatus::Lost)
     }
 
     fn close(&mut self) {
@@ -450,19 +462,20 @@ impl Terminal {
             self.status = status;
             self.exit_code = code;
         }
-        if self.status == TerminalStatus::Exited && self.controller.is_none() {
+        if !self.pinned() && self.controller.is_none() {
             // Keep the lightweight idempotency receipt, not an unbounded archive
             // of closed shells. A later attach observes the honest output gap.
-            lock(&self.output).bytes.clear();
-        }
-        if lock(&self.output).failed {
-            self.close();
+            lock(&self.output).bytes = VecDeque::new();
         }
     }
 
     fn row(&self, key: &TerminalKey, instance: &OperatorId) -> TerminalRow {
         let output = lock(&self.output);
         TerminalRow {
+            survivors: self
+                .process
+                .as_ref()
+                .map_or_else(Vec::new, |p| p.survivors()),
             key: key.clone(),
             status: self.status,
             oldest: TerminalCursor {

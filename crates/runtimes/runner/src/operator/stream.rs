@@ -96,11 +96,16 @@ impl OperatorTerminalService {
         true
     }
 
-    /// Produces one fair round of output within existing credits. The embedding
-    /// transport calls at most 16 rounds/awake second: 256 KiB/s per terminal,
-    /// 512 KiB/s per principal. No-credit readers do not block PTY draining.
+    /// Produces at most `capacity` frames, without advancing unsent cursors or
+    /// sequences. Awake byte budgets enforce rates independently of polling.
     #[must_use]
-    pub fn output_round(&self, host: &str, generation: &str, connection: u64) -> Vec<StreamFrame> {
+    pub fn output_round(
+        &self,
+        host: &str,
+        generation: &str,
+        connection: u64,
+        capacity: usize,
+    ) -> Vec<StreamFrame> {
         self.tick();
         let mut table = lock(&self.inner.table);
         let now = (self.inner.clock)();
@@ -156,6 +161,7 @@ impl OperatorTerminalService {
                         &mut controller,
                         &mut room,
                         &mut frames,
+                        capacity,
                     );
                     let sent = allowed - room as u64;
                     budget.remaining -= sent;
@@ -231,12 +237,13 @@ impl Terminal {
         controller: &mut Controller,
         budget: &mut usize,
         frames: &mut Vec<StreamFrame>,
+        capacity: usize,
     ) {
         let output = lock(&self.output);
-        if controller.credit == 0 {
+        if frames.len() >= capacity {
             return;
         }
-        if controller.cursor < output.oldest() {
+        if controller.credit > 0 && controller.cursor < output.oldest() {
             controller.cursor = output.oldest();
             frames.push(controller.event(TerminalEvent::OutputGap {
                 oldest: TerminalCursor {
@@ -244,6 +251,9 @@ impl Terminal {
                     offset: output.oldest(),
                 },
             }));
+        }
+        if frames.len() >= capacity {
+            return;
         }
         let available = usize::try_from(
             (output.next - controller.cursor)
@@ -269,17 +279,25 @@ impl Terminal {
             controller.credit -= available as u64;
             *budget -= available;
         }
-        if matches!(
-            self.status,
-            TerminalStatus::Exited | TerminalStatus::TerminationUnknown
-        ) && controller.cursor == output.next
-            && !controller.exit_sent
+        if frames.len() < capacity
+            && matches!(
+                self.status,
+                TerminalStatus::Exited | TerminalStatus::TerminationUnknown | TerminalStatus::Lost
+            )
+            && controller.cursor == output.next
+            && controller.exit_status != Some(self.status)
         {
-            frames.push(controller.event(TerminalEvent::Exit {
-                status: self.status,
-                code: self.exit_code,
-            }));
-            controller.exit_sent = true;
+            frames.push(
+                controller.event(TerminalEvent::Exit {
+                    survivors: self
+                        .process
+                        .as_ref()
+                        .map_or_else(Vec::new, |p| p.survivors()),
+                    status: self.status,
+                    code: self.exit_code,
+                }),
+            );
+            controller.exit_status = Some(self.status);
         }
     }
 }

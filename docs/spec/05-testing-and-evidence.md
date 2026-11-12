@@ -37,8 +37,16 @@ output-gap cursors, fair shared byte budgets, awake idle/detach/namespace expiry
 and reclamation/open exclusion in both admission orders. PTY serial tests use a
 deterministic child for raw echo and resize and an interactive shell for real
 background/stopped/foreground job-control groups and session-wide cleanup. A
-new-session descendant must leave termination unknown even if hangup later ends
-it. Runner-loss durability tests kill a real PTY-owning process and distinguish
+new-session descendant initially leaves termination unknown; close and periodic
+re-proofs distinguish later absence from explicit acknowledged loss with live
+escapees. A fast double-fork case records the non-containment residual. The
+platform scan test compares the runner's own kernel session id against a fresh
+PTY child's before platform cleanup qualification. Injected observation failures
+must leave a shell running. Tests read the exact curated environment from `env`,
+validate passwd/fallback shell selection, bound output before cursor advancement,
+collect more than 65 closed receipts without replay, and fence more than 129
+retired generations. Runner-loss durability tests kill a real PTY-owning process,
+including one with a real surviving HUP-ignoring orphaned shell, and distinguish
 lost-instance receipts from permission to spawn or signal a remembered PID.
 These platform-sensitive tests require both supported operating systems; Linux
 evidence alone is not macOS process-supervision qualification. The product client

@@ -711,6 +711,12 @@ reservations and unresolved cleanup. Input idle expires after 15 awake minutes,
 detach after five awake minutes, and a host-generation namespace after 90 awake
 seconds without renewal. Output, resize and credits do not refresh input idle.
 The shell comes from the runner account, never a `runner.toml` shell setting.
+The curated SHELL value names that validated shell. Eight unattached completed
+receipts remain per namespace; at most 4,096 compact evicted-id fences prevent
+forgotten-id respawn. Closed namespaces are collected only after all pins end;
+compact closed/superseded fences retain at most 4,096 facts across at most 128
+home/state scopes. Exhaustion refuses new reservations/generations, never forgets
+a fence. Explicitly acknowledged `lost` terminals no longer block daemon idle exit.
 
 Effective roots, first-root default and copies support come from paired
 `workspace.options`, never ssh-reading configuration. `workspace.discover` is

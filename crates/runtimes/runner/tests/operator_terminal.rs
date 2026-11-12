@@ -35,7 +35,7 @@ fn key() -> TerminalKey {
 
 async fn call(client: &RunnerClient, operation: OperatorOperation) -> OperatorAnswer {
     client
-        .operator_control(namespace(), id("control"), operation)
+        .operator_control(namespace(), operation)
         .await
         .unwrap()
 }
@@ -155,7 +155,14 @@ async fn operator_pty_wire_and_home_local_have_no_agent_jobs_or_lines() {
                 .unwrap()
                 .workspace_pinned(directory.path())
         );
-        call(&client, OperatorOperation::Close { key: key() }).await;
+        call(
+            &client,
+            OperatorOperation::Close {
+                key: key(),
+                acknowledge_loss: false,
+            },
+        )
+        .await;
         let deadline = Instant::now() + Duration::from_secs(5);
         while runner.operator_terminals().unwrap().has_live_terminals() {
             assert!(Instant::now() < deadline, "cleanup not proven");

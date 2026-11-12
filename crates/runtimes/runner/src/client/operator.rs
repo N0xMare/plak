@@ -3,7 +3,11 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use plakous_runner_protocol::StreamEvent;
 use plakous_runner_protocol::operator::{
-    OperatorAnswer, OperatorId, OperatorNamespace, OperatorOperation, TerminalEvent,
+    OperatorAnswer, OperatorNamespace, OperatorOperation, TerminalEvent,
+};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
 };
 
 use super::{
@@ -17,8 +21,14 @@ pub struct OperatorTerminalStream {
     connection: u64,
     stream: u64,
     inbound_seq: u64,
-    outbound_seq: u64,
+    outbound_seq: Arc<AtomicU64>,
     received: mpsc::Receiver<StreamFrame>,
+}
+
+#[derive(Clone)]
+pub(super) struct OperatorInbound {
+    sender: mpsc::Sender<StreamFrame>,
+    outbound_seq: Arc<AtomicU64>,
 }
 
 impl RunnerClient {
@@ -30,11 +40,9 @@ impl RunnerClient {
     pub async fn operator_control(
         &self,
         namespace: OperatorNamespace,
-        control_id: OperatorId,
         operation: OperatorOperation,
     ) -> Result<OperatorAnswer, RunnerFailure> {
-        self.operator_request(namespace, control_id, operation, false)
-            .await
+        self.operator_request(namespace, operation, false).await
     }
 
     /// Resolves a lost open answer from a retained reservation only. A missing
@@ -45,7 +53,6 @@ impl RunnerClient {
     pub async fn operator_recover_open(
         &self,
         namespace: OperatorNamespace,
-        control_id: OperatorId,
         operation: OperatorOperation,
     ) -> Result<OperatorAnswer, RunnerFailure> {
         if !matches!(operation, OperatorOperation::Open { .. }) {
@@ -53,14 +60,12 @@ impl RunnerClient {
                 "open recovery requires an open operation".into(),
             ));
         }
-        self.operator_request(namespace, control_id, operation, true)
-            .await
+        self.operator_request(namespace, operation, true).await
     }
 
     async fn operator_request(
         &self,
         namespace: OperatorNamespace,
-        control_id: OperatorId,
         operation: OperatorOperation,
         replay: bool,
     ) -> Result<OperatorAnswer, RunnerFailure> {
@@ -71,10 +76,7 @@ impl RunnerClient {
         };
         let request = Request {
             request_id: self.inner.next_id("operator"),
-            class: RequestClass::OperatorControl {
-                namespace,
-                control_id,
-            },
+            class: RequestClass::OperatorControl { namespace },
             owner: None,
             deadline_ms: None,
             digest: digest(&operation),
@@ -119,13 +121,20 @@ impl RunnerClient {
             ));
         }
         let (sender, received) = mpsc::channel(8);
-        state.operator_streams.insert(stream, sender);
+        let outbound_seq = Arc::new(AtomicU64::new(0));
+        state.operator_streams.insert(
+            stream,
+            OperatorInbound {
+                sender,
+                outbound_seq: outbound_seq.clone(),
+            },
+        );
         Ok(OperatorTerminalStream {
             client: self.clone(),
             connection: state.connection,
             stream,
             inbound_seq: 0,
-            outbound_seq: 0,
+            outbound_seq,
             received,
         })
     }
@@ -189,7 +198,7 @@ impl OperatorTerminalStream {
         }
         let frame = HostFrame::Stream(StreamFrame {
             stream: self.stream,
-            seq: self.outbound_seq,
+            seq: self.outbound_seq.load(Ordering::Relaxed),
             event,
         });
         if state
@@ -201,29 +210,31 @@ impl OperatorTerminalStream {
                 "terminal input acceptance unknown".into(),
             ));
         }
-        self.outbound_seq += 1;
+        self.outbound_seq.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 }
 
 impl super::Inner {
     pub(super) fn operator_frame(&self, frame: &StreamFrame) -> bool {
-        let sender = lock(&self.state)
-            .operator_streams
-            .get(&frame.stream)
-            .cloned();
-        let Some(sender) = sender else {
+        let mut state = lock(&self.state);
+        let inbound = state.operator_streams.get(&frame.stream).cloned();
+        let Some(inbound) = inbound else {
             return false;
         };
-        if sender.try_send(frame.clone()).is_err() {
-            lock(&self.state).operator_streams.remove(&frame.stream);
-            self.send(HostFrame::Stream(StreamFrame {
+        if inbound.sender.try_send(frame.clone()).is_err() {
+            state.operator_streams.remove(&frame.stream);
+            let close = HostFrame::Stream(StreamFrame {
                 stream: frame.stream,
-                seq: 0,
+                seq: inbound.outbound_seq.load(Ordering::Relaxed),
                 event: StreamEvent::Close {
                     reason: Some("slow_reader".into()),
                 },
-            }));
+            });
+            if let Some(sender) = &state.sender {
+                let _ = sender.send(close);
+            }
+            inbound.outbound_seq.fetch_add(1, Ordering::Relaxed);
         }
         true
     }
