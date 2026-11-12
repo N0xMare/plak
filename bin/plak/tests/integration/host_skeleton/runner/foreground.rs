@@ -127,8 +127,9 @@ fn following_effect(fixture: &Fixture, client: &mut Client, session: &str) {
         .node;
     let attachment = client.attach(41, &node);
     for id in [42, 43] {
-        client.prompt(id, attachment, "following effect", ANSWER);
-        if fixture.root.join("next-effect").exists() {
+        if client.try_prompt(id, attachment, "following effect", ANSWER)
+            && fixture.root.join("next-effect").exists()
+        {
             break;
         }
     }
@@ -152,6 +153,15 @@ fn no_job_terminals(fixture: &Fixture) {
 
 #[test]
 fn runner_wake_settled_foreground() {
+    settled_foreground(std::time::Duration::ZERO);
+}
+
+#[test]
+fn runner_wake_settled_foreground_after_delayed_reconnect() {
+    settled_foreground(std::time::Duration::from_millis(2500));
+}
+
+fn settled_foreground(resume_delay: std::time::Duration) {
     let Some(fixture) = fixture() else { return };
     let (mut host, mut client, session) = begin(&fixture, 1200);
     let (pid, daemon) = job(&fixture);
@@ -163,6 +173,7 @@ fn runner_wake_settled_foreground() {
         settled > 0,
         "the driver did not settle its unavailable effect"
     );
+    std::thread::sleep(resume_delay);
     paused.resume();
     stopped(pid);
     assert!(

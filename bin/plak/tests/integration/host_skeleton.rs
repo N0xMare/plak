@@ -274,8 +274,17 @@ impl Client {
         }
     }
 
-    /// Prompts on `attachment` and waits for `answer` in its events.
+    /// Waits for `answer`, failing if this prompt is refused.
     fn prompt(&mut self, id: RequestId, attachment: u64, text: &str, answer: &str) {
+        assert!(
+            self.try_prompt(id, attachment, text, answer),
+            "prompt {id} was refused: {text:?}"
+        );
+    }
+
+    /// Returns true for `answer`, or false for a refusal of this prompt.
+    fn try_prompt(&mut self, id: RequestId, attachment: u64, text: &str, answer: &str) -> bool {
+        self.retained.get_or_insert_with(Default::default);
         let accepted = self.request(
             id,
             Op::Intent {
@@ -286,11 +295,31 @@ impl Client {
             },
         );
         assert_eq!(accepted, Outcome::Ok(Answer::Accepted { duplicate: false }));
+        let mut draft_accepted = false;
         loop {
-            if let HostFrame::Event { observation, .. } = self.next()
-                && format!("{observation:?}").contains(answer)
+            if let HostFrame::Event {
+                attachment: observed,
+                observation,
+                ..
+            } = self.next()
+                && observed == attachment
             {
-                return;
+                if matches!(&observation,
+                    plakous_host_protocol::SessionObservation::DraftRejected(SessionIntent::Prompt(draft))
+                    if draft.text == text)
+                {
+                    return false;
+                }
+                if matches!(&observation,
+                    plakous_host_protocol::SessionObservation::DraftAccepted(SessionIntent::Prompt(draft))
+                    if draft.text == text)
+                {
+                    draft_accepted = true;
+                    continue;
+                }
+                if draft_accepted && format!("{observation:?}").contains(answer) {
+                    return true;
+                }
             }
         }
     }
@@ -298,6 +327,72 @@ impl Client {
 
 const ANSWER: &str = "the host answer";
 const REQUEST: &str = "00000000-0000-4000-8000-0000000000a1";
+
+#[test]
+fn prompt_refusals_fail_strict_callers_and_return_false_for_retry_callers() {
+    for (before_response, strict) in [(false, false), (true, false), (false, true), (true, true)] {
+        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let mut client = Client {
+            reader: BufReader::new(stream.try_clone().unwrap()),
+            stream,
+            retained: None,
+        };
+        let observation = plakous_host_protocol::SessionObservation::<PlakExtension>::DraftRejected(
+            SessionIntent::Prompt(Draft::from("retry this prompt")),
+        );
+        let refusal = HostFrame::Event {
+            client_id: None,
+            attachment: 7,
+            seq: 2,
+            class: observation.class(),
+            observation,
+            blobs: Vec::new(),
+        };
+        let accepted = HostFrame::Response {
+            id: 42,
+            outcome: Outcome::Ok(Answer::Accepted { duplicate: false }),
+        };
+        let stale_answer =
+            plakous_host_protocol::SessionObservation::<PlakExtension>::AssistantDelta(
+                "no answer will arrive".into(),
+            );
+        peer.write_all(
+            encode_line(&HostFrame::Event {
+                client_id: None,
+                attachment: 7,
+                seq: 1,
+                class: stale_answer.class(),
+                observation: stale_answer,
+                blobs: Vec::new(),
+            })
+            .unwrap()
+            .as_bytes(),
+        )
+        .unwrap();
+        let frames = if before_response {
+            [refusal, accepted]
+        } else {
+            [accepted, refusal]
+        };
+        for frame in frames {
+            peer.write_all(encode_line(&frame).unwrap().as_bytes())
+                .unwrap();
+        }
+        peer.shutdown(std::net::Shutdown::Write).unwrap();
+        if strict {
+            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                client.prompt(42, 7, "retry this prompt", "no answer will arrive");
+            }))
+            .expect_err("a strict prompt must fail on refusal");
+            assert_eq!(
+                panic.downcast_ref::<String>().unwrap(),
+                "prompt 42 was refused: \"retry this prompt\""
+            );
+        } else {
+            assert!(!client.try_prompt(42, 7, "retry this prompt", "no answer will arrive"));
+        }
+    }
+}
 
 #[test]
 fn lifecycle_real_product_archive_delete_releases_idle_actor_without_reopen() {
