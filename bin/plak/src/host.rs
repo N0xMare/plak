@@ -172,8 +172,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     };
     runner::host::start(&services, local, &environment, &runtime);
     let receipt_recovery = upgrade::start_retry(&services, &host, runtime.handle());
-    crate::shell::catalog_refresh::hook(services.paths()?.clone(), None)(None);
-    announce_host(&bound, &environment);
+    announce_host(&bound, &environment, services.paths()?);
     let scanning = Arc::new(std::sync::atomic::AtomicBool::new(!owed.is_empty()));
     scan(
         &host,
@@ -234,7 +233,12 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     )
 }
 
-fn announce_host(bound: &socket::Bound, environment: &environment::HostEnvironment) {
+fn announce_host(
+    bound: &socket::Bound,
+    environment: &environment::HostEnvironment,
+    paths: &crate::home::paths::PlakPaths,
+) {
+    crate::shell::catalog_refresh::hook(paths.clone(), None)(None);
     let identity = plakous_recursive_subagents::tree::custody_host();
     eprintln!(
         "plak host: serving on {} (host {}, instance {}); tools get {}",

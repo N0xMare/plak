@@ -735,7 +735,10 @@ pub(super) fn effect_settlements_in(
         .filter(|(_, state)| {
             *state == FeedOperationState::OutcomeUnknown
                 || (!unknown_only
-                    && matches!(state, FeedOperationState::Completed | FeedOperationState::Finalized))
+                    && matches!(
+                        state,
+                        FeedOperationState::Completed | FeedOperationState::Finalized
+                    ))
         })
         .count()
 }
