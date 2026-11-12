@@ -53,6 +53,11 @@ one cross-build carrier (a build imports its own and the previous version).
   log directories and explicit load, start and removal instructions. Installation
   never loads or starts the service.
 
+- Report issued job output containing NUL as binary during literal or regex
+  search instead of returning unmarked binary text. Context beyond an early
+  match stop marks binary lines explicitly and keeps later context. Invalid
+  UTF-8 still searches lossily with its existing warning and later matches.
+
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.
 

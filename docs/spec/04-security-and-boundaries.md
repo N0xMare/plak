@@ -372,8 +372,12 @@ spans two slices is matched whole, and the match bound (`head_limit` plus
 read back the same way. A line holding invalid UTF-8 is matched with U+FFFD in
 place of the invalid bytes and counted in a `lines with invalid UTF-8 were
 matched with U+FFFD` header note, so a stray byte neither hides the log nor
-drops matches already found; workspace files with invalid UTF-8 are still
-skipped as binary. Every row, match or context, keeps at most 4 KiB of its
+drops matches already found. NUL is different: when a scanned line contains
+it, the file is reported as one skipped binary file and earlier text matches
+from that file are withdrawn. If an early match bound stopped before that
+line, a context reread replaces it with `[binary context line omitted: contains NUL]`
+and keeps reading subsequent context lines. Workspace files with invalid
+UTF-8 or NUL remain skipped as binary. Every row, match or context, keeps at most 4 KiB of its
 line and is marked ` …` when cut, so a long neighbouring line cannot fill the
 page before its match. A match from the stream is not identified: its content
 identity is that of empty content, which names no file and is not an edit or

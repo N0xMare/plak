@@ -32,6 +32,7 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 #[path = "sdk_tools.rs"]
 mod sdk_tools;
 
+mod issued_search_bytes;
 mod write_guard;
 
 #[derive(Clone, Copy)]

@@ -91,6 +91,7 @@ pub fn search_admitted_text<'a>(
         matches: Vec::new(),
         result_bytes: format!("matches={} incomplete=true\n", limits.max_matches).len(),
         stop_reason: None,
+        binary: false,
         lossy_lines: 0,
         line_number: 1,
         partial: Vec::new(),
@@ -140,7 +141,9 @@ fn admitted_matcher(
 /// A line split across slices is matched whole. A line holding invalid UTF-8
 /// is matched with U+FFFD in place of the invalid bytes and counted, so one
 /// stray byte neither hides a log nor drops matches already found. The scan
-/// stops at the match, retained-result or scanned-byte bound.
+/// counts a NUL-containing file as binary and withdraws its text matches, as
+/// the workspace scanner does. The scan stops at the match, retained-result
+/// or scanned-byte bound, or when binary content is found.
 pub struct AdmittedTextScan<'a> {
     path: &'a Path,
     matcher: AdmittedMatcher<'a>,
@@ -149,6 +152,7 @@ pub struct AdmittedTextScan<'a> {
     matches: Vec<RepositoryQueryMatch>,
     result_bytes: usize,
     stop_reason: Option<RepositoryQueryStopReason>,
+    binary: bool,
     lossy_lines: u64,
     line_number: u64,
     /// The unterminated tail of the bytes pushed so far.
@@ -220,12 +224,13 @@ impl AdmittedTextScan<'_> {
         }
         Ok(RepositoryQueryResult {
             lossy_lines: self.lossy_lines,
+            skipped_binary: usize::from(self.binary),
             ..admitted_result(self.matches, 1, self.bytes_scanned, self.stop_reason)
         })
     }
 
     const fn stopped(&self) -> bool {
-        self.stop_reason.is_some()
+        self.binary || self.stop_reason.is_some()
     }
 
     fn scan_line(
@@ -233,6 +238,12 @@ impl AdmittedTextScan<'_> {
         control: &OperationContext,
         line: &[u8],
     ) -> Result<(), ExecutionBackendError> {
+        if line.contains(&0) {
+            self.binary = true;
+            self.matches.clear();
+            self.lossy_lines = 0;
+            return Ok(());
+        }
         let replaced;
         let line = if std::str::from_utf8(line).is_ok() {
             line
@@ -358,3 +369,6 @@ fn admitted_path_list(path: &Path) -> Result<RepositoryQueryResult, ExecutionBac
         stop_reason: None,
     })
 }
+
+#[cfg(test)]
+mod tests;

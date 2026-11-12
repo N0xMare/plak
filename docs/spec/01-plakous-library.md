@@ -7217,6 +7217,13 @@ file would exceed the scan ceiling before the byte counter reaches it. Results
 report bounds and skips on the first line. `incomplete` reflects only a backend
 resource stop: skipped binary, oversized, changed or unreadable entries do not
 set it.
+Issued job-output search is the admitted-file exception (chapter 04 §2.1):
+invalid UTF-8 is replaced with U+FFFD per line and reported, without hiding
+later matches. A NUL-containing line instead identifies the file as binary;
+the result withdraws any earlier text matches and reports one skipped binary
+file. This is not a resource stop. Context read beyond an early match stop
+replaces a NUL-containing line with `[binary context line omitted: contains NUL]`
+and continues with the following context lines, never emitting unmarked NUL.
 Skip-only reports do not recommend narrowing. Early-stop and clipped-output
 advice uses the presentation's own parameters: Grok grep `path`/`pattern`, and `search_repository`
 `path`/`filename_glob`/`query`. Regex output reserves 1 KiB of its 64 KiB result

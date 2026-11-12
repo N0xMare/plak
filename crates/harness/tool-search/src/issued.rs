@@ -109,7 +109,7 @@ pub(crate) async fn lines_around_hits(
                 } else {
                     &partial
                 };
-                lines.insert(index, String::from_utf8_lossy(line).into_owned());
+                lines.insert(index, context_line(line));
             }
             partial.clear();
             index += 1;
@@ -126,9 +126,18 @@ pub(crate) async fn lines_around_hits(
         }
     }
     if !partial.is_empty() {
-        lines.insert(index, String::from_utf8_lossy(&partial).into_owned());
+        lines.insert(index, context_line(&partial));
     }
     Ok(lines)
+}
+
+fn context_line(bytes: &[u8]) -> String {
+    if bytes.contains(&0) {
+        // An early match stop can leave context outside the searched prefix.
+        "[binary context line omitted: contains NUL]".to_owned()
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
 }
 
 async fn next_slice(
@@ -155,5 +164,22 @@ fn search_error(error: ExecutionBackendError) -> ToolRuntimeError {
         )
     } else {
         backend_runtime_error(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::context_line;
+
+    #[test]
+    fn binary_context_is_marked_instead_of_emitting_nul() {
+        for bytes in [b"\0prefix".as_slice(), b"mid\0line", b"tail\0", b"\xff\0"] {
+            assert_eq!(
+                context_line(bytes),
+                "[binary context line omitted: contains NUL]"
+            );
+        }
+        assert_eq!(context_line(b"next line"), "next line");
+        assert_eq!(context_line(b"invalid \xff"), "invalid \u{fffd}");
     }
 }
