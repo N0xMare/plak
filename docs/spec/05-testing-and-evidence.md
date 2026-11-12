@@ -54,7 +54,8 @@ proof; job-control commands run from a short sourced script, disabling Bash
 history expansion before any job-id expansion rather than relying on shell-specific
 interactive parsing. Tests read the exact curated environment from `env`,
 validate passwd/fallback shell selection, bound output before cursor advancement,
-collect more than 65 closed receipts without replay, and fence more than 129
+collect more than 65 closed receipts without replay, collect more than 64 refused
+opens while admitting a fresh id and preserving old refusal/digest outcomes, and fence more than 129
 retired generations. Runner-loss durability tests kill a real PTY-owning process,
 including one with a real surviving HUP-ignoring orphaned shell, and distinguish
 lost-instance receipts from permission to spawn or signal a remembered PID.

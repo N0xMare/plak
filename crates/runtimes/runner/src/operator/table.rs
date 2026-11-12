@@ -67,14 +67,11 @@ impl OperatorTerminalService {
             dimensions,
         } = operation
         {
-            if let Some((prior, refusal)) = namespace.refused_opens.get(&terminal) {
-                return Err(if prior == digest {
-                    *refusal
-                } else {
-                    OperatorRefusal::Conflict
-                });
+            if let Some(refusal) = namespace.refused_open(&terminal, digest) {
+                return Err(refusal);
             }
-            if namespace.refused_opens.len() >= 64 && !namespace.terminals.contains_key(&terminal) {
+            if namespace.refused_fence.len() >= 4096 && !namespace.terminals.contains_key(&terminal)
+            {
                 return Err(OperatorRefusal::Quota);
             }
             let result = self.open(
@@ -90,11 +87,12 @@ impl OperatorTerminalService {
             );
             if let Err(refusal) = &result
                 && let Some(ns) = table.namespaces.get_mut(&key)
-                && ns.refused_opens.len() < 64
                 && !ns.terminals.contains_key(&terminal)
             {
+                ns.refused_order.push_back(terminal.clone());
                 ns.refused_opens
                     .insert(terminal, (digest.to_owned(), *refusal));
+                super::collection::collect_refused(ns);
             }
             return result;
         }
@@ -165,6 +163,8 @@ impl OperatorTerminalService {
             closed: false,
             terminals: HashMap::new(),
             refused_opens: HashMap::new(),
+            refused_order: VecDeque::new(),
+            refused_fence: HashMap::new(),
         });
         ns.renewed = now;
         ns.reconciled = connection;

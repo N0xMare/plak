@@ -91,6 +91,29 @@ struct Namespace {
     closed: bool,
     terminals: HashMap<TerminalKey, Terminal>,
     refused_opens: HashMap<TerminalKey, (String, OperatorRefusal)>,
+    refused_order: VecDeque<TerminalKey>,
+    refused_fence: HashMap<[u8; 32], ([u8; 32], OperatorRefusal)>,
+}
+
+impl Namespace {
+    fn refused_open(&self, key: &TerminalKey, digest: &str) -> Option<OperatorRefusal> {
+        if let Some((prior, refusal)) = self.refused_opens.get(key) {
+            return Some(if prior == digest {
+                *refusal
+            } else {
+                OperatorRefusal::Conflict
+            });
+        }
+        self.refused_fence
+            .get(&collection::terminal_hash(key))
+            .map(|(prior, refusal)| {
+                if *prior == collection::hash(digest.as_bytes()) {
+                    *refusal
+                } else {
+                    OperatorRefusal::Conflict
+                }
+            })
+    }
 }
 
 struct Table {
@@ -307,18 +330,12 @@ impl OperatorTerminalService {
             .get(&owner)
             .and_then(|ns| ns.terminals.get(key))
         else {
-            if let Some((prior, refusal)) = table
+            if let Some(refusal) = table
                 .namespaces
                 .get(&owner)
-                .and_then(|ns| ns.refused_opens.get(key))
+                .and_then(|ns| ns.refused_open(key, digest))
             {
-                return OperatorAnswer::Refused {
-                    refusal: if prior == digest {
-                        *refusal
-                    } else {
-                        OperatorRefusal::Conflict
-                    },
-                };
+                return OperatorAnswer::Refused { refusal };
             }
             return OperatorAnswer::Refused {
                 refusal: OperatorRefusal::TerminalLost,

@@ -11,8 +11,20 @@ pub(super) struct Generations {
     closed: HashSet<[u8; 32]>,
 }
 
-fn hash(bytes: &[u8]) -> [u8; 32] {
+pub(super) fn hash(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
+}
+
+pub(super) fn collect_refused(ns: &mut super::Namespace) {
+    while ns.refused_order.len() > 8 {
+        let Some(key) = ns.refused_order.pop_front() else {
+            break;
+        };
+        if let Some((digest, refusal)) = ns.refused_opens.remove(&key) {
+            ns.refused_fence
+                .insert(terminal_hash(&key), (hash(digest.as_bytes()), refusal));
+        }
+    }
 }
 
 pub(super) fn terminal_hash(key: &TerminalKey) -> [u8; 32] {

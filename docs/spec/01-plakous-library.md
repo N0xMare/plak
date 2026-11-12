@@ -6111,8 +6111,11 @@ Open validates the canonical workspace against runner roots, the product home an
 application state, reserves before spawning, and retains the terminal-id/digest outcome.
 Quota includes starting, closing and unknown shells: two/session, four/principal,
 sixteen/host, thirty-two/runner. Tables are bounded to 128 namespaces with at most 64
-terminal reservations and 64 refused-open receipts each; saturation refuses rather than
-forgetting an id and spawning it again. Attach never spawns and acquires one input/resize
+terminal reservations each. Eight recent refused-open receipts retain exact outcomes;
+older refusals move to a compact key/digest/outcome fence (at most 4,096 entries).
+Transient refusal volume does not consume terminal reservation slots. A retried id
+retains its original refusal, and changed digests conflict. Fence saturation refuses
+rather than forgetting an id and spawning it again. Attach never spawns and acquires one input/resize
 controller. Eight unattached completed receipts remain per namespace; compact SHA-256
 identity fences (at most 4,096 per namespace) make an evicted id answer terminal_lost,
 never spawn. Closed/expired namespaces whose pins ended are collected behind compact

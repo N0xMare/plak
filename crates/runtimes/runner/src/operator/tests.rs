@@ -1240,3 +1240,66 @@ fn operator_input_bounds_refuse_before_acceptance_and_never_refresh_idle() {
     );
     assert_eq!(lock(&fixture.fake).input.len(), 4);
 }
+
+#[test]
+fn operator_refused_open_collection_preserves_outcomes_without_blocking_fresh_ids() {
+    let fixture = Fixture::new();
+    fixture.open(0);
+    fixture.open(1);
+    for n in 2..132 {
+        refused(
+            fixture.call(
+                1,
+                OperatorOperation::Open {
+                    key: key(n),
+                    workspace: "/workspace".into(),
+                    dimensions: dimensions(),
+                },
+            ),
+            OperatorRefusal::Quota,
+        );
+    }
+    {
+        let table = lock(&fixture.service.inner.table);
+        let ns = table.namespaces.values().next().unwrap();
+        assert_eq!(ns.refused_opens.len(), 8);
+        assert_eq!(ns.refused_fence.len(), 122);
+    }
+    lock(&fixture.fake).proof = true;
+    fixture.call(
+        1,
+        OperatorOperation::Close {
+            key: key(0),
+            generation: None,
+            acknowledge_loss: false,
+        },
+    );
+    fixture.service.tick();
+    fixture.open(132);
+    for n in [2, 131] {
+        refused(
+            fixture.call(
+                1,
+                OperatorOperation::Open {
+                    key: key(n),
+                    workspace: "/workspace".into(),
+                    dimensions: dimensions(),
+                },
+            ),
+            OperatorRefusal::Quota,
+        );
+        refused(
+            fixture
+                .service
+                .replay_open("paired", "generation", namespace(), "digest", &key(n)),
+            OperatorRefusal::Quota,
+        );
+        refused(
+            fixture
+                .service
+                .replay_open("paired", "generation", namespace(), "changed", &key(n)),
+            OperatorRefusal::Conflict,
+        );
+    }
+    assert_eq!(lock(&fixture.fake).spawned, 3);
+}
