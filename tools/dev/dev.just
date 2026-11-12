@@ -41,6 +41,12 @@ test-timing *ARGS:
 crash-sweep *ARGS:
     tools/gate/test-env.sh -- python3 tools/gate/test-processes.py -- tools/dev/crash-sweep.py {{ARGS}}
 
+# Trial layout: the serial and durability lanes on several threads with
+# per-test weights, from a generated copy of .config/nextest.toml. Not a gate.
+[doc("serial and durability lanes on weighted threads; a trial, not a gate")]
+weighted-lanes *ARGS:
+    tools/dev/weighted-lanes.py {{ARGS}}
+
 [doc("compare two crash-sweep reports at equal cuts")]
 crash-compare *ARGS:
     tools/dev/compare_crash_sweeps.py {{ARGS}}

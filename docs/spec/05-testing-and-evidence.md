@@ -776,7 +776,8 @@ uses (chapter 06 §6), first on `PATH`: `PLAK_TEST_JJ` when set, else, with no
 `jj` on `PATH`, the newest pinned jj that `just dev-tools install` unpacked. Its `--json` form names only the variables it
 exports, `PATH` included when it changed; the live drivers keep their real keys. Its
 `--unset-names` form prints the names the other forms unset, and the offline
-drivers that take `--json` (`crash-sweep.py`, `jj-tools.py compat`) drop exactly
+drivers that take `--json` (`crash-sweep.py`, `jj-tools.py compat`,
+`weighted-lanes.py`) drop exactly
 those, so no driver keeps a list of its own. `dev-check.sh`
 (with `--fresh`), `just dev coverage`, `perf-smoke.sh`, `crash-sweep.py`,
 `jj-tools.py compat` and the live drivers use it. `just nextest` runs the
@@ -1625,6 +1626,24 @@ test and the test span (first test start to last finish, from per-test
 timestamps; without them, the longest test as a lower bound), then the
 slowest tests and the per-binary and per-package totals. It is informational:
 no gate reads it.
+
+`just dev weighted-lanes [--serial-threads N] [--durability-threads N] [LANE...]`
+(`tools/dev/weighted-lanes.py`) trials a multi-thread layout for the two
+wall-clock lanes without changing them. On every run it writes
+`<target>/nextest-weighted.toml`: `.config/nextest.toml` plus `weighted-serial`
+and `weighted-durability` profiles with the `serial` and `durability`
+membership and settings, 4 and 16 threads by default. In `weighted-durability`
+the three campaigns that run cuts on their own workers (`durability_subset`,
+`durability_twin_pilots`, image residency) require half the threads, the
+ledger-retirement campaigns a quarter rounded up, and the four host-restart
+matrices, the redial test and the busy-root test start first. It refuses a
+weight filter that matches no test, builds the workers as the gate does, runs
+the lanes through `--config-file` in a scratch directory of its own (the
+per-checkout one plus `-w`), so it leaves a gate's files in the same checkout
+alone, and ends with `test-timing` over its profiles. Its load is not isolated:
+beside a gate on one machine, timing-sensitive tests fail in both, so it runs
+when no gate does or with lower thread counts. No gate tier runs it; a failing
+lane exits non-zero.
 
 The `default` profile sets `leak-timeout = { period = "5s", result = "fail" }`;
 the lane profiles inherit it.

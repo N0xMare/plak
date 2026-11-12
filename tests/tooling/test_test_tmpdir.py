@@ -1,6 +1,7 @@
 """Every test entry point takes its scratch directory from one selector, which
 keeps it off the operator's HOME and on a physical, caller-owned path."""
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -139,6 +141,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             "tools/dev/crash-sweep.py",
             "tools/dev/jj-tools.py",
             "tools/dev/coverage.sh",
+            "tools/dev/weighted-lanes.py",
             "tests/live/live.py",
         ):
             with self.subTest(path=path):
@@ -267,11 +270,53 @@ class TestTmpdirSelectorTests(unittest.TestCase):
                 self.assertEqual(seen(dict(env, PLAK_TEST_JJ=""), form), [None, nextest])
 
     def test_json_drivers_drop_what_test_env_unsets(self):
-        for path in ("tools/dev/crash-sweep.py", "tools/dev/jj-tools.py"):
+        for path in (
+            "tools/dev/crash-sweep.py",
+            "tools/dev/jj-tools.py",
+            "tools/dev/weighted-lanes.py",
+        ):
             with self.subTest(path=path):
                 source = (ROOT / path).read_text()
                 self.assertIn("--unset-names", source)
                 self.assertNotIn("PLAK_TEST_SESSION_LEASE_SECONDS", source)
+
+    def test_weighted_lanes_build_without_overrides_or_provider_keys(self):
+        spec = importlib.util.spec_from_file_location(
+            "weighted_lanes", ROOT / "tools/dev/weighted-lanes.py"
+        )
+        lanes = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lanes)
+        leaked = subprocess.check_output(
+            ["bash", str(ROOT / "tools/gate/test-env.sh"), "--unset-names"], text=True
+        ).split()
+        real_run = subprocess.run
+        seen = {}
+
+        class Built(Exception):
+            pass
+
+        def run(command, **kwargs):
+            if command[:2] == ["bash", "tools/gate/dev-tools.sh"]:
+                return subprocess.CompletedProcess(command, 0)
+            if command[:2] == ["cargo", "test"]:
+                seen.update(kwargs["env"])
+                raise Built
+            return real_run(command, **kwargs)
+
+        env = dict(
+            os.environ,
+            PLAK_TEST_TMPDIR=str(self.base / "weighted-tmp"),
+            CARGO_TARGET_DIR=str(self.base / "target"),
+            **{name: "leaked" for name in leaked},
+        )
+        with (
+            unittest.mock.patch.dict(os.environ, env, clear=True),
+            unittest.mock.patch.object(lanes.subprocess, "run", side_effect=run),
+            self.assertRaises(Built),
+        ):
+            lanes.main([])
+        self.assertEqual(seen["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual([name for name in leaked if name in seen], [])
 
     def test_test_env_unsets_overrides_and_provider_keys(self):
         script = ROOT / "tools/gate/test-env.sh"

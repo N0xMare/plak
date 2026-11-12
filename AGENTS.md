@@ -64,7 +64,7 @@ just live RECIPE          # smoke, soak, tui-soak, jobs, mcp-oauth, census, esti
 just perf RECIPE          # smoke, samply, flamegraph, stat, bloat, density, check; not a gate
 just prompts RECIPE       # render, diff, pins, native-compare
 just tui RECIPE           # story, frames
-just dev RECIPE           # home-install, home-reset, reload-rehearsal, coverage, test-timing, crash-sweep, crash-compare, jj-compat
+just dev RECIPE           # home-install, home-reset, reload-rehearsal, coverage, test-timing, crash-sweep, crash-compare, jj-compat, weighted-lanes
 just harbor RECIPE        # Harbor bakeoff, not a gate; `test` is the zero-inference adapter suite
 ```
 
