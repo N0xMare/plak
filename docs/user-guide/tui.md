@@ -435,8 +435,10 @@ Notes worth knowing:
   attachment. If it says the previous switch is still finishing, retry shortly;
   the resumed history is rebuilt from the committed runtime feed.
 - `/providers` is read-only. Per vertical it names the account, its status, and
-  the CLI command that connects it. Logging in and setting keys are CLI-only:
-  `plak login`, `plak logout`, `plak key set|clear`.
+  the CLI command that connects it. In this public TUI, logging in and setting
+  keys use `plak login`, `plak logout`, `plak key set|clear`. Protocol-7 host
+  clients can also offer confirmed Accounts forms; this TUI does not yet
+  include those forms.
 - Templates, the roster and orchestration are config-only. `/config` opens
   `config.toml`; there is no roster editor.
 - `/mcp` is read-only. It lists every configured MCP server with its
@@ -740,12 +742,13 @@ next one, or click it:
 - **Use now** appears instead when the session has no model yet (a fresh home):
   the session takes the profile's root and the agent attaches, including an
   OpenRouter or direct API-account root.
-- **Set as default** makes it the profile brand-new sessions start with
+- **Set as default**, offered in embedded mode, makes it the profile brand-new sessions start with
   (`[root] agent` and `[roster] working_set` in `config.toml`); existing
   sessions keep their own.
 
 A profile is per session: Switch now and Fork now change only that session and never the
-default (Use now also makes its profile the default when the home has none).
+default (embedded local-face Use now also makes its profile the default when
+the home has none; socket-attached Use now does not).
 The session keeps its profile through `/reload`, resume, a carry and
 `/rebind`; if you edit one of its template files, its next `/reload` applies
 the edit to it. A session without sub-agents has no agent tree and records no
@@ -762,7 +765,21 @@ xhigh (profile: high)`. If `config.toml` cannot be loaded, the chip says
 
 ### Settings
 
-Every row writes `config.toml` and takes effect on change; nothing needs a
+When bare `plak` attaches to a running `plak host`, its socket connection is a
+remote face even on the same machine. Host-owned settings (currently Auto
+compaction and Edit raw config) are marked read-only; use
+`plak config set compaction.enabled <true|false>` or `plak config edit` on the
+host. The Agents dialog explains **Set as default** but does not offer its
+button: run `plak config set root.profile <id>` on the host. **Use now**,
+**Switch now** and **Fork now** still work, but remote Use now never sets a
+home default. Usage still reads allowances, but offers no `[refresh]` control:
+run `plak refresh <account>`, then `plak usage --account <account>` on the host.
+These restrictions remain until this TUI has the confirmed host-client forms.
+Late refusals show a visible error, restore the Settings draft and release a
+pending Usage refresh; an unknown outcome asks you to check before retrying.
+
+Terminal-local appearance and input preferences stay editable in both modes.
+In embedded mode, every editable row takes effect on change; nothing needs a
 save. `d` on a row opens the confirmation pop-up (`Reset <label>?`, focused
 on `[ Reset ]`), naming that setting. `Enter` confirms from the value as it
 is then, so a change that lands while the pop-up is open is kept except for

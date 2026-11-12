@@ -747,7 +747,10 @@ pub(crate) fn limits_layout(
         strong,
     ))];
     if let Some(note) = chrome.read_note {
-        lines.push(Line::from(Span::styled(note.to_owned(), muted)));
+        lines.extend(
+            note.lines()
+                .map(|line| Line::from(Span::styled(line.to_owned(), muted))),
+        );
     }
     if let Some((account, error)) = chrome.refresh.and_then(|refresh| refresh.error.as_ref()) {
         let recorded = limits.verticals.iter().find(|vertical| vertical.vertical.account() == account)

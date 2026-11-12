@@ -3998,7 +3998,17 @@ or runner protocol changes are introduced by these console operations.
 Remote `SaveSettings`, `ApplyProfile {apply:default}` and the legacy
 `RefreshUsageCredential` are now local-face-only: refusal is
 `refused_for_role {row:local_face}` before dispatch, with no config/credential
-write. Remote web and host-client TUI forms use the consented host requests.
+write. Private remote web and host-client TUI forms use the consented host requests.
+The public socket-attached TUI is also a remote face, even on the same machine.
+Until it has those forms, host-owned Settings rows are read-only, Set as default
+is not an offered button, and Usage has no credential-refresh control. The
+screen names the host CLI remedies (`plak config set <key> <value>`,
+`plak config set root.profile <id>`, and `plak refresh <account>` followed by
+`plak usage --account <account>`). A late refusal of any of these legacy writes
+is a visible transcript error (also shown in an open Menu), not background work
+to rearm: restore the Settings product draft to its last authoritative snapshot and clear any active
+Usage refresh. An unknown outcome also clears pending UI state but tells the
+operator to reread before writing again. Terminal-local preferences remain editable.
 Switch/Fork/Use now remain explicit session binding actions. Local-face
 legacy behavior is unchanged.
 Remote Use now still binds its session, but never seeds a fresh home's
@@ -4202,7 +4212,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   id; a host of many sessions names none, below) or
   `refused` with `version_mismatch`, `malformed`, `busy` or `unavailable`
   (the session could not be opened, with why), and closes. The version must
-  match exactly; it is 6 (`WIRE_VERSION`), with no negotiation. The session opens before the welcome is sent, so any
+  match exactly; it is 7 (`WIRE_VERSION`), with no negotiation. The session opens before the welcome is sent, so any
   failure before dispatch, `plak agent --wire v2` included, is that
   `unavailable` frame and never a JSONL record. Its detail is the failure's
   own text only for an authenticated peer (stdio's parent process, a web
@@ -7476,8 +7486,15 @@ identity, consequence/Confirm affordance, masked secret input and typed
 remedies. No credential form uses the chat composer. The retained embedded
 menu's local-face operations remain unchanged; this public increment does not
 claim those private client forms or their human TUI review are implemented.
+The retained public socket TUI does not have those forms either: its host-owned
+Settings rows are marked read-only before activation (including reset), its
+profile dialog explains the host CLI default-setting remedy without offering
+Set as default, and Usage explains the host CLI refresh remedy without offering
+`[refresh]`. Theme, mouse, scrolling and other terminal-local preferences still
+save locally. Refused legacy writes remain visible and roll back pending UI
+state as §4.4 specifies; they never silently retry or leave refresh stuck.
 
-Usage's explicit `[refresh]` action (§7.2) appears only on a subscription
+The embedded local-face Usage's explicit `[refresh]` action (§7.2) appears only on a subscription
 vertical whose credential needs a refresh (an expired access token, a
 `RefreshRequired` posture, or SuperGrok's reclaimable quarantine), refreshes it
 and re-reads Usage; the retained embedded view offers CLI login repair.
@@ -7612,10 +7629,11 @@ unsent draft remain. Outstanding decoration reads are invalidated at the boundar
 An attempted open or a same-session binding is not a
 confirmed switch and preserves the source observations.
 
-**Every row applies on change.** There is no Save row and no draft: a toggle, a
-committed chooser or stepper, and a confirmed reset each persist immediately
-through one typed save intent, and the host — the only authority that can
-refuse — answers inline over a tab that stays where the operator left it. `Esc`
+**Every editable row applies on change.** There is no Save row or staged batch:
+a toggle, committed chooser or stepper, and confirmed reset persist immediately.
+Terminal preferences save locally; host-owned settings use one typed save
+intent on the embedded local face, and the host's answer leaves the tab open.
+Those host-owned rows are read-only on the public socket face as above. `Esc`
 in a live-preview chooser reverts and writes nothing. `Space` toggles a switch,
 `Enter` opens a chooser or stepper or fires an action, `/` searches label,
 description and keywords, and `d` resets a row to its schema default behind the

@@ -7,6 +7,21 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Add consented host-console writes for named accounts, masked write-only keys,
+  cancellable subscription login, logout and explicit refresh, plus etag-checked
+  home configuration, template and profile publication. Client protocol 6 becomes
+  7 (runner protocol unchanged); welcome advertises `max_request_bytes: 278528`,
+  with the enlarged request allowance restricted to template/profile puts.
+  Remote `SaveSettings`, `ApplyProfile {apply:default}` and
+  `RefreshUsageCredential` are refused; the public socket TUI marks these
+  controls unavailable, names host CLI remedies and visibly handles late
+  refusals. Terminal-local preferences remain editable. Public API additions:
+  `plakous-hosted` exposes `HostSessions::{host_request_timeout,
+  host_request_refused, host_disconnect}` and `HostRequestContext.request_id`;
+  `plakous-host-protocol` adds `ProtocolExtension::host_request_size_allowed`,
+  `ConsoleCapability::{CredentialsWrite, ConfigWrite}` and a redacted
+  `LineReader` Debug implementation. No persisted format changes.
+
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.
   Profile switches keep their recorded attachable root address, and a late

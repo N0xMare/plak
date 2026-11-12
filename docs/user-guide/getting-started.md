@@ -186,7 +186,9 @@ mode `0600`. Environment variables (`OPENAI_API_KEY`, `XAI_API_KEY`,
 `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`) override the files, and Plak never
 loads a `.env` file.
 
-Both are CLI-only; the TUI's Providers tab shows status and names the command.
+Both use the CLI in the public TUI; its Providers tab shows status and names
+the command. Protocol-7 host clients can also offer confirmed Accounts forms
+for login and masked key entry; the public TUI does not yet include those forms.
 
 ## Check the setup
 

@@ -190,11 +190,16 @@ impl App {
                 actions.push(("[ Fork now ]", apply(ProfileApply::Fork)));
             }
         }
-        lines.push(
-            "Set as default makes it the profile new sessions start with; existing sessions keep their own."
-                .to_owned(),
-        );
-        actions.push(("[ Set as default ]", apply(ProfileApply::Default)));
+        if self.host_mode {
+            lines.push("Set as default is unavailable on a host attachment.".into());
+            lines.push(format!("On the host: `plak config set root.profile {id}`."));
+        } else {
+            lines.push(
+                "Set as default makes it the profile new sessions start with; existing sessions keep their own."
+                    .to_owned(),
+            );
+            actions.push(("[ Set as default ]", apply(ProfileApply::Default)));
+        }
         self.open_confirm(format!("Apply profile {id}?"), lines, actions);
     }
 

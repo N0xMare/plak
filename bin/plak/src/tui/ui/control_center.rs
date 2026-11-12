@@ -157,6 +157,7 @@ impl App {
                 None
             }
             _ if self.control_tab == Some(ControlTab::Usage)
+                && !self.host_mode
                 && !self.usage_refresh.accounts.is_empty() =>
             {
                 match code {
@@ -207,6 +208,13 @@ impl App {
     /// Scrolls the one Usage page to the next (`delta >= 0`) or previous
     /// Copies the body of the active read-only tab (spec 02 §5.5).
     pub(super) fn start_usage_refresh(&mut self, account: String) -> Option<UserAction> {
+        if self.host_mode {
+            self.push_root_block(super::ScrollBlock::Error(format!(
+                "Refresh is unavailable on a host attachment; run `plak refresh {account}`, then `plak usage --account {account}` on the host."
+            )));
+            self.mark_dirty();
+            return None;
+        }
         if self.usage_refresh.active.is_some() || !self.usage_refresh.accounts.contains(&account) {
             return None;
         }
@@ -408,6 +416,7 @@ impl App {
         self.profiles.hits.clear();
         self.settings_menu = None;
         self.settings_error = None;
+        self.control_write_error = None;
         // Reverting the previewed theme also reverts the previewed render
         // prefs: an Esc must leave nothing of the draft behind.
         self.sync_render_prefs();

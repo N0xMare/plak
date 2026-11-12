@@ -634,6 +634,7 @@ pub(crate) struct App {
     /// inert until the Settings tab opens and never captures composer input.
     settings_snapshot: Option<SettingsView>,
     settings_error: Option<String>,
+    control_write_error: Option<String>,
     /// Painted rows of the Settings pane for mouse selection: registry rows
     /// while browsing, the choices while a chooser is open.
     settings_hits: Vec<picker::RowHit>,
@@ -1005,6 +1006,7 @@ impl App {
             settings_snapshot: launch.settings.clone(),
             settings_menu: None,
             settings_error: None,
+            control_write_error: None,
             settings_hits: Vec::new(),
             list_clicks: picker::ListClicks::default(),
             settings_hover: None,
@@ -1339,6 +1341,13 @@ mod pilot_tests;
     reason = "unit tests may assert with unwrap/expect"
 )]
 mod provisional_tests;
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "unit tests may assert with unwrap/expect"
+)]
+mod remote_write_tests;
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,

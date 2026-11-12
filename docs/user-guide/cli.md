@@ -136,8 +136,10 @@ URL. An SSH session refuses a local login outright and tells you to re-run
 with `--remote` rather than switching mode silently.
 
 The SuperGrok account answers to `grok` and `supergrok`; bare `xai` is refused
-as ambiguous. API keys use `plak key set` instead. Login is CLI-only; the TUI's Providers tab shows status
-and names this command.
+as ambiguous. API keys use `plak key set` instead. In the public TUI, login
+uses the CLI; its Providers tab shows status and names this command.
+Protocol-7 host clients can also offer confirmed Accounts login forms; the
+public TUI does not yet include those forms.
 
 ### `plak logout <codex|grok|claude> [--local]`
 
@@ -231,7 +233,8 @@ that one account cannot be read. The four columns stay put, so
 `set` prompts for the key and writes it to the secrets store; `clear` removes
 the file; `status` reports presence without printing the key. Environment
 variables override files, `plak key clear` cannot unset a process environment
-variable, and Plak never loads a `.env` file. Key entry is CLI-only.
+variable, and Plak never loads a `.env` file. In the public TUI, key entry uses
+the CLI; protocol-7 host clients can also offer masked, confirmed key forms.
 
 ### `plak secret set|rm <name>`, `plak secret list`
 

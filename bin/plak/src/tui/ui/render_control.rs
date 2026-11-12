@@ -37,6 +37,9 @@ impl App {
                     // The switch hint names what pressing Space would do to the
                     // focused row, never the key's generic meaning.
                     match SettingsMenu::meta(menu.selected).map(|meta| meta.kind) {
+                        _ if self.remote_setting_remedy(menu.selected).is_some() => {
+                            hints.push(Hint::new("read-only", "use plak config on the host"));
+                        }
                         Some(SettingKind::Bool { .. }) => {
                             hints.push(Hint::new(
                                 "Space",
@@ -57,7 +60,9 @@ impl App {
                         }
                     }
                     hints.push(Hint::new("/", "search"));
-                    hints.push(Hint::new("d", "restore default"));
+                    if self.remote_setting_remedy(menu.selected).is_none() {
+                        hints.push(Hint::new("d", "restore default"));
+                    }
                 }
             }
         }
@@ -65,6 +70,7 @@ impl App {
             hints.push(Hint::new("Enter", "choose when it applies"));
         }
         if self.control_tab == Some(ControlTab::Usage)
+            && !self.host_mode
             && !self.usage_refresh.accounts.is_empty()
             && self.usage_refresh.active.is_none()
         {
@@ -142,7 +148,7 @@ impl App {
         self.settings_hits.clear();
         self.session_row_hits.clear();
         self.usage_refresh_hits.clear();
-        let body = layout.body;
+        let body = self.draw_control_write_error(frame, layout.body);
         if body.height == 0 || body.width == 0 {
             return;
         }
@@ -207,6 +213,22 @@ impl App {
         }
     }
 
+    fn draw_control_write_error(&self, frame: &mut Frame<'_>, mut body: Rect) -> Rect {
+        if let Some(message) = &self.control_write_error {
+            let lines = Self::wrap_sheet_lines_impl(message, body.width);
+            let height = u16::try_from(lines.len())
+                .unwrap_or(u16::MAX)
+                .min(body.height);
+            frame.render_widget(
+                Paragraph::new(lines.join("\n")).style(self.theme.error),
+                Rect { height, ..body },
+            );
+            body.y = body.y.saturating_add(height);
+            body.height = body.height.saturating_sub(height);
+        }
+        body
+    }
+
     pub(super) fn settings_description(&self) -> Option<modal_chrome::DescriptionPanel> {
         let menu = self.settings_menu.as_ref()?;
         if menu.pane != SettingsPane::Browse {
@@ -226,7 +248,11 @@ impl App {
         });
         Some(modal_chrome::DescriptionPanel {
             title: meta.label.to_owned(),
-            body: row.description,
+            body: self
+                .remote_setting_remedy(index)
+                .map_or(row.description.clone(), |remedy| {
+                    format!("{remedy} {}", row.description)
+                }),
             value,
         })
     }
@@ -443,7 +469,7 @@ impl App {
     }
 
     fn usage_tab_layout(&self, width: u16) -> usage_tab::LimitsLayout {
-        let note = match &self.subscription_usage {
+        let mut note = match &self.subscription_usage {
             SubscriptionUsageView::Loading if !self.allowance_observation_shown() => {
                 Some("Loading provider allowance snapshots…".to_owned())
             }
@@ -453,8 +479,12 @@ impl App {
             }
             SubscriptionUsageView::Read => None,
         };
+        if self.host_mode {
+            let remedy = "Refresh is unavailable on a host attachment.\nOn the host: `plak refresh <account>`, then `plak usage --account <account>`.";
+            note = Some(note.map_or_else(|| remedy.to_owned(), |note| format!("{note}\n{remedy}")));
+        }
         let chrome = usage_tab::LimitsChrome {
-            refresh: Some(&self.usage_refresh),
+            refresh: (!self.host_mode).then_some(&self.usage_refresh),
             refresh_failure_notes: &self.refresh_failure_notes,
             read_note: note.as_deref(),
             latest_turn: self
@@ -882,7 +912,10 @@ impl App {
             let Some(meta) = SettingsMenu::meta(index) else {
                 continue;
             };
-            let row = Self::settings_row(&menu, index, meta);
+            let mut row = Self::settings_row(&menu, index, meta);
+            if self.remote_setting_remedy(index).is_some() {
+                row.pill = Some("· read-only");
+            }
             let hit = picker::render_row(
                 frame,
                 Rect {

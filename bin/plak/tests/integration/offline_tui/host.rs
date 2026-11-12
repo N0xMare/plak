@@ -8,6 +8,7 @@ use std::os::unix::net::UnixStream;
 
 mod build_notice;
 mod lifecycle;
+mod operator_writes;
 
 struct Directory {
     stream: UnixStream,

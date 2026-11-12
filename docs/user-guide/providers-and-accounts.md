@@ -40,12 +40,14 @@ informational blocks are skipped with a counted notice rather than failing the
 turn. Unknown tool-related or incomplete signed content still refuses when it
 cannot be continued faithfully; this does not enable additional hosted tools.
 
-Login and key entry are CLI-only. The TUI's Providers tab is read-only: per
+In the public TUI, login and key entry use the CLI. Protocol-7 host clients
+can instead use confirmed Accounts forms; the public TUI does not yet include
+those forms. Its Providers tab is read-only: per
 vertical it names the account, its status, and the command that connects it.
 
 A usage read never refreshes an expired token. An expired Codex, Grok or Claude
 access token shows that the credential needs a token refresh: the next turn
-refreshes it, or run `plak refresh <account>`. In the TUI, the Usage tab offers
+refreshes it, or run `plak refresh <account>`. In the embedded TUI, the Usage tab offers
 `[refresh]` beside a Codex, SuperGrok or Claude account only when its token
 needs a refresh (or a SuperGrok refresh outcome is quarantined): click it, or
 use Up/Down and Enter. It runs the same refresh as `plak refresh <account>`
@@ -55,6 +57,15 @@ once Up/Down has focused it. Accounts with a valid token, or that need
 still fresh, the usage read forces one refresh and reads again; if that
 refresh fails, the provider line shows why. An ended usage window means stale provider
 data, not an expired local token.
+
+When bare `plak` attaches to `plak host` over its local socket, the public TUI
+is a remote face: Usage reads still work, but credential refresh is unavailable
+there. Run `plak refresh <account>` on the host, then
+`plak usage --account <account>` to read the result. Host-owned Settings and
+Set as default likewise require `plak config set <key> <value>` on the host
+(`root.profile <id>` for a profile default). Terminal-local preferences remain
+editable. A refused pending write shows an error and restores the UI rather
+than appearing saved or leaving refresh spinning.
 
 API-key environment variables override stored key files. In particular,
 `OPENROUTER_API_KEY` wins over the OpenRouter key file even if the variable's

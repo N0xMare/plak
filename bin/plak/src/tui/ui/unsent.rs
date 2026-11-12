@@ -94,8 +94,9 @@ impl App {
     /// Takes back what the TUI recorded of `unsent` when it sent it. A draft
     /// or a queued edit is restored beside the composer's text and its
     /// refusal shown, as is a `/new` the session never acknowledged; a
-    /// reload check ends as failed. Any other intent is background work and
-    /// is armed again, silently. The wait for one kind starts at
+    /// reload check ends as failed. Operator writes show their remedy and
+    /// release pending UI state; background intents are armed again silently.
+    /// The wait for one kind starts at
     /// [`REARM_MIN`] and doubles, up to [`REARM_CAP`], until that kind
     /// succeeds or the state it serves changes. A reload answer is the
     /// exception: it is armed again on the frame that learns the refusal.
@@ -110,6 +111,9 @@ impl App {
             }
             Unsent::Unknown(action) => (action, None),
         };
+        if self.unsent_host_write(&action, reason.as_deref()) {
+            return;
+        }
         match action {
             UserAction::Prompt(_) | UserAction::FollowUp(_) | UserAction::Steer(_) => {
                 let action = self.remove_pending_draft(&action).unwrap_or(action);
@@ -165,6 +169,47 @@ impl App {
                 .to_owned(),
         }));
         self.mark_dirty();
+    }
+
+    fn unsent_host_write(&mut self, action: &UserAction, reason: Option<&str>) -> bool {
+        let remedy = match action {
+            UserAction::Extension(SurfaceIntent::SaveSettings(_)) => {
+                if let (Some(menu), Some(snapshot)) =
+                    (&mut self.settings_menu, &self.settings_snapshot)
+                {
+                    menu.draft.product = snapshot.product.clone();
+                    menu.pane = super::SettingsPane::Browse;
+                }
+                self.settings_error = Some(
+                    "Settings were not confirmed; run `plak config set <key> <value>` on the host."
+                        .into(),
+                );
+                "run `plak config set <key> <value>` on the host".to_owned()
+            }
+            UserAction::Extension(SurfaceIntent::ApplyProfile {
+                name,
+                apply: crate::tui::ProfileApply::Default,
+            }) => format!("run `plak config set root.profile {name}` on the host"),
+            UserAction::Extension(SurfaceIntent::RefreshUsageCredential { account }) => {
+                if self.usage_refresh.active.as_ref() == Some(account) {
+                    self.usage_refresh.active = None;
+                }
+                let remedy = format!(
+                    "run `plak refresh {account}`, then `plak usage --account {account}` on the host"
+                );
+                self.usage_refresh.error = Some((account.clone(), remedy.clone()));
+                remedy
+            }
+            _ => return false,
+        };
+        let status = reason.unwrap_or(
+            "no answer from the product host; outcome unknown — check the saved state first",
+        );
+        let message = format!("{status} — {remedy}");
+        self.control_write_error = Some(message.clone());
+        self.push_root_block(ScrollBlock::Error(message));
+        self.mark_dirty();
+        true
     }
 
     /// When the next background intent the session did not take is armed

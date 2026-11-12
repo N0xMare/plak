@@ -7,6 +7,22 @@ use super::{
 use crate::tui::SurfaceIntent;
 
 impl App {
+    pub(super) fn remote_setting_remedy(&self, index: usize) -> Option<String> {
+        let meta = SettingsMenu::meta(index)?;
+        // Socket attachments are remote faces even when the host is on this
+        // machine. Terminal-local preferences remain editable on either face.
+        (self.host_mode && !meta.key.starts_with("tui.")).then(|| {
+            if meta.key == settings_registry::EDIT_RAW_CONFIG {
+                "Host config is read-only here; run `plak config edit` on the host.".to_owned()
+            } else {
+                format!(
+                    "Read-only on a host attachment; run `plak config set {} <value>` on the host.",
+                    meta.key
+                )
+            }
+        })
+    }
+
     pub(super) fn move_settings_selection(&mut self, delta: i8) {
         let Some(menu) = self.settings_menu.as_mut() else {
             return;
@@ -17,6 +33,11 @@ impl App {
     /// Fires the action a settings row names, or `None` when the row mutated
     /// the draft in place.
     pub(super) fn activate_settings_row(&mut self, index: usize) -> Option<UserAction> {
+        if let Some(remedy) = self.remote_setting_remedy(index) {
+            self.push_root_block(super::ScrollBlock::Error(remedy));
+            self.mark_dirty();
+            return None;
+        }
         let action = self.settings_menu.as_mut()?.activate(index);
         // Every activation changes what is painted: a Bool flips in place, an
         // Enum or Int row opens its sub-pane over the list. The frame must
@@ -50,6 +71,11 @@ impl App {
     /// Enter or a click confirms, and the reset is computed from the live
     /// draft then.
     pub(super) fn confirm_settings_reset(&mut self, row: usize) {
+        if let Some(remedy) = self.remote_setting_remedy(row) {
+            self.push_root_block(super::ScrollBlock::Error(remedy));
+            self.mark_dirty();
+            return;
+        }
         let Some(meta) = SettingsMenu::meta(row) else {
             return;
         };
