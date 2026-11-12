@@ -8,6 +8,10 @@ use plakous_host_protocol::wire::{Answer, ClientFrame, HostFrame, Op, Outcome, W
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(WIRE_VERSION, 8);
+    let _ = plakd_wire_types::console::CredentialRefreshObservation {
+        outcome: plakd_wire_types::console::CredentialRefreshOutcome::Restored,
+        observed_at: "2026-01-01T00:00:00Z".into(), failure_class: Some("timeout".into()),
+    };
     let target = plakd_wire_types::console::WorkspaceTarget { session: "saved".into(), node: None };
     let _ = HostRequest::FilesRead { target: target.clone(), path: "data".into(), cursor: None, max_bytes: Some(1) };
     let _ = HostRequest::ChangesDiff { target, entry: "opaque".into() };

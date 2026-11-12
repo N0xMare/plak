@@ -6,6 +6,8 @@
 
 pub(crate) fn shared_api_key_source_is_a_supported_facade_workflow()
 -> Result<(), Box<dyn std::error::Error>> {
+    let account = plakous::agent::CredentialAccountLabel::new("codex/work")?;
+    assert_eq!(account.as_str(), "codex/work");
     use plakous::api_key::{
         ApiKey, ApiKeyRequest, ApiKeySource, CredentialProviderTag, StaticApiKeySource,
     };

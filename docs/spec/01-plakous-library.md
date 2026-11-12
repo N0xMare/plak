@@ -10961,6 +10961,12 @@ log and `plak.log` can say which phase elapsed. The phase text is content-free.
 
 ### 11.2 Telemetry
 
+Credential-refresh detail may carry a bounded, content-free exact account
+label supplied by the composition boundary. It is attribution only, not a
+provider name in neutral runtime policy, upstream identity, credential state
+or recovery authority. Native composition supplies the selected default/named
+account; consumers must not infer a missing label from current defaults.
+
 The neutral `TurnOrigin` distinguishes `UserPrompt` from `HostWake` (child
 results now, host job notices through the same origin). It is derived from
 the admitted command and the latest retained `RecentIntent`, never changed

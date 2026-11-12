@@ -65,6 +65,7 @@ one cross-build carrier (a build imports its own and the previous version).
   identity, with matching local and paired-runner results and no local fallback.
 
 - Add protocol-8 saved-workspace Files and Changes inspection with exact byte pages, contained execution and bounded operator admission.
+- Include exact-account last settled credential-refresh outcome and time in protocol-8 account status reads.
 
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.

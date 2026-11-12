@@ -135,6 +135,7 @@ pub(super) async fn status(
         native: None,
         key: None,
         same_upstream_as: None,
+        last_refresh: None,
         remedies: Vec::new(),
         diagnostics: Vec::new(),
     };
@@ -186,11 +187,57 @@ pub(super) async fn status(
             "native status could not be read",
         ));
     }
+    if !vertical.is_api() {
+        match crate::telemetry_store::TelemetryStore::latest_account_refresh_outcome(paths, account)
+        {
+            Ok(Some(refresh)) => row.last_refresh = refresh_observation(refresh),
+            Ok(None) => {}
+            Err(_) => row.diagnostics.push(diagnostic(
+                "refresh_history_unavailable",
+                Some(account.as_str()),
+                "retained refresh history could not be read",
+            )),
+        }
+    }
     if !row.compiled {
         row.remedies
             .push(remedy(ReadAction::UseMatchingBuild, account));
     }
     row
+}
+
+fn refresh_observation(
+    row: crate::telemetry_store::CredentialRefreshRow,
+) -> Option<plakd_wire_types::console::CredentialRefreshObservation> {
+    use plakd_wire_types::console::{CredentialRefreshObservation, CredentialRefreshOutcome};
+    let outcome = match row.phase.as_str() {
+        "completed" => CredentialRefreshOutcome::Completed,
+        "restored" => CredentialRefreshOutcome::Restored,
+        "outcome_unknown" => CredentialRefreshOutcome::OutcomeUnknown,
+        "quarantined" => CredentialRefreshOutcome::Quarantined,
+        _ => return None,
+    };
+    let failure_class = row.failure_class.filter(|class| {
+        matches!(
+            class.as_str(),
+            "transport"
+                | "timeout"
+                | "http_4xx"
+                | "http_5xx"
+                | "http_other"
+                | "validation"
+                | "store"
+                | "cancelled"
+                | "not_ready"
+        )
+    });
+    Some(CredentialRefreshObservation {
+        outcome,
+        observed_at: jiff::Timestamp::from_nanosecond(i128::from(row.at_ns))
+            .ok()?
+            .to_string(),
+        failure_class,
+    })
 }
 
 pub(super) async fn status_rows(

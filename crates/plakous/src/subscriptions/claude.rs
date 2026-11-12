@@ -111,7 +111,9 @@ impl NativeSubscriptions {
             if let Some(gate) = request_gate {
                 manager = manager.with_subscription_request_gate(gate);
             }
-            if let Some(observer) = credential_refresh_observer(NativeProvider::Claude) {
+            if let Some(observer) =
+                credential_refresh_observer(NativeProvider::Claude, identity_paths.source_scope())
+            {
                 manager = manager.with_credential_refresh_observer(observer);
             }
             Ok(ClaudeOnline {

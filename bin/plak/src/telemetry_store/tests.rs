@@ -1469,6 +1469,7 @@ fn credential_refresh_round_trips_and_latest_query() -> TestResult {
                 elapsed: Some(Duration::from_millis(30_000)),
                 generation: 40,
                 detail: plakous::agent::CredentialRefreshDetail {
+                    account: None,
                     reason: Some(plakous::agent::CredentialRefreshFailureReason::IdTokenExp),
                     expires_in_secs: Some(21_600),
                     id_token_iat_age_secs: Some(3_700),

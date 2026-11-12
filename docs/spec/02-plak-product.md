@@ -3998,6 +3998,14 @@ workspace. Unknown or retired workspaces answer product `workspace_unavailable`;
 unavailable saved runners keep the placement refusal, never a local fallback.
 Reads use BuildRead, not a tool effect or runtime journal entry.
 
+Protocol-8 `accounts_status` also carries nullable `last_refresh` per exact
+account: settled outcome (`completed`, `restored`, `outcome_unknown` or
+`quarantined`), UTC observation time and a content-free failure class. A later
+in-flight refresh does not erase a settled outcome. Missing/unattributed
+history stays unknown; named accounts never borrow a default's or sibling's
+outcome. These retained observations are display facts, not current credential
+or recovery authority; no secret or raw provider diagnostic is returned.
+
 File content is `{revision,size,offset,bytes_b64,next}` with exact raw bytes.
 Opaque continuations bind principal, host generation, target, runner instance,
 path and whole-file digest. There is no offset-only continuation; changed
@@ -4088,6 +4096,12 @@ The client protocol number is **8**. It must match exactly; the runner
 transport has its own independent version. Protocol 5 adds explicit placement,
 bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
+
+The protocol-8 schema pin is SHA-256
+`841ffd7c0526dd56e1c227e00dc980c155e262f7159a4ecc8547628eff428490`:
+serialize the schema document as compact JSON with sorted object keys and
+remove only its build-specific `binary_id` field. The offline schema contract
+checks this build-independent pin.
 
 Protocol 7 adds process-local `operator_prepare {action}` and
 `operator_confirm {nonce}` through that same attachment-free seam. Prepare

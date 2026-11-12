@@ -8,6 +8,39 @@ const DISABLED_SWITCHES: ConfiguredSwitches = ConfiguredSwitches {
     web_files_read: false,
 };
 
+#[tokio::test]
+async fn account_status_refresh_history_is_exact_settled_and_content_free()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_root, paths) = PlakPaths::isolated_test_home();
+    let _store = crate::telemetry_store::TelemetryStore::open(&paths)?;
+    let database = rusqlite::Connection::open(paths.telemetry_database())?;
+    for (at, account, phase, class) in [
+        (1_i64, Some("codex/work"), "quarantined", Some("timeout")),
+        (2, Some("codex"), "completed", None),
+        (3, Some("codex/work"), "began", None),
+        (4, Some("codex/other"), "restored", Some("transport")),
+        (5, None, "outcome_unknown", Some("validation")),
+    ] {
+        database.execute("INSERT INTO credential_refreshes (at,provider,account,phase,failure_class,generation,oauth_error_description) VALUES (?1,'codex',?2,?3,?4,1,'withheld-provider-body')", rusqlite::params![at * 1_000_000_000, account, phase, class])?;
+    }
+    let state = paths.home().join("state");
+    let reader = accounts::reader(&state).map_err(|_| "reader")?;
+    for (id, outcome, at) in [
+        ("codex", "completed", "1970-01-01T00:00:02Z"),
+        ("codex/work", "quarantined", "1970-01-01T00:00:01Z"),
+        ("codex/other", "restored", "1970-01-01T00:00:04Z"),
+    ] {
+        let row = accounts::status(&reader, &paths, &id.parse()?, "fixture").await;
+        let json = serde_json::to_value(row)?;
+        assert_eq!(json["last_refresh"]["outcome"], outcome);
+        assert_eq!(json["last_refresh"]["observed_at"], at);
+        assert!(!json.to_string().contains("withheld-provider-body"));
+    }
+    let row = accounts::status(&reader, &paths, &"codex/missing".parse()?, "fixture").await;
+    assert!(row.last_refresh.is_none());
+    Ok(())
+}
+
 fn context(principal: HostPrincipal) -> HostRequestContext {
     HostRequestContext {
         principal,

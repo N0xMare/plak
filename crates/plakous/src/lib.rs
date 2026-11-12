@@ -226,6 +226,7 @@ pub mod agent {
         ContinuationPreferenceStrategy,
         ControlError,
         ControlErrorKind,
+        CredentialAccountLabel,
         CredentialProviderLabel,
         CredentialRefreshDetail,
         CredentialRefreshDiagnostic,

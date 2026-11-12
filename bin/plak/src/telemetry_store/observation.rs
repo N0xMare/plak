@@ -196,7 +196,7 @@ fn statement(kind: RowKind) -> &'static str {
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         RowKind::CredentialRefresh => "INSERT INTO credential_refreshes (
                     at, provider, phase, failure_class, http_status, elapsed_ns, generation, transport_phase,
-                    failure_reason, oauth_error_code, oauth_error_description
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    failure_reason, oauth_error_code, oauth_error_description, account
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
     }
 }

@@ -1456,7 +1456,7 @@ impl TelemetryStore {
         paths: &PlakPaths,
         provider: &str,
     ) -> Result<Option<CredentialRefreshRow>, TelemetryStoreOpenError> {
-        Self::read_credential_refresh(paths, provider, false)
+        Self::read_credential_refresh(paths, provider, false, None)
     }
 
     /// Latest settled failure; an in-flight Began does not hide it, and a
@@ -1465,14 +1465,27 @@ impl TelemetryStore {
         paths: &PlakPaths,
         provider: &str,
     ) -> Result<Option<CredentialRefreshRow>, TelemetryStoreOpenError> {
-        Ok(Self::read_credential_refresh(paths, provider, true)?
+        Ok(Self::read_credential_refresh(paths, provider, true, None)?
             .filter(|row| row.phase != "completed"))
+    }
+
+    /// Exact-account settled history for the operator console. Unattributed
+    /// older rows never become evidence for a default or named account.
+    pub(crate) fn latest_account_refresh_outcome(
+        paths: &PlakPaths,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> Result<Option<CredentialRefreshRow>, TelemetryStoreOpenError> {
+        let Some(provider) = account.vertical().capability().native_provider() else {
+            return Ok(None);
+        };
+        Self::read_credential_refresh(paths, provider.as_str(), true, Some(account.as_str()))
     }
 
     fn read_credential_refresh(
         paths: &PlakPaths,
         provider: &str,
         terminal_only: bool,
+        account: Option<&str>,
     ) -> Result<Option<CredentialRefreshRow>, TelemetryStoreOpenError> {
         let database = paths.telemetry_database();
         if !database.exists() {
@@ -1494,8 +1507,9 @@ impl TelemetryStore {
                  FROM v_credential_refreshes
                  WHERE provider = ?1
                    AND (?2 = 0 OR phase IN ('completed', 'restored', 'outcome_unknown', 'quarantined'))
+                   AND (?3 IS NULL OR account = ?3)
                  ORDER BY at DESC, id DESC LIMIT 1",
-            params![provider, terminal_only],
+            params![provider, terminal_only, account],
             |row| {
                 Ok(CredentialRefreshRow {
                     provider: row.get(0)?,

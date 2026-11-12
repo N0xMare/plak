@@ -402,6 +402,13 @@ impl PlakousApplication {
         }
         self
     }
+
+    fn record_credential_refreshes(&mut self) {
+        if self._credential_telemetry.is_none() {
+            self._credential_telemetry = self.product.as_ref()
+                .and_then(crate::telemetry_sink::install_product_credential_telemetry);
+        }
+    }
     /// `state_home` is the XDG state home and `extra_telemetry_sink` the
     /// binary's optional OTLP bridge; both come from the composition root.
     pub fn new(
@@ -908,6 +915,7 @@ impl AccountOps for PlakousApplication {
     }
 
     fn refresh(&mut self, account: &AccountRef) -> CliResult<CredentialState> {
+        self.record_credential_refreshes();
         let subscriptions = self.subscriptions_for(account)?;
         let result = self
             .executor
@@ -917,6 +925,7 @@ impl AccountOps for PlakousApplication {
     }
 
     fn refresh_now(&mut self, account: &AccountRef) -> CliResult<(CredentialState, u64)> {
+        self.record_credential_refreshes();
         let subscriptions = self.subscriptions_for(account)?;
         let result = self
             .executor

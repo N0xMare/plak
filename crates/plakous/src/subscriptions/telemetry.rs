@@ -29,6 +29,7 @@ pub fn install_credential_telemetry(emitter: Arc<TelemetryEmitter>) {
 
 pub(super) fn credential_refresh_observer(
     provider: NativeProvider,
+    account: Option<String>,
 ) -> Option<Arc<dyn CredentialRefreshObserver>> {
     let emitter = CREDENTIAL_TELEMETRY
         .get()?
@@ -37,12 +38,21 @@ pub(super) fn credential_refresh_observer(
         .clone()?;
     let label = CredentialProviderLabel::new(provider.as_str()).ok()?;
     Some(Arc::new(FacadeCredentialObserver {
+        account: plakous_agent::CredentialAccountLabel::new(&account.unwrap_or_else(|| {
+            if provider == NativeProvider::Xai {
+                "grok".into()
+            } else {
+                provider.as_str().into()
+            }
+        }))
+        .ok(),
         provider: label,
         emitter,
     }))
 }
 
 struct FacadeCredentialObserver {
+    account: Option<plakous_agent::CredentialAccountLabel>,
     provider: CredentialProviderLabel,
     emitter: Arc<TelemetryEmitter>,
 }
@@ -62,6 +72,7 @@ impl CredentialRefreshObserver for FacadeCredentialObserver {
                 elapsed: Some(event.elapsed),
                 generation: event.generation,
                 detail: CredentialRefreshDetail {
+                    account: self.account,
                     reason: event.detail.reason.and_then(map_failure_reason),
                     expires_in_secs: event.detail.expires_in_secs,
                     id_token_iat_age_secs: event.detail.id_token_iat_age_secs,
@@ -188,6 +199,7 @@ mod tests {
             let mut detail = plakous_auth::oauth_orchestrator::CredentialRefreshDetail::default();
             detail.record_oauth_error(br#"{"error":"invalid_grant","error_description":"Grant revoked sk-private-fixture refresh_token=private-fixture eyJheader.payload.signature", "access_token":"private-body-field"}"#);
             FacadeCredentialObserver {
+                account: Some(plakous_agent::CredentialAccountLabel::new("selected/work")?),
                 provider: CredentialProviderLabel::new(provider.as_str())?,
                 emitter: emitter.clone(),
             }
@@ -213,6 +225,13 @@ mod tests {
                 return Err("unexpected telemetry kind".into());
             };
             assert_eq!(generation, 7);
+            assert_eq!(
+                detail
+                    .account
+                    .map(|account| account.as_str().to_owned())
+                    .as_deref(),
+                Some("selected/work")
+            );
             assert_eq!(detail.oauth_error.code(), Some("invalid_grant"));
             let description = detail.oauth_error.description().unwrap_or("");
             assert!(description.starts_with("Grant revoked"));

@@ -791,6 +791,8 @@ impl CredentialRefreshFailureReason {
 /// value, subject, or account id is carried.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CredentialRefreshDetail {
+    /// Exact selected account label, when known by the composition boundary.
+    pub account: Option<CredentialAccountLabel>,
     /// Which check rejected the response, when known.
     pub reason: Option<CredentialRefreshFailureReason>,
     /// The response's `expires_in`, when present.
@@ -801,6 +803,45 @@ pub struct CredentialRefreshDetail {
     pub id_token_exp_in_secs: Option<i64>,
     /// Bounded, sanitized OAuth failure metadata, never a raw response body.
     pub oauth_error: CredentialRefreshDiagnostic,
+}
+
+/// Content-free exact account attribution for credential lifecycle telemetry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CredentialAccountLabel {
+    bytes: [u8; 64],
+    len: u8,
+}
+
+impl CredentialAccountLabel {
+    /// Creates a bounded printable account label, never an upstream identity.
+    ///
+    /// # Errors
+    /// Refuses empty, non-ASCII, whitespace or oversized labels.
+    pub fn new(value: &str) -> Result<Self, plakous_model::IdentityError> {
+        if value.is_empty() {
+            return Err(plakous_model::IdentityError::Empty);
+        }
+        if value.len() > 64 {
+            return Err(plakous_model::IdentityError::TooLong { maximum: 64 });
+        }
+        let mut bytes = [0; 64];
+        for (index, byte) in value.bytes().enumerate() {
+            if !byte.is_ascii_graphic() {
+                return Err(plakous_model::IdentityError::InvalidCharacter { index });
+            }
+            bytes[index] = byte;
+        }
+        Ok(Self {
+            bytes,
+            len: u8::try_from(value.len())
+                .map_err(|_| plakous_model::IdentityError::TooLong { maximum: 64 })?,
+        })
+    }
+    /// Returns the exact validated account label.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or("")
+    }
 }
 
 /// Copyable OAuth failure metadata supplied after credential filtering.

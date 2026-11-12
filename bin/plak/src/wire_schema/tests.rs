@@ -10,7 +10,7 @@ fn protocol_eight_schema_has_an_exact_build_independent_pin() {
     let digest = plakous::model::sha256_hex(&[&bytes]);
     assert_eq!(
         digest,
-        "49f5876f2aa0e0e4f16c9695bb782ecced0792edf8cf9eb6c43499ae6a29b5fb"
+        "841ffd7c0526dd56e1c227e00dc980c155e262f7159a4ecc8547628eff428490"
     );
 }
 

@@ -2164,6 +2164,14 @@ Workspace content, patches and content identities are authorized operator
 data, not log or model-channel material. No secret redactor can preserve exact
 diff bytes while guaranteeing removal of secrets already in the workspace.
 
+Credential refresh telemetry attributes each new observation to the exact
+selected account at composition time, using a bounded content-free account
+label. Console account status reads the last settled observation for that
+account only; provider-wide or unattributed rows are not account authority.
+Only categorical outcome/failure and observation time cross the console wire,
+never OAuth error descriptions or response bodies. The existing nullable
+telemetry account column is used without changing its schema.
+
 Workspace viewer bytes are authorized raw data and never logged or copied
 into model-visible channels. No redactor can preserve exact bytes while
 guaranteeing secret removal. Hardlinks and secret-containing workspace files

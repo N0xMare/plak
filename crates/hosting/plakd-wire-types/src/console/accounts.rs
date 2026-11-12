@@ -21,8 +21,31 @@ pub struct AccountStatus {
     #[serde(deserialize_with = "required")]
     #[schemars(required, schema_with = "nullable::<Vec<String>>")]
     pub same_upstream_as: Option<Vec<String>>,
+    #[serde(deserialize_with = "required")]
+    #[schemars(required, schema_with = "nullable::<CredentialRefreshObservation>")]
+    pub last_refresh: Option<CredentialRefreshObservation>,
     pub remedies: Vec<ReadRemedy>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Last retained settled outcome for this exact account, not credential state.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CredentialRefreshObservation {
+    pub outcome: CredentialRefreshOutcome,
+    pub observed_at: String,
+    #[serde(deserialize_with = "required")]
+    #[schemars(required, schema_with = "nullable::<String>")]
+    pub failure_class: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialRefreshOutcome {
+    Completed,
+    Restored,
+    OutcomeUnknown,
+    Quarantined,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

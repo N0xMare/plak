@@ -5944,6 +5944,10 @@ window remaining (chapter 06).
 
 ### Protocol-7 operator console evidence
 
+Protocol-8 account-status probes distinguish named/default/sibling refresh
+history, retain the last settled outcome across a later in-flight event, keep
+unattributed history unknown and exclude raw provider descriptions.
+
 Protocol-8 Files evidence exercises exact binary bytes and UTF-8 page splits,
 digest-bound cursor mutation conflicts, principal/target/runner-generation
 ownership, no-follow paths, nonregular inputs, invalid names and the 16 MiB

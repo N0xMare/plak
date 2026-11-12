@@ -98,6 +98,7 @@ impl NativeSubscriptions {
         let catalog_observer = self.exchange_observer.clone();
         let catalog_retries = self.catalog_retries;
         let source_scope = self.state.source_scope();
+        let telemetry_scope = source_scope.clone();
         run_blocking(move || {
             let timestamp =
                 Timestamp::new(accepted_at, 0).map_err(|_| NativeSubscriptionError::Internal)?;
@@ -141,7 +142,9 @@ impl NativeSubscriptions {
                     .with_subscription_request_gate(gate)
                     .map_err(map_xai_error)?;
             }
-            if let Some(observer) = credential_refresh_observer(NativeProvider::Xai) {
+            if let Some(observer) =
+                credential_refresh_observer(NativeProvider::Xai, telemetry_scope)
+            {
                 manager = manager
                     .with_credential_refresh_observer(observer)
                     .map_err(map_xai_error)?;

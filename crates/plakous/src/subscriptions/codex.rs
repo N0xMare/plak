@@ -90,6 +90,7 @@ impl NativeSubscriptions {
         let clock = self.state.clock();
         #[cfg(test)]
         let fixture_transport = self.codex_test_transport.clone();
+        let telemetry_scope = self.state.source_scope();
         run_blocking(move || {
             let timestamp =
                 Timestamp::new(accepted_at, 0).map_err(|_| NativeSubscriptionError::Internal)?;
@@ -130,7 +131,9 @@ impl NativeSubscriptions {
             if let Some(gate) = request_gate {
                 manager = manager.with_subscription_request_gate(gate);
             }
-            if let Some(observer) = credential_refresh_observer(NativeProvider::Codex) {
+            if let Some(observer) =
+                credential_refresh_observer(NativeProvider::Codex, telemetry_scope)
+            {
                 manager = manager.with_credential_refresh_observer(observer);
             }
             // Unit tests never bind the pinned Codex callback ports.

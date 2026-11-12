@@ -1121,6 +1121,12 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
                         ),
                         Cell::from(detail.oauth_error.code()),
                         Cell::from(detail.oauth_error.description()),
+                        Cell::from(
+                            detail
+                                .account
+                                .as_ref()
+                                .map(plakous::agent::CredentialAccountLabel::as_str),
+                        ),
                     ],
                     fallback: None,
                 })
