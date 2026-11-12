@@ -12260,16 +12260,15 @@ rejected record left over from the previous request also aborts the connection
 before the new request can complete. The transport reports typed
 `RequestIncomplete` evidence with cause
 `peer_rejected_record`, retaining `AlertReceived(20)`. The existing unsent-only
-policy retries it under the same attempt and wait budget, including for
+policy retries it under the incomplete-write ride-out budget below, including for
 compaction and other `SessionWorkflow` operations. All three kernels map this
 proof to `ModelRetryCause::RecordRejectedInTransit` (stable kind
 `record_rejected_in_transit`), labeled **request corrupted in transit (TLS record
 rejected)**, never a connect failure. On the first physical request's failure,
 its first resend has zero backoff and bypasses idle pool checkout to establish
 a fresh connection. Every subsequent resend after this cause also uses a fresh
-connection but retains the ordinary jittered doubling. The four-physical-request
-cap, 120 s total wait cap, cancellation, deadlines and replay permits are
-unchanged; this rule grants no additional replay authority. No kernel parses diagnostic
+connection with longer outage backoff. Cancellation, deadlines and replay permits
+are unchanged; this rule grants no additional replay authority. No kernel parses diagnostic
 strings. Other alerts, local TLS decrypt failures, alerts after the first
 response byte, TLS 1.2, and HTTP/2 retain their existing classification.
 TLS 1.2 may send a `no_renegotiation` control record after the complete request
@@ -12340,7 +12339,17 @@ the budget, becomes:
   or 120 s budgets (including the credential-refresh retry cap). Every wait
   must fit before the caller's hard deadline and remains cancellable. A prior
   possible hosted effect and the long-generation replay cap still forbid replay.
-  `RequestIncomplete`, including rejected TLS records, never enters this ride-out.
+  Independently, `RequestIncomplete`, including rejected TLS records, gets up
+  to sixteen incomplete physical requests and 900 s of waiting per logical
+  attempt. Equal-jittered backoff bases double from 10 s to 60 s with each
+  incomplete generation; the first physical failure's record-rejection resend
+  remains immediate (its next base is 20 s). Even minimum jitter rides out
+  more than six minutes of consecutive incomplete writes. This allowance has
+  separate counters and waits from the unreachable and ordinary budgets;
+  an HTTP response, a fully written request (`MayHaveTransmitted`) or an
+  ambiguous response-head wait never enters it. A prior possible hosted
+  effect still forbids replay. The transport taxonomy is unchanged: no
+  TLS message or error prose alone can reclassify a complete request.
   This also covers unsent-only session workflows; it never permits a second paid
   compaction dispatch, changes the exact route, or bypasses fresh revalidation.
   Retry presentation names the provider unreachable and the next network-wait try.
@@ -12374,12 +12383,18 @@ the budget, becomes:
 - **Terminal refusals.** A definite authentication rejection keeps its HTTP
   status and phase with `Permanent` retryability. The Responses retry behavior
   is revision-bound in the Responses attempt host behavior identity, revision
-  12. It binds proven-unsent permit settlement and outage ride-out,
+  13. It binds the separate incomplete-write outage allowance in addition to
+  proven-unsent permit settlement and unreachable ride-out,
   per-generation deadlines, the long-generation cap, semantic-stall handling,
   activity/declined-retry observations and the immediate
-  `advice_beyond_budget` decline of retry advice beyond the wait budget. A
-  session recorded under an earlier revision refuses exact reopen and carries
-  forward through reload or rebind.
+  `advice_beyond_budget` decline of retry advice beyond the wait budget.
+  This is an in-memory per-attempt execution consistency guard: a prepared
+  attempt from another host-behavior revision is rejected before preflight.
+  It is not part of the frozen session binding. With the other frozen inputs
+  unchanged, an existing session reopens exactly across a host-behavior
+  revision change; no history carry, reload or rebind is required by that
+  revision alone. A host restart uses the ordinary recorded-handoff and
+  continuation paths, constructing new attempts under the current revision.
 
 A classified retry that is declined still emits a content-free `ModelRetry`
 observation: `loss.declined_reason` is one of `deadline`, `budget`,

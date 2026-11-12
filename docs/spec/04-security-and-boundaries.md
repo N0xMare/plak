@@ -66,8 +66,9 @@ usage before another inference, and still honors cancellation, the operation
 deadline, and the model-round cap. Malformed values fail closed; hosted server-pause recovery
 continues to require its own exact family artifact.
 The shared Responses host behavior identity advances for this terminal
-interpretation, so an older admitted route binding cannot silently retain the
-previous stop behavior.
+interpretation, so a prepared attempt from another execution revision is
+rejected before preflight. This in-memory consistency guard does not enter the
+frozen session binding or itself refuse an existing session's exact reopen.
 
 The threat register is eighteen entries. Each names the threat, the control
 that answers it, and the section here that states that control in full.

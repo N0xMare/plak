@@ -57,6 +57,61 @@ impl Facts {
 const POLICY: RetryPolicy = RetryPolicy::TURN;
 
 #[test]
+fn incomplete_writes_ride_out_minutes_without_spending_ordinary_retries() {
+    for point in [
+        FailurePoint::RequestIncomplete,
+        FailurePoint::RecordRejectedInTransit,
+    ] {
+        for jitter in [Jitter::SHORTEST, Jitter::LONGEST] {
+            let mut budget = UnreachableRideOut::default();
+            let mut waited = Duration::ZERO;
+            for physical in 1..=16 {
+                let delay = budget.next_delay(
+                    Facts::refused(physical).build(),
+                    point,
+                    None,
+                    waited,
+                    jitter,
+                );
+                if physical == 16 {
+                    assert_eq!(delay, None);
+                } else {
+                    let Some(delay) = delay else {
+                        panic!("incomplete-write allowance exhausted early");
+                    };
+                    waited += delay;
+                }
+            }
+            assert!((Duration::from_secs(360)..=Duration::from_secs(900)).contains(&waited));
+            assert_eq!(budget.physical(), 16);
+            for (physical, expected) in [(17, Some(1)), (18, Some(2)), (19, Some(4)), (20, None)] {
+                let delay = budget.next_delay(
+                    Facts::refused(physical).build(),
+                    FailurePoint::Refused,
+                    None,
+                    waited,
+                    Jitter::LONGEST,
+                );
+                assert_eq!(delay, expected.map(Duration::from_secs));
+                waited += delay.unwrap_or_default();
+            }
+            // A possible earlier hosted effect still forbids even a proven
+            // incomplete next request from buying another dispatch.
+            assert_eq!(
+                UnreachableRideOut::default().next_delay(
+                    Facts::accepted(1, ReplaySafety::ServerEffect).build(),
+                    point,
+                    None,
+                    Duration::ZERO,
+                    jitter
+                ),
+                None
+            );
+        }
+    }
+}
+
+#[test]
 fn unreachable_ride_out_has_twelve_requests_and_exact_equal_jitter_bounds() {
     for (jitter, expected_total) in [(Jitter::LONGEST, 240), (Jitter::SHORTEST, 120)] {
         let mut budget = UnreachableRideOut::default();

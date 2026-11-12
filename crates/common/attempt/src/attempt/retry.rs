@@ -31,9 +31,10 @@ pub enum ReplaySafety {
 pub enum FailurePoint {
     /// Resolution, connect or TLS failed with proof that no request bytes were sent.
     Unreachable,
-    /// The provider provably refused the request before accepting it, or the
-    /// request never left whole. Proven-unreachable connections are separate.
+    /// The provider provably refused the request before accepting it.
     Refused,
+    /// The transport proves the peer never received the complete request.
+    RequestIncomplete,
     /// The peer rejected a TLS record of the incomplete request and killed
     /// the connection. Its first resend needs no congestion backoff.
     RecordRejectedInTransit,
@@ -45,35 +46,42 @@ pub enum FailurePoint {
     MidStream,
 }
 
-/// Per-call allowance for riding out a short outage without spending ordinary retries.
+/// Per-call allowances for unreachable and provably incomplete requests,
+/// without spending ordinary retries.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct UnreachableRideOut {
     physical: u32,
     waited: Duration,
+    incomplete_physical: u32,
+    incomplete_waited: Duration,
 }
 
 impl UnreachableRideOut {
-    /// Returns failed physical requests proven unreachable.
+    /// Returns failed physical requests proven unreachable or incomplete.
     #[must_use]
     pub const fn physical(self) -> u32 {
-        self.physical
+        self.physical.saturating_add(self.incomplete_physical)
     }
 
     /// Returns the physical count charged to the ordinary four-request allowance.
     #[must_use]
     pub const fn ordinary_physical(self, facts: TerminalFacts) -> u32 {
-        facts.physical_attempts().saturating_sub(self.physical)
+        facts.physical_attempts().saturating_sub(self.physical())
     }
 
     /// Returns the current retry row's physical upper bound.
     #[must_use]
     pub fn max_physical(self, facts: TerminalFacts, point: FailurePoint) -> u32 {
-        if point == FailurePoint::Unreachable {
-            12_u32.saturating_add(self.ordinary_physical(facts))
-        } else {
-            RetryPolicy::TURN
-                .max_physical()
+        match point {
+            FailurePoint::Unreachable => 12_u32
+                .saturating_add(self.incomplete_physical)
+                .saturating_add(self.ordinary_physical(facts)),
+            FailurePoint::RequestIncomplete | FailurePoint::RecordRejectedInTransit => 16_u32
                 .saturating_add(self.physical)
+                .saturating_add(self.ordinary_physical(facts)),
+            _ => RetryPolicy::TURN
+                .max_physical()
+                .saturating_add(self.physical()),
         }
     }
 
@@ -101,13 +109,19 @@ impl UnreachableRideOut {
         waited: Duration,
         jitter: Jitter,
     ) -> RetryWait {
+        if matches!(
+            point,
+            FailurePoint::RequestIncomplete | FailurePoint::RecordRejectedInTransit
+        ) {
+            return self.incomplete_wait(facts, point, jitter);
+        }
         if point != FailurePoint::Unreachable {
             return RetryPolicy::TURN.next_wait_for_physical(
                 facts,
                 self.ordinary_physical(facts),
                 point,
                 retry_after,
-                waited.saturating_sub(self.waited),
+                waited.saturating_sub(self.waited.saturating_add(self.incomplete_waited)),
                 jitter,
             );
         }
@@ -122,6 +136,33 @@ impl UnreachableRideOut {
             return RetryWait::Exhausted;
         }
         self.waited = total;
+        RetryWait::After(delay)
+    }
+
+    fn incomplete_wait(
+        &mut self,
+        facts: TerminalFacts,
+        point: FailurePoint,
+        jitter: Jitter,
+    ) -> RetryWait {
+        self.incomplete_physical = self.incomplete_physical.saturating_add(1);
+        if self.incomplete_physical >= 16 || facts.hosted_effects_possible() {
+            return RetryWait::Exhausted;
+        }
+        // One immediate fresh-connection resend preserves the isolated TLS
+        // rejection fast path; persistent failures must ride out an outage.
+        let delay =
+            if point == FailurePoint::RecordRejectedInTransit && facts.physical_attempts() == 1 {
+                Duration::ZERO
+            } else {
+                let exponent = self.incomplete_physical.saturating_sub(1).min(3);
+                jitter.spread(Duration::from_secs((10_u64 << exponent).min(60)))
+            };
+        let total = self.incomplete_waited.saturating_add(delay);
+        if total > Duration::from_secs(900) {
+            return RetryWait::Exhausted;
+        }
+        self.incomplete_waited = total;
         RetryWait::After(delay)
     }
 }
@@ -310,6 +351,7 @@ impl RetryPolicy {
         let replayable = match point {
             FailurePoint::Unreachable
             | FailurePoint::Refused
+            | FailurePoint::RequestIncomplete
             | FailurePoint::RecordRejectedInTransit => true,
             FailurePoint::AfterSend | FailurePoint::MidStream => cost_only,
         };

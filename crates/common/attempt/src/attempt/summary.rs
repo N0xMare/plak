@@ -95,7 +95,7 @@ impl fmt::Display for AttemptRetryDecline {
 pub struct AttemptSummary {
     /// Physical requests started.
     pub physical: u32,
-    /// Physical requests spent on the unreachable ride-out.
+    /// Physical requests spent on the unreachable or incomplete-write ride-out.
     pub ride_out_physical: u32,
     /// Last classified failure point.
     pub last_point: Option<FailurePoint>,
@@ -117,11 +117,17 @@ impl fmt::Display for AttemptSummary {
         }
         write!(formatter, " [{} requests", self.physical)?;
         if self.ride_out_physical > 0 {
-            write!(formatter, "; {} unreachable", self.ride_out_physical)?;
+            write!(formatter, "; {} unsent", self.ride_out_physical)?;
         }
         // A refusal the provider named says more than where the exchange
         // stopped: it is the class the terminal failure is typed as.
         let last = match (self.last_refusal, self.last_phase) {
+            (None, _) if self.last_point == Some(FailurePoint::RequestIncomplete) => {
+                "request write incomplete"
+            }
+            (None, _) if self.last_point == Some(FailurePoint::RecordRejectedInTransit) => {
+                "TLS record rejected"
+            }
             (Some(refusal), _) => refusal.label(),
             (None, Some(AttemptPhase::Resolution)) => "DNS lookup failed",
             (None, Some(AttemptPhase::Connect)) => "could not connect",
@@ -134,6 +140,7 @@ impl fmt::Display for AttemptSummary {
             (None, _) => match self.last_point {
                 Some(FailurePoint::Unreachable) => "provider unreachable",
                 Some(FailurePoint::Refused) => "request refused",
+                Some(FailurePoint::RequestIncomplete) => "request write incomplete",
                 Some(FailurePoint::RecordRejectedInTransit) => "TLS record rejected",
                 Some(FailurePoint::AfterSend) => "after send",
                 Some(FailurePoint::MidStream) => "response stream interrupted",
@@ -142,7 +149,11 @@ impl fmt::Display for AttemptSummary {
         };
         write!(formatter, "; last: {last}")?;
         if self.proven_unsent {
-            formatter.write_str(", nothing sent")?;
+            formatter.write_str(if self.last_point == Some(FailurePoint::Unreachable) {
+                ", nothing sent"
+            } else {
+                ", no complete request sent"
+            })?;
         }
         if let Some(decline) = self.decline {
             write!(formatter, "; retry declined: {decline}")?;
@@ -160,7 +171,7 @@ mod tests {
         assert_eq!(AttemptSummary::default().to_string(), "");
         let summary = AttemptSummary {
             physical: 4,
-            last_point: Some(FailurePoint::Refused),
+            last_point: Some(FailurePoint::Unreachable),
             last_phase: Some(AttemptPhase::Resolution),
             proven_unsent: true,
             decline: Some(AttemptRetryDecline::Deadline),
@@ -169,6 +180,23 @@ mod tests {
         assert_eq!(
             summary.to_string(),
             " [4 requests; last: DNS lookup failed, nothing sent; retry declined: deadline]"
+        );
+    }
+
+    #[test]
+    fn incomplete_request_summary_never_implies_a_complete_send() {
+        let summary = AttemptSummary {
+            physical: 16,
+            ride_out_physical: 16,
+            last_point: Some(FailurePoint::RequestIncomplete),
+            last_phase: Some(AttemptPhase::RequestWriteOrResponseHead),
+            proven_unsent: true,
+            decline: Some(AttemptRetryDecline::Budget),
+            ..AttemptSummary::default()
+        };
+        assert_eq!(
+            summary.to_string(),
+            " [16 requests; 16 unsent; last: request write incomplete, no complete request sent; retry declined: budget]"
         );
     }
 

@@ -435,7 +435,7 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
                         if transmission == plakous_http::TransmissionFact::NotStarted {
                             FailurePoint::Unreachable
                         } else {
-                            FailurePoint::Refused
+                            FailurePoint::RequestIncomplete
                         },
                         ModelRetryCause::Connect,
                     ))
@@ -858,7 +858,12 @@ async fn retry_step<W: FamilyWire, H: FamilyHttpHooks<W>>(
         long_stream_replays,
     );
     let phase = failure.loss.transport_phase;
-    let unsent = failure.point == FailurePoint::Unreachable;
+    let unsent = matches!(
+        failure.point,
+        FailurePoint::Unreachable
+            | FailurePoint::RequestIncomplete
+            | FailurePoint::RecordRejectedInTransit
+    );
     attempt.record_failure(
         failure.point,
         phase.map(plakous_model::ModelRetryPhase::as_str),

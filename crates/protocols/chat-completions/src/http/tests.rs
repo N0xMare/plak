@@ -776,8 +776,12 @@ async fn record_rejected_resends_immediately_on_a_fresh_connection() -> TestResu
 }
 
 #[tokio::test(start_paused = true)]
-async fn chat_unreachable_ride_out_excludes_incomplete_requests() -> TestResult {
-    for (fault, expected) in [("connect", 12), ("write-reset", 4), ("record-rejected", 4)] {
+async fn chat_unsent_ride_out_includes_incomplete_requests() -> TestResult {
+    for (fault, expected) in [
+        ("connect", 12),
+        ("write-reset", 16),
+        ("record-rejected", 16),
+    ] {
         let operation = fixture_operation(b"ride-out")?;
         let (attempt, _receiver) = fixture_attempt(operation.binding().clone())?;
         let client = Client::new(Limits::default())?.with_faults(Some(
@@ -806,9 +810,12 @@ async fn chat_unreachable_ride_out_excludes_incomplete_requests() -> TestResult 
         );
         assert_eq!(
             error.facts().ok_or("facts")?.summary().ride_out_physical,
-            if fault == "connect" { expected } else { 0 }
+            expected
         );
-        assert!(started.elapsed() <= Duration::from_secs(240));
+        assert!(started.elapsed() <= Duration::from_secs(900));
+        if fault != "connect" {
+            assert!(started.elapsed() >= Duration::from_secs(360));
+        }
     }
     Ok(())
 }

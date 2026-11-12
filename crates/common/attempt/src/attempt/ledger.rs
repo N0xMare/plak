@@ -466,7 +466,12 @@ impl PhysicalRequestLedger {
         decline: Option<&'static str>,
     ) {
         let mut state = self.lock_state();
-        if point == super::retry::FailurePoint::Unreachable {
+        if matches!(
+            point,
+            super::retry::FailurePoint::Unreachable
+                | super::retry::FailurePoint::RequestIncomplete
+                | super::retry::FailurePoint::RecordRejectedInTransit
+        ) {
             state.summary.ride_out_physical = state.summary.ride_out_physical.saturating_add(1);
         }
         state.summary.last_point = Some(point);

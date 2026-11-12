@@ -140,7 +140,7 @@ pub(super) fn retryable(
                     } else if source.transmission() == plakous_http::TransmissionFact::NotStarted {
                         FailurePoint::Unreachable
                     } else {
-                        FailurePoint::Refused
+                        FailurePoint::RequestIncomplete
                     },
                     cause: if source.cause() == Some("peer_rejected_record") {
                         ModelRetryCause::RecordRejectedInTransit
@@ -274,7 +274,12 @@ pub(super) async fn wait_to_retry(
         },
         &mut attempt.long_stream_replays,
     );
-    let unsent = failure.point == FailurePoint::Unreachable;
+    let unsent = matches!(
+        failure.point,
+        FailurePoint::Unreachable
+            | FailurePoint::RequestIncomplete
+            | FailurePoint::RecordRejectedInTransit
+    );
     attempt.core.observations_ref().record_failure(
         failure.point,
         failure.phase.map(plakous_model::ModelRetryPhase::as_str),

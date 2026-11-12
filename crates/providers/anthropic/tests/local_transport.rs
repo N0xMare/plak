@@ -2639,7 +2639,7 @@ async fn a_session_workflow_retries_peer_rejected_records_only_before_response()
             assert_eq!(marker.delay(), Duration::ZERO);
             assert!(marker.detail().as_str().contains("peer_rejected_record"));
             assert!(marker.detail().as_str().contains("RequestIncomplete"));
-            assert_eq!(marker.max_physical(), 4);
+            assert_eq!(marker.max_physical(), 16);
         }
         assert_eq!(
             timeout(Duration::from_secs(30), peer).await???,
@@ -2727,9 +2727,13 @@ async fn an_unsent_request_without_retry_revalidation_is_not_resent() -> TestRes
 }
 
 #[tokio::test(start_paused = true)]
-async fn messages_unreachable_ride_out_excludes_incomplete_requests() -> TestResult {
+async fn messages_unsent_ride_out_includes_incomplete_requests() -> TestResult {
     for workflow in [false, true] {
-        for (fault, expected) in [("connect", 12), ("write-reset", 4), ("record-rejected", 4)] {
+        for (fault, expected) in [
+            ("connect", 12),
+            ("write-reset", 16),
+            ("record-rejected", 16),
+        ] {
             let client = Client::new(Limits::default())?
                 .with_faults(Some(FaultPlan::parse(&format!("fault={fault}"))?));
             let resolved = resolved_fixture()?;
@@ -2761,11 +2765,11 @@ async fn messages_unreachable_ride_out_excludes_incomplete_requests() -> TestRes
             let error = result.expect_err("injected outage");
             let facts = error.facts().ok_or("facts")?;
             assert_eq!(facts.physical_attempts(), expected, "{fault}");
-            assert_eq!(
-                facts.summary().ride_out_physical,
-                if fault == "connect" { expected } else { 0 }
-            );
-            assert!(started.elapsed() <= Duration::from_secs(240));
+            assert_eq!(facts.summary().ride_out_physical, expected);
+            assert!(started.elapsed() <= Duration::from_secs(900));
+            if fault != "connect" {
+                assert!(started.elapsed() >= Duration::from_secs(360));
+            }
         }
     }
     Ok(())

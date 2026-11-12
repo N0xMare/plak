@@ -231,7 +231,7 @@ pub(super) fn host_behavior_identity<D, G>(
         DigestDomain::ModelBinding,
         HOST_BEHAVIOR_IDENTITY_REVISION,
         &[
-            b"responses-attempt-host-behavior-v12",
+            b"responses-attempt-host-behavior-v13",
             transport.as_slice(),
             preflight.as_slice(),
             final_authorization.as_slice(),

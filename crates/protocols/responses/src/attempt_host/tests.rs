@@ -1,6 +1,8 @@
 use super::*;
 use plakous_attempt::RetryClass;
 
+mod incomplete_retry;
+
 #[test]
 fn replay_required_history_refusals_preserve_the_protected_history_remedy() {
     use crate::ResponsesRequestContentError as ContentError;
@@ -30,14 +32,15 @@ fn replay_required_history_refusals_preserve_the_protected_history_remedy() {
 use crate::{ResponsesProviderErrorClass, ResponsesStoragePolicy};
 
 #[tokio::test(start_paused = true)]
-async fn responses_unreachable_ride_out_excludes_incomplete_and_honors_hard_deadline() -> TestResult
-{
+async fn responses_unsent_ride_out_includes_incomplete_and_honors_hard_deadline() -> TestResult {
     for workflow in [false, true] {
         for (fault, hard_seconds, expected) in [
             ("connect", None, 12),
             ("connect", Some(1), 1),
-            ("write-reset", None, 4),
-            ("record-rejected", None, 4),
+            ("write-reset", None, 16),
+            ("record-rejected", None, 16),
+            ("write-reset", Some(1), 1),
+            ("record-rejected", Some(1), 2),
         ] {
             let client = Client::new(Limits::default())?.with_faults(Some(
                 plakous_http::FaultPlan::parse(&format!("fault={fault}"))?,
@@ -75,10 +78,7 @@ async fn responses_unreachable_ride_out_excludes_incomplete_and_honors_hard_dead
                 panic!("injected outage must fail");
             };
             assert_eq!(error.facts().physical_attempts(), expected, "{fault}");
-            assert_eq!(
-                error.facts().summary().ride_out_physical,
-                if fault == "connect" { expected } else { 0 }
-            );
+            assert_eq!(error.facts().summary().ride_out_physical, expected);
             assert_eq!(dialect.preflights.load(Ordering::SeqCst), expected as usize);
             assert_eq!(
                 dialect.final_authorizations.load(Ordering::SeqCst),
@@ -88,7 +88,11 @@ async fn responses_unreachable_ride_out_excludes_incomplete_and_honors_hard_dead
                 dialect.guards_dropped.load(Ordering::SeqCst),
                 expected as usize
             );
-            assert!(monotonic_now().duration_since(started) <= Duration::from_secs(240));
+            let elapsed = monotonic_now().duration_since(started);
+            assert!(elapsed <= Duration::from_secs(900));
+            if fault != "connect" && hard.is_none() {
+                assert!(elapsed >= Duration::from_secs(360));
+            }
             if let Some(hard) = hard {
                 assert!(monotonic_now() <= hard);
             }
@@ -4302,8 +4306,8 @@ async fn shared_model_host_incomplete_arguments_deadline_is_diagnostic_and_joine
     Ok(())
 }
 
-/// Declining advice beyond the wait budget is a declined-retry behavior the
-/// identity binds, so revision 12 differs from revision 11.
+/// Incomplete-write ride-out changes dispatch behavior, so its identity differs
+/// from the earlier ordinary-retry-only behavior.
 #[tokio::test]
 async fn retry_advice_decline_changes_shared_host_behavior_identity() -> TestResult {
     let endpoint = wire_endpoint().await?;
@@ -4319,16 +4323,16 @@ async fn retry_advice_decline_changes_shared_host_behavior_identity() -> TestRes
         .ok_or_else(|| io::Error::other("missing TLS behavior identity"))?;
     let prior = Digest::sha256(
         DigestDomain::ModelBinding,
-        11,
+        12,
         &[
-            b"responses-attempt-host-behavior-v11",
+            b"responses-attempt-host-behavior-v12",
             transport.as_bytes().as_slice(),
             1_u32.to_be_bytes().as_slice(),
             1_u32.to_be_bytes().as_slice(),
         ],
     )?;
     assert_ne!(current, prior);
-    assert_eq!(HOST_BEHAVIOR_IDENTITY_REVISION, 12);
+    assert_eq!(HOST_BEHAVIOR_IDENTITY_REVISION, 13);
     Ok(())
 }
 

@@ -23,6 +23,8 @@ use crate::sessions::projector::{RootContinuationCause, RootInterruptCause};
 
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
+mod binding_upgrade;
+
 /// The root's interrupt causes the store holds when the handoff is recorded.
 fn record_root_causes(
     config: crate::runtime::HostConfig<TestExtension>,

@@ -3940,6 +3940,18 @@ this synthetic pre-resolution failure has no connection-use fact; real TLS
 pool tests pin preserved fresh/reused facts and eviction of the rejected
 connection.
 
+Paused-clock Responses, Messages and Chat tests use `fault=write-reset` and
+`fault=record-rejected` to exhaust the sixteen-request incomplete-write
+allowance across more than six virtual minutes, without real upstream traffic
+or wall-clock sleeps. Responses additionally injects eight incomplete writes
+followed by an HTTP 503: turn inference retains all four ordinary attempts,
+whereas an unsent-only session workflow stops at that first authoritative
+response. Each generation revalidates and releases its authorization; exhaustion
+retains definite refusal facts rather than inventing a possible hosted effect.
+Hard caller deadlines still cut the outage wait short. Existing actual TLS
+and response-head regressions keep complete writes, other alerts and
+post-response failures outside this allowance (chapter 01 §13.1).
+
 `FaultPlan::parse` refuses an unknown field or fault, `nth=0`, a `hang` or `stall` without
 `seconds`, and fields that do not apply to the fault. A plan from the
 environment that does not parse fails every exchange before it starts with

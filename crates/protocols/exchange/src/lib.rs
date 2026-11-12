@@ -237,6 +237,7 @@ pub fn retry_decline(
                 input.point,
                 FailurePoint::Unreachable
                     | FailurePoint::Refused
+                    | FailurePoint::RequestIncomplete
                     | FailurePoint::RecordRejectedInTransit
             ))
     {

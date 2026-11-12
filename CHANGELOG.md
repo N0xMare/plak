@@ -10,6 +10,13 @@ one cross-build carrier (a build imports its own and the previous version).
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.
 
+- Ride out multi-minute provider outages when transport evidence proves a
+  request write never completed, without spending ordinary retries or replaying
+  an ambiguously dispatched session workflow.
+- Clarify and test that Responses host-behavior revisions guard prepared
+  attempts, not frozen session bindings: existing sessions reopen exactly
+  across that revision change without a carry or rebind.
+
 - Fixed workspace reads returning stale cached bytes after a same-size rewrite.
 - Fixed pending child decisions not being offered when the child's read model
   first attaches.
