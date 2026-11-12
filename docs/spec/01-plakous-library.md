@@ -6061,12 +6061,12 @@ agent named on its execution environment at construction
 (`ExecutionEnvironment::with_line_owner`, from the job owner of §8.5). The
 direct local backend carries the owner, class and budget without reading them;
 they are the fence and idempotency key a runner checks once execution leaves
-the process (runner protocol v4, below). The owner a runner checks comes from
+the process (runner protocol v5, below). The owner a runner checks comes from
 the session's current job owner (§8.5), not from an owner a joined process
 service stored when it started. `LineOwner` lives in `plakous-tools`; it never
 enters `plakous-model`.
 
-**Runner protocol v4.** `plakous-runner-protocol` defines what a host and a
+**Runner protocol v5.** `plakous-runner-protocol` defines what a host and a
 runner say to each other over one byte stream, and `plakous-runner` implements
 both ends over an `ExecutionEnvironment` and joins them in process as a
 loopback (both published internal, chapter 06 §3, and reached from the facade
@@ -6205,7 +6205,7 @@ the normal recovery-required path before Ready. The driver's placement parking
   no effect, since the operation ran.
 - **Handshake.** The runner speaks first: `Hello { version, binary_id,
   runner_id, instance, boot_id, machine_id, descriptor, capabilities, path, home,
-  job_bound }`. The version triple is the protocol version (4), the source
+  job_bound }`. The version triple is the protocol version, the source
   revision and the build flavor, and binding requires an exact match, except
   to a home-local runner (below), which binds by protocol version alone; the
   binary id is evidence and is never compared. `instance` is fresh for every

@@ -1,6 +1,6 @@
 # plakous-runner-protocol
 
-Runner protocol v1 for Plakous: the length-prefixed JSON frames, the hello and
+The runner protocol for Plakous: the length-prefixed JSON frames, the hello and
 bind handshake, request classes, owner transfer and answers a Plakous host and
 a runner exchange over one byte stream. This crate is part of
 [Plak](https://github.com/N0xMare/plak), an embeddable single-agent
