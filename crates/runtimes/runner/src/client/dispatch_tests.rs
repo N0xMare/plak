@@ -29,7 +29,7 @@ impl CallJournal for ClosingJournal {
     }
 }
 
-fn connected(journal: Arc<ClosingJournal>) -> (RunnerClient, mpsc::UnboundedReceiver<HostFrame>) {
+fn connected(journal: &Arc<ClosingJournal>) -> (RunnerClient, mpsc::UnboundedReceiver<HostFrame>) {
     let (sender, frames) = mpsc::unbounded_channel();
     let client = RunnerClient {
         inner: Arc::new(Inner {
@@ -104,7 +104,7 @@ fn assert_not_sent(disconnect_first: bool) {
         closer: CancellationToken::new(),
         claims: AtomicU64::new(0),
     });
-    let (client, mut frames) = connected(journal.clone());
+    let (client, mut frames) = connected(&journal);
     if disconnect_first {
         client.disconnect();
     }
@@ -122,7 +122,7 @@ fn assert_not_sent(disconnect_first: bool) {
         Err(mpsc::error::TryRecvError::Empty)
     ));
     assert!(lock(&client.inner.state).pending.is_empty());
-    assert!(journal.pending().unwrap().is_empty());
+    assert_eq!(journal.pending().unwrap(), []);
     assert_eq!(
         journal.claims.load(Ordering::Relaxed),
         u64::from(!disconnect_first)
