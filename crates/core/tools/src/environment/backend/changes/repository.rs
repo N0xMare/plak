@@ -63,7 +63,7 @@ impl Repository {
             .executor
             .run(
                 &repo.identity.toplevel,
-                None,
+                Some(&repo.identity),
                 None,
                 &[
                     "rev-parse",
@@ -255,11 +255,15 @@ pub(super) fn identify(
     let metadata = match fs::symlink_metadata(&marker) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(if workspace.join(".jj").symlink_metadata().is_ok() {
-                ChangesRefusal::VcsUnsupported
-            } else {
-                ChangesRefusal::NotARepository
-            });
+            return Err(
+                if workspace.join(".jj").symlink_metadata().is_ok()
+                    || toplevel.join(".jj").symlink_metadata().is_ok()
+                {
+                    ChangesRefusal::VcsUnsupported
+                } else {
+                    ChangesRefusal::NotARepository
+                },
+            );
         }
         Err(_) => return Err(ChangesRefusal::Io),
     };
@@ -325,7 +329,8 @@ pub(super) fn identify(
         .collect::<Result<Vec<_>, ChangesRefusal>>()?
         .join("\0");
     Ok(ChangesRepository {
-        git_view: workspace.join(".jj").symlink_metadata().is_ok(),
+        git_view: workspace.join(".jj").symlink_metadata().is_ok()
+            || toplevel.join(".jj").symlink_metadata().is_ok(),
         workspace,
         toplevel,
         git_dir,
@@ -360,19 +365,34 @@ fn canonical(path: &Path) -> Result<PathBuf, ChangesRefusal> {
 }
 
 pub(super) fn protected_roots() -> Result<Vec<PathBuf>, ChangesRefusal> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let product = std::env::var_os("PLAK_HOME")
+    let home = std::env::var_os("HOME");
+    let product = std::env::var_os("PLAK_HOME");
+    let state = std::env::var_os("XDG_STATE_HOME");
+    protected_roots_from(home.as_deref(), product.as_deref(), state.as_deref())
+}
+
+pub(super) fn protected_roots_from(
+    home: Option<&std::ffi::OsStr>,
+    product: Option<&std::ffi::OsStr>,
+    state: Option<&std::ffi::OsStr>,
+) -> Result<Vec<PathBuf>, ChangesRefusal> {
+    let home = home.filter(|value| !value.is_empty()).map(PathBuf::from);
+    let product = product
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .or_else(|| home.as_ref().map(|home| home.join(".plak")));
-    let state = std::env::var_os("XDG_STATE_HOME")
+    let state = state
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .or_else(|| home.map(|home| home.join(".local/state")))
         .map(|state| state.join("plak"));
-    [product, state]
-        .into_iter()
-        .flatten()
-        .map(|path| resolve_missing(&path))
-        .collect()
+    [
+        product.ok_or(ChangesRefusal::UnsafeRepository)?,
+        state.ok_or(ChangesRefusal::UnsafeRepository)?,
+    ]
+    .into_iter()
+    .map(|path| resolve_missing(&path))
+    .collect()
 }
 
 fn resolve_missing(path: &Path) -> Result<PathBuf, ChangesRefusal> {

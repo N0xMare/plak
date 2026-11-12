@@ -3851,6 +3851,13 @@ directories, oversized inputs/output and entry counts. Serial process-stop
 fixtures verify byte-cap, deadline, cancellation and dropped-future group
 cleanup, including descendants retaining pipes. These tests never invoke `jj`
 or a provider, and production probes never write an object into the user's repo.
+Paired-runner conformance compares the exact local/remote status, text/binary
+diff and stale-index refusal through a placed execution environment, and
+verifies that a home-local process transport neither receives nor serves a
+Changes request. Missing-promisor-object fixtures include a nonblocking local
+listener and hostile per-protocol policy, proving no network connection or
+object write. Unsupported version, ignored attribute-source and disabled-CLI
+fixtures prove closed `vcs_unavailable` refusals.
 
 Two classes of evidence exist. Each answers a different question, and neither
 substitutes for the other. Offline tests are never a substitute for live

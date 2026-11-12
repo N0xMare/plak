@@ -110,6 +110,17 @@ impl ChangesAnswer {
                 {
                     return Err(ChangesRefusal::OutputLimit);
                 }
+                ChangesRequest::diff(
+                    status.repository.clone(),
+                    status.observation.clone(),
+                    ChangesEntry {
+                        path: ".".into(),
+                        state: "??".into(),
+                        head_object: None,
+                        index_object: None,
+                        content: ChangesContent::Missing,
+                    },
+                )?;
                 for entry in &status.entries {
                     ChangesRequest::diff(
                         status.repository.clone(),
@@ -169,7 +180,8 @@ impl ChangesRequest {
             absolute(path)?;
         }
         relative(&entry.path)?;
-        if !digest(&repository.identity)
+        if !repository.workspace.starts_with(&repository.toplevel)
+            || !digest(&repository.identity)
             || !digest(&observation.index)
             || !observation.head.as_deref().is_none_or(object)
             || !entry.head_object.as_deref().is_none_or(object)

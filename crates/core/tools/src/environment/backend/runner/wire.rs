@@ -34,6 +34,12 @@ pub(super) fn encode_changes_answer(
     to_value(answer)
 }
 
+pub(super) fn decode_changes_answer(value: Value) -> Result<ChangesAnswer, ExecutionBackendError> {
+    let answer: ChangesAnswer = from_value(value)?;
+    answer.validate().map_err(|_| malformed())?;
+    Ok(answer)
+}
+
 pub(super) fn malformed() -> ExecutionBackendError {
     invalid_request("runner wire value is malformed")
 }

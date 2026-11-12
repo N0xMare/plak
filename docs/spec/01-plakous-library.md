@@ -6715,6 +6715,9 @@ or wakes an agent. A home-local process daemon refuses the verb: local Changes
 uses the same executor in the embedding process. The unsupported official
 hosting seam is `plakous::tools::changes`; the host retains the execution
 identities behind opaque client tokens rather than exposing free diff inputs.
+The environment verifies its live backend identity and routes the canonical
+workspace through that same frozen node placement. A disconnected remote
+backend fails as remote I/O; it never falls back to an equal local pathname.
 
 The runner seam keeps a read's `OperationClass::EffectCall` context intact:
 it identifies the model call and its placement-hold eligibility, not an effect

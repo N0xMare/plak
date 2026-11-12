@@ -22,10 +22,7 @@ pub(super) async fn execute(
     if std::env::var("GIT_CLI_ENABLED").is_ok_and(|value| value.eq_ignore_ascii_case("false")) {
         return Err(ChangesRefusal::VcsUnavailable);
     }
-    let executor = Executor {
-        deadline,
-        cancellation,
-    };
+    let executor = Executor::new(deadline, cancellation);
     supported(&executor, workspace.root()).await?;
     let known = match &request.0 {
         Request::Status { repository } => repository.clone(),
@@ -49,7 +46,7 @@ pub(super) async fn execute(
     }
 }
 
-async fn supported(executor: &Executor, cwd: &Path) -> Result<(), ChangesRefusal> {
+pub(super) async fn supported(executor: &Executor, cwd: &Path) -> Result<(), ChangesRefusal> {
     let version = executor.run(cwd, None, None, &["--version"], 256).await?;
     if !version.success || !supported_version(&text(version.bytes)?) {
         return Err(ChangesRefusal::VcsUnavailable);

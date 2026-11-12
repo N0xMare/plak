@@ -31,30 +31,21 @@ pub fn workspace_changes(
     environment.workspace_changes(request, control)
 }
 
+#[cfg(unix)]
 pub(super) fn execute(
     workspace: super::ExecutionWorkspace,
     request: ChangesRequest,
     control: OperationContext,
 ) -> ExecutionBackendFuture<ChangesAnswer> {
-    #[cfg(unix)]
-    {
-        Box::pin(async move {
-            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-            let cancellation = control.cancellation().clone();
-            let result = tokio::select! {
-                biased;
-                () = cancellation.cancelled() => Err(ChangesRefusal::Cancelled),
-                () = tokio::time::sleep_until(deadline) => Err(ChangesRefusal::Deadline),
-                answer = git::execute(workspace, request, deadline, cancellation.clone()) => answer,
-            };
-            Ok(result.unwrap_or_else(ChangesAnswer::Refused))
-        })
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (workspace, request, control);
-        Box::pin(std::future::ready(Ok(ChangesAnswer::Refused(
-            ChangesRefusal::VcsUnavailable,
-        ))))
-    }
+    Box::pin(async move {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let cancellation = control.cancellation().clone();
+        let result = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => Err(ChangesRefusal::Cancelled),
+            () = tokio::time::sleep_until(deadline) => Err(ChangesRefusal::Deadline),
+            answer = git::execute(workspace, request, deadline, cancellation.clone()) => answer,
+        };
+        Ok(result.unwrap_or_else(ChangesAnswer::Refused))
+    })
 }

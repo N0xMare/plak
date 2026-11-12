@@ -36,10 +36,10 @@ async fn terminated(root: &Path) {
 #[tokio::test]
 async fn cap_kills_the_whole_group_including_pipe_holders() {
     let root = tempfile::tempdir().unwrap();
-    let executor = Executor {
-        deadline: Instant::now() + Duration::from_secs(5),
-        cancellation: CancellationToken::new(),
-    };
+    let executor = Executor::new(
+        Instant::now() + Duration::from_secs(5),
+        CancellationToken::new(),
+    );
     let error = executor
         .output(
             shell(root.path(), "while :; do printf 0123456789; done"),
@@ -57,10 +57,10 @@ async fn deadline_and_cancellation_kill_stalled_groups() {
     for cancel in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let cancellation = CancellationToken::new();
-        let executor = Executor {
-            deadline: Instant::now() + Duration::from_millis(200),
-            cancellation: cancellation.clone(),
-        };
+        let executor = Executor::new(
+            Instant::now() + Duration::from_millis(200),
+            cancellation.clone(),
+        );
         let answer = executor.output(shell(root.path(), "wait"), 1024);
         let cancel_task = async {
             if cancel {
@@ -86,10 +86,10 @@ async fn deadline_and_cancellation_kill_stalled_groups() {
 #[tokio::test]
 async fn dropping_a_request_kills_its_group() {
     let root = tempfile::tempdir().unwrap();
-    let executor = Executor {
-        deadline: Instant::now() + Duration::from_secs(5),
-        cancellation: CancellationToken::new(),
-    };
+    let executor = Executor::new(
+        Instant::now() + Duration::from_secs(5),
+        CancellationToken::new(),
+    );
     {
         let answer = executor.output(shell(root.path(), "wait"), 1024);
         tokio::pin!(answer);
@@ -99,4 +99,29 @@ async fn dropping_a_request_kills_its_group() {
         }
     }
     terminated(root.path()).await;
+}
+
+#[tokio::test]
+async fn a_stalled_filesystem_open_is_killed_at_the_five_second_deadline() {
+    let root = checkout();
+    let environment = environment(root.path());
+    std::fs::rename(
+        root.path().join(".git/config"),
+        root.path().join(".git/config.saved"),
+    )
+    .unwrap();
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(root.path().join(".git/config"))
+            .status()
+            .unwrap()
+            .success()
+    );
+    let result = tokio::time::timeout(
+        Duration::from_secs(7),
+        ask(&environment, ChangesRequest::status()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result, ChangesAnswer::Refused(ChangesRefusal::Deadline));
 }

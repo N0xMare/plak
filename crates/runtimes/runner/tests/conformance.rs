@@ -43,6 +43,100 @@ mod changes {
     };
     use plakous_tools::internal::runner::RunnerVerb;
 
+    fn git(root: &Path, args: &[&str]) {
+        let result = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+            ])
+            .args(args)
+            .current_dir(root)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn placed_changes_backend_matches_local_status_diff_conflict_and_refusals() {
+        use plakous_tools::internal::changes::ChangesDiff;
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), &["init", "--quiet"]);
+        std::fs::write(root.path().join("file"), "old\n").unwrap();
+        git(root.path(), &["add", "."]);
+        git(root.path(), &["commit", "--quiet", "-m", "fixture"]);
+        std::fs::write(root.path().join("file"), "new\n").unwrap();
+        let direct = host(root.path());
+        let (_link, remote) = loopback(root.path()).await;
+        let local_status = workspace_changes(&direct, ChangesRequest::status(), unkeyed())
+            .await
+            .unwrap();
+        let remote_status = workspace_changes(&remote, ChangesRequest::status(), unkeyed())
+            .await
+            .unwrap();
+        assert_eq!(local_status, remote_status);
+        let ChangesAnswer::Status(observed) = local_status else {
+            panic!("status");
+        };
+        let request = ChangesRequest::diff(
+            observed.repository.clone(),
+            observed.observation.clone(),
+            observed.entries[0].clone(),
+        )
+        .unwrap();
+        let local_diff = workspace_changes(&direct, request.clone(), unkeyed())
+            .await
+            .unwrap();
+        assert!(matches!(
+            local_diff,
+            ChangesAnswer::Diff(ChangesDiff::Patch { .. })
+        ));
+        assert_eq!(
+            local_diff,
+            workspace_changes(&remote, request.clone(), unkeyed())
+                .await
+                .unwrap()
+        );
+        git(root.path(), &["add", "file"]);
+        for environment in [&direct, &remote] {
+            assert_eq!(
+                workspace_changes(environment, request.clone(), unkeyed())
+                    .await
+                    .unwrap(),
+                ChangesAnswer::Refused(ChangesRefusal::Conflict)
+            );
+        }
+        std::fs::write(root.path().join("file"), b"binary\0").unwrap();
+        for environment in [&direct, &remote] {
+            let ChangesAnswer::Status(status) =
+                workspace_changes(environment, ChangesRequest::status(), unkeyed())
+                    .await
+                    .unwrap()
+            else {
+                panic!("status");
+            };
+            let request = ChangesRequest::diff(
+                status.repository,
+                status.observation,
+                status.entries[0].clone(),
+            )
+            .unwrap();
+            assert!(matches!(
+                workspace_changes(environment, request, unkeyed())
+                    .await
+                    .unwrap(),
+                ChangesAnswer::Diff(ChangesDiff::Binary { .. })
+            ));
+        }
+    }
+
     #[tokio::test]
     async fn paired_changes_dispatches_build_reads_and_refuses_free_options() {
         let root = tempfile::tempdir().unwrap();

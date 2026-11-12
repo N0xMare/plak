@@ -597,7 +597,8 @@ The child environment starts empty, retaining only PATH and fixed settings:
 system/global config disabled, fsmonitor off, hooks and attributes files at
 `/dev/null`, system attributes off, empty credential helper, all protocols
 disabled, quotePath false, no terminal prompt or askpass, empty-tree attributes,
-no lazy fetch, literal pathspecs and no optional locks. Diff also fixes
+no lazy fetch, an empty protocol allowlist (including per-protocol overrides),
+literal pathspecs, no pager and no optional locks. Diff also fixes
 `--no-ext-diff --no-textconv --ignore-submodules=all --no-renames`. No `jj`
 process runs: non-colocated repositories answer `vcs_unsupported`, and colocated
 repositories are labelled a Git view. Untracked entries are listed with

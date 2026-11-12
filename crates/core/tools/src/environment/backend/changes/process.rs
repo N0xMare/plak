@@ -17,9 +17,26 @@ pub(super) struct Output {
 pub(super) struct Executor {
     pub deadline: Instant,
     pub cancellation: CancellationToken,
+    #[cfg(test)]
+    program: Option<std::path::PathBuf>,
 }
 
 impl Executor {
+    pub const fn new(deadline: Instant, cancellation: CancellationToken) -> Self {
+        Self {
+            deadline,
+            cancellation,
+            #[cfg(test)]
+            program: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn test_program(mut self, program: std::path::PathBuf) -> Self {
+        self.program = Some(program);
+        self
+    }
+
     pub fn check(&self) -> Result<(), ChangesRefusal> {
         if self.cancellation.is_cancelled() {
             Err(ChangesRefusal::Cancelled)
@@ -39,10 +56,17 @@ impl Executor {
         cap: usize,
     ) -> Result<Output, ChangesRefusal> {
         self.check()?;
-        let mut command = command(cwd);
+        let program = Path::new("git");
+        #[cfg(test)]
+        let program = self.program.as_deref().unwrap_or(program);
+        let mut command = command(program, cwd);
         if let Some(repo) = repository {
             command.env("GIT_DIR", &repo.git_dir);
             command.env("GIT_WORK_TREE", &repo.toplevel);
+            command.env(
+                "GIT_CEILING_DIRECTORIES",
+                repo.workspace.parent().unwrap_or(&repo.workspace),
+            );
         }
         if let Some(attributes) = attributes {
             command.env("GIT_ATTR_SOURCE", attributes);
@@ -125,8 +149,8 @@ async fn drain(mut pipe: impl AsyncRead + Unpin, cap: usize) -> Result<Vec<u8>, 
     }
 }
 
-fn command(cwd: &Path) -> Command {
-    let mut command = Command::new("git");
+fn command(program: &Path, cwd: &Path) -> Command {
+    let mut command = Command::new(program);
     // Empty-then-curated also removes unknown future GIT_* steering variables.
     command.env_clear();
     if let Some(path) = std::env::var_os("PATH") {
@@ -143,6 +167,8 @@ fn command(cwd: &Path) -> Command {
         .env("GIT_ASKPASS", "")
         .env("SSH_ASKPASS", "")
         .env("GIT_NO_LAZY_FETCH", "1")
+        // An empty allowlist also overrides protocol.<name>.allow=always.
+        .env("GIT_ALLOW_PROTOCOL", "")
         .env("GIT_LITERAL_PATHSPECS", "1")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(Stdio::null())
@@ -150,6 +176,7 @@ fn command(cwd: &Path) -> Command {
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .process_group(0)
+        .arg("--no-pager")
         .arg("--no-optional-locks");
     for setting in [
         "core.fsmonitor=false",

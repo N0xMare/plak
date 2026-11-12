@@ -2,6 +2,63 @@ use super::*;
 use std::os::unix::fs::PermissionsExt;
 
 #[test]
+fn protected_roots_match_empty_variable_fallbacks_and_fail_closed_without_authority() {
+    use crate::environment::backend::changes::repository::protected_roots_from;
+    use std::ffi::OsStr;
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().canonicalize().unwrap();
+    assert_eq!(
+        protected_roots_from(
+            Some(home.as_os_str()),
+            Some(OsStr::new("")),
+            Some(OsStr::new(""))
+        )
+        .unwrap(),
+        vec![home.join(".plak"), home.join(".local/state/plak")]
+    );
+    assert!(protected_roots_from(None, None, None).is_err());
+    assert!(
+        protected_roots_from(Some(home.as_os_str()), None, Some(OsStr::new("relative"))).is_err()
+    );
+}
+
+#[tokio::test]
+async fn missing_promised_objects_cannot_reach_a_network_listener_or_write_objects() {
+    let root = checkout();
+    let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!("http://{}/repository", listener.local_addr().unwrap());
+    git(root.path(), &["config", "remote.origin.url", &url]);
+    git(root.path(), &["config", "remote.origin.promisor", "true"]);
+    git(root.path(), &["config", "protocol.http.allow", "always"]);
+    std::fs::write(root.path().join("file"), "changed\n").unwrap();
+    let environment = environment(root.path());
+    let observed = status(&environment).await;
+    let object = observed.entries[0].head_object.as_deref().unwrap();
+    let path = root
+        .path()
+        .join(".git/objects")
+        .join(&object[..2])
+        .join(&object[2..]);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(
+        ask(&environment, diff_request(&observed, 0)).await,
+        ChangesAnswer::Refused(ChangesRefusal::VcsUnavailable)
+    );
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert!(!path.exists());
+    assert!(
+        !root
+            .path()
+            .join(".git/objects/4b/825dc642cb6eb9a060e54bf8d69288fbee4904")
+            .exists()
+    );
+}
+
+#[test]
 fn protected_workspace_git_and_linked_common_directories_refuse_in_both_directions() {
     use crate::environment::backend::changes::repository::identify;
     let root = checkout();

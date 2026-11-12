@@ -780,6 +780,21 @@ fn failure_error(failure: RunnerFailure) -> ExecutionBackendError {
 impl sealed::Sealed for RunnerBackend {}
 
 impl ExecutionBackend for RunnerBackend {
+    fn workspace_changes(
+        &self,
+        workspace: ExecutionWorkspace,
+        request: super::changes::ChangesRequest,
+        control: OperationContext,
+    ) -> ExecutionBackendFuture<super::changes::ChangesAnswer> {
+        self.call(
+            RunnerVerb::WorkspaceChanges,
+            &workspace,
+            wire::to_value(&request),
+            &control,
+            wire::decode_changes_answer,
+        )
+    }
+
     fn identity(&self) -> &ExecutionBackendIdentity {
         &self.identity
     }

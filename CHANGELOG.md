@@ -61,6 +61,8 @@ one cross-build carrier (a build imports its own and the previous version).
   and network/lazy fetch, and explicit refusals on unsafe repositories or limits.
   Paired runner protocol 6 adds the ownerless BuildRead `workspace.changes`
   status/diff verb; home-local daemons remain process-only.
+  Placed environments route the same executor through their frozen backend
+  identity, with matching local and paired-runner results and no local fallback.
 
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.

@@ -8,6 +8,8 @@ use crate::{ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironme
 
 mod hostile;
 mod process_stops;
+mod unsupported;
+mod wire;
 
 #[tokio::test]
 async fn diff_output_and_old_or_index_blob_inputs_are_bounded() {
@@ -127,6 +129,34 @@ async fn status_diff_stale_worktree_and_stale_index() {
         ask(&environment, diff_request(&observed, 0)).await,
         ChangesAnswer::Refused(ChangesRefusal::Conflict)
     );
+    git(root.path(), &["commit", "--quiet", "-m", "staged content"]);
+    std::fs::write(root.path().join("file"), "fourth\n").unwrap();
+    let observed = status(&environment).await;
+    git(
+        root.path(),
+        &["commit", "--quiet", "--allow-empty", "-m", "new head"],
+    );
+    assert_eq!(
+        ask(&environment, diff_request(&observed, 0)).await,
+        ChangesAnswer::Refused(ChangesRefusal::Conflict)
+    );
+}
+
+#[tokio::test]
+async fn sha256_repositories_use_their_own_read_only_empty_tree_source() {
+    let root = tempfile::tempdir().unwrap();
+    git(root.path(), &["init", "--quiet", "--object-format=sha256"]);
+    std::fs::write(root.path().join("file"), "old\n").unwrap();
+    git(root.path(), &["add", "file"]);
+    git(root.path(), &["commit", "--quiet", "-m", "fixture"]);
+    std::fs::write(root.path().join("file"), "new\n").unwrap();
+    let environment = environment(root.path());
+    let observed = status(&environment).await;
+    assert_eq!(observed.observation.head.as_ref().unwrap().len(), 64);
+    assert!(matches!(
+        ask(&environment, diff_request(&observed, 0)).await,
+        ChangesAnswer::Diff(ChangesDiff::Patch { .. })
+    ));
 }
 
 #[tokio::test]
