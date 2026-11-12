@@ -5422,7 +5422,11 @@ keeps its separate readiness path.
   reaped by a waiter. A closed daemon link is redialed under the same bound,
   reconnecting the existing client and repeating sweep, recovery, recorded stops
   and settled-foreground cleanup before readiness. Failures block that runner row,
-  not the host. Needed connections retry with 1, 2, 5 and then 15 second backoff;
+  not the host. A prompt whose full reopen races this process's own lease-only
+  readoption waits up to two seconds behind it instead of rejecting the draft
+  as foreign-held. A timeout identifies this host's reconciliation and asks for
+  a short retry; other instances still receive the ordinary fenced lease refusal.
+  Needed connections retry with 1, 2, 5 and then 15 second backoff;
   idle remote picker rows do not keep an SSH connection alive. Recorded stop debt
   skipped under a live holder retains the required connection and one coalesced
   delayed retry on that same backoff and then a steady 15-second cadence. The

@@ -427,6 +427,7 @@ impl ProductStateRoots {
                 let stopped = crate::runner_adoption::finish_recorded_stop(
                     client,
                     &sessions,
+                    self.runtime_database(),
                     head.line(),
                     &intent,
                 )

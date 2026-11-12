@@ -42,6 +42,8 @@ impl RunnerLink for CutLink {
                 && payload_match
                     .as_ref()
                     .is_none_or(|selected| call.payload().to_string().contains(selected.trim()));
+            let lose_answer = std::fs::read_to_string(directory.join("lose-answer.verb"))
+                .is_ok_and(|selected| selected.trim() == verb);
             if before && claim(&directory.join("before-send.entered")) {
                 release(
                     &directory.join("before-send.release"),
@@ -52,6 +54,14 @@ impl RunnerLink for CutLink {
                 client.disconnect();
             }
             let answer = client.call(call).await;
+            if lose_answer && answer.is_ok() && claim(&directory.join("lose-answer.entered")) {
+                release(&directory.join("lose-answer.release"), None, None).await?;
+                client.disconnect();
+                tokio::time::sleep(super::runner_windows().effect).await;
+                return Err(RunnerFailure::OutcomeUnknown(
+                    "injected lost foreground answer".into(),
+                ));
+            }
             let marker = match &answer {
                 Err(RunnerFailure::NotSent(_)) => Some("not-sent"),
                 Err(RunnerFailure::ReadInterrupted(_)) => Some("read-interrupted"),

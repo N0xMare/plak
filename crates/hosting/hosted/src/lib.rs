@@ -136,6 +136,8 @@ mod test_support_runner;
 mod test_support_runner {
     pub(crate) const fn cut(_: &str) {}
     pub(crate) const fn reopen_cut(_: &str) {}
+    pub(crate) async fn hold_readoption() {}
+    pub(crate) const fn readoption_waiting() {}
     pub(crate) const fn selected(_: &str) -> bool {
         false
     }

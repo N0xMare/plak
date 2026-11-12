@@ -42,11 +42,33 @@ fn clock(fixture: &Fixture, milliseconds: u64) {
     std::fs::rename(temporary, directory.join("lease-clock-ms")).unwrap();
 }
 
-fn begin(fixture: &Fixture, window: u64) -> (Host, Client, String) {
+#[derive(Clone, Copy)]
+enum WakeMode {
+    Settled,
+    Live,
+}
+
+fn begin(fixture: &Fixture, mode: WakeMode) -> (Host, Client, String) {
+    begin_env(fixture, mode, &[])
+}
+
+fn begin_env(fixture: &Fixture, mode: WakeMode, env: &[(&str, String)]) -> (Host, Client, String) {
     clock(fixture, 0);
+    let window = match mode {
+        WakeMode::Settled => 1200,
+        WakeMode::Live => 10000,
+    };
     let mut script = job_script(fixture, false);
     script["runner_windows"] =
         json!({"read_ms": window, "effect_ms": window, "ping_ms": 100, "dead_ms": 500});
+    if matches!(mode, WakeMode::Settled) {
+        let cut = fixture.root.join("foreground-cut");
+        std::fs::create_dir_all(&cut).unwrap();
+        std::fs::write(cut.join("lose-answer.verb"), b"process.start").unwrap();
+        script["runner_hold_cuts"] = json!(cut);
+        // An unknown start ends the first turn before another model step.
+        script["steps"].as_array_mut().unwrap().remove(1);
+    }
     script["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(3000);
     let command = script["steps"][0]["output"]["tool"]["arguments"]["command"].as_str().unwrap().replace("read line", &format!(
         "n=0; while [ ! -f '{}' ]; do [ \"$n\" -lt 30000 ] || exit 1; n=$((n + 1)); sleep 0.01; done; printf done > '{}'",
@@ -65,7 +87,7 @@ fn begin(fixture: &Fixture, window: u64) -> (Host, Client, String) {
         json!({"output":{"text":ANSWER},"finish":"stop"}),
     ]);
     fixture.write_script(&script);
-    let host = start(fixture);
+    let host = start_env(fixture, &[], env);
     let mut client = Client::connect(&host);
     // The daemon and model are admitted only on the following create/open.
     let Outcome::Ok(Answer::Created { session, node, .. }) =
@@ -94,7 +116,32 @@ fn begin(fixture: &Fixture, window: u64) -> (Host, Client, String) {
         assert!(std::time::Instant::now() < deadline);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
+    if matches!(mode, WakeMode::Settled) {
+        while !fixture
+            .root
+            .join("foreground-cut/lose-answer.entered")
+            .is_file()
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "start answer was never held"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
     (host, client, session)
+}
+
+fn pause(fixture: &Fixture, daemon: i32) -> Paused {
+    let paused = Paused::new(daemon);
+    if fixture.root.join("foreground-cut").is_dir() {
+        std::fs::write(
+            fixture.root.join("foreground-cut/lose-answer.release"),
+            b"release",
+        )
+        .unwrap();
+    }
+    paused
 }
 
 fn terminal(client: &mut Client) {
@@ -126,13 +173,26 @@ fn following_effect(fixture: &Fixture, client: &mut Client, session: &str) {
         .unwrap()
         .node;
     let attachment = client.attach(41, &node);
-    for id in [42, 43] {
-        if client.try_prompt(id, attachment, "following effect", ANSWER)
-            && fixture.root.join("next-effect").exists()
-        {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    client.read_deadline = Some(deadline);
+    // At most four refusals, spaced by the documented reconnect backoff.
+    for (attempt, delay) in [0, 1, 2, 5, 15].into_iter().enumerate() {
+        std::thread::sleep(std::time::Duration::from_secs(delay));
+        assert!(
+            std::time::Instant::now() < deadline,
+            "runner recovery exceeded its deadline"
+        );
+        let id = 42 + u64::try_from(attempt).unwrap();
+        if client.try_prompt(id, attachment, &format!("following effect {id}"), ANSWER) {
+            assert!(
+                fixture.root.join("next-effect").exists(),
+                "the prompt answered without its effect"
+            );
             break;
         }
+        assert!(attempt < 4, "runner recovery exceeded four prompt refusals");
     }
+    client.read_deadline = None;
     assert!(fixture.root.join("next-effect").exists());
     assert!(
         !fixture.root.join("effect-before-cleanup").exists(),
@@ -156,11 +216,75 @@ fn runner_wake_settled_foreground() {
     settled_foreground(std::time::Duration::ZERO);
 }
 
+#[test]
+fn runner_wake_settled_foreground_after_delayed_reconnect() {
+    settled_foreground(std::time::Duration::from_millis(2500));
+}
+
+#[test]
+fn runner_reopen_waits_for_its_readoption() {
+    let Some(fixture) = fixture() else { return };
+    let hold = fixture.root.join("readoption-hold");
+    std::fs::create_dir(&hold).unwrap();
+    let (mut host, mut client, session) = begin_env(
+        &fixture,
+        WakeMode::Settled,
+        &[(
+            "PLAK_TEST_HOST_READOPT_CUT",
+            format!("hold:{}", hold.display()),
+        )],
+    );
+    let (pid, daemon) = job(&fixture);
+    let mut paused = pause(&fixture, daemon);
+    terminal(&mut client);
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    paused.resume();
+    let deadline = std::time::Instant::now() + WAIT;
+    while !hold.join("entered").is_file() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "readoption never held the lease"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let node = client
+        .rows(40)
+        .into_iter()
+        .find(|row| row.session == session)
+        .unwrap()
+        .node;
+    let attachment = client.attach(41, &node);
+    let answered = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            while !hold.join("waiting").is_file() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            std::fs::write(hold.join("release"), b"release").unwrap();
+        });
+        client.try_prompt(42, attachment, "following effect", ANSWER)
+    });
+    assert!(
+        answered,
+        "a prompt racing this host's readoption was rejected: {:?}",
+        host.lines.try_iter().collect::<Vec<_>>()
+    );
+    assert!(
+        hold.join("waiting").is_file(),
+        "the prompt never waited on readoption"
+    );
+    assert!(fixture.root.join("next-effect").is_file());
+    assert!(!fixture.root.join("effect-before-cleanup").is_file());
+    stopped(pid);
+    job(&fixture);
+    stop(&mut host);
+}
+
 fn settled_foreground(resume_delay: std::time::Duration) {
     let Some(fixture) = fixture() else { return };
-    let (mut host, mut client, session) = begin(&fixture, 1200);
+    let (mut host, mut client, session) = begin(&fixture, WakeMode::Settled);
     let (pid, daemon) = job(&fixture);
-    let mut paused = Paused::new(daemon);
+    let mut paused = pause(&fixture, daemon);
     terminal(&mut client);
     assert!(alive(pid), "frozen awake time expired the owner lease");
     let settled = effect_settlements(&fixture, &session, false);
@@ -185,9 +309,9 @@ fn settled_foreground(resume_delay: std::time::Duration) {
 #[test]
 fn runner_wake_live_foreground() {
     let Some(fixture) = fixture() else { return };
-    let (mut host, mut client, session) = begin(&fixture, 10000);
+    let (mut host, mut client, session) = begin(&fixture, WakeMode::Live);
     let (pid, daemon) = job(&fixture);
-    let mut paused = Paused::new(daemon);
+    let mut paused = pause(&fixture, daemon);
     std::thread::sleep(std::time::Duration::from_millis(1100));
     assert!(alive(pid));
     paused.resume();
@@ -206,9 +330,9 @@ fn runner_wake_live_foreground() {
 #[test]
 fn runner_lease_lapse_reports_foreground() {
     let Some(fixture) = fixture() else { return };
-    let (mut host, mut client, session) = begin(&fixture, 1200);
+    let (mut host, mut client, session) = begin(&fixture, WakeMode::Settled);
     let (pid, daemon) = job(&fixture);
-    let mut paused = Paused::new(daemon);
+    let mut paused = pause(&fixture, daemon);
     terminal(&mut client);
     let unknown = unknown_effects(&fixture, &session);
     clock(&fixture, 301_000);

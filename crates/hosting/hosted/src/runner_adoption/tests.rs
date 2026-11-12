@@ -160,10 +160,14 @@ async fn another_store_skips_the_line(directory: &Path, client: &RunnerClient, f
     )
     .unwrap();
     let (sibling, _) = bind(directory, "instance-3").await;
-    let (readopted, failed) =
-        crate::runner_adoption::readopt_lines(&sibling, &other, "plak:readopt")
-            .await
-            .unwrap();
+    let (readopted, failed) = crate::runner_adoption::readopt_lines(
+        &sibling,
+        &other,
+        &directory.join("other-runtime.sqlite3"),
+        "plak:readopt",
+    )
+    .await
+    .unwrap();
     assert_eq!((readopted, failed), (Vec::new(), Vec::new()));
     let lines = client.lines().await.unwrap();
     assert!(lines[0].adopted);
@@ -222,10 +226,14 @@ async fn a_returning_host_readopts_its_line_under_a_lease_only_head() {
 
     // The same host identity returns.
     let (client, backend) = bind(directory.path(), "instance-2").await;
-    let (readopted, failed) =
-        crate::runner_adoption::readopt_lines(&client, &sessions, "plak:readopt")
-            .await
-            .unwrap();
+    let (readopted, failed) = crate::runner_adoption::readopt_lines(
+        &client,
+        &sessions,
+        &directory.path().join("runtime.sqlite3"),
+        "plak:readopt",
+    )
+    .await
+    .unwrap();
     assert_eq!(failed, Vec::new());
     assert_eq!(readopted.len(), 1);
     let adopted = &readopted[0];
@@ -367,10 +375,14 @@ async fn a_held_line_does_not_prevent_the_next_lines_sweep() {
     let free_line = free.line();
     free.release().await.unwrap();
     let held = heads.pop().unwrap();
-    let (readopted, failed) =
-        crate::runner_adoption::readopt_lines(&client, &sessions, "sweep:retry")
-            .await
-            .unwrap();
+    let (readopted, failed) = crate::runner_adoption::readopt_lines(
+        &client,
+        &sessions,
+        &workspace.join("runtime.sqlite3"),
+        "sweep:retry",
+    )
+    .await
+    .unwrap();
     assert_eq!(failed.len(), 1);
     assert_eq!(failed[0].line, held.line().to_string());
     assert!(

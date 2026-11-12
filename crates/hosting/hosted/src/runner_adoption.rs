@@ -15,6 +15,9 @@
 use crate::test_support_runner::cut;
 use std::str::FromStr as _;
 
+mod admission;
+pub(crate) use admission::admit_open;
+
 use plakous::model::LineId;
 use plakous::runner::RunnerClient;
 use plakous::sessions::{AgentSessions, AgentSessionsErrorKind, SessionOperationId};
@@ -79,6 +82,7 @@ impl From<String> for AdoptionFailure {
 pub async fn readopt_lines(
     client: &RunnerClient,
     sessions: &AgentSessions,
+    database: &std::path::Path,
     operation_prefix: &str,
 ) -> Result<(Vec<Readopted>, Vec<ReadoptFailure>), RunnerFailure> {
     if crate::test_support_runner::selected("skip-readopt") {
@@ -95,7 +99,16 @@ pub async fn readopt_lines(
         {
             continue;
         }
-        match readopt_line(client, sessions, operation_prefix, &status.line, None).await {
+        match readopt_line(
+            client,
+            sessions,
+            database,
+            operation_prefix,
+            &status.line,
+            None,
+        )
+        .await
+        {
             Ok(line) => readopted.push(line),
             Err(failure) => failed.push(ReadoptFailure {
                 line: status.line,
@@ -151,12 +164,14 @@ pub async fn report_obsolete_lines(
 pub async fn finish_recorded_stop(
     client: &RunnerClient,
     sessions: &AgentSessions,
+    database: &std::path::Path,
     line: LineId,
     intent: &str,
 ) -> Result<Readopted, String> {
     readopt_line(
         client,
         sessions,
+        database,
         "plak:host:stop",
         &line.to_string(),
         Some(intent),
@@ -183,11 +198,16 @@ pub async fn finish_recorded_stop_held(
 async fn readopt_line(
     client: &RunnerClient,
     sessions: &AgentSessions,
+    database: &std::path::Path,
     operation_prefix: &str,
     line: &str,
     stop: Option<&str>,
 ) -> Result<Readopted, AdoptionFailure> {
     let line = LineId::from_str(line).map_err(|error| format!("line id: {error}"))?;
+    let _admission = admission::try_readoption(database, line).ok_or_else(|| AdoptionFailure {
+        reason: "this host is opening the line's runtime".into(),
+        held_elsewhere: true,
+    })?;
     let operation = SessionOperationId::new(format!("{operation_prefix}:{line}"))
         .map_err(|error| format!("operation id: {error}"))?;
     let head = sessions
@@ -201,6 +221,7 @@ async fn readopt_line(
             reason: format!("the line's head could not be held: {error}"),
         })?;
     cut("lease");
+    crate::test_support_runner::hold_readoption().await;
     let adopted = readopt_held(client, &head, stop).await;
     let released = head
         .release()

@@ -566,10 +566,17 @@ async fn reconcile_remote(
     let sessions = roots
         .runtime_sessions()
         .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
-    let (readopted, failures) =
-        plakous_hosted::runner_adoption::readopt_lines(client, &sessions, "plak:host:readopt")
-            .await
-            .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    let (readopted, failures) = plakous_hosted::runner_adoption::readopt_lines(
+        client,
+        &sessions,
+        &services
+            .paths()
+            .map_err(|_| unavailable(ProbePhase::Reconcile, false))?
+            .runtime_database(),
+        "plak:host:readopt",
+    )
+    .await
+    .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
     if let Some(failure) = failures.iter().find(|failure| !failure.held_elsewhere) {
         tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
         return Err(unavailable(ProbePhase::Reconcile, false));
@@ -704,11 +711,17 @@ async fn finish_stops(
                 pending.push(line);
                 continue;
             }
-            plakous_hosted::runner_adoption::finish_recorded_stop(client, sessions, line, intent)
-                .await
-                .map_err(|error| {
-                    CliFailure::new(format!("recorded stop on {line} remains pending: {error}"))
-                })?;
+            plakous_hosted::runner_adoption::finish_recorded_stop(
+                client,
+                sessions,
+                &paths.runtime_database(),
+                line,
+                intent,
+            )
+            .await
+            .map_err(|error| {
+                CliFailure::new(format!("recorded stop on {line} remains pending: {error}"))
+            })?;
         }
     }
     Ok(pending)

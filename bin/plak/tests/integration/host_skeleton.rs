@@ -173,6 +173,7 @@ struct Client {
     stream: UnixStream,
     reader: BufReader<UnixStream>,
     retained: Option<std::collections::VecDeque<HostFrame<PlakExtension>>>,
+    read_deadline: Option<std::time::Instant>,
 }
 
 impl Client {
@@ -188,6 +189,7 @@ impl Client {
             reader: BufReader::new(stream.try_clone().unwrap()),
             stream,
             retained: None,
+            read_deadline: None,
         };
         client.send(&ClientFrame::Hello(Hello {
             proto: WIRE_VERSION,
@@ -225,7 +227,12 @@ impl Client {
 
     fn read_frame(&mut self) -> HostFrame<PlakExtension> {
         let mut line = String::new();
-        self.stream.set_read_timeout(Some(WAIT)).unwrap();
+        let timeout = self.read_deadline.map_or(WAIT, |deadline| {
+            deadline
+                .checked_duration_since(std::time::Instant::now())
+                .expect("host observation deadline expired")
+        });
+        self.stream.set_read_timeout(Some(timeout)).unwrap();
         assert_ne!(
             self.reader.read_line(&mut line).unwrap(),
             0,
@@ -336,6 +343,7 @@ fn prompt_refusals_fail_strict_callers_and_return_false_for_retry_callers() {
             reader: BufReader::new(stream.try_clone().unwrap()),
             stream,
             retained: None,
+            read_deadline: None,
         };
         let observation = plakous_host_protocol::SessionObservation::<PlakExtension>::DraftRejected(
             SessionIntent::Prompt(Draft::from("retry this prompt")),

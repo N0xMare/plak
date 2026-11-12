@@ -32,7 +32,7 @@ impl HostEnvironment {
         runtime: tokio::runtime::Handle,
     ) -> plakous::tools::runner::LocalDaemonBackend {
         plakous::tools::runner::LocalDaemonBackend::new(
-            std::sync::Arc::new(client),
+            crate::test_hooks::runner_link(client),
             runtime,
             self.path.clone(),
             self.home.as_ref().map(std::path::PathBuf::from),

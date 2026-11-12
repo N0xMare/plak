@@ -1379,7 +1379,22 @@ not only the product package's separate feature resolution.
 Runner authority shapes in the strict sweep own explicit process/link cuts,
 like the direct TUI restart shapes, rather than pretending their clocks are
 SQLite commit ordinals. `runner_wake_settled_foreground` freezes runner awake
-time while the driver settles, then checks keyed cleanup before a new effect;
+time while the driver settles, then checks keyed cleanup before a new effect.
+The settled fixtures hold a real answered/Acked start at the tool-link seam,
+pause the daemon, and inject loss of that answer after the unchanged 1200 ms
+effect window. This pins driver settlement rather than racing an acknowledged
+start's later read: that read is correctly placement-held, so waiting for its
+terminal before allowing reconnect would deadlock the fixture.
+`runner_wake_settled_foreground_after_delayed_reconnect` resumes 2500 ms after
+the terminal. Following effects have a 30-second observation deadline, fresh
+request ids and at most four rejected drafts, spaced by the documented
+1/2/5/15-second reconnect backoff; an answer without its effect fails.
+`runner_reopen_waits_for_its_readoption` holds the real lease-only sweep, sends
+one prompt, and releases only after the admission waiter is observed: that
+single prompt must run its effect after cleanup without a rejected draft.
+The process-local gate also pins the two-second bound, separate database scopes
+and a sweep skipping an in-progress root open. The real-host prompt regression
+uses independently constructed workflow handles over the same database.
 `runner_wake_live_foreground` reconnects inside the effect window and proves
 natural completion. `runner_lease_lapse_reports_foreground` advances awake
 time past the lease without a wall-clock wait. `runner_new_owner_foreground`

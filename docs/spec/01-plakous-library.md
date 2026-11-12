@@ -6137,6 +6137,16 @@ of subsequent reachability and does not replace dispatch-time admission checks.
 Direct local placement has no daemon connection and retains its separate
 readiness path.
 
+A serving host orders its own lease-only runner readoption against root opens
+of that line within the process and runtime database. An open waits at most
+two seconds for an active readoption, retaining its queued prompt; a sweep skips
+an in-progress root open instead of waiting. Timeout names this host's runner
+reconciliation, not a foreign process or a 30-second lease expiry. Fresh workflow
+handles and storage-interrupt views share that database-scoped ordering.
+This is scheduling only: every open still acquires the ordinary store lease,
+and another process keeps the existing lease refusal. No facade or persistence
+identity grants authority through this process-local gate.
+
 **Placement hold.** A placed runner's services carry one admission with a
 revision: open after the barrier above publishes Ready, held while the link or
 the barrier is down, refused when the placement itself is refused (pairing,
