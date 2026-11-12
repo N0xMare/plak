@@ -168,14 +168,12 @@ async fn nonregular_symlinks_invalid_names_and_oversized_files_refuse_promptly()
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("plain"), "safe").unwrap();
     symlink("plain", root.path().join("link")).unwrap();
-    rustix::fs::mknodat(
-        rustix::fs::CWD,
-        root.path().join("fifo"),
-        rustix::fs::FileType::Fifo,
-        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-        0,
-    )
-    .unwrap();
+    // rustix exposes mknodat only on Linux; mkfifo(1) is portable.
+    let made = std::process::Command::new("mkfifo")
+        .arg(root.path().join("fifo"))
+        .status()
+        .unwrap();
+    assert!(made.success(), "mkfifo did not create the test fifo");
     let console = console(root.path());
     for path in ["link", "fifo"] {
         let result = tokio::time::timeout(
