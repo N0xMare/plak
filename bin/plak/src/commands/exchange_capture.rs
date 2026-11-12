@@ -264,7 +264,8 @@ mod enabled {
             {
                 return Err("capture root must be owned, non-symlink and mode 0700".to_owned());
             }
-            let run = root.join(format!("plak-{}", uuid::Uuid::new_v4()));
+            // Time-ordered names break retention's ties between coarse marker mtimes.
+            let run = root.join(format!("plak-{}", uuid::Uuid::now_v7()));
             let dir = run.join("process");
             fs::DirBuilder::new()
                 .mode(0o700)
@@ -319,7 +320,9 @@ mod enabled {
                     completed.push((meta.modified()?, entry.path(), file));
                 }
             }
-            completed.sort_by_key(|(modified, _, _)| *modified);
+            completed.sort_by(|(a_modified, a_path, _), (b_modified, b_path, _)| {
+                (a_modified, a_path).cmp(&(b_modified, b_path))
+            });
             let remove = completed.len().saturating_sub(RETAIN_COMPLETED_RUNS);
             for (_, path, _lock) in completed.into_iter().take(remove) {
                 fs::remove_dir_all(path)?;

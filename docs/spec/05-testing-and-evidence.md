@@ -2055,8 +2055,11 @@ retained suffix from being mistaken for full-run evidence. If protected/current
 evidence exhausts the unavoidable disk limit, it declines
 recording, persists a sticky `process/incomplete.log` and diagnoses incomplete
 evidence, without refusing inference. Failed starts conservatively retain their
-reservation. Startup retention keeps eight
-successful unlocked automatic-v1 runs plus all locked active runs and all runs
+reservation. Startup retention keeps the eight newest
+successful unlocked automatic-v1 runs, ordered by marker modification time and
+then by run name, whose UUIDv7 follows creation order (within one process, and
+to the millisecond across processes), so runs sharing a coarse timestamp expire
+oldest first. It also keeps all locked active runs and all runs
 with pending, failed, non-success or incomplete `.info` metadata or `incomplete.log`.
 Retention inspects only bounded private metadata, never raw bodies, and preserves
 unsafe or unrecognized layouts. Locks remain held by
