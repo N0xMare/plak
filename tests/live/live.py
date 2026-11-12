@@ -2082,7 +2082,7 @@ _plak_child_source: dict[str, str] | None = None
 
 
 def test_environment() -> dict[str, str]:
-    """The four variables from `tools/gate/test-env.sh` over the current environment."""
+    """The variables `tools/gate/test-env.sh --json` exports, over the current environment."""
     # __file__, not ROOT: live tests patch ROOT to a capture workspace.
     script = Path(__file__).resolve().parents[2] / "tools" / "gate" / "test-env.sh"
     values = json.loads(subprocess.check_output([str(script), "--json"], text=True))

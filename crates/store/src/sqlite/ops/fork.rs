@@ -227,10 +227,10 @@ pub(in super::super) fn fork(
     )?;
     meta(&tx, 0, 1)?;
     #[cfg(test)]
-    test_crash_cut("fork-before-commit");
+    test_crash_cut(CrashCut::ForkBeforeCommit);
     super::lease::commit_claimed(tx, &mut b.holders, target, lease_fence, r.owner())?;
     #[cfg(test)]
-    test_crash_cut("fork-after-commit");
+    test_crash_cut(CrashCut::ForkAfterCommit);
     b.checkpoints
         .seed_fork(target, reference, r.target(), source_id);
     Ok(receipt)

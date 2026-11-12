@@ -191,9 +191,12 @@ impl Driver {
     }
 
     /// Idle-only maintenance; failures leave history for the next terminal's retry.
-    pub(super) async fn retain_history_when_idle(&self, turn_id: plakous_model::TurnId) {
-        self.retain_history(turn_id, AUTOMATIC_PRUNE_MINIMUM_CHECKPOINTS)
-            .await;
+    /// A shutdown with no active root runs it too (see `run_loop`).
+    pub(super) async fn retain_due_history_when_idle(&mut self) {
+        if let Some(turn_id) = self.retention_due.take() {
+            self.retain_history(turn_id, AUTOMATIC_PRUNE_MINIMUM_CHECKPOINTS)
+                .await;
+        }
     }
 
     /// Between two rounds of a Working turn, so a long turn's superseded

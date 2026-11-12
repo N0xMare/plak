@@ -212,7 +212,9 @@ use plakous_agent::internal::{CommitReceipt, FeedChange, FeedPage, FeedSeq};
 use std::num::NonZeroUsize;
 
 #[cfg(unix)]
-use super::{CRASH_CUT_MARKER_ENV, CRASH_CUT_STAGE_ENV, SqliteStoreStats, verify_database};
+use super::{
+    CRASH_CUT_MARKER_ENV, CRASH_CUT_STAGE_ENV, CrashCut, SqliteStoreStats, verify_database,
+};
 use super::{
     Job, SqliteSessionStore, StartupProgress, StartupStage, Worker, crash_fixture as fixture,
     map_sqlite, sqlite_failure_category, startup_error_category, wait_for_actor,
@@ -229,6 +231,30 @@ const CRASH_RENEWALS_ENV: &str = "PLAKOUS_SQLITE_TEST_CRASH_RENEWALS";
 const CRASH_CHILD_TEST: &str = "sqlite::tests::sqlite_crash_cut_child";
 #[cfg(unix)]
 const CRASH_WAIT: Duration = Duration::from_secs(30);
+/// Each commit cut and whether the commit is durable once it is reached.
+#[cfg(unix)]
+const COMMIT_CUTS: [(CrashCut, bool); 3] = [
+    (CrashCut::BeforeCommit, false),
+    (CrashCut::PreCommitHook, false),
+    (CrashCut::PostCommitPreReply, true),
+];
+/// Each prune cut and whether the prune is durable once it is reached.
+#[cfg(unix)]
+const PRUNE_CUTS: [(CrashCut, bool); 3] = [
+    (CrashCut::PruneAfterEnqueue, false),
+    (CrashCut::PruneBeforeCommit, false),
+    (CrashCut::PruneAfterCommit, true),
+];
+/// Each line-advance cut, its operation and whether it is durable once reached.
+#[cfg(unix)]
+const LINE_CUTS: [(&str, CrashCut, bool); 6] = [
+    ("fork", CrashCut::ForkBeforeCommit, false),
+    ("fork", CrashCut::ForkAfterCommit, true),
+    ("carry", CrashCut::CarryBeforeCommit, false),
+    ("carry", CrashCut::CarryAfterCommit, true),
+    ("record", CrashCut::RecordTerminalsBeforeCommit, false),
+    ("record", CrashCut::RecordTerminalsAfterCommit, true),
+];
 static NEXT_CRASH_DIRECTORY: AtomicU64 = AtomicU64::new(1);
 #[cfg(unix)]
 static STARTUP_QUERY_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -913,16 +939,43 @@ async fn sqlite_crash_cut_child() {
     panic!("configured crash cut did not stop the child: {result:?}");
 }
 
+/// Every crash cut has one name and is listed in exactly one `SIGKILL`
+/// matrix's stage table, so a cut cannot be added that no matrix selects.
+/// Whether a listed cut fires is each matrix's own assertion.
+#[cfg(unix)]
+#[test]
+fn every_crash_cut_is_named_once_and_listed_in_one_matrix() {
+    for cut in CrashCut::ALL {
+        for other in CrashCut::ALL {
+            assert_eq!(
+                CrashCut::named(cut.name()) == Some(other),
+                cut == other,
+                "{cut:?} and {other:?}"
+            );
+        }
+    }
+    let mut matrices: Vec<CrashCut> = COMMIT_CUTS.iter().map(|(cut, _)| *cut).collect();
+    // The async-commit test cuts inside the commit on its own.
+    matrices.push(CrashCut::AsyncInCommit);
+    matrices.extend(PRUNE_CUTS.iter().map(|(cut, _)| *cut));
+    matrices.extend(LINE_CUTS.iter().map(|(_, cut, _)| *cut));
+    matrices.extend(super::gc_tests::GC_CUTS.iter().map(|(cut, _)| *cut));
+    for cut in CrashCut::ALL {
+        assert_eq!(
+            matrices.iter().filter(|cut_by| **cut_by == cut).count(),
+            1,
+            "{cut:?} is not listed in exactly one matrix"
+        );
+    }
+    assert_eq!(matrices.len(), CrashCut::ALL.len());
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn sigkill_commit_cuts_reopen_as_exact_old_or_new_authority() -> TestResult {
     use std::os::unix::process::ExitStatusExt as _;
 
-    for (stage, committed) in [
-        ("before-commit", false),
-        ("pre-commit-hook", false),
-        ("post-commit-pre-reply", true),
-    ] {
+    for (stage, committed) in COMMIT_CUTS {
         let database = CrashDatabase::new()?;
         let seed = crash_seed(50_000)?;
         let checkpoint_id = fixture::id::<CheckpointId>(50_010)?;
@@ -932,13 +985,13 @@ async fn sigkill_commit_cuts_reopen_as_exact_old_or_new_authority() -> TestResul
         let baseline = store.stats().await?;
         drop(store);
 
-        let marker = database.directory.join(format!("{stage}.reached"));
+        let marker = database.directory.join(format!("{}.reached", stage.name()));
         let child = Command::new(std::env::current_exe()?)
             .arg("--exact")
             .arg(CRASH_CHILD_TEST)
             .arg("--nocapture")
             .env(CRASH_DB_ENV, &database.path)
-            .env(CRASH_CUT_STAGE_ENV, stage)
+            .env(CRASH_CUT_STAGE_ENV, stage.name())
             .env(CRASH_CUT_MARKER_ENV, &marker)
             .env("RUST_TEST_THREADS", "1")
             .stdin(Stdio::null())
@@ -1015,7 +1068,7 @@ async fn bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit() -
             .env(CRASH_DB_ENV, &database.path)
             .env(CRASH_HISTORY_ENV, HISTORY_ITEMS.to_string())
             .env(CRASH_RENEWALS_ENV, renewals.to_string())
-            .env(CRASH_CUT_STAGE_ENV, "async-in-commit")
+            .env(CRASH_CUT_STAGE_ENV, CrashCut::AsyncInCommit.name())
             .env(CRASH_CUT_MARKER_ENV, &marker)
             .env("RUST_TEST_THREADS", "1")
             .stdin(Stdio::null())
@@ -1121,19 +1174,15 @@ async fn sqlite_prune_crash_cut_child() {
 async fn sigkill_prune_cuts_reopen_as_exact_unpruned_or_pruned_history() -> TestResult {
     use std::os::unix::process::ExitStatusExt as _;
 
-    for (stage, committed) in [
-        ("prune-after-enqueue", false),
-        ("prune-before-commit", false),
-        ("prune-after-commit", true),
-    ] {
+    for (stage, committed) in PRUNE_CUTS {
         let database = CrashDatabase::new()?;
-        let marker = database.directory.join(format!("{stage}.reached"));
+        let marker = database.directory.join(format!("{}.reached", stage.name()));
         let child = Command::new(std::env::current_exe()?)
             .arg("--exact")
             .arg(PRUNE_CRASH_CHILD_TEST)
             .arg("--nocapture")
             .env(PRUNE_CRASH_DB_ENV, &database.path)
-            .env(CRASH_CUT_STAGE_ENV, stage)
+            .env(CRASH_CUT_STAGE_ENV, stage.name())
             .env(CRASH_CUT_MARKER_ENV, &marker)
             .env("RUST_TEST_THREADS", "1")
             .stdin(Stdio::null())
@@ -1160,9 +1209,13 @@ async fn sigkill_prune_cuts_reopen_as_exact_unpruned_or_pruned_history() -> Test
                 .await
                 .map(|_| ());
             if committed && revision + 1 < PRUNE_CRASH_COMMITS {
-                assert_eq!(loaded, Err(SessionStoreError::Pruned), "{stage} {revision}");
+                assert_eq!(
+                    loaded,
+                    Err(SessionStoreError::Pruned),
+                    "{stage:?} {revision}"
+                );
             } else {
-                assert_eq!(loaded, Ok(()), "{stage} {revision}");
+                assert_eq!(loaded, Ok(()), "{stage:?} {revision}");
             }
         }
         let retained = reopened.stats().await?;
@@ -1171,7 +1224,7 @@ async fn sigkill_prune_cuts_reopen_as_exact_unpruned_or_pruned_history() -> Test
         } else {
             PRUNE_CRASH_COMMITS + 1
         };
-        assert_eq!(retained.checkpoints(), expected, "{stage}");
+        assert_eq!(retained.checkpoints(), expected, "{stage:?}");
         reopened.shutdown().await?;
     }
     Ok(())
@@ -1339,23 +1392,16 @@ async fn sqlite_line_advance_crash_cut_child() {
 async fn sigkill_line_advance_cuts_reopen_with_exactly_one_head() -> TestResult {
     use std::os::unix::process::ExitStatusExt as _;
 
-    for (mode, stage, committed) in [
-        ("fork", "fork-before-commit", false),
-        ("fork", "fork-after-commit", true),
-        ("carry", "carry-before-commit", false),
-        ("carry", "carry-after-commit", true),
-        ("record", "record-terminals-before-commit", false),
-        ("record", "record-terminals-after-commit", true),
-    ] {
+    for (mode, stage, committed) in LINE_CUTS {
         let database = CrashDatabase::new()?;
-        let marker = database.directory.join(format!("{stage}.reached"));
+        let marker = database.directory.join(format!("{}.reached", stage.name()));
         let child = Command::new(std::env::current_exe()?)
             .arg("--exact")
             .arg(LINE_CRASH_CHILD_TEST)
             .arg("--nocapture")
             .env(LINE_CRASH_DB_ENV, &database.path)
             .env(LINE_CRASH_MODE_ENV, mode)
-            .env(CRASH_CUT_STAGE_ENV, stage)
+            .env(CRASH_CUT_STAGE_ENV, stage.name())
             .env(CRASH_CUT_MARKER_ENV, &marker)
             .env("RUST_TEST_THREADS", "1")
             .stdin(Stdio::null())
@@ -1381,7 +1427,7 @@ async fn sigkill_line_advance_cuts_reopen_with_exactly_one_head() -> TestResult 
 async fn assert_one_line_head(
     reopened: &SqliteSessionStore,
     mode: &str,
-    stage: &str,
+    stage: CrashCut,
     committed: bool,
 ) -> TestResult {
     let seed = crash_seed(70_000)?;
@@ -1396,7 +1442,7 @@ async fn assert_one_line_head(
             } else {
                 Vec::new()
             },
-            "{stage}"
+            "{stage:?}"
         );
         return Ok(());
     }
@@ -1434,24 +1480,28 @@ async fn assert_one_line_head(
         .await
         .map(|_| ());
     if committed {
-        assert_eq!((record.head(), record.generation()), (target, 2), "{stage}");
+        assert_eq!(
+            (record.head(), record.generation()),
+            (target, 2),
+            "{stage:?}"
+        );
         assert_eq!(
             source_commit,
             Err(SessionStoreError::NotLineHead),
-            "{stage}"
+            "{stage:?}"
         );
     } else {
         assert_eq!(
             (record.head(), record.generation()),
             (seed.selector, 1),
-            "{stage}"
+            "{stage:?}"
         );
         assert_eq!(
             reopened.load_branch(target).await.map(|_| ()),
             Err(SessionStoreError::NotFound),
-            "{stage}"
+            "{stage:?}"
         );
-        assert_eq!(source_commit, Ok(()), "{stage}");
+        assert_eq!(source_commit, Ok(()), "{stage:?}");
     }
     Ok(())
 }

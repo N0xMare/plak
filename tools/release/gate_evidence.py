@@ -125,8 +125,12 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
         "a temporary parent for the copied reference home, not spec or the user guide",
     ),
     "tests/tooling/test_changed_packages.py": (
-        frozenset({"docs/spec/05-testing-and-evidence.md"}),
-        "a path the mapper classifies, never opened",
+        frozenset({"docs/spec/05-testing-and-evidence.md", "docs/spec/07-config-reference.md"}),
+        "paths the mapper classifies, never opened",
+    ),
+    "tools/gate/changed_packages.py": (
+        frozenset({"docs/spec/07-config-reference.md"}),
+        "a path mapped to the package whose tests read it, never opened",
     ),
     "tests/tooling/test_policy_validators.py": (
         frozenset({"README.md"}),

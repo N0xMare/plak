@@ -10,7 +10,7 @@ mod recording;
 // Directory switching is driven by the terminal while the host owns the work.
 
 /// [`drive`], with the terminal's own directory acts in the middle: after
-/// the answer (a busy root's stall, or a real running child) the TUI makes
+/// the root's answer, or while a real child runs, the TUI makes
 /// a session with `/new` (its own `new_session` and attach), switches back
 /// with `/resume <id>`, then stops the original.
 fn review_drive_switch(fixture: &Fixture, session: &str, cut: bool, child: bool) {

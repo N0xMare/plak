@@ -23,24 +23,43 @@ install_system_packages() {
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
 }
 
-install_release_binary() {
-  local name="$1" version_command="$2" expected_version="$3" url="$4" checksum="$5" member="$6" destination="$7"
-  if [[ -x "$destination" ]] && "$destination" $version_command 2>/dev/null | grep -Fq "$expected_version"; then
-    printf '%s %s already installed.\n' "$name" "$expected_version"
+pins="$repo_root/tools/gate/dev-tools.pins"
+pinned_target=x86_64-unknown-linux-musl
+
+# Installs the last pins line for a tool on this target (for jj, the newest
+# version), unless the destination already reports that version.
+install_pinned() {
+  local name="$1" destination="$2" line version checksum url installed
+  line="$(awk -v tool="$name" -v target="$pinned_target" \
+    '$1 == tool && $3 == target { line = $2 " " $4 " " $5 } END { print line }' "$pins")"
+  read -r version checksum url <<<"$line"
+  if [[ -z "$url" ]]; then
+    printf 'error: %s pins no %s for %s\n' "$pins" "$name" "$pinned_target" >&2
+    return 1
+  fi
+  # The version field, without a build suffix such as jj's `-<commit>`.
+  installed="$("$destination" --version 2>/dev/null)" || true
+  read -r _ installed _ <<<"$installed"
+  if [[ "${installed%%-*}" == "$version" ]]; then
+    printf '%s %s already installed.\n' "$name" "$version"
     return
   fi
 
-  local archive temporary
+  local archive member temporary
   temporary="$(mktemp -d)"
   archive="$temporary/archive.tar.gz"
   trap 'rm -rf "$temporary"' RETURN
   curl --proto '=https' --tlsv1.2 -fsSL "$url" -o "$archive"
-  printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --status
+  printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --status \
+    || { printf 'error: checksum mismatch for %s\n' "$url" >&2; return 1; }
+  member="$(tar -tzf "$archive" | awk -v name="$name" '{ n = split($0, part, "/") } !found && part[n] == name { print; found = 1 }')"
+  [[ -n "$member" ]] || { printf 'error: no %s in %s\n' "$name" "$url" >&2; return 1; }
   tar -xzf "$archive" -C "$temporary" "$member"
   mkdir -p "$(dirname "$destination")"
   install -m 0755 "$temporary/$member" "$destination"
   rm -rf "$temporary"
   trap - RETURN
+  printf 'Installed %s %s.\n' "$name" "$version"
 }
 
 step "Install Linux prerequisites"
@@ -55,7 +74,7 @@ export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 rustup toolchain install 1.99.0 \
   --profile minimal \
   --component clippy,rustfmt \
-  --target x86_64-unknown-linux-musl
+  --target x86_64-unknown-linux-musl,wasm32-unknown-unknown
 
 profile_marker="# plak orb tool paths"
 if grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
@@ -68,25 +87,15 @@ export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 EOF
 fi
 
-step "Install the command runner"
-install_release_binary \
-  just "--version" "1.58.0" \
-  "https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-x86_64-unknown-linux-musl.tar.gz" \
-  "4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d" \
-  just "$HOME/.local/bin/just"
+step "Install the command runner and jj"
+install_pinned just "$HOME/.local/bin/just"
+install_pinned jj "$HOME/.local/bin/jj"
 
 step "Install repository-pinned verification tools"
 dev_tools="$repo_root/.dev-tools/bin"
-install_release_binary \
-  cargo-nextest "--version" "0.9.100" \
-  "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.100/cargo-nextest-0.9.100-x86_64-unknown-linux-musl.tar.gz" \
-  "fbc4f0989a1b58bc23c335f8e1dc656f60efb854246aaa869a88543494e5b0ce" \
-  cargo-nextest "$dev_tools/cargo-nextest"
-install_release_binary \
-  cargo-deny "--version" "0.19.0" \
-  "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.19.0/cargo-deny-0.19.0-x86_64-unknown-linux-musl.tar.gz" \
-  "0e8c2aa59128612c90d9e09c02204e912f29a5b8d9a64671b94608cbe09e064f" \
-  cargo-deny-0.19.0-x86_64-unknown-linux-musl/cargo-deny "$dev_tools/cargo-deny"
+install_pinned cargo-nextest "$dev_tools/cargo-nextest"
+install_pinned cargo-deny "$dev_tools/cargo-deny"
+install_pinned ruff "$dev_tools/ruff"
 
 step "Prefetch locked Rust dependencies"
 cd "$repo_root"

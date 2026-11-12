@@ -16,6 +16,7 @@ pub(crate) fn host_start_environment() -> Vec<(&'static str, std::ffi::OsString)
         "PLAK_TEST_MODEL",
         "PLAK_TEST_SCRIPT",
         "PLAK_TEST_EVIDENCE",
+        "PLAK_TEST_HOST_IDLE_EXIT_SECONDS",
     ]
     .into_iter()
     .filter_map(|name| super::hook_environment(name).map(|value| (name, value)))

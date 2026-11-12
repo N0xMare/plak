@@ -25,7 +25,7 @@ class PerfSmokeTargetTests(unittest.TestCase):
             (root / "tmp").mkdir()
             script = root / "tools/perf/perf-smoke.sh"
             script.write_text(prefix)
-            for name in ("test-tmpdir.sh", "test-env.sh"):
+            for name in ("test-tmpdir.sh", "test-env.sh", "dev-tools-prefix.sh", "dev-tools.pins"):
                 destination = root / "tools/gate" / name
                 destination.write_bytes((ROOT / "tools/gate" / name).read_bytes())
                 destination.chmod(0o755)

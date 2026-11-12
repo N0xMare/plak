@@ -683,7 +683,9 @@ walk excluding `.git`, `.jj` and `target`; changed-package discovery requires a
 repository or explicit packages. A root Cargo input (manifest, lockfile, toolchain,
 lint, format or nextest config, `.cargo/`), or any path under `vendor/`
 (vendored members and the patched `monty-typeshed` source), selects every
-package. Its parallel
+package. A file outside every package that a package's tests read selects that
+package: chapter 07, `docs/reference-config/` and
+`tests/fixtures/config-scenarios/` select `plak`. Its parallel
 lane passes `-E 'rdeps(=<pkg>) | ...'`, which nextest intersects with the
 profile's own filter; an empty selection passes, and no touched package runs
 only static. Fast is worker evidence, not a substitute for the integration
@@ -764,7 +766,19 @@ gate does not qualify the supported musl platform.
 
 `tools/gate/test-env.sh` is the one test environment. It exports `TMPDIR` from
 `tools/gate/test-tmpdir.sh`, `PLAK_HOME` (`$TMPDIR/plak-isolated-home`, mode
-0700), an empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. `dev-check.sh`
+0700), an empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. Its shell and
+command forms also unset the test-hook overrides `PLAK_TEST_SESSION_LEASE_SECONDS`,
+`PLAK_TEST_CELL_HELLO_MS` and `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` and the provider keys `OPENAI_API_KEY`,
+`XAI_API_KEY`, `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`, so an operator's
+exported key never reaches an offline test. Every form also puts
+`$TMPDIR/plak-test-jj`, which holds only a `jj` link to the jj the tools check
+uses (chapter 06 §6), first on `PATH`: `PLAK_TEST_JJ` when set, else, with no
+`jj` on `PATH`, the newest pinned jj that `just dev-tools install` unpacked. Its `--json` form names only the variables it
+exports, `PATH` included when it changed; the live drivers keep their real keys. Its
+`--unset-names` form prints the names the other forms unset, and the offline
+drivers that take `--json` (`crash-sweep.py`, `jj-tools.py compat`,
+`weighted-lanes.py`) drop exactly
+those, so no driver keeps a list of its own. `dev-check.sh`
 (with `--fresh`), `just dev coverage`, `perf-smoke.sh`, `crash-sweep.py`,
 `jj-tools.py compat` and the live drivers use it. `just nextest` runs the
 pinned cargo-nextest under it and passes recipe arguments as positional
@@ -1639,6 +1653,24 @@ timestamps; without them, the longest test as a lower bound), then the
 slowest tests and the per-binary and per-package totals. It is informational:
 no gate reads it.
 
+`just dev weighted-lanes [--serial-threads N] [--durability-threads N] [LANE...]`
+(`tools/dev/weighted-lanes.py`) trials a multi-thread layout for the two
+wall-clock lanes without changing them. On every run it writes
+`<target>/nextest-weighted.toml`: `.config/nextest.toml` plus `weighted-serial`
+and `weighted-durability` profiles with the `serial` and `durability`
+membership and settings, 4 and 16 threads by default. In `weighted-durability`
+the three campaigns that run cuts on their own workers (`durability_subset`,
+`durability_twin_pilots`, image residency) require half the threads, the
+ledger-retirement campaigns a quarter rounded up, and the four host-restart
+matrices, the redial test and the busy-root test start first. It refuses a
+weight filter that matches no test, builds the workers as the gate does, runs
+the lanes through `--config-file` in a scratch directory of its own (the
+per-checkout one plus `-w`), so it leaves a gate's files in the same checkout
+alone, and ends with `test-timing` over its profiles. Its load is not isolated:
+beside a gate on one machine, timing-sensitive tests fail in both, so it runs
+when no gate does or with lower thread counts. No gate tier runs it; a failing
+lane exits non-zero.
+
 The `default` profile sets `leak-timeout = { period = "5s", result = "fail" }`;
 the lane profiles inherit it.
 After a test process exits, nextest waits up to five seconds to observe EOF on
@@ -2070,8 +2102,11 @@ retained suffix from being mistaken for full-run evidence. If protected/current
 evidence exhausts the unavoidable disk limit, it declines
 recording, persists a sticky `process/incomplete.log` and diagnoses incomplete
 evidence, without refusing inference. Failed starts conservatively retain their
-reservation. Startup retention keeps eight
-successful unlocked automatic-v1 runs plus all locked active runs and all runs
+reservation. Startup retention keeps the eight newest
+successful unlocked automatic-v1 runs, ordered by marker modification time and
+then by run name, whose UUIDv7 follows creation order (within one process, and
+to the millisecond across processes), so runs sharing a coarse timestamp expire
+oldest first. It also keeps all locked active runs and all runs
 with pending, failed, non-success or incomplete `.info` metadata or `incomplete.log`.
 Retention inspects only bounded private metadata, never raw bodies, and preserves
 unsafe or unrecognized layouts. Locks remain held by
@@ -2508,6 +2543,15 @@ completion of a recorded stop, respectively. The durability cases
 `host_crash_mid_stop_finishes_the_recorded_stop_once_after_retransfer`
 add explicit repeated SIGKILL boundaries after lease acquisition, transfer,
 terminal recording, and immediately before and after the keyed stop.
+These boundaries, the root-handoff boundary, the four binding-reopen
+boundaries and the re-adoption skip are the variants of one
+`plakous_hosted::test_support_runner::HostCut`, public only with
+`test-support`. Tests name a cut by its variant in
+`PLAK_TEST_HOST_READOPT_CUT`, and a value that names no cut aborts the gate
+build's host instead of never firing. The store's SQLite commit, prune,
+line-advance and reclaim cuts are one `cfg(test)` enum in the same way, and
+a unit test requires each of them to be listed in exactly one `SIGKILL`
+matrix.
 The child-stop counterpart cuts the live stop and repeats startup cuts on
 both sides of the child's keyed stop before checking its one terminal.
 `host_handoff_keeps_jobs_and_continues_the_busy_turn_once` checks both loss
@@ -2583,7 +2627,7 @@ The `tui_host_restart` shape uses the ordinary offline TUI PTY fixture
 against a test-hooks `plak host`. Its specialized driver is registered in
 the strict crash-sweep entry point and the durability lane (excluded from
 offline by its exact test name). It cuts every indexed host commit of
-creation, terminal attach, a busy turn and `stop_session`, once with a
+creation, terminal attach, a turn and `stop_session`, once with a
 root alone and once with a real child running. Twin pilots must have the
 same indexed labels per store, and every cut must reach that pilot label.
 A live terminal reports
@@ -2596,8 +2640,8 @@ authority handoff or host commit to cut: the deterministic PTY case checks
 that the host process and resident session survive it.
 
 The exact durability test `review_tui_host_restart_switch` adds the TUI's
-own `/new`, `/resume <original>` and `/stop` while a busy root or real child
-runs. Twin pilots pin every indexed per-store label. Both terminal shapes
+own `/new`, `/resume <original>` and `/stop` after the root's answer or while
+a real child runs. Twin pilots pin every indexed per-store label. Both terminal shapes
 wait for the stop notice to appear in the read-only durable transcript before
 leaving, and for the stopped child tree to become interrupted with no active
 turns before killing each pilot host. The stop reply and live notice alone
@@ -3959,10 +4003,14 @@ modifying them. `plakous-runner`'s
 keeps service discovery distinct from explicit workspace admission.
 
 `an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists`
-is a serial wall-clock fixture: it waits the real five-minute interval with no
-test-only lifetime override, checks ordinary host persistence beside it, and
-owns both hosts' cleanup. The pure idle-clock test separately resets the full
-window on activity or kept work. Idle eligibility includes residents,
+is a serial wall-clock fixture: it runs both hosts with a five-second window
+through the `test-hooks` override `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` (a whole
+second from 1 through 300; anything else keeps 300 s, and other builds do not
+read it), waits that window for real, checks ordinary host persistence beside
+it, and owns both hosts' cleanup. A detached host start forwards the override;
+`tools/gate/test-env.sh` unsets it. The pure idle-clock test keeps the
+production five-minute window: it builds the clock through the production
+constructor and resets the full window on activity or kept work. Idle eligibility includes residents,
 opening/releasing workers, startup recovery and durable runner-stop debt; an
 unreadable directory is not proof of idleness. No test achieves idle exit by
 evicting a session.

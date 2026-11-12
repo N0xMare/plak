@@ -132,20 +132,14 @@ mod test_diagnostics {
     pub(crate) const fn credential_wait_refused(_: bool) {}
 }
 pub mod runner_adoption;
-#[cfg(feature = "test-support")]
-mod test_support_runner;
-#[cfg(not(feature = "test-support"))]
-mod test_support_runner {
-    pub(crate) const fn cut(_: &str) {}
-    pub(crate) const fn reopen_cut(_: &str) {}
-    pub(crate) async fn hold_readoption() {}
-    pub(crate) const fn readoption_waiting() {}
-    pub(crate) const fn selected(_: &str) -> bool {
-        false
-    }
-}
 #[doc(hidden)]
 pub mod runner_reader;
+/// Host crash cuts, public only to the gate build's tests.
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod test_support_runner;
+#[cfg(not(feature = "test-support"))]
+mod test_support_runner;
 
 // A session release joins one in-flight store call and then commits the shutdown receipt, each
 // bounded by the agent's store deadline; the host's release timeout must cover both.

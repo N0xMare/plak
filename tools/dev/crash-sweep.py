@@ -42,8 +42,8 @@ def main() -> int:
     script = Path(__file__).resolve().parents[1] / "gate" / "test-env.sh"
     env = os.environ.copy()
     env.update(json.loads(subprocess.check_output([str(script), "--json"], text=True)))
-    # test-env.sh unsets these only in a shell or a command it runs itself.
-    for name in ("PLAK_TEST_SESSION_LEASE_SECONDS", "PLAK_TEST_CELL_HELLO_MS"):
+    # --json keeps the overrides and provider keys the offline tests must not see.
+    for name in subprocess.check_output([str(script), "--unset-names"], text=True).split():
         env.pop(name, None)
     env.update(
         PLAK_CRASH_SWEEP_JOBS=str(args.jobs),

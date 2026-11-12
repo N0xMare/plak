@@ -20,6 +20,7 @@ class DevToolsTests(unittest.TestCase):
         shutil.copyfile(
             ROOT / "tools/gate/dev-tools-prefix.sh", self.root / "tools/gate/dev-tools-prefix.sh"
         )
+        shutil.copyfile(ROOT / "tools/gate/dev-tools.pins", self.root / "tools/gate/dev-tools.pins")
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
@@ -33,6 +34,7 @@ class DevToolsTests(unittest.TestCase):
             FAKE_DENY_VERSION="0.19.0",
             FAKE_RUFF_VERSION="0.17.3",
         )
+        self.env.pop("PLAK_TEST_JJ", None)
         self.executable(
             "python3",
             r'''import os, sys
@@ -72,6 +74,7 @@ if "--version" in sys.argv:
 raise SystemExit(0)
 ''',
         )
+        self.executable("jj", 'print("jj 0.46.0")\n')
         self.executable(
             "rustup",
             r'''import json, os, sys
@@ -163,6 +166,34 @@ if sys.argv[1:] != ["target", "add", "wasm32-unknown-unknown"]:
         self.assertEqual(pinned.returncode, 0, pinned.stderr)
         self.assertIn('required-version = "==0.17.3"', (ROOT / "pyproject.toml").read_text())
 
+    def test_missing_jj_fails_the_check_but_not_check_nextest(self):
+        missing = dict(self.env, PLAK_TEST_JJ=str(self.root / "no-jj"))
+        result = self.run_script("check", env=missing)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("jj is unavailable, so jj tests would pass without running", result.stderr)
+        self.assertEqual(self.run_script("check-nextest", env=missing).returncode, 0)
+        self.executable("pinned-jj", 'print("jj 0.44.0")\n', self.root / "pinned")
+        named = dict(missing, PLAK_TEST_JJ=str(self.root / "pinned/pinned-jj"))
+        self.assertEqual(self.run_script("check", env=named).returncode, 0)
+
+    def test_check_falls_back_to_an_installed_pinned_jj_but_not_past_an_empty_override(self):
+        (self.bin / "jj").unlink()
+        path = os.pathsep.join(
+            entry
+            for entry in self.env["PATH"].split(os.pathsep)
+            if not os.access(Path(entry) / "jj", os.X_OK)
+        )
+        env = dict(self.env, PATH=path)
+        missing = self.run_script("check", env=env)
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("jj is unavailable", missing.stderr)
+        self.executable("jj", 'print("jj 0.46.0")\n', self.root / ".dev-tools/jj/0.46.0")
+        installed = self.run_script("check", env=env)
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        empty = self.run_script("check", env=dict(env, PLAK_TEST_JJ=""))
+        self.assertEqual(empty.returncode, 2)
+        self.assertIn("jj is unavailable", empty.stderr)
+
     def test_old_deny_fails_before_policy_check(self):
         result = self.run_script("deny", env=dict(self.env, FAKE_DENY_VERSION="0.18.999"))
         self.assertEqual(result.returncode, 2)
@@ -209,6 +240,22 @@ if sys.argv[1:] != ["target", "add", "wasm32-unknown-unknown"]:
         self.assertEqual(calls[-1]["env_names"], [])
         self.assertNotIn("--force", result.stdout + result.stderr + json.dumps(calls))
         self.assertTrue((self.root / ".dev-tools/build").is_dir())
+
+    def test_install_keeps_prefix_binaries_already_at_the_pin(self):
+        local_bin = self.root / ".dev-tools/bin"
+        self.executable("cargo-nextest", 'print("cargo-nextest 0.9.100 (7e6129fe2)")\n', local_bin)
+        self.executable("ruff", 'print("ruff 0.17.2")\n', local_bin)
+        result = self.run_script("install")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cargo-nextest 0.9.100 is already installed.", result.stdout)
+        prefix = str(self.root / ".dev-tools")
+        self.assertEqual(
+            [call["args"] for call in self.calls() if call["args"][:1] == ["install"]],
+            [
+                ["install", "--locked", "--root", prefix, "--version", "0.19.0", "cargo-deny"],
+                ["install", "--locked", "--root", prefix, "--version", "0.17.3", "ruff"],
+            ],
+        )
 
     def test_install_prefetch_is_repeatable_and_failures_are_not_success(self):
         for _ in range(2):

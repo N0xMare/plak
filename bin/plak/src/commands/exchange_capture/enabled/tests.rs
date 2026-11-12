@@ -216,6 +216,32 @@ fn retention_preserves_expired_failed_crashed_and_gap_runs() {
 }
 
 #[test]
+fn retention_removes_the_oldest_runs_when_markers_share_an_mtime() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("captures");
+    // Coarse filesystem timestamps give runs created close together one mtime.
+    let tied = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    let runs: Vec<PathBuf> = (0..2 * RETAIN_COMPLETED_RUNS)
+        .map(|_| {
+            let capture = Capture::create(&root).unwrap();
+            let run = capture.dir.parent().unwrap().to_owned();
+            drop(capture);
+            File::options()
+                .write(true)
+                .open(run.join("automatic-v1.lock"))
+                .unwrap()
+                .set_modified(tied)
+                .unwrap();
+            run
+        })
+        .collect();
+    Capture::retain(&root).unwrap();
+    let (expired, kept) = runs.split_at(RETAIN_COMPLETED_RUNS);
+    assert!(expired.iter().all(|run| !run.exists()));
+    assert!(kept.iter().all(|run| run.exists()));
+}
+
+#[test]
 fn retention_metadata_inspection_preserves_unsafe_and_missing_evidence() {
     let temp = tempfile::tempdir().unwrap();
     let capture = Capture::automatic(temp.path()).unwrap();

@@ -6,8 +6,9 @@ dependencies for its parallel test lane; static checks cover the workspace.
 A file belongs to the package whose
 directory is its longest prefix. A change to a workspace-wide Cargo input
 (the root manifest, the lockfile, toolchain, lint or nextest config) touches
-every package, as does any path under vendor/. Files outside any package,
-such as docs and Python tooling, touch none.
+every package, as does any path under vendor/. A file outside every package
+that a package's tests read (PACKAGE_INPUTS) touches that package. Other
+files outside any package, such as docs and Python tooling, touch none.
 
 Usage:
   changed_packages.py            # one package name per line, or `--workspace`
@@ -38,6 +39,14 @@ WORKSPACE_INPUTS = {
     ".config/nextest.toml",
 }
 WORKSPACE_PREFIXES = (".cargo/", "vendor/")
+# Files and directories outside every package that the named package's tests
+# read: plak compares its config key table, template schema and reference
+# config with these and loads every scenario home.
+PACKAGE_INPUTS = {
+    "docs/spec/07-config-reference.md": "plak",
+    "docs/reference-config": "plak",
+    "tests/fixtures/config-scenarios": "plak",
+}
 
 
 def package_dirs(root: Path = REPO_ROOT) -> dict[str, str]:
@@ -67,8 +76,8 @@ def touched_packages(paths: list[str], dirs: dict[str, str]) -> list[str]:
         if path in WORKSPACE_INPUTS or path.startswith(WORKSPACE_PREFIXES):
             return [WORKSPACE]
         owner = None
-        for parent in PurePosixPath(path).parents:
-            owner = dirs.get(parent.as_posix())
+        for parent in (PurePosixPath(path), *PurePosixPath(path).parents):
+            owner = dirs.get(parent.as_posix()) or PACKAGE_INPUTS.get(parent.as_posix())
             if owner is not None:
                 break
         if owner is not None:

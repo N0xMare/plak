@@ -1575,7 +1575,6 @@ async fn repository_search_truncates_only_at_utf8_boundaries_and_yields_runtime(
 async fn deterministic_read_resume_fails_closed_when_content_changes_and_enforces_bounds()
 -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
-    fs::write(workspace.path().join("data.txt"), b"abcdef")?;
     let backend = Arc::new(DeterministicExecutionBackend::new(
         [],
         DeterministicProcessPolicy::default(),
@@ -1589,18 +1588,48 @@ async fn deterministic_read_resume_fails_closed_when_content_changes_and_enforce
         backend,
     )?;
 
-    let first = environment
-        .read_workspace(WorkspaceReadSliceRequest::start("data.txt", 3)?, control())
-        .await?;
-    let cursor = first.next().cloned().ok_or("missing read cursor")?;
-    fs::write(workspace.path().join("data.txt"), b"abcXYZ")?;
-    let changed = environment
-        .read_workspace(WorkspaceReadSliceRequest::resume(cursor, 3)?, control())
-        .await;
-    assert_eq!(
-        changed.err().map(|error| error.kind()),
-        Some(ExecutionBackendErrorKind::Conflict)
-    );
+    // A resume must compare bytes, not trust the snapshot cache. Each pass
+    // resumes after a same-length rewrite while the cache still holds the
+    // opening read's bytes, so every pass exercises that comparison on any
+    // filesystem. Passes repeat until a rewrite also keeps device, inode,
+    // length, mtime and ctime, which only the bytes tell apart. Setting a
+    // timestamp back moves ctime, so that rewrite cannot be forced: it happens
+    // only where timestamps come from a coarse clock, and where they never
+    // repeat, metadata alone already tells the contents apart.
+    let path = workspace.path().join("data.txt");
+    let stamp = |path: &Path| -> Result<_, TestError> {
+        use std::os::unix::fs::MetadataExt as _;
+        let metadata = fs::metadata(path)?;
+        Ok((
+            metadata.ino(),
+            metadata.len(),
+            metadata.mtime(),
+            metadata.mtime_nsec(),
+            metadata.ctime(),
+            metadata.ctime_nsec(),
+        ))
+    };
+    for _ in 0..200 {
+        fs::write(&path, b"abcdef")?;
+        let first = environment
+            .read_workspace(WorkspaceReadSliceRequest::start("data.txt", 3)?, control())
+            .await?;
+        let cursor = first.next().cloned().ok_or("missing read cursor")?;
+        let opened = stamp(&path)?;
+        fs::write(&path, b"abcXYZ")?;
+        let same_tick = stamp(&path)? == opened;
+        let changed = environment
+            .read_workspace(WorkspaceReadSliceRequest::resume(cursor, 3)?, control())
+            .await;
+        assert_eq!(
+            changed.err().map(|error| error.kind()),
+            Some(ExecutionBackendErrorKind::Conflict),
+            "same_tick={same_tick}"
+        );
+        if same_tick {
+            break;
+        }
+    }
 
     let over_environment_limit = environment
         .read_workspace(WorkspaceReadSliceRequest::start("data.txt", 5)?, control())

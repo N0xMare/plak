@@ -1,9 +1,9 @@
-#[cfg(test)]
-use super::test_crash_cut;
 use super::{
     Connection, OptionalExtension, SessionStoreError, StoreReclaimReport, TransactionBehavior,
     exactly_one, i64n, map_sqlite, nonnegative, params,
 };
+#[cfg(test)]
+use super::{CrashCut, test_crash_cut};
 
 pub(super) fn pending(c: &Connection) -> Result<bool, SessionStoreError> {
     c.query_row("SELECT EXISTS(SELECT 1 FROM gc_candidates)", [], |r| {
@@ -97,9 +97,9 @@ pub(super) fn step(
         params![i64n(objects)?, i64n(bytes)?]).map_err(map_sqlite)?;
     let pending = pending(&tx)?;
     #[cfg(test)]
-    test_crash_cut("gc-before-commit");
+    test_crash_cut(CrashCut::GcBeforeCommit);
     tx.commit().map_err(map_sqlite)?;
     #[cfg(test)]
-    test_crash_cut("gc-after-commit");
+    test_crash_cut(CrashCut::GcAfterCommit);
     Ok(StoreReclaimReport::from_store(objects, bytes, pending))
 }

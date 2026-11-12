@@ -1006,26 +1006,16 @@ pub(super) fn transcript_ops(
             prompt,
             expires_at,
         } => {
-            let approval_id = format!("approval-{}", uuid::Uuid::new_v4());
-            projection.approvals.insert(
-                approval_id.clone(),
-                super::PendingApproval {
-                    decision: decision.clone(),
-                },
-            );
-            projection
-                .approval_by_decision
-                .insert(decision.clone(), approval_id.clone());
-            ops.push(HostEvent::ApprovalRequired {
-                approval_id,
-                call_id: event.call_id().map(|id| id.as_uuid().to_string()),
-                tool_name: identity.canonical_name().as_str().to_owned(),
-                subject: None,
-                prompt: prompt.as_ref().map(|prompt| {
+            ops.push(offer_decision(
+                projection,
+                decision,
+                event.call_id().map(|id| id.as_uuid().to_string()),
+                identity.canonical_name().as_str().to_owned(),
+                prompt.as_ref().map(|prompt| {
                     crate::session_log::redact_text_preview(prompt.description().as_str())
                 }),
-                expires_at_ms: super::events::timestamp_ms(*expires_at),
-            });
+                super::events::timestamp_ms(*expires_at),
+            ));
         }
         AgentEventKind::EffectDecisionResolved {
             decision,
@@ -1043,6 +1033,35 @@ pub(super) fn transcript_ops(
         _ => {}
     }
     ops
+}
+
+/// Offers one decision the child's turn waits on under a fresh handle.
+pub(super) fn offer_decision(
+    projection: &mut TurnProjection<Core>,
+    decision: &plakous::agent::EffectDecisionRef,
+    call_id: Option<String>,
+    tool_name: String,
+    prompt: Option<String>,
+    expires_at_ms: u64,
+) -> HostEvent<Core> {
+    let approval_id = format!("approval-{}", uuid::Uuid::new_v4());
+    projection.approvals.insert(
+        approval_id.clone(),
+        super::PendingApproval {
+            decision: decision.clone(),
+        },
+    );
+    projection
+        .approval_by_decision
+        .insert(decision.clone(), approval_id.clone());
+    HostEvent::ApprovalRequired {
+        approval_id,
+        call_id,
+        tool_name,
+        subject: None,
+        prompt,
+        expires_at_ms,
+    }
 }
 
 /// A test seam: work a test runs while an agent view opens, right before

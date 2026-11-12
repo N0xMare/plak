@@ -73,7 +73,7 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "
 toml.workspace = true
 toml_edit.workspace = true
 unicode-width = "0.2.2"
-uuid = { workspace = true, features = ["v4"] }
+uuid = { workspace = true, features = ["v4", "v7"] }
 # `plak wire schema`: the extension's half of the wire v2 schema.
 schemars.workspace = true
 # `web` only. Serve terminates TLS, so no TLS stack: the WebSocket protocol

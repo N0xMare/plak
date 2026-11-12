@@ -1,6 +1,7 @@
 //! Daemon-held jobs survive the serving host and keep its start environment.
 
 use super::*;
+use plakous_hosted::test_support_runner::HostCut;
 
 /// Ready is published only after the ownership sweep, answered-key recovery,
 /// recorded stops and foreground cleanup have completed.
@@ -549,7 +550,10 @@ fn a_foreground_host_cut_stops_at_transfer_and_records_unknown_once() {
             let (mut child, _) = spawn_env(
                 &fixture,
                 &[],
-                &[("PLAK_TEST_HOST_READOPT_CUT", "transfer".into())],
+                &[(
+                    "PLAK_TEST_HOST_READOPT_CUT",
+                    HostCut::Transfer.name().into(),
+                )],
             );
             assert_eq!(cut_exit(&mut child).signal(), Some(9));
             stopped(pid);
@@ -762,7 +766,10 @@ fn an_idle_handoff_does_not_resurrect_a_previously_cancelled_root() {
         let (mut host, session, node) = start_job_env(
             &fixture,
             true,
-            &[("PLAK_TEST_HOST_READOPT_CUT", "before-root-handoff".into())],
+            &[(
+                "PLAK_TEST_HOST_READOPT_CUT",
+                HostCut::BeforeRootHandoff.name().into(),
+            )],
         );
         let (pid, _) = job(&fixture);
         nix::sys::signal::kill(
@@ -1022,7 +1029,7 @@ fn start_child_job_variant(
 #[test]
 fn host_crash_mid_child_stop_finishes_the_recorded_intent_once() {
     use std::os::unix::process::ExitStatusExt as _;
-    for phase in ["before-stop", "after-stop"] {
+    for cut in [HostCut::BeforeStop, HostCut::AfterStop] {
         let Some(fixture) = fixture() else { return };
         let (mut host, session, node) = start_child_job(&fixture);
         let (pid, _) = job(&fixture);
@@ -1030,7 +1037,7 @@ fn host_crash_mid_child_stop_finishes_the_recorded_intent_once() {
         let mut host = start_env(
             &fixture,
             &[],
-            &[("PLAK_TEST_HOST_READOPT_CUT", phase.into())],
+            &[("PLAK_TEST_HOST_READOPT_CUT", cut.name().into())],
         );
         let mut client = Client::connect(&host);
         client.attach(1, &node);
@@ -1044,10 +1051,10 @@ fn host_crash_mid_child_stop_finishes_the_recorded_intent_once() {
             let (mut child, _) = spawn_env(
                 &fixture,
                 &[],
-                &[("PLAK_TEST_HOST_READOPT_CUT", phase.into())],
+                &[("PLAK_TEST_HOST_READOPT_CUT", cut.name().into())],
             );
             assert_eq!(cut_exit(&mut child).signal(), Some(9));
-            if phase == "before-stop" {
+            if cut == HostCut::BeforeStop {
                 assert!(alive(pid));
             } else {
                 stopped(pid);
@@ -1168,7 +1175,7 @@ fn host_crash_mid_readopt_converges_after_every_transfer_boundary() {
     use std::os::unix::process::ExitStatusExt as _;
     let Some(probe) = fixture() else { return };
     drop(probe);
-    for phase in ["lease", "transfer", "terminals"] {
+    for cut in [HostCut::Lease, HostCut::Transfer, HostCut::Terminals] {
         let fixture = fixture().unwrap();
         let (mut host, session, node) = start_job(&fixture, false);
         let (pid, _) = job(&fixture);
@@ -1177,11 +1184,11 @@ fn host_crash_mid_readopt_converges_after_every_transfer_boundary() {
             let (mut child, _) = spawn_env(
                 &fixture,
                 &[],
-                &[("PLAK_TEST_HOST_READOPT_CUT", phase.into())],
+                &[("PLAK_TEST_HOST_READOPT_CUT", cut.name().into())],
             );
             let status = cut_exit(&mut child);
-            assert_eq!(status.signal(), Some(9), "{phase}: {status}");
-            assert!(alive(pid), "{phase}: the cut stopped the job");
+            assert_eq!(status.signal(), Some(9), "{cut:?}: {status}");
+            assert!(alive(pid), "{cut:?}: the cut stopped the job");
         }
         let mut host = start(&fixture);
         let mut client = Client::connect(&host);
@@ -1207,7 +1214,7 @@ fn host_crash_mid_stop_finishes_the_recorded_stop_once_after_retransfer() {
 
     let Some(probe) = fixture() else { return };
     drop(probe);
-    for phase in ["before-stop", "after-stop"] {
+    for cut in [HostCut::BeforeStop, HostCut::AfterStop] {
         let fixture = fixture().unwrap();
         let (mut host, session, _) = start_job(&fixture, true);
         let (pid, _) = job(&fixture);
@@ -1230,10 +1237,10 @@ fn host_crash_mid_stop_finishes_the_recorded_stop_once_after_retransfer() {
             let (mut child, _) = spawn_env(
                 &fixture,
                 &[],
-                &[("PLAK_TEST_HOST_READOPT_CUT", phase.into())],
+                &[("PLAK_TEST_HOST_READOPT_CUT", cut.name().into())],
             );
             assert_eq!(cut_exit(&mut child).signal(), Some(9));
-            if phase == "before-stop" {
+            if cut == HostCut::BeforeStop {
                 assert!(alive(pid));
             } else {
                 stopped(pid);

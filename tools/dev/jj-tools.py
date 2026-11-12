@@ -15,33 +15,21 @@ import tarfile
 import tempfile
 import urllib.request
 
-PINS = {
-    (
-        '0.44.0',
-        'aarch64-apple-darwin',
-    ): '22b92ed109378a9638f0ae55ca7a7bdc9ef26aa60124215a1f04f6808623ba94',
-    (
-        '0.44.0',
-        'x86_64-unknown-linux-musl',
-    ): '0a07bab4641a55fd2bc2fd1563ba3a3f9a577584086ad74086a1c5b69b3ffce9',
-    (
-        '0.45.0',
-        'aarch64-apple-darwin',
-    ): '4eb739e998fed3dd9784db86349ad60133494d71e7f4e100907711dcad19c058',
-    (
-        '0.45.0',
-        'x86_64-unknown-linux-musl',
-    ): 'ce25abe9192fbdc2fe0b112f883cf976e8646f556ba60f3f0947aacd8714ded3',
-    (
-        '0.46.0',
-        'aarch64-apple-darwin',
-    ): '43daa37ce0f9716cdf6fb65a29cbcae74a3160aef048cf3cb3d166d41cb4ab58',
-    (
-        '0.46.0',
-        'x86_64-unknown-linux-musl',
-    ): 'fce0271158e665ceb82dc66c5eb95b1728649094e9133074f3b5baece345fc08',
-}
-VERSIONS = ('0.44.0', '0.45.0', '0.46.0')
+
+def _pins() -> dict[tuple[str, str], tuple[str, str]]:
+    """(version, target) to (sha256, url) for every jj line of dev-tools.pins."""
+    pins = {}
+    path = Path(__file__).resolve().parents[1] / 'gate' / 'dev-tools.pins'
+    for line in path.read_text().splitlines():
+        fields = line.split()
+        if fields and fields[0] == 'jj':
+            _, version, target, checksum, url = fields
+            pins[version, target] = checksum, url
+    return pins
+
+
+PINS = _pins()
+VERSIONS = tuple(dict.fromkeys(version for version, _ in PINS))
 
 
 def install(prefix: Path) -> None:
@@ -52,14 +40,11 @@ def install(prefix: Path) -> None:
     if triple is None:
         raise RuntimeError('JJ compatibility binaries support Apple Silicon macOS and Linux x86_64')
     for version in VERSIONS:
-        archive = f'jj-v{version}-{triple}.tar.gz'
-        url = f'https://github.com/jj-vcs/jj/releases/download/v{version}/{archive}'
+        checksum, url = PINS[version, triple]
+        archive = url.rsplit('/', 1)[1]
         with urllib.request.urlopen(url, timeout=60) as response:
             content = response.read(128 * 1024 * 1024 + 1)
-        if (
-            len(content) > 128 * 1024 * 1024
-            or hashlib.sha256(content).hexdigest() != PINS[version, triple]
-        ):
+        if len(content) > 128 * 1024 * 1024 or hashlib.sha256(content).hexdigest() != checksum:
             raise RuntimeError(f'JJ archive checksum mismatch: {url}')
         directory = prefix / 'jj' / version
         directory.mkdir(parents=True, exist_ok=True)
@@ -73,7 +58,7 @@ def install(prefix: Path) -> None:
                 temp.write(binary.read())
                 os.fchmod(temp.fileno(), 0o755)
             os.replace(temp.name, directory / 'jj')
-        (directory / f'{archive}.sha256').write_text(PINS[version, triple] + '\n')
+        (directory / f'{archive}.sha256').write_text(checksum + '\n')
         print(f'installed {directory / "jj"}')
 
 
@@ -82,8 +67,8 @@ def compat(prefix: Path) -> None:
     script = root / 'tools' / 'gate' / 'test-env.sh'
     env = os.environ.copy()
     env.update(json.loads(subprocess.check_output([str(script), '--json'], text=True)))
-    # test-env.sh unsets these only in a shell or a command it runs itself.
-    for name in ('PLAK_TEST_SESSION_LEASE_SECONDS', 'PLAK_TEST_CELL_HELLO_MS'):
+    # --json keeps the overrides and provider keys the offline tests must not see.
+    for name in subprocess.check_output([str(script), '--unset-names'], text=True).split():
         env.pop(name, None)
     for version in VERSIONS:
         binary = (prefix / 'jj' / version / 'jj').resolve()

@@ -5127,7 +5127,10 @@ authority.
 Observation delivery cannot reject an admitted child turn: if taking its
 admission receiver fails, hosted recovers through a fresh atomic attachment
 while retaining the acknowledgement, control and result. Recovered observation
-closes immediately for a terminal turn snapshot. Throwaway cancellation/release
+closes immediately for a terminal turn snapshot. Otherwise a recovered
+observation first offers the decisions its attachment snapshot lists as
+pending for that turn which the read model does not offer yet, since the
+attachment's tail never repeats them. Throwaway cancellation/release
 handles start no presentation task. On explicit source loss, the reducer marks
 a gap; structural lag reattaches after a one-second backoff without replacing
 the shared observation or its cursor. It never infers loss from the branch-wide

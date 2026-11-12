@@ -1,13 +1,17 @@
 """Every test entry point takes its scratch directory from one selector, which
 keeps it off the operator's HOME and on a physical, caller-owned path."""
 
+import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -137,6 +141,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             "tools/dev/crash-sweep.py",
             "tools/dev/jj-tools.py",
             "tools/dev/coverage.sh",
+            "tools/dev/weighted-lanes.py",
             "tests/live/live.py",
         ):
             with self.subTest(path=path):
@@ -169,8 +174,6 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             ["bash", str(script), "--json"], env=env, capture_output=True, text=True, timeout=20
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        import json
-
         values = json.loads(result.stdout)
         scratch = (self.base / "explicit-tmp").resolve()
         self.assertEqual(Path(values["TMPDIR"]), scratch)
@@ -181,6 +184,183 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.assertEqual(gitconfig, scratch / "gitconfig")
         self.assertEqual(gitconfig.read_text(), "")
         self.assertEqual(values["GIT_CONFIG_NOSYSTEM"], "1")
+
+    def test_test_env_falls_back_to_the_newest_installed_pinned_jj(self):
+        gate = self.checkout / "tools/gate"
+        for name in ("test-env.sh", "dev-tools-prefix.sh"):
+            shutil.copy(ROOT / "tools/gate" / name, gate / name)
+        (gate / "dev-tools.pins").write_text(
+            "jj 0.9.0 x86_64-unknown-linux-musl 00 https://example.invalid/a\n"
+            "jj 0.10.0 x86_64-unknown-linux-musl 00 https://example.invalid/b\n"
+        )
+        for version in ("0.9.0", "0.10.0", "0.11.0"):
+            binary = self.checkout / ".dev-tools/jj" / version / "jj"
+            binary.parent.mkdir(parents=True)
+            binary.write_text("#!/bin/sh\n")
+            binary.chmod(0o700)
+        newest = str(self.checkout / ".dev-tools/jj/0.10.0/jj")
+        path = os.pathsep.join(
+            entry
+            for entry in os.environ["PATH"].split(os.pathsep)
+            if not os.access(Path(entry) / "jj", os.X_OK)
+        )
+        env = dict(self.env, PATH=path, PLAK_TEST_TMPDIR=str(self.base / "jj-tmp"))
+        env.pop("PLAK_TEST_JJ", None)
+        script = str(gate / "test-env.sh")
+        report = (
+            "import json, os, shutil; jj = shutil.which('jj');"
+            " print(json.dumps([jj and os.path.realpath(jj), shutil.which('cargo-nextest')]))"
+        )
+
+        def seen(env, form):
+            command = {
+                "json": ["bash", script, "--json"],
+                "command": ["bash", script, "--", sys.executable, "-c", report],
+                "snippet": [
+                    "bash",
+                    "-c",
+                    'set -euo pipefail; test_env="$("$1")"; eval "$test_env"; "$2" -c "$3"',
+                    "snippet",
+                    script,
+                    sys.executable,
+                    report,
+                ],
+            }[form]
+            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            value = json.loads(result.stdout)
+            if form != "json":
+                return value
+            search = value.get("PATH", env["PATH"])
+            jj = shutil.which("jj", path=search)
+            return [jj and os.path.realpath(jj), shutil.which("cargo-nextest", path=search)]
+
+        on_path = self.base / "on-path"
+        on_path.mkdir()
+        (on_path / "jj").symlink_to(newest)
+        # A named jj beside other tools moves only jj: the stub never wins.
+        named = self.base / "tools-beside-jj/jj-0.9"
+        named.parent.mkdir()
+        named.symlink_to(self.checkout / ".dev-tools/jj/0.9.0/jj")
+        stub = named.parent / "cargo-nextest"
+        stub.write_text("#!/bin/sh\n")
+        stub.chmod(0o700)
+        nextest = shutil.which("cargo-nextest", path=path)
+        older = str(self.checkout / ".dev-tools/jj/0.9.0/jj")
+        # A call nested under another finds the link itself as the jj on PATH.
+        nested = subprocess.run(
+            ["bash", script, "--", "bash", script, "--", "true"],
+            env=dict(env, PATH=f"{on_path}{os.pathsep}{path}", PLAK_TEST_JJ="jj"),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        self.assertEqual(nested.returncode, 0, nested.stderr)
+        link = self.base / "jj-tmp/plak-test-jj/jj"
+        self.assertEqual(os.path.realpath(link), newest)
+        for form in ("json", "command", "snippet"):
+            for search in (path, f"{on_path}{os.pathsep}{path}"):
+                with self.subTest(form=form, search=search):
+                    pinned = dict(env, PATH=search, PLAK_TEST_JJ=str(named))
+                    self.assertEqual(seen(pinned, form), [older, nextest])
+            with self.subTest(form=form):
+                self.assertEqual(seen(env, form), [newest, nextest])
+                kept = seen(dict(env, PATH=f"{on_path}{os.pathsep}{path}"), form)
+                self.assertEqual(kept, [newest, nextest])
+                self.assertEqual(seen(dict(env, PLAK_TEST_JJ=""), form), [None, nextest])
+
+    def test_json_drivers_drop_what_test_env_unsets(self):
+        for path in (
+            "tools/dev/crash-sweep.py",
+            "tools/dev/jj-tools.py",
+            "tools/dev/weighted-lanes.py",
+        ):
+            with self.subTest(path=path):
+                source = (ROOT / path).read_text()
+                self.assertIn("--unset-names", source)
+                self.assertNotIn("PLAK_TEST_SESSION_LEASE_SECONDS", source)
+
+    def test_weighted_lanes_build_without_overrides_or_provider_keys(self):
+        spec = importlib.util.spec_from_file_location(
+            "weighted_lanes", ROOT / "tools/dev/weighted-lanes.py"
+        )
+        lanes = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lanes)
+        leaked = subprocess.check_output(
+            ["bash", str(ROOT / "tools/gate/test-env.sh"), "--unset-names"], text=True
+        ).split()
+        real_run = subprocess.run
+        seen = {}
+
+        class Built(Exception):
+            pass
+
+        def run(command, **kwargs):
+            if command[:2] == ["bash", "tools/gate/dev-tools.sh"]:
+                return subprocess.CompletedProcess(command, 0)
+            if command[:2] == ["cargo", "test"]:
+                seen.update(kwargs["env"])
+                raise Built
+            return real_run(command, **kwargs)
+
+        env = dict(
+            os.environ,
+            PLAK_TEST_TMPDIR=str(self.base / "weighted-tmp"),
+            CARGO_TARGET_DIR=str(self.base / "target"),
+            **{name: "leaked" for name in leaked},
+        )
+        with (
+            unittest.mock.patch.dict(os.environ, env, clear=True),
+            unittest.mock.patch.object(lanes.subprocess, "run", side_effect=run),
+            self.assertRaises(Built),
+        ):
+            lanes.main([])
+        self.assertEqual(seen["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual([name for name in leaked if name in seen], [])
+
+    def test_test_env_unsets_overrides_and_provider_keys(self):
+        script = ROOT / "tools/gate/test-env.sh"
+        leaked = (
+            "PLAK_TEST_SESSION_LEASE_SECONDS",
+            "PLAK_TEST_CELL_HELLO_MS",
+            "PLAK_TEST_HOST_IDLE_EXIT_SECONDS",
+            "OPENAI_API_KEY",
+            "XAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "OPENROUTER_API_KEY",
+        )
+        env = dict(
+            os.environ,
+            PLAK_TEST_TMPDIR=str(self.base / "unset-tmp"),
+            KEEP_ME="kept",
+            **{name: "leaked" for name in leaked},
+        )
+        names = subprocess.run(
+            ["bash", str(script), "--unset-names"], capture_output=True, text=True, timeout=20
+        )
+        self.assertEqual(tuple(names.stdout.split()), leaked, names.stderr)
+        report = "import json, os; print(json.dumps(dict(os.environ)))"
+        for command in (
+            ["bash", str(script), "--", sys.executable, "-c", report],
+            [
+                "bash",
+                "-c",
+                'set -euo pipefail; test_env="$("$1")"; eval "$test_env"; "$2" -c "$3"',
+                "snippet",
+                str(script),
+                sys.executable,
+                report,
+            ],
+        ):
+            with self.subTest(form=command[1]):
+                result = subprocess.run(
+                    command, env=env, capture_output=True, text=True, timeout=20
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                seen = json.loads(result.stdout)
+                self.assertEqual(seen["KEEP_ME"], "kept")
+                for name in leaked:
+                    self.assertNotIn(name, seen)
 
     def test_nextest_filter_expression_reaches_cargo_as_one_argument(self):
         copy = self.base / "repo"
@@ -198,6 +378,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             "tools/gate/test-processes.py",
             "tools/gate/dev-tools.sh",
             "tools/gate/dev-tools-prefix.sh",
+            "tools/gate/dev-tools.pins",
         ):
             destination = copy / relative
             destination.parent.mkdir(parents=True, exist_ok=True)

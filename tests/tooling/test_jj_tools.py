@@ -4,12 +4,25 @@ import hashlib
 import importlib.util
 import io
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
+UNSET_NAMES = subprocess.check_output(
+    ['bash', str(ROOT / 'tools/gate/test-env.sh'), '--unset-names'], text=True
+)
+TEST_ENV = (
+    '{"TMPDIR":"/tmp","PLAK_HOME":"/tmp/h","GIT_CONFIG_GLOBAL":"/tmp/g","GIT_CONFIG_NOSYSTEM":"1"}'
+)
+
+
+def test_env_output(command, **kwargs):
+    return UNSET_NAMES if command[-1] == '--unset-names' else TEST_ENV
+
+
 SPEC = importlib.util.spec_from_file_location('jj_tools', ROOT / 'tools/dev/jj-tools.py')
 jj_tools = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(jj_tools)
@@ -19,8 +32,9 @@ class JjToolsTests(unittest.TestCase):
     def test_every_supported_minor_and_platform_has_a_checksum(self):
         self.assertEqual(jj_tools.VERSIONS, ('0.44.0', '0.45.0', '0.46.0'))
         self.assertEqual(len(jj_tools.PINS), 6)
-        for checksum in jj_tools.PINS.values():
+        for (version, triple), (checksum, url) in jj_tools.PINS.items():
             self.assertRegex(checksum, r'^[0-9a-f]{64}$')
+            self.assertTrue(url.endswith(f'/v{version}/jj-v{version}-{triple}.tar.gz'), url)
 
     def test_verified_regular_binary_is_the_only_archive_entry_installed(self):
         stream = io.BytesIO()
@@ -36,7 +50,12 @@ class JjToolsTests(unittest.TestCase):
             patch.object(jj_tools, 'VERSIONS', ('0.46.0',)),
             patch.dict(
                 jj_tools.PINS,
-                {('0.46.0', 'x86_64-unknown-linux-musl'): hashlib.sha256(content).hexdigest()},
+                {
+                    ('0.46.0', 'x86_64-unknown-linux-musl'): (
+                        hashlib.sha256(content).hexdigest(),
+                        jj_tools.PINS['0.46.0', 'x86_64-unknown-linux-musl'][1],
+                    )
+                },
             ),
             patch.object(
                 jj_tools.urllib.request, 'urlopen', side_effect=lambda *a, **kw: io.BytesIO(content)
@@ -70,11 +89,7 @@ class JjToolsTests(unittest.TestCase):
     def test_compat_requires_explicit_install(self):
         with (
             tempfile.TemporaryDirectory() as temporary,
-            patch.object(
-                jj_tools.subprocess,
-                'check_output',
-                return_value='{"TMPDIR":"/tmp","PLAK_HOME":"/tmp/h","GIT_CONFIG_GLOBAL":"/tmp/g","GIT_CONFIG_NOSYSTEM":"1"}',
-            ),
+            patch.object(jj_tools.subprocess, 'check_output', side_effect=test_env_output),
         ):
             with self.assertRaisesRegex(RuntimeError, 'run just dev-tools install'):
                 jj_tools.compat(Path(temporary))
@@ -83,11 +98,7 @@ class JjToolsTests(unittest.TestCase):
         calls = []
         with (
             tempfile.TemporaryDirectory() as temporary,
-            patch.object(
-                jj_tools.subprocess,
-                'check_output',
-                return_value='{"TMPDIR":"/tmp","PLAK_HOME":"/tmp/h","GIT_CONFIG_GLOBAL":"/tmp/g","GIT_CONFIG_NOSYSTEM":"1"}',
-            ),
+            patch.object(jj_tools.subprocess, 'check_output', side_effect=test_env_output),
             patch.object(
                 jj_tools.subprocess,
                 'run',
@@ -95,7 +106,12 @@ class JjToolsTests(unittest.TestCase):
             ),
             patch.dict(
                 jj_tools.os.environ,
-                {'PLAK_TEST_SESSION_LEASE_SECONDS': '1', 'PLAK_TEST_CELL_HELLO_MS': '1'},
+                {
+                    'PLAK_TEST_SESSION_LEASE_SECONDS': '1',
+                    'PLAK_TEST_CELL_HELLO_MS': '1',
+                    'PLAK_TEST_HOST_IDLE_EXIT_SECONDS': '1',
+                    'ANTHROPIC_API_KEY': 'leaked',
+                },
             ),
         ):
             prefix = Path(temporary).resolve()
@@ -112,6 +128,8 @@ class JjToolsTests(unittest.TestCase):
                 self.assertEqual(env['PLAK_TEST_JJ'], str(prefix / 'jj' / version / 'jj'))
                 self.assertNotIn('PLAK_TEST_SESSION_LEASE_SECONDS', env)
                 self.assertNotIn('PLAK_TEST_CELL_HELLO_MS', env)
+                self.assertNotIn('PLAK_TEST_HOST_IDLE_EXIT_SECONDS', env)
+                self.assertNotIn('ANTHROPIC_API_KEY', env)
             for command, _ in calls[1::2]:
                 self.assertEqual(command[-1], 'tests/tooling/test_vcs_listing.py')
 

@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 use serde_json::json;
 
 use super::park::tests::{
-    Fixture, fixture, fixture_deciding, held, leaf, parked, settled, start_job, turns,
+    Fixture, fixture, fixture_decided_late, fixture_deciding, held, leaf, parked, settled,
+    start_job, turns,
 };
 use crate::agent_tree::{MailDisposition, NodeDetach, ProductAgentTree, TopologyObserver};
 use crate::agent_tree_protocol::{
@@ -269,6 +270,18 @@ async fn child_processes_are_reached_by_node_address() {
 async fn child_approval_is_decided_once_by_the_child() {
     assert_today(Row::Approval, Column::Child, Cell::Classes(&[Class::B]));
     let fixture = fixture_deciding(json!([start_job("true"), held("decided")]), leaf).await;
+    decided_once(&fixture).await;
+}
+
+/// The child's read model attaches after its turn already waits on the
+/// decision: the decision is offered from the attach, not lost before it.
+#[tokio::test]
+async fn child_approval_pending_before_its_read_model_attaches_is_offered() {
+    let fixture = fixture_decided_late(json!([start_job("true"), held("decided")]), leaf).await;
+    decided_once(&fixture).await;
+}
+
+async fn decided_once(fixture: &Fixture) {
     let approval_id = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             let pending = {
@@ -305,7 +318,7 @@ async fn child_approval_is_decided_once_by_the_child() {
             .policy_id(),
         "plakous.allow-registered"
     );
-    finish(&fixture).await;
+    finish(fixture).await;
 }
 
 #[derive(Default)]

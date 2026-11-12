@@ -545,7 +545,7 @@ async fn structural_source_lag_reattaches_without_closing_the_observation() {
     let owner = ChildTurnProjection::start(
         turn.id(),
         Some(attached.agent().clone()),
-        std::future::ready(Some(Source::Recovered(initial))),
+        std::future::ready(Some(Source::Recovered(initial, None))),
     )
     .drive_in(&crate::TaskSet::new());
     // A successful reattach registers a fresh subscription after the backoff.

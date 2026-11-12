@@ -1,6 +1,6 @@
 [package]
 name = "plakous-runner-protocol"
-description = "Runner protocol v1: frames, handshake, request classes and operations between a Plakous host and a runner"
+description = "Runner protocol frames, handshake, request classes and operations between a Plakous host and a runner"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
