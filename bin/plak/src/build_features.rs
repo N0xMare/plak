@@ -8,6 +8,7 @@ pub(crate) fn require_account(account: &str) -> CliResult<()> {
     Ok(())
 }
 
+/// The agent entry owns capability admission so refusals retain its wire framing.
 pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
     match command {
         Command::Tui { .. }
@@ -44,12 +45,6 @@ pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
             plakous_hosted::capabilities::require(account.as_str())?;
         }
         Command::ModelsPlatform(account) | Command::RunPlatform { account, .. } => {
-            plakous_hosted::capabilities::require(account.as_str())?;
-        }
-        Command::Agent {
-            account: Some(account),
-            ..
-        } => {
             plakous_hosted::capabilities::require(account.as_str())?;
         }
         _ => {}

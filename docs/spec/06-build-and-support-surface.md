@@ -481,7 +481,13 @@ defaults include all seven routes, JS, Python, MCP, local web fetch, images,
 TUI, clipboard and Git. Hosted defaults additionally include the JJ backend.
 Every package must declare the dependency features its own Rust targets use;
 features enabled only by another workspace member are not evidence that the
-package builds on its own. The gate's `builds` group therefore also builds each
+package builds on its own. Plak declares the signal feature used by same-user
+host discovery directly; shared console/TUI setup detection and MCP adapters
+are gated by their actual consuming surfaces, not the default feature set.
+The agent entry owns omitted-route admission so a reduced JSONL product still
+terminates rejection with `error` then `bye`, before session or credential
+admission; wire clients retain their own refusal framing.
+The gate's `builds` group therefore also builds each
 supported package alone, `cargo build -p <package>` with its own default
 features, rustc warnings denied (chapter 05 §1); for `plak` that is the release
 build's resolution. The `static` group runs clippy on the same per-package
