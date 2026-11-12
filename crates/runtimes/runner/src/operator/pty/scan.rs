@@ -99,6 +99,7 @@ pub(super) struct SessionCleanup {
     leader: Identity,
     seen: HashMap<u32, String>,
     pub(super) escaped: HashMap<u32, String>,
+    session_live: HashMap<u32, String>,
     pub(super) uncertain: bool,
 }
 
@@ -107,12 +108,27 @@ impl SessionCleanup {
         Self {
             seen: HashMap::from([(leader.pid, leader.started.clone())]),
             escaped: HashMap::new(),
+            session_live: HashMap::new(),
             leader,
             uncertain: false,
         }
     }
 
     pub(super) fn observe(&mut self, rows: &[Identity]) {
+        self.session_live = rows
+            .iter()
+            .filter(|row| row.session == self.leader.session && !row.zombie)
+            .take(MAX_TRACKED_PROCESSES)
+            .map(|row| (row.pid, row.started.clone()))
+            .collect();
+        if rows
+            .iter()
+            .filter(|row| row.session == self.leader.session && !row.zombie)
+            .count()
+            > MAX_TRACKED_PROCESSES
+        {
+            self.uncertain = true;
+        }
         if self.leader.started.is_empty()
             && self
                 .leader
@@ -159,6 +175,7 @@ impl SessionCleanup {
 
     pub(super) fn finish(&mut self, mut reap: impl FnMut() -> bool) -> bool {
         let observed_escape = !self.escaped.is_empty();
+        let mut certain = true;
         let deadline = Instant::now() + Duration::from_secs(3);
         for signal in [
             rustix::process::Signal::HUP,
@@ -168,9 +185,10 @@ impl SessionCleanup {
             let Some(rows) = complete_scan(deadline) else {
                 return false;
             };
-            if !self.signal_groups(&rows, signal) {
+            if !self.leader_anchored(&rows) {
                 return false;
             }
+            certain &= self.signal_groups(&rows, signal);
             if signal != rustix::process::Signal::KILL {
                 std::thread::sleep(Duration::from_millis(150));
             }
@@ -187,19 +205,32 @@ impl SessionCleanup {
             {
                 break;
             }
-            if !self.signal_groups(&rows, rustix::process::Signal::KILL) {
+            if !self.leader_anchored(&rows) {
                 return false;
             }
+            certain &= self.signal_groups(&rows, rustix::process::Signal::KILL);
             std::thread::sleep(Duration::from_millis(20));
         }
         self.leader.retire_anchor();
         if !reap() {
             return false;
         }
-        self.prove_absence_until(deadline) && !observed_escape && self.escaped.is_empty()
+        self.prove_absence_until(deadline) && certain && !observed_escape && self.escaped.is_empty()
     }
 
     fn signal_groups(&mut self, rows: &[Identity], signal: rustix::process::Signal) -> bool {
+        self.signal_groups_with(rows, signal, rustix::process::kill_process_group)
+    }
+
+    fn signal_groups_with(
+        &mut self,
+        rows: &[Identity],
+        signal: rustix::process::Signal,
+        mut send: impl FnMut(
+            rustix::process::Pid,
+            rustix::process::Signal,
+        ) -> Result<(), rustix::io::Errno>,
+    ) -> bool {
         self.observe(rows);
         // A PTY child is its own session leader. Never accept the runner's SID,
         // a ps sess pointer, or a reused leader as process-group kill authority.
@@ -211,59 +242,84 @@ impl SessionCleanup {
             .filter(|row| row.session == self.leader.session && !row.zombie)
             .map(|row| row.group)
             .collect();
+        let mut certain = true;
         for group in groups {
-            // Validate *all* members against this same fresh complete scan before
-            // each group signal. No group without a leader-SID match is signalled.
-            if rows.iter().any(|row| {
-                row.group == group
-                    && row.session != self.leader.session
-                    && (!cfg!(target_os = "macos") || !row.zombie)
-            }) {
-                return false;
-            }
-            let mut validated = false;
-            for member in rows.iter().filter(|row| row.group == group && !row.zombie) {
-                let Some(pid) = i32::try_from(member.pid)
-                    .ok()
-                    .and_then(rustix::process::Pid::from_raw)
-                else {
-                    return false;
-                };
-                match rustix::process::getsid(Some(pid)) {
-                    Ok(sid) if sid.as_raw_nonzero().get().to_string() == self.leader.session => {}
-                    Err(rustix::io::Errno::SRCH) => continue,
-                    _ => return false,
-                }
-                let Some(expected) = i32::try_from(group)
-                    .ok()
-                    .and_then(rustix::process::Pid::from_raw)
-                else {
-                    return false;
-                };
-                if rustix::process::getpgid(Some(pid)) != Ok(expected) {
-                    continue;
-                }
-                validated = true;
-            }
-            if !validated {
-                continue;
-            }
-            let Some(group) = i32::try_from(group)
+            // An uncertain group cannot prevent cleanup of other validated groups.
+            certain &= self.signal_group(rows, group, signal, &mut send).is_ok();
+        }
+        certain
+    }
+
+    fn signal_group(
+        &self,
+        rows: &[Identity],
+        group: u32,
+        signal: rustix::process::Signal,
+        send: &mut impl FnMut(
+            rustix::process::Pid,
+            rustix::process::Signal,
+        ) -> Result<(), rustix::io::Errno>,
+    ) -> Result<(), ()> {
+        // Validate every member against this same fresh scan before signalling.
+        if rows.iter().any(|row| {
+            row.group == group
+                && row.session != self.leader.session
+                && (!cfg!(target_os = "macos") || !row.zombie)
+        }) {
+            return Err(());
+        }
+        let only_anchor = self.leader_anchored(rows)
+            && rows
+                .iter()
+                .filter(|row| row.group == group)
+                .all(|row| row.pid == self.leader.pid);
+        let mut validated = false;
+        for member in rows.iter().filter(|row| row.group == group && !row.zombie) {
+            let Some(pid) = i32::try_from(member.pid)
                 .ok()
                 .and_then(rustix::process::Pid::from_raw)
             else {
-                return false;
+                return Err(());
             };
-            if !self.leader_anchored(rows) {
-                return false;
+            match rustix::process::getsid(Some(pid)) {
+                Ok(sid) if sid.as_raw_nonzero().get().to_string() == self.leader.session => {}
+                Err(rustix::io::Errno::SRCH) => continue,
+                Err(rustix::io::Errno::PERM) if only_anchor => continue,
+                _ => return Err(()),
             }
-            if let Err(error) = rustix::process::kill_process_group(group, signal)
-                && error != rustix::io::Errno::SRCH
-            {
-                return false;
+            let Some(expected) = i32::try_from(group)
+                .ok()
+                .and_then(rustix::process::Pid::from_raw)
+            else {
+                return Err(());
+            };
+            match rustix::process::getpgid(Some(pid)) {
+                Ok(actual) if actual == expected => {}
+                Err(rustix::io::Errno::SRCH) => continue,
+                Err(rustix::io::Errno::PERM) if only_anchor => continue,
+                _ => return Err(()),
             }
+            validated = true;
         }
-        true
+        if !validated {
+            return Ok(());
+        }
+        let Some(group) = i32::try_from(group)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        else {
+            return Err(());
+        };
+        if !self.leader_anchored(rows) {
+            return Err(());
+        }
+        if let Err(error) = send(group, signal)
+            && error != rustix::io::Errno::SRCH
+            && !(error == rustix::io::Errno::PERM && only_anchor)
+        {
+            return Err(());
+        }
+        Ok(())
     }
 
     pub(super) fn leader_anchored(&self, rows: &[Identity]) -> bool {
@@ -301,8 +357,13 @@ impl SessionCleanup {
     }
 
     pub(super) fn survivors(&self) -> Vec<super::super::TerminalProcessIdentity> {
-        let mut survivors: Vec<_> = self
-            .escaped
+        let mut identities = self.session_live.clone();
+        identities.extend(
+            self.escaped
+                .iter()
+                .map(|(pid, start)| (*pid, start.clone())),
+        );
+        let mut survivors: Vec<_> = identities
             .iter()
             .map(|(&pid, started)| super::super::TerminalProcessIdentity {
                 pid,
@@ -310,7 +371,34 @@ impl SessionCleanup {
             })
             .collect();
         survivors.sort_by_key(|identity| identity.pid);
+        survivors.truncate(MAX_TRACKED_PROCESSES);
         survivors
+    }
+
+    pub(super) fn reprove_once(&mut self) -> bool {
+        self.prove_pair(scan)
+    }
+
+    fn prove_pair(&mut self, mut scan: impl FnMut() -> Result<Vec<Identity>, ()>) -> bool {
+        let mut absent = true;
+        for step in 0..2 {
+            if step != 0 {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            absent &= scan().is_ok_and(|rows| self.absent_in(&rows));
+        }
+        absent && !self.uncertain
+    }
+
+    fn absent_in(&mut self, rows: &[Identity]) -> bool {
+        self.observe(rows);
+        self.escaped.retain(|pid, start| {
+            rows.iter()
+                .any(|row| row.pid == *pid && row.started == *start && !row.zombie)
+        });
+        !rows.iter().any(|r| {
+            r.session == self.leader.session || self.escaped.get(&r.pid) == Some(&r.started)
+        })
     }
 
     fn prove_absence_until(&mut self, deadline: Instant) -> bool {
@@ -321,17 +409,10 @@ impl SessionCleanup {
                 std::thread::sleep(Duration::from_millis(20));
                 continue;
             };
-            self.observe(&rows);
-            self.escaped.retain(|pid, start| {
-                rows.iter()
-                    .any(|row| row.pid == *pid && row.started == *start && !row.zombie)
-            });
-            if rows.iter().any(|r| {
-                r.session == self.leader.session || self.escaped.get(&r.pid) == Some(&r.started)
-            }) {
-                absent = 0;
-            } else {
+            if self.absent_in(&rows) {
                 absent += 1;
+            } else {
+                absent = 0;
             }
             if absent == 2 {
                 return !self.uncertain;
@@ -533,6 +614,118 @@ mod tests {
         cleanup.observe(&[row(10, 1, "10"), row(11, 10, "10")]);
         cleanup.observe(&[row(10, 1, "10"), row(11, 10, "11")]);
         assert!(!cleanup.escaped.is_empty());
+    }
+
+    #[test]
+    fn operator_pty_signal_groups_rejects_forged_members_and_continues_valid_groups() {
+        let pair = portable_pty::native_pty_system()
+            .openpty(portable_pty::PtySize::default())
+            .unwrap();
+        let mut command = portable_pty::CommandBuilder::new("/bin/sleep");
+        command.arg("5");
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        let leader = Identity::capture_child(child.process_id().unwrap()).unwrap();
+        let snapshot = scan().unwrap();
+        let live_leader = snapshot
+            .iter()
+            .find(|r| r.pid == leader.pid)
+            .unwrap()
+            .clone();
+        let own = snapshot
+            .iter()
+            .find(|r| r.pid == std::process::id())
+            .unwrap()
+            .clone();
+        let mut cleanup = SessionCleanup::new(leader);
+        // A forged SID cannot turn this test process's real group into a target.
+        let mut forged = own.clone();
+        forged.session.clone_from(&live_leader.session);
+        let mut zombie_leader = live_leader.clone();
+        zombie_leader.zombie = true;
+        let mut sent = Vec::new();
+        assert!(!cleanup.signal_groups_with(
+            &[zombie_leader, forged.clone()],
+            rustix::process::Signal::HUP,
+            |group, _| {
+                sent.push(group);
+                Ok(())
+            }
+        ));
+        assert_eq!(sent, Vec::<rustix::process::Pid>::new());
+        // A foreign-session row in the candidate group refuses that entire group.
+        let mut foreign = own;
+        foreign.group = live_leader.group;
+        assert!(!cleanup.signal_groups_with(
+            &[live_leader.clone(), foreign],
+            rustix::process::Signal::HUP,
+            |group, _| {
+                sent.push(group);
+                Ok(())
+            }
+        ));
+        assert_eq!(sent, Vec::<rustix::process::Pid>::new());
+        // An uncertain independent group does not suppress a valid leader group.
+        assert!(!cleanup.signal_groups_with(
+            &[live_leader.clone(), forged],
+            rustix::process::Signal::HUP,
+            |group, _| {
+                sent.push(group);
+                Ok(())
+            }
+        ));
+        assert_eq!(sent.len(), 1);
+        assert_eq!(
+            sent[0].as_raw_nonzero().get().unsigned_abs(),
+            live_leader.group
+        );
+        // Darwin can return EPERM when the only scanned member is our anchor.
+        assert!(cleanup.signal_groups_with(
+            &[live_leader],
+            rustix::process::Signal::HUP,
+            |_, _| Err(rustix::io::Errno::PERM)
+        ));
+        drop(pair);
+        let mut cleanup = SessionCleanup::new(cleanup.leader);
+        assert!(cleanup.finish(|| child.try_wait().ok().flatten().is_some()));
+        child.wait().unwrap();
+    }
+
+    #[test]
+    fn operator_cleanup_unknown_survivors_include_last_live_session_members() {
+        let mut cleanup = SessionCleanup::new(row(10, 1, "10"));
+        let mut zombie = row(10, 1, "10");
+        zombie.zombie = true;
+        cleanup.observe(&[zombie, row(20, 10, "10"), row(30, 10, "30")]);
+        let survivors = cleanup.survivors();
+        assert_eq!(
+            survivors.iter().map(|r| r.pid).collect::<Vec<_>>(),
+            [20, 30]
+        );
+        assert!(
+            survivors
+                .iter()
+                .all(|r| r.started == format!("start-{}", r.pid))
+        );
+    }
+
+    #[test]
+    fn operator_cleanup_periodic_proof_uses_only_one_scan_pair() {
+        let mut cleanup = SessionCleanup::new(row(10, 1, "10"));
+        let mut calls = 0;
+        assert!(!cleanup.prove_pair(|| {
+            calls += 1;
+            Err(())
+        }));
+        assert_eq!(
+            calls, 2,
+            "periodic incomplete scans do not retry in a window"
+        );
+        calls = 0;
+        assert!(cleanup.prove_pair(|| {
+            calls += 1;
+            Ok(Vec::new())
+        }));
+        assert_eq!(calls, 2);
     }
 
     #[test]

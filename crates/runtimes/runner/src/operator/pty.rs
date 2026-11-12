@@ -292,16 +292,26 @@ impl Worker {
         code: Option<u32>,
     ) {
         *lock(survivors) = cleanup.survivors();
+        let mut delay = Duration::from_secs(10);
         loop {
-            let acknowledge_loss = match receive.recv_timeout(Duration::from_secs(10)) {
-                Ok(Command::Reprove { acknowledge_loss }) => acknowledge_loss,
+            let (acknowledge_loss, explicit) = match receive.recv_timeout(delay) {
+                Ok(Command::Reprove { acknowledge_loss }) => (acknowledge_loss, true),
                 Ok(Command::Input(_)) => continue,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => (false, false),
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             };
             // A reproof never signals: the leader may already have been reaped.
             let _ = self.reap_child();
-            let proven = cleanup.reprove();
+            let proven = if explicit {
+                cleanup.reprove()
+            } else {
+                cleanup.reprove_once()
+            };
+            delay = if explicit {
+                Duration::from_secs(10)
+            } else {
+                next_reproof_delay(delay)
+            };
             *lock(survivors) = cleanup.survivors();
             if proven || acknowledge_loss {
                 *lock(result) = Some((
@@ -375,6 +385,10 @@ impl Worker {
         }
         Ok(())
     }
+}
+
+fn next_reproof_delay(delay: Duration) -> Duration {
+    delay.saturating_mul(2).min(Duration::from_secs(5 * 60))
 }
 
 impl Process for PtyProcess {

@@ -5,6 +5,15 @@ use super::*;
 mod loss;
 
 #[test]
+fn operator_cleanup_periodic_reproof_backs_off_to_a_bounded_interval() {
+    let mut delay = Duration::from_secs(10);
+    for expected in [20, 40, 80, 160, 300, 300] {
+        delay = next_reproof_delay(delay);
+        assert_eq!(delay, Duration::from_secs(expected));
+    }
+}
+
+#[test]
 fn operator_pty_exited_before_first_observation_retains_only_unreaped_anchor() {
     let pair = native_pty_system()
         .openpty(size(TerminalDimensions::new(24, 80).unwrap()))

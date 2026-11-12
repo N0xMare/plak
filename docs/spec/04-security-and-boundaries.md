@@ -796,6 +796,13 @@ mandatory.
 Expired/closed namespaces and exhausted namespace-table admission refuse before
 changing another generation: a stale renewal cannot close its successor's terminals.
 
+An uncertain group never suppresses signals to other independently validated groups;
+the final result remains unknown. EPERM is equivalent to a vanished group only
+when its sole scanned member is the owned unreaped leader. Unknown receipts include
+bounded last-observed live session identities as well as tracked escapees. Periodic
+re-proofs use a single scan pair with exponential backoff from ten seconds to five
+minutes; explicit close retains its full proof window and never signals escaped ids.
+
 Close and expiry supervise the entire independently identified PTY session, not
 only the shell's process group. Closing all master descriptors hangs up the PTY;
 HUP, TERM and KILL cover each freshly identity-checked member group, including

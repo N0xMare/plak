@@ -42,7 +42,10 @@ re-proofs distinguish later absence from explicit acknowledged loss with live
 escapees. A fast double-fork case records the non-containment residual. The
 platform scan test compares the runner's own kernel session id against a fresh
 PTY child's before platform cleanup qualification. Injected observation failures
-must leave a shell running. A zombie-anchor regression keeps Linux's full scan
+must leave a shell running. Forged session/group rows must never authorize a
+signal to a non-member, and uncertainty in one group cannot suppress another
+validated group. Unknown survivors include live session rows; periodic re-proofs
+are bounded to one scan pair and a capped exponential cadence. A zombie-anchor regression keeps Linux's full scan
 requirement while checking Darwin's unreaped direct-child fallback and rejection
 of changed start identity. A child exits before identity observation on both
 platforms: Darwin accepts its by-construction unreaped-child anchor without any
@@ -56,7 +59,10 @@ interactive parsing. Tests read the exact curated environment from `env`,
 validate passwd/fallback shell selection, bound output before cursor advancement,
 collect more than 65 closed receipts without replay, collect more than 64 refused
 opens while admitting a fresh id and preserving old refusal/digest outcomes, and fence more than 129
-retired generations. Runner-loss durability tests kill a real PTY-owning process,
+retired generations. A full-bulk-channel serial regression holds input behind the controller reserve,
+then proves InputAccepted follows output with a gap-free sequence; a separate cut
+requires the read deadline to expire even while that gate is closed.
+Runner-loss durability tests kill a real PTY-owning process,
 including one with a real surviving HUP-ignoring orphaned shell, and distinguish
 lost-instance receipts from permission to spawn or signal a remembered PID.
 These platform-sensitive tests require both supported operating systems; Linux

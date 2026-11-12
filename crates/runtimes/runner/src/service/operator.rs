@@ -5,6 +5,10 @@ use super::{
     ServeFuture, Value, environment_failure, mpsc,
 };
 
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "bounded congested-link fixture")]
+mod tests;
+
 impl RunnerService {
     pub(super) fn operator_link_current(
         &self,
@@ -157,7 +161,10 @@ impl RunnerService {
         };
         // This connection's single producer reserves its remaining frame capacity
         // before output can advance a cursor or sequence. The consumer only frees it.
-        for frame in operator.output_round(host, generation, connection, sender.capacity()) {
+        let capacity = sender
+            .capacity()
+            .saturating_sub(operator.control_reserve(host, generation, connection));
+        for frame in operator.output_round(host, generation, connection, capacity) {
             let _ = sender.try_send(RunnerFrame::Stream(frame));
         }
     }

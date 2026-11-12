@@ -15,6 +15,36 @@ struct Fake {
 struct FakeBackend(Arc<Mutex<Fake>>);
 struct FakeProcess(Arc<Mutex<Fake>>, bool, bool);
 
+pub(crate) fn congested_link_fixture() -> (OperatorTerminalService, u64, Vec<StreamFrame>) {
+    let fixture = Fixture::new();
+    fixture.open(0);
+    fixture.call(0, OperatorOperation::Renew);
+    let stream = fixture.attach(0, 0);
+    fixture
+        .service
+        .receive(
+            "paired",
+            "generation",
+            0,
+            StreamFrame {
+                stream,
+                seq: 0,
+                event: StreamEvent::Credit {
+                    bytes: WINDOW_BYTES,
+                },
+            },
+        )
+        .unwrap();
+    lock(&lock(&fixture.fake).outputs[0]).push(&vec![0xff; usize::try_from(WINDOW_BYTES).unwrap()]);
+    let mut frames = Vec::new();
+    for _ in 0..4 {
+        frames.extend(fixture.service.output_round("paired", "generation", 0, 4));
+        fixture.advance(1);
+    }
+    assert_eq!(frames.len(), 4);
+    (fixture.service, stream, frames)
+}
+
 impl Backend for FakeBackend {
     fn spawn(
         &self,

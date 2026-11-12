@@ -94,7 +94,10 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
-  test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive)
+  test(operator_pty_signal_groups_rejects_forged_members_and_continues_valid_groups)
+  | test(operator_stream_full_bulk_channel_gates_input_and_preserves_ack_sequence)
+  | test(operator_stream_congested_read_gate_honors_read_deadline)
+  | test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive)
   | test(operator_console_pty_wire_consent_takeover_disconnect_and_loss)
   | test(environment::backend::changes::tests::process_stops::)
   | test(operator_pty_exited_before_first_observation_retains_only_unreaped_anchor)
@@ -404,7 +407,10 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive)
+  test(operator_pty_signal_groups_rejects_forged_members_and_continues_valid_groups)
+  | test(operator_stream_full_bulk_channel_gates_input_and_preserves_ack_sequence)
+  | test(operator_stream_congested_read_gate_honors_read_deadline)
+  | test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive)
   | test(operator_console_pty_wire_consent_takeover_disconnect_and_loss)
   | test(environment::backend::changes::tests::process_stops::)
   | test(operator_pty_exited_before_first_observation_retains_only_unreaped_anchor)

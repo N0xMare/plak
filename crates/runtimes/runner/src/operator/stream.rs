@@ -8,6 +8,23 @@ use super::{
 use base64::Engine as _;
 
 impl OperatorTerminalService {
+    pub(crate) fn control_reserve(&self, host: &str, generation: &str, connection: u64) -> usize {
+        let table = lock(&self.inner.table);
+        let controllers = table
+            .namespaces
+            .iter()
+            .filter(|(key, _)| key.host == host && key.generation == generation)
+            .flat_map(|(_, ns)| ns.terminals.values())
+            .filter(|terminal| {
+                terminal
+                    .controller
+                    .as_ref()
+                    .is_some_and(|c| c.connection == connection)
+            })
+            .count();
+        controllers + 2
+    }
+
     /// Applies a terminal stream frame. None means it is not this connection's
     /// operator stream. Corruption detaches only that controller, never the shell.
     #[must_use]

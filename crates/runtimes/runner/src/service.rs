@@ -443,8 +443,17 @@ impl RunnerService {
         let mut terminal_tick = tokio::time::interval(Duration::from_millis(64));
         let mut read_deadline = tokio::time::Instant::now() + self.inner.dead;
         loop {
+            let reserve = self.inner.operator.as_ref().map_or(1, |operator| {
+                operator.control_reserve(host, instance, connection)
+            });
+            let readable = terminal_sender.capacity() >= reserve;
             let frame = tokio::select! {
-                frame = tokio::time::timeout_at(read_deadline, reader.next::<HostFrame>()) => frame,
+                frame = reader.next::<HostFrame>(), if readable => frame,
+                () = tokio::time::sleep_until(read_deadline) => break,
+                room = terminal_sender.reserve_many(reserve), if !readable => {
+                    if room.is_err() { break; }
+                    continue;
+                }
                 () = closer.cancelled() => break,
                 _ = terminal_tick.tick(), if self.inner.operator.is_some() => {
                     self.operator_output(host, instance, connection, &terminal_sender);
@@ -452,9 +461,9 @@ impl RunnerService {
                 }
             };
             let frame = match frame {
-                Err(_) | Ok(None) => break,
-                Ok(Some(Ok(frame))) => frame,
-                Ok(Some(Err(error))) => {
+                None => break,
+                Some(Ok(frame)) => frame,
+                Some(Err(error)) => {
                     let _ = sender.send(refused(
                         None,
                         Refusal::Malformed {

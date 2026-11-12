@@ -6129,6 +6129,10 @@ attach observes an honest gap. At most 32 controllers retain output at once, inc
 controllers viewing exited shells. Input is capped at 64 KiB/s and output at 256 KiB/s
 per terminal, 512 KiB/s per principal, with shared awake-clock budgets and bounded queues.
 Control frames run ahead of bulk frames; stalled writes have a five-second bound.
+Operator output leaves at least one slot per controller plus two margin slots in
+the connection bulk channel. The read gate waits for that reserve before consuming
+another host frame, still enforcing the existing read deadline. Input/refusal/close
+responses cannot be dropped after sequence advancement under slow-link pressure.
 
 Runner-owned awake deadlines are 15 minutes since accepted input, five minutes detached,
 and 90 seconds since namespace renewal. Output, resize and credit do not refresh input

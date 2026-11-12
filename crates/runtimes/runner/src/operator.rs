@@ -22,7 +22,7 @@ mod stream;
 mod table;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "operator lifecycle fixtures")]
-mod tests;
+pub(crate) mod tests;
 
 const RING_BYTES: usize = 1024 * 1024;
 const CHUNK_BYTES: usize = 16 * 1024;
