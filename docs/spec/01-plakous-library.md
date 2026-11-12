@@ -6094,6 +6094,45 @@ observations. Byte credit is capped at 64 KiB outstanding. Ambiguous input is ne
 replayed; an ambiguous open resolves only from the same instance's reservation and
 matching digest, never by spawning a replacement after a missing receipt.
 
+**Operator PTY service.** `OperatorTerminalService` owns separate memory-only
+namespaces, terminal reservations and controllers. `RunnerClient::operator_control`
+carries its fixed requests with no owner or effect journal; `operator_recover_open`
+sets replay and can resolve only an existing reservation. Lost operator requests
+are not automatically replayed by a reconnect. `operator_stream` registers an Attach
+answer before credit is granted. The same service and explicit startup policy serve
+host-local placement; the home-local daemon allowlist includes this independent class,
+without admitting general file or VCS verbs there.
+
+Open validates the canonical workspace against runner roots, the product home and XDG
+application state, reserves before spawning, and retains the terminal-id/digest outcome.
+Quota includes starting, closing and unknown shells: two/session, four/principal,
+sixteen/host, thirty-two/runner. Tables are bounded to 128 namespaces with at most 64
+terminal reservations and 64 refused-open receipts each; saturation refuses rather than
+forgetting an id and spawning it again. Attach never spawns and acquires one input/resize
+controller. Resize coalesces the latest valid dimensions. The raw merged stdout/stderr
+ring is 1 MiB per terminal, continues draining without viewer credit and never spools.
+Slow readers receive output_gap before replay from the oldest retained cursor. Closed,
+unattached terminals retain lightweight receipts rather than archived output; a later
+attach observes an honest gap. At most 32 controllers retain output at once, including
+controllers viewing exited shells. Input is capped at 64 KiB/s and output at 256 KiB/s
+per terminal, 512 KiB/s per principal, with shared awake-clock budgets and bounded queues.
+Control frames run ahead of bulk frames; stalled writes have a five-second bound.
+
+Runner-owned awake deadlines are 15 minutes since accepted input, five minutes detached,
+and 90 seconds since namespace renewal. Output, resize and credit do not refresh input
+idle. A lifecycle worker enforces them even without a connection. Renew/list reconcile a
+same-generation table before new input; another generation closes, never adopts, old
+namespaces. Cleanup retains quota and workspace pins until whole-session absence is
+proven (chapter 04 §§2.2, 2.9). Live and unknown terminals block both daemon idle-exit
+paths. The reclamation guard canonicalizes aliases and excludes opens in either
+admission order through actual removal/trim completion. VCS extensions identify removal,
+reclamation checks and disposable-target trims through `reclamation_path`; they cannot
+reclaim a live terminal's workspace or its descendants. The host-local embedding uses
+the same `reclaim` guard for its own removals. `workspace_pinned` is the host's residency
+and delete/handoff admission query, not authority to close another principal's shell.
+Product request/confirmation, residency-refusal rendering and client scheduling belong
+to the separate client-protocol increment; this runner increment changes no client DTO.
+
 **Runner protocol v6.** `plakous-runner-protocol` defines what a host and a
 runner say to each other over one byte stream, and `plakous-runner` implements
 both ends over an `ExecutionEnvironment` and joins them in process as a

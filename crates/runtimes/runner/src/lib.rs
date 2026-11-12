@@ -1,4 +1,4 @@
-//! The two ends of runner protocol v5 over a Plakous execution environment
+//! The two ends of runner protocol v6 over a Plakous execution environment
 //! (spec 01 §8.4), and an in-process loopback that joins them.
 //!
 //! [`RunnerService`] is the runner end: it answers requests from a local
@@ -19,6 +19,7 @@ mod floors;
 mod journal;
 mod loopback;
 mod machine;
+pub mod operator;
 mod overlap;
 mod registry;
 
@@ -42,7 +43,8 @@ pub use workspace::{
 };
 
 pub use client::{
-    ClientWindows, ConnectError, RecoveredCall, RunnerClient, RunnerConnectionRevision,
+    ClientWindows, ConnectError, OperatorTerminalStream, RecoveredCall, RunnerClient,
+    RunnerConnectionRevision,
 };
 pub use floors::{FileOwnerFloors, Floor, OwnerFloors};
 pub use journal::{CallJournal, FileCallJournal, JournalEntry};

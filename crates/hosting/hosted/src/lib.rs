@@ -124,6 +124,8 @@ mod frozen_tables;
 pub mod mcp_binding;
 mod node;
 mod process_environment;
+#[cfg(unix)]
+pub use process_environment::operator_launch;
 #[cfg(feature = "test-support")]
 mod test_diagnostics;
 /// Without the gate's build, nothing is reported.

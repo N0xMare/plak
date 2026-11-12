@@ -4,6 +4,44 @@ use crate::{CliFailure, CliResult};
 use plakous::tools::{HostProcessOptions, ProbeError};
 use std::path::{Path, PathBuf};
 
+/// Constructs the runner-account operator shell context with the same existing
+/// copy shim and discovery ceiling as agent processes, but no delegated env.
+///
+/// # Errors
+/// Account, executable shell, or required copy shim is unavailable.
+#[cfg(unix)]
+pub fn operator_launch(
+    workspace: &Path,
+    path: String,
+    fallback: Option<plakous::runner::operator::OperatorAccountFallback>,
+) -> Result<
+    plakous::runner::operator::OperatorLaunch,
+    plakous::runner::protocol::operator::OperatorRefusal,
+> {
+    use plakous::runner::protocol::operator::OperatorRefusal;
+    let mut launch =
+        plakous::runner::operator::account_launch(workspace.to_path_buf(), path, fallback)?;
+    let prefix = workspace.join(".plak/bin");
+    let known_copy = crate::git_redirect_fence::is_minted_occupancy_copy(workspace);
+    let shim_present = prefix.join("git").is_file() || prefix.join("jj").is_file();
+    if known_copy && !shim_present {
+        return Err(OperatorRefusal::WorkspaceUnavailable);
+    }
+    if known_copy || shim_present {
+        let canonical = prefix
+            .canonicalize()
+            .map_err(|_| OperatorRefusal::WorkspaceUnavailable)?;
+        if !canonical.starts_with(workspace) || canonical.to_str().is_none_or(|s| s.contains(':')) {
+            return Err(OperatorRefusal::WorkspaceUnavailable);
+        }
+        launch.path = format!("{}:{}", canonical.display(), launch.path);
+    }
+    if crate::git_redirect_fence::is_minted_jj_copy(workspace) {
+        launch.discovery_ceiling = workspace.parent().map(Path::to_path_buf);
+    }
+    Ok(launch)
+}
+
 /// The one refusal for a workspace probe that cannot answer: construction
 /// fails closed rather than act on a path that only looks absent.
 pub(crate) fn probe_unavailable(error: ProbeError) -> CliFailure {

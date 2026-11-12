@@ -18,6 +18,7 @@ layer = "engine"
 class = "published-internal"
 
 [dependencies]
+base64.workspace = true
 plakous-model.workspace = true
 plakous-runner-protocol.workspace = true
 plakous-tools.workspace = true
@@ -29,7 +30,10 @@ tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "r
 uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["fs", "process"] }
+portable-pty.workspace = true
+filedescriptor.workspace = true
+nix = { workspace = true, features = ["user"] }
+rustix = { workspace = true, features = ["fs", "process", "termios"] }
 
 [dev-dependencies]
 tempfile.workspace = true

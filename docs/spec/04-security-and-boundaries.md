@@ -435,6 +435,17 @@ operator-global and workspace-parent rules confer no authority.
 
 ### 2.2 Shells are not constrained
 
+Operator PTYs are interactive shells with the runner user's full authority, not
+read-only file tools and not a sandbox at the initial workspace. The runner
+selects the uid's passwd shell, falling back to an absolute executable `SHELL`
+only when account lookup is unavailable. It starts interactive mode with normal
+SIGHUP disposition and an empty environment, adding only runner-owned PATH,
+account HOME/USER/LOGNAME, TERM and LANG plus the established copy shim/discovery
+fence. No browser bootstrap command, arbitrary environment, provider key or host
+credential is delegated. Startup files remain the runner user's authority; a
+local shell can read the same user's host credentials. Workspace roots and the
+product/XDG application-state exclusions gate startup, not subsequent shell I/O.
+
 JJ copies request a reconstructive, provider-neutral repository-discovery
 ceiling. Literal, piped, PTY and service processes (including MCP servers) get `GIT_CEILING_DIRECTORIES` naming the workspace
 root's parent, including absolute Git, environment-aware gix callers
@@ -751,6 +762,31 @@ The policy does not stop a model from placing workspace content in the URL it
 requests; that exfiltration path is residual risk (section 9).
 
 ### 2.9 Runners
+
+Operator terminals have separate principal-private, host-generation namespaces,
+with no line owner, agent job, promotion, accounting, history or line fence. Only
+the paired host asserts a principal; inspecting connections have no terminal
+authority. A terminal reservation precedes spawn. The same terminal id and digest
+recover a lost open answer only on that runner instance; missing receipts never
+authorize replayed execution. Same-generation reconciliation precedes new input.
+Another host generation never adopts an old namespace: it requests cleanup and
+waits for the old pins before opening replacement work.
+
+Close and expiry supervise the entire independently identified PTY session, not
+only the shell's process group. Closing all master descriptors hangs up the PTY;
+HUP, TERM and KILL cover each freshly identity-checked member group, including
+background, stopped and foreground jobs. The unreaped leader anchors session
+identity through the last signal. Cleanup reaps that leader, sends no later
+signals, and requires two complete session-id absence scans. Incomplete scans,
+identity loss or observed setsid escape yield `termination_unknown`, retaining
+quota and workspace pins; a vanished table after runner restart is not death
+evidence. Arbitrary daemonized escape is still the ordinary unsandboxed-shell
+residual, not a promise of descendant containment.
+
+Memory-only terminal tables and 1 MiB raw output rings never become agent output
+or disk spools. Input acknowledgments prove queue admission only. Reattachment
+does not replay ambiguous keyboard bytes. Runner-enforced awake input-idle,
+detach and namespace deadlines remain authoritative while the host is absent.
 
 Serving hosts share a home-wide runner-custody lock, while standalone runner
 composition requires it exclusively. Standalone imports refuse through the running

@@ -703,7 +703,14 @@ with which `plak runner serve` refuses to start. Any other key is a load error.
 | `path` | string | `(unset)` | | The `PATH` the daemon and its processes start with. Unset, a login shell (`$SHELL -l`) is asked once, bounded at 5 s, when `connect` starts the daemon: it runs in a process group of its own, which is killed once it answered or at the deadline, so a startup file that leaves a job in the background neither delays the answer nor outlives it. |
 | `home` | string | `(unset)` | | The `HOME` the daemon and its processes start with. Unset, the user's. |
 | `hosts` | array of strings | `[]` | lowercase uuids | The host identities that may bind (`plak runner allow`). |
-| `idle_exit_seconds` | integer | `300` | | How long the daemon stays up with no connection, job, orphan, service or unacknowledged answer before it exits. |
+| `idle_exit_seconds` | integer | `300` | | How long the daemon stays up with no connection, job, orphan, service, live operator terminal or unacknowledged answer before it exits. Starting, closing and termination-unknown operator terminals count as live work, including on the home-local daemon. |
+
+Operator terminal limits are fixed policy, not new configuration keys: two live
+terminals/session, four/principal, sixteen/host and thirty-two/runner, counting
+reservations and unresolved cleanup. Input idle expires after 15 awake minutes,
+detach after five awake minutes, and a host-generation namespace after 90 awake
+seconds without renewal. Output, resize and credits do not refresh input idle.
+The shell comes from the runner account, never a `runner.toml` shell setting.
 
 Effective roots, first-root default and copies support come from paired
 `workspace.options`, never ssh-reading configuration. `workspace.discover` is

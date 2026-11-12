@@ -14,6 +14,7 @@ pub(crate) mod environment;
 mod home;
 #[cfg(feature = "web")]
 pub(crate) mod local;
+mod operator;
 pub(crate) mod ownership;
 pub(crate) mod registry;
 pub(crate) mod services;
@@ -179,6 +180,10 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
             binary_id: crate::build_identity::known_binary_id(),
         },
         RunnerOptions {
+            operator_workspace: Some(operator::workspace(
+                paths,
+                Some(config.roots.iter().chain(&config.copies).cloned().collect()),
+            )?),
             lease_clock: crate::test_hooks::runner_lease_clock(home.root()),
             machine_id: plakous::runner::machine_id().ok(),
             workspace_catalog: Some(Arc::new(workspace_catalog)),
@@ -284,6 +289,7 @@ async fn serve_local(paths: &PlakPaths) -> CliResult<()> {
             lease_clock: crate::test_hooks::runner_lease_clock(home.root()),
             machine_id: plakous::runner::machine_id().ok(),
             workspace_catalog: None,
+            operator_workspace: Some(operator::workspace(paths, None)?),
             workspaces: Some(workspaces),
             local_host: Some(host.clone()),
             floors: Some(Arc::new(floors)),

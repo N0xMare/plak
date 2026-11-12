@@ -13,6 +13,14 @@ pub const VERBS: &[&str] = &[
     "operator.terminal.close",
 ];
 
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "exact wire fixtures"
+)]
+mod pinned_tests;
+
 /// A bounded opaque operator identity component.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(try_from = "String", into = "String")]

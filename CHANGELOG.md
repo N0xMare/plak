@@ -85,6 +85,11 @@ one cross-build carrier (a build imports its own and the previous version).
 - Add a separate operator-terminal runner protocol with validated namespace,
   terminal identity, dimensions and raw-byte stream vocabulary. Runner protocol
   6 is an exact-version cut; the product client handshake is unchanged.
+  Runner and home-local daemon PTYs use principal-private, bounded in-memory
+  tables and output rings, independent quotas and awake deadlines, single
+  controllers and session-wide identity-checked cleanup. Unproven cleanup keeps
+  workspace pins and blocks idle exit; agent lines, jobs and accounting are
+  unchanged. Product terminal requests and browser integration are separate.
 
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.

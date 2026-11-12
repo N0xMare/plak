@@ -398,6 +398,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         # a PATH runner.toml leaves unset (spec 04 §2.9).
         ("var_os", (("string", "PATH"),)),
         ("var_os", (("string", "HOME"),)),
+        ("var_os", (("string", "USER"),)),
         # The installer contacts only the selected user manager, never copies
         # the shell's environment into the installed host unit.
         ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
@@ -1681,6 +1682,18 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'runner::environment_failure',
             'runner::workspace_refusal',
         },
+    },
+    ("plakous-hosted", "src/process_environment.rs"): {
+        "runner": {"operator", "protocol", "OperatorRefusal"}
+    },
+    ("plak", "src/commands/runner/operator.rs"): {
+        "runner": {
+            "operator",
+            "protocol",
+            "OperatorWorkspace",
+            "OperatorAccountFallback",
+            "OperatorRefusal",
+        }
     },
     # The export document names its runner by the library's runner identity.
     ("plak", "src/carry/document.rs"): {"tools": {"RunnerId"}},

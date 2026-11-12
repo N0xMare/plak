@@ -8,6 +8,43 @@ use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 
+/// Runner writes control ahead of bounded operator bulk, draining queued refusals
+/// before close. A stalled write has a fixed bound, not an unbounded bulk queue.
+pub(crate) async fn write_prioritized<W, T>(
+    mut writer: W,
+    mut control: mpsc::UnboundedReceiver<T>,
+    mut bulk: mpsc::Receiver<T>,
+    closer: CancellationToken,
+) where
+    W: AsyncWrite + Unpin,
+    T: Serialize,
+{
+    loop {
+        let frame = tokio::select! {
+            biased;
+            frame=control.recv()=>frame,
+            frame=bulk.recv()=>frame,
+            ()=closer.cancelled()=>None,
+        };
+        let Some(frame) = frame else {
+            break;
+        };
+        let Ok(bytes) = encode(&frame) else {
+            continue;
+        };
+        let written = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            writer.write_all(&bytes).await?;
+            writer.flush().await
+        })
+        .await;
+        if !matches!(written, Ok(Ok(()))) {
+            closer.cancel();
+            break;
+        }
+    }
+    let _ = writer.shutdown().await;
+}
+
 /// Writes each queued frame until the queue closes, the stream fails or
 /// `closer` fires, then shuts the write half down so the peer sees the end. A
 /// frame that cannot be encoded is skipped; senders check their frames first

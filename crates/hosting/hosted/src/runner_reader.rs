@@ -337,6 +337,9 @@ struct NodeRunnerExtension {
 }
 
 impl RunnerExtension for NodeRunnerExtension {
+    fn reclamation_path(&self, verb: RunnerVerb, payload: &Value) -> Option<PathBuf> {
+        self.vcs.reclamation_path(verb, payload)
+    }
     fn serve(&self, verb: RunnerVerb, payload: Value) -> ServeFuture {
         if verb == RunnerVerb::ReadInstructions {
             let home = self.login_home.clone();

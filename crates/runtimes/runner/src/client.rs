@@ -20,7 +20,6 @@ use plakous_tools::internal::runner::{
     RunnerStreams, RunnerVerb, RunnerVerbFamily, encode_preempt,
 };
 use serde_json::Value;
-use sha2::{Digest as _, Sha256};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 
@@ -29,6 +28,12 @@ use crate::journal::{CallJournal, JournalEntry};
 use crate::streams::{
     Credit, INITIAL_CREDIT, Outbound, StreamEnds, Window, receive_stream, send_stream,
 };
+
+mod operator;
+pub use operator::OperatorTerminalStream;
+mod wire;
+pub(crate) use wire::digest;
+use wire::wire_owner;
 
 type ForegroundReporter =
     Arc<dyn Fn(&str, &plakous_runner_protocol::StoppedForeground) + Send + Sync>;
@@ -166,6 +171,7 @@ struct State {
     /// host.
     refusal: Option<Refusal>,
     streams: HashMap<u64, StreamEnds>,
+    operator_streams: HashMap<u64, mpsc::Sender<StreamFrame>>,
 }
 
 struct Pending {
@@ -368,6 +374,7 @@ impl RunnerClient {
                     questions: HashMap::new(),
                     refusal: None,
                     streams: HashMap::new(),
+                    operator_streams: HashMap::new(),
                 }),
                 transferred: Mutex::default(),
             }),
@@ -636,6 +643,7 @@ impl State {
     /// Ends the current connection's transfers and streams, and fails each
     /// pending call `lost` selects as of unknown outcome.
     fn lose(&mut self, lost: impl Fn(&Request) -> bool, restarted: bool) {
+        self.operator_streams.clear();
         self.transfers.clear();
         self.questions.clear();
         for (_, mut stream) in self.streams.drain() {
@@ -789,6 +797,9 @@ impl Inner {
                 return;
             }
             RunnerFrame::Stream(frame) => {
+                if self.operator_frame(&frame) {
+                    return;
+                }
                 // Taken out of the state while it runs: an abort sends a
                 // close, and sending takes the state's lock.
                 let stream = frame.stream;
@@ -1542,24 +1553,4 @@ fn replayable(request: &Request) -> bool {
             | RequestClass::TreeOperation { .. }
             | RequestClass::ProcessObservation { .. }
     ) || RunnerVerb::parse(&request.operation.verb).is_some_and(RunnerVerb::is_read)
-}
-
-fn wire_owner(owner: &plakous_tools::LineOwner) -> LineOwner {
-    LineOwner {
-        line: owner.line().to_string(),
-        generation: owner.generation(),
-        branch: owner.branch().to_string(),
-        fence: owner.fence(),
-    }
-}
-
-/// Lowercase hex SHA-256 of the operation's canonical (RFC 8785) JSON.
-pub(crate) fn digest(operation: &Operation) -> String {
-    use std::fmt::Write as _;
-    let bytes = serde_json_canonicalizer::to_vec(operation).unwrap_or_default();
-    let mut text = String::with_capacity(64);
-    for byte in Sha256::digest(&bytes) {
-        let _ = write!(text, "{byte:02x}");
-    }
-    text
 }

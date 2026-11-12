@@ -30,7 +30,7 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, watch};
 
-use crate::connection::{FrameStream, fits, write_frames};
+use crate::connection::{FrameStream, fits, write_prioritized};
 use crate::floors::OwnerFloors;
 use crate::state::{Admission, OpKey, Tables};
 use crate::streams::{
@@ -38,6 +38,7 @@ use crate::streams::{
 };
 
 mod foreground;
+mod operator;
 
 /// One runner process: its identity, its environment and the state every
 /// connection to it shares. A new service is a new instance.
@@ -47,6 +48,7 @@ pub struct RunnerService {
 }
 
 struct Inner {
+    operator: Option<crate::operator::OperatorTerminalService>,
     environment: ExecutionEnvironment,
     changes_git_enabled: bool,
     workspaces: Option<Arc<WorkspaceFactory>>,
@@ -184,6 +186,8 @@ pub struct RunnerOptions {
     /// The embedding build's Git CLI gate. Product callers pass the existing
     /// compile-time gate, never a client or environment value. Defaults closed.
     pub changes_git_enabled: bool,
+    /// Operator-only PTY workspace policy; absent means no operator capability.
+    pub operator_workspace: Option<Arc<crate::operator::OperatorWorkspace>>,
     /// Explicit lease clock; absent uses the platform's suspend-excluding clock.
     pub lease_clock: Option<Arc<RunnerLeaseClock>>,
     /// Stable physical-machine identity; unknown identities cannot be paired for placement.
@@ -273,7 +277,7 @@ impl RunnerService {
     ) -> Result<Self, ExecutionEnvironmentError> {
         let limits = options.limits;
         let descriptor = runner_descriptor(&environment, identity.runner_id.clone())?;
-        let hello = Hello {
+        let mut hello = Hello {
             version: identity.version,
             binary_id: identity.binary_id,
             runner_id: identity.runner_id.as_str().to_owned(),
@@ -292,8 +296,23 @@ impl RunnerService {
         let tables = options
             .floors
             .map_or_else(Tables::default, Tables::with_floors);
+        let operator = options
+            .operator_workspace
+            .map(|workspace| {
+                crate::operator::OperatorTerminalService::new(
+                    hello.instance.clone(),
+                    workspace,
+                    options.lease_clock.clone(),
+                )
+            })
+            .transpose()
+            .map_err(|_| plakous_tools::internal::runner::workspace_refusal())?;
+        if operator.is_some() {
+            hello.capabilities.push(capabilities::OPERATOR_PTY.into());
+        }
         Ok(Self {
             inner: Arc::new(Inner {
+                operator,
                 environment,
                 changes_git_enabled: options.changes_git_enabled,
                 workspaces: options.workspaces,
@@ -350,8 +369,14 @@ impl RunnerService {
     {
         let (reader, writer) = tokio::io::split(stream);
         let (sender, frames) = mpsc::unbounded_channel();
+        let (terminal_sender, terminal_frames) = mpsc::channel(64);
         let closer = CancellationToken::new();
-        tokio::spawn(write_frames(writer, frames, closer.clone()));
+        tokio::spawn(write_prioritized(
+            writer,
+            frames,
+            terminal_frames,
+            closer.clone(),
+        ));
         let mut reader = FrameStream::new(reader);
         let _ = sender.send(RunnerFrame::Hello(self.inner.hello.clone()));
         let bind = tokio::time::timeout(self.inner.dead, reader.next::<HostFrame>()).await;
@@ -397,11 +422,47 @@ impl RunnerService {
             host_instance: instance,
             ..
         } = bind;
-        let connection = self.enter(&host, &instance, &sender, &closer);
+        self.serve_bound_connection(
+            &host,
+            &instance,
+            &mut reader,
+            sender,
+            terminal_sender,
+            closer,
+        )
+        .await;
+    }
+
+    async fn serve_bound_connection<R: AsyncRead + Unpin>(
+        &self,
+        host: &str,
+        instance: &str,
+        reader: &mut FrameStream<R>,
+        sender: mpsc::UnboundedSender<RunnerFrame>,
+        terminal_sender: mpsc::Sender<RunnerFrame>,
+        closer: CancellationToken,
+    ) {
+        let connection = self.enter(host, instance, &sender, &closer);
+        let mut terminal_tick = tokio::time::interval(Duration::from_millis(64));
+        let mut read_deadline = tokio::time::Instant::now() + self.inner.dead;
         loop {
+            if self.inner.operator.is_some() && terminal_sender.capacity() < 32 {
+                if tokio::time::Instant::now() >= read_deadline {
+                    break;
+                }
+                tokio::select! {
+                    () = tokio::time::sleep(Duration::from_millis(5)) => {},
+                    () = closer.cancelled() => break,
+                }
+                continue;
+            }
             let frame = tokio::select! {
-                frame = tokio::time::timeout(self.inner.dead, reader.next::<HostFrame>()) => frame,
+                frame = tokio::time::timeout_at(read_deadline, reader.next::<HostFrame>()) => frame,
                 () = closer.cancelled() => break,
+                _ = terminal_tick.tick(), if self.inner.operator.is_some() => {
+                    self.operator_output(host, instance, connection, &terminal_sender);
+                    continue;
+                }
             };
             let frame = match frame {
                 Err(_) | Ok(None) => break,
@@ -421,9 +482,10 @@ impl RunnerService {
                     continue;
                 }
             };
-            self.receive(&host, &instance, connection, frame, &sender);
+            read_deadline = tokio::time::Instant::now() + self.inner.dead;
+            self.receive(host, instance, connection, frame, &sender, &terminal_sender);
         }
-        self.leave(&host, &instance, connection);
+        self.leave(host, instance, connection);
         closer.cancel();
     }
 
@@ -506,6 +568,9 @@ impl RunnerService {
             }
         }
         self.end_services(host, connection);
+        if let Some(operator) = &self.inner.operator {
+            operator.disconnect(host, connection);
+        }
     }
 
     /// An inspecting connection: line-table questions and pings until it
@@ -628,6 +693,14 @@ impl RunnerService {
         let now = Instant::now();
         self.expire_leases(self.lease_now());
         self.inner.foreground.prune();
+        if self
+            .inner
+            .operator
+            .as_ref()
+            .is_some_and(crate::operator::OperatorTerminalService::has_live_terminals)
+        {
+            return false;
+        }
         if self.inner.open.load(Ordering::Acquire) != 0 || !lock(&self.inner.services).is_empty() {
             return false;
         }
@@ -649,10 +722,15 @@ impl RunnerService {
         connection: u64,
         frame: HostFrame,
         sender: &mpsc::UnboundedSender<RunnerFrame>,
+        terminal_sender: &mpsc::Sender<RunnerFrame>,
     ) {
         match frame {
             HostFrame::Request(request) => {
-                self.admit(host, instance, connection, request, sender);
+                if matches!(request.class, RequestClass::OperatorControl { .. }) {
+                    self.operator_request(host, instance, connection, request, terminal_sender);
+                } else {
+                    self.admit(host, instance, connection, request, sender);
+                }
             }
             HostFrame::Cancel { request_id } => {
                 let run = self.run_key(host, instance, request_id);
@@ -708,7 +786,18 @@ impl RunnerService {
                     },
                 ));
             }
-            HostFrame::Stream(frame) => self.stream(host, frame),
+            HostFrame::Stream(frame) => {
+                if let Some(operator) = &self.inner.operator
+                    && let Some(frames) =
+                        operator.receive(host, instance, connection, frame.clone())
+                {
+                    for frame in frames {
+                        let _ = terminal_sender.try_send(RunnerFrame::Stream(frame));
+                    }
+                } else {
+                    self.stream(host, frame);
+                }
+            }
         }
     }
 
@@ -793,10 +882,7 @@ impl RunnerService {
                 Some(admits) => serve_probe(payload, admits.as_ref()),
                 None => serve_probe(payload, &|_| true),
             },
-            RunnerVerbFamily::Extension => match &self.inner.extension {
-                Some(extension) => extension.serve(verb, payload),
-                None => Box::pin(std::future::ready(Err(ServeFailure::Unsupported))),
-            },
+            RunnerVerbFamily::Extension => self.serve_extension(verb, payload),
             RunnerVerbFamily::Sessions if verb == RunnerVerb::JobsWatch => {
                 let line = request.owner.map(|owner| owner.line).unwrap_or_default();
                 self.watch_jobs(&host, connection, &line, &payload)
@@ -1096,6 +1182,9 @@ impl RunnerService {
     /// Losing the endpoint ends the daemon, not merely a host's link lease.
     pub(crate) async fn shutdown(&self) {
         self.inner.closing.store(true, Ordering::Release);
+        if let Some(operator) = &self.inner.operator {
+            operator.close_all();
+        }
         for (_, connection) in std::mem::take(&mut *lock(&self.inner.hosts)) {
             connection.closer.cancel();
         }
@@ -1120,6 +1209,7 @@ impl RunnerService {
             );
         }
         self.stop_owned().await;
+        self.join_operator_shutdown().await;
     }
 
     async fn stop_owned(&self) {

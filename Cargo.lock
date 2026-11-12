@@ -4531,9 +4531,13 @@ dependencies = [
 name = "plakous-runner"
 version = "0.0.3"
 dependencies = [
+ "base64 0.22.1",
+ "filedescriptor",
+ "nix 0.28.0",
  "plakous-model",
  "plakous-runner-protocol",
  "plakous-tools",
+ "portable-pty",
  "rustix",
  "serde",
  "serde_json",

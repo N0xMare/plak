@@ -106,8 +106,8 @@ const fn runner_variant(frame: &RunnerFrame) -> &'static str {
 fn request(class: RequestClass) -> Request {
     Request {
         request_id: "request".into(),
+        owner: (!matches!(class, RequestClass::OperatorControl { .. })).then(owner),
         class,
-        owner: Some(owner()),
         deadline_ms: Some(1),
         digest: "digest".into(),
         replay: true,

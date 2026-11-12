@@ -747,6 +747,17 @@ struct VcsExtension {
 }
 
 impl RunnerExtension for VcsExtension {
+    fn reclamation_path(&self, verb: RunnerVerb, payload: &Value) -> Option<PathBuf> {
+        if !matches!(verb, RunnerVerb::VcsRead | RunnerVerb::VcsEffect) {
+            return None;
+        }
+        match serde_json::from_value::<VcsCall>(payload.clone()).ok()? {
+            VcsCall::CheckReclaimable { path, .. }
+            | VcsCall::Unmint { path, .. }
+            | VcsCall::TrimDisposableTarget { path } => Some(path),
+            _ => None,
+        }
+    }
     fn serve(&self, verb: RunnerVerb, payload: Value) -> ServeFuture {
         if !matches!(verb, RunnerVerb::VcsRead | RunnerVerb::VcsEffect) {
             return Box::pin(std::future::ready(Err(ServeFailure::Unsupported)));

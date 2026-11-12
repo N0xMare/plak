@@ -29,6 +29,22 @@ file lock through the product/pin commit and reread durable occupancy before adm
 Probe tests cover the four-wide limit, admission-relative budgets, five-second cache,
 shared bind ownership and cancellation that leaves probes/reconciliation running.
 
+Operator-terminal evidence is separate from agent foreground/job evidence. Pure
+tests exercise concurrent quota reservations, principal-private tables, lost open
+answers, input acknowledgment loss with no replay, duplicate/gap offsets, binary
+bytes, strict base64 and byte bounds, controller ownership, ring overflow and
+output-gap cursors, fair shared byte budgets, awake idle/detach/namespace expiry,
+and reclamation/open exclusion in both admission orders. PTY serial tests use a
+deterministic child for raw echo and resize and an interactive shell for real
+background/stopped/foreground job-control groups and session-wide cleanup. A
+new-session descendant must leave termination unknown even if hangup later ends
+it. Runner-loss durability tests kill a real PTY-owning process and distinguish
+lost-instance receipts from permission to spawn or signal a remembered PID.
+These platform-sensitive tests require both supported operating systems; Linux
+evidence alone is not macOS process-supervision qualification. The product client
+terminal scheduler and browser transport-loss evidence belong to their later
+client-protocol increment, not these runner-side tests.
+
 Direct Anthropic API refusal qualification follows Anthropic's
 [refusals and fallback documentation](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback),
 which treats partial refused output as incomplete and instructs consumers to

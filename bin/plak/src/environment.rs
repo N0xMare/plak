@@ -40,6 +40,11 @@ pub(crate) fn inherited_home() -> Option<String> {
     std::env::var_os("HOME").and_then(|value| value.into_string().ok())
 }
 
+/// Runner-local account name, used only if passwd lookup is unavailable.
+pub(crate) fn inherited_user() -> Option<String> {
+    std::env::var_os("USER").and_then(|value| value.into_string().ok())
+}
+
 /// Only the transport variables needed to reach the caller's user manager.
 pub(crate) fn user_manager_environment() -> Vec<(&'static str, std::ffi::OsString)> {
     [
