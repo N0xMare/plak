@@ -6,9 +6,21 @@ use super::*;
 
 const DESTINATION: &str = "r999.e999.p999.t999";
 
+mod remote;
+mod topology;
+
 fn output(fixture: &Fixture, arguments: &[&str], destination: bool) -> std::process::Output {
+    output_env(fixture, arguments, destination, &[])
+}
+
+fn output_env(
+    fixture: &Fixture,
+    arguments: &[&str],
+    destination: bool,
+    environment: &[(&str, &str)],
+) -> std::process::Output {
     let mut command = fixture.command();
-    command.args(arguments);
+    command.args(arguments).envs(environment.iter().copied());
     if destination {
         command.env("PLAK_TEST_STATE_KEY", DESTINATION);
     }
@@ -29,10 +41,14 @@ fn binary(fixture: &Fixture) -> String {
 }
 
 fn seed(fixture: &Fixture, ordinal: usize) -> String {
+    seed_in(fixture, ordinal, &fixture.workspace())
+}
+
+fn seed_in(fixture: &Fixture, ordinal: usize, workspace: &std::path::Path) -> String {
     let mut document: serde_json::Value =
         serde_json::from_str(include_str!("../../fixtures/session-export-v11.json")).unwrap();
     document["source"]["session_id"] = json!(uuid::Uuid::new_v4().to_string());
-    document["workspace_root"] = json!(fixture.workspace());
+    document["workspace_root"] = json!(workspace);
     document["named_state"] = json!({"answer": ordinal});
     document["queue"] = json!([format!("paused input {ordinal}")]);
     let path = fixture.root.join(format!("seed-{ordinal}.json"));
@@ -334,6 +350,56 @@ fn host_upgrade_wait_timeout_restores_admissions_without_surrender() {
             .join(format!("state/{DESTINATION}/runtime.sqlite3"))
             .exists()
     );
+    stop(&mut host);
+}
+
+#[test]
+fn host_upgrade_stale_source_instance_or_key_refuses_without_draining() {
+    let Some(fixture) = fixture() else { return };
+    let source = seed(&fixture, 9);
+    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    let row = client
+        .rows(1)
+        .into_iter()
+        .find(|row| row.session == source)
+        .unwrap();
+    let attachment = client.attach(2, &row.node);
+    let binary = binary(&fixture);
+    for field in ["source_instance", "source_key"] {
+        let mut stream = UnixStream::connect(fixture.home().join("host/upgrade.sock")).unwrap();
+        stream.set_read_timeout(Some(WAIT)).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        let identity: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let mut request = json!({
+            "source_instance":identity["instance"], "source_key":identity["key"],
+            "destination":env!("CARGO_BIN_EXE_plak"), "destination_key":DESTINATION,
+            "expected_binary":binary, "wait_seconds":0
+        });
+        request[field] = json!(if field == "source_key" {
+            DESTINATION
+        } else {
+            "stale-instance"
+        });
+        writeln!(stream, "{request}").unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        let answer: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(answer["status"], "refused");
+        assert!(
+            answer["detail"]
+                .as_str()
+                .unwrap()
+                .contains("host_upgrade_stale_source")
+        );
+    }
+    assert_eq!(
+        client.request(3, Op::Detach { attachment }),
+        Outcome::Ok(Answer::Detached)
+    );
+    assert!(!fixture.home().join("host/upgrades").exists());
     stop(&mut host);
 }
 

@@ -6,14 +6,26 @@ pub(crate) fn prepare(
     services: &Services,
     startup: Option<&std::path::Path>,
 ) -> CliResult<(Services, std::sync::Arc<plakous::runner::WorkspaceCatalog>)> {
-    let ownership = std::sync::Arc::new(super::super::ownership::RunnerOwnership::host(
-        services.paths()?,
-    )?);
-    let services = services.with_runner_ownership(ownership);
+    let services = custody(services)?;
     let prepared = crate::commands::runner::registry::prepare(&services, startup)?;
     let services = prepared.services;
     services.runners().require_connection("local", true);
     Ok((services, prepared.local))
+}
+
+pub(crate) fn custody(services: &Services) -> CliResult<Services> {
+    if let Some(owner) = services.runner_ownership() {
+        if owner.is_standalone() {
+            return Err(crate::CliFailure::new(
+                "a standalone owner cannot become a serving host",
+            ));
+        }
+        return Ok(services.clone());
+    }
+    let ownership = std::sync::Arc::new(super::super::ownership::RunnerOwnership::host(
+        services.paths()?,
+    )?);
+    Ok(services.with_runner_ownership(ownership))
 }
 
 /// Starts daemon probes only after every host endpoint has bound successfully.

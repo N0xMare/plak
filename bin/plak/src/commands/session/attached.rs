@@ -109,11 +109,15 @@ pub(crate) fn probe_upgrade_capacity(
         crate::carry::read_document(path).map_err(|error| CliFailure::new(error.to_string()))?;
     let mut prepared = PreparedImport::new(document, false)?;
     let record = &mut prepared.carried.record;
-    if record.runner.is_some() {
-        return Err(CliFailure::new(
-            "host_upgrade_unsupported_runner: retain the source build to inspect and drain its runner before carrying this session",
-        ));
-    }
+    let placement = crate::carry::upgrade::remote::Placement::prepare(
+        services,
+        record
+            .runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str()),
+        &record.workspace_root,
+    )?;
+    let services = &placement.services;
     let paths = session_paths(services, record)?;
     if let Some(profile) = &prepared.carried.profile {
         let home = product_config::ProductConfig::load(&paths).map_err(CliFailure::new)?;
@@ -164,6 +168,15 @@ pub(crate) fn verify_exact_reopen(
     record: product_sessions::SessionRecord,
     head: plakous::sessions::SessionLocator,
 ) -> CliResult<crate::carry::ReopenProbe> {
+    let placement = crate::carry::upgrade::remote::Placement::prepare(
+        services,
+        record
+            .runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str()),
+        &record.workspace_root,
+    )?;
+    let services = &placement.services;
     let config = match build_attached_host_config(services, record, AttachedPurpose::Verify) {
         Ok(config) => config,
         Err(AttachedConfigError::Answered(probe)) => return Ok(*probe),

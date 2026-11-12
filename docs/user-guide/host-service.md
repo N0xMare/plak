@@ -86,26 +86,40 @@ Keep the old and new snapshots, including sidecars, until the command confirms
 success. Installation does not itself replace the running host.
 
 Same-key upgrade uses planned handoff and the existing session identities.
-Cross-key upgrade in this first slice supports **settled local roots only**.
+Cross-key upgrade supports **settled roots**, locally or on paired runners.
 Let turns, children, workspace operations and daemon jobs finish; resolve held
 work first. `--wait 60` closes admissions while waiting up to 60 seconds and
 restores them on timeout. Unsupported destination/configuration/capacity
-refusals leave the old owner authoritative. Remote-placed roots are refused
-before drain: this slice is not a remote-host/runner upgrade procedure. A source
-build without the coordinator is refused, never silently stopped.
+refusals leave the old owner authoritative. A source build without the
+coordinator is refused, never silently stopped.
+
+For paired runners, install the matching snapshot and advance each runner's
+dedicated command link **before** invoking host upgrade. Revision, flavor and
+runner protocol must all match the destination exactly. The host checks that
+command, pairing, roots, configuration and capacity through read-only runner
+qualification before draining; it takes no runner custody during this check.
+Normal maintainer installation must not move the dedicated link. On a mismatch,
+fix the link first; keep the old build available to inspect and drain old
+workers. A smaller destination or changed binding/configuration that cannot
+admit the carried history refuses rather than surrendering it.
 
 The command prints source-to-successor session IDs. Cross-key successors are
 new agent lines with committed named state, conversation, generated title and
 paused queued text. Explicit title overrides and queued images do not survive.
 Children, candidates and live jobs are not moved; source children remain inert
 references and cannot be revived in the new root. Workspace files stay in place.
+The retained source export documents contain those inert facts; the successor
+does not reconstruct the old topology.
 No historical prompt or tool is replayed.
 
 If interrupted, retry the same destination command and expected binary ID.
 Before surrender, recovery withdraws the preparation and restores the retained
 old host; retry then starts a new attempt. After surrender, the old records
 cannot reopen: repair the destination if needed and recover only through its
-receipts. A lost success answer reports the existing successors, not another
+receipts. The source exits before the destination imports under its own host
+custody. The destination imports before Ready, then performs its ordinary
+runner reconciliation; interrupted or partial imports reuse the same reserved
+successors. A lost success answer reports the existing successors, not another
 import. Do not delete or edit `host/upgrades` to force an old owner to resume.
 Client reload remains separate and never performs this operation or resends
 ambiguously accepted input.

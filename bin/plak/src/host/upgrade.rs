@@ -1,5 +1,8 @@
 //! Same-user, instance-bound upgrade coordination; the export is the only data carrier.
 
+mod startup;
+pub(super) use startup::{acknowledge, prepare_host};
+
 use std::io::{BufRead as _, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
@@ -62,7 +65,6 @@ enum BlockerKind {
     HeldWork,
     UnsettledInput,
     UnboundRoot,
-    UnsupportedRunner,
     Unavailable,
 }
 
@@ -166,20 +168,6 @@ pub(super) fn has_ready(pending: &Pending) -> bool {
         .is_some()
 }
 
-pub(super) fn acknowledge(paths: &PlakPaths) -> CliResult<()> {
-    for mut receipt in receipt::all(paths)? {
-        if receipt.destination_key == crate::home::state::state_key()
-            && receipt.destination_binary == crate::build_identity::binary_id()
-            && receipt.phase == Phase::Committed
-        {
-            receipt.phase = Phase::Acknowledged;
-            receipt.save(paths)?;
-            crate::carry::upgrade::crash_cut("after-ack");
-        }
-    }
-    Ok(())
-}
-
 pub(super) fn replace(
     ready: Option<Ready>,
     services: &Services,
@@ -258,7 +246,8 @@ pub(super) fn startup_replacement(paths: &PlakPaths) -> CliResult<Option<Startup
         return Ok(None);
     };
     let own = crate::home::state::state_key();
-    if receipt.source_key != own && receipt.destination_key != own {
+    let unresolved = matches!(receipt.phase, Phase::Prepared | Phase::Committed);
+    if !unresolved && receipt.source_key != own && receipt.destination_key != own {
         return Ok(None);
     }
     if receipt.phase == Phase::Prepared {
@@ -279,7 +268,7 @@ pub(super) fn startup_replacement(paths: &PlakPaths) -> CliResult<Option<Startup
             receipt.destination_binary,
         )
     };
-    if key == own {
+    if key == own && (!unresolved || binary == crate::build_identity::binary_id()) {
         return Ok(None);
     }
     process::verify_image(&executable, &binary)?;
@@ -291,7 +280,7 @@ pub(super) fn startup_replacement(paths: &PlakPaths) -> CliResult<Option<Startup
     }))
 }
 
-fn socket(paths: &PlakPaths, _key: &str) -> PathBuf {
+fn socket(paths: &PlakPaths) -> PathBuf {
     paths.home().join("host/upgrade.sock")
 }
 
@@ -317,7 +306,7 @@ pub(super) fn request(
             "host_upgrade_source_unavailable: exactly one running source host is required; no host was stopped",
         ));
     };
-    let mut stream = crate::wire_transport::hosts::socket_until(&socket(paths, &source.key), Instant::now() + PROBE_BOUND)
+    let mut stream = crate::wire_transport::hosts::socket_until(&socket(paths), Instant::now() + PROBE_BOUND)
         .map_err(|_| CliFailure::new("host_upgrade_unsupported_source: source has no supported upgrade coordinator; retain its executable and settle it using its own lifecycle"))?;
     stream
         .set_read_timeout(Some(wait + Duration::from_secs(600)))
@@ -326,7 +315,7 @@ pub(super) fn request(
         .set_write_timeout(Some(PROBE_BOUND))
         .map_err(io_failure)?;
     let identity: Identity = read(&stream)?;
-    if identity.protocol != 1
+    if identity.protocol != crate::carry::upgrade::PROTOCOL
         || identity.key != source.key
         || !crate::carry::upgrade::binary_id_valid(&identity.binary)
         || plakous_recursive_subagents::tree::HostInstance::parse(&identity.instance).is_err()
@@ -410,7 +399,7 @@ fn wait_host(paths: &PlakPaths, key: &str, binary: &str) -> CliResult<()> {
     let deadline = Instant::now() + Duration::from_secs(90);
     while Instant::now() < deadline {
         if let Ok(stream) = crate::wire_transport::hosts::socket_until(
-            &socket(paths, key),
+            &socket(paths),
             Instant::now() + Duration::from_millis(100),
         ) {
             let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
@@ -496,7 +485,7 @@ fn recover(paths: &PlakPaths, expected: &str) -> CliResult<ProcessOutcome> {
 
 pub(super) fn bind(paths: &PlakPaths) -> CliResult<tokio::net::UnixListener> {
     use std::os::unix::fs::PermissionsExt as _;
-    let path = socket(paths, &crate::home::state::state_key());
+    let path = socket(paths);
     if path.try_exists().map_err(io_failure)? {
         std::fs::remove_file(&path).map_err(io_failure)?;
     }
@@ -573,7 +562,7 @@ fn handle(
     write(
         &mut stream,
         &Identity {
-            protocol: 1,
+            protocol: crate::carry::upgrade::PROTOCOL,
             key: crate::home::state::state_key(),
             instance: identity.instance.to_string(),
             binary: crate::build_identity::binary_id().to_owned(),
@@ -687,7 +676,11 @@ fn qualify_destination(
         .collect::<Vec<_>>();
     std::fs::write(
         &service_file,
-        serde_json::to_vec(&probe_arguments).map_err(|error| CliFailure::new(error.to_string()))?,
+        serde_json::to_vec(&crate::carry::upgrade::ServiceProbe {
+            arguments: probe_arguments.into_iter().cloned().collect(),
+            placements: probe_placements(paths)?,
+        })
+        .map_err(|error| CliFailure::new(error.to_string()))?,
     )
     .map_err(io_failure)?;
     let mut probe_command =
@@ -699,7 +692,7 @@ fn qualify_destination(
         &process::run(probe_command, PROBE_BOUND)?.stdout,
     )
     .map_err(|_| CliFailure::new("host upgrade destination did not answer its capability probe"))?;
-    if probe.protocol != 1
+    if probe.protocol != crate::carry::upgrade::PROTOCOL
         || !probe.host_available
         || probe.binary_id != request.expected_binary
         || probe.state_key != request.destination_key
@@ -781,11 +774,10 @@ fn carry_settled(
             .session_records()?
             .load(&record.id)
             .map_err(CliFailure::new)?;
-        let document =
-            crate::carry::export_session(&paths.for_workspace(&record.workspace_root), &record)
-                .map_err(|error| {
-                    CliFailure::new(format!("host_upgrade_blocked: {}: {error}", record.id))
-                })?;
+        let document = crate::carry::export_session(&source_paths(paths, &record), &record)
+            .map_err(|error| {
+                CliFailure::new(format!("host_upgrade_blocked: {}: {error}", record.id))
+            })?;
         let file = directory.join(format!("{}.json", record.id));
         crate::carry::write_document(&file, &document).map_err(CliFailure::new)?;
         crate::carry::upgrade::crash_cut("after-export");
@@ -809,25 +801,9 @@ fn carry_settled(
         crate::carry::upgrade::crash_cut("after-mapping");
     }
     receipt.save(paths)?;
-    let import = (|| {
-        process::verify_image(&receipt.destination, &receipt.destination_binary)?;
-        let mut command =
-            process::command(&receipt.destination, paths.home(), &receipt.destination_key);
-        command
-            .args(["host", "__upgrade-import"])
-            .arg(receipt.path(paths));
-        process::run(command, Duration::from_secs(300))?;
-        check_cancel(cancelled)?;
-        ready.leases.check()?;
-        Ok::<_, CliFailure>(())
-    })();
-    if let Err(failure) = import {
-        receipt.phase = Phase::Aborted;
-        receipt.save(paths)?;
-        return Err(failure);
-    }
-    crate::carry::upgrade::crash_cut("after-import");
+    process::verify_image(&receipt.destination, &receipt.destination_binary)?;
     check_cancel(cancelled)?;
+    ready.leases.check()?;
     receipt.phase = Phase::Committed;
     // From this point a failed fsync is outcome-unknown, never an abort.
     if let Err(failure) = receipt.save(paths) {
@@ -846,6 +822,25 @@ fn check_cancel(cancelled: &std::sync::atomic::AtomicBool) -> CliResult<()> {
     }
 }
 
+fn probe_placements(paths: &PlakPaths) -> CliResult<Vec<crate::carry::upgrade::PlacementProbe>> {
+    let withheld = receipt::withheld_targets(paths)?;
+    let mut seen = std::collections::BTreeSet::new();
+    let records =
+        crate::store::ProductStore::inspect_upgrade_roots(paths).map_err(CliFailure::new)?;
+    Ok(records
+        .into_iter()
+        .filter(|record| !withheld.contains(&record.id))
+        .filter_map(|record| {
+            let runner = record.runner?;
+            seen.insert((runner.runner_id.clone(), record.workspace_root.clone()))
+                .then_some(crate::carry::upgrade::PlacementProbe {
+                    id: runner.runner_id,
+                    workspace: record.workspace_root,
+                })
+        })
+        .collect())
+}
+
 fn preflight_capacities(
     services: &Services,
     request: &Request,
@@ -855,9 +850,8 @@ fn preflight_capacities(
     let directory = tempfile::tempdir_in(paths.home()).map_err(io_failure)?;
     for record in roots {
         let file = directory.path().join(format!("{}.json", record.id));
-        let document =
-            crate::carry::export_session(&paths.for_workspace(&record.workspace_root), record)
-                .map_err(|error| CliFailure::new(format!("host_upgrade_blocked: {error}")))?;
+        let document = crate::carry::export_session(&source_paths(paths, record), record)
+            .map_err(|error| CliFailure::new(format!("host_upgrade_blocked: {error}")))?;
         crate::carry::write_document(&file, &document).map_err(CliFailure::new)?;
         let mut command =
             process::command(&request.destination, paths.home(), &request.destination_key);
@@ -901,6 +895,14 @@ fn preflight_same_key(services: &Services, request: &Request) -> CliResult<()> {
     Ok(())
 }
 
+fn source_paths(paths: &PlakPaths, record: &crate::store::sessions::SessionRecord) -> PlakPaths {
+    if record.runner.is_some() {
+        paths.for_remote_workspace(&record.workspace_root)
+    } else {
+        paths.for_workspace(&record.workspace_root)
+    }
+}
+
 fn settled_roots(services: &Services) -> CliResult<Vec<crate::store::sessions::SessionRecord>> {
     let paths = services.paths()?;
     let roots =
@@ -929,14 +931,6 @@ fn settled_roots(services: &Services) -> CliResult<Vec<crate::store::sessions::S
             });
             continue;
         }
-        if record.runner.is_some() {
-            blockers.push(Blocker {
-                session: record.id.clone(),
-                kind: BlockerKind::UnsupportedRunner,
-                detail: "retain the old build to inspect and drain its runner".into(),
-            });
-            continue;
-        }
         if held_topology(paths, &record)? {
             blockers.push(Blocker {
                 session: record.id.clone(),
@@ -945,7 +939,7 @@ fn settled_roots(services: &Services) -> CliResult<Vec<crate::store::sessions::S
             });
             continue;
         }
-        match crate::carry::export_session(&paths.for_workspace(&record.workspace_root), &record) {
+        match crate::carry::export_session(&source_paths(paths, &record), &record) {
             Ok(_) => documents.push(record),
             Err(refusal) => blockers.push(Blocker {
                 session: record.id.clone(),
@@ -1091,5 +1085,5 @@ fn write(stream: &mut UnixStream, value: &impl Serialize) -> CliResult<()> {
 }
 
 pub(super) fn remove(paths: &PlakPaths) {
-    let _ = std::fs::remove_file(socket(paths, &crate::home::state::state_key()));
+    let _ = std::fs::remove_file(socket(paths));
 }

@@ -40,7 +40,7 @@ fn receipt(record: &SessionRecord, destination: bool) -> Receipt {
 }
 
 #[test]
-fn source_surrender_and_target_admission_are_one_durable_receipt_decision() {
+fn source_surrender_precedes_target_execution_admission() {
     for destination in [false, true] {
         let home = tempfile::tempdir().unwrap();
         let paths = PlakPaths::explicit(home.path().to_path_buf());
@@ -55,7 +55,7 @@ fn source_surrender_and_target_admission_are_one_durable_receipt_decision() {
             receipt.phase = phase;
             receipt.save(&paths).unwrap();
             let expected = if destination {
-                matches!(phase, Phase::Committed | Phase::Acknowledged)
+                phase == Phase::Acknowledged
             } else {
                 matches!(phase, Phase::Prepared | Phase::Aborted)
             };

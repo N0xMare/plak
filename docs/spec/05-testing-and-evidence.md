@@ -19,10 +19,18 @@ from offline: named state and paused queue round trips, source reopen refusal,
 recorded-root redirects, lost-ack retry, precommit rollback, postcommit-only
 destination recovery, wait timeout and preflight failures. Receipt cuts cover
 initial publication, export publication, mapping publication, imported seeds,
-surrender, reply loss and destination acknowledgement. None authorizes prompt
+surrender, reply loss and destination acknowledgement. Remote placed-root
+fixtures also cut after source surrender before import, after canonical create
+but before product binding, partway through multiple imports and before Ready.
+They require source custody release, once-only reserved successors, inert paused
+queues, destination-only receipt recovery and normal post-import readiness.
+Paired command mismatch must refuse before drain with an operator remedy; the
+configuration builder must not read a same-spelled host checkout. None authorizes prompt
 replay or proves live-tree/job migration. Dedicated input-limit/import-refusal
 hooks model unknown/smaller windows and unsupported readers only in test-hooks
-probes. New remote-root transfer evidence is separate from this local slice.
+probes. Runner qualification regressions independently pin the closed read
+allowlist, refusals for every other request/frame class, unchanged unpaired
+inspection and absence of persisted runner mutations after qualification.
 
 Offline runner fault injection targets only the recorded daemon that still
 has the fixture home's lock file open, never a host's transient startup probe.

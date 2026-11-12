@@ -39,6 +39,14 @@ mod hold;
 mod pending_stop;
 mod recovery;
 
+pub(super) fn remote_fixture(fixture: &Fixture) -> (ChildRunner, String, String) {
+    pending_stop::remote(fixture)
+}
+
+pub(super) fn remote_ready(client: &mut Client, id: &str) {
+    pending_stop::ready(client, id);
+}
+
 fn reload_signal(host: &Host) {
     assert!(
         std::process::Command::new("kill")

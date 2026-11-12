@@ -24,6 +24,7 @@ pub(crate) type TelemetrySinkFactory = fn() -> Option<Arc<dyn ExtraTelemetrySink
 /// Handles every product command shares for the life of the process.
 pub(crate) struct Services {
     terminals: Arc<OnceLock<Arc<crate::terminal_registry::TerminalRegistry>>>,
+    upgrade_placement: Option<UpgradePlacement>,
     runner_ownership: Option<Arc<crate::commands::runner::ownership::RunnerOwnership>>,
     runners: plakous::runner::RunnerRegistry,
     runner_overlap: Arc<OnceLock<plakous::runner::MachineOverlapGuard>>,
@@ -44,7 +45,34 @@ pub(crate) struct Services {
     jobs: plakous_hosted::agent::ProcessJobs,
 }
 
+#[derive(Clone)]
+struct UpgradePlacement {
+    id: String,
+    workspace: std::path::PathBuf,
+    runner: plakous::runner::RunnerServices,
+    client: Option<plakous::runner::RunnerClient>,
+}
+
 impl Services {
+    /// Scoped only to qualification or host-owned dormant creation, never
+    /// driver admission or publication of registry Ready.
+    pub(crate) fn with_upgrade_runner(
+        &self,
+        id: &str,
+        workspace: &std::path::Path,
+        runner: plakous::runner::RunnerServices,
+        client: Option<plakous::runner::RunnerClient>,
+    ) -> Self {
+        let mut services = self.clone();
+        services.upgrade_placement = Some(UpgradePlacement {
+            id: id.to_owned(),
+            workspace: workspace.to_owned(),
+            runner,
+            client,
+        });
+        services
+    }
+
     /// Composes standalone import runners on a process-owned executor.
     /// Refuses while any host owns the home, before any runner bind.
     #[allow(
@@ -94,6 +122,7 @@ impl Services {
         Self {
             terminals: Arc::default(),
             runner_ownership: None,
+            upgrade_placement: None,
             runners: plakous::runner::RunnerRegistry::default(),
             runner_overlap: Arc::default(),
             local_daemon: Arc::default(),
@@ -133,6 +162,7 @@ impl Services {
         Self {
             terminals: Arc::default(),
             runner_ownership: None,
+            upgrade_placement: None,
             runners: plakous::runner::RunnerRegistry::default(),
             runner_overlap: Arc::default(),
             local_daemon: Arc::default(),
@@ -166,6 +196,7 @@ impl Clone for Services {
         Self {
             terminals: self.terminals.clone(),
             runner_ownership: self.runner_ownership.clone(),
+            upgrade_placement: self.upgrade_placement.clone(),
             runners: self.runners.clone(),
             runner_overlap: self.runner_overlap.clone(),
             local_daemon: self.local_daemon.clone(),
@@ -231,6 +262,20 @@ impl Services {
         runner_id: &str,
     ) -> CliResult<plakous_hosted::agent::ProductStateRoots> {
         let roots = self.state_roots_for(context)?;
+        if let Some(placement) = &self.upgrade_placement
+            && placement.id == runner_id
+        {
+            if context.workspace().map_err(crate::CliFailure::new)? != placement.workspace {
+                return Err(crate::CliFailure::new(
+                    "upgrade placement services belong to a different workspace",
+                ));
+            }
+            let roots = roots.with_runner_services(placement.runner.clone());
+            return Ok(match &placement.client {
+                Some(client) => roots.with_runner_client(client.clone()),
+                None => roots,
+            });
+        }
         if runner_id == "local" && self.runners.rows().is_empty() {
             return Ok(roots);
         }

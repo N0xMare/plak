@@ -89,9 +89,6 @@ impl Command {
                 service: service.map(at),
             },
             Self::HostUpgradeCapacity { path } => Self::HostUpgradeCapacity { path: at(path) },
-            Self::HostUpgradeImport { receipt } => Self::HostUpgradeImport {
-                receipt: at(receipt),
-            },
             Self::Host(mut host) => {
                 if let Some(web) = &mut host.web {
                     web.ui = web.ui.take().map(at);
@@ -373,9 +370,6 @@ pub(crate) enum Command {
         expect_binary: String,
         wait: std::time::Duration,
     },
-    HostUpgradeImport {
-        receipt: PathBuf,
-    },
     /// A byte-transparent bridge to the home's existing host.
     HostConnect {
         auto_start: bool,
@@ -542,8 +536,7 @@ impl Command {
             Self::Host(_)
             | Self::HostInstall(_)
             | Self::HostConnect { .. }
-            | Self::HostUpgrade { .. }
-            | Self::HostUpgradeImport { .. } => "host",
+            | Self::HostUpgrade { .. } => "host",
             Self::WireSchema => "wire",
         }
     }

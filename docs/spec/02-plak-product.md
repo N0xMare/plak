@@ -1654,38 +1654,47 @@ snapshot exists, a paid compaction fallback is not offered.
 
 **Host-owned settled carry.** `plak host upgrade --expect-binary <id>` uses
 this same v12 producer and importer, not a database copy or live-tree export
-(§4.6). The local settled-root slice carries the newest unarchived record of
+(§4.6). Settled carry takes the newest unarchived record of
 each tree, across the whole home rather than the directory's row limit.
 Archived roots remain in their original key. A root with no canonical runtime,
 an unsettled submission/workflow, a running or held turn, a live/sealing child,
 a held child continuation, an in-flight workspace operation, or nonterminal
-daemon jobs blocks cross-key carry. **Remote-placed roots are refused before
-drain in this slice**, with an old-build inspection/drain remedy. This is not
-live migration and does not satisfy the remote-root upgrade prerequisite.
+daemon jobs blocks cross-key carry. Local and paired remote placements are
+supported; live trees and job registries are not. A remote placement must pass
+the destination's paired, exact-triple read-only qualification before drain.
+Advance its dedicated executable link to the matching snapshot first; retain
+the old build to inspect and drain any incompatible old workers.
 
 Carried roots start new agent lines and retain committed named state, portable
 conversation, bounded transcript, generated title and paused queued text under
 the ordinary carry law. Finished children and unresolved source facts remain
 inert references; their tree, candidates, job registry, leases and continuation
-authority are not imported or revived. Queued images and provider replay are
-not transported, and historical prompts/tools are never re-executed.
+authority are not imported or revived. Their inert facts remain in the retained
+v12 source documents, not executable topology in the successor. Queued images
+and provider replay are not transported, and historical prompts/tools are never
+re-executed.
 
 Version-1 private ownership receipts under `host/upgrades/<operation>/` name
 source instance/key/binary/executable, destination identity, monotonically
 ordered operation sequence, original host argv, export digests and reserved
 successor IDs. They carry no session encodings. Imports use the reserved product
 ID and create operation, with a write-ahead target record: retry finishes that
-same seed. Prepared or aborted seeds cannot open and are not served as ordinary
-directory entries. Before source surrender the source remains authoritative;
+same seed. Targets cannot open or appear as ordinary directory entries before
+acknowledgement. Before source surrender the source remains authoritative;
 an interrupted preparation is withdrawn and the old host is restored. Aborted
 seeds remain non-authoritative, including after a later successful attempt.
 
-A committed receipt simultaneously fences the source tree's records against
-reopen and authorizes its imported successors. After this boundary there is no
-fallback to the old owner: startup and retry follow the recorded destination.
-The destination acknowledges once its host endpoints and startup context are
-prepared. A lost acknowledgement never creates another successor or replays
-input; the same upgrade invocation reports the existing mappings. Source stores,
+A committed receipt fences the source tree's records against reopen and
+authorizes only destination startup import, not client execution. The source
+exits and releases its shared home custody before that import. The destination
+claims its own host custody, seeds the reserved successors from receipts before
+normal runner preparation, then performs the ordinary Ready sweep. It does not
+use standalone exclusive import or transfer old agent-line custody. After this
+boundary there is no fallback to the old owner: startup and retry follow the
+recorded destination, including partial import and failure before Ready. The
+destination acknowledges only after the imported placements are Ready. A lost
+acknowledgement never creates another successor or replays input; the same
+upgrade invocation reports the existing mappings. Source stores,
 exports and executable remain available for reference, not automatic deletion.
 Keep both installed snapshots and their sidecars through acknowledged success.
 
@@ -5390,7 +5399,7 @@ an unfinished-turn verdict retains the existing planned-handoff recovery law.
 A changed local-runner protocol refuses before handoff. There is no promise to
 preserve jobs across incompatible worker protocols.
 
-Cross-key upgrade is the local **settled-root** operation of §2.5.1. Without
+Cross-key upgrade is the **settled-root** operation of §2.5.1. Without
 `--wait`, blockers are returned before stopping admissions, as a list with
 session ID, closed kind and detail. The optional wait is bounded to 3600 seconds
 and closes new client and standalone-writer admissions while work settles;
@@ -5402,9 +5411,25 @@ the pause. A failed preparation restores the old directory's admissions;
 released old sessions can be attached again under normal handoff recovery.
 No shell stop-then-import sequence or client-owned runtime performs this work.
 
-The destination imports only dormant local seeds before the commit. A commit
-or acknowledgement lost to process failure is resolved from receipts before
-serving either side. Restarting with the destination executable after a
+Before pausing, the destination qualifies every required paired runner using
+its installed command, exact revision/flavor/protocol and pinned identity and
+roots. This authenticated, binding-free connection permits only configuration
+build reads (chapter 01 §8.4); it cannot register an owner, lease or line, sweep,
+or dispatch work. Configuration, credentials and strict capacity are checked
+using that placement, not a same-spelled host checkout. A mismatch refuses
+before drain with the paired-upgrade remedy: advance the runner's dedicated
+link to the matching immutable snapshot first, retaining the old build to
+inspect and drain old workers. Installation does not advance that link.
+
+After durable source surrender and source exit, the destination imports dormant
+seeds during startup under its own host custody and before Ready. Its temporary
+normal binding reads the fresh successor's job state; it loads no old
+call journal, adopts no old line, and runs no recovery sweep before import.
+The normal runner Ready sweep follows import and precedes acknowledgement.
+An interruption after surrender, partway through import or before Ready resumes
+the same reserved successors. A commit or acknowledgement lost to process
+failure is resolved from receipts before serving either side. Restarting with
+the destination executable after a
 precommit crash restores the retained source executable; after commit it can
 only start the destination. An executable/configuration failure after commit
 requires repairing and retrying that destination, not reopening the source.

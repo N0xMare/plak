@@ -238,8 +238,8 @@ pub(crate) fn all(paths: &PlakPaths) -> CliResult<Vec<Receipt>> {
     Ok(receipts)
 }
 
-/// Source and target opens consult the same durable commit. Prepared and
-/// aborted target seeds are never execution authority.
+/// Source opens fence at surrender; target opens wait for acknowledged Ready.
+/// Every open consults the same durable operation receipt.
 pub(crate) fn ensure_open(paths: &PlakPaths, record: &SessionRecord) -> CliResult<()> {
     let key = crate::home::state::state_key();
     for receipt in all(paths)? {
@@ -255,10 +255,10 @@ pub(crate) fn ensure_open(paths: &PlakPaths, record: &SessionRecord) -> CliResul
             }
             if key == receipt.destination_key
                 && mapping.successor == record.id
-                && !matches!(receipt.phase, Phase::Committed | Phase::Acknowledged)
+                && receipt.phase != Phase::Acknowledged
             {
                 return Err(CliFailure::new(
-                    "host_upgrade_target_pending: this dormant seed has no committed source surrender",
+                    "host_upgrade_target_pending: destination import and readiness are not acknowledged",
                 ));
             }
         }
@@ -283,10 +283,7 @@ pub(crate) fn withheld_targets(paths: &PlakPaths) -> CliResult<std::collections:
     let key = crate::home::state::state_key();
     Ok(all(paths)?
         .into_iter()
-        .filter(|receipt| {
-            receipt.destination_key == key
-                && !matches!(receipt.phase, Phase::Committed | Phase::Acknowledged)
-        })
+        .filter(|receipt| receipt.destination_key == key && receipt.phase != Phase::Acknowledged)
         .flat_map(|receipt| {
             receipt
                 .mappings

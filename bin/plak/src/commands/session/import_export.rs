@@ -185,14 +185,18 @@ pub(super) fn import_prepared_with_fallback(
         mut note,
         profile: document_profile,
     } = carried;
-    let placement = super::import_placement::ImportPlacement::prepare(
-        services,
-        record
-            .runner
-            .as_ref()
-            .map_or("local", |runner| runner.runner_id.as_str()),
-        &record.workspace_root,
-    )?;
+    let placement = if upgrade_successor.is_some() {
+        super::import_placement::ImportPlacement::passive_upgrade(services)?
+    } else {
+        super::import_placement::ImportPlacement::prepare(
+            services,
+            record
+                .runner
+                .as_ref()
+                .map_or("local", |runner| runner.runner_id.as_str()),
+            &record.workspace_root,
+        )?
+    };
     let services = &placement.services;
     let resumed = carry.as_ref().and_then(|carry| carry.resume.as_ref());
     if let Some(intent) = resumed {

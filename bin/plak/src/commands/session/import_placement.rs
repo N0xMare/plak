@@ -28,6 +28,21 @@ fn standalone_refusal(
 }
 
 impl ImportPlacement {
+    pub(crate) fn passive_upgrade(services: &Services) -> CliResult<Self> {
+        if services
+            .runner_ownership()
+            .is_none_or(crate::commands::runner::ownership::RunnerOwnership::is_standalone)
+        {
+            return Err(CliFailure::new(
+                "passive upgrade import requires the destination serving host custody",
+            ));
+        }
+        Ok(Self {
+            services: services.clone(),
+            _runtime: None,
+        })
+    }
+
     pub(crate) fn prepare(services: &Services, id: &str, workspace: &Path) -> CliResult<Self> {
         if id == "local" {
             return Ok(Self {

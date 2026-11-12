@@ -124,7 +124,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     drop(entered);
     let restart_services = services.clone();
     let (services, terminals) = terminals::TerminalRegistry::compose(services, host_generation())?;
-    let (services, local) = runner::host::prepare(&services, None)?;
+    let (services, local) = upgrade::prepare_host(&services)?;
     let sessions = sessions::ProductSessions::new(
         &services,
         command.idle_release,
@@ -152,7 +152,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         }
     };
     runner::host::start(&services, local, &environment, &runtime);
-    upgrade::acknowledge(services.paths()?)?;
+    upgrade::acknowledge(&services, &runtime)?;
     crate::shell::catalog_refresh::hook(services.paths()?.clone(), None)(None);
     eprintln!(
         "plak host: serving on {} (host {}, instance {}); tools get {}",

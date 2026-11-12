@@ -145,6 +145,58 @@ pub(crate) async fn dial_placed(
 
 type SshStream = tokio::io::Join<tokio::process::ChildStdout, tokio::process::ChildStdin>;
 
+/// A paired, exact-triple read-only connection; never binds an owner instance.
+pub(crate) async fn qualify(
+    paths: &PlakPaths,
+    destination: &str,
+    command: &str,
+) -> CliResult<Dialed> {
+    let host_id = std::fs::read_to_string(paths.home().join("host-id")).map_err(|_| {
+        CliFailure::new("runner qualification requires this home existing paired identity")
+    })?;
+    let host_id = host_id.trim();
+    uuid::Uuid::parse_str(host_id)
+        .map_err(|_| CliFailure::new("runner qualification home identity is invalid"))?;
+    let (child, stream) = ssh_stream(destination, command).map_err(|failure| {
+        CliFailure::new(format!(
+            "runner qualification transport failed: {failure:?}"
+        ))
+    })?;
+    let (client, hello) = RunnerClient::connect_qualification(stream, host_id.to_owned(), version(), crate::test_hooks::runner_windows()).await
+        .map_err(|failure| CliFailure::new(format!("host_upgrade_runner_qualification: {failure:?}; advance the runner dedicated link to the matching snapshot first; retain the old build to inspect and drain old workers")))?;
+    Ok(Dialed {
+        client,
+        hello,
+        _ssh: child,
+    })
+}
+
+/// A dormant seed reads its fresh line's jobs under destination host custody.
+/// Bind normally after source exit, without loading or replaying an old journal.
+#[cfg(feature = "web")]
+pub(crate) async fn passive_import(
+    paths: &PlakPaths,
+    destination: &str,
+    command: &str,
+) -> CliResult<Dialed> {
+    let (child, stream) = ssh_stream(destination, command).map_err(|failure| {
+        CliFailure::new(format!(
+            "passive import runner transport failed: {failure:?}"
+        ))
+    })?;
+    let bind = super::bind(super::host_id(paths)?, false);
+    let (client, hello) = RunnerClient::connect(stream, bind, crate::test_hooks::runner_windows())
+        .await
+        .map_err(|failure| {
+            CliFailure::new(format!("passive import runner bind failed: {failure:?}"))
+        })?;
+    Ok(Dialed {
+        client,
+        hello,
+        _ssh: child,
+    })
+}
+
 fn ssh_stream(
     destination: &str,
     command: &str,

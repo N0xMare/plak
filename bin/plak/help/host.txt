@@ -25,12 +25,16 @@ embedded; it does not start a host.
 --web adds the web endpoint; loopback development also requires --dev-login.
 
 Upgrade is invoked using the destination build and its exact binary id.
-Same-key upgrades use planned handoff. Cross-key upgrade carries settled local
+Same-key upgrades use planned handoff. Cross-key upgrade carries settled
 roots as new lines, with paused text queues and committed named state; live or
-held work and nonterminal jobs block it. Remote-placed roots are refused in
-this local-only slice. --wait closes admissions for at most 3600 seconds and
+held work and nonterminal jobs block it. Children carry only as inert facts.
+For paired remote roots, advance the runner's dedicated link to the matching
+revision/flavor/protocol snapshot first; qualification refuses before drain
+on mismatch. --wait closes admissions for at most 3600 seconds and
 restores them on timeout. Retry the same command after an unknown outcome;
-receipts select the old owner before commit or the recorded successor after it.
+receipts select the old owner before surrender or the destination after it.
+After surrender the old roots cannot reopen; destination startup alone imports
+under host custody before Ready. Partial imports reuse the reserved successors.
 Never remove the old snapshot until the destination has acknowledged success.
 --ui serves a validated static build with csp.json. SIGUSR1 reloads that build
 atomically; invalid replacements keep the old build. SIGHUP and SIGTERM mean

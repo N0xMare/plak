@@ -642,9 +642,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             expect_binary,
             wait,
         } => return host::upgrade(&services, &expect_binary, wait),
-        Command::HostUpgradeImport { receipt } => {
-            return carry::upgrade::import(&services, &receipt);
-        }
         Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
         // The runner bridge owns raw stdin and stdout, so it runs before the
         // process takes their locks.
@@ -1396,7 +1393,6 @@ fn execute_command(
         | Command::HostInstall(_)
         | Command::HostConnect { .. }
         | Command::HostUpgrade { .. }
-        | Command::HostUpgradeImport { .. }
         | Command::WireSchema
         | Command::Help
         | Command::CommandHelp { .. }

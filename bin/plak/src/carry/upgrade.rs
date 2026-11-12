@@ -5,8 +5,27 @@ use serde::{Deserialize, Serialize};
 use crate::shell::services::Services;
 use crate::{CliFailure, CliResult};
 
+#[cfg(feature = "web")]
 pub(crate) mod process;
+pub(crate) mod remote;
 
+pub(crate) const PROTOCOL: u32 = 2;
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ServiceProbe {
+    pub(crate) arguments: Vec<String>,
+    pub(crate) placements: Vec<PlacementProbe>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PlacementProbe {
+    pub(crate) id: String,
+    pub(crate) workspace: std::path::PathBuf,
+}
+
+#[cfg(feature = "web")]
 pub(crate) fn crash_cut(name: &str) {
     #[cfg(feature = "test-hooks")]
     if std::env::var("PLAK_TEST_HOST_UPGRADE_CUT").is_ok_and(|selected| selected == name) {
@@ -87,17 +106,22 @@ fn probe_service(services: &Services, path: &std::path::Path) -> CliResult<()> {
     use std::io::Read as _;
     let mut bytes = Vec::new();
     std::fs::File::open(path)
-        .and_then(|file| file.take(65537).read_to_end(&mut bytes))
+        .and_then(|file| file.take(1024 * 1024 + 1).read_to_end(&mut bytes))
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    if bytes.len() > 65536 {
+    if bytes.len() > 1024 * 1024 {
         return Err(CliFailure::new(
             "host upgrade service arguments exceed their bound",
         ));
     }
-    let arguments: Vec<String> = serde_json::from_slice(&bytes)
+    let probe: ServiceProbe = serde_json::from_slice(&bytes)
         .map_err(|_| CliFailure::new("invalid host upgrade service arguments"))?;
+    if probe.arguments.len() > 64 || probe.placements.len() > 4096 {
+        return Err(CliFailure::new(
+            "host upgrade probe exceeds its argument or placement bound",
+        ));
+    }
     let crate::command::Command::Host(command) =
-        crate::cli::parse(arguments.into_iter().map(std::ffi::OsString::from))?
+        crate::cli::parse(probe.arguments.into_iter().map(std::ffi::OsString::from))?
     else {
         return Err(CliFailure::new(
             "destination cannot serve the recorded host arguments",
@@ -109,9 +133,13 @@ fn probe_service(services: &Services, path: &std::path::Path) -> CliResult<()> {
     }
     #[cfg(not(feature = "web"))]
     let _ = (services, command);
+    for placement in probe.placements {
+        let _qualified = remote::Placement::prepare(services, &placement.id, &placement.workspace)?;
+    }
     Ok(())
 }
 
+#[cfg(feature = "web")]
 pub(crate) fn import(
     services: &Services,
     receipt_path: &std::path::Path,
@@ -121,7 +149,10 @@ pub(crate) fn import(
     if receipt.path(paths) != receipt_path
         || receipt.destination_key != crate::home::state::state_key()
         || receipt.destination_binary != crate::build_identity::binary_id()
-        || receipt.phase == receipt::Phase::Aborted
+        || receipt.phase != receipt::Phase::Committed
+        || services
+            .runner_ownership()
+            .is_none_or(crate::commands::runner::ownership::RunnerOwnership::is_standalone)
     {
         return Err(CliFailure::new(
             "host_upgrade_import_refused: destination or receipt identity does not match",
@@ -148,9 +179,14 @@ pub(crate) fn import(
             ));
         }
         crate::commands::session::probe_upgrade_capacity(services, &file)?;
+        let placed = remote::Placement::for_import(
+            services,
+            document.runner_id(),
+            document.workspace_root(),
+        )?;
         let mut prepared = crate::commands::session::PreparedImport::new(document, false)?;
         prepared.upgrade_successor = Some(mapping.successor.clone());
-        let (record, _) = crate::commands::session::import_prepared(services, prepared)?;
+        let (record, _) = crate::commands::session::import_prepared(&placed.services, prepared)?;
         let saved = services
             .session_records()?
             .load(&mapping.successor)
@@ -218,7 +254,7 @@ pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationPro
             export_versions
         };
     Ok(DestinationProbe {
-        protocol: 1,
+        protocol: PROTOCOL,
         binary_id: crate::build_identity::binary_id().to_owned(),
         state_key: crate::home::state::state_key(),
         export_versions,

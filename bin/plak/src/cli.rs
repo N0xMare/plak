@@ -590,8 +590,6 @@ enum HostAction {
         #[arg(long, default_value = "0", value_parser = clap::value_parser!(u64).range(0..=3600))]
         wait: u64,
     },
-    #[command(name = "__upgrade-import", hide = true)]
-    UpgradeImport { receipt: std::path::PathBuf },
     /// Relay wire bytes to this home's host without consuming its handshake.
     Connect {
         #[arg(long, required = true)]

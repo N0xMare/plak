@@ -141,16 +141,22 @@ one cross-build carrier (a build imports its own and the previous version).
   Darwin retains an owned zombie's unreaped-child anchor without treating it as
   live session membership; fast-exiting children retain cleanup authority.
 
-- Add the local settled-root slice of `plak host upgrade --expect-binary <id>`.
+- Add settled-root `plak host upgrade --expect-binary <id>`.
   It preflights the destination, optionally waits with a bounded admission
   pause, and carries settled roots across state keys through unchanged export
   v12, with durable successor mappings and source-surrender/retry receipts.
   Named state and paused text queues survive; carried roots start new lines.
   Children remain inert references and cannot be revived. Running/held work,
-  live or sealing children, nonterminal daemon jobs and remote-placed roots
-  refuse before cross-key drain. Same-key upgrade remains planned handoff.
-  This is not live migration or remote-root upgrade qualification. Adds a
-  version-1 ownership receipt, not a new session export or state-key format.
+  live or sealing children and nonterminal daemon jobs refuse before cross-key
+  drain. Paired remote roots require advancing the runner's dedicated link to
+  the exact matching snapshot first; read-only qualification checks identity,
+  revision/flavor/protocol, configuration and capacity before drain. After
+  surrender the source exits; the destination host imports under its own
+  custody before Ready and recovers partial imports from receipts. Surrendered
+  roots cannot reopen on the old build. Same-key upgrade remains planned
+  handoff. This is not live tree or job migration. Adds a version-1 ownership
+  receipt and private coordinator protocol 2, not a new session export or
+  state-key format; runner protocol 8 adds paired read-only qualification.
 
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.

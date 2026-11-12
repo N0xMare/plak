@@ -62,20 +62,31 @@ pub(crate) fn configured_id(paths: &crate::home::paths::PlakPaths, id: &str) -> 
 }
 
 pub(crate) fn remote(services: &Services, id: &str) -> Result<Remote, PlacementFailure> {
-    let paths = services
-        .paths()
-        .map_err(|_| PlacementFailure::RunnerNotPaired)?;
+    let remote = paired_remote(
+        services
+            .paths()
+            .map_err(|_| PlacementFailure::RunnerNotPaired)?,
+        id,
+    )?;
+    services.runner_overlap().admit_pin(RunnerPin {
+        runner_id: id.into(),
+        machine_id: remote.pin.machine_id.clone(),
+        roots: remote.pin.roots.clone(),
+    })?;
+    Ok(remote)
+}
+
+/// Configuration/pin lookup only: no occupancy admission, pin repair or store open.
+pub(crate) fn paired_remote(
+    paths: &crate::home::paths::PlakPaths,
+    id: &str,
+) -> Result<Remote, PlacementFailure> {
     let config = crate::product_config::ProductConfig::load(paths)
         .map_err(|_| PlacementFailure::RunnerNotPaired)?;
     for (name, config) in config.runners {
         if let Some(pin) = read_pin(paths, &name)
             && pin.runner_id == id
         {
-            services.runner_overlap().admit_pin(RunnerPin {
-                runner_id: id.into(),
-                machine_id: pin.machine_id.clone(),
-                roots: pin.roots.clone(),
-            })?;
             return Ok(Remote {
                 id: id.into(),
                 config,

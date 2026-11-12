@@ -4057,6 +4057,14 @@ reopen the old directory after a failed preparation. This operation carries
 settled roots as new lines, not live tree custody: old children remain inert
 references and cannot be resumed in the successor. Same-key upgrade remains
 the planned handoff above, with its existing once-only continuation law.
+Paired remote roots use binding-free destination qualification before drain.
+After durable surrender, source exit releases shared home custody; destination
+startup takes its own host custody and imports the reserved fresh lines before
+normal runner preparation and Ready reconciliation. It does not transfer or
+adopt source lines, copy job registries, or load an old call journal. Interrupted
+creation retries its reserved operation and successor, including a canonical
+create committed before the product locator was saved. Until acknowledgement,
+those target records cannot execute; surrendered source records never reopen.
 Runner transfer rules and the embedded daemon-process refusal are unchanged.
 
 **Stops.** Every interrupt intent records its cause: a parent's

@@ -372,10 +372,6 @@ impl TopCommand {
                 wait: std::time::Duration::from_secs(wait),
             }),
             Self::Host {
-                action: Some(HostAction::UpgradeImport { receipt }),
-                ..
-            } => Ok(Command::HostUpgradeImport { receipt }),
-            Self::Host {
                 action: None,
                 web,
                 ui,
