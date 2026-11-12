@@ -53,7 +53,7 @@ impl Driver {
         };
         self.emit_telemetry(
             self.telemetry_context.with_turn(command.turn_id),
-            TelemetryObservationKind::ModelReresolved {
+            &TelemetryObservationKind::ModelReresolved {
                 accepted: admitted.is_ok(),
             },
         );

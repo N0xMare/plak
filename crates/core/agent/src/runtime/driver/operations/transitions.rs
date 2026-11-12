@@ -541,7 +541,7 @@ impl Driver {
         if count != 0 {
             self.emit_telemetry(
                 self.telemetry_context.with_turn(turn_id),
-                crate::TelemetryObservationKind::JobNoticesDelivered {
+                &crate::TelemetryObservationKind::JobNoticesDelivered {
                     point,
                     count: u32::try_from(count).unwrap_or(u32::MAX),
                 },

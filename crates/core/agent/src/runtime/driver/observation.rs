@@ -13,10 +13,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 impl Driver {
-    pub(super) fn emit_telemetry(&self, context: TelemetryContext, kind: TelemetryObservationKind) {
+    pub(super) fn emit_telemetry(
+        &self,
+        context: TelemetryContext,
+        kind: &TelemetryObservationKind,
+    ) {
         let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
             self.telemetry
-                .emit(TelemetryObservation::new(context, self.clock.now(), kind));
+                .emit(TelemetryObservation::new(context, self.clock.now(), *kind));
         }));
     }
 

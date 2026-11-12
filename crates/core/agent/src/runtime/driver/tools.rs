@@ -1397,7 +1397,7 @@ impl Driver {
             .with_call(call.call_id());
         self.emit_telemetry(
             context,
-            crate::TelemetryObservationKind::JobPreempted {
+            &crate::TelemetryObservationKind::JobPreempted {
                 kind: crate::JobPreemption::Superseded,
             },
         );

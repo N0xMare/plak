@@ -42,7 +42,7 @@ impl Driver {
                 let refusal = compaction_refusal_reason(&error);
                 self.emit_telemetry(
                     self.telemetry_context.with_turn(command.turn_id),
-                    TelemetryObservationKind::CompactionFinished {
+                    &TelemetryObservationKind::CompactionFinished {
                         refusal: Some(refusal),
                         elapsed: Duration::ZERO,
                         outcome: CompactionEventOutcome::Unavailable,

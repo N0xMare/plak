@@ -233,7 +233,7 @@ impl Driver {
             .telemetry_context
             .with_turn(command.turn_id)
             .with_attempt(attempt_id);
-        self.emit_telemetry(context, TelemetryObservationKind::ModelStarted);
+        self.emit_telemetry(context, &TelemetryObservationKind::ModelStarted);
         let idle_gap = self.note_provider_request();
         let mut usage = None;
         let mut output_deltas = 0;
@@ -284,7 +284,7 @@ impl Driver {
         }
         self.emit_telemetry(
             context,
-            TelemetryObservationKind::ModelFinished {
+            &TelemetryObservationKind::ModelFinished {
                 elapsed: model_elapsed,
                 status: agent_terminal_status(&result, self.shutdown.is_cancelled()),
                 usage,
@@ -409,7 +409,7 @@ impl Driver {
                         self.telemetry_context
                             .with_turn(command.turn_id)
                             .with_attempt(attempt_id),
-                        TelemetryObservationKind::ModelArtifactPrefixDrift { fields },
+                        &TelemetryObservationKind::ModelArtifactPrefixDrift { fields },
                     );
                 }
                 let prepared = admitted
@@ -803,7 +803,7 @@ impl Driver {
                     self.telemetry_context
                         .with_turn(command.turn_id)
                         .with_attempt(attempt_id),
-                    TelemetryObservationKind::ModelFirstEvent {
+                    &TelemetryObservationKind::ModelFirstEvent {
                         elapsed: started.elapsed(),
                     },
                 );
@@ -813,7 +813,7 @@ impl Driver {
                     self.telemetry_context
                         .with_turn(command.turn_id)
                         .with_attempt(attempt_id),
-                    TelemetryObservationKind::ModelStreamActivity {
+                    &TelemetryObservationKind::ModelStreamActivity {
                         activity: *activity,
                     },
                 );
@@ -824,7 +824,7 @@ impl Driver {
                     self.telemetry_context
                         .with_turn(command.turn_id)
                         .with_attempt(attempt_id),
-                    kind,
+                    &kind,
                 );
                 continue;
             }
@@ -907,7 +907,7 @@ impl Driver {
                 self.telemetry_context
                     .with_turn(command.turn_id)
                     .with_attempt(attempt_id),
-                TelemetryObservationKind::ModelArtifactPrefixDrift { fields },
+                &TelemetryObservationKind::ModelArtifactPrefixDrift { fields },
             );
         }
         let (prepared, prepared_at) = self

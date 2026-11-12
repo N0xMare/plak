@@ -288,7 +288,7 @@ impl Driver {
         );
         self.emit_telemetry(
             self.telemetry_context.with_turn(command.turn_id),
-            TelemetryObservationKind::CompactionFinished {
+            &TelemetryObservationKind::CompactionFinished {
                 refusal: None,
                 elapsed: std::time::Duration::ZERO,
                 outcome: CompactionEventOutcome::Committed,

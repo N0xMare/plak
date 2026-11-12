@@ -97,7 +97,7 @@ impl Driver {
         command.shared.mark_telemetry_started(started);
         self.emit_telemetry(
             self.telemetry_context.with_turn(command.turn_id),
-            TelemetryObservationKind::TurnStarted {
+            &TelemetryObservationKind::TurnStarted {
                 origin: if command.instruction {
                     plakous_model::TurnOrigin::HostWake
                 } else {
@@ -241,7 +241,7 @@ impl Driver {
         };
         self.emit_telemetry(
             self.telemetry_context.with_turn(turn_id),
-            TelemetryObservationKind::RetentionFinished {
+            &TelemetryObservationKind::RetentionFinished {
                 elapsed: started.elapsed(),
                 status,
                 pruned_checkpoints: receipt.map_or(0, PruneReceipt::pruned_checkpoints),

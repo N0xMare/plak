@@ -257,12 +257,12 @@ impl DurabilityCommitTelemetry {
         );
     }
 
-    fn emit(&self, kind: TelemetryObservationKind) {
+    fn emit(&self, kind: &TelemetryObservationKind) {
         let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
             self.emitter.emit(TelemetryObservation::new(
                 self.context,
                 self.clock.now(),
-                kind,
+                *kind,
             ));
         }));
     }
@@ -273,7 +273,7 @@ impl DurabilityCommitTelemetry {
         attempt: DurabilityAttemptKind,
         outcome: DurabilityAttemptOutcome,
     ) {
-        self.emit(TelemetryObservationKind::DurabilityAttemptFinished {
+        self.emit(&TelemetryObservationKind::DurabilityAttemptFinished {
             elapsed,
             attempt,
             outcome,
@@ -281,7 +281,7 @@ impl DurabilityCommitTelemetry {
     }
 
     fn emit_finished(&self, elapsed: Duration, status: TelemetryTerminalStatus) {
-        self.emit(TelemetryObservationKind::DurabilityFinished { elapsed, status });
+        self.emit(&TelemetryObservationKind::DurabilityFinished { elapsed, status });
     }
 }
 

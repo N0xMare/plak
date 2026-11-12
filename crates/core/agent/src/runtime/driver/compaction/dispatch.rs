@@ -419,7 +419,7 @@ impl Driver {
                         self.emit_telemetry(
                             self.telemetry_context_for_turn(live.turn_id())
                                 .with_attempt(live.identity().attempt_id),
-                            TelemetryObservationKind::PromptCacheDiagnosis {
+                            &TelemetryObservationKind::PromptCacheDiagnosis {
                                 reason: diagnosis.reason,
                                 missed_input_tokens: diagnosis.missed_input_tokens,
                             },

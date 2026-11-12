@@ -71,10 +71,8 @@ impl NativeSubscriptions {
         let slot = self.state.slot_id()?;
         let status_slot = slot.clone();
         let local_status = run_blocking(move || {
-            let slot = status_slot;
-            let admin = plakous_xai::XaiOfflineSelectedSlot::open_explicit(status_path, slot)
-                .map_err(map_xai_error)?;
-            admin
+            plakous_xai::XaiOfflineSelectedSlot::open_explicit(status_path, status_slot)
+                .map_err(map_xai_error)?
                 .status()
                 .map(map_xai_offline_status)
                 .map_err(map_xai_error)
@@ -98,7 +96,8 @@ impl NativeSubscriptions {
         let catalog_observer = self.exchange_observer.clone();
         let catalog_retries = self.catalog_retries;
         let source_scope = self.state.source_scope();
-        let telemetry_scope = source_scope.clone();
+        let refresh_observer =
+            credential_refresh_observer(NativeProvider::Xai, source_scope.clone());
         run_blocking(move || {
             let timestamp =
                 Timestamp::new(accepted_at, 0).map_err(|_| NativeSubscriptionError::Internal)?;
@@ -142,9 +141,7 @@ impl NativeSubscriptions {
                     .with_subscription_request_gate(gate)
                     .map_err(map_xai_error)?;
             }
-            if let Some(observer) =
-                credential_refresh_observer(NativeProvider::Xai, telemetry_scope)
-            {
+            if let Some(observer) = refresh_observer {
                 manager = manager
                     .with_credential_refresh_observer(observer)
                     .map_err(map_xai_error)?;

@@ -377,7 +377,7 @@ impl Driver {
         let compaction_context = self.telemetry_context_for_turn(compaction_turn_id);
         self.emit_telemetry(
             compaction_context,
-            TelemetryObservationKind::CompactionStarted {
+            &TelemetryObservationKind::CompactionStarted {
                 reason: compaction_reason,
             },
         );
@@ -408,7 +408,7 @@ impl Driver {
         };
         self.emit_telemetry(
             compaction_context,
-            TelemetryObservationKind::CompactionFinished {
+            &TelemetryObservationKind::CompactionFinished {
                 refusal: outcome.as_ref().err().map(compaction_refusal_reason),
                 elapsed: compaction_elapsed,
                 outcome: compaction_session_event_outcome(&outcome),

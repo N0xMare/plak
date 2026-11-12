@@ -391,7 +391,7 @@ pub struct PlakousApplication {
     exchange_observer: Option<Arc<dyn plakous::exchange_observation::ExchangeObserver>>,
     /// The process's one job bound, shared by every state root it opens.
     jobs: plakous_hosted::agent::ProcessJobs,
-    _credential_telemetry: Option<crate::telemetry_sink::CredentialTelemetryGuard>,
+    credential_telemetry: Option<crate::telemetry_sink::CredentialTelemetryGuard>,
 }
 
 impl PlakousApplication {
@@ -404,8 +404,8 @@ impl PlakousApplication {
     }
 
     fn record_credential_refreshes(&mut self) {
-        if self._credential_telemetry.is_none() {
-            self._credential_telemetry = self
+        if self.credential_telemetry.is_none() {
+            self.credential_telemetry = self
                 .product
                 .as_ref()
                 .and_then(crate::telemetry_sink::install_product_credential_telemetry);
@@ -448,7 +448,7 @@ impl PlakousApplication {
             extra_telemetry_sink,
             exchange_observer,
             jobs: plakous_hosted::agent::ProcessJobs::default(),
-            _credential_telemetry: credential_telemetry,
+            credential_telemetry,
         })
     }
 
