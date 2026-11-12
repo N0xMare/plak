@@ -37,6 +37,12 @@ one cross-build carrier (a build imports its own and the previous version).
   UTF-8 result filtering and retryable continuation authority; retain full bounded
   Changes snapshots independently of client-response truncation.
 
+- Harden Changes execution against repository-local executable search and Git
+  index refresh writes. Require Git 2.44 with a no-lazy-fetch capability probe,
+  enforce repository ownership, and tighten metadata redirect checks.
+  Keep the 2,000-entry internal status budget separate from the bounded client
+  projection, so full execution identities survive client-side truncation.
+
 - Add consented host-console writes for named accounts, masked write-only keys,
   cancellable subscription login, logout and explicit refresh, plus etag-checked
   home configuration, template and profile publication. Client protocol 6 becomes

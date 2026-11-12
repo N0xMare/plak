@@ -503,7 +503,7 @@ pub trait ExecutionBackend: sealed::Sealed + Send + Sync + 'static {
 impl ExecutionEnvironment {
     /// Fixed operator-only VCS reads through the exact live backend.
     #[doc(hidden)]
-    pub fn workspace_changes(
+    pub(crate) fn workspace_changes(
         &self,
         request: changes::ChangesRequest,
         control: OperationContext,

@@ -21,6 +21,10 @@ use super::super::{
 };
 use crate::ExecutionEnvironment;
 
+#[cfg(all(test, unix))]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod changes_tests;
+
 pub(super) fn decode_changes_request(
     value: Value,
 ) -> Result<ChangesRequest, ExecutionBackendError> {

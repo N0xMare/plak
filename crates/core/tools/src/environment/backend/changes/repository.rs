@@ -247,6 +247,20 @@ pub(super) fn identify(
     known: Option<&Path>,
     protected: &[PathBuf],
 ) -> Result<ChangesRepository, ChangesRefusal> {
+    identify_owned(
+        workspace,
+        known,
+        protected,
+        rustix::process::geteuid().as_raw(),
+    )
+}
+
+pub(super) fn identify_owned(
+    workspace: &Path,
+    known: Option<&Path>,
+    protected: &[PathBuf],
+    owner: u32,
+) -> Result<ChangesRepository, ChangesRefusal> {
     let workspace = canonical(workspace)?;
     let toplevel = canonical(known.unwrap_or(&workspace))?;
     if !workspace.starts_with(&toplevel) {
@@ -300,6 +314,8 @@ pub(super) fn identify(
             "info",
             "objects",
             "objects/info",
+            "objects/pack",
+            "packed-refs",
             "refs",
         ] {
             if fs::symlink_metadata(root.join(name))
@@ -323,6 +339,9 @@ pub(super) fn identify(
         .into_iter()
         .map(|path| {
             let metadata = fs::metadata(path).map_err(|_| ChangesRefusal::UnsafeRepository)?;
+            if metadata.uid() != owner {
+                return Err(ChangesRefusal::UnsafeRepository);
+            }
             Ok(format!(
                 "{}\0{}\0{}",
                 path.display(),
@@ -381,15 +400,22 @@ pub(super) fn protected_roots_from(
     let state = state
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| home.map(|home| home.join(".local/state")))
+        .or_else(|| home.as_ref().map(|home| home.join(".local/state")))
         .map(|state| state.join("plak"));
-    [
+    let mut roots = vec![
         product.ok_or(ChangesRefusal::UnsafeRepository)?,
         state.ok_or(ChangesRefusal::UnsafeRepository)?,
-    ]
-    .into_iter()
-    .map(|path| resolve_missing(&path))
-    .collect()
+    ];
+    if let Some(home) = home {
+        let default = home.join(".plak");
+        if !roots.contains(&default) {
+            roots.push(default);
+        }
+    }
+    roots
+        .into_iter()
+        .map(|path| resolve_missing(&path))
+        .collect()
 }
 
 fn resolve_missing(path: &Path) -> Result<PathBuf, ChangesRefusal> {

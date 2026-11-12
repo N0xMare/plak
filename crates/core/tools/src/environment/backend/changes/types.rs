@@ -3,6 +3,10 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Deserializer, Serialize};
 
 pub const MAX_CHANGES_ENTRIES: usize = 2_000;
+/// Internal status JSON budget, separate from the client projection's 256 KiB.
+/// Fits 2,000 entries with 4,096-byte paths and maximal object/content witnesses,
+/// leaving 4 MiB below the runner frame limit. JSON escaping counts toward it.
+pub const MAX_CHANGES_STATUS_BYTES: usize = 12 * 1024 * 1024;
 pub const MAX_CHANGES_OUTPUT_BYTES: usize = 256 * 1024;
 pub const MAX_CHANGES_INPUT_BYTES: u64 = 1024 * 1024;
 
@@ -106,7 +110,7 @@ impl ChangesAnswer {
                     || serde_json::to_vec(status)
                         .map_err(|_| ChangesRefusal::InvalidRequest)?
                         .len()
-                        > MAX_CHANGES_OUTPUT_BYTES
+                        > MAX_CHANGES_STATUS_BYTES
                 {
                     return Err(ChangesRefusal::OutputLimit);
                 }

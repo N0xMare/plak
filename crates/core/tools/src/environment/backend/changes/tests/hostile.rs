@@ -168,12 +168,14 @@ async fn hostile_filters_drivers_hooks_helpers_and_promisor_do_not_run() {
     // selection even when status cannot short circuit on file length.
     std::fs::write(root.path().join("file"), "AFTER!\n").unwrap();
     let environment = environment(root.path());
+    let index = review::index_witness(root.path());
     let observed = status(&environment).await;
     assert!(matches!(
         ask(&environment, diff_request(&observed, 0)).await,
         ChangesAnswer::Diff(ChangesDiff::Patch { .. })
     ));
     assert!(!marker.exists());
+    assert_eq!(review::index_witness(root.path()), index);
     assert!(
         root.path()
             .join(".git/index.lock")

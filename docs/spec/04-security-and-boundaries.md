@@ -618,20 +618,35 @@ explicit `GIT_DIR` and `GIT_WORK_TREE` and check `rev-parse --show-toplevel`;
 disagreeing `core.worktree`, symlinked metadata, nonempty `info/attributes` and
 object alternates are refused. Ancestor queries always carry a literal
 workspace pathspec, and every metadata result must stay beneath that workspace.
+The workspace, toplevel, Git directory and common directory must each be owned
+by the execution process's effective uid; explicit `GIT_DIR` must not bypass
+ownership admission. At both Git and common roots, symlinks are refused at
+`config`, `config.worktree`, `HEAD`, `index`, `info`, `objects`, `objects/info`,
+`objects/pack`, `packed-refs` and `refs`; `objects/info/alternates` is refused
+whenever present, and `info/attributes` must be absent or an empty regular file.
+Changes also protects the default `$HOME/.plak` product home when `PLAK_HOME`
+selects a different directory, in addition to the selected product and state homes.
 
-Git must be at least 2.43 and pass a known-fixture empty-tree attribute-source
-probe; an unsupported version/build or the existing compile-time
+Git must be at least 2.44 and pass known-fixture empty-tree attribute-source
+and no-lazy-fetch probes; the latter permits only disposable local-file
+transport and proves that a known missing object is not fetched. An unsupported
+version/build or the existing compile-time
 `GIT_CLI_ENABLED=false` gate answers `vcs_unavailable`. This is the `git-cli`
 build feature, not an environment escape or client-selected switch. The
 official host API receives that build gate explicitly, and paired dispatch
 checks the runner build's gate independently. The empty tree is never written
 into the user's repository.
-The child environment starts empty, retaining only PATH and fixed settings:
+Git is resolved once, before changing directory, to an absolute canonical
+executable using only absolute PATH entries. An executable beneath the
+workspace or containing repository is refused. Empty and relative PATH entries
+are never searched or passed to children.
+The child environment starts empty, retaining only the sanitized PATH and fixed settings:
 system/global config disabled, fsmonitor off, hooks and attributes files at
 `/dev/null`, system attributes off, empty credential helper, all protocols
 disabled, quotePath false, no terminal prompt or askpass, empty-tree attributes,
 no lazy fetch, an empty protocol allowlist (including per-protocol overrides),
-literal pathspecs, no pager and no optional locks. Diff also fixes
+literal pathspecs, no pager and no optional locks. `diff.autoRefreshIndex=false`
+also prevents diff's unconditional index refresh and replacement. Diff fixes
 `--no-ext-diff --no-textconv --ignore-submodules=all --no-renames`. No `jj`
 process runs: non-colocated repositories answer `vcs_unsupported`, and colocated
 repositories are labelled a Git view. Untracked entries are listed with
@@ -640,8 +655,16 @@ porcelain v2 `-z --untracked-files=normal`, never diffed with `--no-index`.
 Each request has a five-second execution deadline. Byte-capped stdout/stderr
 pipes are drained incrementally, never spooled or read whole without a bound.
 Cap, deadline, cancellation and dropped futures kill the owned process group.
-Status is at most 2,000 entries and 256 KiB; a truncated result is a refusal,
-never clean. Diff rejects old, index or worktree inputs over 1 MiB before
+The leader is not reaped until pipe draining finishes; after reaping it, cleanup
+never signals a potentially reused group identifier.
+Status is at most 2,000 entries. Its raw porcelain and internal serialized
+answer each have a separate 12 MiB budget (`MAX_CHANGES_STATUS_BYTES`), enough
+for 2,000 entries with maximum-length 4,096-byte paths and full object/content
+witnesses, with 4 MiB reserved below the runner's 16 MiB frame ceiling. JSON
+escaping counts against the internal byte budget. An internal limit violation
+is a refusal, never clean. The host separately projects status into the client's
+256 KiB budget and labels any omitted entries honestly; the client budget does
+not truncate execution identities. Diff rejects old, index or worktree inputs over 1 MiB before
 diffing and caps output at 256 KiB. Binary output is bounded numstat.
 Unmerged entries size-check HEAD and every index-stage object before diffing.
 Status returns repository, observed HEAD/index and per-entry identities binding both

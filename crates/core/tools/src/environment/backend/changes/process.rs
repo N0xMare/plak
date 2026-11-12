@@ -1,5 +1,7 @@
-use std::path::Path;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, OnceLock};
 
 use plakous_model::CancellationToken;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -18,29 +20,56 @@ pub(super) struct Executor {
     pub deadline: Instant,
     pub cancellation: CancellationToken,
     path: std::ffi::OsString,
-    #[cfg(test)]
-    program: Option<std::path::PathBuf>,
+    program: Arc<OnceLock<Result<PathBuf, ChangesRefusal>>>,
 }
 
 impl Executor {
-    pub const fn new(
-        deadline: Instant,
-        cancellation: CancellationToken,
-        path: std::ffi::OsString,
-    ) -> Self {
+    pub fn new(deadline: Instant, cancellation: CancellationToken, path: &std::ffi::OsStr) -> Self {
         Self {
             deadline,
             cancellation,
-            path,
-            #[cfg(test)]
-            program: None,
+            path: std::env::join_paths(
+                std::env::split_paths(path).filter(|entry| entry.is_absolute()),
+            )
+            .unwrap_or_default(),
+            program: Arc::default(),
         }
     }
 
     #[cfg(test)]
-    pub fn test_program(mut self, program: std::path::PathBuf) -> Self {
-        self.program = Some(program);
+    pub fn test_program(self, program: PathBuf) -> Self {
+        let _ = self.program.set(Ok(program));
         self
+    }
+
+    pub async fn resolve(
+        &self,
+        workspace: &Path,
+        toplevel: Option<&Path>,
+    ) -> Result<PathBuf, ChangesRefusal> {
+        let roots = vec![
+            workspace.to_path_buf(),
+            toplevel.unwrap_or(workspace).to_path_buf(),
+        ];
+        let path = self.path.clone();
+        let pinned = self.program.clone();
+        super::repository::blocking(move || {
+            let roots = roots
+                .into_iter()
+                .map(|root| {
+                    root.canonicalize()
+                        .map_err(|_| ChangesRefusal::UnsafeRepository)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let program = pinned
+                .get_or_init(|| resolve_program(&path, &roots))
+                .clone()?;
+            if roots.iter().any(|root| program.starts_with(root)) {
+                return Err(ChangesRefusal::UnsafeRepository);
+            }
+            Ok(program)
+        })
+        .await
     }
 
     pub fn check(&self) -> Result<(), ChangesRefusal> {
@@ -62,10 +91,10 @@ impl Executor {
         cap: usize,
     ) -> Result<Output, ChangesRefusal> {
         self.check()?;
-        let program = Path::new("git");
-        #[cfg(test)]
-        let program = self.program.as_deref().unwrap_or(program);
-        let mut command = command(program, cwd, &self.path);
+        let program = self
+            .resolve(cwd, repository.map(|repo| repo.toplevel.as_path()))
+            .await?;
+        let mut command = command(&program, cwd, &self.path);
         if let Some(repo) = repository {
             command.env("GIT_DIR", &repo.git_dir);
             command.env("GIT_WORK_TREE", &repo.toplevel);
@@ -80,6 +109,29 @@ impl Executor {
         }
         command.args(args);
         self.output(command, cap).await
+    }
+
+    pub async fn probe_lazy_fetch(
+        &self,
+        cwd: &Path,
+        object: &str,
+        disabled: bool,
+    ) -> Result<Output, ChangesRefusal> {
+        let program = self.resolve(cwd, None).await?;
+        let mut command = command(&program, cwd, &self.path);
+        // Only this disposable capability fixture permits a local transport.
+        // Ignoring GIT_NO_LAZY_FETCH would fetch the known advertised object.
+        command.env("GIT_ALLOW_PROTOCOL", "file").args([
+            "-c",
+            "protocol.file.allow=always",
+            "cat-file",
+            "-e",
+            object,
+        ]);
+        if !disabled {
+            command.env_remove("GIT_NO_LAZY_FETCH");
+        }
+        self.output(command, 1024).await
     }
 
     pub(super) async fn output(
@@ -97,7 +149,7 @@ impl Executor {
         let mut child = command
             .spawn()
             .map_err(|_| ChangesRefusal::VcsUnavailable)?;
-        let group = Group(
+        let mut group = Group(
             child
                 .id()
                 .and_then(|pid| i32::try_from(pid).ok())
@@ -110,11 +162,14 @@ impl Executor {
             () = self.cancellation.cancelled() => Err(ChangesRefusal::Cancelled),
             () = tokio::time::sleep_until(self.deadline) => Err(ChangesRefusal::Deadline),
             output = async {
-                let (bytes, _, status) = tokio::try_join!(
+                // Keep the unreaped leader's PID reserved until all pipe holders
+                // finish. Cancellation can still kill that exact process group.
+                let (bytes, _) = tokio::try_join!(
                     Box::pin(drain(stdout, cap)),
                     Box::pin(drain(stderr, 8 * 1024)),
-                    async { child.wait().await.map_err(|_| ChangesRefusal::Io) },
                 )?;
+                let status = child.wait().await.map_err(|_| ChangesRefusal::Io)?;
+                group.0 = None;
                 Ok(Output { success: status.success(), bytes })
             } => output,
         };
@@ -155,7 +210,7 @@ async fn drain(mut pipe: impl AsyncRead + Unpin, cap: usize) -> Result<Vec<u8>, 
     }
 }
 
-fn command(program: &Path, cwd: &Path, path: &std::ffi::OsStr) -> Command {
+pub(super) fn command(program: &Path, cwd: &Path, path: &std::ffi::OsStr) -> Command {
     let mut command = Command::new(program);
     // Empty-then-curated also removes unknown future GIT_* steering variables.
     command.env_clear();
@@ -194,10 +249,28 @@ fn command(program: &Path, cwd: &Path, path: &std::ffi::OsStr) -> Command {
         "core.trustctime=true",
         "diff.ignoreSubmodules=all",
         "diff.renames=false",
+        "diff.autoRefreshIndex=false",
         "submodule.recurse=false",
         "status.relativePaths=false",
     ] {
         command.args(["-c", setting]);
     }
     command
+}
+
+fn resolve_program(path: &std::ffi::OsStr, roots: &[PathBuf]) -> Result<PathBuf, ChangesRefusal> {
+    for directory in std::env::split_paths(path).filter(|entry| entry.is_absolute()) {
+        let Ok(program) = directory.join("git").canonicalize() else {
+            continue;
+        };
+        let metadata = std::fs::metadata(&program).map_err(|_| ChangesRefusal::VcsUnavailable)?;
+        if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+            continue;
+        }
+        if roots.iter().any(|root| program.starts_with(root)) {
+            return Err(ChangesRefusal::UnsafeRepository);
+        }
+        return Ok(program);
+    }
+    Err(ChangesRefusal::VcsUnavailable)
 }

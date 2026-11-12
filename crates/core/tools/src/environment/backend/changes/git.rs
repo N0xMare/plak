@@ -9,7 +9,7 @@ use super::types::{Request, object, relative};
 use super::{
     ChangesAnswer, ChangesContent, ChangesDiff, ChangesEntry, ChangesObservation, ChangesRefusal,
     ChangesRequest, ChangesStatus, MAX_CHANGES_ENTRIES, MAX_CHANGES_INPUT_BYTES,
-    MAX_CHANGES_OUTPUT_BYTES,
+    MAX_CHANGES_OUTPUT_BYTES, MAX_CHANGES_STATUS_BYTES,
 };
 use crate::environment::backend::ExecutionWorkspace;
 
@@ -20,12 +20,13 @@ pub(super) async fn execute(
     cancellation: CancellationToken,
     machine: super::ChangesEnvironment,
 ) -> Result<ChangesAnswer, ChangesRefusal> {
-    let executor = Executor::new(deadline, cancellation, machine.path.clone());
-    supported(&executor, workspace.root()).await?;
+    let executor = Executor::new(deadline, cancellation, &machine.path);
     let known = match &request.0 {
         Request::Status { repository } => repository.clone(),
         Request::Diff { repository, .. } => Some(repository.toplevel.clone()),
     };
+    executor.resolve(workspace.root(), known.as_deref()).await?;
+    supported(&executor, workspace.root()).await?;
     let protected = blocking(move || {
         super::repository::protected_roots_from(
             machine.home.as_deref(),
@@ -35,7 +36,7 @@ pub(super) async fn execute(
     })
     .await?;
     let repo = Repository::discover(workspace.clone(), known, executor, protected).await?;
-    match request.0 {
+    let answer = match request.0 {
         Request::Status { .. } => status(&workspace, &repo).await.map(ChangesAnswer::Status),
         Request::Diff {
             repository,
@@ -49,7 +50,9 @@ pub(super) async fn execute(
                 .await
                 .map(ChangesAnswer::Diff)
         }
-    }
+    }?;
+    answer.validate()?;
+    Ok(answer)
 }
 
 pub(super) async fn supported(executor: &Executor, cwd: &Path) -> Result<(), ChangesRefusal> {
@@ -88,6 +91,74 @@ pub(super) async fn supported(executor: &Executor, cwd: &Path) -> Result<(), Cha
     if !probe.success || probe.bytes != b"probe\0changes-probe\0unspecified\0" {
         return Err(ChangesRefusal::VcsUnavailable);
     }
+    probe_lazy_fetch(executor, fixture.path()).await?;
+    Ok(())
+}
+
+async fn probe_lazy_fetch(executor: &Executor, source: &Path) -> Result<(), ChangesRefusal> {
+    let receiver = source.join("receiver");
+    let root = source.to_path_buf();
+    let target = receiver.clone();
+    blocking(move || {
+        std::fs::write(root.join("probe-blob"), "capability probe\n")
+            .map_err(|_| ChangesRefusal::Io)?;
+        std::fs::create_dir(target).map_err(|_| ChangesRefusal::Io)
+    })
+    .await?;
+    let blob = executor
+        .run(
+            source,
+            None,
+            None,
+            &["hash-object", "-w", "probe-blob"],
+            128,
+        )
+        .await?;
+    let oid = text(blob.bytes)?;
+    if !blob.success || !object(&oid) {
+        return Err(ChangesRefusal::VcsUnavailable);
+    }
+    for (cwd, args) in [
+        (source, vec!["update-ref", "refs/tags/probe", &oid]),
+        (
+            receiver.as_path(),
+            vec!["init", "--quiet", "--object-format=sha1"],
+        ),
+    ] {
+        if !executor.run(cwd, None, None, &args, 1024).await?.success {
+            return Err(ChangesRefusal::VcsUnavailable);
+        }
+    }
+    let config = receiver.join(".git/config");
+    let url = source
+        .to_str()
+        .ok_or(ChangesRefusal::VcsUnavailable)?
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    blocking(move || {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(config)
+            .map_err(|_| ChangesRefusal::Io)?;
+        writeln!(
+            file,
+            "[remote \"origin\"]\nurl = \"{url}\"\npromisor = true"
+        )
+        .map_err(|_| ChangesRefusal::Io)
+    })
+    .await?;
+    if executor
+        .probe_lazy_fetch(&receiver, &oid, true)
+        .await?
+        .success
+        || !executor
+            .probe_lazy_fetch(&receiver, &oid, false)
+            .await?
+            .success
+    {
+        return Err(ChangesRefusal::VcsUnavailable);
+    }
     Ok(())
 }
 
@@ -98,7 +169,7 @@ pub(super) fn supported_version(version: &str) -> bool {
     let mut parts = version.split('.');
     let major = parts.next().and_then(|part| part.parse::<u32>().ok());
     let minor = parts.next().and_then(|part| part.parse::<u32>().ok());
-    matches!((major, minor), (Some(major), Some(minor)) if (major, minor) >= (2, 43))
+    matches!((major, minor), (Some(major), Some(minor)) if (major, minor) >= (2, 44))
 }
 
 async fn observation(repo: &Repository) -> Result<ChangesObservation, ChangesRefusal> {
@@ -143,7 +214,7 @@ async fn records(
                 "--",
                 pathspec,
             ],
-            MAX_CHANGES_OUTPUT_BYTES,
+            MAX_CHANGES_STATUS_BYTES,
         )
         .await?;
     if !result.success {
@@ -264,6 +335,9 @@ async fn status(
     } else {
         observed.head.clone().unwrap_or_else(|| "unborn".into())
     };
+    if label.len() > 4096 - "work tree vs HEAD · ".len() {
+        return Err(ChangesRefusal::OutputLimit);
+    }
     let status = ChangesStatus {
         repository: repo.identity.clone(),
         observation: observed,
@@ -274,7 +348,7 @@ async fn status(
     if serde_json::to_vec(&status)
         .map_err(|_| ChangesRefusal::Io)?
         .len()
-        > MAX_CHANGES_OUTPUT_BYTES
+        > MAX_CHANGES_STATUS_BYTES
     {
         return Err(ChangesRefusal::OutputLimit);
     }

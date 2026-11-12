@@ -338,7 +338,11 @@ of account/configuration limits: 256 KiB page/output, 16 MiB file ceiling,
 two reads/principal, 10 requests/s (burst 20), 4 MiB/s returned raw bytes
 (burst 8 MiB), 32 MiB/s hash work (burst 64 MiB), 16 in flight process-wide,
 one search/principal and six starts per rolling minute, 2 s file and 5 s
-Changes execution deadlines. Changes retains at most 2,000 entries/target,
+Changes execution deadlines. The 256 KiB Changes bound applies to the client
+projection, which marks omitted entries. Execution and runner-wire status have
+a separate fixed 12 MiB budget, below the 16 MiB runner frame limit, and retain
+at most 2,000 entries independently of the client projection. JSON escaping
+counts against that internal budget. Changes retains at most 2,000 entries/target,
 four targets/principal, for 60 s. These are fixed implementation bounds,
 not configurable keys. Viewer requests do not change session bindings.
 

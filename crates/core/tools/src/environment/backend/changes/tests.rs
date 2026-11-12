@@ -8,6 +8,7 @@ use crate::{ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironme
 
 mod hostile;
 mod process_stops;
+mod review;
 mod unsupported;
 mod wire;
 
@@ -339,5 +340,6 @@ fn wire_is_closed_and_validates_constructor_bounds() {
     for value in ["git version 2.42.9", "git version 1.99.0", "not git"] {
         assert!(!git::supported_version(value));
     }
-    assert!(git::supported_version("git version 2.43.0"));
+    assert!(!git::supported_version("git version 2.43.0"));
+    assert!(git::supported_version("git version 2.44.0"));
 }

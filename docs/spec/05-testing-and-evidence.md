@@ -3857,7 +3857,16 @@ verifies that a home-local process transport neither receives nor serves a
 Changes request. Missing-promisor-object fixtures include a nonblocking local
 listener and hostile per-protocol policy, proving no network connection or
 object write. Unsupported version, ignored attribute-source and disabled-CLI
-fixtures prove closed `vcs_unavailable` refusals.
+fixtures prove closed `vcs_unavailable` refusals. Empty and relative PATH marker
+fixtures prove that repository executables never run. Staged-then-restored
+worktree fixtures assert both index bytes and inode are unchanged, including
+hostile repository settings. Local-file promisor fixtures test the protocol
+allowlist and no-lazy-fetch independently, with a positive fetch control.
+Ownership mismatch, metadata symlinks and alternates fixtures pin repository
+admission, and an unattributed default textconv marker pins `--no-textconv`.
+Maximum-field 2,000-entry status fixtures pass both local validation and the
+runner codec/frame. A status exactly one byte over the internal 12 MiB budget
+is refused by both, even while fitting the runner's larger frame ceiling.
 
 Two classes of evidence exist. Each answers a different question, and neither
 substitutes for the other. Offline tests are never a substitute for live

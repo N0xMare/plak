@@ -39,23 +39,28 @@ fn inherited_git_steering_and_command_or_trace_injection_are_cleared() {
 #[tokio::test]
 async fn old_git_and_a_build_ignoring_attribute_source_are_unavailable() {
     let root = tempfile::tempdir().unwrap();
+    let programs = tempfile::tempdir().unwrap();
     for (name, behavior) in [
         (
             "old-git",
-            "case \"$*\" in *--version*) printf 'git version 2.42.9\\n';; *) exit 99;; esac",
+            "case \"$*\" in *--version*) printf 'git version 2.43.9\\n';; *) exit 99;; esac",
         ),
         (
             "ignored-feature",
             "case \"$*\" in *check-attr*) printf 'probe\\000changes-probe\\000set\\000';; *) exec git \"$@\";; esac",
         ),
+        (
+            "ignored-lazy-fetch",
+            "unset GIT_NO_LAZY_FETCH; exec git \"$@\"",
+        ),
     ] {
-        let program = root.path().join(name);
+        let program = programs.path().join(name);
         std::fs::write(&program, format!("#!/bin/sh\n{behavior}\n")).unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
         let executor = process::Executor::new(
             tokio::time::Instant::now() + std::time::Duration::from_secs(5),
             CancellationToken::new(),
-            std::env::var_os("PATH").unwrap(),
+            &std::env::var_os("PATH").unwrap(),
         )
         .test_program(program);
         assert_eq!(
