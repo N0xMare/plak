@@ -7,6 +7,9 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Fixed duplicate topology refreshes from split binding/attach observations and
+  made topology precede the terminal's initial promptable notification.
+
 - Fixed a redundant topology snapshot request while resuming a session; the
   terminal now waits for the successful target transition before refreshing.
 

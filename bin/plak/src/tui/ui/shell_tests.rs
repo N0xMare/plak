@@ -828,7 +828,8 @@ fn restored_paused_queue_snapshot_after_attach_stays_paused() {
     let mut app = App::new(launch_basic(), true);
     let (tx, rx) = user_action_channel();
     app.apply_host_event(HostEvent::AgentAttached(true));
-    app.maybe_request_tree_snapshot_after_attach(Some(&tx));
+    app.apply_host_event(super::test_support::session_binding("s1"));
+    app.publish_attach_controls(Some(&tx), false);
     app.apply_host_event(HostEvent::QueueSnapshot {
         items: vec![queue_item("q-restored", 1, "later")],
         drain: QueueDrainState::RestoredPaused,

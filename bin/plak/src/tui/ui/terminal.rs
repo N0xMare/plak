@@ -692,7 +692,7 @@ pub(super) fn run_app(
         PilotSidecar::from_root(crate::test_hooks::tui::pilot_root()).map_err(TuiError::Io)?;
     let mut input_watch = crate::tui::wake::InputWatch::default();
     let mut input_seen = crate::tui::wake::Input::Quiet;
-    let mut promptable_sent = false;
+    let mut first_frame_painted = false;
     loop {
         // Biased: terminal input is drained before host observations, so a
         // burst of stream deltas can never starve a keystroke or an interrupt.
@@ -719,7 +719,7 @@ pub(super) fn run_app(
             HostDrain::default()
         };
 
-        app.maybe_request_tree_snapshot_after_attach(actions);
+        app.publish_attach_controls(actions, first_frame_painted);
         app.maybe_refresh_composer_chrome(actions);
         app.maybe_reread_usage(actions);
         app.maybe_sync_usage_watch(actions);
@@ -827,11 +827,8 @@ pub(super) fn run_app(
             if let Some(after_draw) = app.after_draw.take() {
                 after_draw();
             }
-            // Once, after the first painted frame: the host learns the face
-            // takes input. Not queued work.
-            if !promptable_sent && let Some(actions) = actions {
-                promptable_sent = actions.send(UserAction::Promptable).is_ok();
-            }
+            first_frame_painted = true;
+            app.publish_attach_controls(actions, first_frame_painted);
             if app.copy_selection_after_draw {
                 if let Some(text) = app.take_transcript_selection_text() {
                     copy_text_osc52(&text);

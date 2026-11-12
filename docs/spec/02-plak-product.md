@@ -4814,7 +4814,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   (§4.3.2) keeps them as the runtime displays them. A child
   attachment gets none, and JSONL v1 never projects
   it. The TUI sends the intent
-  `promptable` once after its first painted frame: it sets the flag that
+  `promptable` once after its first painted frame and after queuing the initial
+  binding's topology refresh, always in that client order regardless of whether
+  paint, binding or attach observations arrive first: it sets the flag that
   gates passive maintenance and never enters the session's queue, so it
   has no answer window; it is refused to a child attachment
   (`refused_for_role`, row `readiness`), and `plak agent` never sends it.
@@ -4831,8 +4833,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   does, and that names no tree, so a switch inside the host (`/new`,
   `/resume`, a rebind) reaches the TUI as the session's own observations,
   not as `moved`. `/resume` does not eagerly refresh the source attachment's
-  topology: the successful target binding or attach observation requests its
-  snapshot, so event-drain timing cannot produce an extra source-tree request.
+  topology: the successful target binding is the sole owner of its snapshot
+  request. Attach/readiness observations never independently re-arm it, so
+  splitting them across event drains cannot duplicate a request. The same
+  publication path orders initial topology before the face's one `promptable`;
+  subsequent bindings refresh topology without repeating `promptable`.
   The connection answers the client's root attach before it
   takes any of the session's observations, so the TUI sees what the session
   said from its start. That attach asks the session for no root baseline:

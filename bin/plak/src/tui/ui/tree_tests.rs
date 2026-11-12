@@ -233,11 +233,164 @@ fn tree_snapshot_ignored_when_overlay_closed_and_live() {
 }
 
 #[test]
+fn attach_controls_keep_one_topology_then_promptable_for_every_event_and_paint_order() {
+    for order in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ] {
+        for paint_after in 0..=3 {
+            for enabled in [false, true] {
+                let mut launch = launch_basic();
+                launch.agent_enabled = enabled;
+                let mut app = App::new(launch, true);
+                let (tx, receiver, peer) = attach_control_wire();
+                app.publish_attach_controls(Some(&tx), paint_after == 0);
+                for (step, event) in order.into_iter().enumerate() {
+                    app.apply_host_event(match event {
+                        0 => super::test_support::session_binding("s1"),
+                        1 => HostEvent::AgentAttached(true),
+                        _ => HostEvent::ResumeSessions(Vec::new()),
+                    });
+                    app.publish_attach_controls(Some(&tx), step + 1 >= paint_after);
+                }
+                app.publish_attach_controls(Some(&tx), true);
+                app.apply_host_event(HostEvent::AgentAttached(true));
+                app.publish_attach_controls(Some(&tx), true);
+                assert!(tx.settle(std::time::Duration::from_secs(5)));
+                drop(tx);
+                drop(receiver);
+                assert_eq!(
+                    peer.join().unwrap(),
+                    [UserAction::OpenTopologyNavigator, UserAction::Promptable],
+                    "order={order:?}, paint_after={paint_after}, enabled={enabled}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn session_switch_attach_controls_ignore_late_or_early_attach_and_directory_events() {
+    for order in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ] {
+        let mut app = App::new(launch_basic(), true);
+        let (tx, rx) = user_action_channel();
+        app.apply_host_event(super::test_support::session_binding("source"));
+        app.publish_attach_controls(Some(&tx), true);
+        assert_eq!(rx.try_recv().unwrap(), UserAction::OpenTopologyNavigator);
+        assert!(rx.is_promptable());
+        for target in ["new", "source"] {
+            for event in order {
+                app.apply_host_event(match event {
+                    0 => super::test_support::session_binding(target),
+                    1 => HostEvent::AgentAttached(true),
+                    _ => HostEvent::ResumeSessions(Vec::new()),
+                });
+                app.publish_attach_controls(Some(&tx), true);
+            }
+            app.publish_attach_controls(None, true);
+            app.publish_attach_controls(Some(&tx), true);
+            assert_eq!(rx.try_recv().unwrap(), UserAction::OpenTopologyNavigator);
+            assert!(rx.try_recv().is_err(), "order={order:?}, target={target}");
+        }
+    }
+}
+
+fn attach_control_wire() -> (
+    crate::tui::FaceActionSender,
+    plakous_host_protocol::client::WireReceiver<crate::surface_protocol::PlakExtension>,
+    std::thread::JoinHandle<Vec<UserAction>>,
+) {
+    use crate::surface_protocol::PlakExtension;
+    use plakous_host_protocol::client::{self, Transport};
+    use plakous_host_protocol::wire::{
+        Answer, ClientFrame, Hello, HostFrame, NodeAddress, Op, Outcome, WIRE_VERSION, encode_line,
+    };
+    use std::io::{BufRead as _, BufReader, Write as _};
+    use std::os::unix::net::UnixStream;
+
+    let (host, socket) = UnixStream::pair().unwrap();
+    host.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .unwrap();
+    let peer = std::thread::spawn(move || {
+        let mut reader = BufReader::new(host.try_clone().unwrap());
+        let mut writer = host;
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        let welcome = plakous_hosted::host_service::wire::session_welcome::<PlakExtension>(
+            "fixture".into(),
+            1,
+            "s1".into(),
+            NodeAddress {
+                tree_id: "s1".into(),
+                agent_id: "s1".into(),
+            },
+        );
+        writer
+            .write_all(
+                encode_line(&HostFrame::Welcome(welcome))
+                    .unwrap()
+                    .as_bytes(),
+            )
+            .unwrap();
+        let mut observed = Vec::new();
+        loop {
+            line.clear();
+            assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+            let frame: ClientFrame<PlakExtension> = serde_json::from_str(&line).unwrap();
+            let ClientFrame::Request { id, op } = frame else {
+                assert!(matches!(frame, ClientFrame::Bye));
+                return observed;
+            };
+            let answer = match op {
+                Op::Attach { .. } => Answer::Attached { attachment: 1 },
+                Op::Intent { intent, .. } => {
+                    observed.push(intent);
+                    Answer::Accepted { duplicate: false }
+                }
+                other => panic!("unexpected control: {other:?}"),
+            };
+            writer
+                .write_all(
+                    encode_line(&HostFrame::<PlakExtension>::Response {
+                        id,
+                        outcome: Outcome::Ok(answer),
+                    })
+                    .unwrap()
+                    .as_bytes(),
+                )
+                .unwrap();
+        }
+    });
+    let (sender, receiver, _) = client::connect::<PlakExtension>(
+        Transport::new(socket.try_clone().unwrap(), socket),
+        Hello {
+            proto: WIRE_VERSION,
+            binary_id: "fixture".into(),
+            caps: Vec::new(),
+        },
+    )
+    .unwrap();
+    (crate::tui::FaceActionSender::Wire(sender), receiver, peer)
+}
+
+#[test]
 fn attach_requests_open_topology_navigator() {
     let mut app = App::new(launch_basic(), true);
     let (tx, rx) = user_action_channel();
     app.apply_host_event(HostEvent::AgentAttached(true));
-    app.maybe_request_tree_snapshot_after_attach(Some(&tx));
+    app.apply_host_event(super::test_support::session_binding("s1"));
+    app.publish_attach_controls(Some(&tx), false);
     assert!(app.tree_navigator.is_none());
     assert_eq!(
         rx.try_recv().expect("attach should request the navigator"),
@@ -261,7 +414,7 @@ fn resume_requests_one_topology_snapshot_only_after_the_new_binding() {
         },
         Some(&tx),
     );
-    app.maybe_request_tree_snapshot_after_attach(Some(&tx));
+    app.publish_attach_controls(Some(&tx), false);
     assert!(app.tree_navigator.is_none());
     assert_eq!(
         rx.try_recv().expect("resume should be queued first"),
@@ -283,8 +436,8 @@ fn resume_requests_one_topology_snapshot_only_after_the_new_binding() {
         protocol: crate::tui::ProtocolSelection::Auto,
         effective_presentation: "direct".into(),
     });
-    app.maybe_request_tree_snapshot_after_attach(Some(&tx));
-    app.maybe_request_tree_snapshot_after_attach(Some(&tx));
+    app.publish_attach_controls(Some(&tx), false);
+    app.publish_attach_controls(Some(&tx), false);
     assert_eq!(rx.try_recv().unwrap(), UserAction::OpenTopologyNavigator);
     assert!(
         rx.try_recv().is_err(),

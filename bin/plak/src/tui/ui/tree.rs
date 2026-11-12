@@ -7,6 +7,14 @@ use super::{
 };
 use plakous_host_protocol::status::HostPhase;
 
+/// Binding owns topology refresh; first paint may only publish after it.
+#[derive(Default)]
+pub(super) struct AttachControls {
+    pub(super) pending: bool,
+    topology_sent: bool,
+    promptable_sent: bool,
+}
+
 /// The product's acknowledged occurrences for the tree the TUI last saw.
 #[derive(Debug, Default)]
 pub(super) struct AgentAcknowledgements {
@@ -156,19 +164,26 @@ impl App {
         }
     }
 
-    /// After attach or in-process `/resume` load, request a tree snapshot.
+    /// Publish binding-owned topology, then the painted face's one promptable.
     ///
     /// The overlay stays closed; a crash-restored queue drain is not resumed.
-    pub(crate) fn maybe_request_tree_snapshot_after_attach(
+    pub(crate) fn publish_attach_controls(
         &mut self,
         actions: Option<&crate::tui::FaceActionSender>,
+        painted: bool,
     ) {
-        if !self.pending_open_tree {
+        let Some(tx) = actions else {
             return;
+        };
+        if self.attach_controls.pending && self.agent_enabled {
+            if tx.send(UserAction::OpenTopologyNavigator).is_err() {
+                return;
+            }
+            self.attach_controls.pending = false;
+            self.attach_controls.topology_sent = true;
         }
-        self.pending_open_tree = false;
-        if let Some(tx) = actions {
-            let _ = tx.send(UserAction::OpenTopologyNavigator);
+        if painted && self.attach_controls.topology_sent && !self.attach_controls.promptable_sent {
+            self.attach_controls.promptable_sent = tx.send(UserAction::Promptable).is_ok();
         }
     }
 

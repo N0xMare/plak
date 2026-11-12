@@ -4021,6 +4021,10 @@ they do not schedule emissions or reorder frames. Negative tooling tests pin
 identity separation, nonempty probe retention, every required-control rejection
 class, attachment lifetimes and semantic boundaries; a legal independent
 cross-direction interleaving passes.
+Terminal unit tests permute binding, attach/readiness and directory observations
+across separate drains, with first paint before, between or after them. Binding
+alone arms topology refresh; one publication path sends topology before the
+first promptable notification and never re-arms on a late attach observation.
 
 The native-client immediate-exit regression repeats 200 real subprocess
 connections, alternating implicit drop and explicit goodbye before drop. Each

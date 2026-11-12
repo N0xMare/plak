@@ -613,8 +613,7 @@ pub(crate) struct App {
     resume_hover: Option<usize>,
     tree_navigator: Option<TreeNavigator>,
     agents_unavailable: Option<String>,
-    /// After attach or in-process resume, request a tree snapshot when closed.
-    pending_open_tree: bool,
+    attach_controls: tree::AttachControls,
     tree_popup: Option<Rect>,
     /// Painted Agents rows by agent id.
     tree_hits: Vec<(String, Rect)>,
@@ -997,7 +996,7 @@ impl App {
             resume_hover: None,
             tree_navigator: None,
             agents_unavailable: None,
-            pending_open_tree: false,
+            attach_controls: tree::AttachControls::default(),
             tree_popup: None,
             tree_hits: Vec::new(),
             agent_acks: tree::AgentAcknowledgements::default(),

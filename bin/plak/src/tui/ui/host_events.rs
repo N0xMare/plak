@@ -53,7 +53,6 @@ impl App {
         self.agents_unavailable = None;
         self.tree_epoch_state = None;
         self.tree_live_descendants = 0;
-        self.pending_open_tree = self.agent_enabled;
         self.agent_acks = super::tree::AgentAcknowledgements::default();
         self.call_details = super::call_detail::CallDetails::default();
         self.session_info = crate::tui::presentation::SessionInfoView::default();
@@ -863,7 +862,6 @@ impl App {
                 self.startup_pending = false;
                 if attached {
                     crate::tui_timing::host_ready();
-                    self.pending_open_tree = true;
                 }
                 self.mark_dirty();
             }
@@ -917,6 +915,7 @@ impl App {
                         self.drop_reload_requests_of_other_sessions(&s);
                     }
                     self.session_id = Some(s);
+                    self.attach_controls.pending = true;
                 }
                 // A rebind to another vertical retires the reading
                 // the previous one reported; the host sends the new binding's
