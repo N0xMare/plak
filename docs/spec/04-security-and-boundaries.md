@@ -801,7 +801,12 @@ its full scanned SID/start match with no missing-row fallback. Fast-exiting PTY
 children use this same unreaped-child capture even if already exited before
 their first scan and no row was captured: the successful PTY spawn and NOWAIT
 direct-child proof establish the anchor, which expires on reap. It never supplies
-live member evidence or permits a signal after reaping. Each stage
+live member evidence or permits a signal after reaping. Initial capture accepts
+the child only once it is its own session and group leader;
+transient non-leader or missing observations retry for a bounded half-second
+window, never become accepted live identities. Darwin may instead establish
+the already-exited unreaped direct-child anchor regardless of stale ps state,
+SID or PGID; it cannot turn that metadata into live signal authority. Cleanup
 deduplicates groups. KILL repeats for newly forked members before reaping the
 leader and proving absence twice. Live observation failures retry without
 closing shells; incomplete cleanup scans retry within the cleanup deadline,

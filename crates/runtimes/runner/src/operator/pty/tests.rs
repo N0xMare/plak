@@ -5,6 +5,65 @@ use super::*;
 mod loss;
 
 #[test]
+#[ignore = "subprocess fixture for delayed session creation"]
+fn operator_pty_delayed_session_child() {
+    let directory = PathBuf::from(std::env::var_os("PLAK_TEST_SESSION_CAPTURE_DIR").unwrap());
+    std::fs::write(directory.join("ready"), b"ready").unwrap();
+    let mut command = [0; 1];
+    std::io::stdin().read_exact(&mut command).unwrap();
+    rustix::process::setsid().unwrap();
+    std::io::stdin().read_exact(&mut command).unwrap();
+}
+
+#[test]
+fn operator_pty_capture_waits_for_delayed_setsid_before_accepting_leader() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "operator::pty::tests::operator_pty_delayed_session_child",
+            "--ignored",
+        ])
+        .env("PLAK_TEST_SESSION_CAPTURE_DIR", directory.path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !directory.path().join("ready").exists() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let pid = child.id();
+    let mut attempts = 0;
+    let identity = Identity::capture_child_with(pid, || {
+        let row = Identity::capture(pid)?;
+        attempts += 1;
+        if attempts == 1 {
+            assert_ne!(
+                row.session,
+                pid.to_string(),
+                "first observation precedes setsid"
+            );
+            input.write_all(b"s").unwrap();
+        }
+        Ok(row)
+    })
+    .unwrap();
+    assert!(
+        attempts >= 2,
+        "a non-leader observation must retry, never be accepted"
+    );
+    assert_eq!(identity.session, pid.to_string());
+    assert_eq!(identity.group, pid);
+    assert!(!scan::child_exited(pid));
+    input.write_all(b"q").unwrap();
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
 #[ignore = "subprocess fixture, invoked by operator PTY tests"]
 fn operator_pty_child() {
     let mut terminal = rustix::termios::tcgetattr(std::io::stdin()).unwrap();

@@ -38,34 +38,53 @@ pub(super) struct Identity {
 
 impl Identity {
     pub(super) fn capture_child(pid: u32) -> Result<Self, ()> {
-        Self::from_child_capture(pid, Self::capture(pid))
+        Self::capture_child_with(pid, || {
+            scan()?.into_iter().find(|row| row.pid == pid).ok_or(())
+        })
+    }
+
+    pub(super) fn capture_child_with(
+        pid: u32,
+        mut observe: impl FnMut() -> Result<Self, ()>,
+    ) -> Result<Self, ()> {
+        let deadline = Instant::now() + Duration::from_millis(500);
+        loop {
+            let captured = observe();
+            if let Ok(identity) = Self::from_child_capture(pid, captured.clone()) {
+                return Ok(identity);
+            }
+            if Instant::now() >= deadline {
+                #[cfg(all(test, target_os = "macos"))]
+                diagnose_capture(pid, &captured);
+                return Err(());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     pub(super) fn from_child_capture(pid: u32, captured: Result<Self, ()>) -> Result<Self, ()> {
-        let Ok(mut row) = captured else {
-            // Darwin can omit an already-exited child from ps before the first
-            // capture. Successful PTY spawn established setsid/pgid, and NOWAIT
-            // proves this is still our unreaped child, so its pid cannot be reused.
-            #[cfg(target_os = "macos")]
-            if child_exited(pid) {
-                return Ok(Self {
-                    pid,
-                    parent: std::process::id(),
-                    group: pid,
-                    session: pid.to_string(),
-                    started: String::new(),
-                    zombie: true,
-                    owned_child: true,
-                });
-            }
-            return Err(());
-        };
-        if cfg!(target_os = "macos") && row.zombie && row.session.is_empty() && child_exited(pid) {
-            // Successful PTY spawn already completed setsid before exec. Darwin
-            // no longer exposes that SID through getsid once the child is a zombie.
+        // Successful PTY spawn has completed setsid before exec. Once NOWAIT
+        // proves our direct child exited, Darwin's ps state/SID/PGID may already
+        // be missing or stale. They are not live membership evidence. Only the
+        // unreaped direct-child relation anchors this already-exited leader.
+        #[cfg(target_os = "macos")]
+        if child_exited(pid) {
+            let mut row = captured.unwrap_or(Self {
+                pid,
+                parent: std::process::id(),
+                group: pid,
+                session: pid.to_string(),
+                started: String::new(),
+                zombie: true,
+                owned_child: true,
+            });
             row.session = pid.to_string();
             row.group = pid;
+            row.zombie = true;
+            row.owned_child = true;
+            return Ok(row);
         }
+        let mut row = captured?;
         if row.session != pid.to_string() || row.group != pid {
             return Err(());
         }
@@ -86,6 +105,28 @@ impl Identity {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+fn diagnose_capture(pid: u32, captured: &Result<Identity, ()>) {
+    let pid_arg = i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw);
+    eprintln!(
+        "operator capture deadline: branch={}, scanned_leader={}, scanned_zombie={}, kernel_sid={:?}, kernel_pgid={:?}, waitid={:?}",
+        if captured.is_ok() {
+            "not_session_leader"
+        } else {
+            "missing_or_incomplete_scan"
+        },
+        captured
+            .as_ref()
+            .is_ok_and(|row| row.session == pid.to_string() && row.group == pid),
+        captured.as_ref().is_ok_and(|row| row.zombie),
+        pid_arg.map(|pid| rustix::process::getsid(Some(pid))),
+        pid_arg.map(|pid| rustix::process::getpgid(Some(pid))),
+        child_exit_status(pid),
+    );
 }
 
 pub(super) struct SessionCleanup {
@@ -327,11 +368,15 @@ fn complete_scan(deadline: Instant) -> Option<Vec<Identity>> {
 }
 
 pub(super) fn child_exited(pid: u32) -> bool {
+    child_exit_status(pid).unwrap_or(false)
+}
+
+fn child_exit_status(pid: u32) -> Result<bool, rustix::io::Errno> {
     let Some(pid) = i32::try_from(pid)
         .ok()
         .and_then(rustix::process::Pid::from_raw)
     else {
-        return false;
+        return Err(rustix::io::Errno::INVAL);
     };
     rustix::process::waitid(
         rustix::process::WaitId::Pid(pid),
@@ -339,7 +384,7 @@ pub(super) fn child_exited(pid: u32) -> bool {
             | rustix::process::WaitIdOptions::NOHANG
             | rustix::process::WaitIdOptions::NOWAIT,
     )
-    .is_ok_and(|status| status.is_some())
+    .map(|status| status.is_some())
 }
 
 #[cfg(target_os = "linux")]
