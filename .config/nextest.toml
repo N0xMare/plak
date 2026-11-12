@@ -94,7 +94,8 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
-  test(operator_console_pty_wire_consent_takeover_disconnect_and_loss)
+  test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive)
+  | test(operator_console_pty_wire_consent_takeover_disconnect_and_loss)
   | test(environment::backend::changes::tests::process_stops::)
   | test(operator_pty_exited_before_first_observation_retains_only_unreaped_anchor)
   | test(operator_host_runner_restart_retains_surviving_memory_pins_without_global_barrier)
@@ -403,7 +404,8 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(operator_console_pty_wire_consent_takeover_disconnect_and_loss)
+  test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive)
+  | test(operator_console_pty_wire_consent_takeover_disconnect_and_loss)
   | test(environment::backend::changes::tests::process_stops::)
   | test(operator_pty_exited_before_first_observation_retains_only_unreaped_anchor)
   | test(operator_host_runner_restart_retains_surviving_memory_pins_without_global_barrier)

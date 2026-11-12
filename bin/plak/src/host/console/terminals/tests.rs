@@ -1,6 +1,7 @@
 use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 mod linked;
+mod rate_wire;
 
 fn context() -> HostRequestContext {
     HostRequestContext {

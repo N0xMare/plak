@@ -4071,6 +4071,14 @@ clock, once within the last minute before policy closure, not a host wall timer.
 Lists show pinned entries and at most eight completed receipts without discarding
 their replay fences. Raw bytes are redacted from Debug and audit output.
 
+The shared connection scheduler is private browser client work, not a public
+library helper: adaptive 50–100 ms input, the 12-message/s request queue,
+32-action queue and batched-credit client algorithm live with that client.
+Public code owns enforcement, advertised welcome limits, DTO/schema fixtures and
+a minimal test-only client contract. That contract drives four streaming
+terminals, typing and tree expansion through one connection, then proves an
+unscheduled overrun receives `rate_limited` without detaching other traffic.
+
 The host round-robins credited terminals, after response, transcript and directory
 traffic. Output is limited to 256 KiB/s per stream and 512 KiB/s per principal
 across runners; input is 64 KiB/s per stream. Blocked output does not advance seq

@@ -76,7 +76,13 @@ product-wire test covers one-use consent, lookup-only open retry, preserved gran
 on no-effect busy refusal, confirmed takeover, a one-time execution marker,
 disconnect/reattach without input replay, runner replacement and acknowledged
 loss without killing the old shell. Runner-clock tests pin once-per-idle-period
-warnings and output-capacity behavior without advancing wall time.
+warnings and output-capacity behavior without advancing wall time. A minimal
+test-only client shares one bounded request cadence between four streaming
+terminals, typing and file-tree expansion, returning consumed output in four-row
+64 KiB credit batches. Its deliberate unscheduled overrun must return typed
+`rate_limited` before accepting input, while directory, ping and terminal traffic
+remain attached and continue. This is host enforcement evidence, not a published
+scheduler implementation or browser qualification.
 
 Host-internal terminal tests cover memory-only pin/hold acquisition, original
 product-37 schema/state-key identity, both pin/reclamation orders, authenticated
