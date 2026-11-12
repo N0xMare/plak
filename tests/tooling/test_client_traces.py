@@ -39,6 +39,130 @@ def attach_entries():
 
 
 class ClientTraceTests(unittest.TestCase):
+    def test_directional_comparison_allows_only_causal_duplex_interleavings(self):
+        def request(number, name):
+            return {
+                'connection': 1,
+                'direction': 'client',
+                'frame': {
+                    'frame': 'request',
+                    'id': number,
+                    'op': {'op': 'intent', 'attachment': 1, 'intent': {'kind': name}},
+                },
+            }
+
+        def response(number):
+            return {
+                'connection': 1,
+                'direction': 'host',
+                'frame': {'frame': 'response', 'id': number, 'outcome': MODULE.READ_ACK},
+            }
+
+        raw = {
+            'fixture': 'directions',
+            'session': 'source',
+            'workspace': '/fixture',
+            'entries': [
+                {'connection': 1, 'opened': True},
+                *attach_entries(),
+                request(2, 'open_topology_navigator'),
+                response(2),
+                request(3, 'promptable'),
+                response(3),
+                {'barrier': 'ready'},
+                {'connection': 1, 'direction': 'client', 'frame': {'frame': 'bye'}},
+                {'connection': 1, 'eof': 'client'},
+                {'connection': 1, 'eof': 'host'},
+            ],
+        }
+        pinned = MODULE.normalize(raw)
+        pipelined = copy.deepcopy(raw)
+        pipelined['entries'][4:6] = [raw['entries'][5], raw['entries'][4]]
+        self.assertNotEqual(MODULE.normalize(pipelined), pinned)
+        MODULE.compare_controls(pinned, MODULE.normalize(pipelined))
+        # The receive side may still drain after the client's write EOF.
+        half_closed = {
+            **raw,
+            'entries': [
+                *attach_entries(),
+                request(2, 'open_topology_navigator'),
+                raw['entries'][8],
+                raw['entries'][9],
+                response(2),
+                raw['entries'][10],
+            ],
+        }
+        MODULE.control_sequences(MODULE.normalize(half_closed))
+        draining = copy.deepcopy(raw)
+        draining['entries'].insert(6, draining['entries'].pop(9))
+        # This crosses the ready barrier and therefore is not equivalent.
+        with self.assertRaises(ValueError):
+            MODULE.compare_controls(pinned, MODULE.normalize(draining))
+        mutations = {}
+        entries = raw['entries']
+        mutations['missing'] = entries[:6] + entries[7:]
+        mutations['duplicate'] = entries[:7] + [entries[6]] + entries[7:]
+        mutations['extra'] = entries[:7] + [request(4, 'stop'), response(4)] + entries[7:]
+        mutations['client_order'] = (
+            entries[:3] + [entries[5], entries[4], entries[3], entries[6]] + entries[7:]
+        )
+        mutations['host_order'] = entries[:4] + [entries[6], entries[5], entries[4]] + entries[7:]
+        mutations['response_before_request'] = entries[:3] + [entries[4], entries[3]] + entries[5:]
+        mutations['before_attachment_grant'] = entries[:2] + [entries[3], entries[2]] + entries[4:]
+        mutations['wrong_attachment'] = copy.deepcopy(entries)
+        mutations['wrong_attachment'][3]['frame']['op']['attachment'] = 2
+        mutations['barrier'] = entries[:6] + [entries[7], entries[6]] + entries[8:]
+        mutations['after_detach'] = (
+            entries[:3]
+            + [
+                {
+                    'connection': 1,
+                    'direction': 'client',
+                    'frame': {
+                        'frame': 'request',
+                        'id': 4,
+                        'op': {'op': 'detach', 'attachment': 1},
+                    },
+                },
+            ]
+            + entries[3:]
+        )
+        mutations['after_bye'] = entries[:3] + [entries[8]] + entries[3:8] + entries[9:]
+        mutations['after_eof'] = entries[:3] + [entries[9]] + entries[3:9] + entries[10:]
+        for name, changed in mutations.items():
+            with self.subTest(mutation=name), self.assertRaises(ValueError):
+                MODULE.compare_controls(pinned, MODULE.normalize({**raw, 'entries': changed}))
+
+    def test_identity_aliases_do_not_depend_on_duplex_interleaving(self):
+        raw = {
+            'fixture': 'aliases',
+            'session': 'source',
+            'workspace': '/fixture',
+            'entries': [
+                {'direction': 'client', 'frame': {'frame': 'request', 'id': 1}},
+                {
+                    'direction': 'host',
+                    'frame': {
+                        'frame': 'response',
+                        'id': 1,
+                        'session': '00000000-0000-4000-8000-000000000001',
+                    },
+                },
+                {
+                    'direction': 'client',
+                    'frame': {
+                        'frame': 'request',
+                        'id': 2,
+                        'session': '00000000-0000-4000-8000-000000000002',
+                    },
+                },
+                {'direction': 'host', 'frame': {'frame': 'response', 'id': 2}},
+            ],
+        }
+        interleaved = copy.deepcopy(raw)
+        interleaved['entries'][1:3] = [raw['entries'][2], raw['entries'][1]]
+        MODULE.compare_controls(MODULE.normalize(raw), MODULE.normalize(interleaved))
+
     def test_binary_aliases_correlate_per_role_and_keep_global_provenance(self):
         raw = {
             'fixture': 'identities',
@@ -374,6 +498,9 @@ class ClientTraceTests(unittest.TestCase):
             result = subprocess.run(command + ['--check'], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('reads audit differs from real client', result.stderr)
+            # Cross-capture stability deliberately excludes raw read UUIDs
+            # and provenance; exact audit checks still use their own capture.
+            subprocess.run(command + ['--check-controls'], check=True, capture_output=True)
 
     def test_control_order_identity_aliases_and_semantic_values_survive(self):
         first = '00000000-0000-4000-8000-000000000001'

@@ -903,11 +903,6 @@ pub(super) fn dispatch_action(
             // deadline.
             app.begin_quit();
         }
-        UserAction::ResumeSession { id: Some(_) } => {
-            if send_user_action(app, actions, action.clone()) {
-                app.pending_open_tree = true;
-            }
-        }
         UserAction::ResumeSession { id: None } => {
             if send_user_action(app, actions, action.clone()) {
                 app.pending_open_resume = true;

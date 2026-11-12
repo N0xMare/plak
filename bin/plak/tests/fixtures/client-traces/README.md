@@ -7,9 +7,15 @@ The complete raw recording also retains unsolicited observations. Runtime,
 tree and dispatch oracles check those observations' effects during replay;
 this is not a byte-for-byte transcript snapshot claim.
 
-The required subsequence is exact: directory, attach, new, prompt, stop, bye,
-their acknowledgements, other pinned controls, barriers and reconnect/no-replay
-ordering. A missing, extra or reordered required frame fails.
+Each direction's control sequence is exact: directory, attach, new, prompt,
+stop, bye, their acknowledgements and other pinned controls. Independent
+opposite-direction frames may interleave differently, but each response must
+follow its request and attachment-scoped controls must stay inside the granted
+attachment's lifetime. Opens and semantic barriers fence both sequences; EOF
+fences its own direction, allowing drained replies after a write half-close.
+Missing, duplicate, extra or within-direction-reordered controls fail. Frames
+are not sorted or additionally filtered. The stored duplex entries remain a
+real replay stimulus, not a unique scheduling oracle.
 
 Only three named read-only operations and their well-formed acknowledgements
 may interleave: `refresh_composer_chrome` (timer-driven chrome),
@@ -20,7 +26,7 @@ retains those pairs for separate real-bridge tests against unchanged session,
 queue, transcript and tree state, after observing read completion, with no
 provider dispatch. Each journey also asserts exact face/durable transcript
 equality, detecting missing or duplicated content. Any other unpinned
-interleaving fails. Adding to the set requires review, not a prefix/pattern,
+operation fails. Adding to the set requires review, not a prefix/pattern,
 scheduler, emission-control proxy or growing collection of capture variants.
 
 Regenerate on a development test host:
@@ -32,8 +38,12 @@ python3 tools/dev/client_traces.py --output bin/plak/tests/fixtures/client-trace
   target/client-traces/*-raw.json
 ```
 
-Use `--check` on the normalizer to compare a new client recording with its
-pinned fixtures. The private client qualifies against these public fixture IDs
+Use `--check` immediately after generation with the same raw capture: it checks
+normalized directional controls and the capture-specific complete reads audit.
+For cross-capture stability or client parity use `--check-controls`: it compares
+only normalized directional controls, still validating legal-read exclusions
+and causality. Audit UUIDs, legal-read pairs and SHA provenance vary by capture;
+they are not a cross-round stability oracle. The private client qualifies against these public fixture IDs
 at its public pin; it does not import public command or runtime handlers.
 
 Generated UUID identity fields, numeric frame correlation IDs, host generations,
@@ -57,6 +67,7 @@ promptable requests are acknowledged; they observe traffic without scheduling
 emissions or sorting frames.
 Numeric frame aliases are per connection, preserving every request/response
 correlation; excluded reads cannot consume action alias numbers.
+UUID aliases are allocated in direction order, not duplex arrival order.
 
 `real_client_control_traces_replay_root_child_switch_stop_and_reconnect` replays
 the four journeys through the real `plak host connect --stdio` executable,

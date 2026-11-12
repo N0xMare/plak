@@ -3918,13 +3918,25 @@ empty identity cache, so both captures consistently report no binary identity.
 
 Public control successors derive their action fixtures from complete real-client
 traffic and replay them through the actual `plak host connect --stdio`
-executable. Qualification compares an exact required subsequence, not one
-byte-identical complete capture. Directory, attach, new, prompt, stop, bye and
-their acknowledgements, the other pinned controls, barriers and reconnect/no-replay
-ordering remain exact, with generated identity aliases preserving correlations.
-A missing, extra or reordered required frame fails.
-Client-to-fixture equality, including the complete reads-audit, is checked
-at regeneration (`client_traces.py --check`) and in the private gate.
+executable. Qualification compares each direction's exact control sequence,
+not a byte-identical duplex schedule. Directory, attach, new, prompt, stop,
+bye and their acknowledgements, other pinned controls, connection lifetimes
+and semantic barriers remain exact, with generated identity aliases preserving
+correlations. Independent opposite-direction frames may interleave differently;
+each response must still follow its own request, and attachment-scoped controls
+must follow their attachment grant and precede detach or client close. Connection
+opens and semantic barriers fence both sequences; EOF fences its own direction,
+allowing the receiver to drain replies after a write half-close. Missing,
+duplicate, extra or within-direction-reordered controls fail. No frames are
+sorted or additionally filtered. Identity alias allocation uses direction order
+so independent duplex interleaving cannot change an alias.
+`client_traces.py --check` compares normalized directional controls and checks
+the complete reads audit against that capture's own raw recording. Audit UUIDs,
+legal-read pairs and SHA provenance are capture-specific, not cross-capture
+stability evidence. `--check-controls` compares only normalized directional
+controls across rounds or clients, while still validating each raw recording's
+legal-read exclusions and control causality. The fixture retains the original
+duplex entries as a replay stimulus, not as a unique cross-direction schedule.
 
 Hello binary identities compare as `<client-binary:N>` and welcome identities
 as `<host-binary:N>`, numbered by first appearance independently within each
@@ -3940,9 +3952,10 @@ in the comparison. Retained connection numbers are aliased by real connection
 order, never merged or sorted. The public capture driver's `ready` and
 `reconnected-without-replay` barriers observe the actual initial topology and
 promptable accepted acknowledgements on that connection before marking ready;
-they do not schedule emissions, reorder frames or weaken the exact control
-subsequence. Negative tooling tests pin identity separation, nonempty probe
-retention and rejection of reordered required controls.
+they do not schedule emissions or reorder frames. Negative tooling tests pin
+identity separation, nonempty probe retention, every required-control rejection
+class, attachment lifetimes and semantic boundaries; a legal independent
+cross-direction interleaving passes.
 
 The native-client immediate-exit regression repeats 200 real subprocess
 connections, alternating implicit drop and explicit goodbye before drop. Each

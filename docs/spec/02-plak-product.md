@@ -4830,7 +4830,10 @@ verdicts) are addressed, the session profile and workspace chrome states.
   thread: a local face that quits the session when it leaves, as stdio's
   does, and that names no tree, so a switch inside the host (`/new`,
   `/resume`, a rebind) reaches the TUI as the session's own observations,
-  not as `moved`. The connection answers the client's root attach before it
+  not as `moved`. `/resume` does not eagerly refresh the source attachment's
+  topology: the successful target binding or attach observation requests its
+  snapshot, so event-drain timing cannot produce an extra source-tree request.
+  The connection answers the client's root attach before it
   takes any of the session's observations, so the TUI sees what the session
   said from its start. That attach asks the session for no root baseline:
   the session publishes one when it opens, and it reaches the attachment,

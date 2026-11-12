@@ -250,8 +250,9 @@ fn attach_requests_open_topology_navigator() {
 }
 
 #[test]
-fn resume_session_load_requests_open_topology_navigator() {
+fn resume_requests_one_topology_snapshot_only_after_the_new_binding() {
     let mut app = App::new(launch_basic(), true);
+    app.session_id = Some("source".into());
     let (tx, rx) = user_action_channel();
     dispatch_action(
         &mut app,
@@ -268,11 +269,23 @@ fn resume_session_load_requests_open_topology_navigator() {
             id: Some("session-1".into()),
         }
     );
-    assert_eq!(
-        rx.try_recv()
-            .expect("resume attach should request the navigator"),
-        UserAction::OpenTopologyNavigator
+    assert!(
+        rx.try_recv().is_err(),
+        "the source attachment must not be refreshed"
     );
+    app.apply_host_event(HostEvent::Binding {
+        session_id: Some("session-1".into()),
+        account: None,
+        model: None,
+        effort: None,
+        extra: None,
+        composition: crate::tui::CompositionSelection::Direct,
+        protocol: crate::tui::ProtocolSelection::Auto,
+        effective_presentation: "direct".into(),
+    });
+    app.maybe_request_tree_snapshot_after_attach(Some(&tx));
+    app.maybe_request_tree_snapshot_after_attach(Some(&tx));
+    assert_eq!(rx.try_recv().unwrap(), UserAction::OpenTopologyNavigator);
     assert!(
         rx.try_recv().is_err(),
         "resume attach must not auto-resume the tree or the queue drain"

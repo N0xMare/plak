@@ -7,6 +7,9 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Fixed a redundant topology snapshot request while resuming a session; the
+  terminal now waits for the successful target transition before refreshing.
+
 - Fixed native-client exits losing `bye`: last-handle drop now waits up to two
   seconds for the sole writer to drain and finish, even after explicit goodbye.
 

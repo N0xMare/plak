@@ -208,6 +208,19 @@ def normalize(raw: dict) -> dict:
         return item
 
     seed = value(raw['session'], 'session')
+    # Allocate aliases in direction order, not a duplex scheduling order.
+    # A response can introduce an identity while an unrelated request is sent.
+    for role in ('client', 'host'):
+        for index, entry in enumerate(raw['entries']):
+            frame = entry.get('frame')
+            if (
+                index not in excluded
+                and entry.get('connection') not in probes
+                and entry.get('direction') == role
+                and frame is not None
+                and (role == 'client' or frame['frame'] in ('welcome', 'refused', 'response'))
+            ):
+                value(entry)
     entries = []
     correlations: dict[int, dict[int, int]] = {}
     for index, entry in enumerate(raw['entries']):
@@ -246,29 +259,111 @@ def normalize(raw: dict) -> dict:
     }
 
 
+def control_sequences(document: dict) -> dict:
+    """Project exact directional controls, validating cross-direction causality.
+
+    Shared connection opens and semantic barriers fence both sequences. EOFs
+    fence their own direction; a write half-close may precede drained answers.
+    No frames are sorted or removed here. The entries remain the original
+    duplex stimulus for replay, not a claimed canonical duplex schedule.
+    """
+    sequences: dict[str, list[dict]] = {'client': [], 'host': []}
+    requests: dict[tuple[int, int], dict] = {}
+    answered = set()
+    attachments: dict[int, set[int]] = {}
+    closed: set[tuple[int, str]] = set()
+    hellos = set()
+    for entry in document['entries']:
+        connection = entry.get('connection', 0)
+        role = entry.get('direction', entry.get('eof'))
+        frame = entry.get('frame')
+        if frame is not None:
+            if role not in sequences:
+                raise ValueError('control frame has no direction')
+            if (connection, role) in closed:
+                raise ValueError('control frame follows direction close')
+            kind = frame['frame']
+            if kind == 'hello' and role == 'client':
+                hellos.add(connection)
+            elif kind == 'welcome' and role == 'host' and connection not in hellos:
+                raise ValueError('welcome precedes hello')
+            elif kind == 'request' and role == 'client':
+                key = (connection, frame['id'])
+                if key in requests:
+                    raise ValueError('duplicate control request')
+                op = frame.get('op', {})
+                live = attachments.setdefault(connection, set())
+                if 'attachment' in op and op['attachment'] not in live:
+                    raise ValueError('control request is not on a live attachment')
+                if op.get('op') == 'detach':
+                    live.remove(op['attachment'])
+                requests[key] = op
+            elif kind == 'response' and role == 'host':
+                key = (connection, frame['id'])
+                if key not in requests:
+                    raise ValueError('control response precedes its request')
+                if key in answered:
+                    raise ValueError('duplicate control response')
+                answered.add(key)
+                answer = frame.get('outcome', {}).get('ok', {})
+                if answer.get('answer') == 'attached':
+                    if requests[key].get('op') != 'attach' or (connection, 'client') in closed:
+                        raise ValueError('attachment grant outside its lifetime')
+                    attachments.setdefault(connection, set()).add(answer['attachment'])
+            if kind == 'bye':
+                closed.add((connection, role))
+                if role == 'host':
+                    closed.add((connection, 'client'))
+        if 'eof' in entry:
+            closed.add((connection, role))
+        if role in sequences:
+            sequences[role].append(entry)
+        else:
+            for sequence in sequences.values():
+                sequence.append(entry)
+    return {**{key: value for key, value in document.items() if key != 'entries'}, **sequences}
+
+
+def compare_controls(expected: dict, actual: dict) -> None:
+    """Reject any directional control or semantic-boundary difference."""
+    if control_sequences(expected) != control_sequences(actual):
+        raise ValueError('directional controls or semantic boundaries differ')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--check', action='store_true')
+    parser.add_argument(
+        '--check-controls',
+        action='store_true',
+        help='compare normalized directional controls only, not capture-specific reads/provenance',
+    )
     parser.add_argument('recordings', type=Path, nargs='+')
     args = parser.parse_args()
-    if not args.check:
+    checking = args.check or args.check_controls
+    if not checking:
         args.output.mkdir(parents=True, exist_ok=True)
     for recording in args.recordings:
         raw = json.loads(recording.read_text())
         document = normalize(raw)
+        control_sequences(document)
         _, audit = read_audit(raw)
         audit_target = args.output / f'{document["fixture"]}-reads-audit.json'
         audit_encoded = json.dumps(audit, indent=2) + '\n'
-        if not args.check:
+        if not checking:
             audit_target.write_text(audit_encoded)
         target = args.output / f'{document["fixture"]}.json'
         encoded = json.dumps(document, indent=2) + '\n'
-        if args.check:
-            if audit_target.read_text() != audit_encoded:
+        if checking:
+            if args.check and audit_target.read_text() != audit_encoded:
                 raise SystemExit(f'reads audit differs from real client: {audit_target}')
-            if target.read_text() != encoded:
-                raise SystemExit(f'control fixture differs from real client: {target}')
+            try:
+                compare_controls(json.loads(target.read_text()), document)
+            except ValueError as error:
+                raise SystemExit(
+                    f'control fixture differs from real client: {target}: {error}'
+                ) from error
         else:
             target.write_text(encoded)
         print(f'{target.name}: {len(document["entries"])} control entries')
