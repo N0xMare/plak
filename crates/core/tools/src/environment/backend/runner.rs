@@ -16,7 +16,7 @@ mod sessions_wire;
 mod wire;
 
 use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -619,7 +619,7 @@ pub trait RunnerLink: Send + Sync + 'static {
 pub trait RunnerExtension: Send + Sync + 'static {
     /// Workspace a reclamation may remove or trim. The runner holds admission
     /// against independent workspace pins until this future settles.
-    fn reclamation_path(&self, _verb: RunnerVerb, _payload: &Value) -> Option<PathBuf> {
+    fn reclamation_path(&self, _verb: RunnerVerb, _payload: &Value) -> Option<std::path::PathBuf> {
         None
     }
     /// Answers one call of `verb`.
@@ -1064,7 +1064,7 @@ pub fn serve(
 /// `None` for a request that names none. A runner uses it to find, or
 /// register, the environment that answers the request.
 #[must_use]
-pub fn requested_workspace(payload: &Value) -> Option<(PathBuf, PathBuf)> {
+pub fn requested_workspace(payload: &Value) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
     wire::envelope_workspace(payload)
 }
 
