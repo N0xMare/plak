@@ -326,10 +326,12 @@ fn host_upgrade_recovers_after_ack() {
 #[test]
 fn host_upgrade_wait_timeout_restores_admissions_without_surrender() {
     let Some(fixture) = fixture() else { return };
-    fixture.write_script(
-        &json!({"version":1,"steps":[{"stream":[{"text":"busy prefix"},{"stall":30000}]}]}),
+    let release = fixture.root.join("provider-release");
+    let mut host = start_env(
+        &fixture,
+        &[],
+        &[("PLAK_TEST_PROVIDER_RELEASE", release.display().to_string())],
     );
-    let mut host = start(&fixture);
     let mut client = Client::connect(&host);
     let Outcome::Ok(Answer::Created { node, .. }) =
         client.request(1, new_session(&fixture.workspace()))
@@ -337,7 +339,19 @@ fn host_upgrade_wait_timeout_restores_admissions_without_surrender() {
         panic!("not created")
     };
     let attachment = client.attach(2, &node);
-    client.prompt(3, attachment, "remain busy", "busy prefix");
+    assert_eq!(
+        client.request(
+            3,
+            Op::Intent {
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
+                attachment,
+                intent: SessionIntent::Prompt(Draft::from("remain busy")),
+                blobs: Vec::new(),
+            },
+        ),
+        Outcome::Ok(Answer::Accepted { duplicate: false })
+    );
+    wait_for_provider_dispatch(&fixture);
     let id = binary(&fixture);
     for wait in ["0", "1"] {
         let refused = output(
@@ -360,6 +374,7 @@ fn host_upgrade_wait_timeout_restores_admissions_without_surrender() {
             .join(format!("state/{DESTINATION}/runtime.sqlite3"))
             .exists()
     );
+    std::fs::write(release, "continue").unwrap();
     stop(&mut host);
 }
 

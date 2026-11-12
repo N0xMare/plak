@@ -359,14 +359,7 @@ fn a_host_reload_refuses_if_the_host_stops_before_client_exec() {
         .unwrap();
     let fences = runtime_fences(&fixture);
     std::fs::write(release, "continue").unwrap();
-    let screen = terminal.wait_where("a refusal, never an embedded shell", |frame| {
-        frame.contains("the host stopped; start it, then plak resume")
-            || frame.contains("/ commands")
-    });
-    assert!(
-        screen.contains("the host stopped; start it, then plak resume"),
-        "{screen}"
-    );
+    // The replacement exits; join its capture reader before inspecting the refusal.
     let (status, screen) = terminal.finish_with_screen();
     assert!(!status.success(), "{screen}");
     assert!(

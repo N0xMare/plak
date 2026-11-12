@@ -203,12 +203,20 @@ fn daemon_environment(root: &Path, link: Arc<dyn RunnerLink>) -> ExecutionEnviro
 }
 
 fn shell(script: &str, terminal: JoinedProcessTerminalMode) -> JoinedProcessStartRequest {
+    shell_with_stdin(script, terminal, false)
+}
+
+fn shell_with_stdin(
+    script: &str,
+    terminal: JoinedProcessTerminalMode,
+    keep_stdin_open: bool,
+) -> JoinedProcessStartRequest {
     let profile = JoinedProcessShellProfile::new("/bin/sh", ["-c".to_owned()]).unwrap();
     JoinedProcessStartRequest::new(
         JoinedProcessCommand::shell(profile, script).unwrap(),
         ".",
         Vec::new(),
-        false,
+        keep_stdin_open,
         terminal,
     )
     .unwrap()
@@ -277,8 +285,10 @@ async fn processes_through_the_home_local_runner_see_what_direct_ones_do() {
             (1, JoinedProcessTerminalMode::Pipes),
             (2, JoinedProcessTerminalMode::UnixPty),
         ] {
-            let carried = run(&through, shell(CONTEXT, terminal), call);
-            let own = run(&local, shell(CONTEXT, terminal), call + 10);
+            // Closing a PTY injects an EOF newline whose echo races child exit.
+            // Compare process context, not that timing-dependent input echo.
+            let carried = run(&through, shell_with_stdin(CONTEXT, terminal, true), call);
+            let own = run(&local, shell_with_stdin(CONTEXT, terminal, true), call + 10);
             assert_eq!(carried, own, "{terminal:?}");
             seen.push(carried);
         }
