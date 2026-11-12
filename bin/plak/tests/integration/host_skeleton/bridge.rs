@@ -457,7 +457,7 @@ fn a_target_only_key_is_resolved_in_the_existing_hosts_environment() {
 }
 
 #[test]
-fn an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists() {
+fn an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists() {
     let Some(fixture) = fixture() else { return };
     let Some(foreground_fixture) = super::fixture() else {
         return;

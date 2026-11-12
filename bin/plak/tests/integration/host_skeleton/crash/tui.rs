@@ -37,12 +37,13 @@ fn review_drive_recorded(
     loop {
         let screen = terminal.screen();
         if cut && (screen.contains("host disconnected") || !terminal.is_alive()) {
-            assert!(screen.contains("host"), "loss must be plain: {screen}");
-            if terminal.is_alive() {
-                terminal.quit();
-            } else {
-                let _ = terminal.finish_with_screen();
+            let alive = terminal.is_alive();
+            if alive {
+                terminal.send(b"\x11");
             }
+            let (status, screen) = terminal.finish_with_screen();
+            assert!(screen.contains("host"), "loss must be plain: {screen}");
+            assert!(!alive || status.success(), "{status:?}: {screen}");
             return;
         }
         let ready = screen.contains("%/") && screen.contains("/ commands");
@@ -233,12 +234,13 @@ fn drive_recorded(
     loop {
         let screen = terminal.screen();
         if cut && (screen.contains("host disconnected") || !terminal.is_alive()) {
-            assert!(screen.contains("host"), "loss must be plain: {screen}");
-            if terminal.is_alive() {
-                terminal.quit();
-            } else {
-                let _ = terminal.finish_with_screen();
+            let alive = terminal.is_alive();
+            if alive {
+                terminal.send(b"\x11");
             }
+            let (status, screen) = terminal.finish_with_screen();
+            assert!(screen.contains("host"), "loss must be plain: {screen}");
+            assert!(!alive || status.success(), "{status:?}: {screen}");
             return;
         }
         if !prompted

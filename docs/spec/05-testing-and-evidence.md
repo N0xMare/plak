@@ -4155,7 +4155,7 @@ modifying them. `plakous-runner`'s
 `a_home_started_service_has_no_implicit_workspace_and_keeps_the_home_protected`
 keeps service discovery distinct from explicit workspace admission.
 
-`an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists`
+`an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists`
 is a serial wall-clock fixture: it runs both hosts with a five-second window
 through the `test-hooks` override `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` (a whole
 second from 1 through 300; anything else keeps 300 s, and other builds do not

@@ -162,7 +162,7 @@ impl Bound {
                         if idle.expired(now, blocked, host).await {
                             match self.retire_idle_listener() {
                                 Ok(backlog) if backlog.is_empty() => {
-                                    eprintln!("plak host: auto-started service idle for five minutes; stopping");
+                                    eprintln!("plak host: auto-started service idle window elapsed; stopping");
                                     return;
                                 }
                                 Ok(backlog) => {
