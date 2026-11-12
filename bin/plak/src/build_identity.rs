@@ -198,6 +198,7 @@ fn open_running_image() -> Option<std::fs::File> {
 pub(crate) static HASH_DELAY: OnceLock<std::time::Duration> = OnceLock::new();
 
 /// Only test hooks install this simulated executable-launch latency.
+#[cfg(any(test, feature = "tui", feature = "test-hooks"))]
 pub(crate) static RELOAD_PROBE_LAUNCH_DELAY: OnceLock<std::time::Duration> = OnceLock::new();
 
 fn hash_image(file: &mut std::fs::File) -> Option<String> {
