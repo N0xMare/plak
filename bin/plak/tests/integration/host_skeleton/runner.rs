@@ -704,15 +704,51 @@ fn effect_transitions(
     session: &str,
 ) -> Vec<(u64, plakous::sessions::feed::FeedOperationState)> {
     use plak::store::session_records::SessionRecordStore as _;
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let product = plak::store::session_records::SqliteSessionStore::new(paths.clone());
+    let locator = product.load(session).unwrap().plakous_locator.unwrap();
+    effect_transitions_at(paths.runtime_database(), locator)
+}
+
+pub(super) fn effect_settlements_in(
+    fixture: &Fixture,
+    session: &str,
+    key: &str,
+    unknown_only: bool,
+) -> usize {
+    use plakous::sessions::feed::FeedOperationState;
+    let state = fixture.home().join("state").join(key);
+    let product = rusqlite::Connection::open_with_flags(
+        state.join("product.sqlite3"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let locator: String = product
+        .query_row(
+            "SELECT locator FROM sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    effect_transitions_at(state.join("runtime.sqlite3"), locator.parse().unwrap())
+        .iter()
+        .filter(|(_, state)| {
+            *state == FeedOperationState::OutcomeUnknown
+                || (!unknown_only
+                    && matches!(state, FeedOperationState::Completed | FeedOperationState::Finalized))
+        })
+        .count()
+}
+
+fn effect_transitions_at(
+    database: PathBuf,
+    locator: plakous::sessions::SessionLocator,
+) -> Vec<(u64, plakous::sessions::feed::FeedOperationState)> {
     use plakous::sessions::feed::{
         FeedCursor, FeedFact, FeedOperationKind, FeedPage, FeedPageRequest, FeedSeq,
     };
     use plakous::sessions::{AgentSessions, SessionBackend};
-    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
-    let product = plak::store::session_records::SqliteSessionStore::new(paths.clone());
-    let locator = product.load(session).unwrap().plakous_locator.unwrap();
-    let sessions =
-        AgentSessions::new(SessionBackend::sqlite(paths.runtime_database()).unwrap()).unwrap();
+    let sessions = AgentSessions::new(SessionBackend::sqlite(database).unwrap()).unwrap();
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

@@ -15,6 +15,7 @@ fn document(services: &Services, receipt: &Receipt, mapping: &Mapping) -> CliRes
     let document = read_document(&path).map_err(|error| CliFailure::new(error.to_string()))?;
     if document.read_digest() != Some(mapping.digest.as_str())
         || document.source() != (mapping.source.as_str(), receipt.source_key.as_str())
+        || document.runner_id() != mapping.runner
     {
         return Err(CliFailure::new(
             "host upgrade export does not match its reserved digest and provenance",
@@ -23,12 +24,9 @@ fn document(services: &Services, receipt: &Receipt, mapping: &Mapping) -> CliRes
     Ok(document)
 }
 
-pub(crate) fn local(services: &Services, receipt: &Receipt, mapping: &Mapping) -> CliResult<bool> {
-    Ok(document(services, receipt, mapping)?.runner_id() == "local")
-}
-
 pub(crate) fn one(services: &Services, receipt: &Receipt, mapping: &Mapping) -> CliResult<String> {
-    if receipt.destination_key != crate::home::state::state_key()
+    if mapping.abandoned
+        || receipt.destination_key != crate::home::state::state_key()
         || receipt.destination_binary != crate::build_identity::binary_id()
         || receipt.phase != Phase::Committed
         || services
@@ -44,6 +42,11 @@ pub(crate) fn one(services: &Services, receipt: &Receipt, mapping: &Mapping) -> 
         Ok(record) => {
             if record.carried_forward_from()
                 != Some((mapping.source.as_str(), receipt.source_key.as_str()))
+                || record
+                    .runner
+                    .as_ref()
+                    .map_or("local", |runner| runner.runner_id.as_str())
+                    != mapping.runner
             {
                 return Err(CliFailure::new(
                     "host upgrade successor conflicts with its reserved provenance",

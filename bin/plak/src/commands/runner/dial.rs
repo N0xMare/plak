@@ -171,32 +171,6 @@ pub(crate) async fn qualify(
     })
 }
 
-/// A dormant seed reads its fresh line's jobs under destination host custody.
-/// Bind normally after source exit, without loading or replaying an old journal.
-#[cfg(feature = "web")]
-pub(crate) async fn passive_import(
-    paths: &PlakPaths,
-    destination: &str,
-    command: &str,
-) -> CliResult<Dialed> {
-    let (child, stream) = ssh_stream(destination, command).map_err(|failure| {
-        CliFailure::new(format!(
-            "passive import runner transport failed: {failure:?}"
-        ))
-    })?;
-    let bind = super::bind(super::host_id(paths)?, false);
-    let (client, hello) = RunnerClient::connect(stream, bind, crate::test_hooks::runner_windows())
-        .await
-        .map_err(|failure| {
-            CliFailure::new(format!("passive import runner bind failed: {failure:?}"))
-        })?;
-    Ok(Dialed {
-        client,
-        hello,
-        _ssh: child,
-    })
-}
-
 fn ssh_stream(
     destination: &str,
     command: &str,

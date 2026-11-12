@@ -16,6 +16,8 @@ pub(crate) const VERSION: u32 = 1;
 
 #[cfg(any(test, feature = "web"))]
 mod publication;
+#[cfg(feature = "web")]
+pub(crate) use publication::lock;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -30,6 +32,8 @@ pub(crate) enum Phase {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Mapping {
     pub(crate) ready: bool,
+    pub(crate) abandoned: bool,
+    pub(crate) runner: String,
     pub(crate) source: String,
     pub(crate) source_node: plakous_host_protocol::wire::NodeAddress,
     pub(crate) successor: String,
@@ -78,8 +82,13 @@ impl Receipt {
             || self.host_argv.len() > 64
             || self.mappings.len() > 4096
             || self.mappings.iter().any(|mapping| {
-                (mapping.ready && matches!(self.phase, Phase::Prepared | Phase::Aborted))
-                    || (self.phase == Phase::Acknowledged && !mapping.ready)
+                ((mapping.ready || mapping.abandoned)
+                    && matches!(self.phase, Phase::Prepared | Phase::Aborted))
+                    || (mapping.ready && mapping.abandoned)
+                    || (mapping.abandoned && mapping.runner == "local")
+                    || mapping.runner.is_empty()
+                    || mapping.runner.len() > 256
+                    || (self.phase == Phase::Acknowledged && !mapping.ready && !mapping.abandoned)
                     || !uuid(&mapping.source)
                     || !uuid(&mapping.successor)
                     || SessionNode::parse(
@@ -224,6 +233,12 @@ pub(crate) fn ensure_open(paths: &PlakPaths, record: &SessionRecord) -> CliResul
                     record.id, mapping.successor, receipt.destination_key,
                 )));
             }
+            if key == receipt.destination_key && mapping.successor == record.id && mapping.abandoned
+            {
+                return Err(CliFailure::new(
+                    "host_upgrade_target_abandoned: this reserved successor can never open; import a copy of the retained source export onto another placement",
+                ));
+            }
             if key == receipt.destination_key && mapping.successor == record.id && !mapping.ready {
                 return Err(CliFailure::new(
                     "host_upgrade_target_pending: destination import and readiness are not acknowledged",
@@ -251,7 +266,7 @@ pub(crate) fn withheld_targets(paths: &PlakPaths) -> CliResult<std::collections:
     let key = crate::home::state::state_key();
     Ok(all(paths)?
         .into_iter()
-        .filter(|receipt| receipt.destination_key == key && receipt.phase != Phase::Acknowledged)
+        .filter(|receipt| receipt.destination_key == key)
         .flat_map(|receipt| {
             receipt
                 .mappings
@@ -274,8 +289,9 @@ pub(crate) fn successor_node(
             continue;
         }
         if let Some(mapping) = receipt.mappings.iter().find(|mapping| {
-            mapping.source_node == node
-                || mapping.source == node.tree_id && mapping.source == node.agent_id
+            !mapping.abandoned
+                && (mapping.source_node == node
+                    || mapping.source == node.tree_id && mapping.source == node.agent_id)
         }) {
             node = plakous_host_protocol::wire::NodeAddress {
                 tree_id: mapping.successor.clone(),

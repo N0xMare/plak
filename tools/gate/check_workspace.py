@@ -696,6 +696,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/commands/runner/local.rs"): {"warn"},
     ("plak", "src/host.rs"): {"select"},
     ("plak", "src/host/send.rs"): {"pin", "select"},
+    ("plak", "src/host/upgrade/startup.rs"): {"select"},
     ("plak", "src/host/sessions/options.rs"): {"pin", "select"},
     ("plak", "src/host/console/files/resolve.rs"): {"select"},
     ("plak", "src/commands/runner/services.rs"): {"info", "select", "warn"},

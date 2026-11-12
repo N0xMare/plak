@@ -92,9 +92,9 @@ work first. `--wait 60` closes admissions while waiting up to 60 seconds and
 restores them on timeout. Unsupported destination/configuration/capacity
 refusals leave the old owner authoritative. A source build without the
 coordinator is refused, never silently stopped.
-Archived roots are checked too: hiding a session does not settle its work.
-Archived roots with live jobs or unverified settlement block upgrade; settled
-archived roots remain under the old key rather than being carried.
+Only unarchived roots are checked, carried and counted against the 4096-root
+limit. Archived roots stay under the old key; their work or workers are outside
+this operation and are not promised to transfer.
 
 For paired runners, install the matching snapshot and advance each runner's
 dedicated command link **before** invoking host upgrade. Revision, flavor and
@@ -127,7 +127,10 @@ receipts. The source exits before the destination imports under its own host
 custody. Each successor is imported and freshly reconciled before its own Ready
 receipt. A runner outage or changed credentials/configuration after surrender
 leaves only the affected successors withheld and retried; ready local roots
-still serve. Fix the destination/runner and retry the same command. Imported
+still serve. Remote imports reuse the host registry's Ready connection, never a
+second connection that could interrupt work on an already-Ready successor.
+Retries wake on runner status changes, with exponential backoff capped at three
+minutes otherwise. Fix the destination/runner and retry the same command. Imported
 successors are not re-probed or re-created; post-surrender capacity changes
 produce an ordinary import warning, not another strict preflight. The command
 reports an unknown outcome early if no host holds the home, and extends its
@@ -135,6 +138,28 @@ wait as import/readiness makes progress. A lost success answer reports the exist
 import. Do not delete or edit `host/upgrades` to force an old owner to resume.
 Client reload remains separate and never performs this operation or resends
 ambiguously accepted input.
+
+If a runner is permanently lost, invoke the serving destination executable:
+
+```sh
+plak host upgrade --abandon <successor-uuid-or-runner-id>
+```
+
+An exact successor UUID abandons one pending remote successor; a runner ID
+abandons that runner's pending successors. Ready successors and local roots
+cannot be abandoned. This is irreversible: the reserved successor never opens,
+even if the runner returns. Repeating the command is safe. The source remains
+surrendered. Once all successors are Ready or abandoned, later upgrades and
+ordinary standalone session commands are no longer blocked by this operation.
+
+The command prints the retained export paths. To recover on another placement,
+copy the desired export, edit only the copy's `runner` and `workspace_root`
+fields to select the destination, then run `plak session import <copy>`. For
+local recovery set `runner` to `{"name":"local","runner_id":"local"}` and
+`workspace_root` to an absolute local directory. Do not edit the retained
+original. Normal import admission still applies; stop the host before standalone remote import, and pair/admit the new
+runner normally. The import creates a new line and session ID, not the
+abandoned reservation. Remove obsolete runner configuration after retiring it.
 
 After success, receipt-aware old-key host starts and old source addresses follow
 the recorded destination. Source records remain archived as well as fenced:

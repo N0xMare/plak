@@ -665,8 +665,16 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         Command::HostConnect { auto_start } => return host::connect_stdio(&services, auto_start),
         Command::HostUpgrade {
             expect_binary,
+            abandon,
             wait,
-        } => return host::upgrade(&services, &expect_binary, wait),
+        } => {
+            return host::upgrade(
+                &services,
+                expect_binary.as_deref(),
+                wait,
+                abandon.as_deref(),
+            );
+        }
         Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
         // The runner bridge owns raw stdin and stdout, so it runs before the
         // process takes their locks.

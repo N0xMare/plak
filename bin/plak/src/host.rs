@@ -67,10 +67,18 @@ pub(crate) fn connect_stdio(services: &Services, auto_start: bool) -> CliResult<
 
 pub(crate) fn upgrade(
     services: &Services,
-    expect_binary: &str,
+    expect_binary: Option<&str>,
     wait: Duration,
+    abandon: Option<&str>,
 ) -> CliResult<ProcessOutcome> {
-    upgrade::request(services, expect_binary, wait)
+    if let Some(target) = abandon {
+        return upgrade::abandon(services, target);
+    }
+    upgrade::request(
+        services,
+        expect_binary.ok_or_else(|| CliFailure::new("expected binary is required"))?,
+        wait,
+    )
 }
 
 fn startup_runtime() -> CliResult<(

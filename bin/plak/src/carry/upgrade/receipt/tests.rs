@@ -26,6 +26,8 @@ fn receipt(record: &SessionRecord, destination: bool) -> Receipt {
         source_archival_pending: false,
         mappings: vec![Mapping {
             ready: false,
+            abandoned: false,
+            runner: "local".into(),
             source: record.id.clone(),
             source_node: plakous_host_protocol::wire::NodeAddress {
                 tree_id: record.node.tree_id.clone(),
@@ -90,6 +92,25 @@ fn an_unreadable_or_linked_receipt_never_grants_execution_authority() {
 }
 
 #[test]
+fn abandoning_a_remote_mapping_never_opens_its_reserved_successor() {
+    let home = tempfile::tempdir().unwrap();
+    let paths = PlakPaths::explicit(home.path().to_path_buf());
+    let record = SessionRecord::new(home.path().join("workspace"));
+    let mut receipt = receipt(&record, true);
+    receipt.phase = Phase::Acknowledged;
+    receipt.mappings[0].runner = "remote-fixture".into();
+    receipt.mappings[0].abandoned = true;
+    receipt.save(&paths).unwrap();
+    assert!(ensure_open(&paths, &record).is_err());
+    assert!(withheld_targets(&paths).unwrap().contains(&record.id));
+    receipt.mappings[0].ready = true;
+    assert!(receipt.save(&paths).is_err());
+    receipt.mappings[0].ready = false;
+    receipt.mappings[0].runner = "local".into();
+    assert!(receipt.save(&paths).is_err());
+}
+
+#[test]
 fn duplicate_mapping_and_unknown_receipt_versions_refuse_before_publication() {
     let home = tempfile::tempdir().unwrap();
     let paths = PlakPaths::explicit(home.path().to_path_buf());
@@ -101,6 +122,8 @@ fn duplicate_mapping_and_unknown_receipt_versions_refuse_before_publication() {
     receipt.version = VERSION;
     receipt.mappings.push(Mapping {
         ready: false,
+        abandoned: false,
+        runner: "local".into(),
         source: record.id.clone(),
         source_node: plakous_host_protocol::wire::NodeAddress {
             tree_id: record.node.tree_id.clone(),

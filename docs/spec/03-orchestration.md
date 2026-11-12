@@ -4062,7 +4062,13 @@ After durable surrender, source exit releases shared home custody; destination
 startup takes its own host custody and imports the reserved fresh lines before
 their fresh Ready reconciliation and per-successor acknowledgement. A host-owned
 worker retries pending imports/reconciliation without holding ready local roots
-behind an unavailable remote placement. It does not transfer or
+behind an unavailable remote placement. Remote creation uses the registry's
+existing Ready client and services, never a second bind under that process
+instance; a new bind would cancel the serving connection and its live services.
+Retries wake on registry status changes and otherwise use capped exponential
+backoff. An explicit operator abandonment permanently withholds the reserved
+remote successor and counts as a terminal receipt disposition, not source
+revival or transfer. It does not transfer or
 adopt source lines, copy job registries, or load an old call journal. Interrupted
 creation retries its reserved operation and successor, including a canonical
 create committed before the product locator was saved. Each target cannot

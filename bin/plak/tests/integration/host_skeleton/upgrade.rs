@@ -8,6 +8,7 @@ const DESTINATION: &str = "r999.e999.p999.t999";
 
 mod recovery;
 mod remote;
+mod selection;
 mod topology;
 
 fn output(fixture: &Fixture, arguments: &[&str], destination: bool) -> std::process::Output {
@@ -454,13 +455,13 @@ fn host_upgrade_cross_key_refuses_daemon_jobs_without_disturbing_custody() {
 }
 
 #[test]
-fn host_upgrade_archived_root_with_daemon_jobs_still_blocks_surrender() {
+fn host_upgrade_archived_root_with_daemon_jobs_is_not_carried_or_checked() {
     let Some(fixture) = fixture() else { return };
+    let _owner = HomeHost(fixture.home());
     let (mut host, session, _) = runner::start_job(&fixture, false);
-    let (pid, daemon) = runner::job(&fixture);
     let mut client = Client::connect(&host);
     profiles::wait_idle(&mut client, &session);
-    // Legacy visibility flags do not establish that a job has settled.
+    // Even legacy unsettled archives are outside the carried root selection.
     let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
     let product = rusqlite::Connection::open(paths.product_database()).unwrap();
     product.busy_timeout(Duration::from_secs(2)).unwrap();
@@ -471,15 +472,13 @@ fn host_upgrade_archived_root_with_daemon_jobs_still_blocks_surrender() {
         1
     );
     drop(product);
-    let refused = upgrade(&fixture, &binary(&fixture));
-    assert!(!refused.status.success());
+    let upgraded = upgrade(&fixture, &binary(&fixture));
     assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("daemon_jobs"),
+        upgraded.status.success(),
         "{}",
-        String::from_utf8_lossy(&refused.stderr)
+        String::from_utf8_lossy(&upgraded.stderr)
     );
-    assert!(runner::alive(pid) && runner::alive(daemon));
-    assert!(!fixture.home().join("host/upgrades").exists());
+    assert_eq!(receipts(&fixture).pop().unwrap()["mappings"], json!([]));
     stop(&mut host);
 }
 

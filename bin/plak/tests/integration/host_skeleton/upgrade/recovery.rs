@@ -2,6 +2,46 @@
 
 use super::*;
 
+#[test]
+fn host_upgrade_prepared_rollback_accepts_a_source_already_deleted() {
+    let Some(fixture) = fixture() else { return };
+    let sources = [seed(&fixture, 51), seed(&fixture, 52)];
+    let mut source = start_env(
+        &fixture,
+        &[],
+        &[("PLAK_TEST_HOST_UPGRADE_CUT", "after-source-archive".into())],
+    );
+    let _ = upgrade(&fixture, &binary(&fixture));
+    let deadline = Instant::now() + WAIT;
+    while source.child.as_mut().unwrap().try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Fault injection: the product record disappeared independently of its held lease.
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let records = rusqlite::Connection::open(paths.product_database()).unwrap();
+    records.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    assert_eq!(
+        records
+            .execute("DELETE FROM sessions WHERE id=?1", [&sources[0]])
+            .unwrap(),
+        1
+    );
+    drop(records);
+    let mut restored = start(&fixture);
+    assert_eq!(receipts(&fixture).pop().unwrap()["phase"], "aborted");
+    let mut client = Client::connect(&restored);
+    let rows = client.rows(1);
+    assert!(!rows.iter().any(|row| row.session == sources[0]));
+    let row = rows.iter().find(|row| row.session == sources[1]).unwrap();
+    let attachment = client.attach(2, &row.node);
+    assert_eq!(
+        client.request(3, Op::Detach { attachment }),
+        Outcome::Ok(Answer::Detached)
+    );
+    stop(&mut restored);
+}
+
 fn plain_start_cut(cut: &str, destination: bool) {
     start_cut(cut, destination, false);
 }

@@ -1454,7 +1454,8 @@ link to the matching immutable snapshot before invoking host upgrade; normal
 maintainer installation must not move that link. A mismatch refuses before
 drain. Keep the old executable and workers for inspection/drain until every
 successor is acknowledged. After surrender, destination host custody owns
-passive import and fresh per-placement Ready reconciliation. Runner outages
+host-owned import through registry connections and fresh per-placement Ready
+reconciliation. Retries never create a second serving-instance bind. Runner outages
 withhold only affected successors while ready roots serve; recovery uses that
 snapshot's receipts, never an old-key fallback.
 

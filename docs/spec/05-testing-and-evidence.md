@@ -45,6 +45,17 @@ then restore the runner and require receipt completion without host restart,
 duplicate import or inference. Upgrade hooks live only in the test-hooks
 composition root; no release build reads their environment inputs.
 
+Retry regressions keep a real foreground call open on an already-Ready remote
+successor while another successor imports on the same runner. The process must
+survive, stay in flight, and leave no OutcomeUnknown effect. Explicit abandonment
+tests select both successor UUID and runner ID, retry idempotently, prove the
+reservation stays withheld after acknowledgement, then copy the retained
+document and normally import it onto a local placement. An independently
+missing source record does not fail Prepared rollback. Archived-head fixtures
+exceed the carried-root cap without consuming it and show their settlement is
+not inspected. All these upgrade cases use the existing durability module
+filter and parallel exclusion.
+
 Offline runner fault injection targets only the recorded daemon that still
 has the fixture home's lock file open, never a host's transient startup probe.
 Its exit wait tracks the killed daemon, not a replacement the live host may

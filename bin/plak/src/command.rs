@@ -368,7 +368,8 @@ pub(crate) enum Command {
     Host(HostCommand),
     HostInstall(HostInstall),
     HostUpgrade {
-        expect_binary: String,
+        expect_binary: Option<String>,
+        abandon: Option<String>,
         wait: std::time::Duration,
     },
     /// A byte-transparent bridge to the home's existing host.

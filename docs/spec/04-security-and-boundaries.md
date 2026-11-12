@@ -2280,8 +2280,9 @@ root consent, not custody, owner registration, adoption or effects. The operator
 must advance the runner's dedicated link to the matching snapshot first.
 After surrender the source exits and releases shared custody. Only the
 destination serving host, holding its own home custody, may import the reserved
-new lines. Its temporary normal binding loads no old call journal or recovery
-sweep; the fresh successor's job read is ordinary new-line authority, not a
+new lines. A remote importer uses only the host registry's Ready bound client
+and services, never another bind under the same serving instance. It loads no
+old call journal; the fresh successor's job read is ordinary new-line authority, not a
 transfer of the source line. Fresh normal Ready reconciliation follows each
 import before its mapping's durable readiness bit is published. A missing
 runner withholds only its own successors; retries retain host custody and do
@@ -2289,6 +2290,13 @@ not re-create or re-probe already imported roots. Preflight is strict, while a
 changed capacity after surrender produces the ordinary import warning.
 Neither a standalone importer alongside a host nor fallback to surrendered
 source roots is authorized, including after a destination startup failure.
+The same-user `host upgrade --abandon` action is bound to the serving destination
+identity. Only pending remote mappings may become permanently abandoned; Ready
+and local mappings refuse. The abandoned reservation stays withheld after
+operation acknowledgement, and source fencing is unchanged. The action grants
+no new placement: a copied retained export goes through ordinary import
+admission. Retry and disposition serialize receipt publication under a private
+owned kernel-held file lock so neither can overwrite the other's terminal state.
 Embedded daemon-held-process refusals remain in force.
 
 Protocol-7 console writes trust transport-verified same-user socket peers by

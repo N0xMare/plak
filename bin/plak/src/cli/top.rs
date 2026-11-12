@@ -365,10 +365,12 @@ impl TopCommand {
                     Some(HostAction::Upgrade {
                         expect_binary,
                         wait,
+                        abandon,
                     }),
                 ..
             } => Ok(Command::HostUpgrade {
                 expect_binary,
+                abandon,
                 wait: std::time::Duration::from_secs(wait),
             }),
             Self::Host {

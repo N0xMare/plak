@@ -586,8 +586,11 @@ enum AccountAction {
 enum HostAction {
     /// Upgrade the running host; cross-key carry requires settled work.
     Upgrade {
-        #[arg(long)]
-        expect_binary: String,
+        #[arg(long, required_unless_present = "abandon", conflicts_with = "abandon")]
+        expect_binary: Option<String>,
+        /// Permanently abandon pending remote successors selected by UUID or runner ID.
+        #[arg(long, conflicts_with = "wait")]
+        abandon: Option<String>,
         /// Wait for settled work for this many seconds (at most 3600).
         #[arg(long, default_value = "0", value_parser = clap::value_parser!(u64).range(0..=3600))]
         wait: u64,

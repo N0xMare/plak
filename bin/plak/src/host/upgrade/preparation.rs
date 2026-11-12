@@ -44,6 +44,8 @@ pub(super) fn exports(
         let bytes = std::fs::read(&file).map_err(io_failure)?;
         receipt.mappings.push(Mapping {
             ready: false,
+            abandoned: false,
+            runner: document.runner_id().to_owned(),
             source: record.id,
             source_node: plakous_host_protocol::wire::NodeAddress {
                 tree_id: record.node.tree_id,
@@ -79,9 +81,12 @@ fn archive_sources(paths: &PlakPaths, receipt: &Receipt, archived: bool) -> CliR
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     for mapping in &receipt.mappings {
-        product
-            .set_archived(&mapping.source, archived)
-            .map_err(|error| CliFailure::new(error.to_string()))?;
+        use crate::commands::session::lifecycle::{LifecycleError, LifecycleRefusal};
+        match product.set_archived(&mapping.source, archived) {
+            Ok(()) => {}
+            Err(LifecycleError::Refused(LifecycleRefusal::NotFound)) if !archived => {}
+            Err(error) => return Err(CliFailure::new(error.to_string())),
+        }
     }
     Ok(())
 }

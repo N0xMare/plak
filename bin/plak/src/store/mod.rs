@@ -225,12 +225,23 @@ impl ProductStore {
                         .collect::<Result<Vec<_>, _>>()
                 })
                 .map_err(|error| error.to_string())?;
-            if trees.len() > 4096 {
-                return Err("too many roots for one host upgrade".to_owned());
-            }
             let ids = trees
                 .iter()
                 .map(|tree| directory::head_of_tree_on(snapshot, tree))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            let ids = ids
+                .into_iter()
+                .map(|id| {
+                    snapshot
+                        .query_row("SELECT archived FROM sessions WHERE id=?1", [&id], |row| {
+                            row.get::<_, bool>(0)
+                        })
+                        .map(|archived| (!archived).then_some(id))
+                        .map_err(|error| error.to_string())
+                })
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .flatten()

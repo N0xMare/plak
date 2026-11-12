@@ -66,6 +66,15 @@ one cross-build carrier (a build imports its own and the previous version).
   unknown loss, not cleanup proof. Product schema stays 37 and the state key is
   unchanged. Client protocol 9 exposes the private registry without adding persisted state.
 
+- Keep settled remote upgrade retries on the serving registry connection, so
+  importing another root cannot cancel live services. Retry with status-change
+  wakeups and capped exponential backoff. Add `plak host upgrade --abandon` for
+  permanently lost pending remote successors; reservations remain unusable,
+  while retained exports can be copied and normally imported elsewhere.
+  Missing rollback records count as restored; archived heads are excluded from
+  settlement and the carried-root cap. The unshipped ownership receipt remains
+  version 1 with explicit placement and abandonment; export v12 is unchanged.
+
 - Fixed native-client exits losing `bye`: last-handle drop now waits up to two
   seconds for the sole writer to drain and finish, even after explicit goodbye.
 

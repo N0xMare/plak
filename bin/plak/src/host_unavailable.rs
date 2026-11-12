@@ -36,8 +36,9 @@ pub(crate) fn connect_stdio(services: &Services, _auto_start: bool) -> CliResult
 
 pub(crate) fn upgrade(
     services: &Services,
-    _expect_binary: &str,
+    _expect_binary: Option<&str>,
     _wait: std::time::Duration,
+    _abandon: Option<&str>,
 ) -> CliResult<ProcessOutcome> {
     run_host_command(services, &crate::command::HostCommand::default())
 }

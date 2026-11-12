@@ -1,7 +1,9 @@
 //! Same-user, instance-bound upgrade coordination; the export is the only data carrier.
 
+mod abandon;
 mod preparation;
 mod startup;
+pub(super) use abandon::request as abandon;
 pub(super) use startup::{prepare_host, start_retry};
 
 use std::io::{BufRead as _, Write as _};
@@ -41,12 +43,14 @@ struct Request {
     destination_key: String,
     expected_binary: String,
     wait_seconds: u64,
+    abandon: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum Answer {
     Ready { receipt: Option<uuid::Uuid> },
+    Abandoned { mappings: Vec<abandon::Abandoned> },
     Refused { detail: String },
 }
 
@@ -377,9 +381,11 @@ pub(super) fn request(
             destination_key: crate::home::state::state_key(),
             expected_binary: expected.to_owned(),
             wait_seconds: wait.as_secs(),
+            abandon: None,
         },
     )?;
     match read::<Answer>(&stream)? {
+        Answer::Abandoned { .. } => Err(CliFailure::new("unexpected abandon reply to upgrade")),
         Answer::Refused { detail } => Err(CliFailure::new(detail)),
         Answer::Ready { receipt } => {
             if let Some(id) = receipt {
@@ -401,6 +407,11 @@ pub(super) fn request(
 fn print_mappings(receipt: &Receipt) -> CliResult<()> {
     let mut stdout = std::io::stdout().lock();
     for mapping in &receipt.mappings {
+        if mapping.abandoned {
+            writeln!(stdout, "{} -> abandoned (reserved successor {}; import a copy of the retained export onto another placement)", mapping.source, mapping.successor)
+                .map_err(|_| CliFailure::new("stdout failed"))?;
+            continue;
+        }
         writeln!(
             stdout,
             "{} -> {} ({})",
@@ -642,6 +653,18 @@ fn handle(
         },
     )?;
     let request: Request = read(&stream)?;
+    if request.abandon.is_some() {
+        let answer = match abandon::apply(services, &request) {
+            Ok(mappings) => {
+                host.changed();
+                Answer::Abandoned { mappings }
+            }
+            Err(failure) => Answer::Refused {
+                detail: failure.message().to_owned(),
+            },
+        };
+        return write(&mut stream, &answer);
+    }
     let result = prepare(host, services, request, cancelled, arguments);
     match result {
         Ok((ready, receipt)) => {
@@ -974,6 +997,16 @@ fn settled_roots(services: &Services) -> CliResult<Vec<crate::store::sessions::S
     let roots =
         crate::store::ProductStore::inspect_upgrade_roots(paths).map_err(CliFailure::new)?;
     let withheld = receipt::withheld_targets(paths)?;
+    if roots
+        .iter()
+        .filter(|record| !withheld.contains(&record.id))
+        .count()
+        > 4096
+    {
+        return Err(CliFailure::new(
+            "too many carried roots for one host upgrade",
+        ));
+    }
     let mut documents = Vec::new();
     let mut blockers = Vec::new();
     for record in roots {
@@ -1006,7 +1039,6 @@ fn settled_roots(services: &Services) -> CliResult<Vec<crate::store::sessions::S
             continue;
         }
         match crate::carry::export_session(&source_paths(paths, &record), &record) {
-            Ok(_) if record.archived => {}
             Ok(_) => documents.push(record),
             Err(refusal) => blockers.push(Blocker {
                 session: record.id.clone(),

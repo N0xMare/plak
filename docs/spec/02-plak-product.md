@@ -1677,7 +1677,8 @@ re-executed.
 Version-1 private ownership receipts under `host/upgrades/<operation>/` name
 source instance/key/binary/executable, destination identity, monotonically
 ordered operation sequence, original host argv, export digests and reserved
-successor IDs, source archival intent and each successor's Ready receipt.
+successor IDs and runner identities, source archival intent and each successor's
+Ready or explicitly abandoned disposition.
 They carry no session encodings. Imports use the reserved product
 ID and create operation, with a write-ahead target record: retry finishes that
 same seed. A target cannot open or appear as an ordinary directory entry before
@@ -1699,8 +1700,8 @@ use standalone exclusive import or transfer old agent-line custody. After this
 boundary there is no fallback to the old owner: startup and retry follow the
 recorded destination, including partial import and failure before Ready. The
 destination acknowledges the complete operation only after every successor is
-Ready; a runner outage leaves only its successors withheld and retried while
-ready roots can serve. Already-imported successors skip import/configuration
+Ready or explicitly abandoned; a runner outage leaves only its successors
+withheld and retried while ready roots can serve. Already-imported successors skip import/configuration
 probes. Post-surrender capacity checking is advisory, not another strict
 admission barrier: preflight already enforced it. A lost
 acknowledgement never creates another successor or replays input; the same
@@ -5422,16 +5423,17 @@ released old sessions can be attached again under normal handoff recovery.
 No shell stop-then-import sequence or client-owned runtime performs this work.
 
 Root selection uses the directory's `head_of_tree` relation, not last-updated
-retired rows. Archived heads are inspected too: archival does not prove work
-settled. An archived head with nonterminal daemon jobs or other unverifiable
-settlement blocks upgrade; settled archived heads remain under the source key
-and are not carried.
+retired rows. Only unarchived, eligible heads are carried, checked for settlement
+and counted against the 4096-root cap. Archived heads remain under the source
+key, outside this operation; their settlement or worker state is not inspected
+or promised to transfer.
 
 Immediately before surrender, the source marks the selected records archived
 through the existing product store, under their held leases. A durable archival
 intent lets plain startup or error rollback undo those flags before marking an
 attempt Aborted; if the source image is missing, the own-key source start later
-finishes that cleanup without redirecting another key. After commit the flags
+finishes that cleanup without redirecting another key. A missing source record
+is already restored for rollback purposes. After commit the flags
 remain, so older builds that do not read upgrade receipts still refuse ordinary
 reopen. This is not an immutable fence against an older build or operator
 explicitly unarchiving or editing source state: do not do that after surrender.
@@ -5447,15 +5449,42 @@ link to the matching immutable snapshot first, retaining the old build to
 inspect and drain old workers. Installation does not advance that link.
 
 After durable source surrender and source exit, the destination imports dormant
-seeds under its own host custody and before each successor becomes Ready. Its
-temporary normal binding reads the fresh successor's job state; it loads no old
-call journal, adopts no old line, and runs no recovery sweep before import.
+seeds under its own host custody and before each successor becomes Ready.
+Remote seeds use only the registry's already Ready bound client and services;
+an importer never creates another bind under the serving process instance.
+The fresh successor's job read uses that same connection, without loading an
+old call journal or adopting an old line.
 The normal runner Ready sweep follows import and precedes that successor's
 acknowledgement. A post-surrender runner outage or credential/configuration
 refusal keeps the affected successors withheld; a host-owned worker retries
-without preventing ready local roots from serving. Completed imports are not
+without preventing ready roots from serving. Retries wake on registry status
+changes and otherwise back off exponentially from five seconds to three minutes;
+they do not run a separate SSH dial loop. Completed imports are not
 re-probed or re-created. The command can report an unknown outcome while such
 work is pending; repair the destination/runner and retry the same command.
+For a permanently lost placement, `plak host upgrade --abandon <successor-or-runner>`
+is an explicit same-user action on the serving destination. An exact reserved
+successor UUID selects one pending remote mapping; a pinned runner ID selects
+its pending mappings. Ready and local successors cannot be abandoned. The
+durable abandoned disposition is irreversible, keeps that reserved successor
+withheld forever even after operation acknowledgement, and never releases the
+source fence. Repeating the action is idempotent. Receipt publication is
+serialized with retry import/readiness so a lost acknowledgement or racing
+retry cannot resurrect the reservation. Once every mapping is Ready or
+abandoned, the operation acknowledges and no longer blocks later upgrades or
+ordinary standalone session commands.
+
+The action prints each retained source export path. To recover elsewhere, copy
+that v12 document, set its placement fields (`runner` and `workspace_root`) to
+the intended admitted placement, and use ordinary `plak session import` on the
+copy. For local recovery use `runner: {"name":"local","runner_id":"local"}`
+and an absolute local workspace.
+Leave the retained original unchanged; the import creates another fresh line,
+not the abandoned reservation. Ordinary import custody rules still apply (stop
+the destination host before a standalone remote import), and normal pairing,
+configuration and credential admission still apply. Remove obsolete runner
+configuration when the placement is permanently retired.
+
 An interruption after surrender, partway through import or before Ready resumes
 the same reserved successors. A commit or acknowledgement lost to process
 failure is resolved from receipts before serving either side. Restarting with

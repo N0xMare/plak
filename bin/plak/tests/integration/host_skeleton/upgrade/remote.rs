@@ -2,8 +2,19 @@
 
 use super::*;
 use std::os::unix::fs::PermissionsExt as _;
+mod retry;
 
 fn seed(fixture: &Fixture, path: &str, id: &str, ordinal: usize) -> String {
+    seed_at(fixture, path, id, ordinal, &fixture.workspace())
+}
+
+fn seed_at(
+    fixture: &Fixture,
+    path: &str,
+    id: &str,
+    ordinal: usize,
+    workspace: &std::path::Path,
+) -> String {
     let mut document: serde_json::Value = serde_json::from_str(include_str!(
         "../../../fixtures/session-export-v12-default.json"
     ))
@@ -12,7 +23,7 @@ fn seed(fixture: &Fixture, path: &str, id: &str, ordinal: usize) -> String {
         serde_json::from_str(include_str!("../../../fixtures/session-export-v11.json")).unwrap();
     document["history"] = previous["history"].clone();
     document["source"]["session_id"] = json!(uuid::Uuid::new_v4().to_string());
-    document["workspace_root"] = json!(fixture.workspace());
+    document["workspace_root"] = json!(workspace);
     document["runner"] = json!({"name":"remote", "runner_id":id});
     document["profile"] = json!({"root_template":"lead", "working_set":["lead"]});
     document["named_state"] = json!({"remote":ordinal});

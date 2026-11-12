@@ -1,9 +1,8 @@
-//! Host-owned imports acknowledge each successor only after fresh reconciliation.
+//! Host-owned imports reuse registry connections and acknowledge fresh reconciliation.
 
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
-    mpsc,
 };
 use std::time::Duration;
 
@@ -21,15 +20,13 @@ pub(in crate::host) fn prepare_host(
     let services = runner::custody(services)?;
     for receipt in pending(&services)? {
         crash_cut("before-import");
-        for mapping in receipt.mappings.iter().filter(|mapping| !mapping.ready) {
-            match importing::local(&services, &receipt, mapping) {
-                Ok(true) => {
-                    if let Err(failure) = importing::one(&services, &receipt, mapping) {
-                        deferred(&mapping.successor, &failure);
-                    }
-                }
-                Ok(false) => {}
-                Err(failure) => deferred(&mapping.successor, &failure),
+        for mapping in receipt
+            .mappings
+            .iter()
+            .filter(|mapping| !mapping.ready && !mapping.abandoned && mapping.runner == "local")
+        {
+            if let Err(failure) = importing::one(&services, &receipt, mapping) {
+                deferred(&mapping.successor, &failure);
             }
         }
     }
@@ -56,14 +53,14 @@ fn deferred(successor: &str, failure: &CliFailure) {
 
 pub(in crate::host) struct Recovery {
     stop: Arc<AtomicBool>,
-    wake: mpsc::Sender<()>,
+    wake: Arc<tokio::sync::Notify>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Recovery {
     pub(in crate::host) fn cancel(&self) {
         self.stop.store(true, Ordering::Release);
-        let _ = self.wake.send(());
+        self.wake.notify_one();
     }
     pub(in crate::host) fn join(mut self) {
         self.finish();
@@ -75,7 +72,6 @@ impl Recovery {
         }
     }
 }
-
 impl Drop for Recovery {
     fn drop(&mut self) {
         self.finish();
@@ -89,13 +85,16 @@ pub(in crate::host) fn start_retry(
     >,
     runtime: &tokio::runtime::Handle,
 ) -> Recovery {
-    let (wake, events) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let cancelled = Arc::clone(&stop);
+    let wake = Arc::new(tokio::sync::Notify::new());
+    let notify = Arc::clone(&wake);
     let services = services.clone();
     let host = Arc::clone(host);
     let runtime = runtime.clone();
     let worker = std::thread::spawn(move || {
+        let mut changes = services.runners().changes();
+        let mut delay = Duration::from_secs(5);
         while !cancelled.load(Ordering::Acquire) {
             let receipts = match pending(&services) {
                 Ok(receipts) if receipts.is_empty() => break,
@@ -105,19 +104,21 @@ pub(in crate::host) fn start_retry(
                     break;
                 }
             };
-            for mut receipt in receipts {
+            for receipt in receipts {
                 if cancelled.load(Ordering::Acquire) {
                     return;
                 }
-                if let Err(failure) = advance(&services, &runtime, &mut receipt, &cancelled, &host)
-                {
+                if let Err(failure) = advance(&services, &runtime, receipt, &cancelled, &host) {
                     deferred("receipt", &failure);
                 }
                 host.changed();
             }
-            if events.recv_timeout(Duration::from_secs(2)).is_ok() {
-                break;
-            }
+            let status_transition = runtime.block_on(wait(&services, &mut changes, &notify, delay));
+            delay = if status_transition {
+                Duration::from_secs(5)
+            } else {
+                delay.saturating_mul(2).min(Duration::from_secs(180))
+            };
         }
     });
     Recovery {
@@ -127,31 +128,75 @@ pub(in crate::host) fn start_retry(
     }
 }
 
+async fn wait(
+    services: &Services,
+    changes: &mut tokio::sync::watch::Receiver<u64>,
+    wake: &tokio::sync::Notify,
+    delay: Duration,
+) -> bool {
+    let statuses = || {
+        services
+            .runners()
+            .rows()
+            .into_iter()
+            .map(|row| (row.runner.runner_id, row.status))
+            .collect::<Vec<_>>()
+    };
+    let before = statuses();
+    changes.borrow_and_update();
+    if statuses() != before {
+        return true;
+    }
+    let deadline = tokio::time::Instant::now() + delay;
+    loop {
+        tokio::select! {
+            () = wake.notified() => return false,
+            () = tokio::time::sleep_until(deadline) => return false,
+            result = changes.changed() => {
+                if result.is_err() || statuses() != before { return true; }
+            }
+        }
+    }
+}
+
 fn advance(
     services: &Services,
     runtime: &tokio::runtime::Handle,
-    receipt: &mut Receipt,
+    receipt: Receipt,
     stop: &AtomicBool,
     host: &plakous_hosted::host_service::wire::SessionHost<crate::surface_protocol::PlakExtension>,
 ) -> CliResult<()> {
+    let paths = services.paths()?;
     let mut order = (0..receipt.mappings.len()).collect::<Vec<_>>();
-    order.sort_by_key(|index| {
-        !importing::local(services, receipt, &receipt.mappings[*index]).unwrap_or(false)
-    });
+    order.sort_by_key(|index| receipt.mappings[*index].runner != "local");
     for index in order {
         if stop.load(Ordering::Acquire) {
             return Ok(());
         }
-        if receipt.mappings[index].ready {
+        let _lock = receipt::lock(paths)?;
+        let mut latest = receipt::read(&receipt.path(paths))?;
+        let mapping = &latest.mappings[index];
+        if latest.phase != Phase::Committed || mapping.ready || mapping.abandoned {
             continue;
         }
-        let id = match importing::one(services, receipt, &receipt.mappings[index]) {
-            Ok(id) => id,
+        let id = mapping.runner.clone();
+        let required = services.runners().needs_connection(&id);
+        services.runners().require_connection(&id, true);
+        if !services.runners().rows().iter().any(|row| {
+            row.runner.runner_id == id && row.status == plakous::runner::RunnerStatus::Ready
+        }) {
+            if !required {
+                services.runners().reconcile_when_available(&id);
+            }
+            continue;
+        }
+        match importing::one(services, &latest, mapping) {
+            Ok(_) => {}
             Err(failure) => {
-                deferred(&receipt.mappings[index].successor, &failure);
+                deferred(&mapping.successor, &failure);
                 continue;
             }
-        };
+        }
         crash_cut("after-import");
         services.runners().reconcile_when_available(&id);
         let refreshed = runtime.block_on(async {
@@ -169,16 +214,36 @@ fn advance(
             continue;
         }
         crash_cut("before-ready");
-        receipt.mappings[index].ready = true;
-        receipt.save(services.paths()?)?;
+        latest.mappings[index].ready = true;
+        acknowledge(&mut latest);
+        latest.save(paths)?;
+        if latest
+            .mappings
+            .iter()
+            .filter(|mapping| mapping.runner == id)
+            .all(|mapping| mapping.ready || mapping.abandoned)
+        {
+            services.runners().require_connection(&id, false);
+        }
         host.changed();
     }
-    if receipt.mappings.iter().all(|mapping| mapping.ready) {
-        receipt.phase = Phase::Acknowledged;
-        receipt.save(services.paths()?)?;
-    }
-    if receipt.phase == Phase::Acknowledged {
+    let _lock = receipt::lock(paths)?;
+    let mut latest = receipt::read(&receipt.path(paths))?;
+    acknowledge(&mut latest);
+    latest.save(paths)?;
+    if latest.phase == Phase::Acknowledged {
         crash_cut("after-ack");
     }
     Ok(())
+}
+
+pub(super) fn acknowledge(receipt: &mut Receipt) {
+    if receipt.phase == Phase::Committed
+        && receipt
+            .mappings
+            .iter()
+            .all(|mapping| mapping.ready || mapping.abandoned)
+    {
+        receipt.phase = Phase::Acknowledged;
+    }
 }

@@ -15,16 +15,9 @@ pub(crate) struct Placement {
     _runtime: Option<tokio::runtime::Runtime>,
 }
 
-#[derive(Clone, Copy)]
-enum Connection {
-    Qualification,
-    #[cfg(feature = "web")]
-    Import,
-}
-
 impl Placement {
     pub(crate) fn prepare(services: &Services, id: &str, workspace: &Path) -> CliResult<Self> {
-        Self::prepare_with(services, id, workspace, Connection::Qualification)
+        Self::qualify(services, id, workspace)
     }
 
     #[cfg(feature = "web")]
@@ -37,15 +30,43 @@ impl Placement {
                 "passive runner binding requires destination host custody",
             ));
         }
-        Self::prepare_with(services, id, workspace, Connection::Import)
+        if id == "local" {
+            return Ok(Self {
+                services: services.clone(),
+                _dialed: None,
+                _runtime: None,
+            });
+        }
+        let runner = services
+            .runners()
+            .services(id)
+            .map_err(refused)?
+            .ok_or_else(|| CliFailure::new("remote import requires a Ready registry connection"))?;
+        let client = services
+            .runners()
+            .client(id)
+            .ok_or_else(|| CliFailure::new("remote import requires the registry owned client"))?;
+        let path = workspace
+            .to_str()
+            .ok_or_else(|| CliFailure::new("runner workspace is not UTF-8"))?;
+        runner.runtime().block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(25),
+                client.workspace_validate(path, true),
+            )
+            .await
+            .map_err(|_| CliFailure::new("remote import workspace validation timed out"))?
+            .map_err(|error| CliFailure::new(format!("runner validation failed: {error:?}")))?
+            .map_err(|error| CliFailure::new(format!("runner workspace refused: {error:?}")))
+        })?;
+        Ok(Self {
+            services: services.with_upgrade_runner(id, workspace, runner, Some(client)),
+            _dialed: None,
+            _runtime: None,
+        })
     }
 
-    fn prepare_with(
-        services: &Services,
-        id: &str,
-        workspace: &Path,
-        connection: Connection,
-    ) -> CliResult<Self> {
+    fn qualify(services: &Services, id: &str, workspace: &Path) -> CliResult<Self> {
         if id == "local" {
             return Ok(Self {
                 services: services.clone(),
@@ -61,11 +82,7 @@ impl Placement {
             .map_err(|error| CliFailure::new(error.to_string()))?;
         let dialed = runtime.block_on(async {
             tokio::time::timeout(Duration::from_secs(25), async {
-                let dialed = match connection {
-                    Connection::Qualification => dial::qualify(services.paths()?, &remote.config.ssh, &remote.config.command).await?,
-                    #[cfg(feature = "web")]
-                    Connection::Import => dial::passive_import(services.paths()?, &remote.config.ssh, &remote.config.command).await?,
-                };
+                let dialed = dial::qualify(services.paths()?, &remote.config.ssh, &remote.config.command).await?;
                 if dialed.hello.runner_id != remote.id || dialed.hello.machine_id.as_deref() != Some(remote.pin.machine_id.as_str()) {
                     return Err(CliFailure::new("host_upgrade_runner_identity: re-pair the configured runner using the retained build"));
                 }
@@ -92,13 +109,8 @@ impl Placement {
         }
         let runner =
             plakous::runner::RunnerServices::new(Arc::new(backend), runtime.handle().clone());
-        let client = match connection {
-            Connection::Qualification => None,
-            #[cfg(feature = "web")]
-            Connection::Import => Some(dialed.client.clone()),
-        };
         Ok(Self {
-            services: services.with_upgrade_runner(id, workspace, runner, client),
+            services: services.with_upgrade_runner(id, workspace, runner, None),
             _dialed: Some(dialed),
             _runtime: Some(runtime),
         })
