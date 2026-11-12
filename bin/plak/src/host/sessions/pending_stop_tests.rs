@@ -2,6 +2,8 @@ use super::*;
 
 struct NoAdmission;
 
+mod scan_timing;
+
 #[test]
 fn child_handoff_selects_only_the_current_unarchived_head_without_root_intents() {
     use plakous_hosted::agent_tree_protocol::{SpawnAgentRequest, WriterMode};
@@ -55,6 +57,21 @@ fn child_handoff_selects_only_the_current_unarchived_head_without_root_intents()
     assert!(!continuation_owed(&services, &record.id).unwrap());
     assert!(continuation_owed(&services, &successor.id).unwrap());
     product.set_archived(&successor.id, true).unwrap();
+    assert_eq!(sessions.owed().unwrap(), Vec::<String>::new());
+    assert!(!continuation_owed(&services, &successor.id).unwrap());
+
+    // The prefilter deliberately leaves command facts to the canonical tree
+    // check: a later accepted turn invalidates automatic handoff continuation.
+    product.set_archived(&successor.id, false).unwrap();
+    let connection = rusqlite::Connection::open(paths.subagents_database()).unwrap();
+    connection.execute(
+        "INSERT INTO agent_commands(tree_id,command_id,recipient_agent_id,attempt_id,kind,canonical_text,message_ids,withdrawn,fact,turn_id,accepted_seq) VALUES (?1,'later-turn',?2,?3,'resume','continue','[]',0,'accepted','00000000-0000-0000-0000-000000000002',1000000)",
+        rusqlite::params![record.node.tree_id, child, tree.node(&child).unwrap().attempt_id.as_ref().unwrap().as_str()],
+    ).unwrap();
+    assert_eq!(
+        sessions.tree.handoff_candidate_tree_ids().unwrap(),
+        vec![record.node.tree_id]
+    );
     assert_eq!(sessions.owed().unwrap(), Vec::<String>::new());
     assert!(!continuation_owed(&services, &successor.id).unwrap());
 }

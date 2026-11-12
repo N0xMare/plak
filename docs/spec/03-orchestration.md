@@ -3680,6 +3680,13 @@ configuration and admission steps from `plakous-recursive-subagents-store`'s
 hint, version and objects); the refusal templates are shared. The product store
 already depends on that crate.
 
+The SQLite store's read-only handoff candidate query selects interrupted child
+attempts whose latest recorded interrupt is a handoff, without loading message
+or unrelated operation bodies, reopening trees, or taking custody. This is only
+a startup-scan prefilter: the current product-session head and the full tree's
+continuation authority (including command facts and turn limits) are rechecked
+before an open is owed. The query adds no persisted rows, schema, or indexes.
+
 ### 14.1 Reopen
 
 No live placement hold survives host loss. Reopen follows the ordinary Working

@@ -20,7 +20,7 @@ use plakous_hosted::host_service::AttachmentCount;
 use plakous_hosted::host_service::wire::{Created, HostSessions, OpenedSession, session_root_of};
 use plakous_hosted::runtime::{IDLE_RELEASE, IdleRelease, RootStanding, spawn_host_worker};
 use plakous_recursive_subagents::tree::{
-    ContinuationCause, LossContinuationState, ProductAgentTree, TreeStore, holder_elsewhere,
+    ContinuationCause, LossContinuationState, ProductAgentTree, holder_elsewhere,
 };
 use plakous_recursive_subagents_store::{SqliteTreeStore, TreeInspection};
 
@@ -340,13 +340,12 @@ impl ProductSessions {
         let paths = self.services.paths()?;
         for tree_id in self
             .tree
-            .ids()
+            .handoff_candidate_tree_ids()
             .map_err(|error| CliFailure::new(error.detail))?
         {
-            if child_handoff_owed(paths, &tree_id)?
-                && let Some(session) = self
-                    .with_product(|product| product.head_of_tree(&tree_id))
-                    .map_err(CliFailure::new)?
+            if let Some(session) = self
+                .with_product(|product| product.head_of_tree(&tree_id))
+                .map_err(CliFailure::new)?
             {
                 entries.push(session);
             }

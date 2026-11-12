@@ -55,6 +55,48 @@ impl SqliteTreeStore {
         SubagentsDatabase::inspect_tree(database, tree_id)
     }
 
+    /// Trees with an interrupted child's current running attempt whose
+    /// latest interrupt records a handoff. Reads only candidate rows, without
+    /// loading message bodies, reopening trees, or taking custody.
+    ///
+    /// This is a prefilter, not continuation authority: callers must inspect
+    /// each candidate's full tree to check turn limits and continuation command
+    /// facts before deciding it owes an open. No candidate is admitted here.
+    ///
+    /// # Errors
+    ///
+    /// The store cannot be read or a returned tree identity is invalid.
+    pub fn handoff_candidate_tree_ids(&self) -> Result<Vec<String>, TreeStoreError> {
+        self.with_database(|database| {
+            let mut statement = database
+                .connection
+                .prepare(
+                    "SELECT DISTINCT n.tree_id
+                 FROM agent_nodes n
+                 JOIN agent_attempts a ON a.tree_id=n.tree_id AND a.attempt_id=n.attempt_id
+                 WHERE n.parent_agent_id IS NOT NULL AND n.status='interrupted'
+                   AND a.status='running'
+                   AND (SELECT json_extract(o.canonical_request, '$.decision.Interrupt.cause')
+                        FROM agent_operations o
+                        WHERE o.tree_id=n.tree_id AND o.caller_agent_id=n.agent_id
+                          AND o.tool_name='interrupt' AND json_valid(o.canonical_request)
+                          AND json_extract(o.canonical_request, '$.attempt_id')=n.attempt_id
+                          AND json_type(o.canonical_request, '$.decision.Interrupt')='object'
+                        ORDER BY o.fold_anchor DESC, o.fold_order DESC, o.operation_id DESC
+                        LIMIT 1)='handoff'
+                 ORDER BY n.tree_id",
+                )
+                .map_err(|_| TreeStoreError::unavailable("could not query handoff candidates"))?;
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|_| TreeStoreError::unavailable("could not query handoff candidates"))?;
+            rows.map(|row| {
+                row.map_err(|_| TreeStoreError::corrupt("agent tree identity is invalid"))
+            })
+            .collect()
+        })
+    }
+
     /// Opens `database`, creating and versioning it when it is new.
     pub fn open(database: &Path) -> Result<Self, OpenError> {
         let mut writers = WRITERS
