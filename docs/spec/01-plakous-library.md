@@ -6073,6 +6073,27 @@ the session's current job owner (§8.5), not from an owner a joined process
 service stored when it started. `LineOwner` lives in `plakous-tools`; it never
 enters `plakous-model`.
 
+**Operator terminal wire.** Protocol 6 adds `OperatorControl { namespace, control_id }`,
+with no `LineOwner`. The authenticated paired connection supplies host id and host
+process generation; namespace adds state key and principal. Terminal identity adds
+session, node and a client-generated terminal id. Inspecting connections cannot use it.
+Fixed verbs are `operator.namespace.renew`, `operator.namespace.close`, and
+`operator.terminal.open`, `.list`, `.attach`, `.resize`, `.close`; the typed operation
+must match its verb. `operator-pty` is advertised only with an explicit runner-owned
+workspace policy. These are not model tools, tree operations, agent jobs, promoted
+processes or line controls. The client handshake is unchanged by this runner increment.
+
+The validating codec bounds identity components to 128 bytes and dimensions to rows
+1..=500, columns 1..=1000. Open accepts a workspace and dimensions, never a bootstrap
+command or browser environment. Attach takes an instance-qualified output cursor and
+never spawns. Stream envelopes retain gap-free directional sequence numbers; terminal
+Data payloads carry `{terminal_event:"data", offset, bytes_b64}`, strict RFC 4648 base64,
+at most 16 KiB decoded. Input acceptance is queue admission, not command execution;
+input-accepted, output-gap and exit are separate typed terminal events, never agent
+observations. Byte credit is capped at 64 KiB outstanding. Ambiguous input is never
+replayed; an ambiguous open resolves only from the same instance's reservation and
+matching digest, never by spawning a replacement after a missing receipt.
+
 **Runner protocol v6.** `plakous-runner-protocol` defines what a host and a
 runner say to each other over one byte stream, and `plakous-runner` implements
 both ends over an `ExecutionEnvironment` and joins them in process as a

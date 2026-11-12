@@ -55,6 +55,8 @@ pub mod verbs {
 /// family only when the runner advertised it; anything else is answered
 /// [`Refusal::Unsupported`].
 pub mod capabilities {
+    /// Independent operator-only interactive shells, with no agent line owner.
+    pub const OPERATOR_PTY: &str = "operator-pty";
     /// The fixed request/response workspace and process verbs.
     pub const WORKSPACE_VERBS: &str = "workspace-verbs";
     /// Process sessions and job control on the owner's line, and services
@@ -134,6 +136,13 @@ pub struct Bind {
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(tag = "class", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestClass {
+    /// Operator terminal control, independent of agent line authority.
+    OperatorControl {
+        /// Principal-private namespace; Bind supplies host id and generation.
+        namespace: crate::operator::OperatorNamespace,
+        /// Caller-generated control identity.
+        control_id: crate::operator::OperatorId,
+    },
     /// One model tool call: effect verbs are keyed by the owner's line, the
     /// call and its attempt, and run at most once per key. Read verbs keep
     /// the owner fence but are never recorded.

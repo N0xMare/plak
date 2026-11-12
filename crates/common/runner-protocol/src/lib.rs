@@ -1,4 +1,4 @@
-//! Runner protocol, version 5: what a Plakous host and a runner say to each
+//! Runner protocol, version 6: what a Plakous host and a runner say to each
 //! other over one byte stream (spec 01 §8.4).
 //!
 //! A connection carries length-prefixed JSON frames ([`frame`]). The runner
@@ -15,6 +15,7 @@
 
 pub mod frame;
 mod message;
+pub mod operator;
 mod owner;
 
 pub use message::{

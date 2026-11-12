@@ -40,6 +40,7 @@ fn version() -> VersionTriple {
 /// Names each variant, so a new one fails to compile until it has a sample.
 const fn class_variant(class: &RequestClass) -> &'static str {
     match class {
+        RequestClass::OperatorControl { .. } => "operator_control",
         RequestClass::EffectCall { .. } => "effect_call",
         RequestClass::BuildRead => "build_read",
         RequestClass::ProcessObservation { .. } => "process_observation",
@@ -128,6 +129,13 @@ fn stream(event: StreamEvent) -> StreamFrame {
 
 fn classes() -> Vec<RequestClass> {
     vec![
+        RequestClass::OperatorControl {
+            namespace: crate::operator::OperatorNamespace {
+                state_key: crate::operator::OperatorId::try_from("state".to_owned()).unwrap(),
+                principal: crate::operator::OperatorId::try_from("principal".to_owned()).unwrap(),
+            },
+            control_id: crate::operator::OperatorId::try_from("control".to_owned()).unwrap(),
+        },
         RequestClass::EffectCall {
             call_id: "call".into(),
             attempt_id: "attempt".into(),
@@ -302,7 +310,7 @@ fn encoded() -> String {
     };
     assert_eq!(named(hosts.iter().map(host_variant).collect()), 9);
     assert_eq!(named(runners.iter().map(runner_variant).collect()), 15);
-    assert_eq!(named(classes().iter().map(class_variant).collect()), 5);
+    assert_eq!(named(classes().iter().map(class_variant).collect()), 6);
     assert_eq!(named(events().iter().map(event_variant).collect()), 3);
     assert_eq!(named(refusals().iter().map(refusal_variant).collect()), 7);
     let mut lines: Vec<Value> = Vec::new();
@@ -324,7 +332,8 @@ fn encoded() -> String {
         verbs::JOBS_SNAPSHOT, verbs::JOBS_STOP, verbs::JOBS_DISOWN, verbs::JOBS_WATCH,
         verbs::SERVICE_SPAWN, verbs::SERVICE_TERMINATE,
     ]}));
-    lines.push(json!({"capabilities": [capabilities::WORKSPACE_VERBS, capabilities::STREAMS]}));
+    lines.push(json!({"capabilities": [capabilities::WORKSPACE_VERBS, capabilities::STREAMS, capabilities::OPERATOR_PTY]}));
+    lines.push(json!({"operator_verbs": crate::operator::VERBS}));
     let mut text = String::new();
     for line in lines {
         text.push_str(&line.to_string());

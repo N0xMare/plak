@@ -82,6 +82,10 @@ one cross-build carrier (a build imports its own and the previous version).
 - Add protocol-8 saved-workspace Files and Changes inspection with exact byte pages, contained execution and bounded operator admission.
 - Include exact-account last settled credential-refresh outcome and time in protocol-8 account status reads.
 
+- Add a separate operator-terminal runner protocol with validated namespace,
+  terminal identity, dimensions and raw-byte stream vocabulary. Runner protocol
+  6 is an exact-version cut; the product client handshake is unchanged.
+
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.
   Profile switches keep their recorded attachable root address, and a late
