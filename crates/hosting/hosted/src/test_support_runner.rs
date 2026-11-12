@@ -1,6 +1,6 @@
 //! Explicit owner-transfer and recorded-stop crash boundaries for gate builds.
 //!
-//! A gate build (`test-support`) names one [`HostCut`] in
+//! A gate build (`test-support`) names one `HostCut` in
 //! `PLAK_TEST_HOST_READOPT_CUT`; a name that is no cut aborts the host rather
 //! than never firing. Without `test-support` nothing reads the variable and no
 //! cut fires.
