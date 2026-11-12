@@ -161,7 +161,7 @@ impl Worker {
         drop(pair.slave);
         let identity = child
             .process_id()
-            .and_then(|pid| Identity::capture(pid).ok());
+            .and_then(|pid| Identity::capture_child(pid).ok());
         let mut worker = Self {
             master: Some(pair.master),
             io: Some(io),

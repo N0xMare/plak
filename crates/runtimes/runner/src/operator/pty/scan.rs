@@ -33,9 +33,24 @@ pub(super) struct Identity {
     pub(super) session: String,
     pub(super) started: String,
     pub(super) zombie: bool,
+    owned_child: bool,
 }
 
 impl Identity {
+    pub(super) fn capture_child(pid: u32) -> Result<Self, ()> {
+        let mut row = Self::capture(pid)?;
+        if cfg!(target_os = "macos") && row.zombie && row.session.is_empty() && child_exited(pid) {
+            // Successful PTY spawn already completed setsid before exec. Darwin
+            // no longer exposes that SID through getsid once the child is a zombie.
+            row.session = pid.to_string();
+            row.group = pid;
+        }
+        if row.session != pid.to_string() || row.group != pid {
+            return Err(());
+        }
+        row.owned_child = true;
+        Ok(row)
+    }
     pub(super) fn capture(pid: u32) -> Result<Self, ()> {
         let deadline = Instant::now() + Duration::from_millis(500);
         loop {
@@ -148,13 +163,7 @@ impl SessionCleanup {
         self.observe(rows);
         // A PTY child is its own session leader. Never accept the runner's SID,
         // a ps sess pointer, or a reused leader as process-group kill authority.
-        if self.leader.session != self.leader.pid.to_string()
-            || !rows.iter().any(|row| {
-                row.pid == self.leader.pid
-                    && row.started == self.leader.started
-                    && row.session == self.leader.session
-            })
-        {
+        if !self.leader_anchored(rows) {
             return false;
         }
         let groups: HashSet<_> = rows
@@ -165,25 +174,39 @@ impl SessionCleanup {
         for group in groups {
             // Validate *all* members against this same fresh complete scan before
             // each group signal. No group without a leader-SID match is signalled.
-            if rows
-                .iter()
-                .any(|row| row.group == group && row.session != self.leader.session)
-            {
+            if rows.iter().any(|row| {
+                row.group == group
+                    && row.session != self.leader.session
+                    && (!cfg!(target_os = "macos") || !row.zombie)
+            }) {
                 return false;
             }
-            let Some(member) = rows.iter().find(|row| row.group == group && !row.zombie) else {
+            let mut validated = false;
+            for member in rows.iter().filter(|row| row.group == group && !row.zombie) {
+                let Some(pid) = i32::try_from(member.pid)
+                    .ok()
+                    .and_then(rustix::process::Pid::from_raw)
+                else {
+                    return false;
+                };
+                match rustix::process::getsid(Some(pid)) {
+                    Ok(sid) if sid.as_raw_nonzero().get().to_string() == self.leader.session => {}
+                    Err(rustix::io::Errno::SRCH) => continue,
+                    _ => return false,
+                }
+                let Some(expected) = i32::try_from(group)
+                    .ok()
+                    .and_then(rustix::process::Pid::from_raw)
+                else {
+                    return false;
+                };
+                if rustix::process::getpgid(Some(pid)) != Ok(expected) {
+                    continue;
+                }
+                validated = true;
+            }
+            if !validated {
                 continue;
-            };
-            let Some(pid) = i32::try_from(member.pid)
-                .ok()
-                .and_then(rustix::process::Pid::from_raw)
-            else {
-                return false;
-            };
-            match rustix::process::getsid(Some(pid)) {
-                Ok(sid) if sid.as_raw_nonzero().get().to_string() == self.leader.session => {}
-                Err(rustix::io::Errno::SRCH) => continue,
-                _ => return false,
             }
             let Some(group) = i32::try_from(group)
                 .ok()
@@ -191,9 +214,6 @@ impl SessionCleanup {
             else {
                 return false;
             };
-            if rustix::process::getpgid(Some(pid)) != Ok(group) {
-                continue;
-            }
             if let Err(error) = rustix::process::kill_process_group(group, signal)
                 && error != rustix::io::Errno::SRCH
             {
@@ -201,6 +221,23 @@ impl SessionCleanup {
             }
         }
         true
+    }
+
+    pub(super) fn leader_anchored(&self, rows: &[Identity]) -> bool {
+        if self.leader.session != self.leader.pid.to_string() {
+            return false;
+        }
+        if let Some(row) = rows.iter().find(|row| row.pid == self.leader.pid) {
+            if row.started != self.leader.started {
+                return false;
+            }
+            if row.session == self.leader.session {
+                return true;
+            }
+        }
+        // Linux still requires its original full SID/start scan match. Only
+        // Darwin may use the *unreaped direct child* when getsid returns ESRCH.
+        cfg!(target_os = "macos") && self.leader.owned_child && child_exited(self.leader.pid)
     }
 
     pub(super) fn reprove(&mut self) -> bool {
@@ -259,6 +296,22 @@ fn complete_scan(deadline: Instant) -> Option<Vec<Identity>> {
     None
 }
 
+pub(super) fn child_exited(pid: u32) -> bool {
+    let Some(pid) = i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    else {
+        return false;
+    };
+    rustix::process::waitid(
+        rustix::process::WaitId::Pid(pid),
+        rustix::process::WaitIdOptions::EXITED
+            | rustix::process::WaitIdOptions::NOHANG
+            | rustix::process::WaitIdOptions::NOWAIT,
+    )
+    .is_ok_and(|status| status.is_some())
+}
+
 #[cfg(target_os = "linux")]
 pub(super) fn scan() -> Result<Vec<Identity>, ()> {
     let deadline = Instant::now() + Duration::from_secs(1);
@@ -308,6 +361,7 @@ fn parse_stat(pid: u32, text: &str) -> Result<Identity, ()> {
         session: fields[3].into(),
         started: fields[19].into(),
         zombie: fields[0] == "Z",
+        owned_child: false,
     })
 }
 
@@ -357,6 +411,7 @@ pub(super) fn scan() -> Result<Vec<Identity>, ()> {
             // Darwin's ps `sess` is not the POSIX session id (it may be 0).
             let session = match rustix::process::getsid(Some(pid_arg)) {
                 Ok(session) => session.as_raw_nonzero().get().to_string(),
+                Err(rustix::io::Errno::SRCH) if f[3].starts_with('Z') => String::new(),
                 Err(rustix::io::Errno::SRCH) => continue,
                 Err(_) => return Err(()),
             };
@@ -369,6 +424,7 @@ pub(super) fn scan() -> Result<Vec<Identity>, ()> {
                 // lstart has only one-second resolution on macOS. An unreaped
                 // direct-child leader, not this timestamp alone, anchors signals.
                 started: f[4..].join(" "),
+                owned_child: false,
             });
         }
         Ok(rows)
@@ -401,6 +457,7 @@ mod tests {
             session: session.into(),
             started: format!("start-{pid}"),
             zombie: false,
+            owned_child: false,
         }
     }
 

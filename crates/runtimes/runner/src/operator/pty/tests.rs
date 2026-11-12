@@ -104,6 +104,36 @@ fn operator_pty_platform_scan_distinguishes_runner_and_child_sessions() {
 }
 
 #[test]
+fn operator_pty_zombie_anchor_keeps_linux_scan_and_checks_unreaped_child_on_darwin() {
+    let pair = native_pty_system()
+        .openpty(size(TerminalDimensions::new(24, 80).unwrap()))
+        .unwrap();
+    let mut command = CommandBuilder::new("/bin/sleep");
+    command.arg("0.01");
+    let mut child = pair.slave.spawn_command(command).unwrap();
+    let identity = Identity::capture_child(child.process_id().unwrap()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !scan::child_exited(identity.pid) {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let cleanup = SessionCleanup::new(identity.clone());
+    assert_eq!(
+        cleanup.leader_anchored(&[]),
+        cfg!(target_os = "macos"),
+        "only Darwin uses a missing live-SID row's unreaped child anchor"
+    );
+    let mut reused = identity;
+    reused.started = "different-start".into();
+    assert!(
+        !cleanup.leader_anchored(&[reused]),
+        "a timestamp mismatch is never accepted as the old child"
+    );
+    drop(pair);
+    child.wait().unwrap();
+}
+
+#[test]
 fn operator_pty_env_has_exact_curated_keys_without_inherited_secrets() {
     let directory = tempfile::tempdir().unwrap();
     for ceiling in [false, true] {
@@ -132,6 +162,14 @@ fn operator_pty_env_has_exact_curated_keys_without_inherited_secrets() {
             expected.insert("GIT_CEILING_DIRECTORIES");
         }
         assert_eq!(keys, expected);
+        worker.io.take();
+        worker.master.take();
+        let mut cleanup = SessionCleanup::new(worker.identity.clone().unwrap());
+        assert!(
+            cleanup.finish(|| worker.child.try_wait().ok().flatten().is_some()),
+            "fast env child must retain cleanup authority until reaped"
+        );
+        worker.cleaned = true;
     }
 }
 
@@ -277,11 +315,12 @@ fn operator_pty_close_kills_background_stopped_and_foreground_job_groups() {
         .unwrap()
         .to_string_lossy()
         .replace('\'', "'\\''");
-    let input = format!(
-        "trap '' HUP TERM; sleep 600 & sleep 600 & kill -STOP $!; echo GROUPS-READY; '{executable}' --exact operator::pty::tests::operator_pty_child --ignored --nocapture\n"
-    );
+    std::fs::write(directory.path().join("jobs.sh"), format!(
+        "case ${{BASH_VERSION-}} in '') ;; *) set +H ;; esac\ntrap '' HUP TERM\nsleep 600 &\nsleep 600 &\nkill -STOP \"$!\"\necho GROUPS-READY\n'{executable}' --exact operator::pty::tests::operator_pty_child --ignored --nocapture\n"
+    )).unwrap();
+    let input = ". ./jobs.sh\n";
     worker
-        .io_round(&mut VecDeque::from(input.into_bytes()))
+        .io_round(&mut VecDeque::from(input.as_bytes().to_vec()))
         .unwrap();
     until_output(&mut worker, b"GROUPS-READY\r\n");
     until_output(&mut worker, b"\x1b[?1049hPTY-READY\n");

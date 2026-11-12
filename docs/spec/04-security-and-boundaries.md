@@ -792,6 +792,14 @@ the runner's session against a fresh independent PTY child and disables the
 operator capability if isolation cannot be verified. Before each group signal,
 one complete fresh scan must put every group member in the anchored leader's
 session; current kernel session/group membership is checked again. Each stage
+checks every live member before signaling a deduplicated group. Darwin may
+return ESRCH for an unreaped zombie's getsid: only a PTY child whose successful
+spawn established SID/PGID equal to its PID may retain the direct-child anchor,
+confirmed with waitid(WNOWAIT). Such a zombie is never used as live group
+membership evidence. A changed start identity still refuses, and Linux retains
+its full scanned SID/start match with no missing-row fallback. Fast-exiting PTY
+children use this same unreaped-child capture, rather than losing ownership
+before their first scan. Each stage
 deduplicates groups. KILL repeats for newly forked members before reaping the
 leader and proving absence twice. Live observation failures retry without
 closing shells; incomplete cleanup scans retry within the cleanup deadline,

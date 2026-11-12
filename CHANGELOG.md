@@ -94,6 +94,8 @@ one cross-build carrier (a build imports its own and the previous version).
   failures never close live shells. Unknown termination supports fresh absence
   proof or explicit acknowledged loss with surviving identities. Completed
   receipts and retired namespaces are collected behind bounded replay fences.
+  Darwin retains an owned zombie's unreaped-child anchor without treating it as
+  live session membership; fast-exiting children retain cleanup authority.
 
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.

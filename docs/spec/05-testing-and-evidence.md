@@ -42,6 +42,12 @@ re-proofs distinguish later absence from explicit acknowledged loss with live
 escapees. A fast double-fork case records the non-containment residual. The
 platform scan test compares the runner's own kernel session id against a fresh
 PTY child's before platform cleanup qualification. Injected observation failures
+must leave a shell running. A zombie-anchor regression keeps Linux's full scan
+requirement while checking Darwin's unreaped direct-child fallback and rejection
+of changed start identity. The fast-exit environment fixture also requires cleanup
+proof; job-control commands run from a short sourced script, disabling Bash
+history expansion before any job-id expansion rather than relying on shell-specific
+interactive parsing. Injected observation failures
 must leave a shell running. Tests read the exact curated environment from `env`,
 validate passwd/fallback shell selection, bound output before cursor advancement,
 collect more than 65 closed receipts without replay, and fence more than 129
