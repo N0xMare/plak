@@ -10,7 +10,6 @@ const NON_VIEWS: &[&str] = &[
     "host_intents",
     "identity_bindings",
     "operator_notices",
-    "operator_terminal_pins",
     "product_schema",
     "prompt_history",
     "queue_attachments",

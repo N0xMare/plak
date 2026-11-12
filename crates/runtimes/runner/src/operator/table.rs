@@ -24,6 +24,13 @@ impl OperatorTerminalService {
         self.tick();
         let now = (self.inner.clock)();
         let mut table = lock(&self.inner.table);
+        match &operation {
+            OperatorOperation::Inventory => return self.inventory(&table, &key),
+            OperatorOperation::Reclaim { workspace } => {
+                return Self::reclaim_stream(&mut table, key, connection, workspace);
+            }
+            _ => {}
+        }
         if let Some(answer) = self.retire(&mut table, &key, connection, &operation, now) {
             return answer;
         }

@@ -24,7 +24,7 @@ use sessions::{
     SessionWorkflowKind, StoreBaseline, digest_parts,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 38;
+pub(crate) const SCHEMA_VERSION: i64 = 37;
 const MAX_LIST_SESSIONS_SQL: i64 = 500;
 const MAX_LIST_PROMPTS_SQL: i64 = 500;
 const MAX_LIST_PROMPT_BYTES: usize = 1024 * 1024;
@@ -713,13 +713,6 @@ impl ProductStore {
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| String::from(write_refusal(error)))?;
-        let terminal_pinned: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM operator_terminal_pins WHERE json_extract(record,'$.key.session')=?1)",
-            [id], |row| row.get(0),
-        ).map_err(|_| "terminal session pin unavailable")?;
-        if terminal_pinned {
-            return Err("operator_terminal retains the session".into());
-        }
         let deleted = transaction
             .execute(
                 "DELETE FROM sessions WHERE id = ?1 AND revision = ?2",
@@ -1393,10 +1386,6 @@ fn from_i64(v: i64) -> rusqlite::Result<u64> {
 
 const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     (
-        "operator_terminal_pins",
-        "CREATE TABLE operator_terminal_pins(identity TEXT PRIMARY KEY,record TEXT NOT NULL CHECK(json_valid(record)))",
-    ),
-    (
         "product_schema",
         "CREATE TABLE product_schema(singleton INTEGER PRIMARY KEY CHECK(singleton=1),instance_id TEXT NOT NULL UNIQUE,fingerprint TEXT NOT NULL)",
     ),
@@ -1504,7 +1493,6 @@ pub mod directory;
 /// Who holds a session another process has open.
 pub mod holders;
 mod lifecycle;
-pub(crate) mod terminal_pins;
 #[cfg(test)]
 pub(crate) use lifecycle::crash_cut as lifecycle_crash_cut;
 /// The product's SQLite implementation of the hosted session-record port.

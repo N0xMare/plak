@@ -15,6 +15,7 @@ mod home;
 #[cfg(feature = "web")]
 pub(crate) mod local;
 mod operator;
+pub(crate) use operator::{LocalReclamation, local_reclamation};
 pub(crate) mod ownership;
 pub(crate) mod registry;
 pub(crate) mod services;

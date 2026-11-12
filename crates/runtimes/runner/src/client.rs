@@ -30,7 +30,7 @@ use crate::streams::{
 };
 
 mod operator;
-pub use operator::OperatorTerminalStream;
+pub use operator::{OperatorReclamationGuard, OperatorTerminalStream};
 mod wire;
 pub(crate) use wire::digest;
 use wire::wire_owner;

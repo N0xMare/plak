@@ -22,12 +22,13 @@ one cross-build carrier (a build imports its own and the previous version).
   draft-reservation hold for deterministic host-client recovery and same-ID
   pending-admission tests. Default and maintainer behavior is unchanged.
 
-- Retain operator-terminal workspace pins across host loss, with authenticated
-  single controllers, residency holds, first-bind cleanup barriers and joined
-  namespace shutdown. Product schema 38 reserves pins durably before spawn and
-  releases them only after cleanup proof or explicit owner loss acknowledgment.
-  Session deletion and actual workspace removal/trim cannot race pinned opens.
-  Host-internal APIs add no client requests; client protocol remains 7.
+- Keep operator-terminal authority process-local on the runner and home-local
+  daemon. The private host registry discovers surviving pin inventory on first
+  bind, retains resident holds and authenticated controllers, and joins shutdown.
+  Runner-owned leases guard workspace removal/trim; precise lost-instance pins
+  remain while host memory survives. Simultaneous host/runner loss is unlocalized
+  unknown loss, not cleanup proof. Product schema stays 37 and the state key is
+  unchanged. Host-internal APIs add no client requests; client protocol remains 7.
 
 - Fixed native-client exits losing `bye`: last-handle drop now waits up to two
   seconds for the sole writer to drain and finish, even after explicit goodbye.

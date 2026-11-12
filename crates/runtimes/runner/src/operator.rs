@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use base64::engine::general_purpose::STANDARD;
 use plakous_runner_protocol::operator::{
     OperatorAnswer, OperatorId, OperatorNamespace, OperatorOperation, OperatorRefusal,
-    TerminalCursor, TerminalDimensions, TerminalEvent, TerminalKey, TerminalProcessIdentity,
-    TerminalRow, TerminalStatus,
+    TerminalCursor, TerminalDimensions, TerminalEvent, TerminalKey, TerminalPin,
+    TerminalProcessIdentity, TerminalRow, TerminalStatus,
 };
 
 #[cfg(unix)]
@@ -17,6 +17,7 @@ mod pty;
 #[cfg(unix)]
 pub use pty::account_launch;
 mod collection;
+mod inventory;
 mod stream;
 mod table;
 #[cfg(test)]
@@ -93,6 +94,7 @@ struct Namespace {
 }
 
 struct Table {
+    leases: HashMap<u64, ReclamationLease>,
     scopes: HashMap<(String, OperatorId), collection::Generations>,
     namespaces: HashMap<NamespaceKey, Namespace>,
     next_stream: u64,
@@ -103,6 +105,7 @@ struct Table {
 impl Default for Table {
     fn default() -> Self {
         Self {
+            leases: HashMap::new(),
             scopes: HashMap::new(),
             namespaces: HashMap::new(),
             next_stream: 1 << 63,
@@ -357,7 +360,9 @@ impl OperatorTerminalService {
     /// Detaches only this connection's controllers; shells retain bounded lifetime.
     pub fn disconnect(&self, host: &str, connection: u64) {
         let now = (self.inner.clock)();
-        for (key, namespace) in &mut lock(&self.inner.table).namespaces {
+        let mut table = lock(&self.inner.table);
+        table.release_leases(host, connection);
+        for (key, namespace) in &mut table.namespaces {
             if key.host != host {
                 continue;
             }
@@ -378,10 +383,12 @@ impl OperatorTerminalService {
     #[must_use]
     pub fn has_live_terminals(&self) -> bool {
         self.tick();
-        lock(&self.inner.table)
-            .namespaces
-            .values()
-            .any(|ns| ns.terminals.values().any(Terminal::pinned))
+        let table = lock(&self.inner.table);
+        !table.leases.is_empty()
+            || table
+                .namespaces
+                .values()
+                .any(|ns| ns.terminals.values().any(Terminal::pinned))
     }
 
     /// A pin includes descendant copies and unknown termination. Call under host
@@ -428,6 +435,37 @@ impl OperatorTerminalService {
             for terminal in ns.terminals.values_mut() {
                 terminal.close();
             }
+        }
+    }
+}
+
+struct ReclamationLease {
+    host: String,
+    generation: String,
+    connection: u64,
+    workspace: PathBuf,
+}
+
+impl Table {
+    fn release_lease(&mut self, stream: u64) {
+        if let Some(lease) = self.leases.remove(&stream)
+            && let Some(count) = self.reclaiming.get_mut(&lease.workspace)
+        {
+            *count -= 1;
+            if *count == 0 {
+                self.reclaiming.remove(&lease.workspace);
+            }
+        }
+    }
+    fn release_leases(&mut self, host: &str, connection: u64) {
+        let streams: Vec<_> = self
+            .leases
+            .iter()
+            .filter(|(_, lease)| lease.host == host && lease.connection == connection)
+            .map(|(stream, _)| *stream)
+            .collect();
+        for stream in streams {
+            self.release_lease(stream);
         }
     }
 }

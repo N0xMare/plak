@@ -1,13 +1,11 @@
 //! Open reservations and VCS admission share one exclusion through the real future.
 
 use super::{
-    Arc, Entry, Mutex, Path, PathBuf, PoisonError, ReclamationAdmission, ReclamationFence,
-    ResidencyHold, State, TerminalError, TerminalPin, TerminalRegistry, TerminalRow,
-    TerminalStatus, VcsError, overlaps,
+    Arc, Entry, Mutex, Path, PathBuf, PoisonError, ReclamationAdmission, ResidencyHold, State,
+    TerminalError, TerminalPin, TerminalRegistry, TerminalRow, TerminalStatus, VcsError, overlaps,
 };
 
 struct Reclaiming {
-    _file: crate::store::terminal_pins::TerminalPinGuard,
     state: Arc<Mutex<State>>,
     key: (String, PathBuf),
 }
@@ -25,15 +23,17 @@ impl Drop for Reclaiming {
 }
 
 pub(super) fn physical(runner: &str, path: &Path) -> Result<PathBuf, TerminalError> {
-    crate::store::terminal_pins::physical(runner, path).map_err(|_| TerminalError::Unavailable)
+    super::placement::physical(runner, path).map_err(|_| TerminalError::Unavailable)
 }
 
-impl ReclamationFence for TerminalRegistry {
-    fn admit(&self, runner: &str, path: &Path) -> Result<Box<dyn ReclamationAdmission>, VcsError> {
+impl TerminalRegistry {
+    pub(super) fn admit_local(
+        &self,
+        runner: &str,
+        path: &Path,
+    ) -> Result<Box<dyn ReclamationAdmission>, VcsError> {
         let unavailable = || VcsError::mint_unavailable("operator terminal retains workspace");
         let path = physical(runner, path).map_err(|_| unavailable())?;
-        let file = crate::store::terminal_pins::TerminalPinGuard::take(&self.paths)
-            .map_err(|_| unavailable())?;
         let mut state = self.lock();
         if state.entries.values().any(|entry| {
             entry.pinned
@@ -47,7 +47,6 @@ impl ReclamationFence for TerminalRegistry {
         let key = (runner.to_owned(), path);
         *state.reclaiming.entry(key.clone()).or_default() += 1;
         Ok(Box::new(Reclaiming {
-            _file: file,
             state: self.state.clone(),
             key,
         }))
@@ -60,8 +59,9 @@ impl TerminalRegistry {
         session: &str,
         count: &plakous_hosted::host_service::AttachmentCount,
     ) -> Result<(), String> {
-        for entry in self
-            .lock()
+        let mut state = self.lock();
+        state.residents.insert(session.to_owned(), count.clone());
+        for entry in state
             .entries
             .values_mut()
             .filter(|entry| entry.pinned && entry.pin.key.session.as_str() == session)
@@ -79,8 +79,6 @@ impl TerminalRegistry {
         hold: ResidencyHold,
     ) -> Result<String, TerminalError> {
         let identity = pin.identity().map_err(|_| TerminalError::Conflict)?;
-        let _file = crate::store::terminal_pins::TerminalPinGuard::take(&self.paths)
-            .map_err(|_| TerminalError::Busy)?;
         let mut state = self.lock();
         if state.closing || state.entries.len() >= 1024 || state.entries.contains_key(&identity) {
             return Err(TerminalError::Busy);
@@ -92,10 +90,6 @@ impl TerminalRegistry {
         {
             return Err(TerminalError::Busy);
         }
-        // The FULL commit precedes spawn. Failure leaves no admitted child effect.
-        self.store()?
-            .reserve_terminal(&pin)
-            .map_err(|_| TerminalError::Storage)?;
         state.entries.insert(
             identity.clone(),
             Entry {

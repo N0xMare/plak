@@ -2,7 +2,7 @@
 
 use super::{
     Arc, Binding, OperatorAnswer, OperatorOperation, OperatorRefusal, RunnerClient, TerminalError,
-    TerminalPin, TerminalRegistry, TerminalRow, TerminalStatus, id,
+    TerminalRegistry, TerminalRow, TerminalStatus, id,
 };
 
 impl TerminalRegistry {
@@ -77,46 +77,24 @@ impl TerminalRegistry {
             }
             state.bindings.insert(runner.to_owned(), binding.clone());
         }
-        let pins: Vec<_> = self
-            .lock()
-            .entries
-            .iter()
-            .filter(|(_, entry)| entry.pinned && entry.pin.runner == runner)
-            .map(|(identity, entry)| (identity.clone(), entry.pin.clone()))
-            .collect();
-        let mut namespaces = Vec::new();
-        for (_, pin) in &pins {
-            if !namespaces.contains(&pin.namespace) {
-                namespaces.push(pin.namespace.clone());
-            }
-        }
-        let mut unresolved = false;
+        let namespaces = self.synchronize_inventory(runner, &binding).await?;
+        Self::namespace_table(
+            &binding,
+            super::OperatorNamespace {
+                state_key: self.state_key.clone(),
+                principal: id("host-inventory".into())?,
+            },
+        )
+        .await?;
         for namespace in namespaces {
-            let table = Self::namespace_table(&binding, namespace.clone()).await?;
-            for (identity, pin) in pins.iter().filter(|(_, pin)| pin.namespace == namespace) {
-                if pin.instance != client.instance() {
-                    self.mark_lost(identity);
-                    unresolved = true;
-                    continue;
-                }
-                if pin.generation != self.runner_generation {
-                    unresolved |= !self
-                        .retire_pin(&binding, identity, pin, table.is_some())
-                        .await?;
-                } else if let Some(row) = table
-                    .as_ref()
-                    .and_then(|rows| rows.iter().find(|row| row.key == pin.key))
-                {
-                    self.observe(identity, row.clone())?;
-                } else {
-                    self.mark_lost(identity);
-                    unresolved = true;
-                }
+            if let Some(rows) = Self::namespace_table(&binding, namespace.clone()).await? {
+                self.observe_table(runner, &namespace, rows)?;
             }
         }
-        if unresolved {
-            return Err(TerminalError::Unavailable);
-        }
+        self.clean_discovered(runner, &binding).await?;
+        self.synchronize_inventory(runner, &binding).await?;
+        self.refresh_completed_rows(runner, &binding).await;
+        // Retained lost pins fence their own workspaces, not unrelated work.
         self.lock().bindings.insert(
             runner.to_owned(),
             Binding {
@@ -145,39 +123,6 @@ impl TerminalRegistry {
             _ => return Err(TerminalError::Unavailable),
         };
         Ok(table)
-    }
-
-    async fn retire_pin(
-        &self,
-        binding: &Binding,
-        identity: &str,
-        pin: &TerminalPin,
-        settled: bool,
-    ) -> Result<bool, TerminalError> {
-        // A successful Renew on the *same* instance proves every old
-        // generation's pin ended. A replacement's empty table cannot.
-        if settled {
-            self.release_proven(identity)?;
-        } else {
-            let answer = Self::request(
-                binding,
-                pin.namespace.clone(),
-                OperatorOperation::Close {
-                    key: pin.key.clone(),
-                    generation: Some(id(pin.generation.clone())?),
-                    acknowledge_loss: false,
-                },
-            )
-            .await;
-            if let Ok(OperatorAnswer::Terminal { terminal, .. }) = answer {
-                self.observe(identity, terminal)?;
-            }
-        }
-        Ok(self
-            .lock()
-            .entries
-            .get(identity)
-            .is_none_or(|entry| !entry.pinned))
     }
 
     pub(super) fn mark_lost(&self, identity: &str) {

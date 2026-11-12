@@ -774,6 +774,9 @@ impl RunnerService {
                 ));
             }
             HostFrame::Stream(frame) => {
+                if !self.operator_link_current(host, instance, connection) {
+                    return;
+                }
                 if let Some(operator) = &self.inner.operator
                     && let Some(frames) =
                         operator.receive(host, instance, connection, frame.clone())

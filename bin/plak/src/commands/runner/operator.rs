@@ -8,6 +8,9 @@ use plakous::runner::protocol::operator::OperatorRefusal;
 
 use super::{CliFailure, CliResult, PlakPaths, home};
 
+mod admission;
+pub(crate) use admission::{LocalReclamation, local_reclamation};
+
 pub(super) fn workspace(
     paths: &PlakPaths,
     roots: Option<Vec<PathBuf>>,

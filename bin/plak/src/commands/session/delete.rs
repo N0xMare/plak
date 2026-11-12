@@ -85,14 +85,6 @@ pub(super) fn delete_confirmed(
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     product.lifecycle_metadata(id)?;
-    let _terminal_admission =
-        crate::store::terminal_pins::TerminalPinGuard::take(paths).map_err(CliFailure::new)?;
-    if product
-        .terminal_session_pinned(id)
-        .map_err(CliFailure::new)?
-    {
-        return Err(LifecycleError::Refused(LifecycleRefusal::Open));
-    }
     let record = services
         .session_records()?
         .load(id)
@@ -101,6 +93,9 @@ pub(super) fn delete_confirmed(
         .runner
         .as_ref()
         .map_or("local", |runner| runner.runner_id.as_str());
+    if crate::terminal_registry::session_pinned(services, id, runner_id).map_err(CliFailure::new)? {
+        return Err(LifecycleError::Refused(LifecycleRefusal::Open));
+    }
     if let Some(successor) = product
         .carried_forward(
             &record.workspace_root,

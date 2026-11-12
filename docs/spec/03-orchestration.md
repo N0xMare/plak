@@ -3358,7 +3358,7 @@ knowledge. Sharing a build cache or priming a copy is the user's hook to write.
 
 ## 14. Persistence, reopen, and recovery
 
-Product state lives in `product.sqlite3` at **schema 38**: intents and
+Product state lives in `product.sqlite3` at **schema 37**: intents and
 feed-derived views (chapter 02 §2.6). Its `submissions` bind queued commands to
 their exact bytes; the result-mail batch a root command carries is a tree
 intent. The tree lives separately in `subagents.sqlite3` at **schema 10**, owned
@@ -3367,13 +3367,14 @@ record are below; §14.3 classifies every column family as an intent, a view of
 the feed, or an external-effect record.
 
 Operator terminals are not tree occupants or jobs. The host's independent terminal
-registry pins their workspaces, including lost-instance pins restored before the
+registry pins their workspaces, including surviving-runner pins discovered at the
 first bind (chapter 02 §2.2). Hosted VCS reclamation wraps coverage checks, disposable
 target trims and copy removal with an owned admission retained across the actual
 future; transferred VCS ports preserve that wrapper. Open and reclamation exclude
 each other in either order, including ancestor/descendant paths. An offline or
-unknown terminal retains the exclusion; an empty replacement runner table cannot
-authorize reclaim. No terminal creates a tree line, promotes a process or contributes
+unknown terminal retains exclusion while its runner or host memory survives;
+an empty replacement table does not clear known host-memory pins. Simultaneous
+host/runner loss is unlocalized unknown loss, not cleanup proof (chapter 04 §2.9). No terminal creates a tree line, promotes a process or contributes
 agent usage/accounting.
 
 A tree save is one `Immediate` transaction under WAL and `synchronous=FULL`.

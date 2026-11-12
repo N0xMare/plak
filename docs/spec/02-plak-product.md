@@ -328,10 +328,10 @@ another session's jobs.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r27.e37.p38.t10/            this build's state (§2.5)
+    r27.e37.p37.t10/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 27, epoch 37
-      product.sqlite3             Plak intents and feed-derived views, schema 38
+      product.sqlite3             Plak intents and feed-derived views, schema 37
       subagents.sqlite3           the agent tree, schema 10
       custody-hosts/<instance>.lock  each live host process's custody liveness lock (chapter 03 §14)
       host.lock                   held by this build's `plak host` for its life, naming its pid and binary (§4.6); not state
@@ -613,7 +613,7 @@ Each pass snapshots same-runtime ancestry once with a narrow metadata read and
 loads only ancestor submissions. It never hydrates ancestor records, transcripts
 or unrelated intents. Own intents are read after each feed page.
 
-Product schema 38 holds the intents of §2.6 in `submissions` (keyed by command id),
+Product schema 37 holds the intents of §2.6 in `submissions` (keyed by command id),
 `workflow_requests` (keyed by operation id), `operator_notices` (keyed by notice
 id, unique per `(anchor, ordinal)`; an imported transcript is written there once
 at anchor 0 in document order) and `host_intents` (the `wake_suppression`,
@@ -634,7 +634,7 @@ them for a session is the rebuild. All keyed views cascade with the session.
 
 Workflow requests and feed-derived workflow completions are the only workflow
 model. Session records carry no workflow journal or two-phase workflow states,
-and product schema 38 has no legacy `workflows` table. Recovery
+and product schema 37 has no legacy `workflows` table. Recovery
 blocking reads the runtime's context disposition, not a product journal flag.
 
 **Operator-terminal pins.** The private host registry owns terminals separately
@@ -646,32 +646,39 @@ when another principal requests release. The private residency outcome is
 `OperatorTerminal`; until the terminal client increment, existing client protocol
 7 renders the conservative `Work` refusal without new DTO vocabulary.
 
-Schema 38 adds `operator_terminal_pins(identity, record)`, bounded to 1,024 records.
-Each record binds host and state-key namespace, principal, host/runner generation,
-runner instance, session, node, terminal id, workspace and operation digest.
-An IMMEDIATE transaction with `synchronous=FULL` reserves the pin before the
-runner open can spawn. Only same-instance cleanup proof or explicit owner loss
-acknowledgment permits the FULL delete; the residency hold is dropped afterwards.
-A lost answer, missing table, unavailable placement or replacement runner instance
-never proves cleanup. Pins contain no shell output, keyboard bytes or PID kill
-authority and are not exported as cross-build session state.
+Terminal tables, host mirrors, workspace pins, quotas and output rings are process-local.
+There is no terminal table or pin file in the product store, no persisted-format
+change and no state-key change: product schema remains 37. Local PTYs live in the
+home-local daemon, never in the host process. On first bind after host loss, the
+host obtains the paired runner's complete host/state-scope pin inventory before
+any reclamation admission. It mirrors surviving pins and closes old namespaces,
+never adopting old terminals or enabling old ids for input. A failed inventory
+refuses admission; known pinned workspaces and their ancestors/descendants remain
+excluded until cleanup proof or authenticated owner loss acknowledgment.
+Unrelated workspaces are not held behind those precise pins.
 
-On restart, pins load as lost and block reclamation before the first runner bind.
-Old ids cannot attach or accept input. Reconciliation must settle old namespaces
-before ordinary runner recovery may reclaim any workspace; same-generation
-reconnect also reconciles before restoring input. A private file lock spans pin
-reservation and the entire actual removal/trim future, including embedded and
-standalone reclamation. Ancestor and descendant overlap both refuse; inability
-to establish workspace identity fails closed. Session deletion takes the same
-lock and refuses a retained pin before modifying runtime or product state.
+A runner-only restart with surviving host memory retains known old-instance pins
+as lost: an empty replacement table does not prove those shells died. If both host
+and runner state are lost, surviving escaped (setsid or HUP-ignoring) processes
+are explicitly unlocalized unknown loss, outside cleanup guarantees. Workspace
+reclamation does not know about them. No cleanup or death is inferred and no global
+first-use or unrelated-workspace barrier is added. The operator is responsible
+for those processes; terminals do not survive host restart (chapter 04 §2.9).
 
-Host stop/handoff ends terminal admission and controller ownership, then joins
-reachable namespace cleanup for up to four seconds. Unresolved pins remain durable
-with an explicit loss diagnostic. SIGKILL leaves them for runner namespace expiry
-and next-bind reconciliation; a new host never adopts old shells. Renewals run
-every thirty seconds while the host lives. A controller binds the authenticated
-principal, connection and host generation, not a supplied user name. Disconnect
-or connection replacement cancels it; reattachment never replays ambiguous input.
+Reclamation admission spans actual removal/trim. A connection-scoped runner lease
+excludes terminal opens in either order; drop/disconnect releases it. The runner
+also guards its own VCS effects. Host-local and standalone removals use the daemon
+lease, or hold its existing startup lock while no daemon is running. This neither
+starts a daemon nor persists pin metadata. Session deletion checks runner inventory
+or the live host mirror before its existing runtime archive/owner fence; terminal
+admission cannot open an agent or bypass that fence.
+
+Host stop/handoff ends terminal admission and controllers, then joins reachable
+namespace cleanup for up to four seconds. Unresolved loss is explicit; a surviving
+runner retains its pins, not a host database record. SIGKILL leaves namespaces to
+runner expiry and next-bind reconciliation. Renewals run every thirty seconds.
+Controllers bind authenticated principal, connection and generation, not supplied
+names. Disconnect/replacement cancels them; reattach never replays ambiguous input.
 
 `session show` reports the projected tool-call counter alongside transcript size.
 Recovery keeps one transcript row per canonical call id even when the recovered
@@ -993,7 +1000,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r27.e37.p38.t10`. The key is derived from the stores'
+schema>`, for example `r27.e37.p37.t10`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup. State-directory
@@ -1303,7 +1310,7 @@ the successor freezes the destination's tools, and with them the placement
 each of its MCP servers runs under there. The version 11 reader imports onto the local runner under the
 destination's home default profile, with the notice `this session's export
 records no profile; the home default profile applies`. This is a document bump,
-not an in-place database migration; the product store is schema 38.
+not an in-place database migration; the product store is schema 37.
 
 `plak session export <id> [--out <path>]` writes one JSON document with
 `"format": "plak-session-export", "version": 12` and prints its path. The
@@ -1953,7 +1960,7 @@ opening note `session <id> was carried forward as <successor>; resuming it`,
 instead of a read-only refusal; the headless faces print it on stderr.
 
 Carries keep their own write-ahead marker rather than a `workflow_requests`
-row. Product schema 38 retains the node, virtual root profile, runner display
+row. Product schema 37 retains the node, virtual root profile, runner display
 copy, frozen MCP placement, `switch` workflow kind, root interrupt cause and
 continuation decision intents. It also owns terminal workspace pins (§2.2);
 none of those pins turns a carry into a terminal or an agent job.
@@ -6809,7 +6816,7 @@ row's own start-to-finish span; a failed wait keeps its timeout and actual
 wait. The live tool line carries the same wait facts as the persisted row. The
 projector writes rows into the product transcript
 (`transcript_rows.row`, one JSON payload per row with its ordering key,
-schema 38) by the provenance rules of §2.6; the export document carries them
+schema 37) by the provenance rules of §2.6; the export document carries them
 (§2.5.1), the host emits the same row live as one `Row` observation once the
 projector wrote it, and restore reads them as the rows of the presentation
 snapshot. Live and restored rows are the same values; the renderer maps a row

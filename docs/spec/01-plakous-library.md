@@ -6156,8 +6156,16 @@ remaining bulk-frame capacity before advancing any cursor or directional sequenc
 
 Product request/confirmation, residency-refusal rendering and client scheduling belong
 to the separate client-protocol increment; this runner increment changes no client DTO.
-The host's private registry retains write-ahead workspace pins across process loss
-(chapter 02 §2.2). `RunnerConnectionRevision::is_current` is a read-only connection
+`operator.scope.inventory` is paired-host recovery metadata, not a client listing:
+it returns bounded live-pin inventory for the authenticated host and state key,
+including original namespaces/generations/workspaces and states, but no raw output.
+The host uses it before first-bind reclaim and mirrors surviving pins only in memory.
+`operator.workspace.reclaim` reserves runner-owned workspace exclusion and returns
+a connection-scoped Close-only stream. Drop/disconnect releases it; invalid traffic
+terminates it. Leases prevent idle exit while held and exclude opens through actual
+host-local removal/trim. With operator PTYs disabled, inventory is empty and reclaim
+needs no stream because that instance can spawn no terminals. All terminal state
+is process-local; product schema and state key are unchanged (chapter 02 §2.2). `RunnerConnectionRevision::is_current` is a read-only connection
 fence for that registry, not permission to skip namespace table reconciliation.
 
 **Runner protocol v6.** `plakous-runner-protocol` defines what a host and a

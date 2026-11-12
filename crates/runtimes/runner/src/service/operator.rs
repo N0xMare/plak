@@ -6,6 +6,16 @@ use super::{
 };
 
 impl RunnerService {
+    pub(super) fn operator_link_current(
+        &self,
+        host: &str,
+        generation: &str,
+        connection: u64,
+    ) -> bool {
+        super::lock(&self.inner.hosts)
+            .get(&(host.to_owned(), generation.to_owned()))
+            .is_some_and(|current| current.id == connection)
+    }
     pub(super) async fn join_operator_shutdown(&self) {
         let Some(operator) = &self.inner.operator else {
             return;
@@ -81,9 +91,9 @@ impl RunnerService {
         request: Request,
     ) -> OperatorAnswer {
         let refuse = |refusal| OperatorAnswer::Refused { refusal };
-        let Some(operator) = &self.inner.operator else {
-            return refuse(OperatorRefusal::InvalidRequest);
-        };
+        if !self.operator_link_current(host, generation, connection) {
+            return refuse(OperatorRefusal::ReconcileRequired);
+        }
         if request.owner.is_some()
             || request.digest != crate::client::digest(&request.operation)
             || self.inner.closing.load(Ordering::Acquire)
@@ -99,6 +109,21 @@ impl RunnerService {
         }
         let RequestClass::OperatorControl { namespace, .. } = request.class else {
             return refuse(OperatorRefusal::InvalidRequest);
+        };
+        let Some(operator) = &self.inner.operator else {
+            return match operation {
+                OperatorOperation::Inventory => {
+                    match self.inner.hello.instance.clone().try_into() {
+                        Ok(instance) => OperatorAnswer::Inventory {
+                            instance,
+                            pins: Vec::new(),
+                        },
+                        Err(_) => refuse(OperatorRefusal::InvalidRequest),
+                    }
+                }
+                OperatorOperation::Reclaim { .. } => OperatorAnswer::Reclamation { stream: None },
+                _ => refuse(OperatorRefusal::InvalidRequest),
+            };
         };
         if request.replay {
             return if let OperatorOperation::Open { key, .. } = &operation {
@@ -124,6 +149,9 @@ impl RunnerService {
         connection: u64,
         sender: &mpsc::Sender<RunnerFrame>,
     ) {
+        if !self.operator_link_current(host, generation, connection) {
+            return;
+        }
         let Some(operator) = &self.inner.operator else {
             return;
         };

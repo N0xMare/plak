@@ -42,8 +42,9 @@ operator title overrides and archival state; it composes with runtime epoch
 version 12, with the version 11 importer retained for the previous version.
 The host's private terminal registry renews namespaces every thirty seconds and
 joins shutdown for up to four seconds. Live and retained unknown/lost-instance
-pins prevent host idle exit; unresolved shutdown retains them for reconciliation
-or explicit owner loss resolution. These fixed bounds add no configuration keys.
+pins prevent idle exit while host memory survives. Unresolved shutdown leaves
+runner-owned pins for discovery or owner loss resolution; simultaneous state loss
+is unlocalized unknown loss, never a global first-use barrier. These fixed bounds add no configuration keys.
 
 Host process coordination is outside the wire and configuration vocabulary:
 `host/host.lock` serializes the whole home, while each

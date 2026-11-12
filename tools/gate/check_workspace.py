@@ -1722,8 +1722,11 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "TerminalEvent",
         }
     },
-    ("plak", "src/store/terminal_pins.rs"): {
+    ("plak", "src/terminal_registry/placement.rs"): {
         "runner": {"protocol", "operator", "OperatorNamespace", "TerminalKey"}
+    },
+    ("plak", "src/commands/runner/operator/admission.rs"): {
+        "runner": {"ClientWindows", "RunnerClient"}
     },
     # The export document names its runner by the library's runner identity.
     ("plak", "src/carry/document.rs"): {"tools": {"RunnerId"}},

@@ -43,8 +43,8 @@ pub use workspace::{
 };
 
 pub use client::{
-    ClientWindows, ConnectError, OperatorTerminalStream, RecoveredCall, RunnerClient,
-    RunnerConnectionRevision,
+    ClientWindows, ConnectError, OperatorReclamationGuard, OperatorTerminalStream, RecoveredCall,
+    RunnerClient, RunnerConnectionRevision,
 };
 pub use floors::{FileOwnerFloors, Floor, OwnerFloors};
 pub use journal::{CallJournal, FileCallJournal, JournalEntry};

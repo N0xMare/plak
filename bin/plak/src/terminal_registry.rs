@@ -15,11 +15,15 @@ use plakous_hosted::workspace_reclamation::{ReclamationAdmission, ReclamationFen
 
 use crate::home::paths::PlakPaths;
 use crate::store::ProductStore;
-use crate::store::terminal_pins::TerminalPin;
 
 mod control;
 mod lifecycle;
 mod pins;
+mod placement;
+mod reclamation;
+mod recovery;
+use placement::TerminalPin;
+pub(crate) use reclamation::{RunnerFence, session_pinned};
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -42,6 +46,7 @@ pub(crate) struct TerminalRegistry {
 
 #[derive(Default)]
 struct State {
+    residents: BTreeMap<String, plakous_hosted::host_service::AttachmentCount>,
     closing: bool,
     entries: BTreeMap<String, Entry>,
     bindings: BTreeMap<String, Binding>,
@@ -92,22 +97,6 @@ impl TerminalRegistry {
         self.generation
     }
     pub(crate) fn new(paths: PlakPaths, generation: u64) -> Result<Arc<Self>, String> {
-        let pins = ProductStore::open(&paths)
-            .map_err(|_| "terminal pin store unavailable")?
-            .terminal_pins()?;
-        let mut entries = BTreeMap::new();
-        for pin in pins {
-            entries.insert(
-                pin.identity()?,
-                Entry {
-                    pin,
-                    pinned: true,
-                    lost: true,
-                    row: None,
-                    hold: None,
-                },
-            );
-        }
         Ok(Arc::new(Self {
             state_key: OperatorId::try_from(crate::home::state::state_key())
                 .map_err(str::to_owned)?,
@@ -116,10 +105,7 @@ impl TerminalRegistry {
             runner_generation: plakous_recursive_subagents::tree::process_instance().to_string(),
             paths,
             generation,
-            state: Arc::new(Mutex::new(State {
-                entries,
-                ..State::default()
-            })),
+            state: Arc::default(),
             operations: tokio::sync::Mutex::new(()),
             hold: std::sync::OnceLock::new(),
         }))
@@ -228,9 +214,6 @@ impl TerminalRegistry {
         if !entry.pinned {
             return Ok(());
         }
-        self.store()?
-            .release_terminal(&entry.pin)
-            .map_err(|_| TerminalError::Storage)?;
         entry.pinned = false;
         entry.hold = None;
         Ok(())

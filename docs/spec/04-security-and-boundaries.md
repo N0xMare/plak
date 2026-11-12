@@ -771,15 +771,25 @@ recover a lost open answer only on that runner instance; missing receipts never
 authorize replayed execution. Same-generation reconciliation precedes new input.
 Another host generation never adopts an old namespace: it requests cleanup and
 waits for the old pins before opening replacement work.
-The host retains a FULL write-ahead workspace pin before dispatching open and
-loads it as lost after restart. Neither first bind nor later recovery may reclaim
-that workspace from a replacement instance's empty table. Cleanup-only Close may
-target an old generation, but the paired host, state key and principal remain
-exact; it grants no attach/input or cross-principal authority. An authenticated
-owner may explicitly acknowledge lost-instance uncertainty and release the host
-pin without signaling remembered PIDs or claiming the shell died. Durable pin
-release precedes dropping residency. Session delete and actual VCS removal/trim
-share pin admission exclusion, including standalone paths.
+Terminal namespace, quota, ring and pin state is memory-only. The runner and the
+home-local daemon own their live tables; the host owns only an ephemeral mirror.
+After host-only loss, paired-host scope inventory discovers surviving pins before
+reclaim, and old namespaces close rather than being adopted. Runner-only loss
+retains precise known pins in surviving host memory. Cleanup-only Close requires
+a current renewed generation, a superseded target and the exact paired host/state/
+principal; it grants no old input or cross-principal authority. An authenticated
+owner may acknowledge known lost-instance uncertainty without signaling remembered
+PIDs or claiming death. Runner leases guard actual host-local removal/trim futures
+without a persisted host pin or state-key change.
+
+When host and runner are both lost, any surviving escaped (setsid or HUP-ignoring)
+processes started from an operator terminal are explicitly unlocalized unknown
+loss, outside cleanup guarantees. Workspace reclamation does not know about them.
+There is no claim of cleanup or death, no automatic terminal adoption and no global
+barrier on first use or unrelated workspaces. Those processes are in the operator's
+hands, consistent with host restart ending terminal namespaces. Wherever runner
+state or host memory survives, precise workspace and lost-instance barriers remain
+mandatory.
 Expired/closed namespaces and exhausted namespace-table admission refuse before
 changing another generation: a stale renewal cannot close its successor's terminals.
 

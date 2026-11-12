@@ -1,4 +1,4 @@
-//! Real host-process loss leaves durable pins, never terminal adoption authority.
+//! Host-only loss discovers runner pins; simultaneous state loss is unlocalized.
 
 use super::*;
 use plakous::runner::protocol::operator::TerminalCursor;
@@ -138,11 +138,13 @@ async fn loss_cut(cut: &str, replacement: bool) {
     let registry = TerminalRegistry::new(killed.paths.clone(), 8).unwrap();
     let mut owner = context("operator");
     owner.host_generation = 8;
-    let old = registry.list(&owner).unwrap().remove(0);
-    assert!(old.lost);
-    assert!(registry.blocks_idle_exit());
     assert!(
-        registry.admit("local", &killed.workspace).is_err(),
+        registry.list(&owner).unwrap().is_empty(),
+        "no host persistence"
+    );
+    assert!(!registry.paths.product_database().exists());
+    assert!(
+        registry.admit("local", &killed.workspace).await.is_err(),
         "no reclaim before first bind"
     );
     let replacement_service = linked::service(&killed.workspace);
@@ -163,21 +165,19 @@ async fn loss_cut(cut: &str, replacement: bool) {
         RunnerClient::connect(stream, linked::bind(&registry), ClientWindows::default())
             .await
             .unwrap();
-    let first = registry.reconcile("local", &client).await;
-    if replacement || cut == "running" {
-        assert_eq!(first, Err(TerminalError::Unavailable));
-        assert!(
-            registry.admit("local", &killed.workspace).is_err(),
-            "an empty table or closing shell is not cleanup proof"
-        );
-    }
+    registry.reconcile("local", &client).await.unwrap();
+    let forgotten = TerminalHandle {
+        identity: "forgotten".into(),
+        host_generation: 7,
+        instance: killed.service.hello().instance.clone(),
+    };
     assert!(matches!(
         registry
             .attach(
                 &owner,
-                &old.handle,
+                &forgotten,
                 TerminalCursor {
-                    instance: id(old.handle.instance.clone()).unwrap(),
+                    instance: id(forgotten.instance.clone()).unwrap(),
                     offset: 0
                 }
             )
@@ -185,30 +185,39 @@ async fn loss_cut(cut: &str, replacement: bool) {
         Err(TerminalError::Lost)
     ));
     if replacement {
-        let mut other = context("other");
-        other.host_generation = 8;
-        assert!(matches!(
-            registry.close(&other, &old.handle, true).await,
-            Err(TerminalError::Lost)
-        ));
-        registry.close(&owner, &old.handle, true).await.unwrap();
+        assert!(registry.list(&owner).unwrap().is_empty());
+        assert!(
+            !registry.blocks_idle_exit(),
+            "no global first-use barrier after both tables were lost"
+        );
         assert!(
             killed
                 .service
                 .operator_terminals()
                 .unwrap()
                 .has_live_terminals(),
-            "acknowledged loss never kills or infers death on a vanished instance"
+            "unlocalized loss never kills or infers death of old processes"
         );
     }
     let until = Instant::now() + Duration::from_secs(5);
-    while registry.reconcile("local", &client).await.is_err() {
+    while registry.blocks_idle_exit() {
+        assert!(registry.admit("local", &killed.workspace).await.is_err());
+        for old in registry.list(&owner).unwrap() {
+            assert!(old.lost);
+            assert!(matches!(
+                registry
+                    .attach(&owner, &old.handle, old.row.unwrap().oldest)
+                    .await,
+                Err(TerminalError::Lost)
+            ));
+        }
+        registry.reconcile("local", &client).await.unwrap();
         assert!(Instant::now() < until, "first-bind cleanup never settled");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert!(!registry.blocks_idle_exit());
-    assert!(registry.admit("local", &killed.workspace).is_ok());
-    assert_eq!(registry.store().unwrap().terminal_pins().unwrap().len(), 0);
+    assert!(registry.admit("local", &killed.workspace).await.is_ok());
+    assert!(!registry.paths.product_database().exists());
     assert_eq!(client.lines().await.unwrap(), []);
     assert_eq!(registry.shutdown(Duration::from_secs(2)).await, 0);
     cleanup(killed, client, second).await;

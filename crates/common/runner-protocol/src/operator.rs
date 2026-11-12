@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 /// Fixed operator verbs, independent of agent process/session verbs.
 pub const VERBS: &[&str] = &[
+    "operator.scope.inventory",
+    "operator.workspace.reclaim",
     "operator.namespace.renew",
     "operator.namespace.close",
     "operator.terminal.open",
@@ -148,6 +150,13 @@ pub struct TerminalCursor {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OperatorOperation {
+    /// Paired-host recovery metadata for this host/state scope; never client output.
+    Inventory,
+    /// Holds workspace exclusion until this connection's stream closes.
+    Reclaim {
+        /// Absolute workspace removal/trim target, validated on the runner.
+        workspace: String,
+    },
     /// Renews the 90-awake-second namespace and reconciles this connection.
     Renew,
     /// Closes every terminal of this principal's generation.
@@ -194,6 +203,8 @@ impl OperatorOperation {
     #[must_use]
     pub const fn verb(&self) -> &'static str {
         match self {
+            Self::Inventory => "operator.scope.inventory",
+            Self::Reclaim { .. } => "operator.workspace.reclaim",
             Self::Renew => "operator.namespace.renew",
             Self::NamespaceClose => "operator.namespace.close",
             Self::Open { .. } => "operator.terminal.open",
@@ -255,6 +266,22 @@ pub struct TerminalRow {
     pub exit_code: Option<u32>,
 }
 
+/// Paired-host recovery metadata, not a principal's public terminal listing.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalPin {
+    /// Original host process generation; cleanup-only, never adoption authority.
+    pub generation: OperatorId,
+    /// Original authenticated principal and state key.
+    pub namespace: OperatorNamespace,
+    /// Runner-admitted workspace.
+    pub workspace: String,
+    /// Open operation identity.
+    pub digest: String,
+    /// Current pinned terminal state, including escaped identities.
+    pub terminal: TerminalRow,
+}
+
 /// A proved-no-effect operator refusal, never an agent backend failure.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -285,6 +312,18 @@ pub enum OperatorRefusal {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OperatorAnswer {
+    /// Complete bounded paired-host scope inventory, with no raw output.
+    Inventory {
+        /// Runner process instance even when empty.
+        instance: OperatorId,
+        /// At most the runner's live-terminal quota of entries.
+        pins: Vec<TerminalPin>,
+    },
+    /// Opaque lease stream: drop/disconnect releases the exclusion.
+    Reclamation {
+        /// Runner-owned stream identity; it accepts Close only.
+        stream: Option<u64>,
+    },
     /// Principal-private, bounded table.
     Table {
         /// Rows.

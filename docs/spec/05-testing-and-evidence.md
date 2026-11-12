@@ -62,19 +62,20 @@ evidence alone is not macOS process-supervision qualification. The product clien
 terminal scheduler and browser transport-loss evidence belong to their later
 client-protocol increment, not these runner-side tests.
 
-Host-internal terminal tests cover write-ahead pin/hold acquisition, both orders
-of pin versus ancestor/descendant reclamation, durable lost pins before any bind,
-principal/connection/generation controller exclusion, disconnect and same-generation
-reconciliation before input, and joined shutdown with no agent line/job records.
-A VCS wrapper test checks that refused admission prevents the actual removal and
-successful admission remains held at that effect. Host-loss durability cuts kill
-an actual host-authority subprocess after FULL reservation and after live PTY open.
-Restart refuses old attachment ids; same-instance first bind waits for cleanup,
-while an empty replacement instance retains the pin until owner-only explicit loss
-resolution, without killing or inferring death of the orphaned old shell. These
-are internal authority tests, not browser end-to-end qualification. Run the platform
-session-scan preflight first, then serial operator tests on each supported platform;
-SIGKILL host/runner cuts belong only in durability and are excluded from offline.
+Host-internal terminal tests cover memory-only pin/hold acquisition, original
+product-37 schema/state-key identity, both pin/reclamation orders, authenticated
+controller exclusion, reconnect-before-input and joined shutdown without agent
+line/job records. Inventory tests distinguish paired hosts and state scopes and
+include no raw output. Lease tests reject another owner and retain the guard until
+Close/disconnect. A VCS wrapper checks admission at the actual removal.
+Host-loss durability cuts kill the authority subprocess after memory reservation
+and live PTY open. Restart discovers surviving runner pins before reclaim and
+refuses old ids. Runner replacement with surviving host memory retains precise lost
+pins until owner-only acknowledged loss, never signaling old PIDs. Combined host
+memory loss and an empty replacement have no global barrier: that is unlocalized
+unknown loss, not proof of process death. These are internal authority tests, not
+browser end-to-end qualification. Run platform preflight first; serial PTY tests
+and durability host/runner cuts remain excluded from offline.
 
 Direct Anthropic API refusal qualification follows Anthropic's
 [refusals and fallback documentation](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback),
@@ -2848,7 +2849,7 @@ Conflict laws run the real topology tool with distinct operation ids, then
 present its terminals with reused, absent and empty display ids. Every
 operation retains one keyed conflict notice and its own whole path; conflict
 facts still cross the existing process-local tool boundary, not a new store
-encoding. Product schema 38, tree schema 10 and export v12 importing v11 stay
+encoding. Product schema 37, tree schema 10 and export v12 importing v11 stay
 unchanged by these notice corrections.
 The bounded result-mail observation law requires start and finished milestones
 before its result row even on the first read. The spawn/wait/adopt parity

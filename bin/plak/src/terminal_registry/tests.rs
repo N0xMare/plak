@@ -48,7 +48,7 @@ fn pin(registry: &TerminalRegistry, workspace: PathBuf) -> TerminalPin {
 }
 
 #[test]
-fn operator_host_write_ahead_pin_keeps_residency_and_reclamation_until_proof() {
+fn operator_host_memory_pin_keeps_residency_and_reclamation_until_proof() {
     let (directory, registry, count) = fixture();
     let identity = registry
         .reserve(
@@ -61,44 +61,24 @@ fn operator_host_write_ahead_pin_keeps_residency_and_reclamation_until_proof() {
         registry.resident_reason("session"),
         Some(ResidentReason::OperatorTerminal)
     );
-    assert!(registry.admit("local", directory.path()).is_err());
-    assert_eq!(registry.store().unwrap().terminal_pins().unwrap().len(), 1);
-    assert!(
-        registry
-            .store()
-            .unwrap()
-            .terminal_session_pinned("session")
-            .unwrap()
-    );
-    assert!(
-        registry
-            .store()
-            .unwrap()
-            .delete_session("session", 0)
-            .unwrap_err()
-            .contains("operator_terminal")
-    );
+    assert!(registry.admit_local("local", directory.path()).is_err());
+    assert!(!registry.paths.product_database().exists());
     registry.release_proven(&identity).unwrap();
     assert_eq!(count.get(), 0);
-    assert!(registry.admit("local", directory.path()).is_ok());
-    assert_eq!(registry.store().unwrap().terminal_pins().unwrap().len(), 0);
-    assert!(
-        !registry
-            .store()
-            .unwrap()
-            .terminal_session_pinned("session")
-            .unwrap()
-    );
+    assert!(registry.admit_local("local", directory.path()).is_ok());
+    assert!(!registry.paths.product_database().exists());
+    assert_eq!(crate::store::SCHEMA_VERSION, 37);
+    assert!(crate::home::state::state_key().contains(".p37."));
 }
 
 #[test]
-fn operator_host_reclaim_admission_blocks_new_pins_and_restart_retains_old_pins() {
+fn operator_host_reclaim_admission_blocks_new_pins_without_persisting_them() {
     let (directory, registry, count) = fixture();
     let workspace = directory.path().join("workspace");
     std::fs::create_dir(&workspace).unwrap();
     let child = workspace.join("child");
     std::fs::create_dir(&child).unwrap();
-    let admission = registry.admit("local", &workspace).unwrap();
+    let admission = registry.admit_local("local", &workspace).unwrap();
     assert!(matches!(
         registry.reserve(pin(&registry, child.clone()), count.hold().unwrap()),
         Err(TerminalError::Busy)
@@ -110,19 +90,45 @@ fn operator_host_reclaim_admission_blocks_new_pins_and_restart_retains_old_pins(
         .unwrap();
     let paths = registry.paths.clone();
     drop(registry);
-    let restarted = TerminalRegistry::new(paths.clone(), 8).unwrap();
-    assert!(restarted.blocks_idle_exit());
-    assert!(restarted.admit("local", &workspace).is_err());
+    let restarted = TerminalRegistry::new(paths, 8).unwrap();
+    assert!(!restarted.blocks_idle_exit());
     assert!(
-        crate::store::terminal_pins::StoredTerminalFence(paths)
-            .admit("local", &child.join("target"))
-            .is_err()
+        restarted
+            .list(&HostRequestContext {
+                host_generation: 8,
+                ..context("operator")
+            })
+            .unwrap()
+            .is_empty()
     );
-    let restored = AttachmentCount::default();
-    restarted.retain_holds("session", &restored).unwrap();
-    assert_eq!(restored.get(), 1);
-    assert_eq!(
-        restarted.resident_reason("session"),
-        Some(ResidentReason::OperatorTerminal)
+    assert!(
+        restarted.binding("local").is_err(),
+        "first bind must discover runner-owned pins"
     );
+    assert!(!restarted.paths.product_database().exists());
+}
+
+#[tokio::test]
+async fn operator_host_quiet_reclamation_holds_existing_startup_lock_without_store_or_daemon() {
+    let (directory, registry, _) = fixture();
+    let fence = RunnerFence::new(registry.paths.clone(), None);
+    let admission = fence.admit("local", directory.path()).await.unwrap();
+    let socket = registry
+        .paths
+        .home()
+        .join("host/runner")
+        .join(format!("v{}", crate::commands::runner::version().protocol))
+        .join("run/runner.sock");
+    assert!(!socket.exists(), "reclamation never auto-starts a daemon");
+    let probe = std::fs::OpenOptions::new()
+        .write(true)
+        .open(socket.with_extension("lock"))
+        .unwrap();
+    assert!(matches!(
+        probe.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    drop(admission);
+    probe.try_lock().unwrap();
+    assert!(!registry.paths.product_database().exists());
 }

@@ -29,3 +29,8 @@
 {"kind":"refusal","value":"offset_gap"}
 {"kind":"refusal","value":"backpressure"}
 {"kind":"status","value":"lost"}
+{"kind":"operation","value":{"operation":"inventory"}}
+{"kind":"operation","value":{"operation":"reclaim","workspace":"/workspace"}}
+{"kind":"answer","value":{"instance":"instance","outcome":"inventory","pins":[{"digest":"digest","generation":"generation","namespace":{"principal":"principal","state_key":"state"},"terminal":{"attached":false,"exit_code":null,"input_next":0,"key":{"node":"node","session":"session","terminal_id":"terminal"},"next":{"instance":"instance","offset":4},"oldest":{"instance":"instance","offset":0},"status":"running","survivors":[]},"workspace":"/workspace"}]}}
+{"kind":"answer","value":{"outcome":"reclamation","stream":42}}
+{"kind":"answer","value":{"outcome":"reclamation","stream":null}}

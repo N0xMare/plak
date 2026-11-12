@@ -190,6 +190,9 @@ impl Fixture {
 
 fn refused(answer: OperatorAnswer, expected: OperatorRefusal) {
     match answer {
+        OperatorAnswer::Inventory { .. } | OperatorAnswer::Reclamation { .. } => {
+            panic!("expected refusal, got control authority")
+        }
         OperatorAnswer::Refused { refusal } => assert_eq!(refusal, expected),
         OperatorAnswer::Table { terminals } => panic!(
             "expected refusal, got a terminal: {}",
@@ -200,6 +203,142 @@ fn refused(answer: OperatorAnswer, expected: OperatorRefusal) {
             String::from(terminal.key.terminal_id)
         ),
     }
+}
+
+#[test]
+fn operator_inventory_recovers_only_its_paired_host_and_state_without_output() {
+    let fixture = Fixture::new();
+    fixture.open(0);
+    let other = OperatorNamespace {
+        principal: id("other"),
+        ..namespace()
+    };
+    assert!(matches!(
+        fixture.service.execute(
+            "paired",
+            "generation",
+            1,
+            other.clone(),
+            "renew",
+            OperatorOperation::Renew,
+        ),
+        OperatorAnswer::Table { .. }
+    ));
+    assert!(matches!(
+        fixture.service.execute(
+            "paired",
+            "generation",
+            1,
+            other,
+            "open",
+            OperatorOperation::Open {
+                key: key(1),
+                workspace: "/workspace/child".into(),
+                dimensions: dimensions(),
+            },
+        ),
+        OperatorAnswer::Terminal { .. }
+    ));
+    let OperatorAnswer::Inventory { instance, pins } =
+        fixture.call(1, OperatorOperation::Inventory)
+    else {
+        panic!("inventory failed");
+    };
+    assert_eq!(instance, id("instance"));
+    assert_eq!(pins.len(), 2);
+    assert!(
+        pins.iter()
+            .any(|pin| pin.namespace.principal == id("other"))
+    );
+    assert!(
+        pins.iter().all(
+            |pin| pin.generation == id("generation") && pin.workspace.starts_with("/workspace")
+        )
+    );
+    for (host, state) in [("foreign", "state"), ("paired", "foreign")] {
+        assert!(matches!(fixture.service.execute(host, "generation", 1,
+            OperatorNamespace { state_key: id(state), ..namespace() }, "inventory", OperatorOperation::Inventory),
+            OperatorAnswer::Inventory { pins, .. } if pins.is_empty()));
+    }
+    assert_eq!(lock(&fixture.fake).spawned, 2);
+    assert_eq!(lock(&fixture.fake).input, Vec::<Vec<u8>>::new());
+}
+
+#[test]
+fn operator_reclamation_stream_holds_until_owned_close_or_disconnect() {
+    let fixture = Fixture::new();
+    let OperatorAnswer::Reclamation {
+        stream: Some(stream),
+    } = fixture.call(
+        1,
+        OperatorOperation::Reclaim {
+            workspace: "/workspace".into(),
+        },
+    )
+    else {
+        panic!("reclaim failed");
+    };
+    let open = |n| OperatorOperation::Open {
+        key: key(n),
+        workspace: "/workspace/child".into(),
+        dimensions: dimensions(),
+    };
+    refused(fixture.call(1, open(0)), OperatorRefusal::TerminalBusy);
+    assert!(
+        fixture
+            .service
+            .receive(
+                "foreign",
+                "generation",
+                1,
+                StreamFrame {
+                    stream,
+                    seq: 0,
+                    event: StreamEvent::Close { reason: None }
+                }
+            )
+            .is_none()
+    );
+    refused(fixture.call(1, open(1)), OperatorRefusal::TerminalBusy);
+    assert!(
+        fixture
+            .service
+            .receive(
+                "paired",
+                "generation",
+                1,
+                StreamFrame {
+                    stream,
+                    seq: 0,
+                    event: StreamEvent::Close { reason: None }
+                }
+            )
+            .is_some()
+    );
+    assert!(matches!(
+        fixture.call(1, open(2)),
+        OperatorAnswer::Terminal { .. }
+    ));
+    let second = Fixture::new();
+    assert!(matches!(
+        second.call(
+            1,
+            OperatorOperation::Reclaim {
+                workspace: "/workspace".into()
+            }
+        ),
+        OperatorAnswer::Reclamation { .. }
+    ));
+    assert!(
+        second.service.has_live_terminals(),
+        "a live reclamation lease prevents idle exit"
+    );
+    second.service.disconnect("paired", 1);
+    assert!(!second.service.has_live_terminals());
+    assert!(matches!(
+        second.call(1, open(0)),
+        OperatorAnswer::Terminal { .. }
+    ));
 }
 
 #[test]

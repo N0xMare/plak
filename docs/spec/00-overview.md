@@ -209,7 +209,7 @@ them on 0.0.2 or start new ones. 0.0.2 state is left untouched for the 0.0.2 bin
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **27** (adds the `lines` heads, each branch's line membership and `line_job_terminals`) |
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **37** (authenticates the root-bound count of retired dispatched local-tool attempts; component revisions remain frozen) |
-| Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **38** (adds write-ahead operator-terminal workspace pins, retaining schema 37's title overrides and archival state) |
+| Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **37** (adds operator title overrides and archival state; terminal state is process-local) |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **10** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **22**, disposable, never recovery authority |
 | Session export document | Plak | version **12** (adds the session's runner and profile), imports **12** and **11** |
@@ -226,7 +226,7 @@ ownership evidence in the shared Git directory.
 Submitted intents own exact child outputs; attempt outputs are derived on load
 and submit-result replay receipts keep a digest summary. Provisional wait
 receipts retain the exact views they returned.
-Product schema 38 and exports v11 and v12 retain closed notice-remedy codes
+Product schema 37 and exports v11 and v12 retain closed notice-remedy codes
 and typed targets. Their frontend command spelling is rendered only by Plak.
 
 The canonical `seal_outcome` payload includes the durable
@@ -245,7 +245,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r27.e37.p38.t10`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r27.e37.p37.t10`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is

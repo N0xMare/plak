@@ -25,6 +25,13 @@ pub struct OperatorTerminalStream {
     received: mpsc::Receiver<StreamFrame>,
 }
 
+/// Runner-owned exclusion for one host-local destructive future; no byte stream.
+pub struct OperatorReclamationGuard {
+    client: RunnerClient,
+    connection: u64,
+    stream: Option<u64>,
+}
+
 #[derive(Clone)]
 pub(super) struct OperatorInbound {
     sender: mpsc::Sender<StreamFrame>,
@@ -32,6 +39,46 @@ pub(super) struct OperatorInbound {
 }
 
 impl RunnerClient {
+    /// Acquires workspace exclusion without an agent effect or keyboard stream.
+    /// An ambiguous answer resets the link so an unnamed lease cannot outlive it.
+    ///
+    /// # Errors
+    /// The workspace is pinned, the runner is unavailable, or admission is unknown.
+    pub async fn operator_reclaim(
+        &self,
+        namespace: OperatorNamespace,
+        workspace: String,
+    ) -> Result<OperatorReclamationGuard, RunnerFailure> {
+        let connection = lock(&self.inner.state).connection;
+        let answer = self
+            .operator_control(namespace, OperatorOperation::Reclaim { workspace })
+            .await;
+        let answer = match answer {
+            Ok(answer) => answer,
+            Err(error) => {
+                if matches!(
+                    &error,
+                    RunnerFailure::OutcomeUnknown(_) | RunnerFailure::Unavailable(_)
+                ) {
+                    self.disconnect();
+                }
+                return Err(error);
+            }
+        };
+        let OperatorAnswer::Reclamation { stream } = answer else {
+            return Err(RunnerFailure::Refused("workspace remains pinned".into()));
+        };
+        if lock(&self.inner.state).connection != connection {
+            return Err(RunnerFailure::OutcomeUnknown(
+                "reclamation link changed".into(),
+            ));
+        }
+        Ok(OperatorReclamationGuard {
+            client: self.clone(),
+            connection,
+            stream,
+        })
+    }
     /// Sends one operator request without an agent owner, journal or automatic retry.
     /// Retry an ambiguous open only with the same terminal id and runner instance.
     ///
@@ -246,6 +293,24 @@ impl Drop for OperatorTerminalStream {
         let mut state = lock(&self.client.inner.state);
         if state.connection == self.connection {
             state.operator_streams.remove(&self.stream);
+        }
+    }
+}
+
+impl Drop for OperatorReclamationGuard {
+    fn drop(&mut self) {
+        let Some(stream) = self.stream else {
+            return;
+        };
+        let state = lock(&self.client.inner.state);
+        if state.connection == self.connection
+            && let Some(sender) = &state.sender
+        {
+            let _ = sender.send(HostFrame::Stream(StreamFrame {
+                stream,
+                seq: 0,
+                event: StreamEvent::Close { reason: None },
+            }));
         }
     }
 }

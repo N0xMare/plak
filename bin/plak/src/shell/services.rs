@@ -335,8 +335,9 @@ impl Services {
             }
             None => roots,
         };
-        let fallback = Arc::new(crate::store::terminal_pins::StoredTerminalFence(
+        let fallback = Arc::new(crate::terminal_registry::RunnerFence::new(
             context.clone(),
+            self.local_runner_client(),
         ));
         if let Some(registry) = self.terminal_registry() {
             return Ok(roots.with_reclamation_fence(registry.clone()));

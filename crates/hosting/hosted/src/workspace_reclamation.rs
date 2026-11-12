@@ -14,9 +14,12 @@ use plakous_workspace::occupancy_vcs::{
 pub trait ReclamationAdmission: Send {}
 impl<T: Send> ReclamationAdmission for T {}
 
+/// Async paired-runner admission retained across a host-local destructive future.
+pub type ReclamationFuture<'a> = VcsFuture<'a, Result<Box<dyn ReclamationAdmission>, VcsError>>;
+
 /// The host's terminal-pin authority, independent of agent jobs and line ownership.
 pub trait ReclamationFence: Send + Sync {
-    fn admit(&self, runner: &str, path: &Path) -> Result<Box<dyn ReclamationAdmission>, VcsError>;
+    fn admit<'a>(&'a self, runner: &'a str, path: &'a Path) -> ReclamationFuture<'a>;
 }
 
 pub(crate) struct GuardedVcs {
@@ -32,7 +35,7 @@ impl GuardedVcs {
         Arc::new(Self { inner, fence })
     }
 
-    fn admit(&self, path: &Path) -> Result<Box<dyn ReclamationAdmission>, VcsError> {
+    fn admit<'a>(&'a self, path: &'a Path) -> ReclamationFuture<'a> {
         self.fence
             .admit(self.inner.stage_runner().unwrap_or("local"), path)
     }
@@ -60,7 +63,7 @@ impl VcsOps for GuardedVcs {
         sealed: Option<&'a VcsSnapshot>,
     ) -> VcsFuture<'a, Result<(), VcsError>> {
         Box::pin(async move {
-            let _admission = self.admit(path)?;
+            let _admission = self.admit(path).await?;
             self.inner.check_reclaimable(path, sealed).await
         })
     }
@@ -69,7 +72,7 @@ impl VcsOps for GuardedVcs {
         path: &'a Path,
     ) -> VcsFuture<'a, Result<bool, VcsError>> {
         Box::pin(async move {
-            let _admission = self.admit(path)?;
+            let _admission = self.admit(path).await?;
             self.inner.trim_disposable_target(path).await
         })
     }
@@ -80,7 +83,7 @@ impl VcsOps for GuardedVcs {
         namespace: &'a str,
     ) -> VcsFuture<'a, Result<(), VcsError>> {
         Box::pin(async move {
-            let _admission = self.admit(path)?;
+            let _admission = self.admit(path).await?;
             self.inner.unmint(launch, path, namespace).await
         })
     }
@@ -316,14 +319,16 @@ mod tests {
         held: Arc<AtomicBool>,
     }
     impl ReclamationFence for Fence {
-        fn admit(&self, _: &str, _: &Path) -> Result<Box<dyn ReclamationAdmission>, VcsError> {
-            if !self.allowed.load(Ordering::SeqCst) {
-                return Err(VcsError::mint_unavailable(
-                    "operator terminal retains workspace",
-                ));
-            }
-            assert!(!self.held.swap(true, Ordering::SeqCst));
-            Ok(Box::new(Admission(self.held.clone())))
+        fn admit<'a>(&'a self, _: &'a str, _: &'a Path) -> ReclamationFuture<'a> {
+            Box::pin(async move {
+                if !self.allowed.load(Ordering::SeqCst) {
+                    return Err(VcsError::mint_unavailable(
+                        "operator terminal retains workspace",
+                    ));
+                }
+                assert!(!self.held.swap(true, Ordering::SeqCst));
+                Ok(Box::new(Admission(self.held.clone())) as Box<dyn ReclamationAdmission>)
+            })
         }
     }
 

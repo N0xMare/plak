@@ -34,6 +34,8 @@ fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
         match row["kind"].as_str().unwrap() {
             "operation" => {
                 operations.insert(match roundtrip::<OperatorOperation>(value) {
+                    OperatorOperation::Inventory => "inventory",
+                    OperatorOperation::Reclaim { .. } => "reclaim",
                     OperatorOperation::Renew => "renew",
                     OperatorOperation::NamespaceClose => "namespace_close",
                     OperatorOperation::Open { .. } => "open",
@@ -54,6 +56,8 @@ fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
             }
             "answer" => {
                 answers.insert(match roundtrip::<OperatorAnswer>(value) {
+                    OperatorAnswer::Inventory { .. } => "inventory",
+                    OperatorAnswer::Reclamation { .. } => "reclamation",
                     OperatorAnswer::Table { .. } => "table",
                     OperatorAnswer::Terminal { .. } => "terminal",
                     OperatorAnswer::Refused { .. } => "refused",
@@ -94,6 +98,6 @@ fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
             statuses.len(),
             refusals.len()
         ),
-        (7, 5, 3, 6, 10)
+        (9, 5, 5, 6, 10)
     );
 }

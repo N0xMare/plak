@@ -21,6 +21,16 @@ impl OperatorTerminalService {
         self.tick();
         let now = (self.inner.clock)();
         let mut table = lock(&self.inner.table);
+        if let Some(lease) = table.leases.get(&frame.stream) {
+            if lease.host != host
+                || lease.generation != generation
+                || lease.connection != connection
+            {
+                return None;
+            }
+            table.release_lease(frame.stream);
+            return Some(Vec::new());
+        }
         for (key, ns) in &mut table.namespaces {
             if key.host != host || key.generation != generation {
                 continue;
