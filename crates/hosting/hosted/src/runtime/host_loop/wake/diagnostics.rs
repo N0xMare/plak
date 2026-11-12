@@ -40,6 +40,7 @@ impl Diagnostics {
 
     fn admitted(&mut self, session: &str) {
         self.bind(session);
+        self.last = None;
         self.pending_since = None;
         self.checked = None;
         self.warned = false;
@@ -62,6 +63,20 @@ impl Diagnostics {
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
+    pub(in crate::runtime::host_loop) fn wake_automatic_precedence(&mut self) {
+        let now = Instant::now();
+        self.role
+            .child_wake
+            .diagnostics
+            .checked(&self.role.config.session.id, now);
+        let reason = if self.role.config.state_roots.runner_pending() {
+            "placement_pending"
+        } else {
+            "automatic_precedence"
+        };
+        self.wake_decision("deferred", reason, now);
+    }
+
     pub(in crate::runtime::host_loop) fn wake_turn_admitted(&mut self) {
         self.role
             .child_wake
@@ -136,8 +151,111 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "offline actor assertions")]
 mod tests {
+    use super::super::tests::{post_child_result, with_host};
     use super::*;
+
+    #[test]
+    fn an_admitted_root_turn_resets_the_armed_watchdog_through_the_actor() {
+        with_host(1, |host, runtime, _, _| {
+            let now = Instant::now();
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap();
+            let crate::runtime::host_loop::HostStep::Prompt {
+                text,
+                queued_delivery,
+                user_echoed,
+            } = host
+                .block(async |host| {
+                    host.child_wake_prompt(now + super::super::QUIET_WINDOW)
+                        .await
+                })
+                .unwrap()
+            else {
+                panic!("ready host wake")
+            };
+            let old = Instant::now().checked_sub(Duration::from_secs(60)).unwrap();
+            host.publish_pending_continuation();
+            host.wake_watchdog(old);
+            host.role
+                .child_wake
+                .diagnostics
+                .checked(&host.role.config.session.id, old);
+            host.wake_decision("deferred", "automatic_precedence", old);
+            assert!(host.role.child_wake.diagnostics.pending_since.is_some());
+            host.block(async |host| {
+                host.run_prompt(text, queued_delivery, user_echoed, None)
+                    .await
+            })
+            .unwrap();
+            assert_eq!(host.role.config.session.root_turn_count, 1);
+            assert!(host.role.child_wake.diagnostics.pending_since.is_none());
+            assert!(host.role.child_wake.diagnostics.checked.is_none());
+            assert!(host.role.child_wake.diagnostics.last.is_none());
+            post_child_result(runtime);
+            host.publish_pending_continuation();
+            host.wake_watchdog(Instant::now());
+            assert!(host.role.child_wake.diagnostics.mail > 0);
+            assert!(!host.role.child_wake.diagnostics.warned);
+        });
+    }
+
+    #[test]
+    fn earlier_automatic_work_records_a_decision_during_placement_hold() {
+        for loss_resume in [false, true] {
+            with_host(1, |host, _, actions, _| {
+                let registry = plakous::runner::RunnerRegistry::default();
+                registry.configure(plakous::runner::ConfiguredRunner {
+                    runner_id: "local".into(),
+                    names: vec!["local".into()],
+                });
+                host.role.config.state_roots = host
+                    .role
+                    .config
+                    .state_roots
+                    .clone()
+                    .with_runner_readiness(registry, "local");
+                if loss_resume {
+                    host.role.root_loss_resume_due = true;
+                } else {
+                    host.role.config.continuation = Some("carry on".into());
+                }
+                let now = Instant::now();
+                host.publish_pending_continuation();
+                host.wake_watchdog(now);
+                host.role.child_wake.diagnostics.pending_since =
+                    now.checked_sub(Duration::from_secs(5));
+                host.role.last_tree_observed_at = now.checked_sub(Duration::from_secs(1)).unwrap();
+                actions
+                    .send(crate::surface_protocol::UserAction::ResyncTranscript {
+                        scope: plakous_host_protocol::views::transcript::TranscriptScope::Root,
+                    })
+                    .unwrap();
+                assert!(matches!(
+                    host.block(async |host| host.next_prompt(None).await)
+                        .unwrap(),
+                    crate::runtime::host_loop::HostStep::Continue
+                ));
+                assert_eq!(
+                    host.role.child_wake.diagnostics.last,
+                    Some(("deferred", "placement_pending"))
+                );
+                host.wake_watchdog(now + Duration::from_secs(6));
+                assert!(host.role.child_wake.diagnostics.mail > 0);
+                assert!(!host.role.child_wake.diagnostics.warned);
+                assert_eq!(
+                    host.role
+                        .config
+                        .store
+                        .load_intents(&host.role.config.session.id)
+                        .unwrap()
+                        .submissions,
+                    []
+                );
+            });
+        }
+    }
 
     #[test]
     fn watchdog_warns_once_until_a_decision_runs_or_work_clears() {

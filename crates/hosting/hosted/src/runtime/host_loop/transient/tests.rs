@@ -29,6 +29,35 @@ fn failure(gate: ResumeGate) -> TransientFailure {
 }
 
 #[test]
+fn queued_transcript_reads_do_not_prevent_scheduling_a_transient_resume() {
+    for reads in [1, 2] {
+        let root = tempfile::tempdir().unwrap();
+        let (mut config, _) = fresh_injected_attached_host(root.path());
+        config.store.save(&mut config.session).unwrap();
+        let (sender, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+        let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let mut host =
+            RootActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+        for _ in 0..reads {
+            sender
+                .send(UserAction::ResyncTranscript {
+                    scope: plakous_host_protocol::views::transcript::TranscriptScope::Root,
+                })
+                .unwrap();
+        }
+        assert!(host.in_runtime(|host| {
+            host.schedule_transient_resume(
+                failure(ResumeGate::Network),
+                "temporary connection failure",
+            )
+        }));
+        assert!(host.role.pending_resume.is_some());
+        assert!(host.role.interrupt_state.borrow().has_deferred());
+        host.block(async |host| host.release().await).unwrap();
+    }
+}
+
+#[test]
 fn queued_transcript_reads_do_not_cancel_a_transient_resume() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());

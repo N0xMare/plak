@@ -829,7 +829,7 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
     }
 }
 
-fn with_host(
+pub(super) fn with_host(
     results: usize,
     test: impl FnOnce(
         &mut RootActor<'_, TestExtension>,
@@ -3598,7 +3598,7 @@ impl WakeJobFixture {
     }
 }
 
-fn post_child_result(runtime: &crate::topology_runtime::ProductTopologyRuntime) {
+pub(super) fn post_child_result(runtime: &crate::topology_runtime::ProductTopologyRuntime) {
     runtime
         .mutate_then_emit(false, |tree| {
             let child = tree

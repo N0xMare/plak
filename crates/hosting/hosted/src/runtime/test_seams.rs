@@ -35,6 +35,24 @@ impl Seams {
 static SEAMS: Mutex<Seams> = Mutex::new(Seams::new());
 static IDLE: Condvar = Condvar::new();
 
+type IdleReadCut = Box<dyn FnOnce() + Send>;
+static IDLE_READ_CUTS: std::sync::LazyLock<Mutex<std::collections::BTreeMap<String, IdleReadCut>>> =
+    std::sync::LazyLock::new(Mutex::default);
+
+pub(crate) fn arm_after_idle_read(session: &str, cut: IdleReadCut) {
+    IDLE_READ_CUTS
+        .lock()
+        .unwrap()
+        .insert(session.to_owned(), cut);
+}
+
+pub(crate) fn after_idle_read(session: &str) {
+    let cut = IDLE_READ_CUTS.lock().unwrap().remove(session);
+    if let Some(cut) = cut {
+        cut();
+    }
+}
+
 fn lock() -> std::sync::MutexGuard<'static, Seams> {
     SEAMS
         .lock()

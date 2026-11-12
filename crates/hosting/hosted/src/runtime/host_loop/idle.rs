@@ -1140,6 +1140,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 // Preserve the iteration boundary: action notices precede
                 // any pause/wake notice the automatic check may commit.
                 self.commit_notice_intents();
+                #[cfg(test)]
+                crate::runtime::test_seams::after_idle_read(&self.role.config.session.id);
                 InterruptWatch::deferring(self.role.actions, &self.role.interrupt_state).poll();
                 let preempted = self.role.interrupt_state.borrow().has_wake_preemptor();
                 if !preempted && let Some(step) = self.idle_automatic_prompt(false, true).await? {
@@ -1165,12 +1167,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         observed_tree: bool,
     ) -> CliResult<Option<HostStep>> {
         if self.role.pending_resume.is_some() {
+            self.wake_automatic_precedence();
             return self.transient_resume_prompt().await.map(Some);
         }
         if one_shot {
             return Ok(None);
         }
         if !self.role.config.attached_one_shot && self.role.root_loss_resume_due {
+            self.wake_automatic_precedence();
             return Ok(Some(match self.root_loss_resume_delivery().await? {
                 Some((text, queued_delivery, user_echoed)) => HostStep::Prompt {
                     text,
@@ -1181,6 +1185,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             }));
         }
         if self.role.config.continuation.is_some() {
+            self.wake_automatic_precedence();
             return self.continuation_prompt().await.map(Some);
         }
         if observed_tree {

@@ -6179,7 +6179,10 @@ Idle interactive roots auto-continue on pending process notices or unread
 child results or questions when `[turn] auto_continue` is enabled (default true). A 2 s
 quiet window coalesces completions. Content-free `plak.wake` logs report each
 wake decision/reason transition with mail and process-exit counts and quiet
-window age. Admission of any root turn resets idle starvation accounting.
+window age. Admission of any root turn resets idle starvation accounting and
+decision deduplication, so each idle period logs its first decision. Earlier
+automatic work records a deferred wake decision (`automatic_precedence`, or
+`placement_pending` while its runner is held), rather than appearing starved.
 If wake work stays unread with host wakes enabled and no decision
 runs for over ten seconds, tree observation warns once until a decision runs
 or the work clears. The warning includes received action-class counts and
@@ -6194,7 +6197,7 @@ abandoning automatic admission; new intents preempt by default. After a read
 action, an idle iteration that observed the tree polls ingress without consuming
 Esc and checks automatic work only without pending preemptors, with the same
 retry/loss-resume, continuation and wake precedence as a receive timeout.
-Reads do not cancel a transient resume. Mutating actions cross the ordinary
+Reads neither prevent scheduling nor cancel a transient resume. Mutating actions cross the ordinary
 idle-entry projection boundary before automatic work. A stream of transcript
 resyncs cannot starve child-result or process-exit wakes. Esc
 confirms interruption of that turn as usual and disables auto-continue until the next prompt.

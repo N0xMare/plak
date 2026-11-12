@@ -68,7 +68,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         if self.role.recovery.blocked()
             || self.quit_started_at.is_some()
             || watch.interrupted()
-            || self.role.interrupt_state.borrow().has_deferred()
+            || self.role.interrupt_state.borrow().has_wake_preemptor()
             || self.role.pending_start.is_some()
             || !self.role.config.session.pending_queue.is_empty()
             || self.role.config.session.queue_commands.has_pending()

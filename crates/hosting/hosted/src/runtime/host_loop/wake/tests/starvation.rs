@@ -4,6 +4,33 @@ use super::*;
 use plakous_host_protocol::views::transcript::TranscriptScope;
 
 #[test]
+fn escape_arriving_after_an_idle_read_stays_deferred() {
+    with_host(1, |host, _, actions, _| {
+        host.role.config.continuation = Some("carry on".into());
+        host.role.last_tree_observed_at =
+            Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        let controls = actions.clone();
+        crate::runtime::test_seams::arm_after_idle_read(
+            &host.role.config.session.id,
+            Box::new(move || controls.send(UserAction::Interrupt).unwrap()),
+        );
+        actions
+            .send(UserAction::ResyncTranscript {
+                scope: TranscriptScope::Root,
+            })
+            .unwrap();
+        assert!(matches!(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+            HostStep::Continue
+        ));
+        assert!(host.role.interrupt_state.borrow().has_wake_preemptor());
+        assert_eq!(host.role.config.continuation.as_deref(), Some("carry on"));
+        assert_eq!(submissions(host), []);
+    });
+}
+
+#[test]
 fn continuation_yields_to_a_prompt_queued_behind_a_read() {
     with_host(0, |host, _, actions, _| {
         host.role.config.continuation = Some("carry on".into());
