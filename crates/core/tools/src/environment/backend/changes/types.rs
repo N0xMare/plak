@@ -90,6 +90,39 @@ pub enum ChangesAnswer {
     Refused(ChangesRefusal),
 }
 
+impl ChangesAnswer {
+    pub(crate) fn validate(&self) -> Result<(), ChangesRefusal> {
+        match self {
+            Self::Refused(_) => Ok(()),
+            Self::Diff(ChangesDiff::Patch { text } | ChangesDiff::Binary { numstat: text }) => {
+                if text.len() > MAX_CHANGES_OUTPUT_BYTES {
+                    return Err(ChangesRefusal::OutputLimit);
+                }
+                Ok(())
+            }
+            Self::Status(status) => {
+                if status.entries.len() > MAX_CHANGES_ENTRIES
+                    || status.base_label.len() > 4096
+                    || serde_json::to_vec(status)
+                        .map_err(|_| ChangesRefusal::InvalidRequest)?
+                        .len()
+                        > MAX_CHANGES_OUTPUT_BYTES
+                {
+                    return Err(ChangesRefusal::OutputLimit);
+                }
+                for entry in &status.entries {
+                    ChangesRequest::diff(
+                        status.repository.clone(),
+                        status.observation.clone(),
+                        entry.clone(),
+                    )?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 /// A validated closed status/diff request. Only trusted placement metadata may
 /// supply the optional containing repository, never a browser request.
 #[derive(Clone, Debug, Serialize)]

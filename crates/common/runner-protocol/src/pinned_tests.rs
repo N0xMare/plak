@@ -21,6 +21,7 @@ const PINNED: &[(u32, &str)] = &[
     (3, include_str!("pinned/v3.jsonl")),
     (4, include_str!("pinned/v4.jsonl")),
     (5, include_str!("pinned/v5.jsonl")),
+    (6, include_str!("pinned/v6.jsonl")),
 ];
 
 fn owner() -> LineOwner {
@@ -317,7 +318,7 @@ fn encoded() -> String {
     );
     lines.push(json!({"verbs": [
         verbs::FOREGROUND_STOP,
-        verbs::WORKSPACE_OPTIONS, verbs::WORKSPACE_DISCOVER, verbs::WORKSPACE_VALIDATE, verbs::READ_WORKSPACE, verbs::QUERY_REPOSITORY, verbs::MUTATE_WORKSPACE,
+        verbs::WORKSPACE_OPTIONS, verbs::WORKSPACE_DISCOVER, verbs::WORKSPACE_VALIDATE, verbs::WORKSPACE_CHANGES, verbs::READ_WORKSPACE, verbs::QUERY_REPOSITORY, verbs::MUTATE_WORKSPACE,
         verbs::EXECUTE_LITERAL_PROCESS, verbs::PROCESS_START, verbs::PROCESS_WRITE,
         verbs::PROCESS_POLL, verbs::PROCESS_STOP, verbs::PROCESS_PROMOTE,
         verbs::JOBS_SNAPSHOT, verbs::JOBS_STOP, verbs::JOBS_DISOWN, verbs::JOBS_WATCH,

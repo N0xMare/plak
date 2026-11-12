@@ -87,6 +87,8 @@ pub enum RunnerVerb {
     WorkspaceDiscover,
     /// Fresh canonical workspace admission on the runner.
     WorkspaceValidate,
+    /// Fixed operator status or single-entry diff read.
+    WorkspaceChanges,
     /// Keyed cleanup of one settled driver call's unpromoted process.
     ForegroundStop,
     /// [`ExecutionEnvironment::read_workspace`].
@@ -152,11 +154,12 @@ pub enum RunnerVerbFamily {
 
 impl RunnerVerb {
     /// Every verb.
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::ForegroundStop,
         Self::WorkspaceOptions,
         Self::WorkspaceDiscover,
         Self::WorkspaceValidate,
+        Self::WorkspaceChanges,
         Self::ReadWorkspace,
         Self::QueryRepository,
         Self::MutateWorkspace,
@@ -185,6 +188,7 @@ impl RunnerVerb {
             Self::WorkspaceOptions => "workspace.options",
             Self::WorkspaceDiscover => "workspace.discover",
             Self::WorkspaceValidate => "workspace.validate",
+            Self::WorkspaceChanges => "workspace.changes",
             Self::ForegroundStop => "process.foreground_stop",
             Self::ReadWorkspace => "workspace.read",
             Self::QueryRepository => "repository.query",
@@ -222,6 +226,7 @@ impl RunnerVerb {
                 RunnerVerbFamily::Workspace
             }
             Self::ReadWorkspace
+            | Self::WorkspaceChanges
             | Self::QueryRepository
             | Self::MutateWorkspace
             | Self::ExecuteLiteralProcess => RunnerVerbFamily::Environment,
@@ -249,6 +254,7 @@ impl RunnerVerb {
             Self::WorkspaceOptions
                 | Self::WorkspaceDiscover
                 | Self::WorkspaceValidate
+                | Self::WorkspaceChanges
                 | Self::ReadWorkspace
                 | Self::QueryRepository
                 | Self::ProcessPoll
@@ -994,6 +1000,13 @@ pub fn serve(
     let environment = environment.clone();
     Box::pin(async move {
         let answer = match verb {
+            RunnerVerb::WorkspaceChanges => match wire::decode_changes_request(request) {
+                Ok(request) => environment
+                    .workspace_changes(request, control)
+                    .await
+                    .and_then(|answer| wire::encode_changes_answer(&answer)),
+                Err(error) => Err(error),
+            },
             RunnerVerb::ReadWorkspace => match wire::decode_read_request(request) {
                 Ok(request) => environment
                     .read_workspace(request, control)

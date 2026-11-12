@@ -15,6 +15,8 @@ pub mod verbs {
     pub const WORKSPACE_DISCOVER: &str = "workspace.discover";
     /// Fresh workspace admission on the runner.
     pub const WORKSPACE_VALIDATE: &str = "workspace.validate";
+    /// Fixed bounded operator status or single-entry diff read.
+    pub const WORKSPACE_CHANGES: &str = "workspace.changes";
     /// Read one bounded slice of a workspace file.
     pub const READ_WORKSPACE: &str = "workspace.read";
     /// Run one bounded repository query.

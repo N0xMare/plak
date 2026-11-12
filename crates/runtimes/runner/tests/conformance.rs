@@ -36,6 +36,52 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf};
 const LINE: &str = "00000000-0000-0000-0000-0000000000a1";
 const BRANCH: &str = "00000000-0000-0000-0000-0000000000b1";
 
+mod changes {
+    use super::*;
+    use plakous_tools::internal::changes::{
+        ChangesAnswer, ChangesRefusal, ChangesRequest, workspace_changes,
+    };
+    use plakous_tools::internal::runner::RunnerVerb;
+
+    #[tokio::test]
+    async fn paired_changes_dispatches_build_reads_and_refuses_free_options() {
+        let root = tempfile::tempdir().unwrap();
+        let link = Loopback::join(service(root.path()), bind("changes"), windows())
+            .await
+            .unwrap();
+        let direct = workspace_changes(&host(root.path()), ChangesRequest::status(), unkeyed())
+            .await
+            .unwrap();
+        assert_eq!(
+            direct,
+            ChangesAnswer::Refused(ChangesRefusal::NotARepository)
+        );
+        let payload = json!({"root": root.path(), "cwd": root.path(), "request": {"query": "status", "repository": null}});
+        let result = link
+            .backend()
+            .link()
+            .call(RunnerCall::unkeyed(
+                RunnerVerb::WorkspaceChanges,
+                payload.clone(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_value::<ChangesAnswer>(result).unwrap(),
+            direct
+        );
+        let mut invalid = payload;
+        invalid["request"]["argv"] = json!(["log"]);
+        assert!(matches!(
+            link.backend()
+                .link()
+                .call(RunnerCall::unkeyed(RunnerVerb::WorkspaceChanges, invalid))
+                .await,
+            Err(RunnerFailure::Backend(_))
+        ));
+    }
+}
+
 mod model_reads {
     use super::*;
     use plakous_tools::internal::runner::RunnerVerb;
@@ -101,7 +147,11 @@ mod model_reads {
         ));
         // Malformed payloads deliberately fail at the backend. Their answers
         // still must not reserve, tombstone or spend a model-call key.
-        for verb in RunnerVerb::ALL.into_iter().filter(|verb| verb.is_read()) {
+        // Operator Changes is never a model read, even with a valid owner.
+        for verb in RunnerVerb::ALL
+            .into_iter()
+            .filter(|verb| verb.is_read() && *verb != RunnerVerb::WorkspaceChanges)
+        {
             for (index, replay) in [(0, false), (1, true), (2, false)] {
                 let operation = Operation {
                     verb: verb.as_str().into(),

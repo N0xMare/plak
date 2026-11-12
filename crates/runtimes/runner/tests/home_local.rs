@@ -31,6 +31,59 @@ const HOME_HOST: &str = "00000000-0000-0000-0000-00000000c0de";
 const LINE: &str = "00000000-0000-0000-0000-0000000000a1";
 const BRANCH: &str = "00000000-0000-0000-0000-0000000000b1";
 
+#[tokio::test]
+async fn changes_stay_in_process_and_the_home_local_daemon_refuses_the_verb() {
+    use plakous_tools::internal::changes::{
+        ChangesAnswer, ChangesRefusal, ChangesRequest, workspace_changes,
+    };
+    let daemon = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let service = service(daemon.path(), "rev-a", true);
+    let client = connect(&service, bind(HOME_HOST, revision("rev-a"), false), true)
+        .await
+        .unwrap();
+    let recorded = Arc::new(Recorded {
+        link: client.clone(),
+        calls: Mutex::default(),
+    });
+    let environment = daemon_environment(root.path(), Arc::clone(&recorded) as _);
+    let answer = workspace_changes(
+        &environment,
+        ChangesRequest::status(),
+        OperationContext::new(CancellationToken::new()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        answer,
+        ChangesAnswer::Refused(ChangesRefusal::NotARepository)
+    );
+    assert!(recorded.calls.lock().unwrap().is_empty());
+    assert!(matches!(
+        client
+            .call(RunnerCall::unkeyed(
+                RunnerVerb::WorkspaceChanges,
+                serde_json::json!({})
+            ))
+            .await,
+        Err(RunnerFailure::Unavailable(_))
+    ));
+    // An ordinary client bypasses that transport preflight, so this refusal
+    // must come from the daemon's process-only dispatch boundary as well.
+    let unfiltered = connect(&service, bind(HOME_HOST, revision("rev-a"), false), false)
+        .await
+        .unwrap();
+    assert!(matches!(
+        unfiltered
+            .call(RunnerCall::unkeyed(
+                RunnerVerb::WorkspaceChanges,
+                serde_json::json!({})
+            ))
+            .await,
+        Err(RunnerFailure::Unsupported)
+    ));
+}
+
 fn scope() -> ExecutionEnvironmentScope {
     ExecutionEnvironmentScope::Run(RunId::from_str("00000000-0000-0000-0000-000000000041").unwrap())
 }

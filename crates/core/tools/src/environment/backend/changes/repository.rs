@@ -10,6 +10,8 @@ use super::process::{Executor, Output};
 use super::{ChangesContent, ChangesRefusal, ChangesRepository, MAX_CHANGES_INPUT_BYTES};
 use crate::environment::backend::{ExecutionWorkspace, workspace};
 
+static FILESYSTEM_LANES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
+
 #[derive(Clone)]
 pub(super) struct Repository {
     pub identity: ChangesRepository,
@@ -21,9 +23,18 @@ pub(super) struct Repository {
 pub(super) async fn blocking<T: Send + 'static>(
     operation: impl FnOnce() -> Result<T, ChangesRefusal> + Send + 'static,
 ) -> Result<T, ChangesRefusal> {
-    tokio::task::spawn_blocking(operation)
+    let permit = FILESYSTEM_LANES
+        .acquire()
         .await
-        .map_err(|_| ChangesRefusal::Io)?
+        .map_err(|_| ChangesRefusal::Io)?;
+    tokio::task::spawn_blocking(move || {
+        // A cancelled request must not release capacity while an OS filesystem
+        // call is still blocked in this detached worker.
+        let _permit = permit;
+        operation()
+    })
+    .await
+    .map_err(|_| ChangesRefusal::Io)?
 }
 
 impl Repository {
@@ -32,7 +43,7 @@ impl Repository {
         known: Option<PathBuf>,
         executor: Executor,
     ) -> Result<Self, ChangesRefusal> {
-        let protected = protected_roots()?;
+        let protected = blocking(protected_roots).await?;
         let copy = workspace.clone();
         let excluded = protected.clone();
         let identity = blocking(move || {

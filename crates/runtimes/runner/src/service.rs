@@ -725,9 +725,12 @@ impl RunnerService {
             ));
             return;
         };
-        // A home-local runner carries its host's processes and nothing else:
-        // files, version control and services stay with the host.
-        if self.inner.home_local.is_some() && verb.family() != RunnerVerbFamily::Sessions {
+        // Home-local is process-only. Changes is operator-only and must never
+        // reserve a model/effect key or carry an owner.
+        if (self.inner.home_local.is_some() && verb.family() != RunnerVerbFamily::Sessions)
+            || (verb == RunnerVerb::WorkspaceChanges
+                && (request.class != RequestClass::BuildRead || request.owner.is_some()))
+        {
             let _ = sender.send(refused(
                 Some(id),
                 Refusal::Unsupported {

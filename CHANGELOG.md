@@ -59,6 +59,8 @@ one cross-build carrier (a build imports its own and the previous version).
 - Add fixed, bounded read-only Changes execution: contained Git status and
   worktree-versus-HEAD diff, revision preconditions, disabled repository helpers
   and network/lazy fetch, and explicit refusals on unsafe repositories or limits.
+  Paired runner protocol 6 adds the ownerless BuildRead `workspace.changes`
+  status/diff verb; home-local daemons remain process-only.
 
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.

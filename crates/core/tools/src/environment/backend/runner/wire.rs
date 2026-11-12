@@ -9,6 +9,7 @@ use plakous_model::Digest;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
+use super::super::changes::{ChangesAnswer, ChangesRequest};
 use super::super::{
     ExecutionBackendError, ExecutionBackendErrorKind, ExecutionWorkspace, LiteralProcessIntent,
     LiteralProcessRequest, LiteralProcessResult, RepositoryMatchCase, RepositoryQuery,
@@ -19,6 +20,19 @@ use super::super::{
     WorkspaceReadSliceRequest, WorkspaceReplacement, invalid_request,
 };
 use crate::ExecutionEnvironment;
+
+pub(super) fn decode_changes_request(
+    value: Value,
+) -> Result<ChangesRequest, ExecutionBackendError> {
+    from_value(value)
+}
+
+pub(super) fn encode_changes_answer(
+    answer: &ChangesAnswer,
+) -> Result<Value, ExecutionBackendError> {
+    answer.validate().map_err(|_| malformed())?;
+    to_value(answer)
+}
 
 pub(super) fn malformed() -> ExecutionBackendError {
     invalid_request("runner wire value is malformed")
