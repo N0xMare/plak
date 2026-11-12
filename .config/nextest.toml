@@ -95,8 +95,14 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 default-filter = '''
 not (
   test(environment::backend::changes::tests::process_stops::)
-  | test(operator_pty_)
-  | test(operator_runner_loss_)
+  | test(operator_pty_close_kills_background_stopped_and_foreground_job_groups)
+  | test(operator_pty_interactive_binary_echo_resize_and_two_absence_scans)
+  | test(operator_pty_namespace_expiry_is_enforced_without_a_host_or_poll)
+  | test(operator_pty_setsid_escape_is_termination_unknown_even_after_master_hangup)
+  | test(operator_pty_detached_terminal_alone_prevents_daemon_idle_exit)
+  | test(operator_pty_wire_and_home_local_have_no_agent_jobs_or_lines)
+  | test(operator_runner_loss_pid_reuse_never_authorizes_a_signal)
+  | test(operator_runner_loss_sigkill_does_not_recover_or_recreate_shell)
   |
   test(placement_hold_cut_nonrunnable_resident_is_retired_before_or_after_instruction_preparation)
   | test(placement_hold_cut_nudge_drain_keeps_owner_loss_debt_without_result_mail)
@@ -383,7 +389,12 @@ test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
   test(environment::backend::changes::tests::process_stops::)
-  | test(operator_pty_)
+  | test(operator_pty_close_kills_background_stopped_and_foreground_job_groups)
+  | test(operator_pty_interactive_binary_echo_resize_and_two_absence_scans)
+  | test(operator_pty_namespace_expiry_is_enforced_without_a_host_or_poll)
+  | test(operator_pty_setsid_escape_is_termination_unknown_even_after_master_hangup)
+  | test(operator_pty_detached_terminal_alone_prevents_daemon_idle_exit)
+  | test(operator_pty_wire_and_home_local_have_no_agent_jobs_or_lines)
   |
   test(placement_hold_cut_nonrunnable_resident_is_retired_before_or_after_instruction_preparation)
   | test(placement_hold_cut_nudge_drain_keeps_owner_loss_debt_without_result_mail)
@@ -572,7 +583,8 @@ default-filter = '''
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(operator_runner_loss_)
+  test(operator_runner_loss_pid_reuse_never_authorizes_a_signal)
+  | test(operator_runner_loss_sigkill_does_not_recover_or_recreate_shell)
   |
   test(console_publication_process_loss_is_old_or_complete_new)
   |
