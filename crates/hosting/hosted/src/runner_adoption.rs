@@ -209,8 +209,9 @@ async fn readopt_line(
     stop: Option<&str>,
 ) -> Result<Readopted, AdoptionFailure> {
     let line = LineId::from_str(line).map_err(|error| format!("line id: {error}"))?;
-    let Some(_admission) = try_lease_only(roots, line).map_err(|error| error.to_string())? else {
-        admission::retry_after_open(roots, line).map_err(|error| error.to_string())?;
+    let Some(_admission) =
+        admission::try_readoption(roots, line).map_err(|error| error.to_string())?
+    else {
         return Err(AdoptionFailure {
             reason: "this host is opening the line's runtime".into(),
             held_elsewhere: true,

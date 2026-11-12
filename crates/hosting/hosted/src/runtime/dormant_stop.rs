@@ -69,7 +69,9 @@ async fn stop_head(
         }
         let permit =
             crate::runner_adoption::try_lease_only(roots, line.line())?.ok_or_else(|| {
-                CliFailure::new("this host is opening or reconciling the session; retry shortly")
+                CliFailure::retryable_open(
+                    "this host is opening or reconciling the session; retry shortly",
+                )
             })?;
         sessions
             .open_lease_only(

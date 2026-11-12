@@ -149,6 +149,39 @@ fn a_dormant_directory_stop_never_opens_or_dispatches_its_continuation() {
 }
 
 #[test]
+fn a_dormant_stop_retries_local_reconciliation_without_recording_cancellation() {
+    let root = tempfile::tempdir().unwrap();
+    let lost =
+        release_a_running_root_turn(root.path(), Release::Lost, Cancel::Deaf, |config| config);
+    let config = next_host(
+        root.path(),
+        &lost,
+        serde_json::json!([]),
+        Arc::clone(&lost.store),
+    );
+    let mut record = lost.store.load(&lost.id).unwrap();
+    let revision = record.store_revision;
+    let causes = root_causes(&lost);
+    let line = config
+        .state_roots
+        .runtime_sessions()
+        .unwrap()
+        .line_head_of(record.plakous_locator.unwrap())
+        .block()
+        .unwrap()
+        .line();
+    let _permit = crate::runner_adoption::try_lease_only(&config.state_roots, line)
+        .unwrap()
+        .unwrap();
+    let error = super::stop_dormant_session(&config.state_roots, lost.store.as_ref(), &mut record)
+        .block()
+        .unwrap_err();
+    assert!(error.can_retry_open(), "{error}");
+    assert_eq!(lost.store.load(&lost.id).unwrap().store_revision, revision);
+    assert_eq!(root_causes(&lost), causes);
+}
+
+#[test]
 fn a_dormant_stop_records_cancellation_before_an_unavailable_runners_settlement() {
     use plakous::runner::{ConfiguredRunner, PlacementFailure, ProbePhase, RunnerRegistry};
     let root = tempfile::tempdir().unwrap();

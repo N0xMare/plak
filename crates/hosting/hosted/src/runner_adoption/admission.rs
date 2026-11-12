@@ -18,7 +18,13 @@ static GATES: LazyLock<Mutex<Gates>> = LazyLock::new(Mutex::default);
 
 struct Gate {
     lock: Arc<RwLock<()>>,
-    retry: Mutex<Option<Retry>>,
+    retry: Mutex<PendingRetry>,
+}
+
+#[derive(Default)]
+struct PendingRetry {
+    callback: Option<Retry>,
+    opened: bool,
 }
 
 enum Held {
@@ -31,39 +37,56 @@ enum Held {
 pub struct ReconciliationPermit {
     held: Option<Held>,
     gate: Arc<Gate>,
+    opened: bool,
+}
+
+impl ReconciliationPermit {
+    pub(crate) fn opened(&mut self) {
+        self.opened = true;
+    }
 }
 
 impl Drop for ReconciliationPermit {
     fn drop(&mut self) {
+        let mut pending = self
+            .gate
+            .retry
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        pending.opened |= self.opened;
         drop(self.held.take());
-        self.gate.retry_if_unheld();
+        let retry = self.gate.retry_if_unheld(&mut pending);
+        drop(pending);
+        if let Some(retry) = retry {
+            retry();
+        }
     }
 }
 
 impl Gate {
-    fn request_retry(&self, retry: Option<Retry>) {
-        let mut retained = self.retry.lock().unwrap_or_else(PoisonError::into_inner);
-        if retained.is_none() {
-            *retained = retry;
-        }
-        drop(retained);
-        // Release may have preceded registration; never leave that retry asleep.
-        self.retry_if_unheld();
+    fn retry_if_unheld(&self, pending: &mut PendingRetry) -> Option<Retry> {
+        let guard = self.lock.try_write().ok()?;
+        let retry = pending.callback.take().filter(|_| !pending.opened);
+        pending.opened = false;
+        // Registration cannot run between taking the retry and releasing this guard.
+        drop(guard);
+        retry
     }
 
-    fn retry_if_unheld(&self) {
-        let Ok(guard) = self.lock.try_write() else {
-            return;
+    fn try_lease_only(self: &Arc<Self>, retry: Option<Retry>) -> Option<ReconciliationPermit> {
+        let mut pending = self.retry.lock().unwrap_or_else(PoisonError::into_inner);
+        let Ok(guard) = self.lock.clone().try_write_owned() else {
+            // Serialize the failed acquisition and retry registration with permit release.
+            if pending.callback.is_none() {
+                pending.callback = retry;
+            }
+            return None;
         };
-        let retry = self
-            .retry
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        drop(guard);
-        if let Some(retry) = retry {
-            retry();
-        }
+        Some(ReconciliationPermit {
+            held: Some(Held::LeaseOnly { _guard: guard }),
+            gate: self.clone(),
+            opened: false,
+        })
     }
 }
 
@@ -81,7 +104,7 @@ fn gate(roots: &ProductStateRoots, line: LineId) -> CliResult<Arc<Gate>> {
     }
     let gate = Arc::new(Gate {
         lock: Arc::new(RwLock::new(())),
-        retry: Mutex::new(None),
+        retry: Mutex::default(),
     });
     gates.insert(key, Arc::downgrade(&gate));
     Ok(gate)
@@ -96,22 +119,14 @@ pub fn try_lease_only(
     roots: &ProductStateRoots,
     line: LineId,
 ) -> CliResult<Option<ReconciliationPermit>> {
-    let gate = gate(roots, line)?;
-    Ok(gate
-        .lock
-        .clone()
-        .try_write_owned()
-        .ok()
-        .map(|guard| ReconciliationPermit {
-            held: Some(Held::LeaseOnly { _guard: guard }),
-            gate,
-        }))
+    Ok(gate(roots, line)?.try_lease_only(None))
 }
 
-pub(super) fn retry_after_open(roots: &ProductStateRoots, line: LineId) -> CliResult<()> {
-    let gate = gate(roots, line)?;
-    gate.request_retry(roots.runner_reconciliation_retry());
-    Ok(())
+pub(super) fn try_readoption(
+    roots: &ProductStateRoots,
+    line: LineId,
+) -> CliResult<Option<ReconciliationPermit>> {
+    Ok(gate(roots, line)?.try_lease_only(roots.runner_reconciliation_retry()))
 }
 
 async fn wait_for_gate(gate: Arc<Gate>) -> Option<ReconciliationPermit> {
@@ -126,6 +141,7 @@ async fn wait_for_gate(gate: Arc<Gate>) -> Option<ReconciliationPermit> {
     Some(ReconciliationPermit {
         held: Some(Held::Open { _guard: guard }),
         gate,
+        opened: false,
     })
 }
 
@@ -150,6 +166,14 @@ pub(crate) async fn admit_open(
 #[allow(clippy::unwrap_used, reason = "process-local admission fixtures")]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn count_retry(retries: &Arc<AtomicUsize>) -> Option<Retry> {
+        let recorded = retries.clone();
+        Some(Box::new(move || {
+            recorded.fetch_add(1, Ordering::SeqCst);
+        }))
+    }
 
     fn fixture_roots(directory: &std::path::Path) -> ProductStateRoots {
         let roots =
@@ -180,7 +204,6 @@ mod tests {
 
     #[tokio::test]
     async fn the_last_open_release_retries_skipped_reconciliation_once() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         let directory = tempfile::tempdir().unwrap();
         let roots = fixture_roots(directory.path());
         let line = "00000000-0000-4000-8000-000000000001".parse().unwrap();
@@ -188,25 +211,64 @@ mod tests {
         let first = wait_for_gate(gate.clone()).await.unwrap();
         let second = wait_for_gate(gate.clone()).await.unwrap();
         let retries = Arc::new(AtomicUsize::new(0));
-        let recorded = retries.clone();
-        gate.request_retry(Some(Box::new(move || {
-            recorded.fetch_add(1, Ordering::SeqCst);
-        })));
+        assert!(gate.try_lease_only(count_retry(&retries)).is_none());
         drop(first);
         assert_eq!(retries.load(Ordering::SeqCst), 0);
         drop(second);
         assert_eq!(retries.load(Ordering::SeqCst), 1);
         assert!(try_lease_only(&roots, line).unwrap().is_some());
         assert_eq!(retries.load(Ordering::SeqCst), 1);
-        let recorded = retries.clone();
-        gate.request_retry(Some(Box::new(move || {
-            recorded.fetch_add(1, Ordering::SeqCst);
-        })));
-        assert_eq!(
-            retries.load(Ordering::SeqCst),
-            2,
-            "registration after release must not lose the retry"
-        );
+        assert!(gate.retry.lock().unwrap().callback.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_successful_open_covers_skips_until_the_last_overlapping_open_releases() {
+        let directory = tempfile::tempdir().unwrap();
+        let roots = fixture_roots(directory.path());
+        let line = "00000000-0000-4000-8000-000000000001".parse().unwrap();
+        let gate = gate(&roots, line).unwrap();
+        let mut opened = wait_for_gate(gate.clone()).await.unwrap();
+        let failed = wait_for_gate(gate.clone()).await.unwrap();
+        let retries = Arc::new(AtomicUsize::new(0));
+        assert!(gate.try_lease_only(count_retry(&retries)).is_none());
+        opened.opened();
+        drop(opened);
+        assert!(gate.try_lease_only(count_retry(&retries)).is_none());
+        drop(failed);
+        assert_eq!(retries.load(Ordering::SeqCst), 0);
+        assert!(gate.retry.lock().unwrap().callback.is_none());
+        let failed = wait_for_gate(gate.clone()).await.unwrap();
+        assert!(gate.try_lease_only(count_retry(&retries)).is_none());
+        drop(failed);
+        assert_eq!(retries.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_skip_racing_the_last_failed_open_never_loses_its_retry() {
+        let directory = tempfile::tempdir().unwrap();
+        let roots = fixture_roots(directory.path());
+        let line = "00000000-0000-4000-8000-000000000001".parse().unwrap();
+        let gate = gate(&roots, line).unwrap();
+        let retries = Arc::new(AtomicUsize::new(0));
+        let mut skipped = 0;
+        for _ in 0..200 {
+            let opening = wait_for_gate(gate.clone()).await.unwrap();
+            let start = Arc::new(std::sync::Barrier::new(2));
+            let worker = {
+                let gate = gate.clone();
+                let start = start.clone();
+                let retries = retries.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    gate.try_lease_only(count_retry(&retries)).is_none()
+                })
+            };
+            start.wait();
+            drop(opening);
+            skipped += usize::from(worker.join().unwrap());
+            assert_eq!(retries.load(Ordering::SeqCst), skipped);
+            assert!(gate.retry.lock().unwrap().callback.is_none());
+        }
     }
 
     #[tokio::test(start_paused = true)]

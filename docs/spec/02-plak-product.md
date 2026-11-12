@@ -5428,8 +5428,11 @@ keeps its separate readiness path.
   a short retry; this scheduling timeout is not classified as a held store
   lease. Other instances still receive the ordinary fenced lease refusal.
   Dormant stops and stop-only retries participate in the same local gate;
-  a sweep skipped for a local open requests one fresh pass after its last
-  permit drops, even if that open failed before acquiring its lease.
+  a sweep skipped for a failed local open requests one fresh pass after its
+  last permit drops, even if it failed before acquiring its lease. A successful
+  overlapping open suppresses the retry to avoid blocking runner readiness
+  over the turn that just opened. Local gate contention also makes a dormant
+  stop explicitly retryable, without recording cancellation first.
   Needed connections retry with 1, 2, 5 and then 15 second backoff;
   idle remote picker rows do not keep an SSH connection alive. Recorded stop debt
   skipped under a live holder retains the required connection and one coalesced

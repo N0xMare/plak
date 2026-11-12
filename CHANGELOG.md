@@ -17,7 +17,9 @@ one cross-build carrier (a build imports its own and the previous version).
   readoption or lease-only stop, without weakening another process's lease
   fence. A local timeout now says that this host is still reconciling the
   session's runner and asks for a short retry, rather than claiming another
-  process holds it. Skipped readoption is retried after the local open ends.
+  process holds it. Skipped readoption is retried after a failed local open;
+  a successful open suppresses the retry to preserve runner readiness. Local
+  contention makes dormant stops explicitly retryable.
   The host-layer `readopt_lines` and `finish_recorded_stop` functions now take
   `ProductStateRoots` instead of a standalone session service, so their
   coordination identity comes from the actual runtime database.

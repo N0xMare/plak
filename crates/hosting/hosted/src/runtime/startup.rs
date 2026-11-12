@@ -1265,9 +1265,12 @@ async fn open_head<P: plakous_host_protocol::ProtocolExtension>(
     head: plakous::sessions::SessionLocator,
     stderr: &mut Vec<u8>,
 ) -> Result<AttachedCodingSession, crate::agent::CodingSessionOpenFailure> {
-    let _admission = crate::runner_adoption::admit_open(&config.state_roots, head).await?;
+    let mut admission = crate::runner_adoption::admit_open(&config.state_roots, head).await?;
     let factory = config.runtime_factory.clone();
     let opened = factory.open_head(config, head, stderr).await;
+    if opened.is_ok() {
+        admission.opened();
+    }
     name_lease_holder(config.lease_holder.as_ref(), head, opened)
 }
 

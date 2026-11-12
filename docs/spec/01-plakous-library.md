@@ -6147,10 +6147,13 @@ by the runtime file's device and inode read from product state roots; missing
 identity is an explicit refusal, never a raw-path fallback. Readoption, dormant
 stops and stop-only followups take the same try-write permit before their
 ordinary head lease and keep it through release. A sweep skipped for a local
-open retains one coalesced reconciliation request: releasing the last local
-permit requests the next owned pass, including when construction failed before
-lease acquisition. Registration also checks an already-released permit, so the
-retry has no lost-wakeup window. Stop-only followups retain their existing
+open retains one coalesced reconciliation request. If no overlapping open
+succeeds, releasing the last local permit requests the next owned pass,
+including when construction failed before lease acquisition. A successful open
+already owns and transfers the line, so it suppresses that retry rather than
+briefly blocking the runner's readiness. Failed try-write/registration and
+permit release/draining share one retry mutex; the draining write guard drops
+before that mutex, so the retry has no lost-wakeup window. Stop-only followups retain their existing
 stop-only retry cadence rather than closing runner readiness.
 This is scheduling only: every open still acquires the ordinary store lease,
 and another process keeps the existing lease refusal. No facade or persistence
