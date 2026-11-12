@@ -154,6 +154,7 @@ pub struct ProcessJobs(Arc<plakous::tools::JobHostCapacity>);
 
 #[derive(Clone)]
 pub struct ProductStateRoots {
+    reclamation_fence: Option<Arc<dyn crate::workspace_reclamation::ReclamationFence>>,
     runner_services: Option<plakous::runner::RunnerServices>,
     runner_readiness: Option<Arc<(plakous::runner::RunnerRegistry, String)>>,
     local_daemon: Option<plakous::tools::runner::LocalDaemonBackend>,
@@ -306,6 +307,7 @@ impl ProductStateRoots {
             state_home,
             subscriptions: std::fs::canonicalize(&subscriptions).unwrap_or(subscriptions),
             local_daemon: None,
+            reclamation_fence: None,
             runner_services: None,
             runner_readiness: None,
             daemon_client: None,
@@ -491,6 +493,24 @@ impl ProductStateRoots {
     #[must_use]
     pub const fn runner_services(&self) -> Option<&plakous::runner::RunnerServices> {
         self.runner_services.as_ref()
+    }
+
+    /// Installs host terminal-pin admission without changing the frozen tool plan.
+    pub fn with_reclamation_fence(
+        mut self,
+        fence: Arc<dyn crate::workspace_reclamation::ReclamationFence>,
+    ) -> Self {
+        self.reclamation_fence = Some(fence);
+        self
+    }
+
+    pub(crate) fn guard_tree_reclamation(&self, tree: &mut crate::agent_tree::ProductAgentTree) {
+        if let Some(fence) = &self.reclamation_fence {
+            tree.set_vcs(crate::workspace_reclamation::GuardedVcs::wrap(
+                tree.vcs_port(),
+                fence.clone(),
+            ));
+        }
     }
 
     /// Supplies the shared client's reconciliation/control port separately
@@ -1005,6 +1025,7 @@ impl ProductStateRoots {
             product,
             state_home,
             local_daemon: None,
+            reclamation_fence: None,
             runner_services: None,
             runner_readiness: None,
             daemon_client: None,

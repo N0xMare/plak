@@ -96,6 +96,8 @@ default-filter = '''
 not (
   test(environment::backend::changes::tests::process_stops::)
   | test(operator_pty_capture_waits_for_delayed_setsid_before_accepting_leader)
+  | test(operator_host_controller_principal_fences_disconnect_reattach_and_shutdown_join)
+  | test(operator_host_same_generation_reconciliation_fences_old_stream_before_input)
   | test(operator_pty_fast_double_fork_escape_is_not_a_descendant_containment_claim)
   | test(operator_pty_unknown_close_reproves_or_acknowledges_surviving_escape_without_kill)
   | test(operator_pty_env_has_exact_curated_keys_without_inherited_secrets)
@@ -291,7 +293,8 @@ not (
   | test(pending_wakes_return_the_wait_and_are_consumed)
   | test(durability::)
   |
-  test(operator_runner_loss_with_a_real_orphaned_shell_reports_lost_not_dead)
+  test(operator_host_loss_sigkill_cuts_retain_pins_and_first_bind_waits_for_proof)
+  | test(operator_runner_loss_with_a_real_orphaned_shell_reports_lost_not_dead)
   | test(operator_runner_loss_pid_reuse_never_authorizes_a_signal)
   | test(operator_runner_loss_sigkill_does_not_recover_or_recreate_shell)
   |
@@ -400,6 +403,8 @@ slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
   test(environment::backend::changes::tests::process_stops::)
   | test(operator_pty_capture_waits_for_delayed_setsid_before_accepting_leader)
+  | test(operator_host_controller_principal_fences_disconnect_reattach_and_shutdown_join)
+  | test(operator_host_same_generation_reconciliation_fences_old_stream_before_input)
   | test(operator_pty_fast_double_fork_escape_is_not_a_descendant_containment_claim)
   | test(operator_pty_unknown_close_reproves_or_acknowledges_surviving_escape_without_kill)
   | test(operator_pty_env_has_exact_curated_keys_without_inherited_secrets)
@@ -601,7 +606,8 @@ default-filter = '''
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(operator_runner_loss_with_a_real_orphaned_shell_reports_lost_not_dead)
+  test(operator_host_loss_sigkill_cuts_retain_pins_and_first_bind_waits_for_proof)
+  | test(operator_runner_loss_with_a_real_orphaned_shell_reports_lost_not_dead)
   | test(operator_runner_loss_pid_reuse_never_authorizes_a_signal)
   | test(operator_runner_loss_sigkill_does_not_recover_or_recreate_shell)
   |

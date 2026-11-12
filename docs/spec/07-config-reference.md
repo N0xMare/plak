@@ -40,6 +40,10 @@ and runner protocol 6 require separate exact matches, with no negotiation. Produ
 operator title overrides and archival state; it composes with runtime epoch
 37 without changing the runtime codec or tree encoding. Session export stays
 version 12, with the version 11 importer retained for the previous version.
+The host's private terminal registry renews namespaces every thirty seconds and
+joins shutdown for up to four seconds. Live and retained unknown/lost-instance
+pins prevent host idle exit; unresolved shutdown retains them for reconciliation
+or explicit owner loss resolution. These fixed bounds add no configuration keys.
 
 Host process coordination is outside the wire and configuration vocabulary:
 `host/host.lock` serializes the whole home, while each

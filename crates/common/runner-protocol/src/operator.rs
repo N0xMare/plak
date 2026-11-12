@@ -181,6 +181,9 @@ pub enum OperatorOperation {
     Close {
         /// Existing terminal.
         key: TerminalKey,
+        /// Cleanup-only target in this paired host/principal namespace. None
+        /// addresses the current generation; never used for attach or input.
+        generation: Option<OperatorId>,
         /// Explicit informed release of unresolved pins, never a claim of death.
         acknowledge_loss: bool,
     },

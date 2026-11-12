@@ -380,6 +380,7 @@ fn operator_close_requires_proof_before_releasing_pin_or_quota() {
     fixture.call(
         1,
         OperatorOperation::Close {
+            generation: None,
             key: key(0),
             acknowledge_loss: false,
         },
@@ -389,6 +390,7 @@ fn operator_close_requires_proof_before_releasing_pin_or_quota() {
     fixture.call(
         1,
         OperatorOperation::Close {
+            generation: None,
             key: key(0),
             acknowledge_loss: false,
         },
@@ -410,6 +412,7 @@ fn operator_expired_unknown_close_reports_acknowledged_loss_before_collection() 
     fixture.call(
         1,
         OperatorOperation::Close {
+            generation: None,
             key: key(0),
             acknowledge_loss: true,
         },
@@ -433,6 +436,7 @@ fn operator_exited_receipts_collect_without_ever_respawning_evicted_ids() {
         fixture.call(
             1,
             OperatorOperation::Close {
+                generation: None,
                 key: key(n),
                 acknowledge_loss: false,
             },
@@ -592,7 +596,7 @@ fn operator_namespace_visibility_generation_loss_and_restart_never_adopt() {
         "digest",
         OperatorOperation::Renew,
     );
-    assert_eq!(rows, OperatorAnswer::Table { terminals: vec![] });
+    refused(rows, OperatorRefusal::TerminalBusy);
     refused(
         fixture.service.execute(
             "paired",
@@ -639,8 +643,19 @@ fn operator_expired_generation_renew_cannot_close_its_successors_terminals() {
         "renew",
         OperatorOperation::Renew,
     );
-    assert!(matches!(renewed, OperatorAnswer::Table { .. }));
+    refused(renewed, OperatorRefusal::TerminalBusy);
     fixture.service.tick();
+    assert!(matches!(
+        fixture.service.execute(
+            "paired",
+            "successor",
+            2,
+            namespace(),
+            "renew",
+            OperatorOperation::Renew
+        ),
+        OperatorAnswer::Table { .. }
+    ));
     let opened = fixture.service.execute(
         "paired",
         "successor",
@@ -660,6 +675,17 @@ fn operator_expired_generation_renew_cannot_close_its_successors_terminals() {
         fixture.call(1, OperatorOperation::Renew),
         OperatorRefusal::NamespaceExpired,
     );
+    refused(
+        fixture.call(
+            1,
+            OperatorOperation::Close {
+                key: key(0),
+                generation: Some(id("successor")),
+                acknowledge_loss: true,
+            },
+        ),
+        OperatorRefusal::NamespaceExpired,
+    );
     fixture.service.tick();
     assert_eq!(
         lock(&fixture.fake).closed,
@@ -677,6 +703,57 @@ fn operator_expired_generation_renew_cannot_close_its_successors_terminals() {
     assert!(
         matches!(table,OperatorAnswer::Table {terminals} if terminals.len()==1 && terminals[0].status==TerminalStatus::Running)
     );
+}
+
+#[test]
+fn operator_successor_close_is_cleanup_only_and_principal_scoped() {
+    let fixture = Fixture::new();
+    fixture.open(0);
+    refused(
+        fixture.service.execute(
+            "paired",
+            "successor",
+            2,
+            namespace(),
+            "renew",
+            OperatorOperation::Renew,
+        ),
+        OperatorRefusal::TerminalBusy,
+    );
+    let close = OperatorOperation::Close {
+        key: key(0),
+        generation: Some(id("generation")),
+        acknowledge_loss: false,
+    };
+    refused(
+        fixture.service.execute(
+            "paired",
+            "successor",
+            2,
+            OperatorNamespace {
+                principal: id("other"),
+                ..namespace()
+            },
+            "close",
+            close.clone(),
+        ),
+        OperatorRefusal::TerminalLost,
+    );
+    assert_eq!(lock(&fixture.fake).closed, 1);
+    let answer = fixture
+        .service
+        .execute("paired", "successor", 2, namespace(), "close", close);
+    assert!(matches!(answer, OperatorAnswer::Terminal { terminal, .. }
+        if terminal.status == TerminalStatus::TerminationUnknown));
+    assert_eq!(lock(&fixture.fake).closed, 1);
+    assert_eq!(lock(&fixture.fake).spawned, 1);
+    assert!(fixture.service.workspace_pinned(Path::new("/workspace")));
+    lock(&fixture.fake).proof = true;
+    fixture.service.tick();
+    assert!(!fixture.service.workspace_pinned(Path::new("/workspace")));
+    assert!(matches!(fixture.service.execute(
+        "paired", "successor", 2, namespace(), "renew", OperatorOperation::Renew,
+    ), OperatorAnswer::Table { terminals } if terminals.is_empty()));
 }
 
 #[test]

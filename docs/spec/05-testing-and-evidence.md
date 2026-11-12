@@ -44,11 +44,14 @@ platform scan test compares the runner's own kernel session id against a fresh
 PTY child's before platform cleanup qualification. Injected observation failures
 must leave a shell running. A zombie-anchor regression keeps Linux's full scan
 requirement while checking Darwin's unreaped direct-child fallback and rejection
-of changed start identity. The fast-exit environment fixture also requires cleanup
+of changed start identity. A deterministic child held before setsid verifies that
+capture rejects the initial non-leader observation and retries until SID/PGID
+match; Darwin's failed-capture test diagnostics retain only stage and kernel
+identity/status information, never commands or environment bytes. The fast-exit
+environment fixture also requires cleanup
 proof; job-control commands run from a short sourced script, disabling Bash
 history expansion before any job-id expansion rather than relying on shell-specific
-interactive parsing. Injected observation failures
-must leave a shell running. Tests read the exact curated environment from `env`,
+interactive parsing. Tests read the exact curated environment from `env`,
 validate passwd/fallback shell selection, bound output before cursor advancement,
 collect more than 65 closed receipts without replay, and fence more than 129
 retired generations. Runner-loss durability tests kill a real PTY-owning process,
@@ -58,6 +61,20 @@ These platform-sensitive tests require both supported operating systems; Linux
 evidence alone is not macOS process-supervision qualification. The product client
 terminal scheduler and browser transport-loss evidence belong to their later
 client-protocol increment, not these runner-side tests.
+
+Host-internal terminal tests cover write-ahead pin/hold acquisition, both orders
+of pin versus ancestor/descendant reclamation, durable lost pins before any bind,
+principal/connection/generation controller exclusion, disconnect and same-generation
+reconciliation before input, and joined shutdown with no agent line/job records.
+A VCS wrapper test checks that refused admission prevents the actual removal and
+successful admission remains held at that effect. Host-loss durability cuts kill
+an actual host-authority subprocess after FULL reservation and after live PTY open.
+Restart refuses old attachment ids; same-instance first bind waits for cleanup,
+while an empty replacement instance retains the pin until owner-only explicit loss
+resolution, without killing or inferring death of the orphaned old shell. These
+are internal authority tests, not browser end-to-end qualification. Run the platform
+session-scan preflight first, then serial operator tests on each supported platform;
+SIGKILL host/runner cuts belong only in durability and are excluded from offline.
 
 Direct Anthropic API refusal qualification follows Anthropic's
 [refusals and fallback documentation](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback),
@@ -2831,7 +2848,7 @@ Conflict laws run the real topology tool with distinct operation ids, then
 present its terminals with reused, absent and empty display ids. Every
 operation retains one keyed conflict notice and its own whole path; conflict
 facts still cross the existing process-local tool boundary, not a new store
-encoding. Product schema 36, tree schema 10 and export v12 importing v11 stay
+encoding. Product schema 38, tree schema 10 and export v12 importing v11 stay
 unchanged by these notice corrections.
 The bounded result-mail observation law requires start and finished milestones
 before its result row even on the first read. The spawn/wait/adopt parity

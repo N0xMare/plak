@@ -23,6 +23,7 @@ pub(crate) type TelemetrySinkFactory = fn() -> Option<Arc<dyn ExtraTelemetrySink
 
 /// Handles every product command shares for the life of the process.
 pub(crate) struct Services {
+    terminals: Arc<OnceLock<Arc<crate::terminal_registry::TerminalRegistry>>>,
     runner_ownership: Option<Arc<crate::commands::runner::ownership::RunnerOwnership>>,
     runners: plakous::runner::RunnerRegistry,
     runner_overlap: Arc<OnceLock<plakous::runner::MachineOverlapGuard>>,
@@ -91,6 +92,7 @@ impl Services {
     #[cfg(test)]
     pub(crate) fn for_home_with_state(paths: PlakPaths, state: std::path::PathBuf) -> Self {
         Self {
+            terminals: Arc::default(),
             runner_ownership: None,
             runners: plakous::runner::RunnerRegistry::default(),
             runner_overlap: Arc::default(),
@@ -129,6 +131,7 @@ impl Services {
             crate::product_doctor::install_credential_state_home(state.to_path_buf());
         }
         Self {
+            terminals: Arc::default(),
             runner_ownership: None,
             runners: plakous::runner::RunnerRegistry::default(),
             runner_overlap: Arc::default(),
@@ -161,6 +164,7 @@ impl Clone for Services {
             let _ = extra_telemetry_sink.set(sink.clone());
         }
         Self {
+            terminals: self.terminals.clone(),
             runner_ownership: self.runner_ownership.clone(),
             runners: self.runners.clone(),
             runner_overlap: self.runner_overlap.clone(),
@@ -176,6 +180,20 @@ impl Clone for Services {
 }
 
 impl Services {
+    pub(crate) fn with_terminal_registry(
+        &self,
+        registry: Arc<crate::terminal_registry::TerminalRegistry>,
+    ) -> Self {
+        let services = self.clone();
+        let _ = services.terminals.set(registry);
+        services
+    }
+
+    pub(crate) fn terminal_registry(
+        &self,
+    ) -> Option<&Arc<crate::terminal_registry::TerminalRegistry>> {
+        self.terminals.get()
+    }
     pub(crate) const fn runners(&self) -> &plakous::runner::RunnerRegistry {
         &self.runners
     }
@@ -317,7 +335,13 @@ impl Services {
             }
             None => roots,
         };
-        Ok(roots)
+        let fallback = Arc::new(crate::store::terminal_pins::StoredTerminalFence(
+            context.clone(),
+        ));
+        if let Some(registry) = self.terminal_registry() {
+            return Ok(roots.with_reclamation_fence(registry.clone()));
+        }
+        Ok(roots.with_reclamation_fence(fallback))
     }
 
     /// The process's one job bound.

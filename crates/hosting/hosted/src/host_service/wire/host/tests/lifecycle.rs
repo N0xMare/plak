@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn operator_host_hold_requires_an_existing_exact_resident_without_opening() {
+    let (host, fake) = host(&["s1", "s2"]);
+    let slot = host.slot("s1");
+    assert!(slot.hold_resident("s1").is_none());
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
+    let out = Out::default();
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    assert!(slot.hold_resident("s2").is_none());
+    let hold = slot.hold_resident("s1").unwrap();
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    assert!(host.slot("s2").hold_resident("s2").is_none());
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    drop(hold);
+    connection.leave();
+    handed_off(&host);
+}
+
 fn a_same_node_switch_reopens_one_dormant_successor_slot_from_a_fresh_client() {
     let Switched {
         host,

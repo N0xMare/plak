@@ -68,6 +68,11 @@ mod review_expiry;
 pub(crate) mod surface_protocol;
 /// Terminal-only application adapters.
 pub(crate) mod terminal_application;
+#[allow(
+    dead_code,
+    reason = "host-internal terminal API; client requests arrive in the next protocol increment"
+)]
+mod terminal_registry;
 pub(crate) mod tui_preferences;
 mod usage_remedy;
 pub mod wire_transport;

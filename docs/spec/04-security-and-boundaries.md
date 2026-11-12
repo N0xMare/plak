@@ -771,6 +771,15 @@ recover a lost open answer only on that runner instance; missing receipts never
 authorize replayed execution. Same-generation reconciliation precedes new input.
 Another host generation never adopts an old namespace: it requests cleanup and
 waits for the old pins before opening replacement work.
+The host retains a FULL write-ahead workspace pin before dispatching open and
+loads it as lost after restart. Neither first bind nor later recovery may reclaim
+that workspace from a replacement instance's empty table. Cleanup-only Close may
+target an old generation, but the paired host, state key and principal remain
+exact; it grants no attach/input or cross-principal authority. An authenticated
+owner may explicitly acknowledge lost-instance uncertainty and release the host
+pin without signaling remembered PIDs or claiming the shell died. Durable pin
+release precedes dropping residency. Session delete and actual VCS removal/trim
+share pin admission exclusion, including standalone paths.
 Expired/closed namespaces and exhausted namespace-table admission refuse before
 changing another generation: a stale renewal cannot close its successor's terminals.
 

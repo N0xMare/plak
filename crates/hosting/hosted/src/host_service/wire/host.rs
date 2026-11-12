@@ -114,6 +114,11 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
     /// Retires process-local operator authority when its authenticated
     /// connection leaves. It never stops or releases an agent session.
     fn host_disconnect(&self, _principal: &HostPrincipal, _connection_id: u64, _generation: u64) {}
+    /// Independent operator pins, including lost-instance pins. `None` checks
+    /// host idle eligibility; this hook must do no I/O.
+    fn operator_terminals_blocked(&self, _session: Option<&str>) -> bool {
+        false
+    }
     /// One immutable policy used by both welcome and console enforcement.
     fn host_read_limits(&self) -> HostReadLimits;
     /// Principal-specific capabilities, built before the handshake from the
@@ -616,9 +621,11 @@ where
     /// Cheap in-memory blockers, safe to check on the accept loop each second.
     #[must_use]
     pub fn idle_residents_blocked(&self) -> bool {
-        self.slots()
-            .iter()
-            .any(|slot| !matches!(slot.peek(), SlotView::Dormant(_)))
+        self.sessions.operator_terminals_blocked(None)
+            || self
+                .slots()
+                .iter()
+                .any(|slot| !matches!(slot.peek(), SlotView::Dormant(_)))
     }
 
     /// Durable eligibility; callers must run this off their accept/frame loop.
@@ -1243,6 +1250,9 @@ where
     ///
     /// A lost output.
     fn release(&mut self, session: &str) -> CliResult<Outcome<P>> {
+        if let Some(outcome) = operator::resident(&self.host, session) {
+            return Ok(outcome);
+        }
         let slot = self
             .host
             .lock()
@@ -1565,6 +1575,7 @@ enum Forwarded<P: ProtocolExtension> {
     Reading(bool),
 }
 
+mod operator;
 mod reads;
 pub use admission::HostReadLimits;
 pub use reads::{HostPrincipal, HostReadTask, HostRequestContext};

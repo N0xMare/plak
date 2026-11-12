@@ -679,6 +679,7 @@ ALLOWED_CLI_MACROS = {
 }
 # Per-source additions to ALLOWED_CLI_MACROS.
 ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
+    ("plak", "src/terminal_registry/control.rs"): {"select"},
     ("plakous-hosted", "src/agent/roots.rs"): {"warn"},
     ("plak", "src/commands/runner/local.rs"): {"warn"},
     ("plak", "src/host.rs"): {"select"},
@@ -1694,6 +1695,35 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "OperatorAccountFallback",
             "OperatorRefusal",
         }
+    },
+    ("plak", "src/terminal_registry.rs"): {
+        "runner": {
+            "protocol",
+            "operator",
+            "RunnerClient",
+            "RunnerConnectionRevision",
+            "OperatorAnswer",
+            "OperatorId",
+            "OperatorNamespace",
+            "OperatorOperation",
+            "OperatorRefusal",
+            "TerminalKey",
+            "TerminalRow",
+            "TerminalStatus",
+        }
+    },
+    ("plak", "src/terminal_registry/control.rs"): {
+        "runner": {
+            "protocol",
+            "operator",
+            "OperatorTerminalStream",
+            "TerminalCursor",
+            "TerminalDimensions",
+            "TerminalEvent",
+        }
+    },
+    ("plak", "src/store/terminal_pins.rs"): {
+        "runner": {"protocol", "operator", "OperatorNamespace", "TerminalKey"}
     },
     # The export document names its runner by the library's runner identity.
     ("plak", "src/carry/document.rs"): {"tools": {"RunnerId"}},

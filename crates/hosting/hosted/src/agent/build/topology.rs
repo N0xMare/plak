@@ -535,6 +535,10 @@ async fn topology_extensions_from_hub_with_owner(
                 runner.as_ref(),
             )
             .await
+            .map(|mut tree| {
+                roots.guard_tree_reclamation(&mut tree);
+                tree
+            })
             .map_err(|error| crate::agent_tree::TreeRuntimeError::new(error.message()))
         },
     )

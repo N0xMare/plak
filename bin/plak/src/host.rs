@@ -20,6 +20,7 @@ pub(crate) mod send;
 mod sessions;
 mod socket;
 mod starter;
+use crate::terminal_registry as terminals;
 
 #[cfg(test)]
 mod scan_tests;
@@ -104,7 +105,8 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     let entered = runtime.enter();
     let mut bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
     drop(entered);
-    let (services, local) = runner::host::prepare(services, None)?;
+    let (services, terminals) = terminals::TerminalRegistry::compose(services, host_generation())?;
+    let (services, local) = runner::host::prepare(&services, None)?;
     let sessions = sessions::ProductSessions::new(
         &services,
         command.idle_release,
@@ -114,7 +116,8 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     // for what the last one left.
     let owed = sessions.owed()?;
     let console_switches = sessions.console_switches();
-    let host = SessionHost::new(sessions, binary.clone(), host_generation());
+    let host = SessionHost::new(sessions, binary.clone(), terminals.generation());
+    terminals.serve(&host, runtime.handle())?;
     let mut idle_reload = None;
     let web = if let Some(args) = &command.web {
         let bound_web = runtime.block_on(crate::web::WebEndpoint::bind(
@@ -184,6 +187,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     // its sessions off, and before the lock: a host that takes the lock
     // next finds no socket of this one.
     bound.remove();
+    runtime.block_on(terminals.stop());
     // The handoff first closes the host: no session opens or is created
     // from then on.
     hand_off(&host);

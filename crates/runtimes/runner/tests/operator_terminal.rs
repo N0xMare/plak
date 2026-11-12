@@ -79,24 +79,7 @@ async fn operator_pty_wire_and_home_local_have_no_agent_jobs_or_lines() {
     for home_local in [false, true] {
         let directory = tempfile::tempdir().unwrap();
         let runner = service(directory.path(), home_local);
-        let served = runner.clone();
-        let (host, remote) = tokio::io::duplex(4096);
-        let serving = tokio::spawn(async move {
-            served.serve_connection(remote).await;
-        });
-        let (client, hello) = RunnerClient::connect(
-            host,
-            Bind {
-                host_id: "paired".into(),
-                host_instance: "generation".into(),
-                version: VersionTriple::current("revision", "debug"),
-                inspect: false,
-            },
-            ClientWindows::default(),
-        )
-        .await
-        .unwrap();
-        assert!(hello.capabilities.iter().any(|c| c == "operator-pty"));
+        let (client, serving) = connect(&runner).await;
         call(&client, OperatorOperation::Renew).await;
         let OperatorAnswer::Terminal { terminal, .. } = call(
             &client,
@@ -158,6 +141,7 @@ async fn operator_pty_wire_and_home_local_have_no_agent_jobs_or_lines() {
         call(
             &client,
             OperatorOperation::Close {
+                generation: None,
                 key: key(),
                 acknowledge_loss: false,
             },
@@ -176,6 +160,28 @@ async fn operator_pty_wire_and_home_local_have_no_agent_jobs_or_lines() {
             .unwrap();
         assert!(runner.is_idle());
     }
+}
+
+async fn connect(runner: &RunnerService) -> (RunnerClient, tokio::task::JoinHandle<()>) {
+    let served = runner.clone();
+    let (host, remote) = tokio::io::duplex(4096);
+    let serving = tokio::spawn(async move {
+        served.serve_connection(remote).await;
+    });
+    let (client, hello) = RunnerClient::connect(
+        host,
+        Bind {
+            host_id: "paired".into(),
+            host_instance: "generation".into(),
+            version: VersionTriple::current("revision", "debug"),
+            inspect: false,
+        },
+        ClientWindows::default(),
+    )
+    .await
+    .unwrap();
+    assert!(hello.capabilities.iter().any(|c| c == "operator-pty"));
+    (client, serving)
 }
 
 #[tokio::test]

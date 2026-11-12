@@ -122,7 +122,9 @@ pub struct RunnerConnectionRevision {
 }
 
 impl RunnerConnectionRevision {
-    pub(crate) fn is_current(&self) -> bool {
+    /// Whether the captured connection still owns this client's live link.
+    #[must_use]
+    pub fn is_current(&self) -> bool {
         let state = lock(&self.client.inner.state);
         state.connection == self.connection
             && state.sender.is_some()

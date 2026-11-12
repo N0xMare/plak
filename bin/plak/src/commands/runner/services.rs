@@ -565,6 +565,12 @@ async fn reconcile_remote(
     services
         .runners()
         .begin_reconcile(id, services.now_unix_seconds());
+    if let Some(terminals) = services.terminal_registry() {
+        terminals
+            .reconcile(id, client)
+            .await
+            .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    }
     let roots = services
         .state_roots()
         .map_err(|_| unavailable(ProbePhase::Reconcile, false))?

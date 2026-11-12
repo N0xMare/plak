@@ -63,6 +63,24 @@ pub(super) fn admit_generation(
     Ok(())
 }
 
+pub(super) fn permit_retirement(
+    table: &Table,
+    key: &NamespaceKey,
+    target: &str,
+) -> Result<(), OperatorRefusal> {
+    let generations = table
+        .scopes
+        .get(&(key.host.clone(), key.namespace.state_key.clone()))
+        .ok_or(OperatorRefusal::ReconcileRequired)?;
+    if generations.current != key.generation {
+        return Err(OperatorRefusal::NamespaceExpired);
+    }
+    if !generations.superseded.contains(&hash(target.as_bytes())) {
+        return Err(OperatorRefusal::TerminalLost);
+    }
+    Ok(())
+}
+
 pub(super) fn collect(table: &mut Table) {
     for ns in table.namespaces.values_mut() {
         let mut done: Vec<_> = ns

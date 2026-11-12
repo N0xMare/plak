@@ -6127,7 +6127,15 @@ Runner-owned awake deadlines are 15 minutes since accepted input, five minutes d
 and 90 seconds since namespace renewal. Output, resize and credit do not refresh input
 idle. A lifecycle worker enforces them even without a connection. Renew/list reconcile a
 same-generation table before new input; another generation closes, never adopts, old
-namespaces. Cleanup retains quota and workspace pins until whole-session absence is
+namespaces. A successor's Renew returns `terminal_busy` until every old-generation
+pin for that host/state scope ends. Only a successful Renew on the same runner
+instance proves this barrier; an empty replacement instance is not proof.
+Close may name an explicit `generation` for cleanup-only access to that paired
+host and principal's old terminal. The caller must already be the current
+renewed generation and the target must be superseded; a stale connection cannot
+use an explicit target to close its successor. It cannot create, attach, resize or input to
+an old terminal, nor close another principal's terminal. Omitted generation means
+the connection's current generation. Cleanup retains quota and workspace pins until whole-session absence is
 proven (chapter 04 §§2.2, 2.9). Live and unknown terminals block both daemon idle-exit
 paths. The reclamation guard canonicalizes aliases and excludes opens in either
 admission order through actual removal/trim completion. VCS extensions identify removal,
@@ -6148,6 +6156,9 @@ remaining bulk-frame capacity before advancing any cursor or directional sequenc
 
 Product request/confirmation, residency-refusal rendering and client scheduling belong
 to the separate client-protocol increment; this runner increment changes no client DTO.
+The host's private registry retains write-ahead workspace pins across process loss
+(chapter 02 §2.2). `RunnerConnectionRevision::is_current` is a read-only connection
+fence for that registry, not permission to skip namespace table reconciliation.
 
 **Runner protocol v6.** `plakous-runner-protocol` defines what a host and a
 runner say to each other over one byte stream, and `plakous-runner` implements

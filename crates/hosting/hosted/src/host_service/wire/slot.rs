@@ -249,6 +249,24 @@ where
             .map(|(session, hold, _releases)| (session, hold))
     }
 
+    /// Holds only an already resident session. Independent operator work never
+    /// opens a driver, creates an agent line or waits for an opening/release.
+    #[must_use]
+    pub fn hold_resident(&self, expected_session: &str) -> Option<ResidencyHold> {
+        let slot = self.slot.try_lock().ok()?;
+        let Slot::Resident {
+            session,
+            attachments,
+            ..
+        } = &*slot
+        else {
+            return None;
+        };
+        (session.session_id() == expected_session)
+            .then(|| attachments.hold())
+            .flatten()
+    }
+
     /// [`Self::resident`], and how many releases had already been asked when
     /// the slot handed the session over. That count is read under the slot
     /// lock, so a release that waited out this open is still ahead of it and

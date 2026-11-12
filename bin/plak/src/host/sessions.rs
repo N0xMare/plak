@@ -406,6 +406,17 @@ impl HostSessions<PlakExtension> for ProductSessions {
         generation: u64,
     ) {
         self.console.disconnect(principal, connection, generation);
+        if let Some(terminals) = self.services.terminal_registry() {
+            terminals.disconnect(principal, connection, generation);
+        }
+    }
+    fn operator_terminals_blocked(&self, session: Option<&str>) -> bool {
+        self.services.terminal_registry().is_some_and(|registry| {
+            session.map_or_else(
+                || registry.blocks_idle_exit(),
+                |session| registry.resident_reason(session).is_some(),
+            )
+        })
     }
     fn host_read_limits(&self) -> plakous_hosted::host_service::wire::HostReadLimits {
         super::host_read_limits()
@@ -656,6 +667,13 @@ impl HostSessions<PlakExtension> for ProductSessions {
     }
 
     fn durable_idle_exit_blocked(&self) -> bool {
+        if self
+            .services
+            .terminal_registry()
+            .is_some_and(|registry| registry.blocks_idle_exit())
+        {
+            return true;
+        }
         let reason = match self.with_product(ProductStore::idle_debt) {
             Err(_) => Some("durable state unreadable"),
             Ok((true, _)) => Some("durable continuation"),
@@ -972,6 +990,11 @@ fn open_session(
         );
     })?;
     let attachments = AttachmentCount::default();
+    if let Some(registry) = services.terminal_registry() {
+        registry
+            .retain_holds(session, &attachments)
+            .map_err(CliFailure::new)?;
+    }
     host.idle_release = Some(IdleRelease {
         after: idle_release,
         attachments: attachments.clone(),

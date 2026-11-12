@@ -24,6 +24,9 @@ impl OperatorTerminalService {
         self.tick();
         let now = (self.inner.clock)();
         let mut table = lock(&self.inner.table);
+        if let Some(answer) = self.retire(&mut table, &key, connection, &operation, now) {
+            return answer;
+        }
         if matches!(operation, OperatorOperation::Renew) {
             return self.renew(&mut table, key, connection, now);
         }
@@ -130,6 +133,7 @@ impl OperatorTerminalService {
         }
         super::collection::admit_generation(table, &key)?;
         // A new generation never adopts old shells, even if its browser retained ids.
+        let mut prior_live = false;
         for (old, ns) in &mut table.namespaces {
             if old.host == key.host
                 && old.namespace.state_key == key.namespace.state_key
@@ -138,6 +142,7 @@ impl OperatorTerminalService {
                 ns.closed = true;
                 for terminal in ns.terminals.values_mut() {
                     terminal.close();
+                    prior_live |= terminal.pinned();
                 }
             }
         }
@@ -152,7 +157,43 @@ impl OperatorTerminalService {
         });
         ns.renewed = now;
         ns.reconciled = connection;
+        // A successful new-generation renewal is the first-bind cleanup proof.
+        // An empty replacement instance cannot supply proof about its predecessor.
+        if prior_live {
+            return Err(OperatorRefusal::TerminalBusy);
+        }
         Ok(self.rows(ns))
+    }
+
+    fn retire(
+        &self,
+        table: &mut Table,
+        key: &NamespaceKey,
+        connection: u64,
+        operation: &OperatorOperation,
+        now: Instant,
+    ) -> Option<Result<OperatorAnswer, OperatorRefusal>> {
+        let OperatorOperation::Close {
+            generation: Some(target),
+            ..
+        } = operation
+        else {
+            return None;
+        };
+        if target.as_str() == key.generation {
+            return None;
+        }
+        if let Err(refusal) = super::collection::permit_retirement(table, key, target.as_str()) {
+            return Some(Err(refusal));
+        }
+        let mut key = key.clone();
+        target.as_str().clone_into(&mut key.generation);
+        let Some(ns) = table.namespaces.get_mut(&key) else {
+            return Some(Err(OperatorRefusal::TerminalLost));
+        };
+        // A successor can clean up, never adopt, its principal's old shell.
+        ns.closed = true;
+        Some(self.existing(ns, connection, 0, operation.clone(), now))
     }
 
     fn rows(&self, ns: &mut Namespace) -> OperatorAnswer {
