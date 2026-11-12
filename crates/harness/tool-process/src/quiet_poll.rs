@@ -27,11 +27,14 @@ fn control() -> OperationContext {
 }
 
 async fn start(environment: &ExecutionEnvironment, notices: bool) -> TestResult<u64> {
-    let result = ProcessSessionTools::posix_sh()?
-        .with_config(ProcessPackConfig {
-            completion_notices: notices,
-        })
-        .start_canonical(
+    let tools = ProcessSessionTools::posix_sh()?.with_config(ProcessPackConfig {
+        completion_notices: notices,
+    });
+    // Shell startup and the supervisor use OS threads, not the virtual clock.
+    tokio::time::resume();
+    let result = tokio::time::timeout(
+        Duration::from_secs(30),
+        tools.start_canonical(
             environment,
             CanonicalProcessStartRequest {
                 command: "read first; printf progress; read second".into(),
@@ -44,8 +47,11 @@ async fn start(environment: &ExecutionEnvironment, notices: bool) -> TestResult<
                 max_output_bytes: 4096,
             },
             control(),
-        )
-        .await?;
+        ),
+    )
+    .await;
+    tokio::time::pause();
+    let result = result??;
     result
         .projection
         .session_id
