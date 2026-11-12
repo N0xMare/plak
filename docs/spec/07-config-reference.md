@@ -423,8 +423,8 @@ capacity and rate refusals do not open a session or close the connection.
 | `page_rows` | `100` | Default and maximum; explicit limits must be 1 through 100. |
 | `dependency_bytes` | `8388608` | Aggregate retained definition bytes and snapshot budget. |
 | `dependency_definitions` | `512` | Scan entries, including rejected names. |
-| `message_rate_per_second` | `12` | Principal-wide console message rate. |
-| `message_burst` | `12` | Principal-wide burst, not reset by reconnect. |
+| `message_rate_per_second` | `20` | Principal-wide console envelope rate; Files applies its own narrower budget. |
+| `message_burst` | `60` | Principal-wide envelope burst, not reset by reconnect. |
 | `inflight_per_connection` | `2` | Pending reads per connection. |
 | `inflight_per_principal` | `4` | Pending reads across a principal's connections. |
 | `inflight_host` | `32` | Pending reads across the host. |
@@ -501,7 +501,7 @@ them on each command. Compaction is captured in `HostConfig` by
 The attachment-free console's initial host limits are product defaults, not
 user configuration keys: 64 KiB per request before product payload decoding,
 2 requests in flight per connection, 4 per transport principal and 32 per
-host, a 10 s whole-request deadline, and 12 console messages/s with burst 12
+host, a 10 s whole-request deadline, and 20 console messages/s with burst 60
 per principal across all its connections. Welcome and admission use the same
 immutable limits. Capacity/rate refusal keeps the connection open; expiry is
 `deadline_exceeded` and never causes an automatic retry. Session traffic keeps

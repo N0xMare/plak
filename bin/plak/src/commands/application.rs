@@ -405,7 +405,9 @@ impl PlakousApplication {
 
     fn record_credential_refreshes(&mut self) {
         if self._credential_telemetry.is_none() {
-            self._credential_telemetry = self.product.as_ref()
+            self._credential_telemetry = self
+                .product
+                .as_ref()
                 .and_then(crate::telemetry_sink::install_product_credential_telemetry);
         }
     }

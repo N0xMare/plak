@@ -1097,6 +1097,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "ChildProcessKind",
         "ChildProcessExit",
         "CredentialProviderLabel",
+        "CredentialAccountLabel",
         "CredentialRefreshDetail",
         "CredentialRefreshFailureClass",
         "CredentialRefreshFailureReason",

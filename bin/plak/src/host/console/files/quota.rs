@@ -232,8 +232,12 @@ mod tests {
         let console = console(root.path());
         let request = HostRequest::ChangesStatus { target: target() };
         let principal = HostPrincipal::Socket(1);
-        let first = Guard::admit(Arc::clone(&console), &principal, &request).unwrap();
-        assert!(Guard::admit(Arc::clone(&console), &principal, &request).is_err());
+        let now = Instant::now();
+        let admit = |principal: &HostPrincipal| {
+            Guard::admit_at(Arc::clone(&console), principal, &request, now)
+        };
+        let first = admit(&principal).unwrap();
+        assert!(admit(&principal).is_err());
         drop(first);
         console
             .files
@@ -245,15 +249,13 @@ mod tests {
             .unwrap()
             .output
             .available = 0;
-        assert!(Guard::admit(Arc::clone(&console), &principal, &request).is_err());
+        assert!(admit(&principal).is_err());
         let guards = (2..18)
-            .map(|uid| {
-                Guard::admit(Arc::clone(&console), &HostPrincipal::Socket(uid), &request).unwrap()
-            })
+            .map(|uid| admit(&HostPrincipal::Socket(uid)).unwrap())
             .collect::<Vec<_>>();
-        assert!(Guard::admit(Arc::clone(&console), &HostPrincipal::Socket(19), &request).is_err());
+        assert!(admit(&HostPrincipal::Socket(19)).is_err());
         drop(guards);
-        assert!(Guard::admit(Arc::clone(&console), &HostPrincipal::Socket(19), &request).is_ok());
+        assert!(admit(&HostPrincipal::Socket(19)).is_ok());
     }
 }
 impl Drop for Guard {

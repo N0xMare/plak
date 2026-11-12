@@ -93,18 +93,21 @@ impl Console {
             };
             let this = Arc::clone(&this);
             let task = runtime.spawn(async move {
-                let _guard = guard;
                 let Some(target) = target(&request).cloned() else {
                     unreachable!()
                 };
-                let workspace =
-                    tokio::task::spawn_blocking(move || resolve::saved(&services, &tree, &target))
-                        .await;
-                let workspace = match workspace {
-                    Ok(Ok(workspace)) => workspace,
-                    Ok(Err(resolve::Failure::Product(reason))) => return Ok(refused(reason)),
-                    Ok(Err(resolve::Failure::Placement(reason))) => return Err(reason),
+                let resolved = tokio::task::spawn_blocking(move || {
+                    (resolve::saved(&services, &tree, &target), guard)
+                })
+                .await;
+                let (workspace, _guard) = match resolved {
+                    Ok(result) => result,
                     Err(_) => return Ok(refused(ReadRefusal::WorkspaceUnavailable {})),
+                };
+                let workspace = match workspace {
+                    Ok(workspace) => workspace,
+                    Err(resolve::Failure::Product(reason)) => return Ok(refused(reason)),
+                    Err(resolve::Failure::Placement(reason)) => return Err(reason),
                 };
                 this.inspect(&context, request, workspace).await
             });

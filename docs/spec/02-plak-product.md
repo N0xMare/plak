@@ -4181,8 +4181,9 @@ login before the handshake. Welcome and connection require that same
 principal; neither face nor a later setter supplies authority. One immutable
 product limits value feeds welcome and admission: 64 KiB before product
 payload decoding, 2 in flight per connection, 4 per principal and 32 per host,
-a 10 s whole-request deadline, and a principal-wide 12 messages/s bucket with
-burst 12. Console frames are classified before the web transport's separate
+a 10 s whole-request deadline, and a principal-wide 20 messages/s envelope
+bucket with burst 60. Files enforces its own 10/s, burst-20 budget beneath
+that envelope; reconnect never resets either. Console frames are classified before the web transport's separate
 legacy session-message close bucket. Capacity or rate refusal does not close
 the connection. Reconnect does not replenish the principal's burst. Completed
 or departing reads release both aggregate permits. Futures are polled only

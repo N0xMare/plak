@@ -101,12 +101,23 @@ async fn exact_binary_pages_and_mutation_never_splice_versions() {
             .unwrap(),
         bytes[3..]
     );
+    let HostResponse::FilesRead { content: fresh } = console
+        .inspect(
+            &context(),
+            request("bytes", None, 3),
+            workspace(root.path()),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("content")
+    };
     std::fs::write(file, b"newest").unwrap();
     assert_eq!(
         console
             .inspect(
                 &context(),
-                request("bytes", first.next, 3),
+                request("bytes", fresh.next, 3),
                 workspace(root.path())
             )
             .await
@@ -214,14 +225,8 @@ async fn cursors_bind_principal_target_generation_path_and_execution_identity() 
         panic!("content")
     };
     let token = content.next.unwrap();
-    let state = console.files.lock().unwrap();
+    let mut state = console.files.lock().unwrap();
     let identity = root.path().to_str().unwrap();
-    assert!(
-        state
-            .cursors
-            .get(&token, &context(), &target(), identity, "data")
-            .is_ok()
-    );
     let mut other = context();
     other.principal = HostPrincipal::Socket(9);
     assert!(
@@ -257,6 +262,12 @@ async fn cursors_bind_principal_target_generation_path_and_execution_identity() 
             .cursors
             .get(&token, &context(), &target(), identity, "other")
             .is_err()
+    );
+    assert!(
+        state
+            .cursors
+            .get(&token, &context(), &target(), identity, "data")
+            .is_ok()
     );
 }
 
@@ -453,6 +464,14 @@ async fn saved_reads_do_not_open_a_session_or_fallback_from_unavailable_placemen
     };
     let revision = record.store_revision;
     assert!(!paths.runtime_database().exists());
+    let mut web = context();
+    web.principal = HostPrincipal::Web("verified".into());
+    assert!(matches!(
+        sessions.host_request(web, request(None)).await,
+        Err(RequestRefusal::CapabilityDisabled {
+            capability: ConsoleCapability::FilesRead
+        })
+    ));
     assert!(matches!(
         sessions
             .host_request(context(), request(None))
@@ -477,6 +496,7 @@ async fn saved_reads_do_not_open_a_session_or_fallback_from_unavailable_placemen
             .store_revision,
         revision
     );
+    let mut record = crate::store::sessions::SessionRecord::new(canonical.clone());
     record.runner = Some(plakous_hosted::sessions::RunnerDisplay {
         name: "unavailable".into(),
         runner_id: "saved-unavailable".into(),
@@ -541,4 +561,77 @@ async fn symlink_swap_never_discloses_the_outside_file() {
         }
     }
     worker.join().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn equal_pathnames_on_two_runners_never_read_the_local_file() {
+    use plakous::tools::runner::{
+        RunnerBackend, RunnerCall, RunnerCallFuture, RunnerClass, RunnerFailure, RunnerLink,
+        RunnerVerb, runner_descriptor, runner_environment,
+    };
+    use plakous::tools::{
+        ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId, WorkspaceContentIdentity,
+    };
+    struct ReadEndpoint(&'static [u8]);
+    impl RunnerLink for ReadEndpoint {
+        fn call(&self, call: RunnerCall) -> RunnerCallFuture {
+            assert!(matches!(call.class(), RunnerClass::Unkeyed));
+            let answer = if call.verb() == RunnerVerb::ReadWorkspace {
+                assert_eq!(call.payload()["request"]["path"], "data");
+                let content = WorkspaceContentIdentity::from_bytes(self.0).unwrap();
+                Ok(
+                    serde_json::json!({"content":{"byte_len":content.byte_len(),"digest":content.digest()},"offset":0,"bytes":plakous::tools::runner::hex(self.0),"next":null}),
+                )
+            } else {
+                match call.payload()["op"].as_str() {
+                    Some("canonicalize") => Ok(serde_json::json!({"path":call.payload()["path"]})),
+                    Some("filesystem_identity") => Ok(serde_json::json!({"device":1,"inode":2})),
+                    _ => Err(RunnerFailure::Unsupported),
+                }
+            };
+            Box::pin(std::future::ready(answer))
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let canonical = std::fs::canonicalize(root.path()).unwrap();
+    std::fs::write(canonical.join("data"), "must-not-read-local").unwrap();
+    let console = console(root.path());
+    for (id, bytes) in [
+        ("first", b"first-runner".as_slice()),
+        ("second", b"second-runner".as_slice()),
+    ] {
+        let direct = workspace(&canonical);
+        let descriptor =
+            runner_descriptor(&direct.environment, RunnerId::new(id).unwrap()).unwrap();
+        let backend =
+            Arc::new(RunnerBackend::new(descriptor, Arc::new(ReadEndpoint(bytes))).unwrap());
+        let scope = ExecutionEnvironmentScope::Run(
+            plakous::model::RunId::try_from(uuid::Uuid::new_v4()).unwrap(),
+        );
+        let environment = runner_environment(
+            scope,
+            &canonical,
+            &canonical,
+            ExecutionEnvironmentConfig::default(),
+            backend,
+        )
+        .unwrap();
+        let placed = resolve::Workspace {
+            environment,
+            identity: id.into(),
+        };
+        let HostResponse::FilesRead { content } = console
+            .inspect(&context(), request("data", None, PAGE), placed)
+            .await
+            .unwrap()
+        else {
+            panic!("content")
+        };
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(content.bytes_b64)
+                .unwrap(),
+            bytes
+        );
+    }
 }

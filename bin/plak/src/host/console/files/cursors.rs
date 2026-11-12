@@ -19,14 +19,15 @@ struct Cursor {
 }
 impl State {
     pub fn get(
-        &self,
+        &mut self,
         token: &str,
         context: &HostRequestContext,
         target: &WorkspaceTarget,
         identity: &str,
         path: &str,
     ) -> Result<WorkspaceReadCursor, ReadRefusal> {
-        self.cursors
+        let cursor = self
+            .cursors
             .get(token)
             .filter(|c| {
                 c.principal == context.principal
@@ -37,7 +38,9 @@ impl State {
                     && c.at.elapsed() < Duration::from_secs(60)
             })
             .map(|c| c.cursor.clone())
-            .ok_or_else(|| failure(WorkspaceReadFailure::InvalidCursor))
+            .ok_or_else(|| failure(WorkspaceReadFailure::InvalidCursor))?;
+        self.cursors.remove(token);
+        Ok(cursor)
     }
     pub fn insert(
         &mut self,

@@ -88,6 +88,9 @@ pub(super) fn saved(
             backend,
         )
         .map_err(|_| missing())?;
+        if environment.root() != path {
+            return Err(missing());
+        }
         (environment, identity)
     } else {
         let paths = services.paths().map_err(|_| missing())?;

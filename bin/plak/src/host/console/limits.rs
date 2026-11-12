@@ -21,8 +21,8 @@ pub(super) fn admission() -> HostReadLimits {
         per_principal: 4,
         host: 32,
         deadline: Duration::from_secs(10),
-        messages_per_second: 12,
-        burst: 12,
+        messages_per_second: 20,
+        burst: 60,
     }
 }
 

@@ -58,10 +58,12 @@ pub(super) fn verified_workspace_root(
 
 fn check_workspace_control(control: &OperationContext) -> Result<(), ExecutionBackendError> {
     control.check_cancelled()?;
-    if control.budget().is_some_and(|budget| {
-        u128::from(plakous_model::now_unix_millis()) * 1_000_000
-            >= u128::from(budget.seconds()) * 1_000_000_000 + u128::from(budget.nanoseconds())
-    }) {
+    if matches!(control.class(), super::OperationClass::Unkeyed)
+        && control.budget().is_some_and(|budget| {
+            u128::from(plakous_model::now_unix_millis()) * 1_000_000
+                >= u128::from(budget.seconds()) * 1_000_000_000 + u128::from(budget.nanoseconds())
+        })
+    {
         return Err(backend_error(
             ExecutionBackendErrorKind::TimedOut,
             "workspace read deadline elapsed",
