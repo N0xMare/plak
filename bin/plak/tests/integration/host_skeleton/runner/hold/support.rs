@@ -62,7 +62,20 @@ impl Remote {
                 runner_id: self.id.clone(),
             };
         }
-        let created = client.request(1, request);
+        // The host's startup reconciliation of the paired runner is a bounded,
+        // documented not-ready window; only that refusal is retried.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let mut id = 1;
+        let created = loop {
+            let created = client.request(id, request.clone());
+            let reconciling = format!("{created:?}")
+                .contains("RunnerUnreachable { phase: Reconcile, timed_out: false }");
+            if !reconciling || std::time::Instant::now() >= deadline {
+                break created;
+            }
+            id += 100;
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
         let Outcome::Ok(Answer::Created { session, node, .. }) = created else {
             panic!("remote creation refused: {created:?}")
         };
