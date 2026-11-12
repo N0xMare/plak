@@ -63,14 +63,6 @@ pub(crate) const ROUTES: &[&ProductCapability] = &[
     &openrouter::OPENROUTER,
 ];
 
-#[cfg(any(test, feature = "tui"))]
-pub(crate) fn oauth_accounts() -> impl Iterator<Item = &'static str> {
-    ROUTES
-        .iter()
-        .filter(|capability| capability.route.compiled && capability.auth_kind() == AuthKind::Oauth)
-        .map(|capability| capability.route.account)
-}
-
 #[cfg(feature = "tui")]
 pub(crate) fn usage_verticals() -> impl Iterator<Item = (&'static str, &'static str)> {
     ROUTES
@@ -119,7 +111,7 @@ mod tests {
             assert!(std::ptr::eq(product.route, *hosted));
         }
         assert_eq!(
-            oauth_accounts().collect::<Vec<_>>(),
+            crate::product_config::settings::oauth_accounts().collect::<Vec<_>>(),
             ["codex", "grok", "claude"]
         );
         assert_eq!(

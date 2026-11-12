@@ -20,7 +20,8 @@ fn workspace_home_prefix_is_shortened_only_at_a_path_boundary() {
 
 #[test]
 fn mcp_view_keeps_read_failures_distinct_from_removed_servers_and_frozen_tools() {
-    use crate::surface_protocol::{McpOverview, McpServerView, McpSessionBinding};
+    use crate::surface_protocol::McpOverview;
+    use plakd_wire_types::{McpServerView, McpSessionBinding};
     let view = McpOverview {
         servers: vec![
             McpServerView {
@@ -60,7 +61,8 @@ fn unreadable_config_does_not_claim_that_no_servers_are_configured() {
 
 #[test]
 fn orphaned_servers_have_their_own_heading() {
-    use crate::surface_protocol::{McpOverview, McpServerView, McpSessionBinding};
+    use crate::surface_protocol::McpOverview;
+    use plakd_wire_types::{McpServerView, McpSessionBinding};
     let text = super::mcp_overview(&McpOverview {
         servers: vec![McpServerView {
             id: "removed".into(),

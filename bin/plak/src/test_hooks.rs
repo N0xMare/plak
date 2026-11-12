@@ -150,8 +150,7 @@ pub(crate) fn install() -> Result<(), String> {
         .and_then(|value| value.into_string().ok())
         .and_then(|value| value.parse().ok())
     {
-        let _ = crate::build_identity::RELOAD_PROBE_LAUNCH_DELAY
-            .set(std::time::Duration::from_millis(millis));
+        let _ = crate::reload_probe_latency::DELAY.set(std::time::Duration::from_millis(millis));
     }
     if let Some(Ok(selection)) = selected() {
         if selection.plan.loopback_runner {

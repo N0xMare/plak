@@ -140,6 +140,8 @@ mod product_telemetry;
 mod product_terminal_e2e_tests;
 #[cfg(any(test, feature = "test-hooks"))]
 mod profile_test_catalog;
+#[cfg(any(test, feature = "tui", feature = "test-hooks"))]
+mod reload_probe_latency;
 #[doc(hidden)]
 pub mod shell;
 #[doc(hidden)]

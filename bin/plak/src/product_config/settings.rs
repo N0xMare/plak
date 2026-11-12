@@ -7,6 +7,17 @@
 //! `settings_registry_defaults_match_the_config_schema` in `crate::config`
 //! pins every default here to it. Integer bounds come from that schema.
 
+use crate::capabilities::ROUTES;
+use plakous_host_protocol::views::AuthKind;
+
+/// Compiled OAuth accounts offered by settings remedies.
+pub(crate) fn oauth_accounts() -> impl Iterator<Item = &'static str> {
+    ROUTES
+        .iter()
+        .filter(|capability| capability.route.compiled && capability.auth_kind() == AuthKind::Oauth)
+        .map(|capability| capability.route.account)
+}
+
 /// A presentation offer must agree with the product's compiled authority.
 pub(crate) fn build_feature_available(feature: &str) -> bool {
     crate::build_features::require_feature(feature).is_ok()
@@ -300,7 +311,7 @@ pub fn api_key_remedy(account: &str) -> String {
 /// unknown name is the exact defect this dispatch exists to prevent.
 #[must_use]
 pub fn account_remedy(account: &str) -> String {
-    if crate::capabilities::oauth_accounts().any(|known| known == account) {
+    if oauth_accounts().any(|known| known == account) {
         oauth_login_remedy(account)
     } else {
         api_key_remedy(account)

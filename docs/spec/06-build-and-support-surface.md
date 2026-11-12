@@ -422,10 +422,12 @@ directory names remain ungated; they describe records, not enabled menus.
 
 Reduced builds group their interactive carry/reload and identity helpers in
 TUI-gated submodules; the launch invocation field itself is absent without
-TUI support. Lookup helpers, imports and re-exports retain explicit gates,
-not dead-code allowances. Capability markers use feature-gated modules rather
-than conditional aliases. Plak's placement feature ceiling is 150 and hosted's
-is 27. The ceilings remain exact ratchets.
+TUI support. Feature-dependent lookup and publication helpers belong in
+feature-gated modules, not behind item-level predicates or dead-code allowances.
+Already-gated consumers import neutral wire DTOs directly instead of adding
+conditional intermediary re-exports. Capability markers likewise use gated
+modules rather than conditional aliases. The placement ceilings recorded in
+workspace metadata remain exact ratchets; these boundaries do not raise them.
 
 `plakous` facade features are listed in chapter 00. The host and product
 features and the evaluator selection are summarized here; backend defaults are

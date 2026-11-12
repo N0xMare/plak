@@ -11,7 +11,10 @@ pub(crate) const fn set_command(on_runner: bool) -> &'static str {
     }
 }
 
-pub(crate) fn server_lines(config: &super::McpServerConfiguration, id: &str) -> Vec<String> {
+pub(crate) fn server_lines(
+    config: &plakd_wire_types::McpServerConfiguration,
+    id: &str,
+) -> Vec<String> {
     let mut lines = vec![format!(
         "{id}  {}  {}  {}",
         config.transport, config.scope, config.target

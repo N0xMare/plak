@@ -234,11 +234,11 @@ fn server_configuration(
     config: &ProductConfig,
     id: &str,
     server: &McpServerConfig,
-) -> CliResult<crate::surface_protocol::McpServerConfiguration> {
+) -> CliResult<plakd_wire_types::McpServerConfiguration> {
     let (transport, target) = transport_line(server);
     let scope = mcp_edit::server_scope(paths, config, id).map_err(CliFailure::new)?;
     let reaching = mcp_edit::templates_reaching(config, id);
-    Ok(crate::surface_protocol::McpServerConfiguration {
+    Ok(plakd_wire_types::McpServerConfiguration {
         transport: transport.to_owned(),
         target,
         scope: scope.as_str().to_owned(),
@@ -528,7 +528,8 @@ pub(crate) fn session_overview(
     paths: &PlakPaths,
     session: Option<&plakous_hosted::runtime::SurfaceSession>,
 ) -> crate::surface_protocol::McpOverview {
-    use crate::surface_protocol::{McpOverview, McpServerView, McpSessionBinding};
+    use crate::surface_protocol::McpOverview;
+    use plakd_wire_types::{McpServerView, McpSessionBinding};
     let empty = plakous_hosted::runtime::SurfaceMcp::default();
     let mcp = session
         .and_then(|session| session.mcp.as_ref())

@@ -9,11 +9,11 @@ pub(crate) use crate::surface_protocol::tui_channel::{
     TuiActionSender as FaceActionSender, TuiEventReceiver as HostEventReceiver,
 };
 pub(crate) use crate::surface_protocol::{
-    AgentAcknowledgement, HostEvent, McpOverview, McpSessionBinding, ProfileApply,
-    ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SettingsTheme,
-    SettingsView, SurfaceIntent, SurfaceObservation, UserAction, UserActionSendError,
-    WorkspaceChrome,
+    AgentAcknowledgement, HostEvent, McpOverview, ProfileApply, ProfileDifference, ProfileOutcome,
+    ProfileRole, ProfileRow, ProfilesView, SettingsTheme, SettingsView, SurfaceIntent,
+    SurfaceObservation, UserAction, UserActionSendError, WorkspaceChrome,
 };
+pub(crate) use plakd_wire_types::McpSessionBinding;
 
 /// A test's TUI mailbox: the receiver, and a face sender no service serves,
 /// whose intents reach it as sent.

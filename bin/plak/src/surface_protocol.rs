@@ -1,12 +1,6 @@
 //! Product-local mailbox and appearance adapters over the public wire DTOs.
 
 pub use crate::tui_preferences::SettingsTheme;
-#[cfg(feature = "mcp")]
-pub use plakd_wire_types::McpServerConfiguration;
-#[cfg(any(feature = "mcp", all(test, feature = "tui")))]
-pub use plakd_wire_types::McpServerView;
-#[cfg(any(feature = "mcp", feature = "tui"))]
-pub use plakd_wire_types::McpSessionBinding;
 pub use plakd_wire_types::{
     AgentAcknowledgement, McpOverview, PlakExtension, ProfileApply, ProfileDifference,
     ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SettingsCompositionOption,
