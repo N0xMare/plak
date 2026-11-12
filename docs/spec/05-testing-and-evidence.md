@@ -1755,12 +1755,25 @@ explicit stop. Closing stdin during termination must not race a `read` command's
 natural exit and obscure the stop attribution being asserted; natural-exit
 preservation remains covered separately.
 
-A hosted quit regression expires the terminal-join deadline after cancellation
-settles, before the host polls the already-published result. It requires a clean
-quit and the canonical cancelled lifecycle, not lease-only abandonment. The
-injected deadline models host descheduling without a wall-clock wait, so this
-regression lives in `runtime::quit_tests` and runs in the parallel lane; the
-real-binary quit latency checks keep their unchanged serial budgets.
+A hosted quit regression expires the terminal-join deadline only after the
+selected result future has resolved into the fixture's result channel, before
+the host observes that ready result. Control settlement alone is not this
+barrier: it can wake while terminal installation still owes result-channel
+notification. The test-only forwarding task preserves the actual result and
+makes both fixture receivers ready before injecting expiry. The regression
+requires a clean quit and the canonical cancelled lifecycle, not lease-only
+abandonment. The injected deadline models host descheduling without a wall-clock
+wait, so this regression lives in `runtime::quit_tests` and runs in the parallel
+lane; production selection, deadlines and serial quit budgets are unchanged.
+
+Stop-cut matrices panic the actor, not a separate process. Even an idle actor's
+join is not proof that its separate driver's graceful lease release completed:
+bounded executor teardown can cut that release short. Before exact reopen, the
+fixtures read the lease row without acquiring or changing authority, wait for
+release when it completes, and otherwise wait out the existing lease period
+plus two seconds. The still-live test process is never treated as a dead holder.
+Both root-stop and child-stop matrices have the long hang watchdog that covers
+these waits; they retain all continuation, cancellation and wake assertions.
 
 The real-binary `real_*quit_releases*` checks accept exactly the two specified
 quit statuses: joined release (0) and lease-only abandonment (130), never a

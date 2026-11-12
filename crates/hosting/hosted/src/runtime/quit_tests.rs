@@ -20,6 +20,7 @@ fn quit_observes_a_ready_terminal_before_an_expired_join_deadline() {
     let id = config.session.id.clone();
     let (actions, events, worker) = spawn_host_worker(config).unwrap();
     let mut seen = Vec::new();
+    super::turn_drive::quit_trace::expire_next_join(&id);
     send_attached_action(&actions, UserAction::Prompt("start".into()));
     wait_for(
         &events,
@@ -27,15 +28,17 @@ fn quit_observes_a_ready_terminal_before_an_expired_join_deadline() {
         "the running turn",
         |event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("ready to cancel")),
     );
-    // Cancellation installs the result before reporting settlement. Simulate
-    // a host descheduled past its join deadline before polling that result.
-    super::turn_drive::quit_trace::expire_next_join(&id);
+    // Expire only after the fixture's result receiver is genuinely ready;
+    // control settlement can precede notification of the result future.
     send_attached_action(&actions, UserAction::Quit);
-    assert_eq!(
-        worker.join().unwrap().unwrap(),
-        super::HostQuitOutcome::Clean
-    );
+    let outcome = worker.join().unwrap().unwrap();
     seen.extend(events.try_iter());
+    assert_eq!(
+        outcome,
+        super::HostQuitOutcome::Clean,
+        "steps={:?}; events={seen:#?}",
+        super::turn_drive::quit_trace::steps(&id)
+    );
     assert!(
         seen.iter().any(|event| matches!(event,
             HostEvent::TurnLifecycle(lifecycle)

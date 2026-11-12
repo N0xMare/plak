@@ -373,7 +373,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     self.quit_join_deadline = Some(Instant::now() + QUIT_RESULT_JOIN);
                     #[cfg(test)]
                     if super::quit_trace::take_expired_join(&self.host.session.id) {
-                        self.control.wait_until_settled().await;
+                        let _ =
+                            super::quit_trace::ready_result(self.quit_result_ready.take()).await;
                         self.quit_join_deadline = Some(Instant::now());
                     }
                     if let Some(observer) = &self.turn_observer {

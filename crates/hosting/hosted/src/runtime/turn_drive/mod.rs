@@ -96,6 +96,8 @@ struct RootTurn<'a, P: plakous_host_protocol::ProtocolExtension> {
     quit_after_terminal: bool,
     /// After Quit, wait this long for a cancelled terminal, then abandon.
     quit_join_deadline: Option<Instant>,
+    #[cfg(test)]
+    quit_result_ready: Option<quit_trace::ResultSlot>,
     cancel_unsettled: Option<CancelUnsettled>,
     cancel_pending: bool,
     /// The runtime accepted a cancel for this turn, or reported the turn
@@ -200,6 +202,8 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootTurn<'a, P> {
             projection: TurnProjection::default(),
             quit_after_terminal: false,
             quit_join_deadline: None,
+            #[cfg(test)]
+            quit_result_ready: None,
             cancel_unsettled: None,
             cancel_pending: false,
             cancel_accepted: false,
@@ -236,6 +240,12 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootTurn<'a, P> {
             .take_events()
             .map_err(|e| format!("events unavailable: {e}"))?;
         let result_fut = turn.result();
+        #[cfg(test)]
+        let result_fut = {
+            let (result, ready) = quit_trace::observe_result(&self.host.session.id, result_fut);
+            self.quit_result_ready = ready;
+            result
+        };
         let mut drive = crate::node::TurnDrive { port: self };
         drive.run(&mut event_stream, result_fut).await;
         self = drive.port;

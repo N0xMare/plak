@@ -84,11 +84,11 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 filter = 'test(a_reader_within_the_recency_margin_projects_exactly_across_an_in_turn_compaction)'
 slow-timeout = { period = "240s", terminate-after = 2 }
 
-# The stop-cut matrix crashes a running turn and reopens it. The holder is
-# this same process, so the store cannot prove it gone and the branch stays
-# leased until the production lease expires. The waits sit inside one test.
+# Stop-cut matrices panic an actor before joined driver release. Even an idle
+# driver may retain its lease across bounded executor teardown. The same
+# process cannot be proven gone, so unreleased leases must expire normally.
 [[profile.default.overrides]]
-filter = 'test(a_stop_cut_with_children_decides_the_root_and_the_wake)'
+filter = 'test(a_stop_cut_with_children_decides_the_root_and_the_wake) | test(a_crash_around_the_root_stop_record)'
 slow-timeout = { period = "300s", terminate-after = 2 }
 
 [profile.offline]

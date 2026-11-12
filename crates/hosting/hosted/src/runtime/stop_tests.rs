@@ -1410,13 +1410,7 @@ fn assert_cut(
         serde_json::json!([{"output": {"text": "continued"}}]),
         Arc::clone(&lost.store),
     );
-    // A crash mid-turn drops the driver without its graceful lease release, so
-    // the branch stays leased until the lease expires. The idle cuts release
-    // on the actor drop; the busy cuts do not, and the holder is this same
-    // process, so only the lease expiring lets the reopen take the branch.
-    if path == "busy" {
-        wait_out_crashed_lease();
-    }
+    wait_out_crashed_lease(lost);
     config.resume_after_loss = if expect.continues {
         ResumeAfterLoss::Continue
     } else {
@@ -1465,15 +1459,39 @@ fn assert_cut(
     }
 }
 
-/// Waits out the branch lease a crashed running turn left behind.
+/// Waits for a crashed actor's branch release or its existing lease to expire.
 ///
-/// The driver's lease release runs only in its graceful shutdown, which a cut
-/// skips by panicking the worker thread. The reopen cannot reclaim the branch
-/// early: the holder was this same process, and the store treats that as not
-/// provably gone. The production lease is 30 s and the last renewal predates
-/// the crash, so it has expired by 32 s.
-fn wait_out_crashed_lease() {
-    std::thread::sleep(Duration::from_secs(32));
+/// Even idle actor drop only requests the separate driver's shutdown. Panic
+/// unwinding can end its executor before graceful lease release finishes. The
+/// process is still alive, so an unreleased claim must expire normally.
+fn wait_out_crashed_lease(lost: &Lost) {
+    let locator = lost.store.load(&lost.id).unwrap().plakous_locator.unwrap();
+    let connection = rusqlite::Connection::open_with_flags(
+        lost.state_roots.runtime_database(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let deadline = Instant::now()
+        + Duration::from_secs(
+            lost.state_roots
+                .runtime_sessions()
+                .unwrap()
+                .lease_period_seconds()
+                + 2,
+        );
+    while Instant::now() < deadline {
+        let held: bool = connection
+            .query_row(
+                "SELECT active_owner IS NOT NULL FROM branches WHERE session_id=?1 AND branch_id=?2",
+                rusqlite::params![locator.session_id().to_string(), locator.branch_id().to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if !held {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn load_tree(
@@ -1675,6 +1693,7 @@ fn crash_at(root: &std::path::Path, lost: &Lost, at: &str) {
         host.join().is_err(),
         "{at}: the actor did not stop at the cut"
     );
+    wait_out_crashed_lease(lost);
 }
 
 /// The stop answer arrives from the settle's wake, with the notice emitted
