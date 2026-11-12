@@ -4034,14 +4034,17 @@ entry tokens, not caller-selected paths, revisions, options or argv. Tokens
 bind principal/target, runner instance, repository identity, observed HEAD,
 index and worktree contents and status revision; they expire after 60 s or
 changed inputs. One result of at most 2,000 entries is retained per target
-and principal, at most four per principal, and none survives restart. One
+and principal, at most four per principal, and none survives restart. The
+process retains at most 64 results, including pending new-target reservations;
+a full pool refuses before executor dispatch. Omitted-root and explicit-root
+targets resolve to the same result slot before admission. One
 Changes request runs per principal, sharing file budgets, with a 5 s execution
 deadline and 256 KiB output limit. Untracked files open through Files, never
 `diff --no-index`; binary patches expose bounded numstat only. Non-colocated
 repositories using jj answer `vcs_unsupported`; colocated ones say git view.
 The fixed execution policy is chapter 04 §2.6.
 
-Protocol-7 `config_patch`, `template_put` and `profile_put` use the P6
+Protocol-8 `config_patch`, `template_put` and `profile_put` use the P6
 attachment-free seam, typed allowlisted fields and mandatory if_match etags.
 Prepare/confirm binds the exact target/revision; conflict never auto-merges.
 Publication replies distinguish Saved from published/durability-uncertain

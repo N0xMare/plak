@@ -37,7 +37,7 @@ pub(super) fn console(root: &std::path::Path) -> Arc<Console> {
         },
     )
 }
-fn workspace(path: &std::path::Path) -> resolve::Workspace {
+pub(super) fn workspace(path: &std::path::Path) -> resolve::Workspace {
     use plakous::tools::{
         ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
     };

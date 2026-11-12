@@ -5960,6 +5960,14 @@ I/O indefinitely. Protocol fixtures round-trip attachment-free Files/Changes
 requests and product refusals, reject offset-only reads and arbitrary runner
 selection, and require the exact protocol-8 handshake.
 
+Changes host probes exercise saved-session status/diff without attachment or
+runtime-store creation, canonical root-target aliases, exact content conflicts,
+foreign principal and restarted-runner refusals before dispatch, distinct
+equal-path runner results and the five-second BuildRead budget. Token probes
+bind repository, HEAD, index and worktree revision, expire retained authority,
+bound per-principal and process-wide pending results, release cancelled
+reservations and mark byte/entry-limit omissions rather than claiming clean.
+
 Protocol-7 consent contracts deterministically cover replay, expiry, changed
 principal/connection/generation/action, disconnect/restart, four-grant quota,
 mutation single-flight and aggregate per-principal quota with web writes off.

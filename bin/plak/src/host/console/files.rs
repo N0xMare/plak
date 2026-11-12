@@ -1,5 +1,6 @@
 //! Saved-workspace inspection, separate from session admission and tool effects.
 
+mod changes;
 mod cursors;
 mod quota;
 mod resolve;
@@ -26,7 +27,6 @@ use std::time::Duration;
 
 pub(super) const PAGE: u64 = 256 * 1024;
 const INPUT: u64 = 16 * 1024 * 1024;
-const DEADLINE: Duration = Duration::from_secs(2);
 
 pub(super) fn welcome_limits() -> WorkspaceReadLimits {
     WorkspaceReadLimits {
@@ -54,6 +54,7 @@ pub(super) fn welcome_limits() -> WorkspaceReadLimits {
 pub(super) struct State {
     quota: quota::State,
     cursors: cursors::State,
+    changes: changes::State,
 }
 
 pub(in super::super) fn target(request: &HostRequest) -> Option<&WorkspaceTarget> {
@@ -112,6 +113,15 @@ impl Console {
                     Err(resolve::Failure::Product(reason)) => return Ok(refused(reason)),
                     Err(resolve::Failure::Placement(reason)) => return Err(reason),
                 };
+                let _result = if matches!(request, HostRequest::ChangesStatus { .. }) {
+                    Some(changes::Reservation::admit(
+                        Arc::clone(&this),
+                        &context,
+                        &workspace.target,
+                    )?)
+                } else {
+                    None
+                };
                 this.inspect(&context, request, workspace).await
             });
             let _cancel = super::Cancel {
@@ -132,9 +142,17 @@ impl Console {
         let placement = workspace.placement.clone();
         let cancellation = plakous::model::CancellationToken::new();
         let _cancel = Cancel(cancellation.clone());
+        let budget_ms = if matches!(
+            request,
+            HostRequest::ChangesStatus { .. } | HostRequest::ChangesDiff { .. }
+        ) {
+            5_000
+        } else {
+            2_000
+        };
         let deadline = u64::try_from(super::clock::now_ms())
             .unwrap_or(0)
-            .saturating_add(2_000);
+            .saturating_add(budget_ms);
         let control = OperationContext::new(cancellation);
         let control = if let Ok(deadline) = plakous::model::Timestamp::new(
             deadline / 1_000,
@@ -144,9 +162,11 @@ impl Console {
         } else {
             control
         };
-        let result =
-            tokio::time::timeout(DEADLINE, self.execute(context, request, workspace, control))
-                .await;
+        let result = tokio::time::timeout(
+            Duration::from_millis(budget_ms),
+            self.execute(context, request, workspace, control),
+        )
+        .await;
         if !matches!(result, Ok(Ok(_)))
             && let Some(refusal) = placement.and_then(|placement| placement.refusal())
         {
@@ -201,8 +221,8 @@ impl Console {
                     .map_err(backend)?;
                 search_reply(&result)
             }
-            HostRequest::ChangesStatus { .. } | HostRequest::ChangesDiff { .. } => {
-                Err(failure(WorkspaceReadFailure::VcsUnavailable))
+            request @ (HostRequest::ChangesStatus { .. } | HostRequest::ChangesDiff { .. }) => {
+                self.changes(context, request, workspace, control).await
             }
             _ => unreachable!(),
         }
