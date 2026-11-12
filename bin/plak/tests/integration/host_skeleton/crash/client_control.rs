@@ -137,7 +137,15 @@ pub(super) fn create(host: &Host, fixture: &Fixture) -> Option<String> {
 
 pub(in super::super) fn script(fixture: &Fixture, child: bool) {
     if !child {
-        fixture.write_script(&busy_script());
+        // These journeys stop the root only after its answer, and a cut is a
+        // commit, not an instant: the busy release's stall would only hold
+        // every answer back.
+        let mut root = busy_script();
+        root["steps"][0]["stream"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|event| event.get("stall").is_none());
+        fixture.write_script(&root);
         return;
     }
     let child_script = fixture.root.join("child.json");

@@ -2543,7 +2543,7 @@ The `tui_host_restart` shape uses the ordinary offline TUI PTY fixture
 against a test-hooks `plak host`. Its specialized driver is registered in
 the strict crash-sweep entry point and the durability lane (excluded from
 offline by its exact test name). It cuts every indexed host commit of
-creation, terminal attach, a busy turn and `stop_session`, once with a
+creation, terminal attach, a turn and `stop_session`, once with a
 root alone and once with a real child running. Twin pilots must have the
 same indexed labels per store, and every cut must reach that pilot label.
 A live terminal reports
@@ -2556,8 +2556,8 @@ authority handoff or host commit to cut: the deterministic PTY case checks
 that the host process and resident session survive it.
 
 The exact durability test `review_tui_host_restart_switch` adds the TUI's
-own `/new`, `/resume <original>` and `/stop` while a busy root or real child
-runs. Twin pilots pin every indexed per-store label. Both terminal shapes
+own `/new`, `/resume <original>` and `/stop` after the root's answer or while
+a real child runs. Twin pilots pin every indexed per-store label. Both terminal shapes
 wait for the stop notice to appear in the read-only durable transcript before
 leaving, and for the stopped child tree to become interrupted with no active
 turns before killing each pilot host. The stop reply and live notice alone
