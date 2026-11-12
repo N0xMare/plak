@@ -2457,6 +2457,15 @@ completion of a recorded stop, respectively. The durability cases
 `host_crash_mid_stop_finishes_the_recorded_stop_once_after_retransfer`
 add explicit repeated SIGKILL boundaries after lease acquisition, transfer,
 terminal recording, and immediately before and after the keyed stop.
+These boundaries, the root-handoff boundary, the four binding-reopen
+boundaries and the re-adoption skip are the variants of one
+`plakous_hosted::test_support_runner::HostCut`, public only with
+`test-support`. Tests name a cut by its variant in
+`PLAK_TEST_HOST_READOPT_CUT`, and a value that names no cut aborts the gate
+build's host instead of never firing. The store's SQLite commit, prune,
+line-advance and reclaim cuts are one `cfg(test)` enum in the same way, and
+a unit test requires each of them to be listed in exactly one `SIGKILL`
+matrix.
 The child-stop counterpart cuts the live stop and repeats startup cuts on
 both sides of the child's keyed stop before checking its one terminal.
 `host_handoff_keeps_jobs_and_continues_the_busy_turn_once` checks both loss

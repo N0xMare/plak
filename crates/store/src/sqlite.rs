@@ -1573,37 +1573,109 @@ const CRASH_CUT_STAGE_ENV: &str = "PLAKOUS_SQLITE_TEST_CRASH_CUT";
 #[cfg(test)]
 const CRASH_CUT_MARKER_ENV: &str = "PLAKOUS_SQLITE_TEST_CRASH_MARKER";
 
+/// A point where a crash-test child parks, named by
+/// `PLAKOUS_SQLITE_TEST_CRASH_CUT`. A name that is no cut fails the child
+/// rather than never parking.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CrashCut {
+    PreCommitHook,
+    BeforeCommit,
+    AsyncInCommit,
+    PostCommitPreReply,
+    PruneAfterEnqueue,
+    PruneBeforeCommit,
+    PruneAfterCommit,
+    ForkBeforeCommit,
+    ForkAfterCommit,
+    CarryBeforeCommit,
+    CarryAfterCommit,
+    RecordTerminalsBeforeCommit,
+    RecordTerminalsAfterCommit,
+    GcBeforeCommit,
+    GcAfterCommit,
+}
+
+#[cfg(test)]
+impl CrashCut {
+    const ALL: [Self; 15] = [
+        Self::PreCommitHook,
+        Self::BeforeCommit,
+        Self::AsyncInCommit,
+        Self::PostCommitPreReply,
+        Self::PruneAfterEnqueue,
+        Self::PruneBeforeCommit,
+        Self::PruneAfterCommit,
+        Self::ForkBeforeCommit,
+        Self::ForkAfterCommit,
+        Self::CarryBeforeCommit,
+        Self::CarryAfterCommit,
+        Self::RecordTerminalsBeforeCommit,
+        Self::RecordTerminalsAfterCommit,
+        Self::GcBeforeCommit,
+        Self::GcAfterCommit,
+    ];
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::PreCommitHook => "pre-commit-hook",
+            Self::BeforeCommit => "before-commit",
+            Self::AsyncInCommit => "async-in-commit",
+            Self::PostCommitPreReply => "post-commit-pre-reply",
+            Self::PruneAfterEnqueue => "prune-after-enqueue",
+            Self::PruneBeforeCommit => "prune-before-commit",
+            Self::PruneAfterCommit => "prune-after-commit",
+            Self::ForkBeforeCommit => "fork-before-commit",
+            Self::ForkAfterCommit => "fork-after-commit",
+            Self::CarryBeforeCommit => "carry-before-commit",
+            Self::CarryAfterCommit => "carry-after-commit",
+            Self::RecordTerminalsBeforeCommit => "record-terminals-before-commit",
+            Self::RecordTerminalsAfterCommit => "record-terminals-after-commit",
+            Self::GcBeforeCommit => "gc-before-commit",
+            Self::GcAfterCommit => "gc-after-commit",
+        }
+    }
+
+    fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|cut| cut.name() == name)
+    }
+}
+
 #[cfg(test)]
 fn install_test_commit_hook(connection: &mut Connection) {
-    if test_crash_cut_requested("pre-commit-hook") {
+    if test_crash_cut_requested(CrashCut::PreCommitHook) {
         let _ = connection.commit_hook(Some(|| {
-            test_crash_cut("pre-commit-hook");
+            test_crash_cut(CrashCut::PreCommitHook);
             false
         }));
     }
 }
 
 #[cfg(test)]
-fn test_crash_cut_requested(stage: &str) -> bool {
-    std::env::var(CRASH_CUT_STAGE_ENV).is_ok_and(|requested| requested == stage)
+fn test_crash_cut_requested(stage: CrashCut) -> bool {
+    std::env::var(CRASH_CUT_STAGE_ENV).is_ok_and(|requested| {
+        CrashCut::named(&requested)
+            .unwrap_or_else(|| panic!("{CRASH_CUT_STAGE_ENV} names no crash cut: {requested:?}"))
+            == stage
+    })
 }
 
 #[cfg(test)]
-fn test_crash_signal(stage: &str) {
+fn test_crash_signal(stage: CrashCut) {
     if test_crash_cut_requested(stage)
         && let Some(marker) = std::env::var_os(CRASH_CUT_MARKER_ENV)
     {
-        let _ = fs::write(marker, stage.as_bytes());
+        let _ = fs::write(marker, stage.name().as_bytes());
     }
 }
 
 #[cfg(test)]
-fn test_crash_cut(stage: &str) {
+fn test_crash_cut(stage: CrashCut) {
     if !test_crash_cut_requested(stage) {
         return;
     }
     if let Some(marker) = std::env::var_os(CRASH_CUT_MARKER_ENV) {
-        let _ = fs::write(marker, stage.as_bytes());
+        let _ = fs::write(marker, stage.name().as_bytes());
     }
     loop {
         thread::park();

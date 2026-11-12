@@ -123,7 +123,7 @@ pub(in super::super) fn create(
     )?;
     #[cfg(test)]
     if r.continuation().is_some() {
-        test_crash_cut("carry-before-commit");
+        test_crash_cut(CrashCut::CarryBeforeCommit);
     }
     let feed_seq = feed::append(
         &tx,
@@ -176,7 +176,7 @@ pub(in super::super) fn create(
     super::lease::commit_claimed(tx, &mut b.holders, r.session(), lease_fence, r.owner())?;
     #[cfg(test)]
     if r.continuation().is_some() {
-        test_crash_cut("carry-after-commit");
+        test_crash_cut(CrashCut::CarryAfterCommit);
     }
     Ok(receipt)
 }

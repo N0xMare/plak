@@ -158,7 +158,10 @@ fn a_startup_stop_never_takes_a_line_the_sweep_did_not_readopt() {
     let mut host = start_env(
         &fixture,
         &[],
-        &[("PLAK_TEST_HOST_READOPT_CUT", "skip-readopt".into())],
+        &[(
+            "PLAK_TEST_HOST_READOPT_CUT",
+            HostCut::SkipReadopt.name().into(),
+        )],
     );
     assert!(
         alive(pid),
@@ -332,7 +335,10 @@ fn a_busy_roots_child_job_survives_attach_after_host_loss() {
             let Some(fixture) = fixture() else { return };
             write_resume_policy(&fixture, policy);
             let env = if phase == "before-root-handoff" {
-                vec![("PLAK_TEST_HOST_READOPT_CUT", phase.into())]
+                vec![(
+                    "PLAK_TEST_HOST_READOPT_CUT",
+                    HostCut::BeforeRootHandoff.name().into(),
+                )]
             } else {
                 Vec::new()
             };

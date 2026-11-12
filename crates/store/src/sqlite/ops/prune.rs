@@ -160,7 +160,7 @@ pub(in super::super) fn prune(
         )?;
     }
     #[cfg(test)]
-    test_crash_cut("prune-after-enqueue");
+    test_crash_cut(CrashCut::PruneAfterEnqueue);
 
     feed::append(
         &tx,
@@ -173,10 +173,10 @@ pub(in super::super) fn prune(
     )?;
     tx.execute("UPDATE store_meta SET checkpoints=checkpoints-?1,semantic_mutations=semantic_mutations+1 WHERE id=1", [i64n(pruned)?]).map_err(map_sqlite)?;
     #[cfg(test)]
-    test_crash_cut("prune-before-commit");
+    test_crash_cut(CrashCut::PruneBeforeCommit);
     tx.commit().map_err(map_sqlite)?;
     #[cfg(test)]
-    test_crash_cut("prune-after-commit");
+    test_crash_cut(CrashCut::PruneAfterCommit);
     // Returning free pages is scheduled after the authoritative commit, not
     // awaited on the prune acknowledgment path.
     b.gc_pending = true;

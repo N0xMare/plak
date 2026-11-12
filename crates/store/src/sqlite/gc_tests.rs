@@ -398,19 +398,26 @@ fn gc_crash_child() -> TestResult {
     Err("GC crash cut did not park the child".into())
 }
 
+/// Each reclaim cut and whether the reclaim is durable once it is reached.
+#[cfg(unix)]
+pub(super) const GC_CUTS: [(CrashCut, bool); 2] = [
+    (CrashCut::GcBeforeCommit, false),
+    (CrashCut::GcAfterCommit, true),
+];
+
 #[cfg(unix)]
 #[test]
 fn sigkill_gc_cuts_preserve_queue_counters_and_oracle() -> TestResult {
     use std::os::unix::process::ExitStatusExt as _;
     use std::process::{Command, Stdio};
-    for (stage, committed) in [("gc-before-commit", false), ("gc-after-commit", true)] {
+    for (stage, committed) in GC_CUTS {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("runtime.sqlite3");
         let marker = dir.path().join("gc.reached");
         let child = Command::new(std::env::current_exe()?)
             .args(["--exact", "sqlite::gc_tests::gc_crash_child", "--nocapture"])
             .env("PLAKOUS_SQLITE_TEST_GC_DB", &path)
-            .env(CRASH_CUT_STAGE_ENV, stage)
+            .env(CRASH_CUT_STAGE_ENV, stage.name())
             .env(CRASH_CUT_MARKER_ENV, &marker)
             .env("RUST_TEST_THREADS", "1")
             .stdin(Stdio::null())

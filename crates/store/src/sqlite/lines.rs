@@ -360,9 +360,9 @@ pub(in super::super) fn record_line_job_terminals(
         )?)
     };
     #[cfg(test)]
-    test_crash_cut("record-terminals-before-commit");
+    test_crash_cut(CrashCut::RecordTerminalsBeforeCommit);
     tx.commit().map_err(map_sqlite)?;
     #[cfg(test)]
-    test_crash_cut("record-terminals-after-commit");
+    test_crash_cut(CrashCut::RecordTerminalsAfterCommit);
     Ok(LineTerminalsReceipt::from_store(recorded, feed_seq))
 }

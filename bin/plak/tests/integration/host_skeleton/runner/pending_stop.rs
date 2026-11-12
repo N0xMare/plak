@@ -159,18 +159,18 @@ fn runner_deferred_bind_finishes_pending_stop_without_redispatch() {
     kill(&mut host);
     // First later bind cuts each sweep/recover/recorded-stop boundary. The
     // durable intent predates all of them and never starts another job.
-    for phase in [
-        "lease",
-        "transfer",
-        "terminals",
-        "before-stop",
-        "after-stop",
+    for cut in [
+        HostCut::Lease,
+        HostCut::Transfer,
+        HostCut::Terminals,
+        HostCut::BeforeStop,
+        HostCut::AfterStop,
     ] {
         let env = [
             ("PATH", path.clone()),
-            ("PLAK_TEST_HOST_READOPT_CUT", phase.into()),
+            ("PLAK_TEST_HOST_READOPT_CUT", cut.name().into()),
         ];
-        let mut host = if phase == "lease" {
+        let mut host = if cut == HostCut::Lease {
             start_env(&fixture, &[], &env)
         } else {
             let (child, lines) = spawn_env(&fixture, &[], &env);
@@ -180,13 +180,13 @@ fn runner_deferred_bind_finishes_pending_stop_without_redispatch() {
                 lines,
             }
         };
-        if phase == "lease" {
+        if cut == HostCut::Lease {
             assert_eq!(Client::connect(&host).rows(20).len(), 1);
             asleep.resume();
         }
         let status = cut_exit(host.child.as_mut().unwrap());
         host.child.take();
-        assert_eq!(status.signal(), Some(9), "missing {phase} cut");
+        assert_eq!(status.signal(), Some(9), "missing {cut:?} cut");
         job(&fixture);
     }
     stopped(pid);

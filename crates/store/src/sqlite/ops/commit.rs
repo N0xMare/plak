@@ -190,14 +190,14 @@ fn commit_impl(
     )?;
     bump(&tx)?;
     #[cfg(test)]
-    test_crash_cut("before-commit");
+    test_crash_cut(CrashCut::BeforeCommit);
     #[cfg(test)]
-    test_crash_signal("async-in-commit");
+    test_crash_signal(CrashCut::AsyncInCommit);
     #[cfg(feature = "perf-instrumentation")]
     let commit_started = observed.then(Instant::now);
     tx.commit().map_err(map_sqlite)?;
     #[cfg(test)]
-    test_crash_cut("async-in-commit");
+    test_crash_cut(CrashCut::AsyncInCommit);
     backend.checkpoints.seed(
         request.expected().session(),
         reference,
@@ -218,7 +218,7 @@ fn commit_impl(
         ..CommitExecution::default()
     };
     #[cfg(test)]
-    test_crash_cut("post-commit-pre-reply");
+    test_crash_cut(CrashCut::PostCommitPreReply);
     Ok((receipt, execution))
 }
 

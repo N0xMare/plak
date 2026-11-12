@@ -12,7 +12,7 @@
 //! and releases the lease. The head's next full open folds those terminals
 //! into its ledger and transfers the line again under its own, newer fence.
 
-use crate::test_support_runner::cut;
+use crate::test_support_runner::{HostCut, cut};
 use std::str::FromStr as _;
 
 use plakous::model::LineId;
@@ -81,7 +81,7 @@ pub async fn readopt_lines(
     sessions: &AgentSessions,
     operation_prefix: &str,
 ) -> Result<(Vec<Readopted>, Vec<ReadoptFailure>), RunnerFailure> {
-    if crate::test_support_runner::selected("skip-readopt") {
+    if crate::test_support_runner::selected(HostCut::SkipReadopt) {
         return Ok((Vec::new(), Vec::new()));
     }
     let mut readopted = Vec::new();
@@ -200,7 +200,7 @@ async fn readopt_line(
             ),
             reason: format!("the line's head could not be held: {error}"),
         })?;
-    cut("lease");
+    cut(HostCut::Lease);
     let adopted = readopt_held(client, &head, stop).await;
     let released = head
         .release()
@@ -228,9 +228,9 @@ pub(crate) async fn readopt_held(
             .transfer_owner(&owner)
             .await
             .map_err(|error| format!("the runner refused the transfer: {error:?}"))?;
-        cut("transfer");
+        cut(HostCut::Transfer);
         if let Some(intent) = stop {
-            cut("before-stop");
+            cut(HostCut::BeforeStop);
             let stopped = client
                 .call(RunnerCall::recorded_control(
                     RunnerVerb::JobsStop,
@@ -244,7 +244,7 @@ pub(crate) async fn readopt_held(
             {
                 return Err(format!("the recorded stop failed: {error:?}"));
             }
-            cut("after-stop");
+            cut(HostCut::AfterStop);
         }
         // The line table read after the transfer is the one this owner holds.
         let jobs = client
@@ -265,7 +265,7 @@ pub(crate) async fn readopt_held(
             .record_job_terminals(&jobs)
             .await
             .map_err(|error| format!("the job terminals could not be recorded: {error}"))?;
-        cut("terminals");
+        cut(HostCut::Terminals);
         let running = jobs
             .iter()
             .filter(|job| job.status == JobStatus::Running)

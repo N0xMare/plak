@@ -2,6 +2,7 @@
 
 use super::crash::dispatches;
 use super::*;
+use plakous_hosted::test_support_runner::HostCut;
 use std::time::Instant;
 
 pub(super) fn seeded(fixture: &Fixture, host: &Host) -> (Client, String, NodeAddress, u64) {
@@ -163,13 +164,18 @@ fn host_plain_attach_reopens_after_a_failed_placement_is_fixed() {
 #[test]
 fn host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch() {
     for rebind in [false, true] {
-        for cut in ["fenced", "released", "carried", "opened"] {
+        for cut in [
+            HostCut::ReopenFenced,
+            HostCut::ReopenReleased,
+            HostCut::ReopenCarried,
+            HostCut::ReopenOpened,
+        ] {
             let Some(fixture) = fixture() else { return };
             fixture.write_script(&json!({"version":1,"steps":[{"output":{"text":ANSWER}}]}));
             let mut host = start_env(
                 &fixture,
                 &[],
-                &[("PLAK_TEST_HOST_READOPT_CUT", format!("reopen:{cut}"))],
+                &[("PLAK_TEST_HOST_READOPT_CUT", cut.name().into())],
             );
             let (mut client, source, _, attachment) = seeded(&fixture, &host);
             client.send(&ClientFrame::Request {
@@ -183,9 +189,11 @@ fn host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch() {
                     break;
                 }
             }
-            assert!(
-                !host.child.take().unwrap().wait().unwrap().success(),
-                "{cut}"
+            let status = host.child.take().unwrap().wait().unwrap();
+            assert_eq!(
+                std::os::unix::process::ExitStatusExt::signal(&status),
+                Some(9),
+                "{cut:?}: {status}"
             );
             drop(client);
             let mut next = start(&fixture);
@@ -193,13 +201,13 @@ fn host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch() {
             let rows = client.rows(6);
             assert!(
                 rows.iter().all(|row| row.hosted_elsewhere.is_none()),
-                "{cut}: custody stayed live"
+                "{cut:?}: custody stayed live"
             );
             let target = rows
                 .iter()
                 .find(|row| row.session != source)
                 .unwrap_or_else(|| rows.first().unwrap());
-            if rebind && matches!(cut, "carried" | "opened") {
+            if rebind && matches!(cut, HostCut::ReopenCarried | HostCut::ReopenOpened) {
                 assert_ne!(
                     target.session, source,
                     "a committed carry lost its successor"
@@ -207,12 +215,12 @@ fn host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch() {
             }
             client.attach(7, &target.node);
             history_preserved(&fixture, &target.session);
-            assert_eq!(dispatches(&fixture), 1, "{cut}: redispatched");
+            assert_eq!(dispatches(&fixture), 1, "{cut:?}: redispatched");
             one_terminal(&fixture, &source);
             assert_eq!(
                 root_record(&fixture, &source).1,
                 0,
-                "{cut}: invented a continuation"
+                "{cut:?}: invented a continuation"
             );
             assert_eq!(
                 client
@@ -221,7 +229,7 @@ fn host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch() {
                     .filter(|row| row.residency == SessionResidency::Resident)
                     .count(),
                 1,
-                "{cut}: duplicate actor"
+                "{cut:?}: duplicate actor"
             );
             drop(client);
             stop(&mut next);
