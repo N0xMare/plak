@@ -97,11 +97,16 @@ case "$target_dir" in
 esac
 py_host=''
 js_host=''
+plak_host=''
 prepare_tests() {
-  if [[ -n "$py_host" ]]; then return; fi
+  # Validate explicit workers before a tooling-only build as well.
+  if [[ "${1:-}" == tooling && -z "$py_host" && "${PLAK_PY_HOST+x}" == x && "${PLAK_JS_HOST+x}" == x ]]; then
+    prepare_tests
+  fi
+  if [[ -n "$py_host" && ( "${1:-}" != tooling || -n "$plak_host" ) ]]; then return; fi
   worker_manifest="$(mktemp "$TMPDIR/plak-worker-build.XXXXXX")"
   trap 'rm -f "$worker_manifest"' EXIT
-  if [[ "${PLAK_PY_HOST+x}" == x && "${PLAK_JS_HOST+x}" == x ]]; then
+  if [[ "${PLAK_PY_HOST+x}" == x && "${PLAK_JS_HOST+x}" == x && "${1:-}" != tooling ]]; then
     worker_mode=explicit
     worker_input=''
   else
@@ -121,8 +126,11 @@ import sys
 mode, manifest = sys.argv[1:]
 records = ([json.loads(line) for line in Path(manifest).read_text().splitlines() if line.strip()]
            if mode == "built" else [])
-for variable, binary in [("PLAK_PY_HOST", "plakous-py-host"), ("PLAK_JS_HOST", "plakous-js-host")]:
-    if variable in os.environ:
+executables = [("PLAK_PY_HOST", "plakous-py-host"), ("PLAK_JS_HOST", "plakous-js-host")]
+if mode == "built":
+    executables.append(("PLAK_TOOLING_BINARY", "plak"))
+for variable, binary in executables:
+    if variable in os.environ and variable != "PLAK_TOOLING_BINARY":
         value = os.environ[variable]
     else:
         paths = {row["executable"] for row in records
@@ -138,14 +146,15 @@ for variable, binary in [("PLAK_PY_HOST", "plakous-py-host"), ("PLAK_JS_HOST", "
     try:
         path = Path(value).resolve(strict=True)
     except OSError as error:
-        raise SystemExit(f"{variable} must name an executable cell worker: {error}") from error
+        raise SystemExit(f"{variable} must name an executable: {error}") from error
     if not path.is_file() or not os.access(path, os.X_OK):
-        raise SystemExit(f"{variable} must name an executable cell worker")
+        raise SystemExit(f"{variable} must name an executable")
     print(path)
 PY_WORKER
   )"
   py_host="$(printf '%s\n' "$worker_paths" | sed -n '1p')"
   js_host="$(printf '%s\n' "$worker_paths" | sed -n '2p')"
+  plak_host="$(printf '%s\n' "$worker_paths" | sed -n '3p')"
   rm -f "$worker_manifest"
   trap - EXIT
 }
@@ -596,8 +605,10 @@ run_group() {
       echo "== positive/negative public compile contracts =="
       python3 tools/gate/check_public_compile.py ;;
     tooling)
-      echo "== structure: checker unit tests =="
-      python3 tools/gate/run_tooling_tests.py -v ;;
+      echo "== structure: checker tests and real-host reference client =="
+      prepare_tests tooling
+      PLAK_TOOLING_BINARY="$plak_host" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" \
+        python3 tools/gate/run_tooling_tests.py -v ;;
     package)
       # Publication packages a git tree; the musl container mounts an export.
       if [[ "$(python3 tools/gate/vcs_listing.py kind)" == export ]]; then
@@ -635,20 +646,22 @@ run_timed() {
   # status and goes on to the next group. Prepared worker paths survive a
   # failed lane so later lanes reuse the same build.
   worker_state="$(mktemp)"
-  printf '%s\n' "$py_host" "$js_host" >"$worker_state"
+  printf '%s\n' "$py_host" "$js_host" "$plak_host" >"$worker_state"
   set +e
   (
     set -Ee
     py_host="$(sed -n '1p' "$worker_state")"
     js_host="$(sed -n '2p' "$worker_state")"
-    trap 'printf "%s\n" "$py_host" "$js_host" >"$worker_state"' ERR
+    plak_host="$(sed -n '3p' "$worker_state")"
+    trap 'printf "%s\n" "$py_host" "$js_host" "$plak_host" >"$worker_state"' ERR
     run_group "$group"
-    printf '%s\n' "$py_host" "$js_host" >"$worker_state"
+    printf '%s\n' "$py_host" "$js_host" "$plak_host" >"$worker_state"
   )
   status=$?
   set -e
   py_host="$(sed -n '1p' "$worker_state")"
   js_host="$(sed -n '2p' "$worker_state")"
+  plak_host="$(sed -n '3p' "$worker_state")"
   rm -f "$worker_state"
   if [[ -s "$skip_record" ]]; then skipped_checks+="$(cat "$skip_record")"$'\n'; fi
   rm -f "$skip_record"

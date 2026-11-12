@@ -35,6 +35,7 @@ ALLOWLIST = ("tests/live/STATUS.md", "CHANGELOG.md", "docs/spec/**", "docs/user-
 # Allowlisted by pattern but read by a gate; a change to one invalidates.
 EXCLUDED = {
     "docs/spec/07-config-reference.md": "bin/plak product_config tests compare the config key table and template schema with it",
+    "docs/user-guide/integrating.md": "the tooling reference-client contract executes its wire transcript against a real host",
 }
 # Packaged into a published crate (`readme.workspace`) and read by no test.
 PACKAGE_ONLY = ("README.md",)
@@ -164,6 +165,7 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
 }
 # Gate readers of an excluded path: the exact path each one reads.
 EXCLUDED_READERS = {
+    "tests/tooling/test_host_client.py": "docs/user-guide/integrating.md",
     "bin/plak/src/product_config/tests.rs": "docs/spec/07-config-reference.md",
     "bin/plak/src/host/console/definitions/settings.rs": "docs/spec/07-config-reference.md",
     "bin/plak/src/host/console/limits.rs": "docs/spec/07-config-reference.md",

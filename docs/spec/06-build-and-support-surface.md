@@ -223,7 +223,7 @@ by whatever happens to be `pub`.
 | `plakous-agent` | The explicit construction, prompt/turn, control and acknowledgement, result, observation and atomic attach contract, context-source, profile and policy, usage, and telemetry reexports. Hosts own presentation; no raw checkpoint, store, or runtime authority | `crates/core/agent/src/lib.rs` and `tests/fixtures/agent-consumer` |
 | `plakous-model` | The Custom-model construction and registration seam: `LanguageModel`, validated preparation inputs and results, Custom descriptor and implementation identity, the identifiers and capability values needed to build them, and the typed preparation error | `tests/fixtures/model-consumer` |
 | `plakous-tools` | The Custom-tool construction and registration seam: executor, future and context, invocation and outcome, registry builder and frozen registry, registration and executor identifiers, plus the model-owned definition, schema, effect, and concurrency values | `tests/fixtures/tools-consumer` |
-| `plak` | The installed process behaviors of the binary: version, help and recursive help; `wire schema` (chapter 02 §4.4); `config init/set/show`; `doctor`, `session list`, key status; confirmation and no-guessed-context failures; non-TTY bare invocation; missing-auth exit 3; malformed-argv exit 2. There is no supported direct Rust library API | `bin/plak/tests/integration/cli_contract.rs`. `cli.rs` is implementation grammar, not output or exit authority |
+| `plak` | The installed process behaviors of the binary: version, help and recursive help; `wire schema` (chapter 02 §4.4); `config init/set/show`; `doctor`, `session list`, key status; confirmation and no-guessed-context failures; non-TTY bare invocation; missing-auth exit 3; malformed-argv exit 2. There is no supported direct Rust library API | `bin/plak/tests/integration/cli_contract.rs` and the tooling real-host integration client. `cli.rs` is implementation grammar, not output or exit authority |
 
 A direct-package symbol outside the corresponding fixture is nameable, not
 supported — even when a facade reexport of the same name is separately
@@ -1582,7 +1582,9 @@ no diff configuration can narrow) touches nothing but:
 
 - documentation no gate reads: `tests/live/STATUS.md`, `CHANGELOG.md`,
   `docs/spec/**` and `docs/user-guide/**`, except
-  `docs/spec/07-config-reference.md`, which `plak` configuration tests read;
+  `docs/spec/07-config-reference.md`, which `plak` configuration tests read,
+  and `docs/user-guide/integrating.md`, whose transcript the tooling client
+  contract executes against a real host;
   and
 - `README.md`, which `readme.workspace` packages and no test reads, when
   `gate-evidence/package` also names HEAD's tree (rerun `just steps package`

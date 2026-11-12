@@ -805,7 +805,7 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these 
 | `tests-serial` | nextest profile `serial`: wall-clock budgets, one test thread |
 | `tests-durability` | nextest profile `durability`: crash matrices and the sqlite SIGKILL campaign, one test thread |
 | `contracts` | Positive/negative public compile contracts |
-| `tooling` | Python tooling self-tests |
+| `tooling` | Python tooling self-tests, including the user-guide stdlib socket client and hello/directory/attach transcript against an isolated, offline-scripted real host. Prepares the shared all-feature workspace test artifacts, including the host binary, and requires exact wire-version refusal |
 | `package` | Publish dry run, `tools/release/publish.sh --gate`: prefetch archive verification inputs offline first, online only for missing cache inputs, then package and verify every publishable crate strictly offline from the staged published tree (chapter 06 §6.5); skipped outside a git work tree |
 
 | Tier | Groups |

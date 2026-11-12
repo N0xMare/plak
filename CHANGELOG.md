@@ -38,6 +38,9 @@ one cross-build carrier (a build imports its own and the previous version).
 - Pin release binding facts across the offline route matrix and require exact
   reopen of predecessor-authored native root and child sessions.
 
+- Add an integration map and a stdlib Python socket client checked against
+  a real offline host in the tooling gate.
+
 - Publish `plak wire schema` as a supported command and attach target-specific
   JSON Schemas to releases.
 

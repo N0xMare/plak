@@ -215,6 +215,8 @@ if args[0] == 'test':
     js_worker.chmod(0o700)
     print(json.dumps(dict(reason='compiler-artifact', executable=str(js_worker),
                          target=dict(name='plakous-js-host', kind=['bin']), profile=dict(test=False))))
+    print(json.dumps(dict(reason='compiler-artifact', executable=str(worker),
+                         target=dict(name='plak', kind=['bin']), profile=dict(test=False))))
 ''',
         )
         self.executable(
@@ -430,7 +432,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.worker.chmod(0o700)
         self.env['PLAK_PY_HOST'] = str(self.worker.relative_to(self.root))
         self.env['PLAK_JS_HOST'] = str(self.worker.relative_to(self.root))
-        result, calls, _ = self.run_gate()
+        result, calls, _ = self.run_gate('--steps', 'tests-parallel,tests-serial')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(c['args'][0] == 'test' for c in calls))
         lanes = [c for c in calls if c['args'][:2] == ['nextest', 'run']]
@@ -491,7 +493,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--steps', 'static,contracts,tooling')
         self.assertEqual(result.returncode, 1)
         self.assertEqual(
-            [c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['fmt', 'fetch', *CLIPPIES]
+            [c['args'][0] for c in calls if c['args'][0] != 'nextest'],
+            ['fmt', 'fetch', *CLIPPIES, 'test'],
         )
         self.assertEqual(
             [Path(s[0]).name for s in scripts if s[0].endswith('.py')],

@@ -30,6 +30,8 @@ Start here:
   Claude OAuth disclosure, and the absence of approval gates.
 - **[Embedding](embedding.md)** — building your own Rust program on the Plakous
   library: features, manifests, examples, and the construction helpers.
+- **[Integrating](integrating.md)** — choose a library, wire transport, batch
+  command or runner boundary; schema export and a tested Python socket client.
 
 Ready-made configuration shapes you can copy into your Plak home live in
 [`docs/reference-config/`](../reference-config/) (the annotated every-key home),

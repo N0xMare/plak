@@ -26,6 +26,7 @@ class ClassifyTests(unittest.TestCase):
             ("docs/spec/05-testing-and-evidence.md", "docs"),
             ("docs/spec/sub/page.md", "docs"),
             ("docs/user-guide/cli.md", "docs"),
+            ("docs/user-guide/integrating.md", "other"),
             ("docs/spec/07-config-reference.md", "other"),
             ("README.md", "package"),
             ("crates/core/model/README.md", "other"),

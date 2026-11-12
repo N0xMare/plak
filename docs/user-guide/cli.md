@@ -19,6 +19,10 @@ failing — `plak run`, `plak login`, `plak key set`, `plak session show` — an
 that is a successful exit, not an error. `plak version` prints, for example, `plak 0.0.3 (release; binary 0123456789ab)`.
 The binary ID identifies the executable in `/reload` and handoffs.
 
+`plak wire schema` prints this build's wire v2 JSON Schema, including the exact
+protocol version and binary id. It is a supported release command; see the
+[integration guide](integrating.md) for transports and a small socket client.
+
 `--runner` and `--workspace` are TUI launch flags, not `run` or `agent`
 options. They require a running host and never fall back to an embedded/local
 session. The runner name must be returned by that host's picker; local means
