@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use super::*;
 
+mod client_fixtures;
+
 struct Bridge {
     child: Child,
     input: Option<std::process::ChildStdin>,

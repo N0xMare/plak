@@ -93,6 +93,7 @@ impl<P: ProtocolExtension> WireSession<P> {
         let service = HostService::new(actions.clone(), root.clone(), ATTACHMENT_CAPACITY)
             .with_nodes(Arc::new(TreeNodes::new(root.tree_id)))
             .with_attachment_count(attachments);
+        let before_pump = super::super::test_open_observations::before_pump(&session_id, &service);
         let served = ServedSession::shared(session_id, Box::new(roots), service);
         let (notify, changes) = watch::channel(0_u64);
         let wake = notify.clone();
@@ -106,6 +107,11 @@ impl<P: ProtocolExtension> WireSession<P> {
         // The pump is the session's only observation consumer; it ends
         // with the session's observations and is never joined.
         thread::spawn(move || {
+            if !before_pump() {
+                pump_ended.store(true, Ordering::Release);
+                notify.send_modify(|revision| *revision = revision.wrapping_add(1));
+                return;
+            }
             let mut lost = LostTranscripts::default();
             loop {
                 match events.recv_timeout(POLL) {

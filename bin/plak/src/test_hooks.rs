@@ -96,6 +96,7 @@ pub(crate) fn profile_route_ready(
     )
 }
 
+pub(crate) mod client_fixtures;
 mod host;
 mod runner;
 pub(crate) use host::OfflineFace;
@@ -143,6 +144,7 @@ fn install_identity_hash_delay() {
 /// loopback or child runner when the offline script asks for one (spec 01
 /// §8.5). Nothing else selects a runner.
 pub(crate) fn install() -> Result<(), String> {
+    client_fixtures::install_pending_gate()?;
     install_identity_hash_delay();
     if let Some(millis) = hook_environment("PLAK_TEST_RELOAD_PROBE_LAUNCH_DELAY_MS")
         .and_then(|value| value.into_string().ok())

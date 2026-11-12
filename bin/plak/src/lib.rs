@@ -416,10 +416,18 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     // relative path on the command line means. Nothing below resolves a
     // path against the process working directory.
     let launch = shell::home::launch_directory();
+    let arguments: Vec<_> = arguments.into_iter().collect();
+    #[cfg(feature = "test-hooks")]
+    {
+        if let Some(result) =
+            test_hooks::client_fixtures::seed_request(&arguments, launch.as_deref())
+        {
+            return result;
+        }
+        test_hooks::install().map_err(CliFailure::new)?;
+    }
     let command = cli::parse(arguments)?.resolved_against(launch.as_deref());
     build_features::admit_command(&command)?;
-    #[cfg(feature = "test-hooks")]
-    test_hooks::install().map_err(CliFailure::new)?;
 
     if let Command::WriteBinaryManifest { directory } = &command {
         build_identity::write_binary_manifest(directory).map_err(|error| {

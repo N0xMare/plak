@@ -1,6 +1,8 @@
 //! Product integration contracts.
 
 mod cli_contract;
+#[cfg(not(feature = "test-hooks"))]
+mod client_fixture_contract;
 #[cfg(all(feature = "test-hooks", feature = "maintainer"))]
 mod crash_sweep;
 mod diagnostics_contract;

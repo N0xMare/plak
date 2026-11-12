@@ -10,6 +10,10 @@ one cross-build carrier (a build imports its own and the previous version).
 - Fixed a redundant topology snapshot request while resuming a session; the
   terminal now waits for the successful target transition before refreshing.
 
+- Add explicit test-hooks-only abandoned-open recovery seeding and a real
+  draft-reservation hold for deterministic host-client recovery and same-ID
+  pending-admission tests. Default and maintainer behavior is unchanged.
+
 - Fixed native-client exits losing `bye`: last-handle drop now waits up to two
   seconds for the sole writer to drain and finish, even after explicit goodbye.
 

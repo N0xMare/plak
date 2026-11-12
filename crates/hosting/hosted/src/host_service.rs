@@ -44,10 +44,37 @@
 //! senders ([`HostService::for_faces`]), so the session still ends when its
 //! last face sender and attachment are gone.
 
+mod attachment;
 mod child;
 pub(crate) mod drafts;
 mod face;
 mod gap_repair;
+#[cfg(feature = "test-support")]
+pub mod test_draft_gate;
+#[cfg(feature = "test-support")]
+pub mod test_open_observations;
+#[cfg(not(feature = "test-support"))]
+mod test_open_observations {
+    pub(super) fn before_pump<P: super::ProtocolExtension>(
+        _session: &str,
+        _service: &super::HostService<P>,
+    ) -> impl FnOnce() -> bool + Send + 'static {
+        || true
+    }
+}
+#[cfg(not(feature = "test-support"))]
+mod test_draft_gate {
+    use super::*;
+    pub(super) fn defer<P: ProtocolExtension>(
+        _service: &HostService<P>,
+        _sender: &IntentSender<P>,
+        _intent: &SessionIntent<P>,
+        _client: Option<&str>,
+        _pending: &BTreeMap<plakous_host_protocol::wire::ClientDraftId, drafts::PendingDraft>,
+    ) -> Result<bool, RequestRefusal> {
+        Ok(false)
+    }
+}
 mod tree_nodes;
 pub mod wire;
 
@@ -65,6 +92,7 @@ use plakous_host_protocol::{
 
 use self::wire::Face;
 
+use attachment::{attachment_of, kept_for_attach, origin};
 pub use child::{ChildNodes, ControlDone, NodeState};
 pub use face::{FacePublisher, FaceReceiver, FaceSender, face};
 pub use tree_nodes::TreeNodes;
@@ -254,55 +282,6 @@ enum Unsent<P: ProtocolExtension> {
     Refused(RequestRefusal, SessionIntent<P>),
     /// The session's mailbox refused it.
     Mailbox(IntentSendError<P>),
-}
-
-/// The origin tag an attachment's intents carry, so the session's
-/// `IntentStarted` names the attachment its answers belong to.
-fn origin(attachment: AttachmentId, face: Face) -> String {
-    let prefix = if face == Face::Remote {
-        REMOTE_ATTACHMENT
-    } else {
-        LOCAL_ATTACHMENT
-    };
-    format!("{prefix}{attachment}")
-}
-
-/// The attachment a correlation names, and the client's own correlation
-/// inside it.
-fn attachment_of(correlation: &str) -> Option<(AttachmentId, Option<String>)> {
-    let rest = correlation
-        .strip_prefix(REMOTE_ATTACHMENT)
-        .or_else(|| correlation.strip_prefix(LOCAL_ATTACHMENT))?;
-    let (id, client) = match rest.split_once(':') {
-        Some((id, client)) => (id, Some(client.to_owned())),
-        None => (rest, None),
-    };
-    Some((id.parse().ok()?, client))
-}
-
-/// Whether an attach re-emits `observation` from what the service keeps
-/// (states, the root baseline, approvals, the credential wait), so a
-/// replay must not send it again.
-fn kept_for_attach<P: ProtocolExtension>(observation: &SessionObservation<P>) -> bool {
-    observation.class() == ObservationClass::State
-        || matches!(
-            observation,
-            SessionObservation::ApprovalRequired { .. }
-                | SessionObservation::ApprovalResolved { .. }
-                | SessionObservation::CredentialWait { .. }
-                | SessionObservation::ClearView
-                | SessionObservation::SessionOpening
-                | SessionObservation::SessionOpened { .. }
-        )
-        || matches!(
-            observation,
-            SessionObservation::PresentationSnapshot(snapshot)
-                if snapshot.scope == TranscriptScope::Root
-        )
-        || matches!(
-            observation,
-            SessionObservation::TranscriptPatch(patch) if patch.scope == TranscriptScope::Root
-        )
 }
 
 /// Whether two observations are states of one kind.
@@ -1012,6 +991,9 @@ impl<P: ProtocolExtension> HostService<P> {
         if let Some(agent) = held.node.clone() {
             drop(state);
             return self.child_intent(attachment, &agent, &sender, intent, client);
+        }
+        if test_draft_gate::defer(self, &sender, &intent, client, &state.pending_drafts)? {
+            return Ok(());
         }
         state
             .root_intent(attachment, &sender, intent, client)

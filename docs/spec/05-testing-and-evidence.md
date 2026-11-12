@@ -2235,6 +2235,45 @@ unready-route/unsupported-effort refusals without changing the home default.
 These hooks and the scripted runtime factory are absent from the shipped
 default build; they add no persisted or wire vocabulary.
 
+Two explicit client-test producers also require `test-hooks`. The setup-only
+`plak --test-seed-abandoned-open without-submission|with-submission` command
+requires the offline selector/script, an explicit absolute `PLAK_HOME`, an
+unused runtime store and an isolated workspace. It settles `seed terminal`
+through the ordinary offline worker, quits and joins that worker, then calls
+the public fenced-code-cell harness seed with command `face-fenced-root`, input
+`fenced face prompt` and `finalized_root=false`. The with-submission variant
+alone saves the matching RootStart submission and pending queue item. Its one
+JSON setup receipt names only fixture/session identity, variant and sanitized
+provenance, never a recovery observation. It exits without reopening. The
+subsequent ordinary host/bridge resume owns the actual typed `Recovered`,
+projected recovery row, binding, baseline, queue and history observations.
+For the real-host journey, `PLAK_TEST_RECOVERY_FIRST_ATTACH=<receipt session>`
+holds only that session's initial wire observation pump until an actual node
+attachment exists (120-second safety bound), rather than losing opening events
+before the first client can attach. The worker still opens normally. This
+test-only scheduling seam neither synthesizes nor rewrites any observation;
+subsequent resync and reattachment use the unmodified host paths.
+Public oracles retain the JSONL once-only and derived-not-durable row checks
+for both variants and compare physical dispatch counts across open/resync.
+
+With the offline selector, all three of `PLAK_TEST_DRAFT_PENDING_ID` (one
+client draft UUID), `PLAK_TEST_DRAFT_PENDING_READY` and
+`PLAK_TEST_DRAFT_PENDING_RELEASE` (distinct new absolute file paths) install
+a one-use reservation hold. Only the first actual reservation of that UUID
+can enter it. The ready file contains only `reserved` plus newline; no draft
+content is logged. The already-authorized original sender and unchanged intent
+wait outside the host loop and service locks. Directory reads, attachment,
+reconnect, conflicting-content refusals and real same-ID `draft_pending`
+checks remain live even after the original connection disappears. A release
+file published by atomic rename and containing exactly `release` with optional newline sends the original
+intent once; any other content, a terminating signal or the 120-second safety
+deadline drops the reservation without admission. Failed mailbox delivery uses
+the same reservation-release path. Durable admission alone enables a later
+real `accepted { duplicate:true }`; this seam creates no synthetic verdict.
+The product reads none of these controls in default or maintainer builds;
+the hosted hold port is compiled only with `test-support`, already excluded
+from both production resolutions. Binary-marker/CLI contracts prove exclusion.
+
 The document is `plakous_offline_crash_harness::script::ScriptPlan`: a version,
 a list of assistant steps, and the fixture dials the compaction ladder needs.
 The test-only `tree_process_tools` dial explicitly adds the standard coding/process
