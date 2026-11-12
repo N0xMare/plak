@@ -5,6 +5,7 @@ use plakous_hosted::host_service::AttachmentCount;
 mod admission;
 mod linked;
 mod loss;
+mod loss_ack;
 
 fn fixture() -> (tempfile::TempDir, Arc<TerminalRegistry>, AttachmentCount) {
     let directory = tempfile::tempdir().unwrap();

@@ -61,6 +61,13 @@ struct State {
     completed_serial: u64,
     opened: BTreeMap<String, std::collections::VecDeque<std::time::Instant>>,
     renewing: std::collections::BTreeSet<String>,
+    unbound: BTreeMap<String, Unbound>,
+}
+
+struct Unbound {
+    client: RunnerClient,
+    revision: plakous::runner::RunnerConnectionRevision,
+    since: std::time::Instant,
 }
 
 struct Entry {
@@ -100,6 +107,7 @@ pub(crate) enum TerminalError {
     OutcomeUnknown,
     Storage,
     Conflict,
+    OpenRateLimited { retry_after_ms: u64 },
     Refused(OperatorRefusal),
 }
 

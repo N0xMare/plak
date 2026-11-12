@@ -62,5 +62,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::from_value::<HostFrame<Product>>(serde_json::to_value(&stream)?)?,
         stream
     );
+    let backpressure = plakd_wire_types::console::ReadRefusal::TerminalBackpressure {
+        retry_after_ms: Some(12_000),
+    };
+    assert_eq!(
+        serde_json::to_value(backpressure)?,
+        serde_json::json!({"reason":"terminal_backpressure","retry_after_ms":12000})
+    );
     Ok(())
 }

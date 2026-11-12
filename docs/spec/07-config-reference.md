@@ -754,7 +754,9 @@ reservations and unresolved cleanup. Session/principal/host limits are enforced
 host-wide across runners as well as by each runner. New confirmed opens are limited
 to six per authenticated principal in a rolling minute; lookup-only retries do not
 count. This is fixed policy, not a configurable key; exhaustion returns proven-no-effect
-terminal_backpressure. Host completed receipts collect to eight per principal namespace,
+terminal_backpressure with a required nullable retry_after_ms; timed open-rate
+refusals report the remaining rolling-window time in milliseconds, rounded up.
+Other backpressure has null when no estimate exists. Host completed receipts collect to eight per principal namespace,
 with at most 4,096 replay fences; namespace exhaustion never refuses inventory import
 or runner binding. Independent runner and namespace operation locks isolate stalls,
 and periodic same-instance renewal does not invalidate a controller. Input idle expires after 15 awake minutes,
@@ -767,6 +769,10 @@ forgotten-id respawn. Closed namespaces are collected only after all pins end;
 compact closed/superseded fences retain at most 4,096 facts across at most 128
 home/state scopes. Exhaustion refuses new reservations/generations, never forgets
 a fence. Explicitly acknowledged `lost` terminals no longer block daemon idle exit.
+An unreachable same-instance host pin can be explicitly acknowledged after 90 awake
+seconds of observed continuous unbound state, or proven removal of a nonlocal runner
+id from home configuration. Rebinding resets the interval. This is a Lost receipt,
+not cleanup proof; renewed same-instance inventory restores any live pin and hold.
 
 Effective roots, first-root default and copies support come from paired
 `workspace.options`, never ssh-reading configuration. `workspace.discover` is

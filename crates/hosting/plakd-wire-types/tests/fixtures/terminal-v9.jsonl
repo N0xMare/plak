@@ -20,4 +20,5 @@
 {"frame":"response","id":1,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"terminal_busy"}}}}}
 {"frame":"response","id":1,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"terminal_lost"}}}}}
 {"frame":"response","id":1,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"termination_unknown"}}}}}
-{"frame":"response","id":1,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"terminal_backpressure"}}}}}
+{"frame":"response","id":1,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"terminal_backpressure","retry_after_ms":null}}}}}
+{"frame":"response","id":1,"outcome":{"ok":{"answer":"host","response":{"response":"refused","reason":{"reason":"terminal_backpressure","retry_after_ms":12000}}}}}

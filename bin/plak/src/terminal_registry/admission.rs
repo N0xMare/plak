@@ -48,7 +48,14 @@ impl TerminalRegistry {
     }
 
     pub(super) fn admit_open(&self, namespace: &OperatorNamespace) -> Result<(), TerminalError> {
-        let now = std::time::Instant::now();
+        self.admit_open_at(namespace, std::time::Instant::now())
+    }
+
+    pub(super) fn admit_open_at(
+        &self,
+        namespace: &OperatorNamespace,
+        now: std::time::Instant,
+    ) -> Result<(), TerminalError> {
         let mut state = self.lock();
         state.opened.retain(|_, times| {
             times.retain(|at| now.duration_since(*at) < std::time::Duration::from_secs(60));
@@ -59,10 +66,34 @@ impl TerminalRegistry {
             .entry(namespace.principal.as_str().into())
             .or_default();
         if times.len() >= 6 {
-            return Err(TerminalError::Refused(OperatorRefusal::Backpressure));
+            let elapsed = now.duration_since(times[0]);
+            let remaining = std::time::Duration::from_secs(60).saturating_sub(elapsed);
+            let retry_after_ms = u64::try_from(remaining.as_nanos().div_ceil(1_000_000))
+                .unwrap_or(60_000)
+                .max(1);
+            return Err(TerminalError::OpenRateLimited { retry_after_ms });
         }
         times.push_back(now);
         Ok(())
+    }
+
+    pub(super) fn observe_unbound(&self, runner: &str, client: &super::RunnerClient) -> bool {
+        let mut state = self.lock();
+        if client.is_connected() {
+            state.unbound.remove(runner);
+            return false;
+        }
+        let new = || super::Unbound {
+            client: client.clone(),
+            revision: client.connection_revision(),
+            since: std::time::Instant::now(),
+        };
+        let observed = state.unbound.entry(runner.into()).or_insert_with(new);
+        if !observed.client.same_client(client) || !observed.revision.is_unbound() {
+            *observed = new();
+        }
+        observed.revision.is_unbound()
+            && observed.since.elapsed() >= std::time::Duration::from_secs(90)
     }
 
     pub(super) fn receipt_key(

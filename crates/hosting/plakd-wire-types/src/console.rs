@@ -349,7 +349,11 @@ pub enum ReadRefusal {
     TerminalBusy {},
     TerminalLost {},
     TerminationUnknown {},
-    TerminalBackpressure {},
+    TerminalBackpressure {
+        #[serde(deserialize_with = "required")]
+        #[schemars(required, schema_with = "nullable::<u64>")]
+        retry_after_ms: Option<u64>,
+    },
     WorkspaceUnavailable {},
     WorkspaceReadFailed {
         cause: WorkspaceReadFailure,

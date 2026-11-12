@@ -25,4 +25,11 @@ fn protocol_nine_terminals_have_separate_bytes_cursors_and_refusals() {
     }
     let invalid = serde_json::json!({"request":"terminal_open","session":"session","node":"node","terminal_id":"terminal","dimensions":{"rows":24,"columns":80},"confirmation":"grant","command":"not allowed"});
     assert!(serde_json::from_value::<HostRequest>(invalid).is_err());
+    assert!(
+        serde_json::from_value::<plakd_wire_types::console::ReadRefusal>(
+            serde_json::json!({"reason":"terminal_backpressure"})
+        )
+        .is_err(),
+        "untimed backpressure must explicitly carry null, not omit the field"
+    );
 }

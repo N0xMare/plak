@@ -107,7 +107,14 @@ pub(super) fn refusal(value: TerminalError) -> dto::ReadRefusal {
             etag: String::new(),
         },
         TerminalError::Refused(RunnerRefusal::Backpressure | RunnerRefusal::Quota) => {
-            dto::ReadRefusal::TerminalBackpressure {}
+            dto::ReadRefusal::TerminalBackpressure {
+                retry_after_ms: None,
+            }
+        }
+        TerminalError::OpenRateLimited { retry_after_ms } => {
+            dto::ReadRefusal::TerminalBackpressure {
+                retry_after_ms: Some(retry_after_ms),
+            }
         }
         _ => dto::ReadRefusal::WorkspaceUnavailable {},
     }

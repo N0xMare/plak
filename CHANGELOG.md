@@ -22,6 +22,13 @@ one cross-build carrier (a build imports its own and the previous version).
   draft-reservation hold for deterministic host-client recovery and same-ID
   pending-admission tests. Default and maintainer behavior is unchanged.
 
+- Restore live terminal pins and residency from same-instance inventory. Permit
+  explicit lost-runner acknowledgment after a continuously observed namespace
+  deadline or proven configuration removal, resetting loss witnesses on rebind.
+  Open-rate backpressure now carries the remaining retry delay; other terminal
+  backpressure explicitly reports no timed estimate. Browser rendering remains
+  private client work. Product storage and state key are unchanged.
+
 - Add client protocol 9 operator-terminal requests, fresh action-bound consent,
   independent credited stream frames, confirmed controller takeover and explicit
   residency/loss outcomes. Credit batches validate atomically; bounded per-stream
@@ -126,7 +133,7 @@ one cross-build carrier (a build imports its own and the previous version).
   tables and output rings, independent quotas and awake deadlines, single
   controllers and session-wide identity-checked cleanup. Unproven cleanup keeps
   workspace pins and blocks idle exit; agent lines, jobs and accounting are
-  unchanged. Product terminal requests and browser integration are separate.
+  unchanged. Browser rendering remains private client work.
   Session-id isolation is probed before enabling PTYs, and transient observation
   failures never close live shells. Unknown termination supports fresh absence
   proof or explicit acknowledged loss with surviving identities. Completed

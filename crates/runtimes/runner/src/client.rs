@@ -122,6 +122,15 @@ pub struct RunnerConnectionRevision {
 }
 
 impl RunnerConnectionRevision {
+    /// Whether this is still the latest connection but it is no longer bound.
+    /// A later rebind makes this false even if that later connection also drops.
+    #[must_use]
+    pub fn is_unbound(&self) -> bool {
+        let state = lock(&self.client.inner.state);
+        state.connection == self.connection
+            && (state.sender.is_none() || state.refusal.is_some() || state.closer.is_cancelled())
+    }
+
     /// Whether the captured connection still owns this client's live link.
     #[must_use]
     pub fn is_current(&self) -> bool {

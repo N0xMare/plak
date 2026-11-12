@@ -45,6 +45,22 @@ fn read_pin(paths: &crate::home::paths::PlakPaths, name: &str) -> Option<super::
         .filter(|pin| !pin.machine_id.is_empty() && !pin.runner_id.is_empty())
 }
 
+/// A missing or unreadable pairing pin cannot prove a configured runner was removed.
+pub(crate) fn configured_id(paths: &crate::home::paths::PlakPaths, id: &str) -> CliResult<bool> {
+    if id == "local" {
+        return Ok(true);
+    }
+    let config = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
+    for name in config.runners.keys() {
+        let pin =
+            read_pin(paths, name).ok_or_else(|| CliFailure::new("runner pairing unavailable"))?;
+        if pin.runner_id == id {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub(crate) fn remote(services: &Services, id: &str) -> Result<Remote, PlacementFailure> {
     let paths = services
         .paths()

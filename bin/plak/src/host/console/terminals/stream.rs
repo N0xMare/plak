@@ -34,7 +34,9 @@ impl Console {
                     || budget.available(Instant::now(), 512 * 1024) < f64::from(512 * 1024)
             });
             if state.output.len() >= 1024 && !state.output.contains_key(&context.principal) {
-                return Err(dto::ReadRefusal::TerminalBackpressure {});
+                return Err(dto::ReadRefusal::TerminalBackpressure {
+                    retry_after_ms: None,
+                });
             }
             state
                 .output
@@ -49,7 +51,9 @@ impl Console {
                 || state.streams.values().filter(|s| !s.ended).count() >= 16
                 || state.streams.len() >= 32
             {
-                return Err(dto::ReadRefusal::TerminalBackpressure {});
+                return Err(dto::ReadRefusal::TerminalBackpressure {
+                    retry_after_ms: None,
+                });
             }
             state.next = state.next.checked_add(1).ok_or_else(mapping::invalid)?;
             let id = state.next;
@@ -109,7 +113,9 @@ impl Console {
                 .filter(|s| s.owner == owner(context) && !s.ended)
                 .ok_or(dto::ReadRefusal::TerminalLost {})?;
             if offset != stream.next_input || stream.next_input != stream.acknowledged_input {
-                return Err(dto::ReadRefusal::TerminalBackpressure {});
+                return Err(dto::ReadRefusal::TerminalBackpressure {
+                    retry_after_ms: None,
+                });
             }
             let now = Instant::now();
             stream.input_tokens = (stream.input_tokens
@@ -119,13 +125,15 @@ impl Console {
             if stream.input_tokens
                 < f64::from(u32::try_from(bytes.len()).map_err(|_| mapping::invalid())?)
             {
-                return Err(dto::ReadRefusal::TerminalBackpressure {});
+                return Err(dto::ReadRefusal::TerminalBackpressure {
+                    retry_after_ms: None,
+                });
             }
-            let permit = stream
-                .commands
-                .clone()
-                .try_reserve_owned()
-                .map_err(|_| dto::ReadRefusal::TerminalBackpressure {})?;
+            let permit = stream.commands.clone().try_reserve_owned().map_err(|_| {
+                dto::ReadRefusal::TerminalBackpressure {
+                    retry_after_ms: None,
+                }
+            })?;
             let next = offset
                 .checked_add(bytes.len() as u64)
                 .ok_or_else(mapping::invalid)?;
@@ -171,15 +179,15 @@ impl Console {
                 .filter(|s| s.owner == owner(context) && !s.ended)
                 .ok_or(dto::ReadRefusal::TerminalLost {})?;
             if grant.bytes > stream.sent_output {
-                return Err(dto::ReadRefusal::TerminalBackpressure {});
+                return Err(dto::ReadRefusal::TerminalBackpressure {
+                    retry_after_ms: None,
+                });
             }
-            permits.push(
-                stream
-                    .commands
-                    .clone()
-                    .try_reserve_owned()
-                    .map_err(|_| dto::ReadRefusal::TerminalBackpressure {})?,
-            );
+            permits.push(stream.commands.clone().try_reserve_owned().map_err(|_| {
+                dto::ReadRefusal::TerminalBackpressure {
+                    retry_after_ms: None,
+                }
+            })?);
         }
         for (grant, permit) in grants.into_iter().zip(permits) {
             if let Some(stream) = state.streams.get_mut(&grant.stream) {

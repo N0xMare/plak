@@ -65,6 +65,9 @@ impl TerminalRegistry {
             if state.closing {
                 return Err(TerminalError::Lost);
             }
+            if client.is_connected() {
+                state.unbound.remove(runner);
+            }
             if state.bindings.get(runner).is_some_and(|prior| {
                 !prior.revision.is_current() || prior.client.instance() != client.instance()
             }) {
@@ -165,6 +168,7 @@ impl TerminalRegistry {
                     .map(|(runner, binding)| (runner.clone(), binding.client.clone()))
                     .collect();
                 for (runner, client) in bindings {
+                    registry.observe_unbound(&runner, &client);
                     if !registry.lock().renewing.insert(runner.clone()) {
                         continue;
                     }

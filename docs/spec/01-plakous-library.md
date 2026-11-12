@@ -6073,6 +6073,12 @@ the session's current job owner (§8.5), not from an owner a joined process
 service stored when it started. `LineOwner` lives in `plakous-tools`; it never
 enters `plakous-model`.
 
+Runner connection-revision witnesses expose `is_unbound`: true only while the
+captured connection is still the latest one and no longer bound. A later rebind
+invalidates that witness even after the later connection disconnects. Host-side
+continuous-loss timers can therefore reset without interpreting missing traffic
+as process death or relying on polling to observe every transient live link.
+
 **Operator terminal wire.** Protocol 7 adds `OperatorControl { namespace }`,
 with no `LineOwner`. The authenticated paired connection supplies host id and host
 process generation; namespace adds state key and principal. Terminal identity adds

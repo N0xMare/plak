@@ -173,7 +173,9 @@ async fn operator_console_input_refusals_accept_no_bytes_or_offsets_and_never_re
         )
         .await
         .unwrap(),
-        Err(dto::ReadRefusal::TerminalBackpressure {})
+        Err(dto::ReadRefusal::TerminalBackpressure {
+            retry_after_ms: None
+        })
     ));
     assert!(
         commands.try_recv().is_err(),

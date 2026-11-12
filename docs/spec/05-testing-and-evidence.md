@@ -92,7 +92,15 @@ before acknowledgment, and unreachable non-acknowledged close retaining its pin.
 Host tests collect over 1,024 completed receipts, import live runner inventory even
 with 4,096 exhausted receipt fences without creating an agent line, enforce quotas across runners,
 refill the six-open rolling minute and isolate runner/namespace operation locks;
-shutdown of a healthy runner must complete even while another operation is stalled. A minimal
+shutdown of a healthy runner must complete even while another operation is stalled. A re-pin
+regression deliberately unpins the host mirror of a still-live runner terminal,
+then requires same-instance inventory to restore pinned state, its residency hold,
+idle-exit refusal and reclamation exclusion. Deterministic loss acknowledgment tests
+advance only the host observation timestamp: before 90 seconds acknowledgment
+refuses, a rebind invalidates the old witness even if disconnected again, and an
+expired witness or removed runner permits explicit Lost without claiming death or
+killing the still-live shell. Open-rate tests pin the exact remaining retry delay;
+wire fixtures cover both a timed hint and null, and the schema pin changes with it. A minimal
 test-only client shares one bounded request cadence between four streaming
 terminals, typing and file-tree expansion, returning consumed output in four-row
 64 KiB credit batches. Its deliberate unscheduled overrun must return typed

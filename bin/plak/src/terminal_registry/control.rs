@@ -288,10 +288,16 @@ impl TerminalRegistry {
         let lost_instance = binding
             .as_ref()
             .is_some_and(|binding| binding.client.instance() != pin.instance);
+        let expired_unbound = binding
+            .as_ref()
+            .is_some_and(|binding| self.observe_unbound(&pin.runner, &binding.client));
         let Some(binding) = binding.filter(|binding| {
             binding.client.instance() == pin.instance && binding.client.is_connected()
         }) else {
-            if !acknowledge_loss || !lost_instance {
+            let removed = acknowledge_loss
+                && crate::commands::runner::registry::configured_id(&self.paths, &pin.runner)
+                    .is_ok_and(|configured| !configured);
+            if !acknowledge_loss || !(lost_instance || expired_unbound || removed) {
                 return Err(TerminalError::Unavailable);
             }
             self.release_proven(&handle.identity)?;

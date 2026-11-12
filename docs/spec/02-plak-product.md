@@ -652,7 +652,10 @@ The host enforces two pinned terminals/session, four/authenticated principal and
 sixteen total across all runners, including reservations and lost-instance pins.
 New confirmed open attempts admit at most six per principal in a rolling minute;
 lookup-only retries do not spend that budget. Exhaustion is proven-no-effect
-`terminal_backpressure` and preserves confirmation for a later attempt. Eight
+`terminal_backpressure` with `retry_after_ms` equal to the remaining rolling-window
+time (rounded up to milliseconds), and preserves confirmation for a later attempt.
+Other terminal backpressure refusals carry a required nullable `retry_after_ms`;
+null means no timed retry estimate is available. Eight
 completed receipts remain per principal namespace; older key/digest identities move
 to at most 4,096 compact fences. Fence exhaustion affects only that namespace's
 new opens, never authoritative inventory import, runner bind or agent work.
@@ -666,9 +669,16 @@ First-bind/replacement barriers remain strict. Runner operations use per-runner
 reconciliation exclusion and per-principal namespace
 serialization; unrelated runners and namespaces do not share an operation mutex.
 Shutdown joins runner cleanup concurrently within its existing overall deadline.
-Acknowledging an unreachable terminal can release a host pin only after an instance
-change is established, not merely because its current instance disconnected.
-A same-instance inventory reporting a live terminal restores both its pin and hold.
+Acknowledging an unreachable terminal can release a host pin after an instance
+change, after at least 90 awake seconds of continuously observed unbound state,
+or after the runner id is proven absent from current home configuration. A transient
+same-instance disconnect is insufficient. The unbound interval starts at the first
+host observation and resets on any rebind, even one followed by another disconnect
+between host observations. A malformed configuration or unreadable pairing pin is
+not removal proof. The implicit local runner cannot be removed from configuration.
+Every path still requires explicit authenticated acknowledgment and reports Lost,
+never cleanup or death. A same-instance inventory reporting a live terminal restores
+its pin, residency hold, idle-exit refusal and workspace barrier before admission.
 
 Terminal tables, host mirrors, workspace pins, quotas and output rings are process-local.
 There is no terminal table or pin file in the product store, no persisted-format
@@ -4240,7 +4250,7 @@ bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
 
 The protocol-9 schema pin is SHA-256
-`e0fd019acb0af0bc4fa31f82848869d3a188af970520973bfd878d281e1c035f`:
+`8db0a47912d5130e11bc52485656fed3489d5b8450a0d95ba8fd296728be2e0c`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
 checks this build-independent pin.

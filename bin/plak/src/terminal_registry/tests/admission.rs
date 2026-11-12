@@ -87,27 +87,22 @@ fn operator_host_session_principal_and_host_quotas_span_runners() {
 fn operator_host_open_rate_is_six_per_principal_minute_and_refills() {
     let (_home, registry, _count) = fixture();
     let namespace = registry.namespace(&context("operator").principal).unwrap();
+    let now = std::time::Instant::now();
     for _ in 0..6 {
-        registry.admit_open(&namespace).unwrap();
+        registry.admit_open_at(&namespace, now).unwrap();
     }
+    let limited = registry.admit_open_at(&namespace, now + std::time::Duration::from_secs(45));
     assert!(matches!(
-        registry.admit_open(&namespace),
-        Err(TerminalError::Refused(OperatorRefusal::Backpressure))
+        limited,
+        Err(TerminalError::OpenRateLimited {
+            retry_after_ms: 15_000
+        })
     ));
     let other = registry.namespace(&context("other").principal).unwrap();
     registry.admit_open(&other).unwrap();
-    let expired = std::time::Instant::now()
-        .checked_sub(std::time::Duration::from_secs(61))
+    registry
+        .admit_open_at(&namespace, now + std::time::Duration::from_secs(60))
         .unwrap();
-    for time in registry
-        .lock()
-        .opened
-        .get_mut(namespace.principal.as_str())
-        .unwrap()
-    {
-        *time = expired;
-    }
-    registry.admit_open(&namespace).unwrap();
 }
 
 #[tokio::test]
