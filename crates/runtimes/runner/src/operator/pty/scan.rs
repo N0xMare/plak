@@ -535,7 +535,7 @@ pub(super) fn scan() -> Result<Vec<Identity>, ()> {
                 Ok(0) => break,
                 Ok(n) => bytes.extend_from_slice(&buffer[..n]),
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(2))
+                    std::thread::sleep(Duration::from_millis(2));
                 }
                 Err(_) => return Err(()),
             }

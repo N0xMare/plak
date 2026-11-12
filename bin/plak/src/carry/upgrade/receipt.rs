@@ -168,13 +168,13 @@ pub(crate) fn all(paths: &PlakPaths) -> CliResult<Vec<Receipt>> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(failed(error)),
     };
-    let private = |metadata: &fs::Metadata| {
-        metadata.is_dir()
-            && !metadata.is_symlink()
-            && metadata.uid() == rustix::process::geteuid().as_raw()
-            && !Mode::from_raw_mode(metadata.mode()).intersects(Mode::RWXG | Mode::RWXO)
+    let exposed = |metadata: &fs::Metadata| {
+        !metadata.is_dir()
+            || metadata.is_symlink()
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.mode() & 0o077 != 0
     };
-    if !private(&metadata) {
+    if exposed(&metadata) {
         return Err(CliFailure::new(
             "host upgrade authority directory is not private and owned",
         ));
@@ -189,7 +189,7 @@ pub(crate) fn all(paths: &PlakPaths) -> CliResult<Vec<Receipt>> {
         else {
             continue;
         };
-        if !private(&fs::symlink_metadata(entry.path()).map_err(failed)?) {
+        if exposed(&fs::symlink_metadata(entry.path()).map_err(failed)?) {
             return Err(CliFailure::new(
                 "host upgrade transaction directory is not private and owned",
             ));
