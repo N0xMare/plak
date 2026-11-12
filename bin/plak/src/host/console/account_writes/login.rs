@@ -543,19 +543,36 @@ fn wait_for_paste(
     progress: &Mutex<Progress>,
     validate: impl Fn(&str) -> Result<(), AccountError>,
 ) -> Result<Option<SecretInput>, AccountError> {
-    let value = app.executor.block_on(async {
-        loop {
-            if *cancel.borrow() { return None; }
-            let completion = tokio::select! { biased; _ = cancel.changed() => None, value = tokio::time::timeout(expires.saturating_duration_since(Instant::now()), pasted.recv()) => value.ok().flatten() }?;
-            if let Err(reason) = validate(completion.pasted.expose()) {
-                progress.lock().unwrap_or_else(PoisonError::into_inner).phase = LoginPhase::AwaitingInput;
-                let _ = completion.reply.send(Err(reason));
-                continue;
+    let value = app
+        .executor
+        .block_on(async {
+            loop {
+                if *cancel.borrow() {
+                    return None;
+                }
+                let completion = tokio::select! {
+                    biased;
+                    _ = cancel.changed() => None,
+                    value = tokio::time::timeout(
+                        expires.saturating_duration_since(Instant::now()),
+                        pasted.recv(),
+                    ) => value.ok().flatten(),
+                }?;
+                if let Err(reason) = validate(completion.pasted.expose()) {
+                    progress
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .phase = LoginPhase::AwaitingInput;
+                    let _ = completion.reply.send(Err(reason));
+                    continue;
+                }
+                if completion.reply.send(Ok(())).is_err() {
+                    return None;
+                }
+                return Some(completion.pasted);
             }
-            if completion.reply.send(Ok(())).is_err() { return None; }
-            return Some(completion.pasted);
-        }
-    }).map_err(|_| failed(false))?;
+        })
+        .map_err(|_| failed(false))?;
     if value.is_none() {
         progress
             .lock()

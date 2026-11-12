@@ -425,6 +425,13 @@ capacity and rate refusals do not open a session or close the connection.
 | `usage_reread_ms` | `30000` | Suggested explicit refresh interval, not automatic retry. |
 | `cursor_ttl_ms` | `30000` | Immutable page-snapshot lifetime. |
 
+The process-local login table also has a host-wide cap of 128 attempt records,
+including settled attempts retained for terminal polling until their original
+15-minute expiry (or owner disconnect). At capacity a new login is rate-limited
+before its grant is consumed or any provider I/O starts; it may be retried with
+fresh consent after a record expires. This retention cap is separate from the
+three pending attempts host-wide and two per principal, and is not configurable.
+
 Admission refusals preserve one-shot consent and do not charge credential,
 config or login-start quotas. A pending native login is governed by attempt
 quotas, not a 15-minute principal-wide mutation lock.
