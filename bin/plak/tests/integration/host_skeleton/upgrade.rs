@@ -10,6 +10,7 @@ mod recovery;
 mod remote;
 mod selection;
 mod topology;
+mod verdicts;
 
 fn output(fixture: &Fixture, arguments: &[&str], destination: bool) -> std::process::Output {
     output_env(fixture, arguments, destination, &[])

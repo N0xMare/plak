@@ -4142,6 +4142,18 @@ reads as a loss. `/reload` hands off a running root turn and running or
 parked sub-agents when it resumes the same session; it still refuses while
 background processes run (chapter 02 §5.1).
 
+Before an upgrade coordinator surrenders these sessions, the paused-host draft
+verdict barrier (chapter 02 §4.6) distinguishes queue-owned input from input
+already claimed by an actor. Only queue-owned reservations can be withdrawn
+with upgrading `DraftRejected`; claimed work must yield its normal durable
+admission or definite refusal. A lost attachment settles delivery only, not
+admission. A global deadline or unknown admission aborts before surrender.
+This barrier writes no handoff decision or runtime command of its own, carries
+no registry, and does not replace the existing once-only continuation ids or
+reorder already accepted queue facts. Restart cuts around the existing decision,
+admission and terminal publications retain those identities; a lost admitted
+turn remains governed by the ordinary loss law, not automatic draft replay.
+
 The host's settled cross-key upgrade (chapter 02 §4.6) first pauses client
 admissions and joins these releases, including already accepted mailboxes,
 then rechecks quiescence before exporting under source branch leases. It may

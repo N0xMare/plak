@@ -35,7 +35,12 @@ fn durable_draft_verdict_outlives_its_attachment_and_mailbox_ack_is_not_cached()
         let DraftReservation::Pending(pending) = registry.reserve(id, [1; 32]).unwrap() else {
             panic!("fresh identity");
         };
-        service.begin_wire_draft(id, pending);
+        service.begin_wire_draft(
+            id,
+            pending,
+            attachment,
+            SessionIntent::Prompt(Draft::from("one admission")),
+        );
         assert!(matches!(
             registry.reserve(id, [1; 32]),
             Err(DraftReservationError::Pending)
@@ -78,7 +83,12 @@ fn rejected_or_dropped_wire_drafts_release_the_hostwide_identity() {
         let DraftReservation::Pending(pending) = registry.reserve(id, [1; 32]).unwrap() else {
             panic!("fresh identity");
         };
-        service.begin_wire_draft(id, pending);
+        service.begin_wire_draft(
+            id,
+            pending,
+            1,
+            SessionIntent::Prompt(Draft::from("rejected")),
+        );
         if rejected {
             service.observe(Observation::IntentStarted(Some(format!(
                 "local-attachment:1:{id}"

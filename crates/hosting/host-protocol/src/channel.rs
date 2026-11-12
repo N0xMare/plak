@@ -429,6 +429,39 @@ impl<P: ProtocolExtension> Drop for IntentSender<P> {
 }
 
 impl<P: ProtocolExtension> IntentSender<P> {
+    /// Withdraws matching ordinary deliveries before the consumer takes them.
+    /// The queue lock is the proof that none returned has entered host handling.
+    /// Other deliveries retain their exact FIFO order; already-taken work is
+    /// never cancelled. The caller owns publishing a definite refusal.
+    #[must_use]
+    pub fn withdraw_queued_correlations(
+        &self,
+        correlations: &BTreeSet<String>,
+    ) -> Vec<(String, IntentDelivery<P>)> {
+        let mut queue = self
+            .0
+            .queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut withdrawn = Vec::new();
+        let mut index = 0;
+        while index < queue.len() {
+            if queue[index]
+                .correlation
+                .as_ref()
+                .is_some_and(|id| correlations.contains(id))
+            {
+                if let Some(queued) = queue.remove(index) {
+                    let correlation = queued.correlation.clone().unwrap_or_default();
+                    withdrawn.push((correlation, IntentDelivery::new(&self.0, queued)));
+                }
+            } else {
+                index += 1;
+            }
+        }
+        withdrawn
+    }
+
     /// Requests process-exit abandonment rather than joined host shutdown.
     /// Call only after restoring the terminal; this outranks queued product work.
     /// It is never a planned handoff: it disarms one requested earlier.

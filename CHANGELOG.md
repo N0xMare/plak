@@ -76,6 +76,10 @@ one cross-build carrier (a build imports its own and the previous version).
   match stop marks binary lines explicitly and keeps later context. Invalid
   UTF-8 still searches lossily with its existing warning and later matches.
 
+- Add a paused-host draft-verdict barrier for planned upgrade preparation,
+  rejecting only unclaimed mailbox inputs and joining durable admission and
+  verdict delivery without carrying a draft registry across generations.
+
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.
 

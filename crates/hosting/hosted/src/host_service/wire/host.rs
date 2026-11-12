@@ -99,6 +99,7 @@ pub struct Creation<'a> {
 }
 
 mod product;
+mod verdicts;
 pub use product::HostSessions;
 
 /// The sessions one host serves.
@@ -305,6 +306,7 @@ where
             host: Arc::clone(self),
             host_changes: self.changes.subscribe(),
             out,
+            buffered_output: false,
             face,
             stopped: Arc::new(stopped),
             node: None,
@@ -494,6 +496,7 @@ struct Watch {
 
 /// One connection to a host of many sessions.
 pub struct HostConnection<P: ProtocolExtension, W: Write> {
+    buffered_output: bool,
     connection_id: u64,
     principal: HostPrincipal,
     principal_budget: Arc<admission::PrincipalBudget>,
@@ -845,8 +848,9 @@ where
             }
             Ok(Some((session, hold, releases))) => {
                 let stopped = Arc::clone(&self.stopped);
-                let mut connection =
-                    session.connect(self.out.clone(), self.face, move || stopped());
+                let mut connection = session
+                    .connect(self.out.clone(), self.face, move || stopped())
+                    .with_buffered_output(self.buffered_output);
                 if let Some(login) = &self.login {
                     connection = connection.identified(login.clone());
                 }
@@ -1013,6 +1017,7 @@ where
         let sessions = Arc::clone(&self.host.sessions);
         let mut connection = session
             .connect(self.out.clone(), self.face, move || stopped())
+            .with_buffered_output(self.buffered_output)
             .with_drafts(self.host.drafts.clone())
             .with_runner_labels(Arc::new(move |id| sessions.runner_label(id)));
         if let Some(login) = &self.login {

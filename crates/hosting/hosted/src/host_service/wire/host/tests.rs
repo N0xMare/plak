@@ -7,6 +7,7 @@ use super::*;
 use crate::runtime::HostWorkerHandle;
 
 mod lifecycle;
+mod verdicts;
 
 /// The frames written so far, shared between the connection and the test.
 #[derive(Clone, Default)]

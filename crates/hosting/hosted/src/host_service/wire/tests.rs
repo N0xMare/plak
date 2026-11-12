@@ -2,6 +2,8 @@ use plakous_host_protocol::intent::Draft;
 
 use super::*;
 
+mod verdicts;
+
 fn root() -> NodeAddress {
     NodeAddress {
         tree_id: "t1".into(),
@@ -386,7 +388,7 @@ fn a_childs_mail_request_is_answered_once_the_mail_is_written() {
             reason: "no topology hub is attached".into(),
         },
     ] {
-        adapter.mail_answer(&observation);
+        adapter.mail_answer(&observation, None);
     }
     adapter.unanswered();
     assert_eq!(

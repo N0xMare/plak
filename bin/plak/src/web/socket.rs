@@ -307,7 +307,8 @@ async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended 
         .host
         .connect(outbox.clone(), Face::Remote, principal, move || {
             stop.stopped()
-        });
+        })
+        .buffered_output();
     let ended = attached(socket, served, &mut connection, &outbox, &mut pong).await;
     // Every way out detaches, so no session holds a dead attachment.
     connection.leave();
@@ -334,7 +335,9 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
             return Ended::Lost("client fell behind");
         }
         let began = Instant::now();
-        if let Err(ended) = send_pending(socket, outbox, || served.stop.stopped()).await {
+        let sent = send_pending(socket, outbox, || served.stop.stopped()).await;
+        connection.output_sent();
+        if let Err(ended) = sent {
             return ended;
         }
         if began.elapsed() >= PING_EVERY {
@@ -359,6 +362,7 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                 if !connection_work(|| connection.frame(Ok(std::mem::take(&mut *line)))).unwrap_or(false) {
                     let _ = connection.flush();
                     let _ = send_pending(socket, outbox, || served.stop.stopped()).await;
+                    connection.output_sent();
                     return Ended::Left;
                 }
             }

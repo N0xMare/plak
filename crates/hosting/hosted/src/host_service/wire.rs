@@ -264,6 +264,7 @@ impl Face {
 /// on the session's host service.
 pub struct WireConnection<P: ProtocolExtension, W: Write> {
     drafts: Option<super::drafts::DraftRegistry>,
+    buffered_drafts: Option<Vec<super::drafts::DraftDelivery>>,
     stdout: W,
     actions: IntentSender<P>,
     service: HostService<P>,
@@ -472,6 +473,7 @@ where
         let told = vec![service.root().clone()];
         Self {
             drafts: None,
+            buffered_drafts: None,
             stdout,
             service,
             actions,
@@ -1158,7 +1160,11 @@ where
 
     /// The response a child's mail request gets from `observation`, the
     /// answer in its window: accepted once written, or the tree's refusal.
-    fn mail_answer(&mut self, observation: &SessionObservation<P>) {
+    fn mail_answer(
+        &mut self,
+        observation: &SessionObservation<P>,
+        client_id: Option<plakous_host_protocol::wire::ClientDraftId>,
+    ) {
         let outcome = match observation {
             SessionObservation::IntentStarted(correlation) => {
                 self.window.clone_from(correlation);
@@ -1168,6 +1174,7 @@ where
             // its switch answers it as its `moved` goes out.
             SessionObservation::Row(TranscriptRow::Notice(notice))
                 if notice.tone == NoticeTone::Error
+                    && client_id.is_none()
                     && self
                         .session_request
                         .as_ref()
@@ -1191,6 +1198,9 @@ where
             SessionObservation::DraftAccepted(_) => {
                 Outcome::Ok(Answer::Accepted { duplicate: false })
             }
+            SessionObservation::DraftRejected(_) => Outcome::Refused(RequestRefusal::MailRefused {
+                detail: "the draft was not admitted".to_owned(),
+            }),
             SessionObservation::Row(TranscriptRow::Notice(notice))
                 if notice.tone == NoticeTone::Error =>
             {
@@ -1205,8 +1215,10 @@ where
             }
             _ => return,
         };
-        if let Some(id) = self
-            .window
+        let correlation = client_id
+            .map(|id| id.to_string())
+            .or_else(|| self.window.clone());
+        if let Some(id) = correlation
             .as_ref()
             .and_then(|window| self.mails.remove(window))
         {
@@ -1225,21 +1237,23 @@ where
     /// A lost output, or a snapshot that cannot be paged.
     pub fn flush(&mut self) -> CliResult<()> {
         self.settle_stop();
-        for (id, outcome) in std::mem::take(&mut self.settled) {
-            write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
-        }
+        self.flush_settled()?;
         let Some(attachment) = self.attachment else {
             return Ok(());
         };
         for item in self.service.take(attachment) {
-            if let Outbound::Event { observation, .. } = &item {
-                self.mail_answer(observation);
+            if let Outbound::Event {
+                observation,
+                client_id,
+                ..
+            } = &item
+            {
+                self.mail_answer(observation, *client_id);
             }
-            for (id, outcome) in std::mem::take(&mut self.settled) {
-                write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
-            }
+            self.flush_settled()?;
             match item {
                 Outbound::ResyncRequired => {
+                    self.service.wire_drafts_lost(attachment);
                     self.attachment = None;
                     self.unanswered();
                     for (id, outcome) in std::mem::take(&mut self.settled) {
@@ -1251,6 +1265,7 @@ where
                     )?;
                 }
                 Outbound::Moved { node, request } => {
+                    self.service.wire_drafts_lost(attachment);
                     self.tell(&node);
                     self.attachment = None;
                     // A connection moved again before attaching the root is
@@ -1292,11 +1307,7 @@ where
                     observation: SessionObservation::PresentationSnapshot(snapshot),
                     ..
                 } => {
-                    let pages = page_snapshot(snapshot, attachment)
-                        .map_err(|error| CliFailure::new(error.to_string()))?;
-                    for page in pages {
-                        write_frame(&mut self.stdout, &HostFrame::<P>::Snapshot(page))?;
-                    }
+                    self.write_snapshot(attachment, snapshot)?;
                 }
                 Outbound::Event {
                     seq,
@@ -1310,9 +1321,10 @@ where
                     for chunk in taken.chunks {
                         write_frame(&mut self.stdout, &HostFrame::<P>::Blob(chunk))?;
                     }
-                    write_frame(
-                        &mut self.stdout,
-                        &HostFrame::<P>::Event {
+                    self.write_draft_event(
+                        attachment,
+                        seq,
+                        HostFrame::<P>::Event {
                             client_id,
                             attachment,
                             seq,
@@ -1325,6 +1337,53 @@ where
             }
         }
         Ok(())
+    }
+
+    fn write_snapshot(
+        &mut self,
+        attachment: AttachmentId,
+        snapshot: plakous_host_protocol::views::PresentationSnapshot,
+    ) -> CliResult<()> {
+        for page in page_snapshot(snapshot, attachment)
+            .map_err(|error| CliFailure::new(error.to_string()))?
+        {
+            write_frame(&mut self.stdout, &HostFrame::<P>::Snapshot(page))?;
+        }
+        Ok(())
+    }
+
+    fn flush_settled(&mut self) -> CliResult<()> {
+        for (id, outcome) in std::mem::take(&mut self.settled) {
+            write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
+        }
+        Ok(())
+    }
+
+    fn write_draft_event(
+        &mut self,
+        attachment: AttachmentId,
+        seq: u64,
+        frame: HostFrame<P>,
+    ) -> CliResult<()> {
+        let written = write_frame(&mut self.stdout, &frame);
+        let delivery = self.service.take_draft_delivery(attachment, seq);
+        if let Some(pending) = &mut self.buffered_drafts
+            && let Some(delivery) = delivery
+        {
+            pending.push(delivery);
+        }
+        written
+    }
+
+    fn with_buffered_output(mut self, buffered: bool) -> Self {
+        self.buffered_drafts = buffered.then(Vec::new);
+        self
+    }
+
+    fn output_sent(&mut self) {
+        if let Some(pending) = &mut self.buffered_drafts {
+            pending.clear();
+        }
     }
 }
 

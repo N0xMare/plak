@@ -4721,8 +4721,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   without enqueueing. `Sender::answering` windows are nested: neither an
   answer-prefixed boundary nor its reopen frees the interrupted submission.
   Only that submission's accepted/rejected verdict, addressed answer-window
-  error, navigator-unavailable refusal or session end resolves its pending
-  reservation. Unwindowed background error notices are not draft verdicts;
+  error or navigator-unavailable refusal resolves its pending reservation.
+  A service ending without a verdict leaves an unknown outcome; it is not
+  proof of non-admission. Unwindowed background error notices are not draft verdicts;
   synchronous draft refusals, including archival, emit DraftRejected.
   Rejection, pre-admission refusal and mailbox drop free
   the reservation. Keep admitted ids for the host process lifetime without
@@ -5466,6 +5467,24 @@ invocation. Destination service preflight parses those arguments and verifies
 web access settings, UI/CSP assets and any existing cookie key without binding
 a listener or creating a key. A known service-configuration failure refuses
 before draining sessions.
+
+The host exposes `resolve_paused_drafts(pause, deadline)` for an upgrade
+coordinator to call before planned surrender. The pause must belong to that
+host; the deadline is one absolute host-wide bound. The barrier withdraws only
+client-id inputs still owned by the mailbox, publishing an upgrading error and
+`DraftRejected` with the original intent and client id. It never cancels an
+already-claimed input on the strength of a lost wire reply: that input must
+reach its normal durable command, mail or queue admission and `DraftAccepted`,
+or a definite refusal. Mailbox acknowledgement is not durable admission.
+The barrier joins verdict write attempts before returning, or recognizes a
+lost attachment without inventing a verdict. Socket/WebSocket outboxes defer
+completion until their asynchronous transport send ends; moving bytes out of
+a service queue into an outbox is not a delivery attempt. Unknown service
+termination or an expired admission/delivery bound refuses preparation: the source must not
+surrender. No draft registry crosses generations, no accepted queue is reordered,
+and the existing durable handoff decision and continuation command ids are reused.
+This is the admission-verdict barrier seam; the step-drain coordinator owns
+when to call it, after closing ingress and before freezing runtime steps.
 
 A same-key upgrade uses planned handoff of the same sessions, not export/import.
 Its exact-reopen probe refuses known binding/configuration/credential changes;

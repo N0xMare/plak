@@ -1,4 +1,43 @@
 #[test]
+fn withdrawing_correlations_keeps_other_queued_deliveries_in_fifo_order() {
+    let (sender, receiver) = intent_channel::<Core>();
+    for id in [
+        "accepted-1",
+        "pending-1",
+        "accepted-2",
+        "pending-2",
+        "accepted-3",
+    ] {
+        sender
+            .send_correlated(SessionIntent::FollowUp(Draft::from(id)), Some(id.into()))
+            .unwrap();
+    }
+    let claimed = receiver.try_recv().unwrap();
+    let rejected = sender.withdraw_queued_correlations(
+        &["pending-1".into(), "pending-2".into(), "accepted-1".into()].into(),
+    );
+    let text = |delivery: &IntentDelivery<Core>| match &**delivery {
+        SessionIntent::FollowUp(draft) => draft.text.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        text(&claimed),
+        "accepted-1",
+        "already claimed work is not cancelled"
+    );
+    assert_eq!(
+        rejected
+            .iter()
+            .map(|(_, delivery)| text(delivery))
+            .collect::<Vec<_>>(),
+        ["pending-1", "pending-2"]
+    );
+    assert_eq!(text(&receiver.try_recv().unwrap()), "accepted-2");
+    assert_eq!(text(&receiver.try_recv().unwrap()), "accepted-3");
+    assert!(receiver.try_recv().is_err());
+}
+
+#[test]
 fn launcher_release_fence_is_not_a_protocol_four_wire_operation() {
     let (sender, receiver) = intent_channel::<Core>();
     let ticket = sender.request_release_for_reopen("session").unwrap();
@@ -221,8 +260,8 @@ fn job_lifecycle_is_not_evicted_at_saturation() {
     ));
 }
 
-use super::{IntentSendError, intent_channel, observation_channel};
-use crate::intent::{Core, SessionIntent};
+use super::{IntentDelivery, IntentSendError, intent_channel, observation_channel};
+use crate::intent::{Core, Draft, SessionIntent};
 use crate::limits::{INTENT_QUEUE_CAPACITY, OBSERVATION_QUEUE_CAPACITY};
 use crate::observation::{
     ContextCapacityRecovery, QueueDrainState, QueueItem, SessionObservation, TurnLifecycle,

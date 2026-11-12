@@ -114,7 +114,7 @@ impl Rate {
 
 /// A reversible host-upgrade admission pause. It never cancels running work.
 pub struct AdmissionPause {
-    gate: Arc<std::sync::RwLock<bool>>,
+    pub(super) gate: Arc<std::sync::RwLock<bool>>,
 }
 
 impl Drop for AdmissionPause {

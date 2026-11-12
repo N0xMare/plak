@@ -1,11 +1,14 @@
 //! Process-lifetime durable-admission registry; mailbox acceptance is not a verdict.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::time::Instant;
 
 use super::{ANSWER, Outbound, attachment_of};
 use plakous_host_protocol::wire::{AttachmentId, ClientDraftId, NodeAddress};
 use plakous_host_protocol::{ProtocolExtension, SessionObservation};
+
+mod barrier;
 
 /// Maximum pending plus durably admitted wire submissions in one host generation.
 pub(crate) const MAX_DRAFT_IDS: usize = 100_000;
@@ -30,18 +33,30 @@ struct Entry {
 struct Registry {
     entries: BTreeMap<ClientDraftId, Entry>,
     limit: usize,
+    deliveries: usize,
+    unresolved_drop: bool,
+}
+
+struct SharedRegistry {
+    state: Mutex<Registry>,
+    changed: Condvar,
 }
 
 /// One host's registry, shared by sessions and independent of their attachments.
 #[derive(Clone)]
-pub(crate) struct DraftRegistry(Arc<Mutex<Registry>>);
+pub(crate) struct DraftRegistry(Arc<SharedRegistry>);
 
 impl Default for DraftRegistry {
     fn default() -> Self {
-        Self(Arc::new(Mutex::new(Registry {
-            entries: BTreeMap::new(),
-            limit: MAX_DRAFT_IDS,
-        })))
+        Self(Arc::new(SharedRegistry {
+            state: Mutex::new(Registry {
+                entries: BTreeMap::new(),
+                limit: MAX_DRAFT_IDS,
+                deliveries: 0,
+                unresolved_drop: false,
+            }),
+            changed: Condvar::new(),
+        }))
     }
 }
 
@@ -67,7 +82,7 @@ impl DraftRegistry {
         id: ClientDraftId,
         digest: [u8; 32],
     ) -> Result<DraftReservation, DraftReservationError> {
-        let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(entry) = state.entries.get(&id) {
             if entry.digest != digest {
                 return Err(DraftReservationError::Conflict);
@@ -93,6 +108,48 @@ impl DraftRegistry {
             id,
         }))
     }
+
+    pub(crate) fn wait_resolved(&self, deadline: Instant) -> Result<(), &'static str> {
+        let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
+        loop {
+            if state.unresolved_drop {
+                return Err(
+                    "host_upgrade_draft_verdict_unknown: a service ended without resolving a reserved input",
+                );
+            }
+            if state.deliveries == 0 && state.entries.values().all(|entry| entry.admitted) {
+                return Ok(());
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(
+                    "host_upgrade_draft_verdicts_pending: admission or verdict delivery did not settle before the deadline",
+                );
+            }
+            state = self
+                .0
+                .changed
+                .wait_timeout(state, deadline - now)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
+}
+
+/// A durable verdict still owed a write attempt, or lost with its attachment.
+pub(super) struct DraftDelivery(DraftRegistry);
+
+impl Drop for DraftDelivery {
+    fn drop(&mut self) {
+        let mut state = self
+            .0
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        state.deliveries -= 1;
+        self.0.0.changed.notify_all();
+    }
 }
 
 /// Process-local pending admission owned by the service, not the submitting connection.
@@ -105,15 +162,37 @@ pub(crate) struct PendingDraft {
 impl PendingDraft {
     /// Record durable admission before delivering its addressed observation.
     /// Mail calls this only after its translated input/mail is durably admitted.
+    #[cfg(test)]
     pub(crate) fn admit(self) {
         let mut state = self
             .registry
             .0
+            .state
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         if let Some(entry) = state.entries.get_mut(&self.id) {
             entry.admitted = true;
         }
+        self.registry.0.changed.notify_all();
+    }
+
+    fn verdict(self, admitted: bool) -> DraftDelivery {
+        let mut state = self
+            .registry
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        state.deliveries += 1;
+        if admitted {
+            if let Some(entry) = state.entries.get_mut(&self.id) {
+                entry.admitted = true;
+            }
+        } else {
+            state.entries.remove(&self.id);
+        }
+        drop(state);
+        DraftDelivery(self.registry.clone())
     }
 }
 
@@ -122,6 +201,7 @@ impl Drop for PendingDraft {
         let mut state = self
             .registry
             .0
+            .state
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         if state
@@ -131,21 +211,43 @@ impl Drop for PendingDraft {
         {
             state.entries.remove(&self.id);
         }
+        self.registry.0.changed.notify_all();
     }
 }
 
 impl<P: ProtocolExtension> super::HostService<P> {
-    pub(super) fn begin_wire_draft(&self, id: ClientDraftId, pending: PendingDraft) {
-        self.lock().pending_drafts.insert(id, pending);
+    pub(super) fn begin_wire_draft(
+        &self,
+        id: ClientDraftId,
+        pending: PendingDraft,
+        attachment: AttachmentId,
+        intent: plakous_host_protocol::SessionIntent<P>,
+    ) {
+        let mut state = self.lock();
+        state.pending_drafts.insert(id, pending);
+        state.draft_inputs.insert(id, (attachment, intent));
     }
 
     pub(super) fn refuse_wire_draft(&self, id: ClientDraftId) {
-        self.lock().pending_drafts.remove(&id);
+        let mut state = self.lock();
+        state.draft_inputs.remove(&id);
+        state.pending_drafts.remove(&id);
     }
 
     pub(super) fn clear_wire_drafts(&self) {
         let mut state = self.lock();
+        for pending in state.pending_drafts.values() {
+            pending
+                .registry
+                .0
+                .state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .unresolved_drop = true;
+            pending.registry.0.changed.notify_all();
+        }
         state.pending_drafts.clear();
+        state.draft_inputs.clear();
         state.draft_window = None;
         state.draft_answer = false;
     }
@@ -185,14 +287,19 @@ impl<P: ProtocolExtension> super::State<P> {
             }
             SessionObservation::DraftAccepted(_) => {
                 let id = self.draft_window?;
+                self.draft_inputs.remove(&id);
                 if let Some(pending) = self.pending_drafts.remove(&id) {
-                    pending.admit();
+                    self.draft_delivery = Some(pending.verdict(true));
                 }
                 Some(id)
             }
             SessionObservation::DraftRejected(_) => {
                 let id = self.draft_window?;
-                self.pending_drafts.remove(&id);
+                self.draft_inputs.remove(&id);
+                self.draft_delivery = self
+                    .pending_drafts
+                    .remove(&id)
+                    .map(|pending| pending.verdict(false));
                 Some(id)
             }
             SessionObservation::DraftRestored(_) => self.draft_window,
@@ -202,15 +309,23 @@ impl<P: ProtocolExtension> super::State<P> {
                 && notice.tone == plakous_host_protocol::views::transcript::NoticeTone::Error =>
             {
                 if let Some(id) = self.draft_window {
-                    self.pending_drafts.remove(&id);
+                    self.draft_inputs.remove(&id);
+                    self.draft_delivery = self
+                        .pending_drafts
+                        .remove(&id)
+                        .map(|pending| pending.verdict(false));
                 }
-                None
+                self.draft_window
             }
             SessionObservation::TopologyNavigatorUnavailable { .. } => {
                 if let Some(id) = self.draft_window {
-                    self.pending_drafts.remove(&id);
+                    self.draft_inputs.remove(&id);
+                    self.draft_delivery = self
+                        .pending_drafts
+                        .remove(&id)
+                        .map(|pending| pending.verdict(false));
                 }
-                None
+                self.draft_window
             }
             _ => None,
         }
@@ -289,10 +404,15 @@ mod tests {
 
     #[test]
     fn full_registry_never_evicts_durable_duplicates_and_drop_releases_capacity() {
-        let host = DraftRegistry(Arc::new(Mutex::new(Registry {
-            entries: BTreeMap::new(),
-            limit: 2,
-        })));
+        let host = DraftRegistry(Arc::new(SharedRegistry {
+            state: Mutex::new(Registry {
+                entries: BTreeMap::new(),
+                limit: 2,
+                deliveries: 0,
+                unresolved_drop: false,
+            }),
+            changed: Condvar::new(),
+        }));
         pending(&host, 1, 1).admit();
         let second = pending(&host, 2, 2);
         assert!(matches!(

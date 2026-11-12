@@ -83,7 +83,8 @@ impl<P: ProtocolExtension, W: Write> WireConnection<P, W> {
                 return Err(Outcome::Ok(Answer::Accepted { duplicate: true }));
             }
             Ok(DraftReservation::Pending(pending)) => {
-                self.service.begin_wire_draft(client_id, pending);
+                self.service
+                    .begin_wire_draft(client_id, pending, attachment, intent.clone());
             }
             Err(DraftReservationError::Pending) => {
                 return Err(Outcome::Refused(RequestRefusal::DraftPending { client_id }));

@@ -38,6 +38,13 @@ pub struct WireSession<P: ProtocolExtension> {
 }
 
 impl<P: ProtocolExtension> WireSession<P> {
+    pub(super) fn reject_queued_wire_drafts(&self) {
+        let service = served::lock(&self.served).service();
+        service.reject_queued_wire_drafts();
+        self.notify
+            .send_modify(|version| *version = version.wrapping_add(1));
+    }
+
     /// Read-only runner debt projected after durable cancellation.
     #[must_use]
     pub fn with_runner_pending(

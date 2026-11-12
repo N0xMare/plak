@@ -220,6 +220,10 @@ struct Snapshot<P: ProtocolExtension> {
 
 struct State<P: ProtocolExtension> {
     pending_drafts: BTreeMap<plakous_host_protocol::wire::ClientDraftId, drafts::PendingDraft>,
+    draft_inputs:
+        BTreeMap<plakous_host_protocol::wire::ClientDraftId, (AttachmentId, SessionIntent<P>)>,
+    draft_delivery: Option<drafts::DraftDelivery>,
+    draft_outputs: BTreeMap<(AttachmentId, u64), drafts::DraftDelivery>,
     draft_window: Option<plakous_host_protocol::wire::ClientDraftId>,
     draft_answer: bool,
     attachments: BTreeMap<AttachmentId, Attachment<P>>,
@@ -561,6 +565,9 @@ impl<P: ProtocolExtension> HostService<P> {
             nodes: None,
             state: Arc::new(Mutex::new(State {
                 pending_drafts: BTreeMap::new(),
+                draft_inputs: BTreeMap::new(),
+                draft_delivery: None,
+                draft_outputs: BTreeMap::new(),
                 draft_window: None,
                 draft_answer: false,
                 attachments: BTreeMap::new(),
@@ -1136,6 +1143,7 @@ impl<P: ProtocolExtension> HostService<P> {
         {
             let mut state = self.lock();
             let client_id = state.observe_draft(&observation);
+            let mut draft_delivery = state.draft_delivery.take();
             let class = observation.class();
             // Inside a child's answer window everything but a transcript is
             // that child's answer, and none of it is the root's to keep.
@@ -1212,12 +1220,14 @@ impl<P: ProtocolExtension> HostService<P> {
                         held.offer(observation.clone(), class, capacity);
                         held.correlate_draft(client_id);
                     }
+                    state.track_draft_delivery(*id, &mut draft_delivery);
                 }
                 if let Some(held) = state.attachments.get_mut(last) {
                     let capacity = held.capacity(self.capacity);
                     held.offer(observation, class, capacity);
                     held.correlate_draft(client_id);
                 }
+                state.track_draft_delivery(*last, &mut draft_delivery);
             }
         }
         self.repair_gaps();
@@ -1375,6 +1385,8 @@ impl<P: ProtocolExtension> State<P> {
 
     /// Takes the attachment `id` out, counted.
     fn remove_counted(&mut self, id: AttachmentId) -> Option<Attachment<P>> {
+        self.draft_outputs
+            .retain(|(attachment, _), _| *attachment != id);
         let removed = self.attachments.remove(&id);
         if removed.is_some() {
             self.count.remove();
