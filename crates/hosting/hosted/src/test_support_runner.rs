@@ -151,27 +151,6 @@ fn named_or_abort(name: &str) -> HostCut {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::HostCut;
-
-    #[test]
-    fn each_name_selects_exactly_its_own_cut() {
-        for cut in HostCut::ALL {
-            for other in HostCut::ALL {
-                assert_eq!(
-                    HostCut::named(cut.name()) == Some(other),
-                    cut == other,
-                    "{cut:?} and {other:?}"
-                );
-            }
-        }
-        for unknown in ["", "reopen", "reopen:", "fenced", "Lease", "before_stop"] {
-            assert_eq!(HostCut::named(unknown), None, "{unknown:?}");
-        }
-    }
-}
-
 #[cfg(feature = "test-support")]
 pub(crate) async fn hold_readoption() {
     let Some(directory) = hold_directory() else {
@@ -198,3 +177,24 @@ pub(crate) fn readoption_waiting() {
 
 #[cfg(not(feature = "test-support"))]
 pub(crate) const fn readoption_waiting() {}
+
+#[cfg(test)]
+mod tests {
+    use super::HostCut;
+
+    #[test]
+    fn each_name_selects_exactly_its_own_cut() {
+        for cut in HostCut::ALL {
+            for other in HostCut::ALL {
+                assert_eq!(
+                    HostCut::named(cut.name()) == Some(other),
+                    cut == other,
+                    "{cut:?} and {other:?}"
+                );
+            }
+        }
+        for unknown in ["", "reopen", "reopen:", "fenced", "Lease", "before_stop"] {
+            assert_eq!(HostCut::named(unknown), None, "{unknown:?}");
+        }
+    }
+}
