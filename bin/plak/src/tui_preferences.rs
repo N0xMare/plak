@@ -29,6 +29,7 @@ impl Default for TuiPreferences {
 
 impl TuiPreferences {
     /// Publishes only client-owned changes in the home's `[tui]` section.
+    #[cfg(any(test, feature = "tui"))]
     pub(crate) fn save(
         &self,
         paths: &crate::home::paths::PlakPaths,
