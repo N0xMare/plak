@@ -395,22 +395,6 @@
     },
     {
       "connection": 1,
-      "direction": "client",
-      "frame": {
-        "frame": "request",
-        "id": 10,
-        "op": {
-          "attachment": 1,
-          "blobs": [],
-          "intent": {
-            "kind": "open_topology_navigator"
-          },
-          "op": "intent"
-        }
-      }
-    },
-    {
-      "connection": 1,
       "direction": "host",
       "frame": {
         "frame": "response",
@@ -543,24 +527,10 @@
     },
     {
       "connection": 1,
-      "direction": "host",
-      "frame": {
-        "frame": "response",
-        "id": 10,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
-      "connection": 1,
       "direction": "client",
       "frame": {
         "frame": "request",
-        "id": 11,
+        "id": 10,
         "op": {
           "node": {
             "agent_id": "@uuid:0",
@@ -575,7 +545,7 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 11,
+        "id": 10,
         "outcome": {
           "ok": {
             "answer": "attached",
@@ -589,7 +559,7 @@
       "direction": "client",
       "frame": {
         "frame": "request",
-        "id": 12,
+        "id": 11,
         "op": {
           "attachment": 2,
           "blobs": [],
@@ -605,7 +575,7 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 12,
+        "id": 11,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -625,7 +595,7 @@
       "direction": "client",
       "frame": {
         "frame": "request",
-        "id": 13,
+        "id": 12,
         "op": {
           "op": "stop_session",
           "session": "@uuid:0"
@@ -637,7 +607,7 @@
       "direction": "host",
       "frame": {
         "frame": "response",
-        "id": 13,
+        "id": 12,
         "outcome": {
           "ok": {
             "answer": "stopped",
@@ -1008,11 +978,11 @@
     },
     {
       "connection": 2,
-      "eof": "client"
+      "eof": "host"
     },
     {
       "connection": 2,
-      "eof": "host"
+      "eof": "client"
     }
   ]
 }

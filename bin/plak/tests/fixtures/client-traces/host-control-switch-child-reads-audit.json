@@ -42,7 +42,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "4910281f-c56f-53c6-9781-8c70e7434042"
+                "tree_id": "84869d57-d568-5f04-94ee-8d99f55e9e29"
               }
             },
             "kind": "extension"
@@ -188,7 +188,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "4e8475ec-1654-559c-8a29-cab1c934f799"
+                "tree_id": "99ddc63b-3f51-5da8-b9ed-63bbf0f686a1"
               }
             },
             "kind": "extension"
@@ -208,6 +208,36 @@
       }
     },
     {
+      "read": "resync_transcript",
+      "reason": "resync at a reconnect sequence boundary",
+      "connection": 1,
+      "request": {
+        "frame": "request",
+        "id": 18,
+        "op": {
+          "attachment": 2,
+          "blobs": [],
+          "intent": {
+            "body": {
+              "scope": "root"
+            },
+            "kind": "resync_transcript"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 18,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
       "read": "refresh_composer_chrome",
       "reason": "timer-driven background chrome",
       "connection": 1,
@@ -248,7 +278,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "4910281f-c56f-53c6-9781-8c70e7434042"
+                "tree_id": "84869d57-d568-5f04-94ee-8d99f55e9e29"
               }
             },
             "kind": "extension"
@@ -296,19 +326,49 @@
       }
     },
     {
+      "read": "resync_transcript",
+      "reason": "resync at a reconnect sequence boundary",
+      "connection": 2,
+      "request": {
+        "frame": "request",
+        "id": 5,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": {
+              "scope": "root"
+            },
+            "kind": "resync_transcript"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 5,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
       "read": "list_agent_acknowledgements",
       "reason": "acknowledgements read",
       "connection": 2,
       "request": {
         "frame": "request",
-        "id": 6,
+        "id": 7,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "4910281f-c56f-53c6-9781-8c70e7434042"
+                "tree_id": "84869d57-d568-5f04-94ee-8d99f55e9e29"
               }
             },
             "kind": "extension"
@@ -318,7 +378,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 6,
+        "id": 7,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -331,8 +391,8 @@
   "excluded_connections": [],
   "provenance": {
     "capture": {
-      "client_sha256": "27a7825cac95074d4904a71fbdf8f57d82cefff135299b8a084ed800561805da",
-      "host_sha256": "27a7825cac95074d4904a71fbdf8f57d82cefff135299b8a084ed800561805da"
+      "client_sha256": "3ca339201518d1838b3ab43eae3ea5eb38e4257fd2508b9834272c76a71d5c76",
+      "host_sha256": "3ca339201518d1838b3ab43eae3ea5eb38e4257fd2508b9834272c76a71d5c76"
     },
     "connections": [
       {

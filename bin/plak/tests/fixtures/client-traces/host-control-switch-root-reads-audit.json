@@ -144,6 +144,36 @@
       }
     },
     {
+      "read": "resync_transcript",
+      "reason": "resync at a reconnect sequence boundary",
+      "connection": 1,
+      "request": {
+        "frame": "request",
+        "id": 16,
+        "op": {
+          "attachment": 2,
+          "blobs": [],
+          "intent": {
+            "body": {
+              "scope": "root"
+            },
+            "kind": "resync_transcript"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 16,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
       "read": "refresh_composer_chrome",
       "reason": "timer-driven background chrome",
       "connection": 1,
@@ -198,13 +228,43 @@
           }
         }
       }
+    },
+    {
+      "read": "resync_transcript",
+      "reason": "resync at a reconnect sequence boundary",
+      "connection": 2,
+      "request": {
+        "frame": "request",
+        "id": 5,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": {
+              "scope": "root"
+            },
+            "kind": "resync_transcript"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 5,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
     }
   ],
   "excluded_connections": [],
   "provenance": {
     "capture": {
-      "client_sha256": "27a7825cac95074d4904a71fbdf8f57d82cefff135299b8a084ed800561805da",
-      "host_sha256": "27a7825cac95074d4904a71fbdf8f57d82cefff135299b8a084ed800561805da"
+      "client_sha256": "3ca339201518d1838b3ab43eae3ea5eb38e4257fd2508b9834272c76a71d5c76",
+      "host_sha256": "3ca339201518d1838b3ab43eae3ea5eb38e4257fd2508b9834272c76a71d5c76"
     },
     "connections": [
       {
