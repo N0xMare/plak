@@ -529,13 +529,13 @@ fn the_hello_wait_ends_at_its_deadline_or_a_stop() {
 }
 
 #[test]
-fn protocol_six_is_explicitly_refused_before_any_attachment() {
+fn protocol_seven_is_explicitly_refused_before_any_attachment() {
     use plakous_host_protocol::Core;
     use plakous_host_protocol::wire::Hello;
     let (sender, lines) = lines(1);
     sender
         .send(Ok(encode_line(&ClientFrame::<Core>::Hello(Hello {
-            proto: 6,
+            proto: 7,
             binary_id: "old-client".into(),
             caps: Vec::new(),
         }))
@@ -547,7 +547,7 @@ fn protocol_six_is_explicitly_refused_before_any_attachment() {
         host_frames(&stdout).as_slice(),
         [HostFrame::Refused(HandshakeRefusal::VersionMismatch {
             host: 8,
-            client: 6
+            client: 7
         })]
     ));
 }

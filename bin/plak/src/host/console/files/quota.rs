@@ -45,6 +45,7 @@ struct Quota {
     input: Bucket,
     search: VecDeque<Instant>,
     active: usize,
+    reads: usize,
     searches: usize,
     changes: usize,
 }
@@ -56,6 +57,7 @@ impl Quota {
             input: Bucket::new(32 * 1024 * 1024, 64 * 1024 * 1024, now),
             search: VecDeque::new(),
             active: 0,
+            reads: 0,
             searches: 0,
             changes: 0,
         }
@@ -64,6 +66,7 @@ impl Quota {
 pub(super) struct Guard {
     console: Arc<Console>,
     principal: HostPrincipal,
+    read: bool,
     search: bool,
     changes: bool,
 }
@@ -82,16 +85,13 @@ impl Guard {
         request: &HostRequest,
         now: Instant,
     ) -> Result<Self, RequestRefusal> {
+        let read = matches!(request, HostRequest::FilesRead { .. });
         let search = matches!(request, HostRequest::FilesSearch { .. });
         let changes = matches!(
             request,
             HostRequest::ChangesStatus { .. } | HostRequest::ChangesDiff { .. }
         );
-        let input = if matches!(request, HostRequest::FilesRead { .. }) || search {
-            INPUT
-        } else {
-            0
-        };
+        let input = if read || search { INPUT } else { 0 };
         let output = match request {
             HostRequest::FilesRead { max_bytes, .. } => max_bytes.unwrap_or(PAGE),
             _ => PAGE,
@@ -119,7 +119,7 @@ impl Guard {
         quota
             .search
             .retain(|at| now.duration_since(*at).as_secs() < 60);
-        if quota.active >= 2
+        if (read && quota.reads >= 2)
             || (search && (quota.searches > 0 || quota.search.len() >= 6))
             || (changes && quota.changes > 0)
             || quota.requests.available == 0
@@ -138,14 +138,42 @@ impl Guard {
         if changes {
             quota.changes += 1;
         }
+        if read {
+            quota.reads += 1;
+        }
         quota.active += 1;
         state.active += 1;
         Ok(Self {
             console: Arc::clone(&console),
             principal: principal.clone(),
+            read,
             search,
             changes,
         })
+    }
+}
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        let mut state = self
+            .console
+            .files
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let state = &mut state.quota;
+        state.active = state.active.saturating_sub(1);
+        if let Some(quota) = state.principals.get_mut(&self.principal) {
+            quota.active -= 1;
+            if self.read {
+                quota.reads -= 1;
+            }
+            if self.search {
+                quota.searches -= 1;
+            }
+            if self.changes {
+                quota.changes -= 1;
+            }
+        }
     }
 }
 
@@ -257,24 +285,34 @@ mod tests {
         drop(guards);
         assert!(admit(&HostPrincipal::Socket(19)).is_ok());
     }
-}
-impl Drop for Guard {
-    fn drop(&mut self) {
-        let mut state = self
-            .console
-            .files
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let state = &mut state.quota;
-        state.active = state.active.saturating_sub(1);
-        if let Some(quota) = state.principals.get_mut(&self.principal) {
-            quota.active -= 1;
-            if self.search {
-                quota.searches -= 1;
-            }
-            if self.changes {
-                quota.changes -= 1;
-            }
-        }
+
+    #[tokio::test]
+    async fn two_regular_reads_do_not_take_the_separate_search_and_changes_slots() {
+        let root = tempfile::tempdir().unwrap();
+        let console = console(root.path());
+        let principal = HostPrincipal::Socket(1);
+        let read = HostRequest::FilesRead {
+            target: target(),
+            path: "data".into(),
+            cursor: None,
+            max_bytes: Some(1),
+        };
+        let first = Guard::admit(Arc::clone(&console), &principal, &read).unwrap();
+        let second = Guard::admit(Arc::clone(&console), &principal, &read).unwrap();
+        let search = HostRequest::FilesSearch {
+            target: target(),
+            path: ".".into(),
+            literal: "needle".into(),
+            match_case: None,
+        };
+        let search = Guard::admit(Arc::clone(&console), &principal, &search).unwrap();
+        let changes = Guard::admit(
+            Arc::clone(&console),
+            &principal,
+            &HostRequest::ChangesStatus { target: target() },
+        )
+        .unwrap();
+        assert!(Guard::admit(Arc::clone(&console), &principal, &read).is_err());
+        drop((first, second, search, changes));
     }
 }

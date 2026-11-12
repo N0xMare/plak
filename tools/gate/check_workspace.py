@@ -1588,6 +1588,35 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    # Operator inspection uses only unkeyed, contained execution reads.
+    ("plak", "src/host/console/files.rs"): {
+        "tools": {
+            "ExecutionBackendErrorKind",
+            "OperationContext",
+            "RepositoryMatchCase",
+            "RepositoryQuery",
+            "RepositoryQueryLimits",
+            "RepositoryQueryResult",
+            "RepositoryQueryStopReason",
+            "WorkspaceReadSliceRequest",
+        },
+    },
+    ("plak", "src/host/console/files/changes.rs"): {
+        "tools": {"OperationContext", "changes"},
+    },
+    ("plak", "src/host/console/files/cursors.rs"): {
+        "tools": {"WorkspaceReadCursor"},
+    },
+    ("plak", "src/host/console/files/resolve.rs"): {
+        "model": {"RunId"},
+        "runner": {"RunnerRegistry"},
+        "tools": {
+            "ExecutionEnvironment",
+            "ExecutionEnvironmentConfig",
+            "ExecutionEnvironmentScope",
+            "runner::runner_environment",
+        },
+    },
     ("plak", "src/host/sessions.rs"): {"runner": {"RunnerRow"}},
     ("plakous-hosted", "src/jobs.rs"): {"tools": {"LineOwner"}},
     ("plak", "src/platform_product/anthropic.rs"): {

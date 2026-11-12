@@ -65,10 +65,7 @@ pub(super) fn walk_repository_query_directories(
             tree_entries = tree_entries.saturating_add(1);
             // Version-control metadata is never repository content. Other
             // dot entries (`.github`, `.cargo`) are walked unless ignored.
-            if matches!(name, b"." | b".." | b".git" | b".jj")
-                || name.eq_ignore_ascii_case(b".git")
-                || name.eq_ignore_ascii_case(b".jj")
-            {
+            if name.eq_ignore_ascii_case(b".git") || name.eq_ignore_ascii_case(b".jj") {
                 continue;
             }
             if query_entry_kind_is_walkable(entry.file_type()) == Some(false) {

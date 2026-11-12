@@ -1138,8 +1138,7 @@ impl Read for CancellationReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         if check_workspace_control(self.control).is_err() {
             self.cancelled = true;
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Err(std::io::Error::other(
                 "workspace mutation preflight cancelled",
             ))
         } else {

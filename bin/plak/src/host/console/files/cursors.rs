@@ -14,7 +14,7 @@ struct Cursor {
     generation: u64,
     target: WorkspaceTarget,
     identity: String,
-    cursor: WorkspaceReadCursor,
+    continuation: WorkspaceReadCursor,
     at: Instant,
 }
 impl State {
@@ -34,10 +34,10 @@ impl State {
                     && c.generation == context.host_generation
                     && &c.target == target
                     && c.identity == identity
-                    && c.cursor.path() == std::path::Path::new(path)
+                    && c.continuation.path() == std::path::Path::new(path)
                     && c.at.elapsed() < Duration::from_secs(60)
             })
-            .map(|c| c.cursor.clone())
+            .map(|c| c.continuation.clone())
             .ok_or_else(|| failure(WorkspaceReadFailure::InvalidCursor))?;
         self.cursors.remove(token);
         Ok(cursor)
@@ -72,7 +72,7 @@ impl State {
                 generation: context.host_generation,
                 target,
                 identity,
-                cursor,
+                continuation: cursor,
                 at: Instant::now(),
             },
         );

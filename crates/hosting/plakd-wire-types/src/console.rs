@@ -156,7 +156,7 @@ pub enum HostRequest {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "response", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostResponse {
     FilesList {
@@ -328,6 +328,12 @@ pub enum ReadRefusal {
 impl std::fmt::Debug for HostRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("HostRequest(<redacted>)")
+    }
+}
+
+impl std::fmt::Debug for HostResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HostResponse(<redacted>)")
     }
 }
 

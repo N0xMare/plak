@@ -4015,6 +4015,8 @@ with ignore rules, at most 1,000 entries, 10,000 traversed entries and 256 KiB.
 Literal search accepts at most 1 KiB and independently bounds 1,000 files,
 10,000 entries, 1 MiB/file, 16 MiB input, 200 matches, 2 KiB/match and 256 KiB
 output. Skipped counts and stop reasons distinguish incomplete from empty.
+Case-insensitive queries use ASCII folding; non-ASCII literals require
+case-sensitive matching.
 The execution-side deadline is 2 s; cancellation drops pending I/O.
 
 All workspace inspection shares principal-scoped request and returned-byte
@@ -7584,7 +7586,7 @@ These are in-process host observations, not new JSONL v1 lines.
 ### 5.5 The Menu
 
 Host-client Accounts/Providers/login and config-builder presentation belongs
-to the private clients. Both use the protocol-7 host operator requests, host
+to the private clients. Both use the protocol-8 host operator requests, host
 identity, consequence/Confirm affordance, masked secret input and typed
 remedies. No credential form uses the chat composer. The retained embedded
 menu's local-face operations remain unchanged; this public increment does not
@@ -10339,7 +10341,7 @@ variables, spelled the same way `plak doctor` spells them.
 
 ### 8.2 The two credential routes
 
-The attachment-free protocol-7 write requests select the same exact
+The attachment-free protocol-8 write requests select the same exact
 `<vertical>/<name>` as the CLI: `account_key_set/clear`, `account_logout`,
 `account_refresh`, `account_remove` and `account_login_start/complete/poll/cancel`.
 The Add account form supplies a validated new reference to key set or login;
@@ -10431,7 +10433,7 @@ caller-supplied endpoint, discovered client id, or copied token can promote a
 profile's provenance.
 
 **Login, logout and API keys are explicit operator operations:** the CLI and
-protocol-7 authenticated host console share the account service. Private TUI
+protocol-8 authenticated host console share the account service. Private TUI
 and web forms consume that wire contract; they do not own credentials. The
 retained embedded TUI does not run an OAuth flow or capture key material; the Providers tab reads status
 and prints the exact command (§5.5).

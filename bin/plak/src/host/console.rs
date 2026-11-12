@@ -1,4 +1,4 @@
-//! Attachment-free, home-scoped product reads. No session store is opened here.
+//! Attachment-free operator requests. Workspace reads never open a session runtime.
 
 mod account_writes;
 mod accounts;

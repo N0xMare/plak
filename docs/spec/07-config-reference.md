@@ -191,7 +191,7 @@ sessions bind, written by the Agents tab's Set as default (or by `plak config
 set` and the file); Fork now never writes them, and local Use now, offered only
 while a session has no model and the home has no loadable default, also records
 its profile as the default. Remote Use now binds only its session; publishing
-home defaults requires the confirmed protocol-7 etag path. Changing the
+home defaults requires the confirmed protocol-8 etag path. Changing the
 default never changes an existing session, which keeps the root template and
 working set its tree froze, re-resolved against the template files at its next
 `/reload` (chapter 02 §5.5).
@@ -418,7 +418,7 @@ capacity and rate refusals do not open a session or close the connection.
 | `secret_input_bytes` | `16384` | Decoded API-key/callback input, including whitespace. |
 | `credential_request_bytes` | `65536` | Before secret decoding; narrower field limits also apply. |
 | `max_request_bytes` | `278528` | Outer console bound; only template/profile writes may exceed 64 KiB. |
-| `max_response_bytes` | `262144` | Private response bound. |
+| `max_response_bytes` | `262144` | Account/configuration response bound, not the workspace byte-page encoding. |
 | `max_definition_bytes` | `262144` | Retained source-file bound. |
 | `page_rows` | `100` | Default and maximum; explicit limits must be 1 through 100. |
 | `dependency_bytes` | `8388608` | Aggregate retained definition bytes and snapshot budget. |
@@ -441,6 +441,10 @@ including settled attempts retained for terminal polling until their original
 before its grant is consumed or any provider I/O starts; it may be retried with
 fresh consent after a record expires. This retention cap is separate from the
 three pending attempts host-wide and two per principal, and is not configurable.
+
+Workspace limits describe raw page/diff bytes before base64 encoding; their
+responses may exceed the home-console response bound by that encoding overhead.
+The common wire line bound remains 16 MiB.
 
 Admission refusals preserve one-shot consent and do not charge credential,
 config or login-start quotas. A pending native login is governed by attempt
@@ -873,7 +877,7 @@ section; omitted keys continue to follow defaults. Every root binding edit copie
 fresh unshared name (`default`, `default-2`, and so on), preserving its other
 fields and leaving the previous template file untouched. Saves preflight all
 existing template bodies and refuse changes to them; edit user or project
-files directly, or use the protocol-7 confirmed home `template_put` exception.
+files directly, or use the protocol-8 confirmed home `template_put` exception.
 `config_patch` never edits a body. Unrelated settings saves do not rewrite templates.
 
 Protocol-7 `config_patch`, `template_put` and `profile_put` publish one file

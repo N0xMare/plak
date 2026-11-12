@@ -3989,7 +3989,7 @@ public runtime invariant.
 The local-face settings payload/dispatch fixture saves runtime settings with
 nondefault terminal preferences in the host configuration. Skipped appearance
 fields never travel in that payload, and the durable `[tui]` values remain
-unchanged. It does not authorize remote legacy saves: protocol-7 role checks
+unchanged. It does not authorize remote legacy saves: protocol-8 role checks
 refuse those before product dispatch.
 Product DTO contract examples decode and re-encode unchanged before and after
 extraction, including temporary reload values. Schema extraction is checked
@@ -5989,7 +5989,7 @@ that authorize URLs and device codes never appear in Debug. Existing
 facade callback/device/claim/CAS tests remain the provider workflow authority;
 no paid or live login is required by offline gates.
 
-Protocol-7 configuration evidence covers two-connection stale forms, CLI and
+Protocol-8 configuration evidence covers two-connection stale forms, CLI and
 external-byte/comment edits, exact allowlists, invalid values with unchanged
 bytes, referenced definitions, built-in collisions, typed template/profile
 publication and comment preservation. Atomic publication probes cover write,
@@ -5998,7 +5998,7 @@ never partial publication or false no-effect after rename. New template
 exclusive-link and replacement-rename paths are checked separately. The
 legacy remote settings/default/credential-refresh path refuses at role
 classification; local-face dispatch remains available. Schema/DTO and public
-compile contracts follow exact protocol 7; the runner version is unchanged.
+compile contracts follow exact client protocol 8 and runner protocol 6.
 Publication SIGKILL cuts run in the durability lane; injected parent-sync
 failures run offline. Connection-drop and forced-deadline contracts verify
 retirement of pending authority and an explicit unknown outcome for admitted

@@ -152,17 +152,15 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         }
         ExecutionEnvironment::host(scope, root, cwd, ExecutionEnvironmentConfig::default())
     });
-    let probe_excluded = excluded.clone();
-    let probe_paths = Arc::new(move |candidate: &Path| {
-        home::admitted_probe_path(&roots, &probe_excluded, candidate)
-    });
+    let extension = vcs_extension(&config, excluded.clone());
     let workspace_catalog = plakous::runner::WorkspaceCatalog::machine(
         config.roots.clone(),
         &excluded,
         config.copies.is_some(),
     )
     .map_err(|error| CliFailure::new(format!("runner workspace policy: {error:?}")))?;
-    let extension = vcs_extension(&config, excluded);
+    let probe_paths =
+        Arc::new(move |candidate: &Path| home::admitted_probe_path(&roots, &excluded, candidate));
     let allowlist_home = home.clone();
     let hosts = Arc::new(move |host_id: &str| {
         // Read at every bind, so a pairing made while the daemon runs holds.

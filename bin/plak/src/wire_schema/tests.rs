@@ -6,6 +6,7 @@ use super::*;
 fn protocol_eight_schema_has_an_exact_build_independent_pin() {
     let mut schema = document();
     schema.as_object_mut().unwrap().remove("binary_id");
+    schema.sort_all_objects();
     let bytes = serde_json::to_vec(&schema).unwrap();
     let digest = plakous::model::sha256_hex(&[&bytes]);
     assert_eq!(

@@ -868,7 +868,7 @@ before allocating bounded execution work. This does not sanitize workspace
 secrets or make an admitted shell a sandbox.
 
 An admitted web client is an operator acting with the serving user's authority.
-In addition to session and directory operations, enabled protocol-7 console
+In addition to session and directory operations, enabled protocol-8 console
 capabilities manage provider accounts and publish allowlisted home configuration.
 These are real credential and deferred-execution powers, not cosmetic settings.
 Capability switches and confirmations are product controls, not an OS sandbox
@@ -1614,7 +1614,7 @@ Chapter 03 §6.1 holds the exact list.
 ### 3.6 Login surfaces
 
 Native login, logout, explicit refresh and API-key management are explicit
-operator operations on CLI or protocol-7 host console. Web writes require the
+operator operations on CLI or protocol-8 host console. Web writes require the
 startup-captured credentials-write capability; verified same-user sockets are
 trusted, with identical consent and quota checks. Private clients own forms,
 not credential authority; the retained embedded Providers view remains

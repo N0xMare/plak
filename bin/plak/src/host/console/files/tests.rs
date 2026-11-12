@@ -1,4 +1,5 @@
 use super::*;
+use plakd_wire_types::console::ConfiguredSwitches;
 
 fn context() -> HostRequestContext {
     HostRequestContext {
@@ -52,6 +53,8 @@ fn workspace(path: &std::path::Path) -> resolve::Workspace {
         )
         .unwrap(),
         identity: path.to_str().unwrap().into(),
+        placement: None,
+        target: target(),
     }
 }
 
@@ -65,7 +68,7 @@ async fn exact_binary_pages_and_mutation_never_splice_versions() {
     let first = console
         .inspect(
             &context(),
-            request("bytes", None, 3),
+            request("./bytes", None, 3),
             workspace(root.path()),
         )
         .await
@@ -84,7 +87,7 @@ async fn exact_binary_pages_and_mutation_never_splice_versions() {
     let second = console
         .inspect(
             &context(),
-            request("bytes", first.next.clone(), 3),
+            request("./bytes", first.next.clone(), 3),
             workspace(root.path()),
         )
         .await
@@ -147,7 +150,7 @@ fn viewer_paths_and_product_and_state_overlap_are_closed_in_both_directions() {
             protected.join("inner"),
         ] {
             assert_eq!(
-                resolve::protect(&candidate, &[protected.clone()]),
+                resolve::protect(&candidate, std::slice::from_ref(&protected)),
                 Err(failure(WorkspaceReadFailure::ProtectedPath))
             );
         }
@@ -165,7 +168,7 @@ async fn nonregular_symlinks_invalid_names_and_oversized_files_refuse_promptly()
     symlink("plain", root.path().join("link")).unwrap();
     rustix::fs::mknodat(
         rustix::fs::CWD,
-        &root.path().join("fifo"),
+        root.path().join("fifo"),
         rustix::fs::FileType::Fifo,
         rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
         0,
@@ -182,6 +185,17 @@ async fn nonregular_symlinks_invalid_names_and_oversized_files_refuse_promptly()
         .unwrap();
         assert!(matches!(result, HostResponse::Refused { .. }));
     }
+    assert_eq!(
+        console
+            .inspect(
+                &context(),
+                request("null", None, 16),
+                workspace(std::path::Path::new("/dev"))
+            )
+            .await
+            .unwrap(),
+        refused(failure(WorkspaceReadFailure::NotRegularFile))
+    );
     let file = std::fs::File::create(root.path().join("huge")).unwrap();
     file.set_len(INPUT + 1).unwrap();
     assert_eq!(
@@ -191,6 +205,16 @@ async fn nonregular_symlinks_invalid_names_and_oversized_files_refuse_promptly()
             .unwrap(),
         refused(failure(WorkspaceReadFailure::FileTooLarge))
     );
+    file.set_len(INPUT).unwrap();
+    let HostResponse::FilesRead { content } = console
+        .inspect(&context(), request("huge", None, 1), workspace(root.path()))
+        .await
+        .unwrap()
+    else {
+        panic!("ceiling is inclusive")
+    };
+    assert_eq!(content.size, INPUT);
+    assert!(content.next.is_some());
     std::fs::write(
         root.path().join(std::ffi::OsString::from_vec(vec![0xff])),
         "data",
@@ -407,6 +431,23 @@ async fn listing_marks_the_entry_and_output_caps_instead_of_claiming_clean() {
     };
     assert_eq!(entries.len(), 1_000);
     assert!(summary.truncated);
+    let HostResponse::FilesSearch { summary, .. } = console
+        .inspect(
+            &context(),
+            HostRequest::FilesSearch {
+                target: target(),
+                path: ".".into(),
+                literal: "absent".into(),
+                match_case: None,
+            },
+            workspace(root.path()),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("search")
+    };
+    assert_eq!(summary.stop_reason, Some(FileStopReason::Files));
     let mut summary = FileQuerySummary {
         skipped_entries: 0,
         skipped_binary: 0,
@@ -619,6 +660,8 @@ async fn equal_pathnames_on_two_runners_never_read_the_local_file() {
         let placed = resolve::Workspace {
             environment,
             identity: id.into(),
+            placement: None,
+            target: target(),
         };
         let HostResponse::FilesRead { content } = console
             .inspect(&context(), request("data", None, PAGE), placed)
@@ -634,4 +677,321 @@ async fn equal_pathnames_on_two_runners_never_read_the_local_file() {
             bytes
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dormant_child_reads_neither_mint_missing_workspaces_nor_reuse_reclaimed_paths() {
+    use plakous_host_protocol::topology::{WorkspaceStatus, WriterMode};
+    use plakous_hosted::host_service::wire::HostSessions;
+    use plakous_recursive_subagents::tree::{FakeVcs, ProductAgentTree, TreeCustody, TreeStore};
+    let (_root, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let work = tempfile::tempdir().unwrap();
+    let canonical = std::fs::canonicalize(work.path()).unwrap();
+    let child_path = canonical.join("child");
+    let services = crate::shell::services::Services::for_home(paths.clone());
+    services
+        .runners()
+        .configure(plakous::runner::ConfiguredRunner {
+            runner_id: "local".into(),
+            names: vec!["local".into()],
+        });
+    services
+        .runners()
+        .ready_local(
+            Arc::new(plakous::runner::WorkspaceCatalog::local(None, &[], paths.home()).unwrap()),
+            0,
+        )
+        .unwrap();
+    let mut record = crate::store::sessions::SessionRecord::new(canonical.clone());
+    record.node = plakous_hosted::sessions::SessionNode {
+        tree_id: "tree".into(),
+        agent_id: "root".into(),
+    };
+    services
+        .session_records()
+        .unwrap()
+        .save(&mut record)
+        .unwrap();
+    let tree = ProductAgentTree::bootstrap_root_for_test_with(
+        Arc::new(FakeVcs::new()),
+        "tree",
+        "root",
+        "owner",
+        canonical,
+        "tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let store = crate::store::tree::open_tree_store(&paths).unwrap();
+    let claim = store
+        .take_custody(
+            "tree",
+            plakous_recursive_subagents::tree::custody_host(),
+            None,
+        )
+        .unwrap();
+    let sessions = crate::host::sessions::ProductSessions::new(
+        &services,
+        None,
+        Some(tokio::runtime::Handle::current()),
+    )
+    .unwrap();
+    let mut stored = 0;
+    for (index, status) in [WorkspaceStatus::Active, WorkspaceStatus::CleanRemoved]
+        .into_iter()
+        .enumerate()
+    {
+        let mut snapshot =
+            child_snapshot(&tree, &child_path, status, tree.revision + index as u64 + 1);
+        snapshot.stored_revision = stored;
+        stored = store.save(&snapshot, &claim).unwrap().value();
+        if status == WorkspaceStatus::CleanRemoved {
+            std::fs::create_dir(&child_path).unwrap();
+            std::fs::write(child_path.join("data"), "unrelated-reuse").unwrap();
+        }
+        let request = HostRequest::FilesRead {
+            target: WorkspaceTarget {
+                session: record.id.clone(),
+                node: Some("child".into()),
+            },
+            path: "data".into(),
+            cursor: None,
+            max_bytes: None,
+        };
+        assert_eq!(
+            sessions.host_request(context(), request).await.unwrap(),
+            refused(ReadRefusal::WorkspaceUnavailable {})
+        );
+        assert_eq!(child_path.exists(), status == WorkspaceStatus::CleanRemoved);
+        assert!(!paths.runtime_database().exists());
+    }
+}
+
+fn child_snapshot(
+    tree: &plakous_recursive_subagents::tree::ProductAgentTree,
+    path: &std::path::Path,
+    status: plakous_host_protocol::topology::WorkspaceStatus,
+    revision: u64,
+) -> plakous_recursive_subagents::tree::ProductAgentTree {
+    let mut nodes = tree.nodes().clone();
+    let mut child = tree.node("root").unwrap().clone();
+    child.agent_id = "child".into();
+    child.parent_agent_id = Some("root".into());
+    child.depth = 1;
+    child.path = path.to_path_buf();
+    child.workspace_id = "ws-child".into();
+    nodes.insert("child".into(), child);
+    let mut workspaces = tree.workspaces().clone();
+    let mut workspace = workspaces["ws-root"].clone();
+    workspace.workspace_id = "ws-child".into();
+    workspace.owner_agent_id = "child".into();
+    workspace.path = path.to_path_buf();
+    workspace.status = status;
+    workspaces.insert("ws-child".into(), workspace);
+    plakous_recursive_subagents::tree::PersistedTree::from_rows(
+        tree.tree_id.clone(),
+        tree.root_agent_id.clone(),
+        revision,
+        tree.host_generation,
+        tree.state,
+        tree.writer_mode,
+        tree.selected_tuple.clone(),
+        tree.launch_checkout.clone(),
+        tree.header_snapshot().clone(),
+        nodes,
+        tree.grants().clone(),
+        tree.attempts().clone(),
+        tree.candidates().clone(),
+        workspaces,
+        tree.messages().clone(),
+        tree.operations().clone(),
+    )
+    .rows()
+    .clone()
+}
+
+#[tokio::test]
+async fn search_caps_distinguish_match_file_and_total_input_omissions() {
+    let root = tempfile::tempdir().unwrap();
+    let console = console(root.path());
+    std::fs::write(root.path().join("text"), "needle\n".repeat(201)).unwrap();
+    let search = || HostRequest::FilesSearch {
+        target: target(),
+        path: ".".into(),
+        literal: "needle".into(),
+        match_case: None,
+    };
+    let HostResponse::FilesSearch { matches, summary } = console
+        .inspect(&context(), search(), workspace(root.path()))
+        .await
+        .unwrap()
+    else {
+        panic!("search")
+    };
+    assert_eq!(matches.len(), 200);
+    assert_eq!(summary.stop_reason, Some(FileStopReason::Matches));
+    std::fs::write(
+        root.path().join("text"),
+        format!("needle{}", "x".repeat(3_000)),
+    )
+    .unwrap();
+    let HostResponse::FilesSearch { matches, .. } = console
+        .inspect(&context(), search(), workspace(root.path()))
+        .await
+        .unwrap()
+    else {
+        panic!("search")
+    };
+    assert!(matches[0].truncated);
+    assert!(
+        base64::engine::general_purpose::STANDARD
+            .decode(&matches[0].bytes_b64)
+            .unwrap()
+            .len()
+            <= 2048
+    );
+    std::fs::write(root.path().join("text"), "x".repeat(1024 * 1024 + 1)).unwrap();
+    let HostResponse::FilesSearch { summary, .. } = console
+        .inspect(&context(), search(), workspace(root.path()))
+        .await
+        .unwrap()
+    else {
+        panic!("search")
+    };
+    assert_eq!(summary.skipped_oversize, 1);
+    std::fs::remove_file(root.path().join("text")).unwrap();
+    let input = "x".repeat(1024 * 1024);
+    for n in 0..17 {
+        std::fs::write(root.path().join(format!("file-{n:02}")), &input).unwrap();
+    }
+    let HostResponse::FilesSearch { summary, .. } = console
+        .inspect(&context(), search(), workspace(root.path()))
+        .await
+        .unwrap()
+    else {
+        panic!("search")
+    };
+    assert_eq!(summary.stop_reason, Some(FileStopReason::ScannedBytes));
+}
+
+#[tokio::test]
+async fn ignored_directory_entries_still_exhaust_the_traversal_budget() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join(".gitignore"), "*\n").unwrap();
+    for n in 0..10 {
+        std::fs::write(root.path().join(format!("ignored-{n}")), "needle").unwrap();
+    }
+    let limits =
+        RepositoryQueryLimits::new(1000, 3, 1024 * 1024, INPUT, 200, 2048, PAGE as usize).unwrap();
+    let query = RepositoryQuery::new(
+        ".",
+        b"needle".to_vec(),
+        RepositoryMatchCase::Sensitive,
+        limits,
+    )
+    .unwrap();
+    let result = workspace(root.path())
+        .environment
+        .query_repository(
+            query,
+            OperationContext::new(plakous::model::CancellationToken::new()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.matches(), []);
+    assert_eq!(
+        result.stop_reason(),
+        Some(RepositoryQueryStopReason::TreeEntries)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn disconnect_drops_pending_runner_io_and_cancels_the_read_control() {
+    use plakous::tools::runner::{
+        RunnerBackend, RunnerCall, RunnerCallFuture, RunnerFailure, RunnerLink, RunnerVerb,
+        runner_descriptor, runner_environment,
+    };
+    use plakous::tools::{ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct PendingRead {
+        entered: Arc<tokio::sync::Notify>,
+        dropped: Arc<AtomicBool>,
+        cancellation: Arc<std::sync::Mutex<Option<plakous::model::CancellationToken>>>,
+    }
+    struct DropRead(Arc<AtomicBool>);
+    impl Drop for DropRead {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+    impl RunnerLink for PendingRead {
+        fn call(&self, call: RunnerCall) -> RunnerCallFuture {
+            if call.verb() == RunnerVerb::ReadWorkspace {
+                *self.cancellation.lock().unwrap() = Some(call.cancellation().clone());
+                let entered = Arc::clone(&self.entered);
+                let dropped = Arc::clone(&self.dropped);
+                return Box::pin(async move {
+                    let _drop = DropRead(dropped);
+                    entered.notify_one();
+                    std::future::pending().await
+                });
+            }
+            let answer = match call.payload()["op"].as_str() {
+                Some("canonicalize") => Ok(serde_json::json!({"path":call.payload()["path"]})),
+                Some("filesystem_identity") => Ok(serde_json::json!({"device":1,"inode":2})),
+                _ => Err(RunnerFailure::Unsupported),
+            };
+            Box::pin(std::future::ready(answer))
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let direct = workspace(root.path());
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let dropped = Arc::new(AtomicBool::new(false));
+    let cancellation = Arc::new(std::sync::Mutex::new(None));
+    let link = PendingRead {
+        entered: Arc::clone(&entered),
+        dropped: Arc::clone(&dropped),
+        cancellation: Arc::clone(&cancellation),
+    };
+    let descriptor =
+        runner_descriptor(&direct.environment, RunnerId::new("pending").unwrap()).unwrap();
+    let backend = Arc::new(RunnerBackend::new(descriptor, Arc::new(link)).unwrap());
+    let scope = ExecutionEnvironmentScope::Run(
+        plakous::model::RunId::try_from(uuid::Uuid::new_v4()).unwrap(),
+    );
+    let environment = runner_environment(
+        scope,
+        root.path(),
+        root.path(),
+        ExecutionEnvironmentConfig::default(),
+        backend,
+    )
+    .unwrap();
+    let placed = resolve::Workspace {
+        environment,
+        identity: "pending".into(),
+        placement: None,
+        target: target(),
+    };
+    let console = console(root.path());
+    let task = tokio::spawn(async move {
+        console
+            .inspect(&context(), request("data", None, PAGE), placed)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(10), entered.notified())
+        .await
+        .unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    assert!(dropped.load(Ordering::Acquire));
+    assert!(
+        cancellation
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .is_cancelled()
+    );
 }

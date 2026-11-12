@@ -64,9 +64,14 @@ fn protocol_eight_files_have_exact_bytes_and_only_saved_target_authority()
                 value.clone(),
             )?)?
         } else {
-            serde_json::to_value(serde_json::from_value::<HostFrame<PlakExtension>>(
-                value.clone(),
-            )?)?
+            let response = serde_json::from_value::<HostFrame<PlakExtension>>(value.clone())?;
+            let debug = format!("{response:?}");
+            assert!(
+                !debug.contains("AP/i")
+                    && !debug.contains("bmVlZGxl")
+                    && !debug.contains("cGF0Y2g=")
+            );
+            serde_json::to_value(response)?
         };
         assert_eq!(encoded, value);
     }

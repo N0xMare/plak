@@ -9,7 +9,11 @@ mod tests;
 
 use super::{Console, HostPrincipal, HostRequestContext, refused};
 use base64::Engine as _;
-use plakd_wire_types::console::*;
+use plakd_wire_types::console::{
+    FileContent, FileEntry, FileKind, FileMatch, FileQuerySummary, FileStopReason, HostRequest,
+    HostResponse, ReadRefusal, ValidationCode, WorkspaceReadFailure, WorkspaceReadLimits,
+    WorkspaceTarget,
+};
 use plakous::tools::{
     ExecutionBackendError, ExecutionBackendErrorKind, OperationContext, RepositoryMatchCase,
     RepositoryQuery, RepositoryQueryLimits, RepositoryQueryResult, RepositoryQueryStopReason,
@@ -100,9 +104,8 @@ impl Console {
                     (resolve::saved(&services, &tree, &target), guard)
                 })
                 .await;
-                let (workspace, _guard) = match resolved {
-                    Ok(result) => result,
-                    Err(_) => return Ok(refused(ReadRefusal::WorkspaceUnavailable {})),
+                let Ok((workspace, _guard)) = resolved else {
+                    return Ok(refused(ReadRefusal::WorkspaceUnavailable {}));
                 };
                 let workspace = match workspace {
                     Ok(workspace) => workspace,
@@ -126,11 +129,17 @@ impl Console {
         request: HostRequest,
         workspace: resolve::Workspace,
     ) -> Result<HostResponse, RequestRefusal> {
+        let placement = workspace.placement.clone();
         let cancellation = plakous::model::CancellationToken::new();
         let _cancel = Cancel(cancellation.clone());
-        let deadline = u64::try_from(super::clock::now_ms()).unwrap_or(0) / 1_000 + 2;
+        let deadline = u64::try_from(super::clock::now_ms())
+            .unwrap_or(0)
+            .saturating_add(2_000);
         let control = OperationContext::new(cancellation);
-        let control = if let Ok(deadline) = plakous::model::Timestamp::new(deadline, 0) {
+        let control = if let Ok(deadline) = plakous::model::Timestamp::new(
+            deadline / 1_000,
+            u32::try_from(deadline % 1_000 * 1_000_000).unwrap_or(0),
+        ) {
             control.with_budget(deadline)
         } else {
             control
@@ -138,6 +147,11 @@ impl Console {
         let result =
             tokio::time::timeout(DEADLINE, self.execute(context, request, workspace, control))
                 .await;
+        if !matches!(result, Ok(Ok(_)))
+            && let Some(refusal) = placement.and_then(|placement| placement.refusal())
+        {
+            return Err(refusal);
+        }
         Ok(match result {
             Ok(Ok(response)) => response,
             Ok(Err(reason)) => refused(reason),
@@ -202,25 +216,28 @@ impl Console {
         control: OperationContext,
     ) -> Result<HostResponse, ReadRefusal> {
         let HostRequest::FilesRead {
-            target,
             path,
             cursor,
             max_bytes,
+            ..
         } = request
         else {
             unreachable!()
         };
+        let target = workspace.target.clone();
         let bytes = max_bytes.unwrap_or(PAGE);
+        let start = WorkspaceReadSliceRequest::start(&path, bytes).map_err(backend)?;
+        let normalized = utf8(start.path())?;
         let read = if let Some(cursor) = cursor {
             let cursor = self
                 .files
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .cursors
-                .get(&cursor, context, &target, &workspace.identity, &path)?;
+                .get(&cursor, context, &target, &workspace.identity, &normalized)?;
             WorkspaceReadSliceRequest::resume(cursor, bytes)
         } else {
-            WorkspaceReadSliceRequest::start(&path, bytes)
+            Ok(start)
         }
         .map_err(backend)?;
         let slice = workspace
@@ -329,9 +346,10 @@ pub(super) fn validate(request: &HostRequest) -> Result<(), ReadRefusal> {
             ..
         } => {
             valid_path(path, false)?;
-            if !(1..=PAGE).contains(&max_bytes.unwrap_or(PAGE))
-                || cursor.as_ref().is_some_and(|c| c.len() > 128)
-            {
+            if !(1..=PAGE).contains(&max_bytes.unwrap_or(PAGE)) {
+                return Err(super::validation("max_bytes", ValidationCode::InvalidLimit));
+            }
+            if cursor.as_ref().is_some_and(|c| c.len() > 128) {
                 return Err(failure(WorkspaceReadFailure::InvalidCursor));
             }
         }
@@ -348,7 +366,7 @@ pub(super) fn validate(request: &HostRequest) -> Result<(), ReadRefusal> {
                 || literal.contains('\0')
                 || (*match_case == Some(false) && !literal.is_ascii())
             {
-                return Err(failure(WorkspaceReadFailure::InvalidPath));
+                return Err(super::validation("literal", ValidationCode::InvalidValue));
             }
         }
         HostRequest::ChangesDiff { entry, .. } if entry.len() > 128 => {

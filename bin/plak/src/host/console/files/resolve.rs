@@ -1,5 +1,6 @@
 use super::{ReadRefusal, WorkspaceReadFailure, WorkspaceTarget, failure};
 use plakous::tools::{ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope};
+use plakous_host_protocol::topology::WorkspaceStatus;
 use plakous_host_protocol::wire::RequestRefusal;
 use plakous_recursive_subagents::tree::{ProductAgentTree, TreeStore};
 use std::path::{Path, PathBuf};
@@ -7,17 +8,39 @@ use std::path::{Path, PathBuf};
 pub(super) struct Workspace {
     pub environment: ExecutionEnvironment,
     pub identity: String,
+    pub placement: Option<Placement>,
+    pub target: WorkspaceTarget,
+}
+
+#[derive(Clone)]
+pub(super) struct Placement {
+    registry: plakous::runner::RunnerRegistry,
+    runner: String,
+}
+impl Placement {
+    pub(super) fn refusal(&self) -> Option<RequestRefusal> {
+        self.registry.services(&self.runner).err().map(|reason| {
+            super::super::super::sessions::runner_views::refusal(
+                &super::super::super::sessions::runner_views::label(
+                    &self.runner,
+                    &self.registry.rows(),
+                ),
+                reason,
+                &self.registry.rows(),
+            )
+        })
+    }
 }
 pub(super) enum Failure {
     Product(ReadRefusal),
     Placement(RequestRefusal),
 }
 
-pub(super) fn saved(
+fn location(
     services: &crate::shell::services::Services,
     store: &plakous_recursive_subagents_store::SqliteTreeStore,
     target: &WorkspaceTarget,
-) -> Result<Workspace, Failure> {
+) -> Result<(PathBuf, String, WorkspaceTarget), Failure> {
     let missing = || Failure::Product(ReadRefusal::WorkspaceUnavailable {});
     let record = services
         .session_records()
@@ -43,7 +66,6 @@ pub(super) fn saved(
             .ok_or_else(missing)?;
         let node = tree.node(node).map_err(|_| missing())?;
         let workspace = tree.workspace(&node.workspace_id).ok_or_else(missing)?;
-        use plakous_host_protocol::topology::WorkspaceStatus;
         if matches!(
             workspace.status,
             WorkspaceStatus::CleanRemoved
@@ -65,7 +87,28 @@ pub(super) fn saved(
             .to_owned();
         (path, runner)
     };
+    Ok((
+        path,
+        runner,
+        WorkspaceTarget {
+            session: target.session.clone(),
+            node: Some(node.to_owned()),
+        },
+    ))
+}
+
+pub(super) fn saved(
+    services: &crate::shell::services::Services,
+    store: &plakous_recursive_subagents_store::SqliteTreeStore,
+    target: &WorkspaceTarget,
+) -> Result<Workspace, Failure> {
+    let missing = || Failure::Product(ReadRefusal::WorkspaceUnavailable {});
+    let (path, runner, target) = location(services, store, target)?;
     let registry = services.runners();
+    let placement = Placement {
+        registry: registry.clone(),
+        runner: runner.clone(),
+    };
     let remote = registry.services(&runner).map_err(|reason| {
         Failure::Placement(super::super::super::sessions::runner_views::refusal(
             &super::super::super::sessions::runner_views::label(&runner, &registry.rows()),
@@ -87,7 +130,7 @@ pub(super) fn saved(
             ExecutionEnvironmentConfig::default(),
             backend,
         )
-        .map_err(|_| missing())?;
+        .map_err(|_| placement.refusal().map_or_else(missing, Failure::Placement))?;
         if environment.root() != path {
             return Err(missing());
         }
@@ -124,6 +167,8 @@ pub(super) fn saved(
     Ok(Workspace {
         environment,
         identity,
+        placement: Some(placement),
+        target,
     })
 }
 

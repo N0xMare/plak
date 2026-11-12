@@ -13,7 +13,7 @@ pub struct WorkspaceTarget {
 }
 
 /// Exact bytes. Rendering and incremental UTF-8 decoding belong to the client.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FileContent {
     pub revision: String,
@@ -40,7 +40,7 @@ pub enum FileKind {
     Directory,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FileMatch {
     pub path: String,
@@ -48,6 +48,17 @@ pub struct FileMatch {
     pub column: u64,
     pub bytes_b64: String,
     pub truncated: bool,
+}
+
+impl std::fmt::Debug for FileContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FileContent(<redacted>)")
+    }
+}
+impl std::fmt::Debug for FileMatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FileMatch(<redacted>)")
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
