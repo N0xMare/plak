@@ -4980,7 +4980,13 @@ verdicts) are addressed, the session profile and workspace chrome states.
   an explicit detach-only `goodbye`: the sole writer drains queued batches,
   writes `bye` once and half-closes its write side. The request never blocks
   on the transport, admits no later sends and sends no session stop. It is
-  idempotent across handles and their later drops. The receiver stays alive
+  idempotent across handles and their later drops. The last handle's drop
+  waits up to two seconds for the sole writer to drain queued batches, write
+  `bye` and finish its write-half shutdown, or fail/close. This also waits for
+  a previously requested explicit goodbye and never sends a second `bye`.
+  A stalled writer can outlive the bound: timeout is not delivery evidence and
+  does not reclassify writes or cancel a write that already started.
+  The receiver stays alive
   to drain observations, responses and delivery dispositions; unwritten and
   started-write classification and the answer deadline do not change. A late
   attach or move after goodbye never submits buffered intents or reattaches.

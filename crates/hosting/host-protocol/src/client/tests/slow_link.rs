@@ -73,6 +73,30 @@ fn release(gate: &Gate) {
 }
 
 #[test]
+fn last_handle_drop_is_bounded_when_the_writer_is_stalled() {
+    let (mut host, sender, receiver, gate, writing) = gated();
+    *lock(&gate.0) = true;
+    sender.request_operation(Op::Ping).unwrap();
+    writing.recv_timeout(Duration::from_secs(3)).unwrap();
+    let (report, complete) = mpsc::channel();
+    let dropping = thread::spawn(move || {
+        let started = Instant::now();
+        drop((sender, receiver));
+        report.send(started.elapsed()).unwrap();
+    });
+    let elapsed = complete
+        .recv_timeout(DROP_DRAIN_TIMEOUT + Duration::from_secs(1))
+        .unwrap();
+    assert!(elapsed >= DROP_DRAIN_TIMEOUT);
+    assert!(elapsed < DROP_DRAIN_TIMEOUT + Duration::from_secs(1));
+    release(&gate);
+    dropping.join().unwrap();
+    assert_eq!(host.request().1, Op::Ping);
+    assert_eq!(host.read(), ClientFrame::Bye);
+    assert_eq!(host.lines.read_line(&mut String::new()).unwrap(), 0);
+}
+
+#[test]
 fn goodbye_preserves_unwritten_and_started_write_dispositions() {
     let (mut host, sender, receiver, gate, writing) = gated();
     *lock(&gate.0) = true;

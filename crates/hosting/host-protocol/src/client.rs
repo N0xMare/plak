@@ -271,10 +271,12 @@ struct Connection<P: ProtocolExtension> {
 
 /// The `bye` frame's line, written without the extension's bounds.
 const BYE_LINE: &str = "{\"frame\":\"bye\"}\n";
+const DROP_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 impl<P: ProtocolExtension> Drop for Connection<P> {
     fn drop(&mut self) {
         self.goodbye();
+        self.inner.outbox.wait_finished(DROP_DRAIN_TIMEOUT);
     }
 }
 
@@ -530,6 +532,7 @@ where
     let writing = Arc::downgrade(&inner);
     let outgoing = Arc::clone(&inner.outbox);
     thread::spawn(move || {
+        let _completion = outgoing.completion();
         let result = outgoing.run(writer, || {
             if let Some(inner) = writing.upgrade() {
                 inner.retry_control();
@@ -637,7 +640,10 @@ impl<P: ProtocolExtension> WireSender<P> {
     /// are refused. It never sends a session stop. Retain the receiver to
     /// drain observations, responses and [`WireReceiver::try_unsent`] after
     /// the host closes: unwritten and started-write dispositions are unchanged.
-    /// Dropping the handles afterwards sends no second `bye`.
+    /// Dropping the last handle waits up to two seconds for this writer to
+    /// finish (or fail/close), including after an explicit goodbye, without
+    /// sending a second `bye`. A stalled writer can outlive that bound; timeout
+    /// does not prove delivery or change any write's disposition.
     pub fn goodbye(&self) {
         self.connection.goodbye();
     }
@@ -923,6 +929,7 @@ impl<P: ProtocolExtension> WireReceiver<P> {
     /// Requests the same detach-only goodbye as [`WireSender::goodbye`],
     /// retaining this receiver to drain the connection and its dispositions.
     /// Repeated requests and later handle drops send no second `bye`.
+    /// The last handle's drop waits up to two seconds for writer completion.
     pub fn goodbye(&self) {
         self.connection.goodbye();
     }

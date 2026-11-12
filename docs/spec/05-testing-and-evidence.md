@@ -3944,6 +3944,14 @@ they do not schedule emissions, reorder frames or weaken the exact control
 subsequence. Negative tooling tests pin identity separation, nonempty probe
 retention and rejection of reordered required controls.
 
+The native-client immediate-exit regression repeats 200 real subprocess
+connections, alternating implicit drop and explicit goodbye before drop. Each
+child queues a control frame, drops both handles and exits immediately; the
+peer must receive that frame followed by exactly one `bye`. A serial gated
+writer test pins the two-second last-handle drop bound without changing
+unwritten/started-write dispositions. Captures require `bye` on every real
+connection, including reconnects.
+
 Only three explicitly named read-only requests and their acknowledgements may
 interleave: `refresh_composer_chrome` (timer-driven chrome), `resync_transcript`
 (resync at a reconnect sequence boundary), and `list_agent_acknowledgements`

@@ -7,6 +7,9 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Fixed native-client exits losing `bye`: last-handle drop now waits up to two
+  seconds for the sole writer to drain and finish, even after explicit goodbye.
+
 - Add consented host-console writes for named accounts, masked write-only keys,
   cancellable subscription login, logout and explicit refresh, plus etag-checked
   home configuration, template and profile publication. Client protocol 6 becomes

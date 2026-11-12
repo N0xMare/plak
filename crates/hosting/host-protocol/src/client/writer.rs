@@ -1,7 +1,7 @@
 //! Bounded, atomic blob/request batches. Withdrawal and starting a write
 //! share a lock: once withdrawn, no byte of that batch can reach the pipe.
 
-use super::{Arc, Condvar, Mutex, Write, lock};
+use super::{Arc, Condvar, Duration, Mutex, Write, lock};
 use std::collections::VecDeque;
 use std::io;
 use std::sync::Weak;
@@ -26,6 +26,23 @@ struct Pending {
     closed: bool,
     finishing: bool,
     goodbye: bool,
+    completion: WriterCompletion,
+}
+
+#[derive(Default)]
+enum WriterCompletion {
+    #[default]
+    Pending,
+    Finished,
+}
+
+pub(super) struct Completion<'a>(&'a Queue);
+
+impl Drop for Completion<'_> {
+    fn drop(&mut self) {
+        lock(&self.0.pending).completion = WriterCompletion::Finished;
+        self.0.changed.notify_all();
+    }
 }
 
 struct Batch {
@@ -101,6 +118,20 @@ impl Ticket {
 }
 
 impl Queue {
+    pub(super) fn completion(&self) -> Completion<'_> {
+        Completion(self)
+    }
+
+    pub(super) fn wait_finished(&self, timeout: Duration) {
+        drop(
+            self.changed
+                .wait_timeout_while(lock(&self.pending), timeout, |pending| {
+                    !matches!(pending.completion, WriterCompletion::Finished) && !pending.closed
+                })
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+    }
+
     pub(super) fn push(self: &Arc<Self>, lines: String) -> io::Result<Ticket> {
         self.reserve(lines, None)
     }
