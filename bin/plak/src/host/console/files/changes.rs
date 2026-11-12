@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
-const TTL: Duration = Duration::from_secs(60);
+const TTL: Duration = Duration::from_millis(super::LIMITS.changes_token_ttl_ms);
 #[derive(Default)]
 pub(super) struct State {
     results: BTreeMap<(HostPrincipal, WorkspaceTarget), Snapshot>,
@@ -41,10 +41,10 @@ impl State {
                     .chain(self.pending.iter())
                     .filter(|(principal, _)| principal == &context.principal)
                     .count()
-                    >= 4)
+                    >= super::LIMITS.changes_targets_per_principal as usize)
         {
             return Err(RequestRefusal::RateLimited {
-                retry_after_ms: 60_000,
+                retry_after_ms: super::LIMITS.changes_token_ttl_ms,
             });
         }
         if !self.results.contains_key(&key) {
@@ -60,13 +60,10 @@ impl State {
         instance: String,
         status: execution::ChangesStatus,
     ) -> Result<HostResponse, ReadRefusal> {
-        if status.entries.len() > 2_000 {
+        if status.entries.len() as u64 > super::LIMITS.changes_entries {
             return Err(failure(WorkspaceReadFailure::TooLarge));
         }
         let encoded = serde_json::to_vec(&status).map_err(|_| failure(WorkspaceReadFailure::Io))?;
-        if encoded.len() > PAGE as usize {
-            return Err(failure(WorkspaceReadFailure::TooLarge));
-        }
         let revision = plakous::model::sha256_hex(&[&encoded]);
         let mut snapshot = Snapshot {
             generation: context.host_generation,
@@ -389,10 +386,21 @@ mod tests {
         );
         let mut full = status();
         full.entries.resize(2_000, full.entries[0].clone());
-        assert!(
-            state
-                .publish(&context(), target("full"), "instance".into(), full)
-                .is_err()
+        let response = state
+            .publish(&context(), target("full"), "instance".into(), full)
+            .unwrap();
+        let HostResponse::ChangesStatus { status } = response else {
+            panic!("status")
+        };
+        assert_eq!(status.entries.len(), 2_000);
+        assert!(!status.truncated);
+        assert!(serde_json::to_vec(&status).unwrap().len() <= PAGE as usize);
+        assert_eq!(
+            state.results[&(context().principal, target("full"))]
+                .status
+                .entries
+                .len(),
+            2_000
         );
     }
 

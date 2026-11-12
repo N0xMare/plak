@@ -6725,6 +6725,11 @@ Paired startup passes that same build constant as
 runner's gate too. Neither an environment variable nor a client field can
 turn Git on in a build without it.
 
+A dropped unkeyed workspace-construction probe releases its host pending-reply
+slot and sends Cancel. This cleanup does not retire an effect-call key or change
+other call kinds' completion ownership. Operator inspection applies its own
+absolute deadline to these synchronous construction ports (chapter 04 §2.1).
+
 The runner seam keeps a read's `OperationClass::EffectCall` context intact:
 it identifies the model call and its placement-hold eligibility, not an effect
 to deduplicate. The host and runner classify the verb's read-only semantics
@@ -6985,7 +6990,9 @@ fifo or device — is skipped without being opened, and a child whose open or
 metadata fails is skipped too. Only an entry that vanished between the listing
 and the open is silently ignored; every other skipped entry is counted and
 reported in the query result, and the search tool surfaces that count. **A
-directory entry the walk cannot traverse never fails the query.** When a query's
+directory entry the walk cannot traverse never fails the query.** A non-UTF-8
+child name is likewise skipped and counted; a requested query root with an
+invalid name still refuses. When a query's
 glob has a literal leading directory prefix with no wildcard, the walk starts at
 that prefix instead of the root; pruning changes only which entries are visited,
 never how a path is named or which containment rule applies.
@@ -6997,7 +7004,12 @@ git's precedence: the deepest rule that speaks about a path decides, and a
 rules are read through the already-open directory descriptor with `O_NOFOLLOW`,
 and the descriptor walk above still does every open, so ignore rules can prune
 but never widen what is reachable. An ignored directory is pruned before it is
-opened. `.git` and `.jj` are never walked; other dot entries (`.github`,
+opened. Every observed directory entry, including ignored, administrative,
+unreadable and nonregular entries, consumes the tree-entry budget; only `.`
+and `..` are exempt. This bounds enumeration even when no content is admitted.
+These shared rules apply to agent grep/glob and list tools as well as operator
+queries. `.git` and `.jj` are excluded case-insensitively and never walked;
+other dot entries (`.github`,
 `.cargo`) are walked unless ignored. A path glob is relative to the query root:
 a pattern without `/` matches the file name at any depth, a pattern with `/`
 matches the root-relative path, `*` and `?` stay within one component, `**`

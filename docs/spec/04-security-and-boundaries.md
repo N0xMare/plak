@@ -230,7 +230,9 @@ nonblocking regular-file opens as contained file reads (§2.6).
 Operator Files/Changes are narrower than agent file tools: only the selected
 saved workspace is readable, without global-skills, job-output or home
 exceptions. Absolute paths, parent traversal, NUL, non-UTF-8 names and `.git`
-administrative paths are refused. All symlink traversal is refused through the
+administrative paths are refused as requested paths. Listings and searches
+skip non-UTF-8 result names and count them as skipped entries instead of
+failing the whole response. All symlink traversal is refused through the
 descriptor-relative no-follow backend, including links back inside the root.
 Regular-file reads open nonblocking and fstat before reading, so FIFOs/devices
 cannot hold a viewer waiting for a writer. Execution deadlines and cancellation
@@ -242,6 +244,17 @@ Both the product home and resolved `$XDG_STATE_HOME/plak` (fallback
 Local unrestricted roots are no exemption. Local inspection checks on the
 serving machine; paired inspection enforces protection on the execution
 machine. Equal path spellings on other machines confer no authority.
+The request deadline includes saved-workspace resolution: synchronous remote
+construction probes have the same absolute deadline and cancel on disconnect,
+so a stalled probe cannot retain an inspection slot beyond that budget.
+Each Files/Changes action, including capability and quota refusals, uses the
+operator audit guard. Audit targets contain only validated session/node ids,
+never paths, literals, file content, cursors or entry tokens.
+
+Agent grep/glob and list tools share the bounded repository walk: ignored,
+administrative and unreadable entries consume its tree-entry budget, and
+`.git`/`.jj` names are excluded case-insensitively. This is a common traversal
+bound, not additional operator authority over agent tools.
 
 Every workspace path a file or search tool names is lowered onto a
 **workspace-relative suffix** before I/O. A relative path must contain no
@@ -868,8 +881,8 @@ before allocating bounded execution work. This does not sanitize workspace
 secrets or make an admitted shell a sandbox.
 
 An admitted web client is an operator acting with the serving user's authority.
-In addition to session and directory operations, enabled protocol-8 console
-capabilities manage provider accounts and publish allowlisted home configuration.
+In addition to session and directory operations, console capabilities introduced in protocol 7 (current client protocol 8)
+manage provider accounts and publish allowlisted home configuration.
 These are real credential and deferred-execution powers, not cosmetic settings.
 Capability switches and confirmations are product controls, not an OS sandbox
 or a boundary against that user's already-admitted agent shell.
@@ -1614,7 +1627,8 @@ Chapter 03 §6.1 holds the exact list.
 ### 3.6 Login surfaces
 
 Native login, logout, explicit refresh and API-key management are explicit
-operator operations on CLI or protocol-8 host console. Web writes require the
+operator operations on CLI or host console, introduced in protocol 7
+(current client protocol 8). Web writes require the
 startup-captured credentials-write capability; verified same-user sockets are
 trusted, with identical consent and quota checks. Private clients own forms,
 not credential authority; the retained embedded Providers view remains

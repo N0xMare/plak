@@ -19,7 +19,7 @@ kills that home's daemons until none remain. A real-daemon regression places
 a successor and a startup probe before the exit observation, on both supported
 platforms.
 
-Runner placement contracts pin protocol 5 frames, process payloads and read-only
+Runner placement contracts pin protocol 6 frames, process payloads and read-only
 root-identity probes without modifying earlier version pins. Deterministic runner
 tests distinguish an answered/Acked start from a committed terminal driver operation:
 same-owner live reconnect preserves foreground work, terminal cleanup stops only the
@@ -3989,7 +3989,7 @@ public runtime invariant.
 The local-face settings payload/dispatch fixture saves runtime settings with
 nondefault terminal preferences in the host configuration. Skipped appearance
 fields never travel in that payload, and the durable `[tui]` values remain
-unchanged. It does not authorize remote legacy saves: protocol-8 role checks
+unchanged. It does not authorize remote legacy saves: role checks introduced in protocol 7 (current client protocol 8)
 refuse those before product dispatch.
 Product DTO contract examples decode and re-encode unchanged before and after
 extraction, including temporary reload values. Schema extraction is checked
@@ -5986,7 +5986,8 @@ The witness neither changes nor replaces the existing recovery crash contracts.
 They use synthetic account IDs and no provider traffic. No persisted format
 or binding input changes are introduced by the consent machinery.
 
-Protocol-7 account write contracts use temporary isolated homes and synthetic
+Account-write contracts, introduced in protocol 7 (current client protocol 8),
+use temporary isolated homes and synthetic
 secrets to verify write-only replies, Debug/input-bound redaction, exact named
 creation/removal and absent-slot isolation. Attempt-table contracts verify
 connection/principal/generation theft refusal, disconnect cancellation, fresh
@@ -5997,7 +5998,24 @@ that authorize URLs and device codes never appear in Debug. Existing
 facade callback/device/claim/CAS tests remain the provider workflow authority;
 no paid or live login is required by offline gates.
 
-Protocol-8 configuration evidence covers two-connection stale forms, CLI and
+Saved-workspace review contracts exercise ProductSessions dispatch with local
+`roots:null`, independently isolated product and XDG homes in both overlap
+directions, and configured READY remote runners with different bytes at an
+equal pathname. A stalled construction probe must drop its future and release
+its quota slot inside the advertised Files deadline. A framed-client drop
+contract checks that an abandoned unkeyed construction probe removes its
+pending reply and sends Cancel; unrelated call kinds keep their existing
+completion ownership. Audit contracts require
+one bounded content-free record for each action, including capability and rate
+refusals. Listing/search contracts skip and count invalid UTF-8 result names,
+retain valid results, and count a skipped file once even with multiple matches.
+Continuation contracts preserve a cursor after read failure, refuse exhausted
+capacity before I/O, and consume it after success. Changes contracts retain
+2,000 entries independently of client-output truncation; welcome limits are
+compared with live admission buckets and host capacity.
+
+Configuration-write evidence, introduced in protocol 7 (current client
+protocol 8), covers two-connection stale forms, CLI and
 external-byte/comment edits, exact allowlists, invalid values with unchanged
 bytes, referenced definitions, built-in collisions, typed template/profile
 publication and comment preservation. Atomic publication probes cover write,

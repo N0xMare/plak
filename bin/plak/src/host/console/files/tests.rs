@@ -1,6 +1,8 @@
 use super::*;
 use plakd_wire_types::console::ConfiguredSwitches;
 
+mod saved;
+
 fn context() -> HostRequestContext {
     HostRequestContext {
         principal: HostPrincipal::Socket(1),
@@ -220,20 +222,22 @@ async fn nonregular_symlinks_invalid_names_and_oversized_files_refuse_promptly()
         "data",
     )
     .unwrap();
-    assert!(matches!(
-        console
-            .inspect(
-                &context(),
-                HostRequest::FilesList {
-                    target: target(),
-                    path: ".".into()
-                },
-                workspace(root.path())
-            )
-            .await
-            .unwrap(),
-        HostResponse::Refused { .. }
-    ));
+    let result = console
+        .inspect(
+            &context(),
+            HostRequest::FilesList {
+                target: target(),
+                path: ".".into(),
+            },
+            workspace(root.path()),
+        )
+        .await
+        .unwrap();
+    let HostResponse::FilesList { entries, summary } = result else {
+        panic!("list")
+    };
+    assert!(entries.iter().any(|entry| entry.path == "plain"));
+    assert!(summary.skipped_entries >= 1);
 }
 
 #[tokio::test]
@@ -249,7 +253,7 @@ async fn cursors_bind_principal_target_generation_path_and_execution_identity() 
         panic!("content")
     };
     let token = content.next.unwrap();
-    let mut state = console.files.lock().unwrap();
+    let state = console.files.lock().unwrap();
     let identity = root.path().to_str().unwrap();
     let mut other = context();
     other.principal = HostPrincipal::Socket(9);

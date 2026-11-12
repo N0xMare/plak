@@ -1,4 +1,4 @@
-use super::{Console, HostPrincipal, HostRequest, INPUT, PAGE};
+use super::{Console, HostPrincipal, HostRequest, INPUT, LIMITS, PAGE};
 use plakous_host_protocol::wire::RequestRefusal;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, PoisonError};
@@ -8,6 +8,12 @@ use std::time::Instant;
 pub(super) struct State {
     principals: BTreeMap<HostPrincipal, Quota>,
     active: usize,
+}
+#[cfg(test)]
+impl State {
+    pub(super) const fn active_for_test(&self) -> usize {
+        self.active
+    }
 }
 struct Bucket {
     available: u64,
@@ -52,9 +58,13 @@ struct Quota {
 impl Quota {
     fn new(now: Instant) -> Self {
         Self {
-            requests: Bucket::new(10, 20, now),
-            output: Bucket::new(4 * 1024 * 1024, 8 * 1024 * 1024, now),
-            input: Bucket::new(32 * 1024 * 1024, 64 * 1024 * 1024, now),
+            requests: Bucket::new(LIMITS.requests_per_second, LIMITS.request_burst, now),
+            output: Bucket::new(
+                LIMITS.output_bytes_per_second,
+                LIMITS.output_burst_bytes,
+                now,
+            ),
+            input: Bucket::new(LIMITS.hash_bytes_per_second, LIMITS.hash_burst_bytes, now),
             search: VecDeque::new(),
             active: 0,
             reads: 0,
@@ -104,7 +114,7 @@ impl Guard {
         state
             .principals
             .retain(|_, q| q.active > 0 || now.duration_since(q.requests.at).as_secs() < 120);
-        if state.active >= 16
+        if state.active as u64 >= LIMITS.inflight_host
             || (!state.principals.contains_key(principal) && state.principals.len() >= 1024)
         {
             return Err(refused());
@@ -119,8 +129,10 @@ impl Guard {
         quota
             .search
             .retain(|at| now.duration_since(*at).as_secs() < 60);
-        if (read && quota.reads >= 2)
-            || (search && (quota.searches > 0 || quota.search.len() >= 6))
+        if (read && quota.reads as u64 >= LIMITS.reads_inflight_per_principal)
+            || (search
+                && (quota.searches as u64 >= LIMITS.search_inflight_per_principal
+                    || quota.search.len() as u64 >= LIMITS.search_starts_per_minute))
             || (changes && quota.changes > 0)
             || quota.requests.available == 0
             || quota.output.available < output
@@ -181,6 +193,61 @@ impl Drop for Guard {
 mod tests {
     use super::super::tests::{console, target};
     use super::*;
+
+    #[tokio::test]
+    async fn advertised_limits_match_live_admission_buckets_and_host_capacity() {
+        let root = tempfile::tempdir().unwrap();
+        let console = console(root.path());
+        let welcome = console.welcome(
+            &HostPrincipal::Socket(1),
+            &super::super::super::admission_limits(),
+        );
+        let limits = welcome.console.workspace_limits;
+        let quota = Quota::new(Instant::now());
+        assert_eq!(
+            (quota.requests.rate, quota.requests.burst),
+            (limits.requests_per_second, limits.request_burst)
+        );
+        assert_eq!(
+            (quota.output.rate, quota.output.burst),
+            (limits.output_bytes_per_second, limits.output_burst_bytes)
+        );
+        assert_eq!(
+            (quota.input.rate, quota.input.burst),
+            (limits.hash_bytes_per_second, limits.hash_burst_bytes)
+        );
+        let request = HostRequest::FilesList {
+            target: target(),
+            path: ".".into(),
+        };
+        let guards = (0..limits.inflight_host)
+            .map(|uid| {
+                Guard::admit(
+                    console.clone(),
+                    &HostPrincipal::Socket(u32::try_from(uid).unwrap()),
+                    &request,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            Guard::admit(
+                console.clone(),
+                &HostPrincipal::Socket(u32::try_from(limits.inflight_host).unwrap()),
+                &request
+            )
+            .is_err()
+        );
+        drop(guards);
+        assert_eq!(
+            super::super::request_budget(&request),
+            std::time::Duration::from_millis(limits.file_deadline_ms)
+        );
+        assert_eq!(
+            super::super::request_budget(&HostRequest::ChangesStatus { target: target() }),
+            std::time::Duration::from_millis(limits.changes_deadline_ms)
+        );
+    }
 
     #[tokio::test]
     async fn request_burst_refills_without_allocating_refused_work() {

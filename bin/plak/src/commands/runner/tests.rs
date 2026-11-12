@@ -173,3 +173,25 @@ fn machine_build_identity_is_atomic_and_cannot_be_reinterpreted() {
             .starts_with(home.build_directory())
     );
 }
+#[test]
+fn workspace_admission_excludes_xdg_state_in_both_directions() {
+    let root = tempfile::tempdir().unwrap();
+    let product = root.path().join("product");
+    let state = root.path().join("xdg/plak");
+    let safe = root.path().join("work");
+    for path in [&product, &state, &safe, &state.join("inner")] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    let scope = ExecutionEnvironmentScope::Run(uuid::Uuid::new_v4().try_into().unwrap());
+    let roots = vec![std::fs::canonicalize(root.path()).unwrap()];
+    for candidate in [
+        state.join("inner"),
+        state.clone(),
+        state.parent().unwrap().to_path_buf(),
+    ] {
+        assert!(
+            admitted_environment(scope, &roots, &product, &state, &candidate, &candidate).is_err()
+        );
+    }
+    assert!(admitted_environment(scope, &roots, &product, &state, &safe, &safe).is_ok());
+}

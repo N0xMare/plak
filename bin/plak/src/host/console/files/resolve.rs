@@ -101,6 +101,8 @@ pub(super) fn saved(
     services: &crate::shell::services::Services,
     store: &plakous_recursive_subagents_store::SqliteTreeStore,
     target: &WorkspaceTarget,
+    expires: std::time::Instant,
+    cancellation: plakous::model::CancellationToken,
 ) -> Result<Workspace, Failure> {
     let missing = || Failure::Product(ReadRefusal::WorkspaceUnavailable {});
     let (path, runner, target) = location(services, store, target)?;
@@ -121,6 +123,18 @@ pub(super) fn saved(
     );
     let (environment, identity) = if let Some(remote) = remote {
         let backend = remote.backend();
+        let link = std::sync::Arc::new(BoundedProbe {
+            link: backend.link(),
+            expires,
+            cancellation,
+        });
+        let backend = std::sync::Arc::new(
+            plakous::tools::runner::RunnerBackend::new(
+                serde_json::to_value(backend.descriptor()).map_err(|_| missing())?,
+                link,
+            )
+            .map_err(|_| missing())?,
+        );
         let instance = registry.client(&runner).ok_or_else(missing)?.instance();
         let identity = format!("{runner}:{instance}");
         let environment = plakous::tools::runner::runner_environment(
@@ -170,6 +184,40 @@ pub(super) fn saved(
         placement: Some(placement),
         target,
     })
+}
+
+// Construction uses synchronous probe ports. Bound their underlying futures too,
+// so dropping the async requester cannot leave its quota pinned in spawn_blocking.
+struct BoundedProbe {
+    link: std::sync::Arc<dyn plakous::tools::runner::RunnerLink>,
+    expires: std::time::Instant,
+    cancellation: plakous::model::CancellationToken,
+}
+impl plakous::tools::runner::RunnerLink for BoundedProbe {
+    fn call(
+        &self,
+        call: plakous::tools::runner::RunnerCall,
+    ) -> plakous::tools::runner::RunnerCallFuture {
+        if std::time::Instant::now() >= self.expires || self.cancellation.is_cancelled() {
+            return Box::pin(std::future::ready(Err(
+                plakous::tools::runner::RunnerFailure::ReadInterrupted(
+                    "inspection deadline".into(),
+                ),
+            )));
+        }
+        let call_cancellation = call.cancellation().clone();
+        let answer = self.link.call(call);
+        let expires = tokio::time::Instant::from_std(self.expires);
+        let cancellation = self.cancellation.clone();
+        Box::pin(async move {
+            let _cancel = super::Cancel(call_cancellation);
+            tokio::select! {
+                result = answer => result,
+                () = cancellation.cancelled() => Err(plakous::tools::runner::RunnerFailure::ReadInterrupted("inspection cancelled".into())),
+                () = tokio::time::sleep_until(expires) => Err(plakous::tools::runner::RunnerFailure::ReadInterrupted("inspection deadline".into())),
+            }
+        })
+    }
 }
 
 pub(crate) fn protect(root: &Path, protected: &[PathBuf]) -> Result<(), ReadRefusal> {

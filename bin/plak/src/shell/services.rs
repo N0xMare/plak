@@ -84,13 +84,19 @@ impl Services {
     }
     #[cfg(test)]
     pub(crate) fn for_home(paths: PlakPaths) -> Self {
+        let state = paths.home().join("test-state");
+        Self::for_home_with_state(paths, state)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_home_with_state(paths: PlakPaths, state: std::path::PathBuf) -> Self {
         Self {
             runner_ownership: None,
             runners: plakous::runner::RunnerRegistry::default(),
             runner_overlap: Arc::default(),
             local_daemon: Arc::default(),
             clock: crate::commands::application::test_clock(),
-            home: Home::explicit(paths.clone(), paths.home().join("test-state")),
+            home: Home::explicit(paths, state),
             session_records: OnceLock::new(),
             telemetry_sink_factory: None,
             extra_telemetry_sink: OnceLock::new(),

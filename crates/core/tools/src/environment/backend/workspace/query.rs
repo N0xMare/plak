@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rustix::fs::Dir;
@@ -86,17 +86,13 @@ pub(super) fn walk_repository_query_directories(
         for child_name in children {
             check_workspace_control(control)?;
             let relative = directory_path.join(&child_name);
-            validate_path_bytes(&relative)?;
-            let child = match open_directory_entry_for_query(&directory, &child_name) {
-                RepositoryQueryEntry::Opened(child) => child,
-                RepositoryQueryEntry::Vanished | RepositoryQueryEntry::Symlink => continue,
-                RepositoryQueryEntry::Skipped => {
-                    entries_skipped = entries_skipped.saturating_add(1);
-                    continue;
-                }
-            };
-            let Ok(metadata) = child.metadata() else {
+            if validate_path_bytes(&relative).is_err() {
                 entries_skipped = entries_skipped.saturating_add(1);
+                continue;
+            }
+            let Some((child, metadata)) =
+                open_query_child(&directory, &child_name, &mut entries_skipped)
+            else {
                 continue;
             };
             if metadata.is_dir() {
@@ -138,6 +134,27 @@ pub(super) fn walk_repository_query_directories(
         entries_skipped,
         stop_reason,
     })
+}
+
+fn open_query_child(
+    directory: &fs::File,
+    name: &Path,
+    skipped: &mut usize,
+) -> Option<(fs::File, fs::Metadata)> {
+    let child = match open_directory_entry_for_query(directory, name) {
+        RepositoryQueryEntry::Opened(child) => child,
+        RepositoryQueryEntry::Vanished | RepositoryQueryEntry::Symlink => return None,
+        RepositoryQueryEntry::Skipped => {
+            *skipped = skipped.saturating_add(1);
+            return None;
+        }
+    };
+    if let Ok(metadata) = child.metadata() {
+        Some((child, metadata))
+    } else {
+        *skipped = skipped.saturating_add(1);
+        None
+    }
 }
 
 pub(super) fn retain_repository_query_glob_matches(

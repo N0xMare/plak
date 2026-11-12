@@ -34,6 +34,7 @@ type ForegroundReporter =
     Arc<dyn Fn(&str, &plakous_runner_protocol::StoppedForeground) + Send + Sync>;
 
 mod foreground;
+mod probe;
 
 /// How long the host waits on its runner.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1090,10 +1091,7 @@ impl Inner {
     }
 
     async fn call(&self, call: RunnerCall) -> Result<Value, RunnerFailure> {
-        let gate = call
-            .owner()
-            .filter(|_| !call.verb().is_read() && call.verb() != RunnerVerb::ForegroundStop)
-            .map(|owner| self.foreground.gate(&owner.line().to_string()));
+        let gate = self.foreground.call_gate(&call);
         let foreground_guard = match &gate {
             Some(gate) => Some(gate.lock().await),
             None => None,
@@ -1143,6 +1141,7 @@ impl Inner {
             }
         }
         drop(foreground_guard);
+        let _probe = probe::PendingProbe::new(self, &request_id, &call);
         let deadline = tokio::time::Instant::now() + window;
         let expiry = tokio::time::sleep(expiring.recheck(window));
         tokio::pin!(expiry);

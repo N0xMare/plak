@@ -13,8 +13,9 @@ Operator-facing instructions live in
 
 ## 1. Files and discovery
 
-Protocol-7 host operators may edit a home template through confirmed, typed
-`template_put`. This is the explicit exception to file-authored template
+Host operators may edit a home template through confirmed, typed
+`template_put`, introduced in protocol 7 (current client protocol 8). This is
+the explicit exception to file-authored template
 bodies: ordinary config saves and `config_patch` still refuse body changes.
 User-profile writes use root/working_set only; built-ins are read-only. No
 console operation accepts a filesystem destination or raw TOML.
@@ -191,7 +192,8 @@ sessions bind, written by the Agents tab's Set as default (or by `plak config
 set` and the file); Fork now never writes them, and local Use now, offered only
 while a session has no model and the home has no loadable default, also records
 its profile as the default. Remote Use now binds only its session; publishing
-home defaults requires the confirmed protocol-8 etag path. Changing the
+home defaults requires the confirmed etag path introduced in protocol 7
+(current client protocol 8). Changing the
 default never changes an existing session, which keeps the root template and
 working set its tree froze, re-resolved against the template files at its next
 `/reload` (chapter 02 §5.5).
@@ -877,11 +879,12 @@ section; omitted keys continue to follow defaults. Every root binding edit copie
 fresh unshared name (`default`, `default-2`, and so on), preserving its other
 fields and leaving the previous template file untouched. Saves preflight all
 existing template bodies and refuse changes to them; edit user or project
-files directly, or use the protocol-8 confirmed home `template_put` exception.
+files directly, or use the confirmed home `template_put` exception introduced
+in protocol 7 (current client protocol 8).
 `config_patch` never edits a body. Unrelated settings saves do not rewrite templates.
 
-Protocol-8 `config_patch`, `template_put` and `profile_put` publish one file
-per request. All require a matching content etag and one-use consent; stale
+`config_patch`, `template_put` and `profile_put`, introduced in protocol 7
+(current client protocol 8), publish one file per request. All require a matching content etag and one-use consent; stale
 etags return conflict and no write. The shared home publication lock covers
 read-current, comparison, complete candidate validation and atomic publication;
 CLI home key edits reread under this lock as well. Recheck actual bytes before

@@ -33,6 +33,10 @@ one cross-build carrier (a build imports its own and the previous version).
   `try_lease_only` and `ReconciliationPermit` expose the same scheduling gate
   to product-owned stop retries. No persisted, wire or binding format changes.
 
+- Harden workspace inspection audit coverage, deadline-bounded placement probes,
+  UTF-8 result filtering and retryable continuation authority; retain full bounded
+  Changes snapshots independently of client-response truncation.
+
 - Add consented host-console writes for named accounts, masked write-only keys,
   cancellable subscription login, logout and explicit refresh, plus etag-checked
   home configuration, template and profile publication. Client protocol 6 becomes

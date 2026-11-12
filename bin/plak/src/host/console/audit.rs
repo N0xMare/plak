@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 #[derive(Default)]
 pub(super) struct State {
     windows: BTreeMap<HostPrincipal, Window>,
+    #[cfg(test)]
+    pub(super) records: Vec<serde_json::Value>,
 }
 struct Window {
     since: Instant,
@@ -63,10 +65,14 @@ impl Console {
         };
         let (old_etag, new_etag) =
             revisions.map_or((None, None), |(old, new)| (Some(old), Some(new)));
-        eprintln!(
-            "{}",
-            serde_json::json!({"audit":"operator", "time_ms":super::clock::now_ms(), "login":login, "face":face, "connection_id":context.connection_id, "request_id":context.request_id, "action":action, "target":target, "category":category, "old_etag":old_etag,"new_etag":new_etag,"aggregated_operations":suppressed})
-        );
+        let record = serde_json::json!({"audit":"operator", "time_ms":super::clock::now_ms(), "login":login, "face":face, "connection_id":context.connection_id, "request_id":context.request_id, "action":action, "target":target, "category":category, "old_etag":old_etag,"new_etag":new_etag,"aggregated_operations":suppressed});
+        #[cfg(test)]
+        self.audit
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .records
+            .push(record.clone());
+        eprintln!("{record}");
     }
 }
 
@@ -80,6 +86,11 @@ pub(super) struct Guard {
 impl Guard {
     pub fn new(console: Arc<Console>, context: HostRequestContext, request: &HostRequest) -> Self {
         let action = match request {
+            HostRequest::FilesList { .. } => "files_list",
+            HostRequest::FilesRead { .. } => "files_read",
+            HostRequest::FilesSearch { .. } => "files_search",
+            HostRequest::ChangesStatus { .. } => "changes_status",
+            HostRequest::ChangesDiff { .. } => "changes_diff",
             HostRequest::OperatorPrepare { .. } => "operator_prepare",
             HostRequest::OperatorConfirm { .. } => "operator_confirm",
             HostRequest::AccountKeySet { .. } => "account_key_set",
@@ -103,18 +114,38 @@ impl Guard {
             HostRequest::ProfilePut { .. } => "profile_put",
             _ => "console_read",
         };
-        let target = match request {
-            HostRequest::TemplatePut { id, .. } | HostRequest::ProfilePut { id, .. }
-                if crate::product_config::validate_template_name(id).is_ok() =>
-            {
-                Some(id.clone())
+        let target = if let Some(target) = super::files::target(request) {
+            let safe = |id: &str| {
+                !id.is_empty()
+                    && id.len() <= 256
+                    && id
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+            };
+            safe(&target.session).then(|| {
+                target
+                    .node
+                    .as_deref()
+                    .filter(|node| safe(node))
+                    .map_or_else(
+                        || target.session.clone(),
+                        |node| format!("{}:{node}", target.session),
+                    )
+            })
+        } else {
+            match request {
+                HostRequest::TemplatePut { id, .. } | HostRequest::ProfilePut { id, .. }
+                    if crate::product_config::validate_template_name(id).is_ok() =>
+                {
+                    Some(id.clone())
+                }
+                HostRequest::ConfigPatch { .. } => Some("home".into()),
+                _ => super::account_writes::action(request)
+                    .as_ref()
+                    .and_then(super::operator::account)
+                    .filter(|id| super::accounts::exact(id).is_ok())
+                    .map(str::to_owned),
             }
-            HostRequest::ConfigPatch { .. } => Some("home".into()),
-            _ => super::account_writes::action(request)
-                .as_ref()
-                .and_then(super::operator::account)
-                .filter(|id| super::accounts::exact(id).is_ok())
-                .map(str::to_owned),
         };
         Self {
             console,

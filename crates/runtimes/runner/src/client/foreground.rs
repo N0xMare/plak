@@ -25,6 +25,12 @@ struct Tracked {
 }
 
 impl Calls {
+    pub(super) fn call_gate(&self, call: &RunnerCall) -> Option<Arc<tokio::sync::Mutex<()>>> {
+        call.owner()
+            .filter(|_| !call.verb().is_read() && call.verb() != RunnerVerb::ForegroundStop)
+            .map(|owner| self.gate(&owner.line().to_string()))
+    }
+
     pub(super) fn gate(&self, line: &str) -> Arc<tokio::sync::Mutex<()>> {
         let mut gates = lock(&self.gates);
         gates.retain(|_, gate| gate.strong_count() != 0);

@@ -25,29 +25,44 @@ use plakous_hosted::host_service::wire::HostReadTask;
 use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
-pub(super) const PAGE: u64 = 256 * 1024;
-const INPUT: u64 = 16 * 1024 * 1024;
+pub(super) const PAGE: u64 = LIMITS.page_bytes;
+const INPUT: u64 = LIMITS.file_bytes;
 
 pub(super) fn welcome_limits() -> WorkspaceReadLimits {
-    WorkspaceReadLimits {
-        page_bytes: PAGE,
-        file_bytes: INPUT,
-        reads_inflight_per_principal: 2,
-        requests_per_second: 10,
-        request_burst: 20,
-        output_bytes_per_second: 4 * 1024 * 1024,
-        output_burst_bytes: 8 * 1024 * 1024,
-        hash_bytes_per_second: 32 * 1024 * 1024,
-        hash_burst_bytes: 64 * 1024 * 1024,
-        inflight_host: 16,
-        search_starts_per_minute: 6,
-        search_inflight_per_principal: 1,
-        file_deadline_ms: 2_000,
-        changes_deadline_ms: 5_000,
-        changes_entries: 2_000,
-        changes_targets_per_principal: 4,
-        changes_token_ttl_ms: 60_000,
-    }
+    LIMITS
+}
+
+pub(super) const LIMITS: WorkspaceReadLimits = WorkspaceReadLimits {
+    page_bytes: 256 * 1024,
+    file_bytes: 16 * 1024 * 1024,
+    reads_inflight_per_principal: 2,
+    requests_per_second: 10,
+    request_burst: 20,
+    output_bytes_per_second: 4 * 1024 * 1024,
+    output_burst_bytes: 8 * 1024 * 1024,
+    hash_bytes_per_second: 32 * 1024 * 1024,
+    hash_burst_bytes: 64 * 1024 * 1024,
+    inflight_host: 16,
+    search_starts_per_minute: 6,
+    search_inflight_per_principal: 1,
+    file_deadline_ms: 2_000,
+    changes_deadline_ms: 5_000,
+    changes_entries: 2_000,
+    changes_targets_per_principal: 4,
+    changes_token_ttl_ms: 60_000,
+};
+
+fn request_budget(request: &HostRequest) -> Duration {
+    Duration::from_millis(
+        if matches!(
+            request,
+            HostRequest::ChangesStatus { .. } | HostRequest::ChangesDiff { .. }
+        ) {
+            LIMITS.changes_deadline_ms
+        } else {
+            LIMITS.file_deadline_ms
+        },
+    )
 }
 
 #[derive(Default)]
@@ -80,6 +95,22 @@ impl Console {
         services: crate::shell::services::Services,
         tree: Arc<plakous_recursive_subagents_store::SqliteTreeStore>,
     ) -> HostReadTask<plakd_wire_types::PlakExtension> {
+        let mut audit = super::audit::Guard::new(Arc::clone(self), context.clone(), &request);
+        let task = self.workspace_request_inner(context, request, services, tree);
+        Box::pin(async move {
+            let result = task.await;
+            audit.finish(&result);
+            result
+        })
+    }
+
+    fn workspace_request_inner(
+        self: &Arc<Self>,
+        context: HostRequestContext,
+        request: HostRequest,
+        services: crate::shell::services::Services,
+        tree: Arc<plakous_recursive_subagents_store::SqliteTreeStore>,
+    ) -> HostReadTask<plakd_wire_types::PlakExtension> {
         let this = Arc::clone(self);
         Box::pin(async move {
             if !matches!(context.principal, HostPrincipal::Socket(_))
@@ -98,16 +129,26 @@ impl Console {
             };
             let this = Arc::clone(&this);
             let task = runtime.spawn(async move {
+                let budget = request_budget(&request);
+                let expires = std::time::Instant::now() + budget;
+                let cancellation = plakous::model::CancellationToken::new();
+                let _cancel = Cancel(cancellation.clone());
                 let Some(target) = target(&request).cloned() else {
                     unreachable!()
                 };
                 let resolved = tokio::task::spawn_blocking(move || {
-                    (resolve::saved(&services, &tree, &target), guard)
+                    (
+                        resolve::saved(&services, &tree, &target, expires, cancellation),
+                        guard,
+                    )
                 })
                 .await;
                 let Ok((workspace, _guard)) = resolved else {
                     return Ok(refused(ReadRefusal::WorkspaceUnavailable {}));
                 };
+                if std::time::Instant::now() >= expires {
+                    return Ok(refused(failure(WorkspaceReadFailure::Deadline)));
+                }
                 let workspace = match workspace {
                     Ok(workspace) => workspace,
                     Err(resolve::Failure::Product(reason)) => return Ok(refused(reason)),
@@ -122,7 +163,8 @@ impl Console {
                 } else {
                     None
                 };
-                this.inspect(&context, request, workspace).await
+                this.inspect_until(&context, request, workspace, expires)
+                    .await
             });
             let _cancel = super::Cancel {
                 abort: task.abort_handle(),
@@ -133,23 +175,34 @@ impl Console {
         })
     }
 
+    #[cfg(test)]
     async fn inspect(
         &self,
         context: &HostRequestContext,
         request: HostRequest,
         workspace: resolve::Workspace,
     ) -> Result<HostResponse, RequestRefusal> {
+        let expires = std::time::Instant::now() + request_budget(&request);
+        self.inspect_until(context, request, workspace, expires)
+            .await
+    }
+
+    async fn inspect_until(
+        &self,
+        context: &HostRequestContext,
+        request: HostRequest,
+        workspace: resolve::Workspace,
+        expires: std::time::Instant,
+    ) -> Result<HostResponse, RequestRefusal> {
         let placement = workspace.placement.clone();
         let cancellation = plakous::model::CancellationToken::new();
         let _cancel = Cancel(cancellation.clone());
-        let budget_ms = if matches!(
-            request,
-            HostRequest::ChangesStatus { .. } | HostRequest::ChangesDiff { .. }
-        ) {
-            5_000
-        } else {
-            2_000
-        };
+        let budget_ms = u64::try_from(
+            expires
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis(),
+        )
+        .unwrap_or(0);
         let deadline = u64::try_from(super::clock::now_ms())
             .unwrap_or(0)
             .saturating_add(budget_ms);
@@ -248,23 +301,25 @@ impl Console {
         let bytes = max_bytes.unwrap_or(PAGE);
         let start = WorkspaceReadSliceRequest::start(&path, bytes).map_err(backend)?;
         let normalized = utf8(start.path())?;
-        let read = if let Some(cursor) = cursor {
+        let read = if let Some(ref cursor) = cursor {
             let cursor = self
                 .files
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .cursors
-                .get(&cursor, context, &target, &workspace.identity, &normalized)?;
+                .get(cursor, context, &target, &workspace.identity, &normalized)?;
             WorkspaceReadSliceRequest::resume(cursor, bytes)
         } else {
             Ok(start)
         }
         .map_err(backend)?;
+        let reservation = cursors::Reservation::admit(self, context, cursor.as_deref())?;
         let slice = workspace
             .environment
             .read_workspace(read, control)
             .await
             .map_err(backend)?;
+        reservation.consume();
         let next = slice
             .next()
             .map(|cursor| {
@@ -288,12 +343,17 @@ impl Console {
 }
 
 fn list_reply(result: &RepositoryQueryResult) -> Result<HostResponse, ReadRefusal> {
+    let mut summary = summary(result);
     let entries = result
         .matches()
         .iter()
-        .map(|row| {
-            Ok(FileEntry {
-                path: utf8(row.path())?,
+        .filter_map(|row| {
+            let Some(path) = row.path().to_str() else {
+                summary.skipped_entries += 1;
+                return None;
+            };
+            Some(FileEntry {
+                path: path.into(),
                 kind: if row.is_directory() {
                     FileKind::Directory
                 } else {
@@ -302,27 +362,32 @@ fn list_reply(result: &RepositoryQueryResult) -> Result<HostResponse, ReadRefusa
                 size: row.entry_size(),
             })
         })
-        .collect::<Result<_, ReadRefusal>>()?;
-    let mut summary = summary(result);
+        .collect::<Vec<_>>();
     let entries = bounded_rows(entries, &mut summary)?;
     Ok(HostResponse::FilesList { entries, summary })
 }
 
 fn search_reply(result: &RepositoryQueryResult) -> Result<HostResponse, ReadRefusal> {
+    let mut summary = summary(result);
+    let mut skipped = std::collections::BTreeSet::new();
     let matches = result
         .matches()
         .iter()
-        .map(|row| {
-            Ok(FileMatch {
-                path: utf8(row.path())?,
+        .filter_map(|row| {
+            let Some(path) = row.path().to_str() else {
+                skipped.insert(row.path());
+                return None;
+            };
+            Some(FileMatch {
+                path: path.into(),
                 line: row.line(),
                 column: row.column(),
                 bytes_b64: b64(row.bytes()),
                 truncated: row.truncated(),
             })
         })
-        .collect::<Result<_, ReadRefusal>>()?;
-    let mut summary = summary(result);
+        .collect::<Vec<_>>();
+    summary.skipped_entries += skipped.len() as u64;
     let matches = bounded_rows(matches, &mut summary)?;
     Ok(HostResponse::FilesSearch { matches, summary })
 }
@@ -467,6 +532,7 @@ fn summary(result: &RepositoryQueryResult) -> FileQuerySummary {
 }
 fn backend(error: ExecutionBackendError) -> ReadRefusal {
     failure(match error.kind() {
+        ExecutionBackendErrorKind::Denied => WorkspaceReadFailure::PermissionDenied,
         ExecutionBackendErrorKind::ResourceLimit => WorkspaceReadFailure::FileTooLarge,
         ExecutionBackendErrorKind::Conflict => WorkspaceReadFailure::ContentChanged,
         ExecutionBackendErrorKind::WorkspacePolicy

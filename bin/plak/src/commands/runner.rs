@@ -128,11 +128,7 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         plakous::model::RunId::try_from(uuid::Uuid::new_v4())
             .map_err(|error| CliFailure::new(error.to_string()))?,
     );
-    let environment =
-        ExecutionEnvironment::host(scope, first, first, ExecutionEnvironmentConfig::default())
-            .map_err(|error| {
-                CliFailure::new(format!("runner root {}: {error}", first.display()))
-            })?;
+    let environment = initial_environment(scope, first)?;
     let roots = config
         .roots
         .iter()
@@ -145,12 +141,14 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         .map_err(CliFailure::new)?
         .join("plak");
     let workspaces = Arc::new(move |root: &Path, cwd: &Path| {
-        if !home::admitted_workspace(&workspace_roots, &outside, root)
-            || home::overlaps_home(root, &protected_state)
-        {
-            return Err(plakous::tools::runner::workspace_refusal());
-        }
-        ExecutionEnvironment::host(scope, root, cwd, ExecutionEnvironmentConfig::default())
+        admitted_environment(
+            scope,
+            &workspace_roots,
+            &outside,
+            &protected_state,
+            root,
+            cwd,
+        )
     });
     let extension = vcs_extension(&config, excluded.clone());
     let workspace_catalog = plakous::runner::WorkspaceCatalog::machine(
@@ -205,6 +203,30 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         Err(daemon::DaemonError::AlreadyServing(_)) => Ok(()),
         Err(error) => Err(CliFailure::new(error.to_string())),
     }
+}
+
+fn initial_environment(
+    scope: ExecutionEnvironmentScope,
+    root: &Path,
+) -> CliResult<ExecutionEnvironment> {
+    ExecutionEnvironment::host(scope, root, root, ExecutionEnvironmentConfig::default())
+        .map_err(|error| CliFailure::new(format!("runner root {}: {error}", root.display())))
+}
+
+fn admitted_environment(
+    scope: ExecutionEnvironmentScope,
+    roots: &[std::path::PathBuf],
+    excluded: &Path,
+    protected_state: &Path,
+    root: &Path,
+    cwd: &Path,
+) -> Result<ExecutionEnvironment, plakous::tools::ExecutionEnvironmentError> {
+    if !home::admitted_workspace(roots, excluded, root)
+        || home::overlaps_home(root, protected_state)
+    {
+        return Err(plakous::tools::runner::workspace_refusal());
+    }
+    ExecutionEnvironment::host(scope, root, cwd, ExecutionEnvironmentConfig::default())
 }
 
 /// `plak runner serve --local`: this home's home-local runner (spec 01

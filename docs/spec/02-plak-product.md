@@ -4015,9 +4015,13 @@ with ignore rules, at most 1,000 entries, 10,000 traversed entries and 256 KiB.
 Literal search accepts at most 1 KiB and independently bounds 1,000 files,
 10,000 entries, 1 MiB/file, 16 MiB input, 200 matches, 2 KiB/match and 256 KiB
 output. Skipped counts and stop reasons distinguish incomplete from empty.
+Non-UTF-8 result names are skipped and counted, not a failure of the listing
+or search; requested paths must still be UTF-8. Cursors are consumed only
+after a successful read, and continuation capacity is reserved before I/O.
 Case-insensitive queries use ASCII folding; non-ASCII literals require
 case-sensitive matching.
-The execution-side deadline is 2 s; cancellation drops pending I/O.
+The execution-side deadline is 2 s including saved-workspace resolution and
+remote construction probes; cancellation drops pending I/O.
 
 All workspace inspection shares principal-scoped request and returned-byte
 budgets: 10 requests/s, burst 20; 4 MiB/s, burst 8 MiB; at most 16 in flight
@@ -4039,12 +4043,15 @@ process retains at most 64 results, including pending new-target reservations;
 a full pool refuses before executor dispatch. Omitted-root and explicit-root
 targets resolve to the same result slot before admission. One
 Changes request runs per principal, sharing file budgets, with a 5 s execution
-deadline and 256 KiB output limit. Untracked files open through Files, never
+deadline and 256 KiB client-output limit. The retained snapshot may hold the
+full 2,000 entries even when the response truncates; internal identity bytes
+do not consume the client-response limit. Untracked files open through Files, never
 `diff --no-index`; binary patches expose bounded numstat only. Non-colocated
 repositories using jj answer `vcs_unsupported`; colocated ones say git view.
 The fixed execution policy is chapter 04 §2.6.
 
-Protocol-8 `config_patch`, `template_put` and `profile_put` use the P6
+`config_patch`, `template_put` and `profile_put`, introduced in protocol 7
+(current client protocol 8), use the P6
 attachment-free seam, typed allowlisted fields and mandatory if_match etags.
 Prepare/confirm binds the exact target/revision; conflict never auto-merges.
 Publication replies distinguish Saved from published/durability-uncertain
@@ -5069,7 +5076,8 @@ verdicts) are addressed, the session profile and workspace chrome states.
 
 ### 4.5 The web endpoint
 
-Protocol-7 console operations have structured host audit evidence: time,
+Console operations introduced in protocol 7 (current client protocol 8)
+have structured host audit evidence: time,
 verified login or socket uid, face, connection/request ID, action and safe
 target, outcome category and applicable revision. This is an ordinary bounded
 host log, not durable execution authority. Never log frames, challenges,
@@ -5182,7 +5190,8 @@ does not inherit another connection's pending answers.
 
 ### 4.6 `plak host`
 
-Protocol-7 native login runs in a dedicated account-service worker, never the
+Native login, introduced in protocol 7 (current client protocol 8), runs in
+a dedicated account-service worker, never the
 session intent mailbox or host action loop. Only the owning authenticated
 connection receives its challenge; poll returns sanitized phase, not a replay
 of the challenge. Disconnect cancels the attempt. No attempt or completion
@@ -7589,7 +7598,7 @@ These are in-process host observations, not new JSONL v1 lines.
 ### 5.5 The Menu
 
 Host-client Accounts/Providers/login and config-builder presentation belongs
-to the private clients. Both use the protocol-8 host operator requests, host
+to the private clients. Both use host operator requests introduced in protocol 7 (current client protocol 8), host
 identity, consequence/Confirm affordance, masked secret input and typed
 remedies. No credential form uses the chat composer. The retained embedded
 menu's local-face operations remain unchanged; this public increment does not
@@ -7606,7 +7615,8 @@ The embedded local-face Usage's explicit `[refresh]` action (§7.2) appears only
 vertical whose credential needs a refresh (an expired access token, a
 `RefreshRequired` posture, or SuperGrok's reclaimable quarantine), refreshes it
 and re-reads Usage; the retained embedded view offers CLI login repair.
-Protocol-7 private host clients use Accounts/Providers operator forms instead. The label is muted until the pointer
+Private host clients use Accounts/Providers operator forms introduced in
+protocol 7 (current client protocol 8) instead. The label is muted until the pointer
 hovers it or Up/Down has focused it.
 
 No Menu read blocks the host's action loop. A subscription posture read takes
@@ -9979,7 +9989,8 @@ product observations without moving product vocabulary into the agent sink.
 
 ### 7.2 Usage and allowances
 
-Protocol-7 `account_refresh` is a confirmed, explicit claimed refresh, not
+`account_refresh`, introduced in protocol 7 (current client protocol 8), is
+a confirmed, explicit claimed refresh, not
 `accounts_status`/`accounts_usage` or automatic login. The exact account is
 selected throughout; an unaccepted/inactive integration refuses before provider
 I/O. Credential waits retain their existing scoped readiness recheck and
@@ -10344,7 +10355,8 @@ variables, spelled the same way `plak doctor` spells them.
 
 ### 8.2 The two credential routes
 
-The attachment-free protocol-8 write requests select the same exact
+The attachment-free write requests, introduced in protocol 7 (current client
+protocol 8), select the same exact
 `<vertical>/<name>` as the CLI: `account_key_set/clear`, `account_logout`,
 `account_refresh`, `account_remove` and `account_login_start/complete/poll/cancel`.
 The Add account form supplies a validated new reference to key set or login;
@@ -10436,7 +10448,8 @@ caller-supplied endpoint, discovered client id, or copied token can promote a
 profile's provenance.
 
 **Login, logout and API keys are explicit operator operations:** the CLI and
-protocol-8 authenticated host console share the account service. Private TUI
+authenticated host console (introduced in protocol 7; current client protocol 8)
+share the account service. Private TUI
 and web forms consume that wire contract; they do not own credentials. The
 retained embedded TUI does not run an OAuth flow or capture key material; the Providers tab reads status
 and prints the exact command (§5.5).
