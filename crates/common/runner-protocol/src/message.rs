@@ -350,6 +350,14 @@ pub enum Refusal {
 pub enum HostFrame {
     /// The answer to [`Hello`].
     Bind(Bind),
+    /// Paired, exact-triple, read-only qualification without a host-instance
+    /// registration, owner lease, operation journal or line adoption.
+    Qualify {
+        /// The paired home whose workspace consent admits these reads.
+        host_id: String,
+        /// Must match protocol, source revision and flavor exactly.
+        version: VersionTriple,
+    },
     /// One request.
     Request(Request),
     /// Cancels a running request; its answer still comes.

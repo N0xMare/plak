@@ -885,6 +885,20 @@ Serving hosts share a home-wide runner-custody lock, while standalone runner
 composition requires it exclusively. Standalone imports refuse through the running
 host before dialing rather than racing a socket probe with a new bind.
 
+Paired read-only qualification (chapter 01 §8.4) is a separate, authenticated
+exact-triple mode, not a normal bind or an expanded unpaired inspection. The
+paired home can read only the runner-admitted workspace/configuration/skill
+data needed to qualify a destination. The closed read list is ProbeWorkspace,
+workspace options/validation/read and instruction reads, all ownerless BuildRead
+with a verified digest and no replay. No effects, host-instance registration,
+owner lease, line transfer/adoption, sweep, floor or journal write occurs.
+Line-table queries are refused because ordinary listing can expire leases.
+Other request classes and control/stream frames are refused; home-local
+process-only daemons do not offer the mode. Existing root admission, protected
+home exclusions and runner-owned skill authority apply without fallback to
+the host filesystem. A successful qualification session leaves no durable
+runner authority. Unpaired inspection remains Lines/Ping only.
+
 Runner placement uses pin-backed stable machine identity and effective canonical
 roots even while a runner is offline. Same-machine pin/root admission and local
 workspace admission share a home-local cross-process file lock through the local

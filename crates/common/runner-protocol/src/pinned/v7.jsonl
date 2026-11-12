@@ -1,4 +1,5 @@
 {"host_id":"host","host_instance":"instance","inspect":true,"kind":"bind","version":{"flavor":"flavor","protocol":7,"source_revision":"revision"}}
+{"host_id":"host","kind":"qualify","version":{"flavor":"flavor","protocol":7,"source_revision":"revision"}}
 {"kind":"cancel","request_id":"request"}
 {"kind":"preempt","request_id":"request","value":"steer"}
 {"kind":"ack","request_id":"request"}

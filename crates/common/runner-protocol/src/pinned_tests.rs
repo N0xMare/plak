@@ -73,6 +73,7 @@ const fn refusal_variant(refusal: &Refusal) -> &'static str {
 const fn host_variant(frame: &HostFrame) -> &'static str {
     match frame {
         HostFrame::Bind(_) => "bind",
+        HostFrame::Qualify { .. } => "qualify",
         HostFrame::Request(_) => "request",
         HostFrame::Cancel { .. } => "cancel",
         HostFrame::Preempt { .. } => "preempt",
@@ -190,6 +191,10 @@ fn host_frames() -> Vec<HostFrame> {
             version: version(),
             inspect: true,
         }),
+        HostFrame::Qualify {
+            host_id: "host".into(),
+            version: version(),
+        },
         HostFrame::Cancel {
             request_id: "request".into(),
         },
@@ -308,7 +313,7 @@ fn encoded() -> String {
         names.dedup();
         names.len()
     };
-    assert_eq!(named(hosts.iter().map(host_variant).collect()), 9);
+    assert_eq!(named(hosts.iter().map(host_variant).collect()), 10);
     assert_eq!(named(runners.iter().map(runner_variant).collect()), 15);
     assert_eq!(named(classes().iter().map(class_variant).collect()), 6);
     assert_eq!(named(events().iter().map(event_variant).collect()), 3);

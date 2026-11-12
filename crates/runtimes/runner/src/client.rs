@@ -147,6 +147,7 @@ struct Inner {
     connected: tokio::sync::Notify,
     foreground_reporter: Mutex<Option<ForegroundReporter>>,
     bind: Bind,
+    qualification: bool,
     windows: ClientWindows,
     /// Bound to this home's home-local runner (spec 01 §8.4): any build of
     /// the same protocol version is bound, and only process-session calls
@@ -321,7 +322,7 @@ impl RunnerClient {
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
-        Self::connect_with(stream, bind, windows, journal, false).await
+        Self::connect_with(stream, bind, windows, journal, false, false).await
     }
 
     /// [`Self::connect_journaled`] to this home's home-local runner: a
@@ -342,7 +343,32 @@ impl RunnerClient {
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
-        Self::connect_with(stream, bind, windows, journal, true).await
+        Self::connect_with(stream, bind, windows, journal, true, false).await
+    }
+
+    /// Opens paired read-only qualification without binding a host instance.
+    /// Only exact-triple workspace/configuration reads are allowed; no journal,
+    /// owner transfer, stream or effect is admitted.
+    ///
+    /// # Errors
+    /// The peer does not answer Hello or its exact version triple differs.
+    /// Pairing is confirmed by the first answered workspace read.
+    pub async fn connect_qualification<S>(
+        stream: S,
+        host_id: String,
+        version: VersionTriple,
+        windows: ClientWindows,
+    ) -> Result<(Self, Hello), ConnectError>
+    where
+        S: AsyncRead + AsyncWrite + Send + 'static,
+    {
+        let bind = Bind {
+            host_id,
+            host_instance: String::new(),
+            version,
+            inspect: false,
+        };
+        Self::connect_with(stream, bind, windows, None, false, true).await
     }
 
     async fn connect_with<S>(
@@ -351,6 +377,7 @@ impl RunnerClient {
         windows: ClientWindows,
         journal: Option<Arc<dyn CallJournal>>,
         home_local: bool,
+        qualification: bool,
     ) -> Result<(Self, Hello), ConnectError>
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
@@ -369,6 +396,7 @@ impl RunnerClient {
                 bind,
                 windows,
                 home_local,
+                qualification,
                 journal,
                 left: Mutex::new(left),
                 ids: uuid::Uuid::new_v4().simple().to_string(),
@@ -495,6 +523,11 @@ impl RunnerClient {
     /// A failed send is `NotSent`; a lost or unanswered read is
     /// `ReadInterrupted`. A runner refusal remains `Unavailable`.
     pub async fn lines(&self) -> Result<Vec<LineStatus>, RunnerFailure> {
+        if self.inner.qualification {
+            return Err(RunnerFailure::NotSent(
+                "qualification never inspects or sweeps lines".into(),
+            ));
+        }
         let request_id = self.inner.next_id("q");
         let (waiter, answer) = oneshot::channel();
         lock(&self.inner.state)
@@ -606,7 +639,15 @@ impl RunnerClient {
         let (sender, frames) = mpsc::unbounded_channel();
         let closer = CancellationToken::new();
         tokio::spawn(write_frames(writer, frames, closer.clone()));
-        let _ = sender.send(HostFrame::Bind(self.inner.bind.clone()));
+        let first = if self.inner.qualification {
+            HostFrame::Qualify {
+                host_id: self.inner.bind.host_id.clone(),
+                version: self.inner.bind.version.clone(),
+            }
+        } else {
+            HostFrame::Bind(self.inner.bind.clone())
+        };
+        let _ = sender.send(first);
         let connection = {
             let mut state = lock(&self.inner.state);
             let restarted = again && state.instance != hello.instance;
@@ -837,7 +878,7 @@ impl Inner {
                     .pending
                     .get(&request_id)
                     .is_some_and(|pending| !keyed(&pending.request));
-                if acknowledge && !unkeyed {
+                if acknowledge && !unkeyed && !self.qualification {
                     self.send(HostFrame::Ack {
                         request_id: request_id.clone(),
                     });
@@ -920,6 +961,11 @@ impl Inner {
         &self,
         owner: &LineOwner,
     ) -> Result<Vec<plakous_runner_protocol::StoppedForeground>, RunnerFailure> {
+        if self.qualification {
+            return Err(RunnerFailure::NotSent(
+                "qualification never transfers an owner".into(),
+            ));
+        }
         let (instance, connection) = {
             let state = lock(&self.state);
             (state.instance.clone(), state.connection)
@@ -1113,6 +1159,7 @@ impl Inner {
     }
 
     async fn call(&self, call: RunnerCall) -> Result<Value, RunnerFailure> {
+        self.check_qualification(&call)?;
         let gate = self.foreground.call_gate(&call);
         let foreground_guard = match &gate {
             Some(gate) => Some(gate.lock().await),
@@ -1184,12 +1231,7 @@ impl Inner {
                 }
                 () = cancellation.cancelled(), if !cancel_sent => {
                     cancel_sent = true;
-                    if !self.send(HostFrame::Cancel { request_id: request_id.clone() }) {
-                        lock(&self.state).pending.remove(&request_id);
-                        return Err(expiring.lost(
-                            "the call was cancelled while the runner was unreachable",
-                        ));
-                    }
+                    self.cancel_request(&request_id, expiring)?;
                 }
                 changed = preempt.changed(), if yields => {
                     yields = changed.is_ok();
@@ -1339,7 +1381,39 @@ impl Inner {
         }
     }
 
+    fn check_qualification(&self, call: &RunnerCall) -> Result<(), RunnerFailure> {
+        if self.qualification
+            && !crate::service::qualification::request_allowed(
+                &self.request(call, call.owner().map(wire_owner)),
+            )
+        {
+            return Err(RunnerFailure::NotSent(
+                "qualification permits only unowned workspace build reads".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn cancel_request(&self, request_id: &str, expiring: Expiring) -> Result<(), RunnerFailure> {
+        if self.qualification {
+            let mut state = lock(&self.state);
+            state.pending.remove(request_id);
+            state.closer.cancel();
+            return Err(expiring.lost("the qualification read was cancelled"));
+        }
+        if !self.send(HostFrame::Cancel {
+            request_id: request_id.to_owned(),
+        }) {
+            lock(&self.state).pending.remove(request_id);
+            return Err(expiring.lost("the call was cancelled while the runner was unreachable"));
+        }
+        Ok(())
+    }
+
     fn send_preempt(&self, request_id: &str, value: ToolPreempt) {
+        if self.qualification {
+            return;
+        }
         self.send(HostFrame::Preempt {
             request_id: request_id.to_owned(),
             value: encode_preempt(value),
@@ -1352,6 +1426,11 @@ impl Inner {
         self: Arc<Self>,
         call: RunnerCall,
     ) -> Result<(Value, RunnerStreams), RunnerFailure> {
+        if self.qualification {
+            return Err(RunnerFailure::NotSent(
+                "qualification does not open streams".into(),
+            ));
+        }
         let value = self.call(call).await?;
         let Some(stream) = value.get("stream").and_then(Value::as_u64) else {
             return Err(RunnerFailure::Refused(

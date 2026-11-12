@@ -39,6 +39,7 @@ use crate::streams::{
 
 mod foreground;
 mod operator;
+pub(crate) mod qualification;
 
 /// One runner process: its identity, its environment and the state every
 /// connection to it shares. A new service is a new instance.
@@ -377,10 +378,19 @@ impl RunnerService {
         let mut reader = FrameStream::new(reader);
         let _ = sender.send(RunnerFrame::Hello(self.inner.hello.clone()));
         let bind = tokio::time::timeout(self.inner.dead, reader.next::<HostFrame>()).await;
-        let Ok(Some(Ok(HostFrame::Bind(bind)))) = bind else {
-            let _ = sender.send(refused(None, Refusal::Unbound));
-            closer.cancel();
-            return;
+        let bind = match bind {
+            Ok(Some(Ok(HostFrame::Bind(bind)))) => bind,
+            Ok(Some(Ok(HostFrame::Qualify { host_id, version }))) => {
+                self.serve_qualification(&host_id, &version, &mut reader, &sender, &closer)
+                    .await;
+                closer.cancel();
+                return;
+            }
+            _ => {
+                let _ = sender.send(refused(None, Refusal::Unbound));
+                closer.cancel();
+                return;
+            }
         };
         if let Some(refusal) = self.bind_refusal(&bind) {
             let _ = sender.send(refused(None, refusal));
@@ -774,7 +784,7 @@ impl RunnerService {
             HostFrame::Ping { nonce } => {
                 let _ = sender.send(RunnerFrame::Pong { nonce });
             }
-            HostFrame::Bind(_) => {
+            HostFrame::Bind(_) | HostFrame::Qualify { .. } => {
                 let _ = sender.send(refused(
                     None,
                     Refusal::Malformed {

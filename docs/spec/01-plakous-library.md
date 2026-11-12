@@ -6190,7 +6190,9 @@ needs no stream because that instance can spawn no terminals. All terminal state
 is process-local; product schema and state key are unchanged (chapter 02 §2.2). `RunnerConnectionRevision::is_current` is a read-only connection
 fence for that registry, not permission to skip namespace table reconciliation.
 
-**Runner protocol v7.** `plakous-runner-protocol` defines what a host and a
+**Runner protocol v7.** This batch adds both `OperatorControl` and paired
+read-only qualification (`Qualify`), without a separate protocol increment.
+`plakous-runner-protocol` defines what a host and a
 runner say to each other over one byte stream, and `plakous-runner` implements
 both ends over an `ExecutionEnvironment` and joins them in process as a
 loopback (both published internal, chapter 06 §3, and reached from the facade
@@ -6360,7 +6362,7 @@ the normal recovery-required path before Ready. The driver's placement parking
   `local`; the one exception is the home-local runner, whose operations a
   host presents as the local runner's (`local_daemon_environment` supplies
   the descriptor and run-stable facts; its `Hello` descriptor is not used). The host answers `Bind { host_id, host_instance, version, inspect }`.
-  The runner refuses any frame before `Bind` (`Unbound`), a `Bind` of another
+  The runner refuses any frame before `Bind` or `Qualify` (`Unbound`), a `Bind` of another
   version, and a host whose identity its allowlist does not hold
   (`NotPaired`); the host refuses a runner of another version before any
   request. A `Bind` from a host instance that is already connected ends that
@@ -6373,6 +6375,24 @@ the normal recovery-required path before Ready. The driver's placement parking
   to have had no effect, and takes no new call on it. A call sent on an
   earlier connection, or replayed on this one, may have run there: it is
   `OutcomeUnknown` and its journal claim stays.
+- **Read-only qualification.** Instead of binding, a paired host may answer
+  Hello with `Qualify { host_id, version }`. All three version components
+  must match, and the runner's allowlist must admit the home. This mode is
+  unsupported on home-local process-only daemons. It never registers an
+  instance, enters an owner lease, touches owner floors or operation tables,
+  adopts a line, runs recovery or publishes placement Ready. It admits only
+  ownerless, non-replay `BuildRead` requests with the correct operation digest:
+  `workspace.options`, `workspace.validate`, `probe.workspace`, `workspace.read`
+  and `instructions.read`. Each uses the same runner-owned consent and protected
+  paths as its ordinary read; workspace environments are transient, not
+  registered. Ping is allowed. Every other class, verb or frame, including
+  OperatorControl, TransferOwner, line-table queries, acknowledgement, cancellation, preemption
+  and streams, is refused with InspectOnly. In particular, line listing is not
+  used as a probe because ordinary listing can expire leases. Pairing is proved
+  by the first successful workspace read. Ending qualification leaves no
+  durable runner record. Unpaired inspection remains limited to Lines/Ping;
+  qualification does not widen it. Normal bind and the ordered first-bind
+  reconciliation barrier still precede later effect admission.
 - **Liveness.** The host pings every 5 s. Either end treats a link it heard
   nothing on for 15 s as lost and closes it: the runner stops answering on
   it, ends its services and shuts its write half once what is queued is
