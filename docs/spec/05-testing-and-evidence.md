@@ -767,15 +767,17 @@ gate does not qualify the supported musl platform.
 `tools/gate/test-env.sh` is the one test environment. It exports `TMPDIR` from
 `tools/gate/test-tmpdir.sh`, `PLAK_HOME` (`$TMPDIR/plak-isolated-home`, mode
 0700), an empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. Its shell and
-command forms also unset the test-hook overrides `PLAK_TEST_SESSION_LEASE_SECONDS`
-and `PLAK_TEST_CELL_HELLO_MS` and the provider keys `OPENAI_API_KEY`,
+command forms also unset the test-hook overrides `PLAK_TEST_SESSION_LEASE_SECONDS`,
+`PLAK_TEST_CELL_HELLO_MS` and `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` and the provider keys `OPENAI_API_KEY`,
 `XAI_API_KEY`, `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`, so an operator's
 exported key never reaches an offline test. Every form also puts
 `$TMPDIR/plak-test-jj`, which holds only a `jj` link to the jj the tools check
 uses (chapter 06 §6), first on `PATH`: `PLAK_TEST_JJ` when set, else, with no
 `jj` on `PATH`, the newest pinned jj that `just dev-tools install` unpacked. Its `--json` form names only the variables it
-exports, `PATH` included when it changed; the live drivers keep their real keys.
-`dev-check.sh`
+exports, `PATH` included when it changed; the live drivers keep their real keys. Its
+`--unset-names` form prints the names the other forms unset, and the offline
+drivers that take `--json` (`crash-sweep.py`, `jj-tools.py compat`) drop exactly
+those, so no driver keeps a list of its own. `dev-check.sh`
 (with `--fresh`), `just dev coverage`, `perf-smoke.sh`, `crash-sweep.py`,
 `jj-tools.py compat` and the live drivers use it. `just nextest` runs the
 pinned cargo-nextest under it and passes recipe arguments as positional
@@ -3893,10 +3895,14 @@ modifying them. `plakous-runner`'s
 keeps service discovery distinct from explicit workspace admission.
 
 `an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists`
-is a serial wall-clock fixture: it waits the real five-minute interval with no
-test-only lifetime override, checks ordinary host persistence beside it, and
-owns both hosts' cleanup. The pure idle-clock test separately resets the full
-window on activity or kept work. Idle eligibility includes residents,
+is a serial wall-clock fixture: it runs both hosts with a five-second window
+through the `test-hooks` override `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` (a whole
+second from 1 through 300; anything else keeps 300 s, and other builds do not
+read it), waits that window for real, checks ordinary host persistence beside
+it, and owns both hosts' cleanup. A detached host start forwards the override;
+`tools/gate/test-env.sh` unsets it. The pure idle-clock test keeps the
+production five-minute window: it builds the clock through the production
+constructor and resets the full window on activity or kept work. Idle eligibility includes residents,
 opening/releasing workers, startup recovery and durable runner-stop debt; an
 unreadable directory is not proof of idleness. No test achieves idle exit by
 evicting a session.

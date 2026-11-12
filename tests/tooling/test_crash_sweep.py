@@ -18,6 +18,15 @@ TEST_ENV = json.dumps(
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+UNSET_NAMES = subprocess.check_output(
+    ["bash", str(ROOT / "tools/gate/test-env.sh"), "--unset-names"], text=True
+)
+
+
+def test_env_output(command, **kwargs):
+    return UNSET_NAMES if command[-1] == "--unset-names" else TEST_ENV
+
+
 SPEC = importlib.util.spec_from_file_location("crash_sweep", ROOT / "tools/dev/crash-sweep.py")
 SWEEP = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SWEEP)
@@ -34,7 +43,7 @@ class CrashSweepTests(unittest.TestCase):
                 "run",
                 return_value=subprocess.CompletedProcess([], 0, stdout=str(scratch) + "\n"),
             ),
-            patch.object(SWEEP.subprocess, "check_output", return_value=TEST_ENV),
+            patch.object(SWEEP.subprocess, "check_output", side_effect=test_env_output),
             patch.object(SWEEP.subprocess, "call", side_effect=results) as calls,
             patch.dict(
                 "os.environ",
@@ -44,6 +53,8 @@ class CrashSweepTests(unittest.TestCase):
                     "PLAK_CRASH_SWEEP_SHAPES": "final_only",
                     "PLAK_TEST_SESSION_LEASE_SECONDS": "1",
                     "PLAK_TEST_CELL_HELLO_MS": "1",
+                    "PLAK_TEST_HOST_IDLE_EXIT_SECONDS": "1",
+                    "OPENAI_API_KEY": "leaked",
                 },
             ),
         ):
@@ -81,6 +92,8 @@ class CrashSweepTests(unittest.TestCase):
             self.assertEqual(env["PLAK_CRASH_SWEEP_STRICT"], "1")
             self.assertNotIn("PLAK_TEST_SESSION_LEASE_SECONDS", env)
             self.assertNotIn("PLAK_TEST_CELL_HELLO_MS", env)
+            self.assertNotIn("PLAK_TEST_HOST_IDLE_EXIT_SECONDS", env)
+            self.assertNotIn("OPENAI_API_KEY", env)
             self.assertEqual(env["PLAK_CRASH_SWEEP_JOBS"], "8")
             self.assertEqual(env["PLAK_CRASH_SWEEP_SHAPES"], "code_mode_cell_final")
 

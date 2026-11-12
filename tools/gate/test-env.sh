@@ -4,6 +4,7 @@
 #   test_env="$(tools/gate/test-env.sh [--fresh])"; eval "$test_env"
 #   tools/gate/test-env.sh [--fresh] -- command  # export, then replace this process
 #   tools/gate/test-env.sh [--fresh] --json      # one JSON object for Python
+#   tools/gate/test-env.sh --unset-names         # what the other forms unset, one per line
 #
 # --fresh empties the shared per-checkout directory first (the gate). PLAK_HOME is
 # $TMPDIR/plak-isolated-home, mode 0700. GIT_CONFIG_GLOBAL is an empty file in
@@ -16,6 +17,13 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 source "$here/dev-tools-prefix.sh"
+# A leaked override would shorten every test, and a provider key the operator
+# exported would make tests see credentials. The shell snippet unsets them in
+# the caller; `-- command` unsets them before the command. --json keeps them:
+# the live drivers need real keys, and the offline Python drivers that take
+# --json drop the names --unset-names prints.
+leaked=(PLAK_TEST_SESSION_LEASE_SECONDS PLAK_TEST_CELL_HELLO_MS PLAK_TEST_HOST_IDLE_EXIT_SECONDS
+  OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY)
 fresh=()
 mode=shell
 cmd=()
@@ -23,8 +31,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --fresh) fresh=(--fresh); shift ;;
     --json) mode=json; shift ;;
+    --unset-names) printf '%s\n' "${leaked[@]}"; exit 0 ;;
     --) shift; cmd=("$@"); break ;;
-    *) echo "usage: test-env.sh [--fresh] [--json | -- command...]" >&2; exit 2 ;;
+    *) echo "usage: test-env.sh [--fresh] [--json | -- command...] | --unset-names" >&2; exit 2 ;;
   esac
 done
 
@@ -56,12 +65,6 @@ if [[ -n "${PLAK_TEST_JJ+set}" ]] || ! command -v jj >/dev/null 2>&1; then
   fi
 fi
 
-# A leaked override would shorten every test, and a provider key the operator
-# exported would make tests see credentials. The shell snippet unsets them in
-# the caller; `-- command` unsets them before the command. --json keeps them:
-# the live drivers need real keys.
-leaked=(PLAK_TEST_SESSION_LEASE_SECONDS PLAK_TEST_CELL_HELLO_MS
-  OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY)
 if [[ ${#cmd[@]} -gt 0 ]]; then
   unset "${leaked[@]}"
   exec "${cmd[@]}"

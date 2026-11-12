@@ -460,9 +460,15 @@ fn an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_per
     let Some(foreground_fixture) = super::fixture() else {
         return;
     };
-    let mut foreground = start(&foreground_fixture);
+    // The test-hooks window replaces the production 300 s, which the pure
+    // idle-clock test in `host/idle.rs` keeps. The foreground host gets the
+    // same short window, so its persistence is not the window's length.
+    let idle = "PLAK_TEST_HOST_IDLE_EXIT_SECONDS";
+    let window = Duration::from_secs(5);
+    let seconds = window.as_secs().to_string();
+    let mut foreground = start_env(&foreground_fixture, &[], &[(idle, seconds.clone())]);
     let started = StartedHome(fixture.home());
-    let mut bridge = Bridge::configured(&fixture, true, &[]);
+    let mut bridge = Bridge::configured(&fixture, true, &[(idle, &seconds)]);
     bridge.hello(WIRE_VERSION);
     assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
     assert!(started.pid().is_some());
@@ -470,14 +476,14 @@ fn an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_per
     let empty = Instant::now();
     while started.pid().is_some() {
         assert!(
-            empty.elapsed() < Duration::from_secs(360),
+            empty.elapsed() < window + Duration::from_secs(60),
             "auto-started host did not idle-exit"
         );
         std::thread::sleep(Duration::from_millis(100));
     }
     assert!(
-        empty.elapsed() >= Duration::from_secs(299),
-        "host exited before the five-minute idle window"
+        empty.elapsed() + Duration::from_secs(1) >= window,
+        "host exited before the idle window"
     );
     assert!(
         foreground

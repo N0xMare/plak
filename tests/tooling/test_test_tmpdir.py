@@ -266,11 +266,19 @@ class TestTmpdirSelectorTests(unittest.TestCase):
                 self.assertEqual(kept, [newest, nextest])
                 self.assertEqual(seen(dict(env, PLAK_TEST_JJ=""), form), [None, nextest])
 
+    def test_json_drivers_drop_what_test_env_unsets(self):
+        for path in ("tools/dev/crash-sweep.py", "tools/dev/jj-tools.py"):
+            with self.subTest(path=path):
+                source = (ROOT / path).read_text()
+                self.assertIn("--unset-names", source)
+                self.assertNotIn("PLAK_TEST_SESSION_LEASE_SECONDS", source)
+
     def test_test_env_unsets_overrides_and_provider_keys(self):
         script = ROOT / "tools/gate/test-env.sh"
         leaked = (
             "PLAK_TEST_SESSION_LEASE_SECONDS",
             "PLAK_TEST_CELL_HELLO_MS",
+            "PLAK_TEST_HOST_IDLE_EXIT_SECONDS",
             "OPENAI_API_KEY",
             "XAI_API_KEY",
             "ANTHROPIC_API_KEY",
@@ -282,6 +290,10 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             KEEP_ME="kept",
             **{name: "leaked" for name in leaked},
         )
+        names = subprocess.run(
+            ["bash", str(script), "--unset-names"], capture_output=True, text=True, timeout=20
+        )
+        self.assertEqual(tuple(names.stdout.split()), leaked, names.stderr)
         report = "import json, os; print(json.dumps(dict(os.environ)))"
         for command in (
             ["bash", str(script), "--", sys.executable, "-c", report],

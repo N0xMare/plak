@@ -111,6 +111,12 @@ pub(crate) fn runner_detached() -> bool {
     crate::environment::test_runner_detached()
 }
 
+/// The auto-started host's idle-exit window override, in whole seconds.
+#[allow(dead_code, reason = "headless builds do not start hosts")]
+pub(crate) fn host_idle_exit_seconds() -> Option<std::ffi::OsString> {
+    hook_environment("PLAK_TEST_HOST_IDLE_EXIT_SECONDS")
+}
+
 pub(crate) fn storage_capacity_override() -> Option<plakous_hosted::session_store::StorageAdmission>
 {
     use plakous_hosted::session_store::StorageAdmission;

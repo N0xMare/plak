@@ -194,6 +194,10 @@ mod test_hooks {
     pub(crate) const fn runner_detached() -> bool {
         false
     }
+    #[allow(dead_code, reason = "headless builds do not start hosts")]
+    pub(crate) const fn host_idle_exit_seconds() -> Option<std::ffi::OsString> {
+        None
+    }
 }
 #[cfg(test)]
 mod test_support;

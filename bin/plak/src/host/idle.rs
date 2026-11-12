@@ -4,6 +4,20 @@ use std::time::{Duration, Instant};
 
 pub(super) const IDLE_EXIT: Duration = Duration::from_secs(300);
 
+/// The production window. A `test-hooks` build may shorten it with
+/// `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` (a whole second from 1 through 300).
+fn window() -> Duration {
+    window_override(crate::test_hooks::host_idle_exit_seconds().as_deref()).unwrap_or(IDLE_EXIT)
+}
+
+/// Accepts `1..=300`. Anything else, including absence, keeps the production window.
+fn window_override(value: Option<&std::ffi::OsStr>) -> Option<Duration> {
+    let seconds = value?.to_str()?.trim().parse::<u64>().ok()?;
+    (1..=IDLE_EXIT.as_secs())
+        .contains(&seconds)
+        .then(|| Duration::from_secs(seconds))
+}
+
 pub(super) struct IdleExit {
     empty_since: Option<Instant>,
     window: Duration,
@@ -13,7 +27,7 @@ impl Default for IdleExit {
     fn default() -> Self {
         Self {
             empty_since: None,
-            window: IDLE_EXIT,
+            window: window(),
         }
     }
 }
@@ -196,6 +210,19 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_override_accepts_whole_seconds_up_to_the_production_window() {
+        let parse = |value: &str| window_override(Some(std::ffi::OsStr::new(value)));
+        assert_eq!(window_override(None), None);
+        assert_eq!(parse("3"), Some(Duration::from_secs(3)));
+        assert_eq!(parse(" 300 "), Some(IDLE_EXIT));
+        for refused in ["0", "301", "-1", "1.5", "", "five"] {
+            assert_eq!(parse(refused), None, "{refused:?}");
+        }
+    }
+
+    /// The production window through the production constructor; the gate's
+    /// test environment never sets the override.
     #[test]
     fn activity_and_kept_work_restart_the_entire_five_minute_window() {
         let start = Instant::now();
