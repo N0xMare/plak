@@ -14,7 +14,7 @@
         "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
-        "proto": 8
+        "proto": 9
       }
     },
     {
@@ -45,7 +45,8 @@
               "web_config_read": false,
               "web_config_write": false,
               "web_credentials_write": false,
-              "web_files_read": false
+              "web_files_read": false,
+              "web_terminal": false
             },
             "credentials_write": {
               "disabled_reason": null,
@@ -88,6 +89,31 @@
               "usage_cache_ms": 30000,
               "usage_reread_ms": 30000
             },
+            "terminal": {
+              "disabled_reason": null,
+              "enabled": true,
+              "remedy": null
+            },
+            "terminal_limits": {
+              "chunk_bytes": 16384,
+              "credit_bytes": 65536,
+              "detach_ms": 300000,
+              "idle_ms": 900000,
+              "input_bytes_per_second": 65536,
+              "input_coalesce_max_ms": 100,
+              "input_coalesce_min_ms": 50,
+              "namespace_ms": 90000,
+              "output_bytes_per_second": 262144,
+              "principal_output_bytes_per_second": 524288,
+              "ring_bytes": 1048576,
+              "scheduler_actions": 32,
+              "scheduler_burst": 12,
+              "scheduler_messages_per_second": 12,
+              "terminals_host": 16,
+              "terminals_per_principal": 4,
+              "terminals_per_session": 2,
+              "unsent_input_bytes": 65536
+            },
             "workspace_limits": {
               "changes_deadline_ms": 5000,
               "changes_entries": 2000,
@@ -111,7 +137,7 @@
         },
         "frame": "welcome",
         "host_generation": "@generation:0",
-        "proto": 8
+        "proto": 9
       }
     },
     {
@@ -673,7 +699,7 @@
         "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
-        "proto": 8
+        "proto": 9
       }
     },
     {
@@ -704,7 +730,8 @@
               "web_config_read": false,
               "web_config_write": false,
               "web_credentials_write": false,
-              "web_files_read": false
+              "web_files_read": false,
+              "web_terminal": false
             },
             "credentials_write": {
               "disabled_reason": null,
@@ -747,6 +774,31 @@
               "usage_cache_ms": 30000,
               "usage_reread_ms": 30000
             },
+            "terminal": {
+              "disabled_reason": null,
+              "enabled": true,
+              "remedy": null
+            },
+            "terminal_limits": {
+              "chunk_bytes": 16384,
+              "credit_bytes": 65536,
+              "detach_ms": 300000,
+              "idle_ms": 900000,
+              "input_bytes_per_second": 65536,
+              "input_coalesce_max_ms": 100,
+              "input_coalesce_min_ms": 50,
+              "namespace_ms": 90000,
+              "output_bytes_per_second": 262144,
+              "principal_output_bytes_per_second": 524288,
+              "ring_bytes": 1048576,
+              "scheduler_actions": 32,
+              "scheduler_burst": 12,
+              "scheduler_messages_per_second": 12,
+              "terminals_host": 16,
+              "terminals_per_principal": 4,
+              "terminals_per_session": 2,
+              "unsent_input_bytes": 65536
+            },
             "workspace_limits": {
               "changes_deadline_ms": 5000,
               "changes_entries": 2000,
@@ -770,7 +822,7 @@
         },
         "frame": "welcome",
         "host_generation": "@generation:1",
-        "proto": 8
+        "proto": 9
       }
     },
     {
