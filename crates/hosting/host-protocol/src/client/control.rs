@@ -65,7 +65,7 @@ where
 
     pub(super) fn retry_control(&self) {
         let mut state = lock(&self.state);
-        if state.closed {
+        if state.closed || state.goodbye {
             return;
         }
         let Some(control) = state.control_retry.take() else {

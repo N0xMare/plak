@@ -16,6 +16,11 @@ impl ProtocolExtension for Product {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use plakous_host_protocol::client::{Transport, WireReceiver, WireSender};
+    let _: fn(&WireSender<Product>) = WireSender::goodbye;
+    let _: fn(&WireReceiver<Product>) = WireReceiver::goodbye;
+    let _transport =
+        Transport::new(std::io::empty(), std::io::sink()).with_write_shutdown(|| Ok(()));
     let request = ClientFrame::<Product>::Request {
         id: 7,
         op: Op::Host { request: true },

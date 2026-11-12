@@ -25,6 +25,7 @@ struct Pending {
     frames: usize,
     closed: bool,
     finishing: bool,
+    goodbye: bool,
 }
 
 struct Batch {
@@ -159,8 +160,18 @@ impl Queue {
         self.changed.notify_all();
     }
 
+    #[cfg(test)]
     pub(super) fn finish(&self) {
         lock(&self.pending).finishing = true;
+        self.changed.notify_all();
+    }
+
+    pub(super) fn goodbye(&self) {
+        let mut pending = lock(&self.pending);
+        if !pending.closed && !pending.finishing {
+            pending.finishing = true;
+            pending.goodbye = true;
+        }
         self.changed.notify_all();
     }
 
@@ -178,7 +189,16 @@ impl Queue {
                         .wait(pending)
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                 }
-                if pending.closed || (pending.finishing && pending.batches.is_empty()) {
+                if pending.closed {
+                    return Ok(());
+                }
+                if pending.finishing && pending.batches.is_empty() {
+                    let goodbye = pending.goodbye;
+                    drop(pending);
+                    if goodbye {
+                        writer.write_all(super::BYE_LINE.as_bytes())?;
+                        writer.flush()?;
+                    }
                     return Ok(());
                 }
                 if pending

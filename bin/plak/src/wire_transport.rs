@@ -87,14 +87,12 @@ pub(crate) fn forward_lifecycle(
 pub fn host_socket(path: &Path) -> io::Result<Transport> {
     let stream = verified_socket(path)?;
     let interrupt = stream.try_clone()?;
-    Ok(
-        Transport::new(stream.try_clone()?, stream).with_welcome_deadline(
-            std::time::Duration::from_secs(10),
-            move || {
-                let _ = interrupt.shutdown(std::net::Shutdown::Both);
-            },
-        ),
-    )
+    let shutdown = stream.try_clone()?;
+    Ok(Transport::new(stream.try_clone()?, stream)
+        .with_write_shutdown(move || shutdown.shutdown(std::net::Shutdown::Write))
+        .with_welcome_deadline(std::time::Duration::from_secs(10), move || {
+            let _ = interrupt.shutdown(std::net::Shutdown::Both);
+        }))
 }
 
 /// The verified byte stream, before a client performs its own handshake.

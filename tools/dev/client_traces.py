@@ -17,6 +17,58 @@ LEGAL_READS = {
 READ_ACK = {'ok': {'answer': 'accepted', 'duplicate': False}}
 
 
+def capture_audit(raw: dict) -> dict:
+    """Keep real identities and complete discovery exclusions outside controls."""
+    grouped: dict[int, list[dict]] = {}
+    for entry in raw['entries']:
+        if 'connection' in entry:
+            grouped.setdefault(entry['connection'], []).append(entry)
+    probes = []
+    connections = []
+    for connection, entries in grouped.items():
+        if (
+            len(entries) == 3
+            and entries[0] == {'connection': connection, 'opened': True}
+            and {entry.get('eof') for entry in entries[1:]} == {'client', 'host'}
+            and all(set(entry) == {'connection', 'eof'} for entry in entries[1:])
+        ):
+            probes.append(
+                {
+                    'connection': connection,
+                    'reason': 'complete frame-free discovery probe',
+                    'entries': entries,
+                }
+            )
+        else:
+            connections.append({'connection': connection, 'alias': len(connections) + 1})
+    identities: dict[str, dict[str, dict]] = {}
+    aliases: dict[str, dict[str, str]] = {'client': {}, 'host': {}}
+    for entry in raw['entries']:
+        frame = entry.get('frame', {})
+        role = entry.get('direction')
+        if (role, frame.get('frame')) not in {('client', 'hello'), ('host', 'welcome')}:
+            continue
+        binary = frame['binary_id']
+        if not isinstance(binary, str):
+            raise ValueError('binary identity is not a string')
+        alias = aliases[role].setdefault(binary, f'<{role}-binary:{len(aliases[role]) + 1}>')
+        roles = identities.setdefault(binary, {})
+        provenance = roles.setdefault(role, {'role': role, 'alias': alias, 'connections': []})
+        if entry['connection'] not in provenance['connections']:
+            provenance['connections'].append(entry['connection'])
+    return {
+        'excluded_connections': probes,
+        'provenance': {
+            'capture': raw.get('provenance', {}),
+            'connections': connections,
+            'binaries': [
+                {'binary_id': binary, 'roles': list(roles.values())}
+                for binary, roles in identities.items()
+            ],
+        },
+    }
+
+
 def read_audit(raw: dict) -> tuple[set[int], dict]:
     """Validate the reviewed legal reads, retaining every complete pair.
 
@@ -116,7 +168,7 @@ def read_audit(raw: dict) -> tuple[set[int], dict]:
                 'acknowledgement': answer['frame'],
             }
         )
-    return excluded, {'fixture': raw['fixture'], 'pairs': pairs}
+    return excluded, {'fixture': raw['fixture'], 'pairs': pairs, **capture_audit(raw)}
 
 
 def normalize(raw: dict) -> dict:
@@ -128,7 +180,16 @@ def normalize(raw: dict) -> dict:
     """
     identities: dict[str, str] = {}
     generations: dict[int, str] = {}
-    excluded, _ = read_audit(raw)
+    excluded, audit = read_audit(raw)
+    probes = {entry['connection'] for entry in audit['excluded_connections']}
+    connections = {
+        entry['connection']: entry['alias'] for entry in audit['provenance']['connections']
+    }
+    binaries = {
+        (role['role'], binary['binary_id']): role['alias']
+        for binary in audit['provenance']['binaries']
+        for role in binary['roles']
+    }
 
     def value(item, key=''):
         if isinstance(item, dict):
@@ -150,7 +211,7 @@ def normalize(raw: dict) -> dict:
     entries = []
     correlations: dict[int, dict[int, int]] = {}
     for index, entry in enumerate(raw['entries']):
-        if index in excluded:
+        if index in excluded or entry.get('connection') in probes:
             continue
         frame = entry.get('frame')
         if (
@@ -160,6 +221,14 @@ def normalize(raw: dict) -> dict:
         ):
             continue
         normalized = value(entry)
+        if 'connection' in entry:
+            normalized['connection'] = connections[entry['connection']]
+        role = entry.get('direction')
+        if frame is not None and (role, frame['frame']) in {
+            ('client', 'hello'),
+            ('host', 'welcome'),
+        }:
+            normalized['frame']['binary_id'] = binaries[role, frame['binary_id']]
         if frame is not None and frame['frame'] in ('request', 'response'):
             aliases = correlations.setdefault(entry.get('connection', 0), {})
             original = frame['id']

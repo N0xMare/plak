@@ -81,17 +81,33 @@ pub struct Transport {
     reader: Box<dyn Read + Send>,
     writer: Box<dyn Write + Send>,
     welcome_deadline: Option<(Duration, Box<dyn FnOnce() + Send>)>,
+    write_shutdown: Option<Box<dyn FnOnce() -> std::io::Result<()> + Send>>,
 }
 
 impl Transport {
     /// The transport that reads from `reader` and writes to `writer`.
+    /// Dropping `writer` closes its write half, as for a pipe. A cloned socket
+    /// additionally needs [`Self::with_write_shutdown`].
     #[must_use]
     pub fn new(reader: impl Read + Send + 'static, writer: impl Write + Send + 'static) -> Self {
         Self {
             reader: Box::new(reader),
             writer: Box::new(writer),
             welcome_deadline: None,
+            write_shutdown: None,
         }
+    }
+
+    /// Half-closes the transport's write side after its sole writer finishes,
+    /// including after [`WireSender::goodbye`], without interrupting reads.
+    /// Use this for a socket whose reader retains another handle to it.
+    #[must_use]
+    pub fn with_write_shutdown(
+        mut self,
+        shutdown: impl FnOnce() -> std::io::Result<()> + Send + 'static,
+    ) -> Self {
+        self.write_shutdown = Some(Box::new(shutdown));
+        self
     }
 
     /// Bounds only the welcome. `interrupt` must unblock the reader when
@@ -258,8 +274,17 @@ const BYE_LINE: &str = "{\"frame\":\"bye\"}\n";
 
 impl<P: ProtocolExtension> Drop for Connection<P> {
     fn drop(&mut self) {
-        let _ = self.inner.write_line(BYE_LINE);
-        self.inner.outbox.finish();
+        self.goodbye();
+    }
+}
+
+impl<P: ProtocolExtension> Connection<P> {
+    fn goodbye(&self) {
+        let mut state = lock(&self.inner.state);
+        state.goodbye = true;
+        self.inner.outbox.goodbye();
+        drop(state);
+        self.inner.changed.notify_all();
     }
 }
 
@@ -289,6 +314,7 @@ struct Sent<P: ProtocolExtension> {
 
 struct State<P: ProtocolExtension> {
     next_request: RequestId,
+    goodbye: bool,
     next_session_request: u64,
     host_generation: u64,
     /// The root to attach: the welcome's, then each `moved` node's.
@@ -485,6 +511,7 @@ where
         reader,
         writer,
         welcome_deadline,
+        write_shutdown,
     } = transport;
     let watchdog = welcome_deadline.map(|(timeout, interrupt)| {
         let (cancel, wait) = mpsc::channel();
@@ -503,11 +530,13 @@ where
     let writing = Arc::downgrade(&inner);
     let outgoing = Arc::clone(&inner.outbox);
     thread::spawn(move || {
-        if let Err(error) = outgoing.run(writer, || {
+        let result = outgoing.run(writer, || {
             if let Some(inner) = writing.upgrade() {
                 inner.retry_control();
             }
-        }) {
+        });
+        let shutdown = write_shutdown.map_or(Ok(()), |shutdown| shutdown());
+        if let Err(error) = result.and(shutdown) {
             outgoing.close();
             if let Some(inner) = writing.upgrade() {
                 inner.close(format!("the transport failed to write: {error}"));
@@ -563,6 +592,7 @@ impl<P: ProtocolExtension> Inner<P> {
             outbox: Arc::new(writer::Queue::default()),
             state: Mutex::new(State {
                 next_request: 1,
+                goodbye: false,
                 next_session_request: 1,
                 host_generation: 0,
                 root: NodeAddress {
@@ -600,6 +630,19 @@ impl<P: ProtocolExtension> Inner<P> {
     }
 }
 
+impl<P: ProtocolExtension> WireSender<P> {
+    /// Requests a detach-only goodbye without waiting for the transport.
+    /// The sole writer drains queued batches, writes `bye` once, then closes
+    /// its write half. All clones share this idempotent request; later sends
+    /// are refused. It never sends a session stop. Retain the receiver to
+    /// drain observations, responses and [`WireReceiver::try_unsent`] after
+    /// the host closes: unwritten and started-write dispositions are unchanged.
+    /// Dropping the handles afterwards sends no second `bye`.
+    pub fn goodbye(&self) {
+        self.connection.goodbye();
+    }
+}
+
 impl<P: ProtocolExtension> WireSender<P>
 where
     P::Intent: Serialize,
@@ -614,7 +657,7 @@ where
     pub fn request_operation(&self, op: Op<P>) -> std::io::Result<RequestId> {
         let inner = &self.connection.inner;
         let mut state = lock(&inner.state);
-        if state.closed {
+        if state.closed || state.goodbye {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
                 "the connection ended",
@@ -642,6 +685,12 @@ where
     pub fn attach_to(&self, root: NodeAddress) -> std::io::Result<RequestId> {
         let inner = &self.connection.inner;
         let mut state = lock(&inner.state);
+        if state.closed || state.goodbye {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "the connection's writer ended",
+            ));
+        }
         if let Some(Control::Detach(attachment)) = state.control_retry.as_ref() {
             let attachment = *attachment;
             inner.write_control(&mut state, Control::Detach(attachment))?;
@@ -677,7 +726,7 @@ where
     pub fn send(&self, intent: SessionIntent<P>) -> Result<(), SendError<P>> {
         let inner = &self.connection.inner;
         let mut state = lock(&inner.state);
-        if state.closed {
+        if state.closed || state.goodbye {
             return Err(SendError::Refused(IntentSendError::Disconnected(intent)));
         }
         let bytes = if state.current_attachment().is_some() {
@@ -689,7 +738,7 @@ where
                 Err(_) => return Err(SendError::Refused(IntentSendError::Refused(intent))),
             };
             state = lock(&inner.state);
-            if state.closed {
+            if state.closed || state.goodbye {
                 return Err(SendError::Refused(IntentSendError::Disconnected(intent)));
             }
             bytes
@@ -735,6 +784,7 @@ where
         let inner = &self.connection.inner;
         let mut state = lock(&inner.state);
         if state.closed
+            || state.goodbye
             || state.host_generation != host_generation
             || state.attaching.is_some()
             || !state.selections.is_empty()
@@ -831,7 +881,7 @@ where
         let deadline = Instant::now() + ANSWER_DEADLINE;
         let mut state = lock(&inner.state);
         let attachment = loop {
-            if state.closed {
+            if state.closed || state.goodbye {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::BrokenPipe,
                     "the connection ended",
@@ -870,6 +920,13 @@ where
 }
 
 impl<P: ProtocolExtension> WireReceiver<P> {
+    /// Requests the same detach-only goodbye as [`WireSender::goodbye`],
+    /// retaining this receiver to drain the connection and its dispositions.
+    /// Repeated requests and later handle drops send no second `bye`.
+    pub fn goodbye(&self) {
+        self.connection.goodbye();
+    }
+
     /// The next answer to [`WireSender::request_operation`].
     #[must_use]
     pub fn try_response(&self) -> Option<(RequestId, Outcome<P>)> {
@@ -1173,6 +1230,9 @@ impl<P: ProtocolExtension> Inner<P> {
                 state.attachment = Some(attachment);
                 state.previous_attachment = None;
                 state.attach_retried = false;
+                if state.goodbye {
+                    return Ok(());
+                }
                 // The face's agent transcript, which the last attachment's
                 // end closed, opens on this one first.
                 if let Some(agent_id) = state.agent.clone() {
@@ -1239,6 +1299,9 @@ impl<P: ProtocolExtension> Inner<P> {
             Err(dropped) if transcript_observation(&dropped) => Ok(true),
             Err(_) => {
                 state.mark_gaps();
+                if state.goodbye {
+                    return Ok(true);
+                }
                 if let Some(attachment) = state.attachment.take() {
                     self.write_control(state, Control::Detach(attachment))?;
                 }
@@ -1299,7 +1362,7 @@ impl<P: ProtocolExtension> Inner<P> {
             state.attach_retried = false;
             state.gaps.insert(TranscriptScope::Root);
         }
-        if let Some(attachment) = state.attachment {
+        if let Some(attachment) = state.attachment.filter(|_| !state.goodbye) {
             for sent in state.take_unsent() {
                 self.write_intent(state, attachment, sent);
             }
@@ -1378,7 +1441,7 @@ impl<P: ProtocolExtension> Inner<P> {
                 Ok(false)
             }
             HostFrame::ResyncRequired { attachment } => {
-                if state.attachment != Some(attachment) {
+                if state.goodbye || state.attachment != Some(attachment) {
                     return Ok(false);
                 }
                 self.attach_again(state).map(|()| false)
@@ -1386,7 +1449,7 @@ impl<P: ProtocolExtension> Inner<P> {
             HostFrame::Moved {
                 attachment, node, ..
             } => {
-                if state.attachment != Some(attachment) {
+                if state.goodbye || state.attachment != Some(attachment) {
                     return Ok(false);
                 }
                 // Another session: the face's agent view was the old one's.

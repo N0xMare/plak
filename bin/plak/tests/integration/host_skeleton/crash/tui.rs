@@ -30,6 +30,7 @@ fn review_drive_recorded(
     child: bool,
     recording: &recording::Recording,
 ) {
+    let previous_connection = recording.connections();
     let mut terminal = super::super::super::offline_tui::attach_to_host(&fixture.root, session);
     let until = Instant::now() + WAIT;
     let mut step = 0;
@@ -46,7 +47,7 @@ fn review_drive_recorded(
         }
         let ready = screen.contains("%/") && screen.contains("/ commands");
         match step {
-            0 if ready => {
+            0 if ready && recording.initial_controls_acked(previous_connection) => {
                 recording.mark("ready");
                 terminal.send(b"crash terminal original prompt\r");
                 step = 1;
@@ -224,6 +225,7 @@ fn drive_recorded(
     child: bool,
     recording: &recording::Recording,
 ) {
+    let previous_connection = recording.connections();
     let mut terminal = super::super::super::offline_tui::attach_to_host(&fixture.root, session);
     let until = Instant::now() + WAIT;
     let mut prompted = false;
@@ -239,7 +241,11 @@ fn drive_recorded(
             }
             return;
         }
-        if !prompted && screen.contains("%/") && screen.contains("/ commands") {
+        if !prompted
+            && screen.contains("%/")
+            && screen.contains("/ commands")
+            && recording.initial_controls_acked(previous_connection)
+        {
             recording.mark("ready");
             terminal.send(b"crash terminal original prompt\r");
             prompted = true;
@@ -294,9 +300,18 @@ fn capture_real_client_host_control_traces() {
             recording.mark("host-restarted");
             {
                 let _proxy = recording::Proxy::start(&host.socket, recording.clone());
+                let previous_connection = recording.connections();
                 let mut terminal =
                     super::super::super::offline_tui::attach_to_host(&fixture.root, &session);
                 terminal.wait_ready();
+                let until = Instant::now() + WAIT;
+                while !recording.initial_controls_acked(previous_connection) {
+                    assert!(
+                        Instant::now() < until,
+                        "initial controls were not acknowledged"
+                    );
+                    std::thread::sleep(Duration::from_millis(15));
+                }
                 recording.mark("reconnected-without-replay");
                 terminal.quit();
             }
@@ -313,6 +328,7 @@ fn capture_real_client_host_control_traces() {
                 "fixture": format!("host-control-{}-{}", if switching { "switch" } else { "stop" }, if child { "child" } else { "root" }),
                 "session": session,
                 "workspace": fixture.workspace(),
+                "provenance": {"client_sha256": binary_sha256(), "host_sha256": binary_sha256()},
                 "entries": entries,
             });
             let path = output.join(format!(
@@ -324,6 +340,13 @@ fn capture_real_client_host_control_traces() {
             eprintln!("real-client control trace: {}", path.display());
         }
     }
+}
+
+fn binary_sha256() -> &'static str {
+    static DIGEST: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DIGEST.get_or_init(|| {
+        plakous::model::sha256_hex(&[&std::fs::read(env!("CARGO_BIN_EXE_plak")).unwrap()])
+    })
 }
 
 pub(super) fn pilot(child: bool) -> (Vec<Commit>, Signature) {

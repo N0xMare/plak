@@ -57,13 +57,18 @@ impl Bindings {
                 .iter()
                 .map(|value| self.outgoing(value, key))
                 .collect(),
-            Value::String(token) if token.starts_with('@') && generated_field(key) => {
+            Value::String(token) if generated_alias(token, key) => {
                 if !self.0.contains_key(token) {
                     assert!(
-                        matches!(key, "client_id" | "request_id"),
+                        matches!(key, "client_id" | "request_id" | "binary_id"),
                         "unbound input {key}: {token}"
                     );
-                    self.0.insert(token.clone(), json!(uuid::Uuid::new_v4()));
+                    let value = if key == "binary_id" {
+                        json!(token)
+                    } else {
+                        json!(uuid::Uuid::new_v4())
+                    };
+                    self.0.insert(token.clone(), value);
                 }
                 self.0[token].clone()
             }
@@ -82,7 +87,7 @@ impl Bindings {
         }
         if let Some(token) = expected
             .as_str()
-            .filter(|value| value.starts_with('@') && generated_field(key))
+            .filter(|value| generated_alias(value, key))
         {
             if let Some(bound) = self.0.get(token) {
                 assert_eq!(bound, actual, "generated identity {token}");
@@ -117,6 +122,12 @@ impl Bindings {
             _ => assert_eq!(expected, actual),
         }
     }
+}
+
+fn generated_alias(value: &str, key: &str) -> bool {
+    (value.starts_with('@') && generated_field(key))
+        || (key == "binary_id"
+            && (value.starts_with("<client-binary:") || value.starts_with("<host-binary:")))
 }
 
 fn generated_field(key: &str) -> bool {

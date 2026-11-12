@@ -26,6 +26,10 @@ one cross-build carrier (a build imports its own and the previous version).
   remain independently attachable at their directory addresses with their own
   transcripts.
 
+- Add an explicit detach-only goodbye to the native wire client: send `bye`
+  once and half-close writes while retaining the receiver to drain replies and
+  exact delivery dispositions, without stopping session work.
+
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.
   Profile switches keep their recorded attachable root address, and a late

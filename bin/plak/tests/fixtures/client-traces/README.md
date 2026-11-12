@@ -36,17 +36,25 @@ Use `--check` on the normalizer to compare a new client recording with its
 pinned fixtures. The private client qualifies against these public fixture IDs
 at its public pin; it does not import public command or runtime handlers.
 
-Only generated UUID identity fields, numeric frame correlation IDs, host
-generations, update timestamps and
-the generated fixture workspace identity are substituted. Equality of identity
-references remains meaningful; distinct identities must not collapse. Semantic
+Generated UUID identity fields, numeric frame correlation IDs, host generations,
+update timestamps and the generated fixture workspace identity are substituted.
+Hello and welcome binary identities use independent first-seen role aliases,
+`<client-binary:N>` and `<host-binary:N>`, including for `unknown`. Repeats
+correlate and distinct values within a role never collapse. The reads audit's
+provenance section retains raw identities, cross-role equality, original
+connections and the capture's binary SHA provenance outside compared controls.
+Only complete frame-free probes (one open, both EOFs, no reset or frame) are
+excluded, each audited; retained connections are aliased by real connection
+order. Any frame keeps a connection. Semantic
 text, capabilities, activity, counts, failures and array order are retained.
 The source has a fixed fixture title. Before `/new`, the driver waits for a
 stable durable update and then past that update's second; before stop it waits
 past the latest update second. These explicit fixture barriers avoid random
 UUID tie-breaking without sorting directory results or scheduling traffic.
-Capture and replay hold the image-hash fixture consistently cold, keeping the
-complete `unknown` welcome/hello identity literal instead of masking readiness.
+Capture and replay hold the image-hash fixture consistently cold. Readiness
+and reconnect barriers pass only after the actual initial topology and
+promptable requests are acknowledged; they observe traffic without scheduling
+emissions or sorting frames.
 Numeric frame aliases are per connection, preserving every request/response
 correlation; excluded reads cannot consume action alias numbers.
 

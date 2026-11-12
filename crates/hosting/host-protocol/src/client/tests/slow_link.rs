@@ -43,6 +43,7 @@ fn gated() -> Gated {
     host.stream
         .set_read_timeout(Some(Duration::from_secs(3)))
         .unwrap();
+    let shutdown = client_socket.try_clone().unwrap();
     let transport = Transport::new(
         client_socket.try_clone().unwrap(),
         GatedWriter {
@@ -50,7 +51,8 @@ fn gated() -> Gated {
             gate: Arc::clone(&gate),
             entered,
         },
-    );
+    )
+    .with_write_shutdown(move || shutdown.shutdown(std::net::Shutdown::Write));
     let connecting = thread::spawn(move || connect::<Core>(transport, hello()).unwrap());
     assert!(matches!(host.read(), ClientFrame::Hello(_)));
     host.send(&HostFrame::Welcome(welcome()));
@@ -68,6 +70,55 @@ fn gated() -> Gated {
 fn release(gate: &Gate) {
     *lock(&gate.0) = false;
     gate.1.notify_all();
+}
+
+#[test]
+fn goodbye_preserves_unwritten_and_started_write_dispositions() {
+    let (mut host, sender, receiver, gate, writing) = gated();
+    *lock(&gate.0) = true;
+    sender
+        .send(SessionIntent::Prompt("started".into()))
+        .unwrap();
+    writing.recv_timeout(Duration::from_secs(3)).unwrap();
+    sender
+        .send(SessionIntent::Prompt("unwritten".into()))
+        .unwrap();
+    sender.goodbye();
+    for sent in lock(&sender.connection.inner.state).sent.values_mut() {
+        sent.at -= ANSWER_DEADLINE;
+    }
+    assert!(
+        matches!(receiver.try_unsent(), Some(SendError::OutcomeUnknown {
+        intent: SessionIntent::Prompt(ref draft), client_id: Some(_), host_generation: 1,
+    }) if draft.text == "started")
+    );
+    assert!(matches!(receiver.try_unsent(), Some(SendError::Refused(
+        IntentSendError::Disconnected(SessionIntent::Prompt(ref draft)))) if draft.text == "unwritten"));
+    release(&gate);
+    assert!(matches!(host.request().1, Op::Intent {
+        intent: SessionIntent::Prompt(ref draft), .. } if draft.text == "started"));
+    assert_eq!(host.read(), ClientFrame::Bye);
+    assert_eq!(host.lines.read_line(&mut String::new()).unwrap(), 0);
+    host.send(&HostFrame::Bye);
+    assert!(matches!(
+        receiver.recv_timeout(Duration::from_secs(3)),
+        Err(RecvTimeoutError::Disconnected)
+    ));
+    assert!(receiver.try_unsent().is_none());
+}
+
+#[test]
+fn goodbye_has_a_terminal_slot_even_when_controls_fill_the_writer() {
+    let (mut host, sender, receiver, gate, writing) = gated();
+    let _last = full_controls(&sender, &gate, &writing);
+    receiver.goodbye();
+    sender.goodbye();
+    release(&gate);
+    for _ in 0..writer::MAX_FRAMES {
+        assert_eq!(host.request().1, Op::Ping);
+    }
+    assert_eq!(host.read(), ClientFrame::Bye);
+    assert_eq!(host.lines.read_line(&mut String::new()).unwrap(), 0);
 }
 
 fn full_controls(

@@ -4976,7 +4976,17 @@ verdicts) are addressed, the session profile and workspace chrome states.
   or unknown frame, a mid-stream `welcome`, `refused` or `bye`, or a
   transport that fails ends the connection: the
   receiver reports the disconnect once drained, with why. The client is one
-  connection; a new one is a new connect. `wire_transport::host_socket`
+  connection; a new one is a new connect. Either native handle can request
+  an explicit detach-only `goodbye`: the sole writer drains queued batches,
+  writes `bye` once and half-closes its write side. The request never blocks
+  on the transport, admits no later sends and sends no session stop. It is
+  idempotent across handles and their later drops. The receiver stays alive
+  to drain observations, responses and delivery dispositions; unwritten and
+  started-write classification and the answer deadline do not change. A late
+  attach or move after goodbye never submits buffered intents or reattaches.
+  Pipe writers close by dropping; a cloned socket supplies its write-half
+  shutdown through `Transport::with_write_shutdown`, after the writer finishes
+  and without interrupting the reader. `wire_transport::host_socket`
   checks the path for a clear error, then the connected peer's uid
   (`SO_PEERCRED`, or `getpeereid` on macOS), which must be the user's.
 

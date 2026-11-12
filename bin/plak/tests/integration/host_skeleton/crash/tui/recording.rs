@@ -13,15 +13,58 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 #[derive(Clone, Default)]
-pub(super) struct Recording(Arc<Mutex<Vec<Value>>>, Arc<AtomicU64>);
+pub(super) struct Recording(Arc<Mutex<Vec<Value>>>, Arc<AtomicU64>, Arc<AtomicBool>);
 
 impl Recording {
     pub(super) fn is_recording(&self) -> bool {
-        self.1.load(Ordering::Acquire) != 0
+        self.2.load(Ordering::Acquire)
     }
 
     pub(super) fn mark(&self, barrier: &str) {
         self.push(json!({"barrier": barrier}));
+    }
+
+    pub(super) fn connections(&self) -> u64 {
+        self.1.load(Ordering::Acquire)
+    }
+
+    pub(super) fn initial_controls_acked(&self, after: u64) -> bool {
+        if !self.is_recording() {
+            return true;
+        }
+        let entries = self.0.lock().unwrap();
+        let Some(connection) = entries.iter().rev().find_map(|entry| {
+            (entry["direction"] == "client" && entry["frame"]["frame"] == "hello")
+                .then(|| entry["connection"].clone())
+        }) else {
+            return false;
+        };
+        if connection
+            .as_u64()
+            .is_none_or(|connection| connection <= after)
+        {
+            return false;
+        }
+        ["open_topology_navigator", "promptable"]
+            .iter()
+            .all(|kind| {
+                entries.iter().enumerate().any(|(index, entry)| {
+                    let frame = &entry["frame"];
+                    entry["connection"] == connection
+                        && entry["direction"] == "client"
+                        && frame["frame"] == "request"
+                        && frame["op"]["op"] == "intent"
+                        && frame["op"]["intent"]["kind"] == *kind
+                        && entries[index + 1..].iter().any(|answer| {
+                            answer["connection"] == connection
+                                && answer["direction"] == "host"
+                                && answer["frame"]["frame"] == "response"
+                                && answer["frame"]["id"] == frame["id"]
+                                && answer["frame"]["outcome"]
+                                    == json!({"ok": {"answer": "accepted", "duplicate": false}})
+                        })
+                })
+            })
     }
 
     fn push(&self, entry: Value) {
@@ -31,6 +74,28 @@ impl Recording {
     pub(super) fn entries(&self) -> Vec<Value> {
         self.0.lock().unwrap().clone()
     }
+}
+
+#[test]
+fn readiness_requires_both_real_acknowledgements_on_the_current_connection() {
+    let recording = Recording::default();
+    recording.2.store(true, Ordering::Release);
+    let hello = |connection| json!({"connection":connection, "direction":"client", "frame":{"frame":"hello"}});
+    let request = |id, kind| json!({"connection":1, "direction":"client", "frame":{"frame":"request", "id":id, "op":{"op":"intent", "intent":{"kind":kind}}}});
+    let answer = |id| json!({"connection":1, "direction":"host", "frame":{"frame":"response", "id":id, "outcome":{"ok":{"answer":"accepted", "duplicate":false}}}});
+    recording.push(hello(1));
+    recording.push(request(1, "open_topology_navigator"));
+    recording.push(request(2, "promptable"));
+    assert!(!recording.initial_controls_acked(0));
+    recording.push(answer(1));
+    assert!(!recording.initial_controls_acked(0));
+    recording.push(answer(2));
+    assert!(recording.initial_controls_acked(0));
+    assert!(!recording.initial_controls_acked(1));
+    recording.push(hello(2));
+    assert!(!recording.initial_controls_acked(1));
+    recording.push(answer(2));
+    assert!(!recording.initial_controls_acked(1));
 }
 
 pub(super) struct Proxy {
@@ -45,6 +110,7 @@ pub(super) struct Proxy {
 
 impl Proxy {
     pub(super) fn start(path: &Path, recording: Recording) -> Self {
+        recording.2.store(true, Ordering::Release);
         let upstream = path.with_extension("u");
         assert!(!upstream.exists(), "recording path is already occupied");
         std::fs::rename(path, &upstream).unwrap();

@@ -3926,6 +3926,24 @@ A missing, extra or reordered required frame fails.
 Client-to-fixture equality, including the complete reads-audit, is checked
 at regeneration (`client_traces.py --check`) and in the private gate.
 
+Hello binary identities compare as `<client-binary:N>` and welcome identities
+as `<host-binary:N>`, numbered by first appearance independently within each
+role. `unknown` is an ordinary value for this purpose. Repeats correlate and
+distinct values never merge within a role; cross-role equality is not compared.
+The audit, outside the compared control stream, retains a global table of raw
+binary values, their roles, aliases and original connection numbers, together
+with the capture's SHA provenance. Raw traffic remains unchanged.
+Only a completely frame-free connection with one open and both directional
+EOFs is excluded as a discovery probe, with every exclusion retained in the
+audit. An incomplete connection, a reset or any frame keeps that connection
+in the comparison. Retained connection numbers are aliased by real connection
+order, never merged or sorted. The public capture driver's `ready` and
+`reconnected-without-replay` barriers observe the actual initial topology and
+promptable accepted acknowledgements on that connection before marking ready;
+they do not schedule emissions, reorder frames or weaken the exact control
+subsequence. Negative tooling tests pin identity separation, nonempty probe
+retention and rejection of reordered required controls.
+
 Only three explicitly named read-only requests and their acknowledgements may
 interleave: `refresh_composer_chrome` (timer-driven chrome), `resync_transcript`
 (resync at a reconnect sequence boundary), and `list_agent_acknowledgements`

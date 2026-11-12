@@ -115,7 +115,9 @@ struct Host {
 impl Host {
     fn pair() -> (Self, Transport) {
         let (host, client) = UnixStream::pair().unwrap();
-        let transport = Transport::new(client.try_clone().unwrap(), client);
+        let shutdown = client.try_clone().unwrap();
+        let transport = Transport::new(client.try_clone().unwrap(), client)
+            .with_write_shutdown(move || shutdown.shutdown(std::net::Shutdown::Write));
         (
             Self {
                 lines: BufReader::new(host.try_clone().unwrap()),
@@ -149,6 +151,76 @@ impl Host {
 #[test]
 fn the_bye_line_is_the_bye_frame() {
     assert_eq!(encode_line(&ClientFrame::<Core>::Bye).unwrap(), BYE_LINE);
+}
+
+#[test]
+fn goodbye_half_closes_once_and_keeps_the_receiver_draining() {
+    let (mut host, sender, receiver) = attached(1);
+    host.stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let cloned = sender.clone();
+    sender.goodbye();
+    receiver.goodbye();
+    cloned.goodbye();
+    assert_eq!(host.read(), ClientFrame::Bye);
+    assert_eq!(host.lines.read_line(&mut String::new()).unwrap(), 0);
+    assert!(matches!(
+        sender.send(SessionIntent::Interrupt),
+        Err(SendError::Refused(IntentSendError::Disconnected(_)))
+    ));
+    assert_eq!(
+        sender.request_operation(Op::Ping).unwrap_err().kind(),
+        std::io::ErrorKind::BrokenPipe
+    );
+    host.send(&event(1, true));
+    assert_eq!(
+        receiver.recv_timeout(Duration::from_secs(3)).unwrap(),
+        SessionObservation::SetBusy(true)
+    );
+    host.send(&HostFrame::Bye);
+    assert!(matches!(
+        receiver.recv_timeout(Duration::from_secs(3)),
+        Err(RecvTimeoutError::Disconnected)
+    ));
+    drop((sender, cloned, receiver));
+    assert_eq!(host.lines.read_line(&mut String::new()).unwrap(), 0);
+}
+
+#[test]
+fn goodbye_does_not_send_waiting_intents_when_an_attach_answers_late() {
+    let (mut host, transport) = Host::pair();
+    host.stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let client = thread::spawn(move || connect::<Core>(transport, hello()).unwrap());
+    assert!(matches!(host.read(), ClientFrame::Hello(_)));
+    host.send(&HostFrame::Welcome(welcome()));
+    let (sender, receiver, _) = client.join().unwrap();
+    let (attach, _) = host.request();
+    sender
+        .send(SessionIntent::Prompt("waiting".into()))
+        .unwrap();
+    receiver.goodbye();
+    assert_eq!(host.read(), ClientFrame::Bye);
+    assert_eq!(host.lines.read_line(&mut String::new()).unwrap(), 0);
+    host.send(&HostFrame::Response {
+        id: attach,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 1 }),
+    });
+    host.send(&event(1, true));
+    assert_eq!(
+        receiver.recv_timeout(Duration::from_secs(3)).unwrap(),
+        SessionObservation::SetBusy(true)
+    );
+    host.send(&HostFrame::Bye);
+    assert!(matches!(
+        receiver.recv_timeout(Duration::from_secs(3)),
+        Err(RecvTimeoutError::Disconnected)
+    ));
+    assert!(matches!(receiver.try_unsent(), Some(SendError::Refused(
+        IntentSendError::Disconnected(SessionIntent::Prompt(ref draft)))) if draft.text == "waiting"));
+    assert!(receiver.try_unsent().is_none());
 }
 
 #[test]

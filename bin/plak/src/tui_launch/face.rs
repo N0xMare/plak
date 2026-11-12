@@ -183,7 +183,9 @@ fn over_frames(
         binary_id: build_identity::known_binary_id().unwrap_or_else(|| "unknown".into()),
         caps: Vec::new(),
     };
-    let transport = Transport::new(tui.try_clone().map_err(failed)?, tui);
+    let shutdown = tui.try_clone().map_err(failed)?;
+    let transport = Transport::new(tui.try_clone().map_err(failed)?, tui)
+        .with_write_shutdown(move || shutdown.shutdown(std::net::Shutdown::Write));
     let (sender, receiver, _) = client::connect::<PlakExtension>(transport, hello)
         .map_err(|error| CliFailure::new(format!("the TUI's wire handshake failed: {error}")))?;
     Ok((
