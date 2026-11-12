@@ -11,7 +11,7 @@ fn operator_pty_exited_before_first_observation_retains_only_unreaped_anchor() {
         .unwrap();
     let mut child = pair
         .slave
-        .spawn_command(CommandBuilder::new("/bin/true"))
+        .spawn_command(CommandBuilder::new("/usr/bin/true"))
         .unwrap();
     let pid = child.process_id().unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
