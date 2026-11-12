@@ -405,7 +405,22 @@ fn job_script(fixture: &Fixture, busy: bool) -> serde_json::Value {
 }
 
 fn job(fixture: &Fixture) -> (i32, i32) {
-    let marker = std::fs::read_to_string(fixture.root.join("local-job.marker")).unwrap();
+    // The tool call returns once the process starts, before its shell has
+    // written the marker line.
+    let path = fixture.root.join("local-job.marker");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let marker = loop {
+        if let Ok(marker) = std::fs::read_to_string(&path)
+            && marker.ends_with('\n')
+        {
+            break marker;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the job never wrote its marker"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
     assert_eq!(marker.lines().count(), 1, "the job ran twice");
     let (pid, parent) = marker.trim().split_once(' ').unwrap();
     (pid.parse().unwrap(), parent.parse().unwrap())
