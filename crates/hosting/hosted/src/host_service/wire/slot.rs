@@ -26,6 +26,7 @@ use super::super::{AttachmentCount, ResidencyHold};
 use super::WireSession;
 use crate::error::{CliFailure, CliResult};
 use crate::runtime::HostWorkerHandle;
+use crate::test_support_runner::{HostCut, cut};
 
 mod lifecycle;
 
@@ -436,7 +437,7 @@ where
             std::thread::sleep(Duration::from_millis(5));
         }
         self.busy.store(BUSY_RELEASING, Ordering::Release);
-        crate::test_support_runner::reopen_cut("fenced");
+        cut(HostCut::ReopenFenced);
         let source = old.session_id();
         let Slot::Resident { worker, .. } = std::mem::replace(
             &mut *slot,
@@ -451,10 +452,10 @@ where
             self.busy.store(BUSY_NONE, Ordering::Release);
             return Err(failure);
         }
-        crate::test_support_runner::reopen_cut("released");
+        cut(HostCut::ReopenReleased);
         let changed = std::thread::scope(|scope| scope.spawn(|| change(&source)).join())
             .unwrap_or_else(|_| Err(CliFailure::new("the binding repair panicked")));
-        crate::test_support_runner::reopen_cut("carried");
+        cut(HostCut::ReopenCarried);
         let (target, mut root) = changed
             .as_ref()
             .cloned()
@@ -470,7 +471,7 @@ where
             self.set_known(&opened.session_id);
             *slot = resident(opened);
         });
-        crate::test_support_runner::reopen_cut("opened");
+        cut(HostCut::ReopenOpened);
         old.end_reopen(Some((&root, attachment, request)));
         self.busy.store(BUSY_NONE, Ordering::Release);
         changed.and(opening).map(|()| root)

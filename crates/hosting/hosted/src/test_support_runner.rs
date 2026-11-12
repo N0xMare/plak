@@ -120,17 +120,6 @@ fn hold_directory() -> Option<std::path::PathBuf> {
 #[cfg(not(feature = "test-support"))]
 pub(crate) const fn cut(_: HostCut) {}
 
-/// [`cut`] at a reopen phase, named without its `reopen:` prefix, so a phase
-/// that names no cut aborts the gate build's host at the reopen.
-#[cfg(feature = "test-support")]
-pub(crate) fn reopen_cut(phase: &str) {
-    cut(named_or_abort(&format!("reopen:{phase}")));
-}
-
-/// Without the gate's build, a reopen has no cut.
-#[cfg(not(feature = "test-support"))]
-pub(crate) const fn reopen_cut(_: &str) {}
-
 /// Whether `at` is the cut this gate build's host was started with.
 #[cfg(feature = "test-support")]
 pub(crate) fn selected(at: HostCut) -> bool {
