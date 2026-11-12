@@ -17,8 +17,9 @@ embedded; it does not start a host.
   all-state-key discovery. Its stdout is protocol-only; the client sends
   the handshake. It never falls back to an embedded session. Only explicit
   local --auto-start permits starting an absent host; an installed user unit
-  instead names its systemctl start command. The detached host receives a
-  curated environment without caller API-key variables, logs privately, and
+  or LaunchAgent instead requires explicit service-manager startup. The
+  detached host receives a curated environment without caller API-key
+  variables, logs privately, and
   exits after five minutes without connections or kept work. Unit hosts persist.
   Closing stdin detaches this client without stopping host work. An active
   other-key host requires an explicit stop/upgrade, not a second service.
@@ -46,11 +47,17 @@ Never remove the old snapshot until the destination has acknowledged success.
 atomically; invalid replacements keep the old build. SIGHUP and SIGTERM mean
 planned handoff, not UI reload. A control-only host needs no --web.
 
-Service installation supports Linux systemd user units only. Both paths are
-explicit and absolute; --dev-login is never accepted by install.
+Service installation supports Linux systemd user units and macOS per-user
+LaunchAgents. Both paths are explicit and absolute; --dev-login is never
+accepted by install.
 
-Install writes ~/.config/systemd/user/plak-host.service and reloads the user
-manager. It never enables or starts a service. An identical unit is a no-op;
-any other existing unit is refused. --dry-run prints the unit without changes.
+On Linux, install writes ~/.config/systemd/user/plak-host.service and reloads
+the user manager. On macOS, it writes
+~/Library/LaunchAgents/com.plak.host.plist and prepares private stdout/stderr
+logs in ~/Library/Logs/Plak; it never invokes launchctl or loads the agent.
+Install never enables or starts a service. An identical service file stays
+unchanged; any other existing file or symlink is refused. --dry-run prints the
+service file without changes. The printed commands show how to start it,
+follow its logs and remove it.
 
 See docs/user-guide/host-service.md for setup, upgrades, logs and removal.

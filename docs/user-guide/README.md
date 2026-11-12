@@ -9,7 +9,7 @@ Start here:
   run your first turn, open your first TUI session.
 - **[CLI reference](cli.md)** — every command, its flags, its output shape, and
   the exit codes.
-- **[Run plak host as a service](host-service.md)** — Linux user-unit setup,
+- **[Run plak host as a service](host-service.md)** — Linux user units and macOS LaunchAgents,
   Tailscale Serve, upgrades and logs.
 - **[TUI](tui.md)** — the composer, the 25 slash commands, the key bindings, the
   Menu, themes, and the Agents list.

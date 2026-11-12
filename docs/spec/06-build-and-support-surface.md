@@ -877,6 +877,21 @@ export-version manifest to refuse incompatible carry without running export.
 Absent, empty or unparseable export-version manifests leave the version
 unknown and retain the export-then-refuse fallback.
 
+The installed stable `$HOME/.local/bin/plak` link is also what
+`plak host install` records in an explicit per-user service file: a systemd user
+unit on Linux, or `$HOME/Library/LaunchAgents/com.plak.host.plist` on macOS.
+Both use the same explicit Unix-socket/UI arguments and cleared host environment;
+installation never enables or starts the service. The macOS installer never
+loads the agent or invokes launchctl; it prepares private stdout/stderr logs
+under `$HOME/Library/Logs/Plak` and prints the exact user-domain load, start,
+log and removal commands. A later GUI login also loads that LaunchAgent.
+Atomic publication refuses a different existing file, including a symlink;
+a matching generated file is unchanged. No snapshot is pinned, no credentials
+are embedded, and no new service prerequisite or toolchain is installed.
+Chapter 02 §4 owns the service contract; `docs/user-guide/host-service.md`
+gives setup and removal steps. Updating the stable link needs no service-file
+rewrite; host/runner revision and sidecar matching still apply.
+
 From the repository root, the newcomer path is:
 
 ```sh

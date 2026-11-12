@@ -5970,19 +5970,20 @@ running until they end or reach their caps; the daemon exits after its idle
 period. Embedded mode keeps direct process calls and exit = stop.
 
 **Service installation.** `plak host install --web unix:<absolute socket>
---ui <absolute dir> [--dry-run]` installs a Linux systemd **user** unit at
-`$HOME/.config/systemd/user/plak-host.service`, mode 0644. Both paths are
-required, absolute UTF-8 paths without control characters; there are no
+--ui <absolute dir> [--dry-run]` installs a systemd **user** unit on Linux at
+`$HOME/.config/systemd/user/plak-host.service`, or a per-user macOS LaunchAgent
+at `$HOME/Library/LaunchAgents/com.plak.host.plist`, mode 0644. Both arguments
+are required, absolute UTF-8 paths without control characters; there are no
 socket or UI defaults. Install never accepts or emits `--dev-login` or a
-TCP listener. Other platforms refuse as not yet supported; this command
-does not install a launchd agent. It runs before product-store setup.
-HOME containing `=` or `:` is refused: neither executable assignment parsing
-nor PATH components may be ambiguous. A set XDG_CONFIG_HOME must resolve to
-`$HOME/.config`, or install refuses before writing, because the user manager
+TCP listener. Other platforms refuse as not yet supported. It runs before
+product-store setup. HOME containing `=` or `:` is refused: neither executable
+assignment parsing nor PATH components may be ambiguous. On Linux, a set
+XDG_CONFIG_HOME must resolve to `$HOME/.config`, or install refuses before
+writing, because the user manager
 would otherwise search a different unit directory. A missing or non-executable
 stable binary is warned about, without preventing installation or dry run.
 
-The generated unit executes the installed stable `$HOME/.local/bin/plak`
+On Linux, the generated unit executes the installed stable `$HOME/.local/bin/plak`
 link, not the invoking executable or a pinned snapshot, from `$HOME`.
 WorkingDirectory remains unset: systemd user services use `$HOME` by default.
 `/usr/bin/env -i` clears ambient variables. Only HOME, PLAK_HOME, a curated
@@ -5998,9 +5999,9 @@ SIGTERM hands off; ExecReload sends SIGUSR1 for UI-only reload.
 SSH_AUTH_SOCK and locale variables are not inherited: the service starts in
 the C locale. Remote runners need IdentityAgent or IdentityFile in ssh config.
 
-Install publishes the complete unit atomically without replacement, then
-runs only `systemctl --user daemon-reload` (bounded at five seconds). It
-resolves the first executable systemctl on the installer's PATH to an absolute
+Install publishes the complete service file atomically without replacement.
+On Linux it then runs only `systemctl --user daemon-reload` (bounded at five
+seconds). It resolves the first executable systemctl on the installer's PATH to an absolute
 path, then invokes it with HOME, fixed PATH `/usr/bin:/bin` and only the
 XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS transport variables forwarded.
 It never enables or starts the service or runs Tailscale. A generated marker
@@ -6014,7 +6015,40 @@ the `loginctl enable-linger "$USER"` note for running without a login session,
 There is no uninstall command: disable with `systemctl --user disable --now
 plak-host.service`, remove the file, and run `systemctl --user daemon-reload`.
 
-Example generated service section for the paths shown in the golden:
+On macOS, the plist uses label `com.plak.host`, `RunAtLoad=true` and
+`KeepAlive.SuccessfulExit=false`: loading it starts the host, and only an
+unsuccessful exit restarts it. A clean planned handoff does not restart the
+source. `ExitTimeOut=90`, `AbandonProcessGroup=true` and `Umask=63` (0077) keep
+planned-stop and private-file semantics. WorkingDirectory is HOME explicitly.
+A fixed `/bin/sh -c` wrapper execs `/usr/bin/env -i`, forwarding only the
+manager's SHELL, USER and LOGNAME, followed by the same fixed HOME, PLAK_HOME,
+curated PATH, stable binary link and explicit host arguments as Linux. User
+paths are separate literal ProgramArguments, never shell source, and XML
+metacharacters are escaped. Paths that cannot be represented as XML are
+refused; the macOS web socket path is at most 103 bytes (Linux: 107).
+No secrets or installer-shell environment values are stored in the plist.
+XDG_CONFIG_HOME does not affect LaunchAgent placement.
+
+Before publishing the plist, install prepares the private, user-owned directory
+`$HOME/Library/Logs/Plak` (0700) and two log files (0600), opened without
+following symlinks or truncating existing contents. Existing logs must be
+single-link, user-owned private regular files. StandardOutPath is
+`host.stdout.log` there and StandardErrorPath is `host.stderr.log`.
+Edited or foreign service files and symlinks are refused before log-directory creation; publication cannot replace
+a file that races it. Identical generated plists remain unchanged. Install
+never invokes launchctl, loads the agent or starts a host. `--dry-run` prints
+only the plist and creates no log directory or service file. The installer
+prints `launchctl bootstrap gui/<uid> <plist>`,
+`launchctl kickstart gui/<uid>/com.plak.host`, the chosen Tailscale Serve
+command, both log paths with `tail -F`, and removal instructions:
+`launchctl bootout gui/<uid> <plist>` then `rm -- <plist>`. Paths are shell-quoted
+and the UID is the invoking user's numeric ID. The GUI agent is also loaded
+at a later login, not as a system-wide or pre-login daemon. UI-only reload uses
+`launchctl kill SIGUSR1 gui/<uid>/com.plak.host`. Explicit bridge auto-start
+refuses an installed LaunchAgent, including a foreign or symlinked plist,
+without inspecting its configured product home or starting an unmanaged host.
+
+Example generated Linux service section for the paths shown in the golden:
 
 ```ini
 [Service]

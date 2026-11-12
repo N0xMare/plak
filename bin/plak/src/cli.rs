@@ -609,7 +609,7 @@ enum HostAction {
     SuperviseAuto,
     #[command(name = "__serve-auto", hide = true)]
     ServeAuto,
-    /// Write the Linux systemd user unit without enabling or starting it.
+    /// Write a systemd user unit or macOS LaunchAgent without starting it.
     Install {
         #[arg(long, value_name = "unix:ABSOLUTE_PATH")]
         web: String,

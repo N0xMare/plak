@@ -247,6 +247,10 @@ fn refuse_installed_unit(
             .find(|(key, _)| *key == name)
             .map(|(_, value)| PathBuf::from(value))
     };
+    #[cfg(target_os = "macos")]
+    if let Some(home) = value("HOME") {
+        refuse_launch_agent(&home)?;
+    }
     let config =
         value("XDG_CONFIG_HOME").or_else(|| value("HOME").map(|home| home.join(".config")));
     let data =
@@ -297,6 +301,21 @@ fn refuse_installed_unit(
     Ok(())
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn refuse_launch_agent(home: &std::path::Path) -> CliResult<()> {
+    let path = home.join("Library/LaunchAgents/com.plak.host.plist");
+    match std::fs::symlink_metadata(&path) {
+        Ok(_) => Err(CliFailure::new(
+            "com.plak.host.plist is installed (its home was not inspected); load and start the LaunchAgent explicitly, or run plak host in the foreground for this home; no unmanaged host was started",
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(CliFailure::new(format!(
+            "could not inspect {}: {error}; LaunchAgent absence is unproven; no unmanaged host was started",
+            path.display()
+        ))),
+    }
+}
+
 fn failed(error: io::Error) -> CliFailure {
     CliFailure::new(format!("host auto-start failed: {error}"))
 }
@@ -307,6 +326,20 @@ mod tests {
     use std::os::unix::fs::PermissionsExt as _;
 
     use super::*;
+
+    #[test]
+    fn an_installed_launch_agent_blocks_unmanaged_auto_start() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(refuse_launch_agent(root.path()).is_ok());
+        let directory = root.path().join("Library/LaunchAgents");
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("com.plak.host.plist");
+        std::fs::write(&path, "its configured product home is not inspected").unwrap();
+        assert!(refuse_launch_agent(root.path()).is_err());
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(root.path().join("missing.plist"), &path).unwrap();
+        assert!(refuse_launch_agent(root.path()).is_err());
+    }
 
     #[test]
     fn await_claim_waits_for_an_unclaimed_child_to_exit() {

@@ -8,6 +8,8 @@ mod crash_sweep;
 mod diagnostics_contract;
 #[cfg(all(target_os = "linux", feature = "web"))]
 mod host_install;
+#[cfg(all(target_os = "macos", feature = "web"))]
+mod host_install_launchd;
 #[cfg(all(feature = "test-hooks", feature = "web"))]
 mod host_skeleton;
 #[cfg(feature = "test-hooks")]

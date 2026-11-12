@@ -65,7 +65,7 @@ fn host_install_refuses_relative_dev_and_injected_paths() {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 #[test]
 fn host_install_refuses_unsupported_platform_before_reading_paths() {
     let error = run(&args(), Err(CliFailure::new("unread")), &mut Vec::new());

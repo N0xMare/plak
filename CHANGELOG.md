@@ -49,6 +49,10 @@ one cross-build carrier (a build imports its own and the previous version).
   Unsafe, missing or mismatched snapshots refuse with an install remedy;
   ordinary exact-triple and pairing admission remain unchanged.
 
+- Add macOS LaunchAgent installation for `plak host install`, with private
+  log directories and explicit load, start and removal instructions. Installation
+  never loads or starts the service.
+
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.
 

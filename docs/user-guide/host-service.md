@@ -1,15 +1,15 @@
 # Run plak host as a service
 
-This setup uses a Linux systemd **user** service, never a system-wide unit.
-macOS service installation is not yet supported. Use the default installed
+This setup uses a Linux systemd **user** service or a macOS per-user
+LaunchAgent, never a system-wide service. Use the default installed
 release product, which includes host/web serving, together with
 its matching sidecars. The unit always runs the stable `~/.local/bin/plak`
 link, so keep that installation current. Install the web UI build separately;
 its directory must contain `index.html` and `csp.json` as described in
 [the web endpoint spec](../spec/02-plak-product.md#45-the-web-endpoint).
 The installer warns, but does not refuse, if that stable link is missing or
-not executable. HOME cannot contain `=` or `:`. If you set XDG_CONFIG_HOME,
-it must resolve to `$HOME/.config`, where this unit is installed.
+not executable. HOME cannot contain `=` or `:`. On Linux, if you set
+XDG_CONFIG_HOME, it must resolve to `$HOME/.config`, where the unit is installed.
 
 Configure `[web] origin` to the exact HTTPS origin Tailscale Serve will publish,
 and `[web] allow` for the permitted tailnet logins. Tag the serving node
@@ -28,12 +28,17 @@ plak host install --web "unix:$HOME/.plak/host/web/web.sock" \
   --ui "$HOME/.plak/web-ui"
 ```
 
-Dry run only prints the unit. Installation writes
+Dry run only prints the service file and creates nothing. An identical
+re-install keeps the service file unchanged; any other existing file, including
+an edited generated file or a symlink, is refused. To change its paths, stop the service and remove
+the old file first, as shown below.
+
+### Linux
+
+Installation writes
 `~/.config/systemd/user/plak-host.service` atomically with mode 0644 and calls
 `systemctl --user daemon-reload`. It does **not** enable, start or restart
-anything. An identical re-install does nothing; any other existing file,
-including an edited generated unit or a symlink, is refused. To change its
-paths, disable it and remove the old file first, as shown below.
+anything.
 
 Follow the printed commands:
 
@@ -67,6 +72,40 @@ For installation's daemon-reload call, systemctl is resolved to an absolute
 executable on your current PATH; the child gets fixed PATH `/usr/bin:/bin`
 and only HOME and the user-manager runtime-directory and bus variables.
 
+### macOS
+
+Installation writes `~/Library/LaunchAgents/com.plak.host.plist` atomically with
+mode 0644 and prepares the private directory `~/Library/Logs/Plak` (mode 0700)
+and its two private log files (mode 0600). Existing logs must be your private
+regular files, not symlinks or hard links; unsafe files are refused unchanged.
+It never calls `launchctl`, loads the agent or starts the host. Follow the
+printed commands, which contain your actual user ID and chosen paths:
+
+```sh
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.plak.host.plist"
+# If it is not already running:
+launchctl kickstart "gui/$(id -u)/com.plak.host"
+tailscale serve --bg "unix:$HOME/.plak/host/web/web.sock"
+tail -F "$HOME/Library/Logs/Plak/host.stdout.log" \
+  "$HOME/Library/Logs/Plak/host.stderr.log"
+```
+
+`RunAtLoad` starts the agent when it is loaded, including at a later GUI login;
+`KeepAlive` restarts it only after unsuccessful exit. A clean host handoff does
+not trigger a restart. The job allows 90 seconds to stop and does not kill its
+remaining process group on exit. It uses a private umask and runs from HOME.
+This is a GUI-login agent, not a daemon that runs before login.
+
+The agent uses the same stable binary link and explicit host arguments as the
+Linux unit. A fixed shell wrapper forwards only the manager's SHELL, USER and
+LOGNAME into `/usr/bin/env -i`, followed by HOME, PLAK_HOME and the same curated
+PATH. Paths are separate literal arguments, not shell source. No credentials,
+proxy settings or installer-shell variables are embedded or inherited by the
+host. Configure credentials through Plak's normal account commands. XDG_CONFIG_HOME
+does not select a LaunchAgent directory. An installed agent, even for another
+product home, prevents the stdio bridge's explicit auto-start from creating an
+unmanaged host; load the intended service yourself.
+
 ## Upgrade, reload and logs
 
 Install a tested matching snapshot. For a host already supporting the upgrade
@@ -80,6 +119,9 @@ plak host upgrade --expect-binary <id>
 systemctl --user status plak-host.service
 journalctl --user -u plak-host.service -f
 ```
+
+On macOS, inspect the service with `launchctl print "gui/$(id -u)/com.plak.host"`
+and follow the two log files shown above instead of using systemctl/journalctl.
 
 Use `just install release` instead for a qualified release-flavor source build.
 Keep the old and new snapshots, including sidecars, until the command confirms
@@ -174,6 +216,8 @@ sessions running; SIGTERM and SIGHUP instead perform a planned host handoff.
 There is no need to reinstall an unchanged unit after updating the stable
 binary link. Remote runners still need the host's matching protocol/revision/
 flavor; follow the runner upgrade rules rather than substituting another build.
+On macOS, the UI-only reload command is
+`launchctl kill SIGUSR1 "gui/$(id -u)/com.plak.host"`.
 
 Before upgrading from runner protocol 4 to 5, finish or stop all home-local
 background jobs using the old build. A protocol-5 host does not see the live
@@ -181,12 +225,13 @@ protocol-4 home-local daemon or its jobs, including during the embedded
 startup check. Settle those jobs before installing the new build and using
 `/reload`; reloading does not transfer them across protocol directories.
 
-The unit leaves WorkingDirectory unset, using systemd's user-service default
-of `$HOME`; it does not choose a workspace or change cwd to bypass startup checks.
+The Linux unit leaves WorkingDirectory unset, using systemd's user-service
+default of `$HOME`; the LaunchAgent sets it to HOME explicitly. Neither chooses
+a workspace or changes cwd to bypass startup checks.
 
 ## Disable or remove
 
-There is no uninstall command. Stop the service before removing its unit:
+There is no uninstall command. On Linux, stop the service before removing its unit:
 
 ```sh
 systemctl --user disable --now plak-host.service
@@ -194,5 +239,12 @@ rm "$HOME/.config/systemd/user/plak-host.service"
 systemctl --user daemon-reload
 ```
 
+On macOS, unload the agent before removing its plist:
+
+```sh
+launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.plak.host.plist"
+rm "$HOME/Library/LaunchAgents/com.plak.host.plist"
+```
+
 This removes neither your product home nor daemon-held jobs, credentials or
-web assets. Manage any Tailscale Serve configuration separately.
+web assets or log files. Manage any Tailscale Serve configuration separately.

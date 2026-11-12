@@ -47,6 +47,7 @@ pub(crate) fn inherited_user() -> Option<String> {
 }
 
 /// Only the transport variables needed to reach the caller's user manager.
+#[cfg(not(target_os = "macos"))]
 pub(crate) fn user_manager_environment() -> Vec<(&'static str, std::ffi::OsString)> {
     [
         ("XDG_RUNTIME_DIR", std::env::var_os("XDG_RUNTIME_DIR")),
