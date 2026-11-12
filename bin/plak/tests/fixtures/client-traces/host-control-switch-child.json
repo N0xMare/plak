@@ -978,11 +978,11 @@
     },
     {
       "connection": 2,
-      "eof": "host"
+      "eof": "client"
     },
     {
       "connection": 2,
-      "eof": "client"
+      "eof": "host"
     }
   ]
 }

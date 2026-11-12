@@ -35,14 +35,14 @@
       "connection": 1,
       "request": {
         "frame": "request",
-        "id": 6,
+        "id": 7,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "84869d57-d568-5f04-94ee-8d99f55e9e29"
+                "tree_id": "d9e80987-1e65-5d9c-aa1e-ac87fa0183a6"
               }
             },
             "kind": "extension"
@@ -52,7 +52,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 6,
+        "id": 7,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -188,7 +188,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "99ddc63b-3f51-5da8-b9ed-63bbf0f686a1"
+                "tree_id": "a45b2ef9-7622-5858-be44-33f63b49cf6c"
               }
             },
             "kind": "extension"
@@ -278,7 +278,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "84869d57-d568-5f04-94ee-8d99f55e9e29"
+                "tree_id": "d9e80987-1e65-5d9c-aa1e-ac87fa0183a6"
               }
             },
             "kind": "extension"
@@ -326,49 +326,19 @@
       }
     },
     {
-      "read": "resync_transcript",
-      "reason": "resync at a reconnect sequence boundary",
-      "connection": 2,
-      "request": {
-        "frame": "request",
-        "id": 5,
-        "op": {
-          "attachment": 1,
-          "blobs": [],
-          "intent": {
-            "body": {
-              "scope": "root"
-            },
-            "kind": "resync_transcript"
-          },
-          "op": "intent"
-        }
-      },
-      "acknowledgement": {
-        "frame": "response",
-        "id": 5,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
       "read": "list_agent_acknowledgements",
       "reason": "acknowledgements read",
       "connection": 2,
       "request": {
         "frame": "request",
-        "id": 7,
+        "id": 6,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "84869d57-d568-5f04-94ee-8d99f55e9e29"
+                "tree_id": "d9e80987-1e65-5d9c-aa1e-ac87fa0183a6"
               }
             },
             "kind": "extension"
@@ -378,7 +348,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 7,
+        "id": 6,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -391,8 +361,8 @@
   "excluded_connections": [],
   "provenance": {
     "capture": {
-      "client_sha256": "3ca339201518d1838b3ab43eae3ea5eb38e4257fd2508b9834272c76a71d5c76",
-      "host_sha256": "3ca339201518d1838b3ab43eae3ea5eb38e4257fd2508b9834272c76a71d5c76"
+      "client_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce",
+      "host_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce"
     },
     "connections": [
       {

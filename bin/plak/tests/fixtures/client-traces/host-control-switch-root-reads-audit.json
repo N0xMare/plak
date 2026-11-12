@@ -30,68 +30,12 @@
       }
     },
     {
-      "read": "refresh_composer_chrome",
-      "reason": "timer-driven background chrome",
-      "connection": 1,
-      "request": {
-        "frame": "request",
-        "id": 7,
-        "op": {
-          "attachment": 1,
-          "blobs": [],
-          "intent": {
-            "body": "refresh_composer_chrome",
-            "kind": "extension"
-          },
-          "op": "intent"
-        }
-      },
-      "acknowledgement": {
-        "frame": "response",
-        "id": 7,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
-      "read": "refresh_composer_chrome",
-      "reason": "timer-driven background chrome",
-      "connection": 1,
-      "request": {
-        "frame": "request",
-        "id": 8,
-        "op": {
-          "attachment": 1,
-          "blobs": [],
-          "intent": {
-            "body": "refresh_composer_chrome",
-            "kind": "extension"
-          },
-          "op": "intent"
-        }
-      },
-      "acknowledgement": {
-        "frame": "response",
-        "id": 8,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
       "read": "resync_transcript",
       "reason": "resync at a reconnect sequence boundary",
       "connection": 1,
       "request": {
         "frame": "request",
-        "id": 11,
+        "id": 5,
         "op": {
           "attachment": 1,
           "blobs": [],
@@ -106,7 +50,63 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 11,
+        "id": 5,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "read": "refresh_composer_chrome",
+      "reason": "timer-driven background chrome",
+      "connection": 1,
+      "request": {
+        "frame": "request",
+        "id": 8,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": "refresh_composer_chrome",
+            "kind": "extension"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 8,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "read": "refresh_composer_chrome",
+      "reason": "timer-driven background chrome",
+      "connection": 1,
+      "request": {
+        "frame": "request",
+        "id": 9,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": "refresh_composer_chrome",
+            "kind": "extension"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 9,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -149,9 +149,9 @@
       "connection": 1,
       "request": {
         "frame": "request",
-        "id": 16,
+        "id": 14,
         "op": {
-          "attachment": 2,
+          "attachment": 1,
           "blobs": [],
           "intent": {
             "body": {
@@ -164,7 +164,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 16,
+        "id": 14,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -202,6 +202,36 @@
       }
     },
     {
+      "read": "resync_transcript",
+      "reason": "resync at a reconnect sequence boundary",
+      "connection": 1,
+      "request": {
+        "frame": "request",
+        "id": 19,
+        "op": {
+          "attachment": 2,
+          "blobs": [],
+          "intent": {
+            "body": {
+              "scope": "root"
+            },
+            "kind": "resync_transcript"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 19,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
       "read": "refresh_composer_chrome",
       "reason": "timer-driven background chrome",
       "connection": 2,
@@ -221,36 +251,6 @@
       "acknowledgement": {
         "frame": "response",
         "id": 4,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
-      "read": "resync_transcript",
-      "reason": "resync at a reconnect sequence boundary",
-      "connection": 2,
-      "request": {
-        "frame": "request",
-        "id": 5,
-        "op": {
-          "attachment": 1,
-          "blobs": [],
-          "intent": {
-            "body": {
-              "scope": "root"
-            },
-            "kind": "resync_transcript"
-          },
-          "op": "intent"
-        }
-      },
-      "acknowledgement": {
-        "frame": "response",
-        "id": 5,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -263,8 +263,8 @@
   "excluded_connections": [],
   "provenance": {
     "capture": {
-      "client_sha256": "3ca339201518d1838b3ab43eae3ea5eb38e4257fd2508b9834272c76a71d5c76",
-      "host_sha256": "3ca339201518d1838b3ab43eae3ea5eb38e4257fd2508b9834272c76a71d5c76"
+      "client_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce",
+      "host_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce"
     },
     "connections": [
       {

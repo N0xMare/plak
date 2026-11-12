@@ -112,13 +112,43 @@
           }
         }
       }
+    },
+    {
+      "read": "resync_transcript",
+      "reason": "resync at a reconnect sequence boundary",
+      "connection": 2,
+      "request": {
+        "frame": "request",
+        "id": 5,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": {
+              "scope": "root"
+            },
+            "kind": "resync_transcript"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 5,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
     }
   ],
   "excluded_connections": [],
   "provenance": {
     "capture": {
-      "client_sha256": "3ca339201518d1838b3ab43eae3ea5eb38e4257fd2508b9834272c76a71d5c76",
-      "host_sha256": "3ca339201518d1838b3ab43eae3ea5eb38e4257fd2508b9834272c76a71d5c76"
+      "client_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce",
+      "host_sha256": "aa1afc42aff631340c865e50efb44b3cf9e7ecef694c15e2c00aaeb120d1a4ce"
     },
     "connections": [
       {
