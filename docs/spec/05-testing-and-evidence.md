@@ -768,8 +768,12 @@ gate does not qualify the supported musl platform.
 command forms also unset the test-hook overrides `PLAK_TEST_SESSION_LEASE_SECONDS`
 and `PLAK_TEST_CELL_HELLO_MS` and the provider keys `OPENAI_API_KEY`,
 `XAI_API_KEY`, `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`, so an operator's
-exported key never reaches an offline test. Its `--json` form names only the
-four exported variables; the live drivers keep their real keys. `dev-check.sh`
+exported key never reaches an offline test. Every form also puts
+`$TMPDIR/plak-test-jj`, which holds only a `jj` link to the jj the tools check
+uses (chapter 06 §6), first on `PATH`: `PLAK_TEST_JJ` when set, else, with no
+`jj` on `PATH`, the newest pinned jj that `just dev-tools install` unpacked. Its `--json` form names only the variables it
+exports, `PATH` included when it changed; the live drivers keep their real keys.
+`dev-check.sh`
 (with `--fresh`), `just dev coverage`, `perf-smoke.sh`, `crash-sweep.py`,
 `jj-tools.py compat` and the live drivers use it. `just nextest` runs the
 pinned cargo-nextest under it and passes recipe arguments as positional

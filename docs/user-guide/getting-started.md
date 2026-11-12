@@ -57,7 +57,9 @@ cargo install --locked plak plakous-js-runtime plakous-py-worker
   needs network access; subsequent compile-contract gates stay offline. A
   checkout set up before the gate checked that target re-runs
   `just dev-tools install`; without the target the `builds` group fails and
-  says so.
+  says so. The gate also needs jj: `PLAK_TEST_JJ` naming one, else `jj` on
+  `PATH`, else the newest pinned jj that install puts under `.dev-tools/jj`;
+  without one the gate stops before it runs anything.
 
 ### Build
 

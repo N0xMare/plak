@@ -35,8 +35,12 @@ MSRV and pinned toolchain are Rust 1.99.0; supported platforms are Linux x86_64
 musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
 cargo-nextest, cargo-deny and ruff and the `wasm32-unknown-unknown` rustc
 target the `builds` group checks the portable crates for; an existing setup
-re-runs it to add that target. Worker branches iterate and finish with
-`just fast <packages>` plus the groups their change needs. The integration
+re-runs it to add that target. The tools check every tier runs first also
+requires a working jj: `PLAK_TEST_JJ` when set, else `jj` on `PATH`, else the
+newest pinned jj that install unpacks under `.dev-tools/jj`.
+`tools/gate/dev-tools.pins` holds every tool version, URL and checksum; a cloud
+agent VM installs them from `.agents/setup`. Worker branches iterate and finish
+with `just fast <packages>` plus the groups their change needs. The integration
 batch, install and publication gates are spec 06 §8.
 `just musl container` is a maintainer-only container gate: it needs the preloaded
 offline image `plak-qual-base:6fc79538`, which is not published (spec 06).

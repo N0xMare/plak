@@ -28,14 +28,14 @@ RUN set -eu; \
     for lock in tests/fixtures/*/Cargo.lock; do \
       cargo fetch --locked --manifest-path "${lock%.lock}.toml"; \
     done; \
-    deny_version=$(sed -n 's/^deny_version=//p' tools/gate/dev-tools.sh); \
+    deny_version=$(awk '$1 == "cargo-deny" { print $2; exit }' tools/gate/dev-tools.pins); \
     cargo install --locked --root /tmp/deny --version "$deny_version" cargo-deny; \
     chmod -R a+rX /usr/local/cargo/registry
 
 FROM base AS nextest-build
-COPY tools/gate/dev-tools.sh /tmp/dev-tools.sh
-RUN nextest_version=$(sed -n 's/^nextest_version=//p' /tmp/dev-tools.sh) \
- && ruff_version=$(sed -n 's/^ruff_version=//p' /tmp/dev-tools.sh) \
+COPY tools/gate/dev-tools.pins /tmp/dev-tools.pins
+RUN nextest_version=$(awk '$1 == "cargo-nextest" { print $2; exit }' /tmp/dev-tools.pins) \
+ && ruff_version=$(awk '$1 == "ruff" { print $2; exit }' /tmp/dev-tools.pins) \
  && cargo install --locked --root /out --version "$nextest_version" cargo-nextest \
  && cargo install --locked --root /out --version "$ruff_version" ruff
 

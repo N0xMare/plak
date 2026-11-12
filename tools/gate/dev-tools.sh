@@ -5,14 +5,26 @@ root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 source "$root/tools/gate/dev-tools-prefix.sh"
 prefix="$(plak_dev_tools_prefix "$root")"
 export PATH="$prefix/bin:$PATH"
-nextest_version=0.9.100
-deny_version=0.19.0
-ruff_version=0.17.3
 
 fail() {
   printf 'error: %s\n' "$*" >&2
   exit 2
 }
+
+pin_version() {
+  local tool version rest
+  while read -r tool version rest; do
+    if [[ "$tool" == "$1" ]]; then
+      printf '%s\n' "$version"
+      return
+    fi
+  done <"$root/tools/gate/dev-tools.pins"
+}
+nextest_version="$(pin_version cargo-nextest)"
+deny_version="$(pin_version cargo-deny)"
+ruff_version="$(pin_version ruff)"
+[[ -n "$nextest_version" && -n "$deny_version" && -n "$ruff_version" ]] \
+  || fail 'tools/gate/dev-tools.pins does not pin cargo-nextest, cargo-deny and ruff'
 
 require_python() {
   command -v python3 >/dev/null 2>&1 || fail 'Python 3.11+ is required; put a working python3 on PATH'
@@ -42,12 +54,32 @@ require_exact_version() {
   fi
 }
 
+# Without jj the jj tests return early and pass, so its absence fails here.
+require_jj() {
+  "$(plak_test_jj "$root")" --version >/dev/null 2>&1 \
+    || fail 'jj is unavailable, so jj tests would pass without running; put jj on PATH, set PLAK_TEST_JJ or run just dev-tools install'
+}
+
+# A prefix binary already at the pin stays: cargo install refuses to replace a
+# binary it did not install, such as the release archive `.agents/setup` unpacks.
+install_crate() {
+  local crate="$1" version="$2" installed
+  installed="$("$prefix/bin/$crate" --version 2>/dev/null)" || true
+  read -r _ installed _ <<<"$installed"
+  if [[ "$installed" == "$version" ]]; then
+    printf '%s %s is already installed.\n' "$crate" "$version"
+    return
+  fi
+  CARGO_TARGET_DIR="$prefix/build" cargo install --locked --root "$prefix" --version "$version" "$crate"
+}
+
 case "${1:-check}" in
   check)
     [[ $# -le 1 ]] || fail 'usage: dev-tools.sh check|check-nextest|install|deny'
     require_python
     require_version cargo-nextest "$nextest_version" cargo nextest --version
     require_exact_version ruff "$ruff_version" ruff --version
+    require_jj
     printf 'Development prerequisites are available.\n'
     ;;
   check-nextest)
@@ -67,9 +99,9 @@ case "${1:-check}" in
     require_python
     command -v cargo >/dev/null 2>&1 || fail 'Cargo is required; install the repository-pinned Rust toolchain'
     mkdir -p "$prefix" "$prefix/build"
-    CARGO_TARGET_DIR="$prefix/build" cargo install --locked --root "$prefix" --version "$nextest_version" cargo-nextest
-    CARGO_TARGET_DIR="$prefix/build" cargo install --locked --root "$prefix" --version "$deny_version" cargo-deny
-    CARGO_TARGET_DIR="$prefix/build" cargo install --locked --root "$prefix" --version "$ruff_version" ruff
+    install_crate cargo-nextest "$nextest_version"
+    install_crate cargo-deny "$deny_version"
+    install_crate ruff "$ruff_version"
     python3 tools/gate/check_public_compile.py --fetch
     python3 tools/dev/jj-tools.py install "$prefix"
     command -v rustup >/dev/null 2>&1 || fail 'rustup is required to install the wasm32-unknown-unknown target; install the repository-pinned Rust toolchain'

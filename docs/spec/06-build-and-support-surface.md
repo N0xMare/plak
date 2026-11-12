@@ -820,11 +820,16 @@ Install the pinned verification tools once, which the gates require:
 just dev-tools install
 ```
 
-`tools/gate/dev-tools.sh install` installs exactly cargo-nextest 0.9.100,
-cargo-deny 0.19.0 and ruff 0.17.3 into the repository-local `.dev-tools/bin`,
-which the gate puts first on `PATH`. It also adds the `wasm32-unknown-unknown`
-rustc target for the pinned toolchain (section 7.5) and does not put that
-target in `rust-toolchain.toml`. `just nextest` and
+`tools/gate/dev-tools.pins` is the one record of developer tool versions,
+release archive URLs and SHA-256 checksums: one line per archive, with
+cargo-nextest 0.9.100, cargo-deny 0.19.0, ruff 0.17.3, just 1.58.0 and jj 0.44.0
+to 0.46.0. `tools/gate/dev-tools.sh install` installs exactly the pinned
+cargo-nextest, cargo-deny and ruff into the repository-local `.dev-tools/bin`,
+which the gate puts first on `PATH`; it builds them with `cargo install --locked`
+and keeps a prefix binary that already reports its pinned version, because
+cargo refuses to replace a binary it did not install. It also adds the
+`wasm32-unknown-unknown` rustc target for the pinned toolchain (section 7.5)
+and does not put that target in `rust-toolchain.toml`. `just nextest` and
 `tools/dev/coverage.sh` prepend that same prefix and run
 `dev-tools.sh check-nextest` before cargo nextest. That check does not require
 ruff. It prefers the pinned cargo-nextest from the prefix; without one, a newer
@@ -838,7 +843,23 @@ the pinned cargo-nextest version before it runs anything, and
 cargo-nextest or cargo-deny already on `PATH` is accepted. Ruff is the
 exception: `pyproject.toml` sets `required-version = "==0.17.3"` and
 `dev-tools.sh check` requires that exact ruff, because a newer formatter
-can rewrite the tree the pin does not.
+can rewrite the tree the pin does not. The same check requires a working jj,
+any version: `PLAK_TEST_JJ` when set (an empty value fails), else `jj` on
+`PATH`, else the newest pinned jj that installation unpacks under
+`.dev-tools/jj/<version>/jj` (§7). Without one the jj tests return early and
+pass, so its absence fails the tier before it runs anything, naming jj.
+`tools/gate/test-env.sh` puts a directory holding only a `jj` link to the jj the
+check found first on `PATH`: `PLAK_TEST_JJ` when set, else the installed one when
+no `jj` is on `PATH`. The tests also run jj by name through the product's shims,
+so they all run that jj, and no other tool moves ahead of the pinned ones
+(chapter 05 §1).
+
+A cloud agent VM prepares the same prerequisites from `.agents/setup`: the pinned
+toolchain with the musl and `wasm32-unknown-unknown` targets, the Linux release
+archives of just and the newest pinned jj in `~/.local/bin`, and those of
+cargo-nextest, cargo-deny and ruff in `.dev-tools/bin`, each verified against
+its checksum. `.agents/resume` runs `dev-tools.sh check`, so a VM that lacks a
+tool fails when it resumes, not partway through a tier.
 
 ### 6.1 Cargo-native product build
 
@@ -950,7 +971,7 @@ summary and records no gate evidence (section 7.5).
 `tools/musl/image.Dockerfile` is the recipe: built from a `git archive` of a
 commit, its default target is the image, tagged `plak-qual-base:` plus the first
 eight hex digits of its image ID, and its `nextest` target exports the musl
-cargo-nextest and ruff at the versions `tools/gate/dev-tools.sh` pins. A toolchain or
+cargo-nextest and ruff at the versions `tools/gate/dev-tools.pins` records. A toolchain or
 dependency change rebuilds the image under a new tag and updates the tag in
 `tools/musl/musl-check.sh`.
 
@@ -1689,8 +1710,9 @@ previous minors; a newer CLI is unsupported until the library is bumped.
 Each bump updates `JJ_LIB_VERSION`, `JJ_CLI_SUPPORTED`, the user guide and
 reruns JJ tests against the lowest and highest supported binaries. The opt-in
 `just dev jj-compat` lane (not a gate tier) tests all three pinned minors;
-`just dev-tools install` installs checksummed release archives under
-`.dev-tools/jj/<version>/jj`. Fixtures honor `PLAK_TEST_JJ`;
+`just dev-tools install` installs the checksummed release archives that
+`tools/gate/dev-tools.pins` records under `.dev-tools/jj/<version>/jj`.
+Fixtures honor `PLAK_TEST_JJ`;
 this is not a promise of compatibility with arbitrary custom backends or
 future repository formats.
 

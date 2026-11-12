@@ -182,6 +182,90 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.assertEqual(gitconfig.read_text(), "")
         self.assertEqual(values["GIT_CONFIG_NOSYSTEM"], "1")
 
+    def test_test_env_falls_back_to_the_newest_installed_pinned_jj(self):
+        gate = self.checkout / "tools/gate"
+        for name in ("test-env.sh", "dev-tools-prefix.sh"):
+            shutil.copy(ROOT / "tools/gate" / name, gate / name)
+        (gate / "dev-tools.pins").write_text(
+            "jj 0.9.0 x86_64-unknown-linux-musl 00 https://example.invalid/a\n"
+            "jj 0.10.0 x86_64-unknown-linux-musl 00 https://example.invalid/b\n"
+        )
+        for version in ("0.9.0", "0.10.0", "0.11.0"):
+            binary = self.checkout / ".dev-tools/jj" / version / "jj"
+            binary.parent.mkdir(parents=True)
+            binary.write_text("#!/bin/sh\n")
+            binary.chmod(0o700)
+        newest = str(self.checkout / ".dev-tools/jj/0.10.0/jj")
+        path = os.pathsep.join(
+            entry
+            for entry in os.environ["PATH"].split(os.pathsep)
+            if not os.access(Path(entry) / "jj", os.X_OK)
+        )
+        env = dict(self.env, PATH=path, PLAK_TEST_TMPDIR=str(self.base / "jj-tmp"))
+        env.pop("PLAK_TEST_JJ", None)
+        script = str(gate / "test-env.sh")
+        report = (
+            "import json, os, shutil; jj = shutil.which('jj');"
+            " print(json.dumps([jj and os.path.realpath(jj), shutil.which('cargo-nextest')]))"
+        )
+
+        def seen(env, form):
+            command = {
+                "json": ["bash", script, "--json"],
+                "command": ["bash", script, "--", sys.executable, "-c", report],
+                "snippet": [
+                    "bash",
+                    "-c",
+                    'set -euo pipefail; test_env="$("$1")"; eval "$test_env"; "$2" -c "$3"',
+                    "snippet",
+                    script,
+                    sys.executable,
+                    report,
+                ],
+            }[form]
+            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            value = json.loads(result.stdout)
+            if form != "json":
+                return value
+            search = value.get("PATH", env["PATH"])
+            jj = shutil.which("jj", path=search)
+            return [jj and os.path.realpath(jj), shutil.which("cargo-nextest", path=search)]
+
+        on_path = self.base / "on-path"
+        on_path.mkdir()
+        (on_path / "jj").symlink_to(newest)
+        # A named jj beside other tools moves only jj: the stub never wins.
+        named = self.base / "tools-beside-jj/jj-0.9"
+        named.parent.mkdir()
+        named.symlink_to(self.checkout / ".dev-tools/jj/0.9.0/jj")
+        stub = named.parent / "cargo-nextest"
+        stub.write_text("#!/bin/sh\n")
+        stub.chmod(0o700)
+        nextest = shutil.which("cargo-nextest", path=path)
+        older = str(self.checkout / ".dev-tools/jj/0.9.0/jj")
+        # A call nested under another finds the link itself as the jj on PATH.
+        nested = subprocess.run(
+            ["bash", script, "--", "bash", script, "--", "true"],
+            env=dict(env, PATH=f"{on_path}{os.pathsep}{path}", PLAK_TEST_JJ="jj"),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        self.assertEqual(nested.returncode, 0, nested.stderr)
+        link = self.base / "jj-tmp/plak-test-jj/jj"
+        self.assertEqual(os.path.realpath(link), newest)
+        for form in ("json", "command", "snippet"):
+            for search in (path, f"{on_path}{os.pathsep}{path}"):
+                with self.subTest(form=form, search=search):
+                    pinned = dict(env, PATH=search, PLAK_TEST_JJ=str(named))
+                    self.assertEqual(seen(pinned, form), [older, nextest])
+            with self.subTest(form=form):
+                self.assertEqual(seen(env, form), [newest, nextest])
+                kept = seen(dict(env, PATH=f"{on_path}{os.pathsep}{path}"), form)
+                self.assertEqual(kept, [newest, nextest])
+                self.assertEqual(seen(dict(env, PLAK_TEST_JJ=""), form), [None, nextest])
+
     def test_test_env_unsets_overrides_and_provider_keys(self):
         script = ROOT / "tools/gate/test-env.sh"
         leaked = (
@@ -237,6 +321,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             "tools/gate/test-processes.py",
             "tools/gate/dev-tools.sh",
             "tools/gate/dev-tools-prefix.sh",
+            "tools/gate/dev-tools.pins",
         ):
             destination = copy / relative
             destination.parent.mkdir(parents=True, exist_ok=True)

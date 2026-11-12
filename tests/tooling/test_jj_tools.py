@@ -19,8 +19,9 @@ class JjToolsTests(unittest.TestCase):
     def test_every_supported_minor_and_platform_has_a_checksum(self):
         self.assertEqual(jj_tools.VERSIONS, ('0.44.0', '0.45.0', '0.46.0'))
         self.assertEqual(len(jj_tools.PINS), 6)
-        for checksum in jj_tools.PINS.values():
+        for (version, triple), (checksum, url) in jj_tools.PINS.items():
             self.assertRegex(checksum, r'^[0-9a-f]{64}$')
+            self.assertTrue(url.endswith(f'/v{version}/jj-v{version}-{triple}.tar.gz'), url)
 
     def test_verified_regular_binary_is_the_only_archive_entry_installed(self):
         stream = io.BytesIO()
@@ -36,7 +37,12 @@ class JjToolsTests(unittest.TestCase):
             patch.object(jj_tools, 'VERSIONS', ('0.46.0',)),
             patch.dict(
                 jj_tools.PINS,
-                {('0.46.0', 'x86_64-unknown-linux-musl'): hashlib.sha256(content).hexdigest()},
+                {
+                    ('0.46.0', 'x86_64-unknown-linux-musl'): (
+                        hashlib.sha256(content).hexdigest(),
+                        jj_tools.PINS['0.46.0', 'x86_64-unknown-linux-musl'][1],
+                    )
+                },
             ),
             patch.object(
                 jj_tools.urllib.request, 'urlopen', side_effect=lambda *a, **kw: io.BytesIO(content)

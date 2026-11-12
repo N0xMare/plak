@@ -110,6 +110,7 @@ class DevCheckWorkerTests(unittest.TestCase):
             "test-tmpdir.sh",
             "test-env.sh",
             "clippy.sh",
+            "dev-tools.pins",
         ):
             destination = self.root / "tools/gate" / name
             shutil.copyfile(ROOT / "tools/gate" / name, destination)
@@ -220,6 +221,8 @@ if args[0] == 'test':
             'ruff',
             "import sys\nif '--version' in sys.argv:\n    print('ruff 0.17.3')\nraise SystemExit(0)\n",
         )
+        self.executable('jj', "print('jj 0.46.0')\n")
+        self.env.pop('PLAK_TEST_JJ', None)
         self.executable(
             'python3',
             r'''import json, os, sys
