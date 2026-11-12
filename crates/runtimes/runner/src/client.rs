@@ -1273,7 +1273,10 @@ impl Inner {
         let (sender, instance, refusal, connection) = {
             let state = lock(&self.state);
             (
-                state.sender.clone(),
+                state
+                    .sender
+                    .clone()
+                    .filter(|_| !state.closer.is_cancelled()),
                 state.instance.clone(),
                 state.refusal.clone().filter(ends_connection),
                 state.connection,
@@ -1305,14 +1308,13 @@ impl Inner {
             _ => false,
         };
         let mut state = lock(&self.state);
-        if state.connection != connection {
-            // A rebinding while the call was journaled: the captured sender
-            // belongs to the old connection, which neither replays nor
-            // answers this request. It was never sent; send it afresh.
+        if state.connection != connection || state.closer.is_cancelled() {
+            // Journal I/O can outlive the link. Never leave a replay claim
+            // for a request refused before it reaches the writer queue.
             drop(state);
             self.unclaim(journaled, &request_id);
             return Err(RunnerFailure::NotSent(
-                "the runner rebound before the call was sent".into(),
+                "the runner link closed or rebound before the call was sent".into(),
             ));
         }
         state.pending.insert(
@@ -1513,3 +1515,6 @@ impl RunnerLink for RunnerClient {
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
+
+#[cfg(test)]
+mod dispatch_tests;

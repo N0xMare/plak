@@ -6320,7 +6320,10 @@ call whose request was coalesced away, or whose services have no owner hook,
 retries the same open admission after the same bounded backoff, so no waiter
 depends on a reconciliation that was never started. A request found journaled
 across a rebinding, before its send, is `NotSent` and is sent afresh rather
-than on the old connection.
+than on the old connection. Dispatch also refuses a link already known to be
+cancelled, both before journal claim and again before enqueueing after journal
+I/O. Cancellation discovered at either boundary queues no frame; a claim made
+in between is removed, so the call remains provably `NotSent`.
 A model read or observation answered `ReadInterrupted` is read again the same
 way at the same cursor; the cursor advances only when a result is consumed. No
 tool, nested cell or batch is retried to recover one call. A call possibly

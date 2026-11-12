@@ -7,6 +7,9 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Fixed runner calls being queued on an already cancelled link; calls refused
+  before dispatch remain provably not sent, without a replay journal claim.
+
 - Fixed workspace reads returning stale cached bytes after a same-size rewrite.
 - Fixed pending child decisions not being offered when the child's read model
   first attaches.
