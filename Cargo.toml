@@ -498,11 +498,11 @@ lto = false
 
 [workspace.metadata.plakous.cfg.plak]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
-env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs", "src/commands/doctor.rs"]
-feature-ceiling = 144
+env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs", "src/commands/doctor.rs", "src/test_hooks.rs"]
+feature-ceiling = 154
 test-seam-ceiling = 76
-env-ceiling = 26
-reason = "Capability registry, grouped interactive identity/carry helpers, lookup/re-export predicates, the capacity-probe hook and the offline image-hash delay installed at the composition root; native contract-drift errors exist only with their compiled route."
+env-ceiling = 18
+reason = "Capability registry, grouped interactive identity/carry helpers and host-upgrade ownership/probe guards preserve reduced products. Upgrade crash, capacity and state-key hooks are isolated at the composition root; native contract-drift errors exist only with their compiled route."
 
 [workspace.metadata.plakous.cfg.plakous]
 feature-ceiling = 63

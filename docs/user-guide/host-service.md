@@ -92,6 +92,9 @@ work first. `--wait 60` closes admissions while waiting up to 60 seconds and
 restores them on timeout. Unsupported destination/configuration/capacity
 refusals leave the old owner authoritative. A source build without the
 coordinator is refused, never silently stopped.
+Archived roots are checked too: hiding a session does not settle its work.
+Archived roots with live jobs or unverified settlement block upgrade; settled
+archived roots remain under the old key rather than being carried.
 
 For paired runners, install the matching snapshot and advance each runner's
 dedicated command link **before** invoking host upgrade. Revision, flavor and
@@ -114,15 +117,31 @@ No historical prompt or tool is replayed.
 
 If interrupted, retry the same destination command and expected binary ID.
 Before surrender, recovery withdraws the preparation and restores the retained
-old host; retry then starts a new attempt. After surrender, the old records
+old host; retry then starts a new attempt. Plain `plak host` startup does the
+same withdrawal. An Aborted attempt never sends a later destination start back
+to the old key. If the retained source executable is unavailable, startup marks
+the preparation Aborted and can start under its own key; restoring the source
+build later completes any source archival cleanup. After surrender, the old records
 cannot reopen: repair the destination if needed and recover only through its
 receipts. The source exits before the destination imports under its own host
-custody. The destination imports before Ready, then performs its ordinary
-runner reconciliation; interrupted or partial imports reuse the same reserved
-successors. A lost success answer reports the existing successors, not another
+custody. Each successor is imported and freshly reconciled before its own Ready
+receipt. A runner outage or changed credentials/configuration after surrender
+leaves only the affected successors withheld and retried; ready local roots
+still serve. Fix the destination/runner and retry the same command. Imported
+successors are not re-probed or re-created; post-surrender capacity changes
+produce an ordinary import warning, not another strict preflight. The command
+reports an unknown outcome early if no host holds the home, and extends its
+wait as import/readiness makes progress. A lost success answer reports the existing successors, not another
 import. Do not delete or edit `host/upgrades` to force an old owner to resume.
 Client reload remains separate and never performs this operation or resends
 ambiguously accepted input.
+
+After success, receipt-aware old-key host starts and old source addresses follow
+the recorded destination. Source records remain archived as well as fenced:
+older builds without receipt readers honour the ordinary archived-session
+refusal. Do not explicitly unarchive surrendered roots or edit their stores
+using an old build; those actions can bypass that legacy protection. Keep the
+source snapshots and state for reference until every successor is acknowledged.
 
 For a UI-only deployment, replace the UI files and use
 `systemctl --user reload plak-host.service`. Reload sends SIGUSR1 and keeps

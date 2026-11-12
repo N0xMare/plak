@@ -410,8 +410,12 @@ impl TopCommand {
             } => Ok(Command::CarryProbe { path }),
             Self::Version {
                 reopen_probe: Some(session),
+                host_upgrade_reopen,
                 ..
-            } => Ok(Command::ReopenProbe { session }),
+            } => Ok(Command::ReopenProbe {
+                session,
+                host_upgrade_reopen,
+            }),
             Self::Version {
                 reload_probe: true, ..
             } => Ok(Command::ReloadProbe),

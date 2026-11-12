@@ -6,6 +6,13 @@ use crate::shell::services::Services;
 
 pub(crate) const AVAILABLE: bool = false;
 
+pub(crate) fn preflight_upgrade_service(
+    services: &Services,
+    command: &crate::command::HostCommand,
+) -> CliResult<()> {
+    run_host_command(services, command).map(|_| ())
+}
+
 /// Refuses: this build has no host.
 ///
 /// # Errors

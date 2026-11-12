@@ -94,7 +94,11 @@ const PROBE_TOKEN_MARGIN: std::time::Duration = std::time::Duration::from_secs(6
 /// Runs in the destination build with the real home: reads the session and
 /// its projected head without writing, resolves the binding as an attach
 /// does, and verifies the exact open without taking its lease.
-pub(crate) fn reopen_probe(services: &crate::shell::services::Services, id: &str) -> ReopenProbe {
+pub(crate) fn reopen_probe(
+    services: &crate::shell::services::Services,
+    id: &str,
+    host_upgrade: bool,
+) -> ReopenProbe {
     let verdict = || -> Result<ReopenProbe, String> {
         let paths = services
             .paths()
@@ -111,8 +115,12 @@ pub(crate) fn reopen_probe(services: &crate::shell::services::Services, id: &str
         let head = views.as_ref().map_or(recorded, |views| {
             plakous_hosted::runtime::projected_head(recorded, views)
         });
-        crate::commands::session::verify_exact_reopen(services, record, head)
-            .map_err(|error| error.message().to_owned())
+        let verify = if host_upgrade {
+            crate::commands::session::verify_host_upgrade_reopen
+        } else {
+            crate::commands::session::verify_exact_reopen
+        };
+        verify(services, record, head).map_err(|error| error.message().to_owned())
     };
     verdict().unwrap_or_else(|reason| ReopenProbe::Refused { reason })
 }

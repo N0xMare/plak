@@ -226,7 +226,7 @@ fn assert_requested_reload_refused(busy: bool) {
         format!(" (build {})", directory.binary)
     };
     let reason = format!(
-        "this session runs in plak host{build}; restarting the host moves it onto the installed build (send SIGTERM to the plak host process, or run `systemctl --user restart plak-host.service` if it runs as the installed unit)"
+        "this session runs in plak host{build}; restarting the host moves it onto the installed build (run the installed build's `plak host upgrade --expect-binary <id>` with its binary id)"
     );
     assert_eq!(written["reason"], reason);
     terminal.wait_screen("requested reload refused: this session runs in plak host");
@@ -467,8 +467,7 @@ fn a_host_tui_shows_a_persistent_notice_only_when_the_installed_build_differs() 
             for expected in [
                 host.as_str(),
                 installed_id,
-                "send SIGTERM to the plak host",
-                "`systemctl --user restart plak-host.service`",
+                "host upgrade --expect-binary <id>",
             ] {
                 assert!(screen.contains(expected), "{screen}");
             }

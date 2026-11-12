@@ -242,12 +242,7 @@ pub(super) fn import_prepared_with_fallback(
             .map_err(CliFailure::new)?;
     }
     let created = product_host::create_seeded_session_with_preflight(config, move |window| {
-        import_capacity(
-            window,
-            estimated_tokens,
-            messages,
-            upgrade_successor.is_some(),
-        )
+        import_capacity(window, estimated_tokens, messages)
     })?;
     if let Some(error) = &created.completion_error {
         note.push_str(&format!(
@@ -276,13 +271,8 @@ fn import_capacity(
     window: plakous::sessions::SessionInputWindow,
     estimated_tokens: u64,
     messages: usize,
-    strict: bool,
 ) -> CliResult<()> {
     let capacity = super::attached::carry_capacity_from_window(window, estimated_tokens, messages);
-    if strict {
-        crate::carry::upgrade::require_capacity(&capacity)?;
-        return Ok(());
-    }
     let message = capacity.warning().unwrap_or_else(|| {
         if capacity.admitted_input.is_none() {
             "destination window unknown; carry will be checked at first prompt".to_owned()

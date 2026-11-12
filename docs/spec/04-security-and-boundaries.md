@@ -2260,7 +2260,7 @@ Ownership receipts are private bounded regular files opened without following
 links, atomically published and synced. Their directories and operation IDs
 are validated; corrupt or ambiguous receipts never grant execution authority.
 They contain identities and export digests, not another session carrier.
-Targets cannot execute before acknowledgement; source records are fenced by a
+Targets cannot execute before their individual Ready acknowledgement; source records are fenced by a
 committed surrender. The host pause and an exclusive home admission guard
 exclude new client and embedded/headless writes during preparation; ordinary
 standalone writers hold that guard shared before construction. The joined
@@ -2268,6 +2268,12 @@ handoff drains accepted mailboxes before the final quiescence check. A crash
 before commit leaves source authority intact; after commit recovery follows
 the destination receipt and never falls back to source execution. Same-user
 control files are not a boundary against the home owner's deliberate edits.
+Source records are also archived under held leases before surrender, so older
+builds without receipt readers honour the existing ordinary-reopen refusal.
+Explicit unarchive or direct source-store edits by an older build/operator are
+a residual authority escape: never use them to resume surrendered work.
+Preparation withdrawal restores its archival intent; an unavailable source image
+cannot turn Prepared into Committed or make Aborted redirect future starts.
 Paired remote placements are qualified before drain using the binding-free,
 exact-triple mode of §2.9. It admits configuration reads under existing runner
 root consent, not custody, owner registration, adoption or effects. The operator
@@ -2276,7 +2282,11 @@ After surrender the source exits and releases shared custody. Only the
 destination serving host, holding its own home custody, may import the reserved
 new lines. Its temporary normal binding loads no old call journal or recovery
 sweep; the fresh successor's job read is ordinary new-line authority, not a
-transfer of the source line. Normal Ready reconciliation follows all imports.
+transfer of the source line. Fresh normal Ready reconciliation follows each
+import before its mapping's durable readiness bit is published. A missing
+runner withholds only its own successors; retries retain host custody and do
+not re-create or re-probe already imported roots. Preflight is strict, while a
+changed capacity after surrender produces the ordinary import warning.
 Neither a standalone importer alongside a host nor fallback to surrendered
 source roots is authorized, including after a destination startup failure.
 Embedded daemon-held-process refusals remain in force.

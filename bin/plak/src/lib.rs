@@ -157,6 +157,27 @@ pub mod telemetry_store;
 mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]
 mod test_hooks {
+    pub(crate) fn upgrade_state_key() -> Option<String> {
+        None
+    }
+    pub(crate) fn upgrade_input_limit() -> Option<String> {
+        None
+    }
+    pub(crate) const fn upgrade_import_refused() -> bool {
+        false
+    }
+    #[allow(dead_code, reason = "only the optional host coordinates upgrades")]
+    pub(crate) fn upgrade_crash_cut(_name: &str) {}
+    #[allow(dead_code, reason = "only the optional host prepares upgrades")]
+    pub(crate) const fn upgrade_preparation_checkpoint(_name: &str) -> crate::CliResult<()> {
+        Ok(())
+    }
+    #[allow(dead_code, reason = "only the optional host starts replacement images")]
+    pub(crate) fn upgrade_key_environment(
+        _key: &str,
+    ) -> impl Iterator<Item = (&'static str, String)> {
+        std::iter::empty()
+    }
     pub(crate) const fn profile_route_ready(
         _catalog: &[plakous_host_protocol::views::ProviderSection],
         _account: &str,
@@ -503,6 +524,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             command,
             Command::StatePruneLegacy { .. } | Command::TreeRelease { .. }
         ) {
+        services
+            .paths()?
+            .ensure_private_state_home()
+            .map_err(CliFailure::new)?;
         Some(carry::upgrade::admission(services.paths()?, false)?)
     } else {
         None
@@ -718,8 +743,11 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             writeln!(stdout).map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }
-        Command::ReopenProbe { session } => {
-            let verdict = carry::reopen_probe(&services, &session);
+        Command::ReopenProbe {
+            session,
+            host_upgrade_reopen,
+        } => {
+            let verdict = carry::reopen_probe(&services, &session, host_upgrade_reopen);
             serde_json::to_writer(&mut stdout, &verdict)
                 .map_err(|_| CliFailure::new("stdout failed"))?;
             writeln!(stdout).map_err(|_| CliFailure::new("stdout failed"))?;

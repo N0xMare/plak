@@ -290,7 +290,15 @@ impl ProductStore {
     ///
     /// The read failed.
     pub fn head_of_tree(&mut self, tree_id: &str) -> Result<Option<String>, String> {
-        self.connection
+        head_of_tree_on(&self.connection, tree_id)
+    }
+}
+
+pub(super) fn head_of_tree_on(
+    connection: &rusqlite::Connection,
+    tree_id: &str,
+) -> Result<Option<String>, String> {
+    connection
             .query_row(
                 "SELECT s.id FROM sessions s WHERE s.node_tree_id=?1 AND NOT EXISTS (SELECT 1 FROM sessions successor WHERE successor.source_session_id=s.id AND successor.node_tree_id=s.node_tree_id AND successor.node_agent_id=s.node_agent_id) ORDER BY s.updated_at DESC, s.id ASC LIMIT 1",
                 [tree_id],
@@ -298,7 +306,6 @@ impl ProductStore {
             )
             .optional()
             .map_err(|_| "could not read the session of a tree".to_owned())
-    }
 }
 
 #[cfg(test)]

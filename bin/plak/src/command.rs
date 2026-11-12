@@ -263,6 +263,7 @@ pub(crate) enum Command {
     /// Hidden `plak version --reopen-probe <id>`.
     ReopenProbe {
         session: String,
+        host_upgrade_reopen: bool,
     },
     CarryProbe {
         path: PathBuf,

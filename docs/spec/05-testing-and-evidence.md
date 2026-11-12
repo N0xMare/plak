@@ -32,6 +32,19 @@ probes. Runner qualification regressions independently pin the closed read
 allowlist, refusals for every other request/frame class, unchanged unpaired
 inspection and absence of persisted runner mutations after qualification.
 
+Plain-start durability cases cut Prepared receipts after initial publication
+and after mapping publication with multiple roots, then restart as either key
+without invoking the upgrade recovery command. Both roots must reopen under
+the source, the receipt must be Aborted and no target record may exist. Cuts
+between source archival and surrender also prove archival rollback, including
+when the retained source image is missing; a later destination-key start must
+not be redirected by Aborted history. A non-crash preparation-error hook proves
+immediate withdrawal while source authority remains held. Mixed local/remote
+outage fixtures keep remote successors withheld, admit a ready local successor,
+then restore the runner and require receipt completion without host restart,
+duplicate import or inference. Upgrade hooks live only in the test-hooks
+composition root; no release build reads their environment inputs.
+
 Offline runner fault injection targets only the recorded daemon that still
 has the fixture home's lock file open, never a host's transient startup probe.
 Its exit wait tracks the killed daemon, not a replacement the live host may

@@ -1,11 +1,14 @@
-//! Only the destination holding home custody imports surrendered roots before Ready.
+//! Host-owned imports acknowledge each successor only after fresh reconciliation.
 
-use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 use std::time::Duration;
 
 use crate::carry::upgrade::{
-    crash_cut,
+    crash_cut, importing,
     receipt::{self, Phase, Receipt},
 };
 use crate::commands::runner::services::host as runner;
@@ -18,8 +21,17 @@ pub(in crate::host) fn prepare_host(
     let services = runner::custody(services)?;
     for receipt in pending(&services)? {
         crash_cut("before-import");
-        crate::carry::upgrade::import(&services, &receipt.path(services.paths()?))?;
-        crash_cut("after-import");
+        for mapping in receipt.mappings.iter().filter(|mapping| !mapping.ready) {
+            match importing::local(&services, &receipt, mapping) {
+                Ok(true) => {
+                    if let Err(failure) = importing::one(&services, &receipt, mapping) {
+                        deferred(&mapping.successor, &failure);
+                    }
+                }
+                Ok(false) => {}
+                Err(failure) => deferred(&mapping.successor, &failure),
+            }
+        }
     }
     runner::prepare(&services, None)
 }
@@ -35,53 +47,137 @@ fn pending(services: &Services) -> CliResult<Vec<Receipt>> {
         .collect())
 }
 
-pub(in crate::host) fn acknowledge(
-    services: &Services,
-    runtime: &tokio::runtime::Runtime,
-) -> CliResult<()> {
-    let pending = pending(services)?;
-    if pending.is_empty() {
-        return Ok(());
+fn deferred(successor: &str, failure: &CliFailure) {
+    eprintln!(
+        "host upgrade successor {successor} remains withheld; destination recovery will retry: {}",
+        crate::cli_output::safe_terminal_block(failure.message())
+    );
+}
+
+pub(in crate::host) struct Recovery {
+    stop: Arc<AtomicBool>,
+    wake: mpsc::Sender<()>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Recovery {
+    pub(in crate::host) fn cancel(&self) {
+        self.stop.store(true, Ordering::Release);
+        let _ = self.wake.send(());
     }
-    let mut required = BTreeSet::new();
-    for receipt in &pending {
-        for mapping in &receipt.mappings {
-            let record = services
-                .session_records()?
-                .load(&mapping.successor)
-                .map_err(CliFailure::new)?;
-            if record.plakous_locator.is_none() {
-                return Err(CliFailure::new("upgrade successor import is incomplete"));
-            }
-            required.insert(
-                record
-                    .runner
-                    .map_or_else(|| "local".to_owned(), |runner| runner.runner_id),
-            );
+    pub(in crate::host) fn join(mut self) {
+        self.finish();
+    }
+    fn finish(&mut self) {
+        self.cancel();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
         }
     }
-    for id in &required {
-        services.runners().require_connection(id, true);
+}
+
+impl Drop for Recovery {
+    fn drop(&mut self) {
+        self.finish();
     }
-    let ids = required.into_iter().collect::<Vec<_>>();
-    runtime.block_on(async {
-        tokio::time::timeout(Duration::from_secs(60), services.runners().refresh(Some(&ids))).await
-            .map_err(|_| CliFailure::new("host_upgrade_destination_not_ready: recover through the recorded destination receipt"))?
-            .map_err(|failure| CliFailure::new(format!("host_upgrade_destination_not_ready: {failure:?}; recover through the destination receipt")))
-    })?;
-    if ids.iter().any(|id| {
-        !services.runners().rows().iter().any(|row| {
-            row.runner.runner_id == *id && row.status == plakous::runner::RunnerStatus::Ready
-        })
-    }) {
-        return Err(CliFailure::new(
-            "host upgrade runner readiness was not published; retry the recorded destination",
-        ));
+}
+
+pub(in crate::host) fn start_retry(
+    services: &Services,
+    host: &Arc<
+        plakous_hosted::host_service::wire::SessionHost<crate::surface_protocol::PlakExtension>,
+    >,
+    runtime: &tokio::runtime::Handle,
+) -> Recovery {
+    let (wake, events) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let cancelled = Arc::clone(&stop);
+    let services = services.clone();
+    let host = Arc::clone(host);
+    let runtime = runtime.clone();
+    let worker = std::thread::spawn(move || {
+        while !cancelled.load(Ordering::Acquire) {
+            let receipts = match pending(&services) {
+                Ok(receipts) if receipts.is_empty() => break,
+                Ok(receipts) => receipts,
+                Err(failure) => {
+                    deferred("receipt", &failure);
+                    break;
+                }
+            };
+            for mut receipt in receipts {
+                if cancelled.load(Ordering::Acquire) {
+                    return;
+                }
+                if let Err(failure) = advance(&services, &runtime, &mut receipt, &cancelled, &host)
+                {
+                    deferred("receipt", &failure);
+                }
+                host.changed();
+            }
+            if events.recv_timeout(Duration::from_secs(2)).is_ok() {
+                break;
+            }
+        }
+    });
+    Recovery {
+        stop,
+        wake,
+        worker: Some(worker),
     }
-    crash_cut("before-ready");
-    for mut receipt in pending {
+}
+
+fn advance(
+    services: &Services,
+    runtime: &tokio::runtime::Handle,
+    receipt: &mut Receipt,
+    stop: &AtomicBool,
+    host: &plakous_hosted::host_service::wire::SessionHost<crate::surface_protocol::PlakExtension>,
+) -> CliResult<()> {
+    let mut order = (0..receipt.mappings.len()).collect::<Vec<_>>();
+    order.sort_by_key(|index| {
+        !importing::local(services, receipt, &receipt.mappings[*index]).unwrap_or(false)
+    });
+    for index in order {
+        if stop.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if receipt.mappings[index].ready {
+            continue;
+        }
+        let id = match importing::one(services, receipt, &receipt.mappings[index]) {
+            Ok(id) => id,
+            Err(failure) => {
+                deferred(&receipt.mappings[index].successor, &failure);
+                continue;
+            }
+        };
+        crash_cut("after-import");
+        services.runners().reconcile_when_available(&id);
+        let refreshed = runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(25),
+                services.runners().refresh(Some(std::slice::from_ref(&id))),
+            )
+            .await
+        });
+        if !matches!(refreshed, Ok(Ok(_)))
+            || !services.runners().rows().iter().any(|row| {
+                row.runner.runner_id == id && row.status == plakous::runner::RunnerStatus::Ready
+            })
+        {
+            continue;
+        }
+        crash_cut("before-ready");
+        receipt.mappings[index].ready = true;
+        receipt.save(services.paths()?)?;
+        host.changed();
+    }
+    if receipt.mappings.iter().all(|mapping| mapping.ready) {
         receipt.phase = Phase::Acknowledged;
         receipt.save(services.paths()?)?;
+    }
+    if receipt.phase == Phase::Acknowledged {
         crash_cut("after-ack");
     }
     Ok(())

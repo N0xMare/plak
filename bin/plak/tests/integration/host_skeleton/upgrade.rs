@@ -6,6 +6,7 @@ use super::*;
 
 const DESTINATION: &str = "r999.e999.p999.t999";
 
+mod recovery;
 mod remote;
 mod topology;
 
@@ -87,7 +88,12 @@ fn successor(fixture: &Fixture, source: &str) -> String {
     receipts(fixture)
         .iter()
         .rev()
-        .filter(|receipt| receipt["phase"] == "acknowledged")
+        .filter(|receipt| {
+            matches!(
+                receipt["phase"].as_str(),
+                Some("committed" | "acknowledged")
+            )
+        })
         .flat_map(|receipt| receipt["mappings"].as_array().unwrap())
         .find(|mapping| mapping["source"] == source)
         .unwrap()["successor"]
@@ -216,7 +222,11 @@ fn host_upgrade_settled_roots_round_trip_once_and_reconnect() {
             false,
         );
         assert!(!refused.status.success());
-        assert!(String::from_utf8_lossy(&refused.stderr).contains("source_fenced"));
+        let refusal = String::from_utf8_lossy(&refused.stderr);
+        assert!(
+            refusal.contains("source_fenced") || refusal.contains("session_archived"),
+            "{refusal}"
+        );
     }
     assert!(!fixture.root.join("evidence.jsonl").exists() || crash::dispatches(&fixture) == 0);
     stop(&mut host);
@@ -429,6 +439,36 @@ fn host_upgrade_cross_key_refuses_daemon_jobs_without_disturbing_custody() {
 }
 
 #[test]
+fn host_upgrade_archived_root_with_daemon_jobs_still_blocks_surrender() {
+    let Some(fixture) = fixture() else { return };
+    let (mut host, session, _) = runner::start_job(&fixture, false);
+    let (pid, daemon) = runner::job(&fixture);
+    let mut client = Client::connect(&host);
+    profiles::wait_idle(&mut client, &session);
+    // Legacy visibility flags do not establish that a job has settled.
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let product = rusqlite::Connection::open(paths.product_database()).unwrap();
+    product.busy_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(
+        product
+            .execute("UPDATE sessions SET archived=1 WHERE id=?1", [&session])
+            .unwrap(),
+        1
+    );
+    drop(product);
+    let refused = upgrade(&fixture, &binary(&fixture));
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("daemon_jobs"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(runner::alive(pid) && runner::alive(daemon));
+    assert!(!fixture.home().join("host/upgrades").exists());
+    stop(&mut host);
+}
+
+#[test]
 fn host_upgrade_preflight_refuses_capacity_versions_config_and_wrong_identity_before_drain() {
     for case in ["small", "unknown", "versions", "config", "binary"] {
         let Some(fixture) = fixture() else { return };
@@ -500,24 +540,7 @@ fn host_upgrade_same_key_uses_planned_handoff_and_preserves_daemon_jobs() {
     let mut client = Client::connect(&host);
     profiles::wait_idle(&mut client, &session);
     let dispatches = crash::dispatches(&fixture);
-    let image = fixture.root.join("replacement");
-    std::fs::copy(env!("CARGO_BIN_EXE_plak"), &image).unwrap();
-    #[cfg(not(target_os = "macos"))]
-    std::fs::OpenOptions::new()
-        .append(true)
-        .open(&image)
-        .unwrap()
-        .write_all(b"\0")
-        .unwrap();
-    #[cfg(target_os = "macos")]
-    assert!(
-        std::process::Command::new("/usr/bin/codesign")
-            .args(["--force", "--sign", "-", "--identifier", "upgrade-fixture"])
-            .arg(&image)
-            .status()
-            .unwrap()
-            .success()
-    );
+    let image = replacement_image(&fixture);
     let probe = image_command(&fixture, &image)
         .args(["version", "--host-upgrade-probe"])
         .output()
@@ -546,6 +569,28 @@ fn host_upgrade_same_key_uses_planned_handoff_and_preserves_daemon_jobs() {
     assert!(!fixture.home().join("host/upgrades").exists());
     assert_eq!(crash::dispatches(&fixture), dispatches);
     stop(&mut host);
+}
+
+fn replacement_image(fixture: &Fixture) -> PathBuf {
+    let image = fixture.root.join("replacement");
+    std::fs::copy(env!("CARGO_BIN_EXE_plak"), &image).unwrap();
+    #[cfg(not(target_os = "macos"))]
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&image)
+        .unwrap()
+        .write_all(b"\0")
+        .unwrap();
+    #[cfg(target_os = "macos")]
+    assert!(
+        std::process::Command::new("/usr/bin/codesign")
+            .args(["--force", "--sign", "-", "--identifier", "upgrade-fixture"])
+            .arg(&image)
+            .status()
+            .unwrap()
+            .success()
+    );
+    image
 }
 
 #[test]

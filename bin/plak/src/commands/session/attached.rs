@@ -140,10 +140,9 @@ pub(crate) fn probe_upgrade_capacity(
         prepared.estimated_tokens,
         prepared.messages,
     );
-    #[cfg(feature = "test-hooks")]
     let capacity = {
         let mut capacity = capacity;
-        if let Ok(limit) = std::env::var("PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT") {
+        if let Some(limit) = crate::test_hooks::upgrade_input_limit() {
             capacity.admitted_input = if limit == "unknown" {
                 None
             } else {
@@ -163,7 +162,7 @@ pub(crate) fn probe_upgrade_capacity(
 /// Whether an exact reopen of `record` would attach on this build, answered
 /// without owning it: the attach's own binding resolution, then the open's
 /// verification at `head` (spec 02 §2.5.1).
-pub(crate) fn verify_exact_reopen(
+pub(crate) fn verify_host_upgrade_reopen(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,
     head: plakous::sessions::SessionLocator,
@@ -177,6 +176,14 @@ pub(crate) fn verify_exact_reopen(
         &record.workspace_root,
     )?;
     let services = &placement.services;
+    verify_exact_reopen(services, record, head)
+}
+
+pub(crate) fn verify_exact_reopen(
+    services: &crate::shell::services::Services,
+    record: product_sessions::SessionRecord,
+    head: plakous::sessions::SessionLocator,
+) -> CliResult<crate::carry::ReopenProbe> {
     let config = match build_attached_host_config(services, record, AttachedPurpose::Verify) {
         Ok(config) => config,
         Err(AttachedConfigError::Answered(probe)) => return Ok(*probe),

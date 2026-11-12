@@ -3,8 +3,6 @@
 use rustix::fs::Mode;
 use std::fs::{self, File};
 use std::io::Read as _;
-#[cfg(any(test, feature = "web"))]
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -14,6 +12,10 @@ use crate::store::sessions::{SessionNode, SessionRecord};
 use crate::{CliFailure, CliResult};
 
 const MAX_BYTES: u64 = 1024 * 1024;
+pub(crate) const VERSION: u32 = 1;
+
+#[cfg(any(test, feature = "web"))]
+mod publication;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +29,7 @@ pub(crate) enum Phase {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Mapping {
+    pub(crate) ready: bool,
     pub(crate) source: String,
     pub(crate) source_node: plakous_host_protocol::wire::NodeAddress,
     pub(crate) successor: String,
@@ -48,6 +51,7 @@ pub(crate) struct Receipt {
     pub(crate) destination_binary: String,
     pub(crate) destination: PathBuf,
     pub(crate) phase: Phase,
+    pub(crate) source_archival_pending: bool,
     pub(crate) mappings: Vec<Mapping>,
 }
 
@@ -56,7 +60,7 @@ impl Receipt {
         let uuid = |value: &str| uuid::Uuid::parse_str(value).is_ok();
         let mut sources = std::collections::BTreeSet::new();
         let mut successors = std::collections::BTreeSet::new();
-        if self.version != 1
+        if self.version != VERSION
             || self.sequence == 0
             || plakous_recursive_subagents::tree::HostInstance::parse(&self.source_instance)
                 .is_err()
@@ -74,7 +78,9 @@ impl Receipt {
             || self.host_argv.len() > 64
             || self.mappings.len() > 4096
             || self.mappings.iter().any(|mapping| {
-                !uuid(&mapping.source)
+                (mapping.ready && matches!(self.phase, Phase::Prepared | Phase::Aborted))
+                    || (self.phase == Phase::Acknowledged && !mapping.ready)
+                    || !uuid(&mapping.source)
                     || !uuid(&mapping.successor)
                     || SessionNode::parse(
                         &mapping.source_node.tree_id,
@@ -99,41 +105,6 @@ impl Receipt {
 
     pub(crate) fn path(&self, paths: &PlakPaths) -> PathBuf {
         root(paths).join(self.id.to_string()).join("receipt.json")
-    }
-
-    /// A publication error is outcome-unknown: after attempting a commit the
-    /// caller must keep the source fenced, never rewrite this as an abort.
-    #[cfg(any(test, feature = "web"))]
-    pub(crate) fn save(&self, paths: &PlakPaths) -> CliResult<()> {
-        self.validate()?;
-        let directory = root(paths).join(self.id.to_string());
-        crate::commands::runner::private_directory(&paths.home().join("host"))?;
-        crate::commands::runner::private_directory(&root(paths))?;
-        crate::commands::runner::private_directory(&directory)?;
-        let bytes = serde_json::to_vec(self).map_err(|error| CliFailure::new(error.to_string()))?;
-        if bytes.len() as u64 > MAX_BYTES {
-            return Err(CliFailure::new(
-                "host upgrade receipt exceeds its size bound",
-            ));
-        }
-        let mut temporary = tempfile::NamedTempFile::new_in(&directory).map_err(failed)?;
-        temporary.write_all(&bytes).map_err(failed)?;
-        temporary.as_file().sync_all().map_err(failed)?;
-        temporary
-            .persist(self.path(paths))
-            .map_err(|error| failed(error.error))?;
-        File::open(&directory)
-            .and_then(|file| file.sync_all())
-            .map_err(failed)?;
-        File::open(root(paths))
-            .and_then(|file| file.sync_all())
-            .map_err(failed)?;
-        File::open(paths.home().join("host"))
-            .and_then(|file| file.sync_all())
-            .map_err(failed)?;
-        File::open(paths.home())
-            .and_then(|file| file.sync_all())
-            .map_err(failed)
     }
 }
 
@@ -253,10 +224,7 @@ pub(crate) fn ensure_open(paths: &PlakPaths, record: &SessionRecord) -> CliResul
                     record.id, mapping.successor, receipt.destination_key,
                 )));
             }
-            if key == receipt.destination_key
-                && mapping.successor == record.id
-                && receipt.phase != Phase::Acknowledged
-            {
+            if key == receipt.destination_key && mapping.successor == record.id && !mapping.ready {
                 return Err(CliFailure::new(
                     "host_upgrade_target_pending: destination import and readiness are not acknowledged",
                 ));
@@ -288,6 +256,7 @@ pub(crate) fn withheld_targets(paths: &PlakPaths) -> CliResult<std::collections:
             receipt
                 .mappings
                 .into_iter()
+                .filter(|mapping| !mapping.ready)
                 .map(|mapping| mapping.successor)
         })
         .collect())

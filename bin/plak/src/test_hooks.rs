@@ -44,6 +44,39 @@ use crate::{product_agent, product_config, product_host, product_paths};
 /// The exact model id this hook answers to.
 pub(crate) const SELECTOR: &str = "offline-loopback-v1";
 
+pub(crate) fn upgrade_state_key() -> Option<String> {
+    std::env::var("PLAK_TEST_STATE_KEY")
+        .ok()
+        .filter(|key| crate::carry::upgrade::state_key_valid(key))
+}
+
+pub(crate) fn upgrade_input_limit() -> Option<String> {
+    std::env::var("PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT").ok()
+}
+
+pub(crate) fn upgrade_import_refused() -> bool {
+    std::env::var("PLAK_TEST_HOST_UPGRADE_IMPORT_REFUSAL").as_deref() == Ok("1")
+}
+
+pub(crate) fn upgrade_crash_cut(name: &str) {
+    if std::env::var("PLAK_TEST_HOST_UPGRADE_CUT").is_ok_and(|cut| cut == name) {
+        std::process::exit(86);
+    }
+}
+
+pub(crate) fn upgrade_preparation_checkpoint(name: &str) -> crate::CliResult<()> {
+    if std::env::var("PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE").is_ok_and(|cut| cut == name) {
+        return Err(crate::CliFailure::new(
+            "injected host upgrade preparation failure",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn upgrade_key_environment(key: &str) -> impl Iterator<Item = (&'static str, String)> {
+    std::iter::once(("PLAK_TEST_STATE_KEY", key.to_owned()))
+}
+
 /// Extend the real catalog with only the credential-free scripted route.
 fn profile_ready_catalog(
     catalog: &plakous_host_protocol::views::ReadyCatalog,

@@ -13,7 +13,7 @@ mod recovery;
 
 pub(crate) use attached::{
     probe_carry_capacity, probe_prepared_capacity, probe_upgrade_capacity, run_attached_action,
-    verify_exact_reopen,
+    verify_exact_reopen, verify_host_upgrade_reopen,
 };
 
 pub use binding::seed_new_session_binding;

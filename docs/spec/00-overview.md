@@ -213,7 +213,7 @@ them on 0.0.2 or start new ones. 0.0.2 state is left untouched for the 0.0.2 bin
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **10** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **22**, disposable, never recovery authority |
 | Session export document | Plak | version **12** (adds the session's runner and profile), imports **12** and **11** |
-| Host-upgrade ownership receipt | Plak | version **1**, outside state keys; operation identities, export digests and source/successor mappings only |
+| Host-upgrade ownership receipt | Plak | version **1**, outside state keys; operation identities, export digests, source archival intent and per-successor readiness only |
 
 Tree schema 10 adds the node's line, epoch and runner placement, successor
 epochs, fork provenance, runner ancestors and the tree custody record (chapter

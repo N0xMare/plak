@@ -217,13 +217,24 @@ impl ProductStore {
             return Ok(Vec::new());
         }
         Self::read_only_snapshot(paths, |snapshot| {
-            let ids = snapshot.prepare(
-                "SELECT id FROM (SELECT id,ROW_NUMBER() OVER(PARTITION BY node_tree_id ORDER BY updated_at DESC,id ASC) AS ordinal FROM sessions WHERE archived=0) WHERE ordinal=1 ORDER BY id"
-            ).and_then(|mut statement| statement.query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>())
+            let trees = snapshot
+                .prepare("SELECT DISTINCT node_tree_id FROM sessions ORDER BY node_tree_id")
+                .and_then(|mut statement| {
+                    statement
+                        .query_map([], |row| row.get::<_, String>(0))?
+                        .collect::<Result<Vec<_>, _>>()
+                })
                 .map_err(|error| error.to_string())?;
-            if ids.len() > 4096 {
+            if trees.len() > 4096 {
                 return Err("too many roots for one host upgrade".to_owned());
             }
+            let ids = trees
+                .iter()
+                .map(|tree| directory::head_of_tree_on(snapshot, tree))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
             ids.iter()
                 .map(|id| load_record(snapshot, &mut views::VerifiedSubmissions::default(), id))
                 .collect()

@@ -3,7 +3,7 @@ use super::*;
 fn receipt(record: &SessionRecord, destination: bool) -> Receipt {
     let own = crate::home::state::state_key();
     Receipt {
-        version: 1,
+        version: VERSION,
         id: uuid::Uuid::new_v4(),
         sequence: 1,
         source_key: if destination {
@@ -23,7 +23,9 @@ fn receipt(record: &SessionRecord, destination: bool) -> Receipt {
         destination_binary: "b".repeat(12),
         destination: PathBuf::from("/fixture/bin/plak"),
         phase: Phase::Prepared,
+        source_archival_pending: false,
         mappings: vec![Mapping {
+            ready: false,
             source: record.id.clone(),
             source_node: plakous_host_protocol::wire::NodeAddress {
                 tree_id: record.node.tree_id.clone(),
@@ -53,6 +55,7 @@ fn source_surrender_precedes_target_execution_admission() {
             Phase::Aborted,
         ] {
             receipt.phase = phase;
+            receipt.mappings[0].ready = phase == Phase::Acknowledged;
             receipt.save(&paths).unwrap();
             let expected = if destination {
                 phase == Phase::Acknowledged
@@ -92,11 +95,12 @@ fn duplicate_mapping_and_unknown_receipt_versions_refuse_before_publication() {
     let paths = PlakPaths::explicit(home.path().to_path_buf());
     let record = SessionRecord::new(home.path().join("workspace"));
     let mut receipt = receipt(&record, false);
-    receipt.version = 2;
+    receipt.version = VERSION + 1;
     assert!(receipt.save(&paths).is_err());
     assert!(!root(&paths).exists());
-    receipt.version = 1;
+    receipt.version = VERSION;
     receipt.mappings.push(Mapping {
+        ready: false,
         source: record.id.clone(),
         source_node: plakous_host_protocol::wire::NodeAddress {
             tree_id: record.node.tree_id.clone(),

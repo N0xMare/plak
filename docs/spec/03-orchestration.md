@@ -4060,11 +4060,15 @@ the planned handoff above, with its existing once-only continuation law.
 Paired remote roots use binding-free destination qualification before drain.
 After durable surrender, source exit releases shared home custody; destination
 startup takes its own host custody and imports the reserved fresh lines before
-normal runner preparation and Ready reconciliation. It does not transfer or
+their fresh Ready reconciliation and per-successor acknowledgement. A host-owned
+worker retries pending imports/reconciliation without holding ready local roots
+behind an unavailable remote placement. It does not transfer or
 adopt source lines, copy job registries, or load an old call journal. Interrupted
 creation retries its reserved operation and successor, including a canonical
-create committed before the product locator was saved. Until acknowledgement,
-those target records cannot execute; surrendered source records never reopen.
+create committed before the product locator was saved. Each target cannot
+execute until its own Ready receipt; surrendered source
+records never reopen. Source archival is durable before surrender, and the
+Prepared receipt owns its rollback if startup or preparation fails.
 Runner transfer rules and the embedded daemon-process refusal are unchanged.
 
 **Stops.** Every interrupt intent records its cause: a parent's

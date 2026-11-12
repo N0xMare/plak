@@ -9,7 +9,7 @@ use crate::{CliFailure, CliResult};
 pub(crate) mod process;
 pub(crate) mod remote;
 
-pub(crate) const PROTOCOL: u32 = 2;
+pub(crate) const PROTOCOL: u32 = 1;
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -27,12 +27,7 @@ pub(crate) struct PlacementProbe {
 
 #[cfg(feature = "web")]
 pub(crate) fn crash_cut(name: &str) {
-    #[cfg(feature = "test-hooks")]
-    if std::env::var("PLAK_TEST_HOST_UPGRADE_CUT").is_ok_and(|selected| selected == name) {
-        std::process::exit(86);
-    }
-    #[cfg(not(feature = "test-hooks"))]
-    let _ = name;
+    crate::test_hooks::upgrade_crash_cut(name);
 }
 
 /// Embedded/headless writers hold this shared; a host upgrade takes it
@@ -127,12 +122,7 @@ fn probe_service(services: &Services, path: &std::path::Path) -> CliResult<()> {
             "destination cannot serve the recorded host arguments",
         ));
     };
-    #[cfg(feature = "web")]
-    if let Some(web) = &command.web {
-        crate::web::preflight(services, web)?;
-    }
-    #[cfg(not(feature = "web"))]
-    let _ = (services, command);
+    crate::host::preflight_upgrade_service(services, &command)?;
     for placement in probe.placements {
         let _qualified = remote::Placement::prepare(services, &placement.id, &placement.workspace)?;
     }
@@ -140,66 +130,7 @@ fn probe_service(services: &Services, path: &std::path::Path) -> CliResult<()> {
 }
 
 #[cfg(feature = "web")]
-pub(crate) fn import(
-    services: &Services,
-    receipt_path: &std::path::Path,
-) -> CliResult<crate::ProcessOutcome> {
-    let paths = services.paths()?;
-    let receipt = receipt::read(receipt_path)?;
-    if receipt.path(paths) != receipt_path
-        || receipt.destination_key != crate::home::state::state_key()
-        || receipt.destination_binary != crate::build_identity::binary_id()
-        || receipt.phase != receipt::Phase::Committed
-        || services
-            .runner_ownership()
-            .is_none_or(crate::commands::runner::ownership::RunnerOwnership::is_standalone)
-    {
-        return Err(CliFailure::new(
-            "host_upgrade_import_refused: destination or receipt identity does not match",
-        ));
-    }
-    process::verify_image(&receipt.destination, &receipt.destination_binary)?;
-    crate::home::state::ensure_usable_state(paths, &mut std::io::stderr())
-        .map_err(CliFailure::new)?;
-    for mapping in &receipt.mappings {
-        let file = receipt_path
-            .parent()
-            .ok_or_else(|| CliFailure::new("upgrade receipt has no directory"))?
-            .join(format!("{}.json", mapping.source));
-        let document =
-            super::read_document(&file).map_err(|error| CliFailure::new(error.to_string()))?;
-        if document.read_digest() != Some(mapping.digest.as_str()) {
-            return Err(CliFailure::new(
-                "host upgrade export digest does not match its receipt",
-            ));
-        }
-        if document.source() != (mapping.source.as_str(), receipt.source_key.as_str()) {
-            return Err(CliFailure::new(
-                "host upgrade export provenance does not match its receipt",
-            ));
-        }
-        crate::commands::session::probe_upgrade_capacity(services, &file)?;
-        let placed = remote::Placement::for_import(
-            services,
-            document.runner_id(),
-            document.workspace_root(),
-        )?;
-        let mut prepared = crate::commands::session::PreparedImport::new(document, false)?;
-        prepared.upgrade_successor = Some(mapping.successor.clone());
-        let (record, _) = crate::commands::session::import_prepared(&placed.services, prepared)?;
-        let saved = services
-            .session_records()?
-            .load(&mapping.successor)
-            .map_err(CliFailure::new)?;
-        if record.id != mapping.successor || saved.plakous_locator.is_none() {
-            return Err(CliFailure::new(
-                "host upgrade successor did not finish importing",
-            ));
-        }
-        crash_cut("after-import-root");
-    }
-    Ok(crate::ProcessOutcome::Success)
-}
+pub(crate) mod importing;
 
 pub(crate) fn binary_id_valid(value: &str) -> bool {
     value.len() == 12
@@ -231,6 +162,7 @@ pub(crate) fn state_key_valid(value: &str) -> bool {
 #[serde(deny_unknown_fields)]
 pub(crate) struct DestinationProbe {
     pub(crate) protocol: u32,
+    pub(crate) receipt_version: u32,
     pub(crate) binary_id: String,
     pub(crate) state_key: String,
     pub(crate) export_versions: Vec<u32>,
@@ -246,15 +178,14 @@ pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationPro
         .and_then(|config| crate::build_features::admit_config(&config));
     let policy = crate::product_config::SessionPolicy::load(paths).map_err(CliFailure::new);
     let export_versions = super::IMPORTABLE_VERSIONS.to_vec();
-    #[cfg(feature = "test-hooks")]
-    let export_versions =
-        if std::env::var("PLAK_TEST_HOST_UPGRADE_IMPORT_REFUSAL").as_deref() == Ok("1") {
-            Vec::new()
-        } else {
-            export_versions
-        };
+    let export_versions = if crate::test_hooks::upgrade_import_refused() {
+        Vec::new()
+    } else {
+        export_versions
+    };
     Ok(DestinationProbe {
         protocol: PROTOCOL,
+        receipt_version: receipt::VERSION,
         binary_id: crate::build_identity::binary_id().to_owned(),
         state_key: crate::home::state::state_key(),
         export_versions,

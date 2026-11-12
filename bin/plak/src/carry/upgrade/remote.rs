@@ -78,7 +78,7 @@ impl Placement {
                     .map_err(|failure| CliFailure::new(format!("runner qualification failed: {failure:?}")))?
                     .map_err(|failure| CliFailure::new(format!("runner workspace refused: {failure:?}")))?;
                 Ok::<_, CliFailure>(dialed)
-            }).await.map_err(|_| CliFailure::new("host_upgrade_runner_qualification_timeout: source remains authoritative"))?
+            }).await.map_err(|_| CliFailure::new("host_upgrade_runner_connection_timeout: the paired runner did not finish preparation"))?
         })?;
         let backend = plakous::tools::runner::RunnerBackend::new(
             dialed.hello.descriptor.clone(),

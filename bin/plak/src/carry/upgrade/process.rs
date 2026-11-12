@@ -3,9 +3,7 @@
 use std::fs::File;
 use std::io::Read as _;
 use std::path::Path;
-#[cfg(any(test, feature = "web"))]
 use std::process::{Command, Output, Stdio};
-#[cfg(any(test, feature = "web"))]
 use std::time::{Duration, Instant};
 
 use sha2::{Digest as _, Sha256};
@@ -42,27 +40,22 @@ pub(crate) fn verify_image(path: &Path, expected: &str) -> CliResult<()> {
         .collect();
     if !super::binary_id_valid(expected) || id != expected {
         return Err(CliFailure::new(
-            "host_upgrade_binary_mismatch: executable does not match --expect-binary; source remains authoritative",
+            "host_upgrade_binary_mismatch: executable does not match its expected binary identity",
         ));
     }
     Ok(())
 }
 
-#[cfg(any(test, feature = "web"))]
 pub(crate) fn command(executable: &Path, home: &Path, key: &str) -> Command {
     let mut command = Command::new(executable);
     command
         .env("PLAK_HOME", home)
         .current_dir(home)
         .env_remove("PLAK_TEST_STATE_KEY");
-    #[cfg(feature = "test-hooks")]
-    command.env("PLAK_TEST_STATE_KEY", key);
-    #[cfg(not(feature = "test-hooks"))]
-    let _ = key;
+    command.envs(crate::test_hooks::upgrade_key_environment(key));
     command
 }
 
-#[cfg(any(test, feature = "web"))]
 pub(crate) fn run(mut command: Command, timeout: Duration) -> CliResult<Output> {
     use std::os::unix::process::CommandExt as _;
     const LIMIT: u64 = 1024 * 1024;

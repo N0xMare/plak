@@ -751,29 +751,6 @@ Layout and test helpers do not become a public TUI API for the benchmark.
 
 ### 4.1 The `maintainer` feature
 
-Host upgrade uses the invoked destination image's binary identity, not the
-workspace revision or a stable link's name. Its private
-`version --host-upgrade-probe` reports host availability, state key, import
-versions, local-runner protocol and configuration verdict;
-`version --host-upgrade-capacity <export>` adds strict settled-carry admission.
-The coordinator adds `--host-upgrade-service <file>` to its capability probe to
-validate the resolved service arguments, web assets and required paired remote
-placements without binding the service or adopting runner lines. The private
-coordinator/capability protocol is 2; an older coordinator refuses before drain.
-Required placements use authenticated read-only exact-triple qualification,
-including the configuration/window builder's runner workspace and skill reads.
-These probes dispatch no turn and do not open a foreign state key as session
-authority. The source hashes the destination and retains its own executable
-path in the ownership receipt; startup/retry verifies the selected image again.
-Keep both immutable snapshots with matching sidecars through acknowledgement.
-Installation alone does not execute an upgrade, and old snapshots/state are not
-automatically removed. For a remote placement, advance its dedicated command
-link to the matching immutable snapshot before invoking host upgrade; normal
-maintainer installation must not move that link. A mismatch refuses before
-drain. Keep the old executable and workers available for inspection/drain until
-acknowledgement. After surrender, destination startup owns passive import and
-its normal runner Ready sweep; recovery uses that snapshot's receipts only.
-
 `maintainer` gates these verbs:
 
 ```text
@@ -1451,6 +1428,35 @@ new launches use the new binary once the install succeeds; a running TUI shows
 `new build installed · /reload`. There is no in-product updater.
 Installation removes an obsolete `monty` launch symlink only when it points
 into the Plak sidecar or snapshot roots; independent files and links remain.
+
+Host upgrade uses the invoked destination image's binary identity, not the
+workspace revision or a stable link's name. Its private
+`version --host-upgrade-probe` reports host availability, state key, export
+import versions, ownership-receipt version, local-runner protocol and
+configuration verdict. `version --host-upgrade-capacity <export>` enforces
+strict preflight. The private coordinator/capability protocol starts at **1**;
+the ownership-receipt format is **1**, independently checked before drain.
+The coordinator adds `--host-upgrade-service <file>` to validate resolved
+service arguments, web assets and required paired placements without binding
+the service or adopting lines. Its `--host-upgrade-reopen --reopen-probe <id>`
+uses remote qualification only for host upgrade; an ordinary embedded reload's
+`--reopen-probe` does not acquire this new runner dependency.
+
+Required placements use authenticated read-only exact-triple qualification,
+including the configuration/window builder's runner workspace and skill reads.
+These probes dispatch no turn and do not open a foreign state key as session
+authority. The source hashes the destination and retains its own executable
+path in the ownership receipt; startup/retry verifies the selected image again.
+Keep both immutable snapshots with matching sidecars through acknowledgement.
+Installation alone does not execute an upgrade, and old snapshots/state are not
+automatically removed. For a remote placement, advance its dedicated command
+link to the matching immutable snapshot before invoking host upgrade; normal
+maintainer installation must not move that link. A mismatch refuses before
+drain. Keep the old executable and workers for inspection/drain until every
+successor is acknowledged. After surrender, destination host custody owns
+passive import and fresh per-placement Ready reconciliation. Runner outages
+withhold only affected successors while ready roots serve; recovery uses that
+snapshot's receipts, never an old-key fallback.
 
 ### 6.4 Linkers
 

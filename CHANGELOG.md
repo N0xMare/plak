@@ -154,9 +154,17 @@ one cross-build carrier (a build imports its own and the previous version).
   surrender the source exits; the destination host imports under its own
   custody before Ready and recovers partial imports from receipts. Surrendered
   roots cannot reopen on the old build. Same-key upgrade remains planned
-  handoff. This is not live tree or job migration. Adds a version-1 ownership
-  receipt and private coordinator protocol 2, not a new session export or
-  state-key format; runner protocol 8 adds paired read-only qualification.
+  handoff. This is not live tree or job migration. Adds ownership receipt
+  format 1 with source archival rollback and per-successor Ready acknowledgements,
+  and private coordinator protocol 1, not a new session export or state-key
+  format; runner protocol 8 adds paired read-only qualification.
+
+- Recover Prepared host upgrades through plain host startup as well as explicit
+  retry; withdraw non-crash preparation failures, make Aborted attempts inert,
+  and archive surrendered source records for older builds' ordinary-reopen
+  protection. A post-surrender runner outage withholds only its own successors
+  while ready roots serve; host-owned retries finish them without duplicate
+  import or renewed strict capacity/credential probes for completed imports.
 
 - Reopen compaction and profile successors on runner-placed and home-daemon
   sessions through a fresh process port scoped to the current line owner.

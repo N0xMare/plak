@@ -562,6 +562,8 @@ enum TopCommand {
         /// this build (`/reload` asks it before teardown).
         #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe"])]
         reopen_probe: Option<String>,
+        #[arg(long, hide = true, requires = "reopen_probe")]
+        host_upgrade_reopen: bool,
         #[arg(long, action = ArgAction::SetTrue, hide = true, conflicts_with = "state_key")]
         export_version: bool,
     },

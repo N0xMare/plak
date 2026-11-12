@@ -265,7 +265,8 @@ must settle, and carried children cannot be revived; see the host-service
 guide. The TUI never
 restarts the host itself. A requested `plak session reload --expect-binary`
 receives an immediate local refusal explaining that this session runs in
-`plak host`: restart the host to move its sessions to another build. This
+`plak host`: run the installed build's `plak host upgrade --expect-binary <id>`
+with its binary ID to move the host; client reload is not host upgrade. This
 also applies if an embedded requested reload lands in a running host.
 
 In embedded mode, `/reload` restarts

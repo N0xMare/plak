@@ -28,6 +28,16 @@ mod scan_tests;
 
 pub(crate) const AVAILABLE: bool = true;
 
+pub(crate) fn preflight_upgrade_service(
+    services: &Services,
+    command: &HostCommand,
+) -> CliResult<()> {
+    if let Some(web) = &command.web {
+        crate::web::preflight(services, web)?;
+    }
+    Ok(())
+}
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -63,7 +73,11 @@ pub(crate) fn upgrade(
     upgrade::request(services, expect_binary, wait)
 }
 
-fn startup_runtime() -> CliResult<(tokio::runtime::Runtime, tokio::signal::unix::Signal)> {
+fn startup_runtime() -> CliResult<(
+    tokio::runtime::Runtime,
+    tokio::signal::unix::Signal,
+    crate::web::StopProbe,
+)> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -73,7 +87,10 @@ fn startup_runtime() -> CliResult<(tokio::runtime::Runtime, tokio::signal::unix:
     let reload = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())
         .map_err(|error| CliFailure::new(format!("cannot listen for UI reload: {error}")))?;
     drop(entered);
-    Ok((runtime, reload))
+    // A stop that arrives during the start still ends the process within the deadline.
+    crate::signals::install_bounded(crate::signals::cli_announcement(), HANDOFF_DEADLINE, || {});
+    crate::signals::count_interrupts();
+    Ok((runtime, reload, crate::web::StopProbe::armed()))
 }
 
 /// Runs the host until it is asked to stop.
@@ -99,12 +116,7 @@ pub(crate) fn run_host_command(
 fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOutcome> {
     let host_arguments = Arc::new(upgrade::host_argv(command)?);
     // Arm reload before any startup I/O, even for a control-only host.
-    let (runtime, reload) = startup_runtime()?;
-    // A stop that arrives during the start still ends the
-    // process within the deadline.
-    crate::signals::install_bounded(crate::signals::cli_announcement(), HANDOFF_DEADLINE, || {});
-    crate::signals::count_interrupts();
-    let stop = crate::web::StopProbe::armed();
+    let (runtime, reload, stop) = startup_runtime()?;
     let paths = services.paths()?;
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
@@ -116,7 +128,6 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         return replacement.exec(paths);
     }
     crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
-    let identity = plakous_recursive_subagents::tree::custody_host();
     let environment = environment::HostEnvironment::capture();
     let entered = runtime.enter();
     let mut bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
@@ -152,15 +163,9 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         }
     };
     runner::host::start(&services, local, &environment, &runtime);
-    upgrade::acknowledge(&services, &runtime)?;
+    let receipt_recovery = upgrade::start_retry(&services, &host, runtime.handle());
     crate::shell::catalog_refresh::hook(services.paths()?.clone(), None)(None);
-    eprintln!(
-        "plak host: serving on {} (host {}, instance {}); tools get {}",
-        bound.path().display(),
-        identity.host_id,
-        identity.instance,
-        environment.describe(),
-    );
+    announce_host(&bound, &environment);
     let scanning = Arc::new(std::sync::atomic::AtomicBool::new(!owed.is_empty()));
     scan(
         &host,
@@ -192,6 +197,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         idle,
         scanning,
     ));
+    receipt_recovery.cancel();
     let ready = upgrades.stop(&runtime, services.paths()?);
     stop_listeners(&runtime, reload_requests, web, idle_reload, ready.is_some());
     let stopping = Instant::now();
@@ -203,14 +209,32 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     // The handoff first closes the host: no session opens or is created
     // from then on.
     hand_off(&host);
+    receipt_recovery.join();
     eprintln!(
         "plak host: stopped in {} ms",
         stopping.elapsed().as_millis()
     );
     drop(lock);
     runtime.shutdown_timeout(Duration::from_secs(1));
-    drop(home_lock);
-    upgrade::replace(ready, &restart_services, command, stop, &host_arguments)
+    upgrade::replace(
+        ready,
+        &restart_services,
+        command,
+        stop,
+        &host_arguments,
+        home_lock,
+    )
+}
+
+fn announce_host(bound: &socket::Bound, environment: &environment::HostEnvironment) {
+    let identity = plakous_recursive_subagents::tree::custody_host();
+    eprintln!(
+        "plak host: serving on {} (host {}, instance {}); tools get {}",
+        bound.path().display(),
+        identity.host_id,
+        identity.instance,
+        environment.describe(),
+    );
 }
 
 fn stop_listeners(

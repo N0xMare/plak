@@ -182,7 +182,10 @@ fn crash_cut(cut: &str) {
     }
     let receipt = receipts(&fixture).pop().unwrap();
     assert_eq!(receipt["phase"], "committed");
-    let mappings = receipt["mappings"].clone();
+    let mut mappings = receipt["mappings"].clone();
+    for mapping in mappings.as_array_mut().unwrap() {
+        mapping["ready"] = json!(true);
+    }
     let first = receipt["mappings"][0]["successor"].as_str().unwrap();
     let refused = output_env(
         &fixture,
@@ -332,4 +335,114 @@ fn host_upgrade_remote_capacity_and_pairing_changes_refuse_before_drain() {
         assert!(!fixture.home().join("host/upgrades").exists(), "{case}");
         stop(&mut host);
     }
+}
+
+fn wait_ack(fixture: &Fixture, client: &mut Client) {
+    let deadline = Instant::now() + WAIT;
+    while receipts(fixture).pop().unwrap()["phase"] != "acknowledged" {
+        assert!(
+            Instant::now() < deadline,
+            "restored remote placement was not retried"
+        );
+        assert_eq!(client.request(4, Op::Ping), Outcome::Ok(Answer::Pong));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn host_upgrade_remote_outage_withholds_only_its_successors_and_retries_without_restart() {
+    let Some(fixture) = fixture() else { return };
+    let _owner = HomeHost(fixture.home());
+    let (_daemon, path, id) = runner::remote_fixture(&fixture);
+    fixture.write_script(&json!({"version":1,"steps":[{"output":{"text":ANSWER}}]}));
+    let local_workspace = fixture.root.join("local-workspace");
+    std::fs::create_dir(&local_workspace).unwrap();
+    let local = seed_in(&fixture, 101, &local_workspace);
+    let sources = [seed(&fixture, &path, &id, 1), seed(&fixture, &path, &id, 2)];
+    let mut source = start_env(
+        &fixture,
+        &[],
+        &[
+            ("PATH", path.clone()),
+            ("PLAK_TEST_HOST_UPGRADE_CUT", "before-import".into()),
+        ],
+    );
+    let binary = binary(&fixture);
+    let _ = upgrade(&fixture, &path, &binary);
+    let deadline = Instant::now() + WAIT;
+    while source.child.as_mut().unwrap().try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let config = fixture.home().join("config.toml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        original.replace(
+            &format!("command = {:?}", env!("CARGO_BIN_EXE_plak")),
+            "command = \"/unavailable-upgrade-runner\"",
+        ),
+    )
+    .unwrap();
+    let mut destination = start_env(
+        &fixture,
+        &[],
+        &[
+            ("PATH", path.clone()),
+            ("PLAK_TEST_STATE_KEY", DESTINATION.into()),
+            ("PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT", "0".into()),
+        ],
+    );
+    let next_local = successor(&fixture, &local);
+    let mut client = Client::connect(&destination);
+    let deadline = Instant::now() + WAIT;
+    loop {
+        if let Some(row) = client.rows(1).iter().find(|row| row.session == next_local) {
+            let attachment = client.attach(2, &row.node);
+            assert_eq!(
+                client.request(3, Op::Detach { attachment }),
+                Outcome::Ok(Answer::Detached)
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "ready local successor stayed withheld"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let pending = receipts(&fixture).pop().unwrap();
+    assert_eq!(pending["phase"], "committed");
+    for remote in &sources {
+        let mapping = pending["mappings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|mapping| mapping["source"] == *remote)
+            .unwrap();
+        assert_eq!(mapping["ready"], false);
+        assert!(
+            !client
+                .rows(1)
+                .iter()
+                .any(|row| row.session == mapping["successor"].as_str().unwrap())
+        );
+    }
+    std::fs::write(&config, original).unwrap();
+    wait_ack(&fixture, &mut client);
+    for remote in &sources {
+        let next = successor(&fixture, remote);
+        assert_eq!(
+            export(
+                &fixture,
+                &path,
+                &next,
+                &format!("{next}-outage-carried.json")
+            )["runner"]["runner_id"],
+            id
+        );
+    }
+    assert_eq!(receipts(&fixture).len(), 1);
+    assert!(!fixture.root.join("evidence.jsonl").exists() || crash::dispatches(&fixture) == 0);
+    stop(&mut destination);
 }

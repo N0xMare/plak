@@ -437,6 +437,11 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     # repository gate's offline model selector. Naming the model rather than a
     # bare flag keeps the selection an explicit binding fact.
     ("plak", "src/test_hooks.rs"): [
+        ("var", (("string", "PLAK_TEST_STATE_KEY"),)),
+        ("var", (("string", "PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT"),)),
+        ("var", (("string", "PLAK_TEST_HOST_UPGRADE_IMPORT_REFUSAL"),)),
+        ("var", (("string", "PLAK_TEST_HOST_UPGRADE_CUT"),)),
+        ("var", (("string", "PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE"),)),
         ("var_os", (("string", "PLAK_TEST_STORAGE_CAPACITY"),)),
         ("var", (("string", "PLAK_TEST_MODEL"),)),
         ("var_os", (("string", "PLAK_TEST_ASSISTANT_DONE_RELEASE"),)),
@@ -548,6 +553,10 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
 EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
 ] = {
+    # Identity-verified, bounded destination probes in their own process group.
+    ("plak", "src/carry/upgrade/process.rs"): [
+        ("Command", (("identifier", "executable"),)),
+    ],
     # Explicit user-unit publication reloads definitions, never starts a unit.
     ("plak", "src/commands/host_install.rs"): [
         ("std::process::Command", (("identifier", "manager"),)),
@@ -653,6 +662,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ],
 }
 EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
+    ("plak", "src/carry/upgrade/process.rs"): {"Command", "Output", "Stdio"},
     ("plak", "src/host/starter.rs"): {"Command", "Stdio"},
     # The host's ssh dial to a runner pipes its link through stdin/stdout.
     ("plak", "src/commands/runner/dial.rs"): {"Stdio"},
@@ -681,6 +691,7 @@ ALLOWED_CLI_MACROS = {
 ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/terminal_registry/control.rs"): {"select"},
     ("plak", "src/host/console/terminals/stream.rs"): {"select"},
+    ("plak", "src/cli.rs"): {"value_parser"},
     ("plakous-hosted", "src/agent/roots.rs"): {"warn"},
     ("plak", "src/commands/runner/local.rs"): {"warn"},
     ("plak", "src/host.rs"): {"select"},
@@ -1626,6 +1637,11 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "runner::RunnerLink",
         },
     },
+    ("plak", "src/carry/upgrade/remote.rs"): {
+        "runner": {"RunnerServices", "PlacementFailure"},
+        "tools": {"runner::RunnerBackend"},
+    },
+    ("plak", "src/host/upgrade/startup.rs"): {"runner": {"WorkspaceCatalog", "RunnerStatus"}},
     ("plak", "src/host/sessions.rs"): {"runner": {"RunnerRow"}},
     ("plakous-hosted", "src/jobs.rs"): {"tools": {"LineOwner"}},
     ("plak", "src/platform_product/anthropic.rs"): {
@@ -1814,6 +1830,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'ProbePhase',
             'RunnerClient',
             'RunnerRegistry',
+            'RunnerServices',
         },
         'tools': {'runner', 'runner::LocalDaemonBackend'},
     },

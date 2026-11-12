@@ -1677,22 +1677,32 @@ re-executed.
 Version-1 private ownership receipts under `host/upgrades/<operation>/` name
 source instance/key/binary/executable, destination identity, monotonically
 ordered operation sequence, original host argv, export digests and reserved
-successor IDs. They carry no session encodings. Imports use the reserved product
+successor IDs, source archival intent and each successor's Ready receipt.
+They carry no session encodings. Imports use the reserved product
 ID and create operation, with a write-ahead target record: retry finishes that
-same seed. Targets cannot open or appear as ordinary directory entries before
-acknowledgement. Before source surrender the source remains authoritative;
-an interrupted preparation is withdrawn and the old host is restored. Aborted
-seeds remain non-authoritative, including after a later successful attempt.
+same seed. A target cannot open or appear as an ordinary directory entry before
+its own durable Ready acknowledgement. Before source surrender the source
+remains authoritative. Preparation errors withdraw the receipt while source
+leases are still held; plain host startup also withdraws a Prepared receipt.
+Aborted receipts neither redirect later starts nor authorize target seeds.
+If the retained source image is unavailable, startup marks preparation Aborted
+and continues under its own key, never treating preparation as surrender.
 
 A committed receipt fences the source tree's records against reopen and
 authorizes only destination startup import, not client execution. The source
 exits and releases its shared home custody before that import. The destination
-claims its own host custody, seeds the reserved successors from receipts before
-normal runner preparation, then performs the ordinary Ready sweep. It does not
+claims its own host custody and imports reserved successors from receipts.
+Local seeds are prepared before normal runner startup; a host-owned retry worker
+finishes pending imports, followed by a fresh ordinary Ready sweep for each
+placement before publishing that successor's Ready receipt. It does not
 use standalone exclusive import or transfer old agent-line custody. After this
 boundary there is no fallback to the old owner: startup and retry follow the
 recorded destination, including partial import and failure before Ready. The
-destination acknowledges only after the imported placements are Ready. A lost
+destination acknowledges the complete operation only after every successor is
+Ready; a runner outage leaves only its successors withheld and retried while
+ready roots can serve. Already-imported successors skip import/configuration
+probes. Post-surrender capacity checking is advisory, not another strict
+admission barrier: preflight already enforced it. A lost
 acknowledgement never creates another successor or replays input; the same
 upgrade invocation reports the existing mappings. Source stores,
 exports and executable remain available for reference, not automatic deletion.
@@ -5411,6 +5421,21 @@ the pause. A failed preparation restores the old directory's admissions;
 released old sessions can be attached again under normal handoff recovery.
 No shell stop-then-import sequence or client-owned runtime performs this work.
 
+Root selection uses the directory's `head_of_tree` relation, not last-updated
+retired rows. Archived heads are inspected too: archival does not prove work
+settled. An archived head with nonterminal daemon jobs or other unverifiable
+settlement blocks upgrade; settled archived heads remain under the source key
+and are not carried.
+
+Immediately before surrender, the source marks the selected records archived
+through the existing product store, under their held leases. A durable archival
+intent lets plain startup or error rollback undo those flags before marking an
+attempt Aborted; if the source image is missing, the own-key source start later
+finishes that cleanup without redirecting another key. After commit the flags
+remain, so older builds that do not read upgrade receipts still refuse ordinary
+reopen. This is not an immutable fence against an older build or operator
+explicitly unarchiving or editing source state: do not do that after surrender.
+
 Before pausing, the destination qualifies every required paired runner using
 its installed command, exact revision/flavor/protocol and pinned identity and
 roots. This authenticated, binding-free connection permits only configuration
@@ -5422,21 +5447,34 @@ link to the matching immutable snapshot first, retaining the old build to
 inspect and drain old workers. Installation does not advance that link.
 
 After durable source surrender and source exit, the destination imports dormant
-seeds during startup under its own host custody and before Ready. Its temporary
-normal binding reads the fresh successor's job state; it loads no old
+seeds under its own host custody and before each successor becomes Ready. Its
+temporary normal binding reads the fresh successor's job state; it loads no old
 call journal, adopts no old line, and runs no recovery sweep before import.
-The normal runner Ready sweep follows import and precedes acknowledgement.
+The normal runner Ready sweep follows import and precedes that successor's
+acknowledgement. A post-surrender runner outage or credential/configuration
+refusal keeps the affected successors withheld; a host-owned worker retries
+without preventing ready local roots from serving. Completed imports are not
+re-probed or re-created. The command can report an unknown outcome while such
+work is pending; repair the destination/runner and retry the same command.
 An interruption after surrender, partway through import or before Ready resumes
 the same reserved successors. A commit or acknowledgement lost to process
 failure is resolved from receipts before serving either side. Restarting with
-the destination executable after a
-precommit crash restores the retained source executable; after commit it can
-only start the destination. An executable/configuration failure after commit
+the destination executable after a precommit crash withdraws preparation and
+restores the retained source when available; a missing source image instead
+marks the attempt Aborted without forcing that key. After commit startup can
+only select the destination. An executable/configuration failure after commit
 requires repairing and retrying that destination, not reopening the source.
 `host connect --stdio` follows recorded successor keys, and attaching a carried
 root (or its full former session UUID) receives the existing `moved` refusal
 with its current root address. Children receive no revival alias. Bare public
 TUI discovery keeps its current-key attach-or-embedded rule.
+
+After acknowledgement, a receipt-aware old-key `plak host` start follows the
+recorded destination, and old source session addresses redirect to their
+recorded successors. Source records stay archived and fenced; old-key execution
+does not resume them. An Aborted attempt, by contrast, never redirects a later
+destination-key start. Embedded/headless paths retain their existing custody
+and daemon-process restrictions rather than becoming upgrade owners.
 
 Client `/reload` still replaces only the client. It does not run this command,
 read ownership receipts, acquire custody or resend an ambiguously accepted
