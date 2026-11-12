@@ -207,7 +207,7 @@ impl super::Console {
             &workspace.environment,
             query,
             control,
-            plakous_hosted::occupancy_vcs::git_cli_enabled(),
+            plakous_hosted::git_cli_enabled(),
         )
         .await
         .map_err(backend)?

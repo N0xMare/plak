@@ -95,6 +95,8 @@ pub mod host_service;
 pub(crate) use plakous_workspace::git_redirect_fence;
 #[cfg(any(test, feature = "test-support"))]
 pub use plakous_workspace::occupancy_vcs;
+/// Whether this build may run the git CLI for workspace VCS reads.
+pub use plakous_workspace::occupancy_vcs::git_cli_enabled;
 pub use plakous_workspace::occupancy_vcs::maintenance as workspace_maintenance;
 pub use plakous_workspace::{JJ_CLI_SUPPORTED, JJ_LIB_VERSION, built_jj_library_version};
 pub(crate) mod intent_dispatch;
