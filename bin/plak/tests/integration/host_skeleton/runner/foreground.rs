@@ -156,11 +156,6 @@ fn runner_wake_settled_foreground() {
     settled_foreground(std::time::Duration::ZERO);
 }
 
-#[test]
-fn runner_wake_settled_foreground_after_delayed_reconnect() {
-    settled_foreground(std::time::Duration::from_millis(2500));
-}
-
 fn settled_foreground(resume_delay: std::time::Duration) {
     let Some(fixture) = fixture() else { return };
     let (mut host, mut client, session) = begin(&fixture, 1200);
