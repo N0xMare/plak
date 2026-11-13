@@ -175,12 +175,10 @@ async fn an_unpaired_host_fails_at_once(home: &Path, work: &Path, runner: Versio
     let unpaired = unpaired.unwrap();
     let asked = Instant::now();
     assert!(unpaired.lines().await.is_err());
+    let refused = unpaired.call(probe(&work.join("file"))).await;
     assert!(
-        matches!(
-            unpaired.call(probe(&work.join("file"))).await,
-            Err(RunnerFailure::Unavailable(_))
-        ),
-        "a refused link takes no call"
+        matches!(refused, Err(RunnerFailure::Unavailable(_))),
+        "a refused link takes no call: {refused:?}"
     );
     // Half the 30 s call window: a refusal that waited the window out fails,
     // and a loaded host's bridge start-up does not.
