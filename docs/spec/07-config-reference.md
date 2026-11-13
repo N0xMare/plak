@@ -154,11 +154,12 @@ source as a warning.
 global `root.agent` or `working_set` name must name a **global** template — a
 project file can never satisfy a reference the global home made. A trusted
 `project/.plak/config.toml` then overrides only the keys it carries, except
-`[orchestration]`, `turn.auto_continue`, `tui.reload_requests` and
-`mcp.client_id_metadata_url`: those controls are home-scoped. Project orchestration
-values are ignored with a warning, and their displayed origins remain user
-or default. The entire file still must satisfy TOML syntax and schema validation;
-invalid values are load errors even in a home-scoped section.
+`[orchestration]`, `turn.auto_continue`, `tui.reload_requests`,
+`mcp.client_id_metadata_url`, `[host]`, `[runners.<name>]` and `[web]`: those
+controls are home-scoped. Project values for them are ignored with a warning,
+and their displayed origins remain user or default. The entire file still
+must satisfy TOML syntax and schema validation; invalid values are load errors
+even in a home-scoped section.
 A project-scope `config set orchestration.*` fails with a hint
 to use `--scope user`. A
 trusted `project/.plak/agents/<name>.toml` replaces the whole global template
@@ -279,8 +280,11 @@ canonical rendering of the tool and server tables after the keys.
 `[host] resume_after_loss` decides whether the root and the sub-agents a lost
 host interrupted hold for the operator's Resume or continue once by themselves
 (chapter 03 §14.1); `[mcp_servers.<id>] placement` places a server (§3.5);
-`[runners.<name>]` is read by `plak runner pair`, `plak runner ps` and `plak
-doctor` (§3.6) and by nothing else yet; `[web] allow` and `[web] origin` are
+`[runners.<name>]` configures the host's runner registry for placed-session
+creation, reopen and reconnect, as well as destination qualification during
+host upgrade. `plak runner pair` and `plak runner ps` dial the configured
+runner; `plak doctor` inspects its SSH resolution without connecting (§3.6).
+`[web] allow` and `[web] origin` are
 read by `plak host` when it serves its web endpoint (`--web`, chapter 02 §4.5,
 chapter 04 §2.10) and by nothing else. A
 0.0.3 build refuses a `config.toml` that sets any of them (unknown section or
