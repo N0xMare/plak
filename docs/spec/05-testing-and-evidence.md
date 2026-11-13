@@ -305,7 +305,12 @@ fixtures require max-turns and timeout cleanup with exit 6 and a real SIGINT
 while waiting with exit 4; a TERM-trap marker proves the process was stopped.
 Child-owned promoted-process fixtures cover timeout and SIGINT, interrupted
 tree status, stopped process groups, durable terminal attribution and exact
-child reopen, including a live attempt with a Quiescent runtime head. A real
+child reopen, including a live attempt with a Quiescent runtime head. Their
+shell publishes readiness after installing its TERM trap and opening a
+separate FIFO, then waits in a builtin read. Closing process stdin cannot end
+that wait, and no foreground sleep can defer the trap past the unchanged
+session-exit grace. The marker and exact terminal/reopen assertions remain
+required. A real
 js-ptc sidecar cell promotes nested `exec_command` and
 requires `JobPromoted { nested: true }` telemetry. Process-watch regressions
 cover output/exit wakeups and await notification waiting that leaves the

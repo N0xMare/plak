@@ -1085,10 +1085,12 @@ fn process_child_script(quiescent: bool) -> Result<Arc<ScriptPlan>, String> {
     };
     // The sleep before the TERM trap makes a stop sent before `owned.pid`
     // exists lose the `stopped.txt` marker every time, not only under load.
+    // Once ready, wait in a builtin over a separate FIFO: a foreground sleep
+    // can defer the trap past the stop grace, and stdin closes during stop.
     let plan = Arc::new(serde_json::from_value(serde_json::json!({
         "version": 1, "process_tools": true, "steps": [
             {"output":{"tool":{"name":"process_session_start","arguments":{
-                "command":"sleep 1; trap 'printf stopped > stopped.txt; exit 0' TERM; printf '%s' \"$$\" > owned.pid; n=0; while true && [ -d \"$PWD\" ] && [ $((n += 1)) -le 6000 ]; do sleep 0.1; done",
+                "command":"sleep 1; trap 'printf stopped > stopped.txt; exit 0' TERM; mkfifo stop-wait; exec 3<>stop-wait; printf '%s' \"$$\" > owned.pid; read line <&3",
                 "workdir":".","login":false,"tty":false,"keep_stdin_open":false,
                 "yield_time_ms":0,"max_output_bytes":8192
             }}},"finish":"tool_calls"},
