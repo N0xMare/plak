@@ -50,7 +50,7 @@ fn seed(fixture: &Fixture, ordinal: usize) -> String {
 
 fn seed_in(fixture: &Fixture, ordinal: usize, workspace: &std::path::Path) -> String {
     let mut document: serde_json::Value =
-        serde_json::from_str(include_str!("../../fixtures/session-export-v11.json")).unwrap();
+        serde_json::from_str(include_str!("../../fixtures/session-export-v12.json")).unwrap();
     document["source"]["session_id"] = json!(uuid::Uuid::new_v4().to_string());
     document["workspace_root"] = json!(workspace);
     document["named_state"] = json!({"answer": ordinal});
@@ -195,7 +195,7 @@ fn host_upgrade_settled_roots_round_trip_once_and_reconnect() {
     for (index, source) in roots.iter().enumerate() {
         let next = successor(&fixture, source);
         let document = export(&fixture, &next, true, &format!("carried-{index}.json"));
-        assert_eq!(document["version"], 12);
+        assert_eq!(document["version"], 13);
         assert_eq!(document["named_state"], json!({"answer":index + 1}));
         assert_eq!(
             document["queue"],

@@ -146,6 +146,11 @@ for one version bump, without native protocol compatibility.
   already consumed numbers are harmless. The job-retention endpoint has its
   own independent version, not native protocol compatibility.
 
+- Write session export v13 with closed document kinds; import v13 and v12,
+  refuse v11 and older, and keep ownership-move capsules out of ordinary session
+  import. The 0.0.3 release wrote v11: those exports cannot be carried into this
+  build directly.
+
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.
 

@@ -200,10 +200,10 @@ Monty worker package needs.
 
 The workspace release is **0.0.3**. The current versions below are this
 build's state tuple (the 0.0.4 format cut), not the 0.0.3 release's tuple
-(`r26.e34.p35.t9`); older state is not opened. This build imports export documents of versions 11 and 12 only
-(§2.5.1 of chapter 02); the 0.0.3 release wrote version 11. 0.0.2 wrote version 8, which
-this build refuses, so 0.0.2 sessions cannot be carried into 0.0.3: finish
-them on 0.0.2 or start new ones. 0.0.2 state is left untouched for the 0.0.2 binary.
+(`r26.e34.p35.t9`); older state is not opened. This build writes export v13,
+imports v13 and v12, and refuses v11 and older (§2.5.1 of chapter 02). The
+0.0.3 release wrote v11, so its exports cannot be carried into this build
+directly. Older native state remains untouched for its matching build.
 
 | Store | Owner | Current version |
 | --- | --- | --- |
@@ -212,7 +212,7 @@ them on 0.0.2 or start new ones. 0.0.2 state is left untouched for the 0.0.2 bin
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **37** (adds operator title overrides and archival state; terminal state is process-local) |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **10** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **22**, disposable, never recovery authority |
-| Session export document | Plak | version **12** (adds the session's runner and profile), imports **12** and **11** |
+| Session export document | Plak | version **13** (closed portable-session and reserved host-upgrade kinds), imports **13** and **12**; 0.0.3 v11 exports cannot be carried directly |
 | Host-upgrade ownership receipt | Plak | version **1**, outside state keys; operation identities, export digests, source archival intent, placement and per-successor Ready/abandoned disposition only |
 
 Tree schema 10 adds the node's line, epoch and runner placement, successor
@@ -227,17 +227,19 @@ ownership evidence in the shared Git directory.
 Submitted intents own exact child outputs; attempt outputs are derived on load
 and submit-result replay receipts keep a digest summary. Provisional wait
 receipts retain the exact views they returned.
-Product schema 37 and exports v11 and v12 retain closed notice-remedy codes
+Product schema 37 and exports v12 and v13 retain closed notice-remedy codes
 and typed targets. Their frontend command spelling is rendered only by Plak.
 
 The canonical `seal_outcome` payload includes the durable
 `history_left_base` boolean used by replayed result-mail notices. Builds open
-only their current version tuple as state authority. Export v12 carries
+only their current version tuple as state authority. Export v13 carries
 conversation history, CarryBinding (including `py-sdk`), session-owned named
 state, the session's runner and its profile, not tree seal outcomes. Its
-history preserves exact account/model replay scope. The v11 importer preserves
-named state and imports onto the local runner under the home default profile;
-v10 and older are refused. Export v12 is this build's document.
+history preserves exact account/model replay scope. The v12 importer preserves
+named state and saved placement/profile; v11 and older are refused. Version 13
+introduces the closed `portable_session` / `host_upgrade` kind. Ordinary import
+accepts only portable sessions; dormant ownership move remains unavailable.
+This carrier cut changes no native schema, epoch or state-key component.
 
 Host-upgrade receipts do not carry history, bindings, topology or job registries.
 They coordinate the unchanged export carrier and record surrender/reconnect

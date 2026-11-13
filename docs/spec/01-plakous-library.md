@@ -3760,7 +3760,7 @@ Sealed Messages artifacts add a distinct `native` block variant; the HTTP reques
 serializer unwraps it into native JSON. Existing variants, artifact revisions
 and sealed digests are unchanged. An older decoder refuses that unfamiliar
 persisted tag as an invalid artifact envelope, rather than treating native cited
-text as uncited text. Exports v11 and v12 carry the opaque replay vocabulary
+text as uncited text. Exports v13 and v12 carry the opaque replay vocabulary
 (chapter 02 §2.5.1).
 
 **On this wire reasoning has exactly two forms, and text is not one of them.** A
@@ -3864,7 +3864,7 @@ model, family and dialect. The canonical replay scope and its digest include the
 full account-binding digest, including its version; an accountless envelope
 never acquires Responses replay authority. This check applies to historical
 prefixes as well as newly appended output and hosted-program lineage. Export
-v11 and v12 preserve the scope. Ordinary forks and validated imports cannot widen it.
+v13 and v12 preserve the scope. Ordinary forks and validated imports cannot widen it.
 The Responses limits of 4,096 replay items and 3 MiB replay payload apply to
 one newly appended response, not the accumulated canonical history. An exact
 active artifact remains reusable beyond either historical total, including
@@ -7383,7 +7383,7 @@ format 5 and host backend semantic revision 15 bind them, and exact reopen rejec
 changed prefix or discovery-ceiling policy. The descriptor wire encoding carries
 the ceiling boolean, including when false. The runtime format epoch isolates
 these bindings from earlier state. CarryBinding does not embed an environment
-descriptor; export v12 retains the v11 importer.
+descriptor; this build writes v13, imports v13 and v12, and refuses v11 and older.
 Unsupported descriptors have no compatibility path.
 The prefix directory is opened at construction and its canonical location and
 filesystem identity are revalidated before literal, piped or PTY spawn. Missing,
@@ -9830,10 +9830,10 @@ lists saved keys and their sizes, plus running promoted job numbers. Values
 themselves are not included in that note. Compaction may drop a state-only note
 because the next boundary re-emits it.
 
-The Python SDK presentation issues these state operations. Export v12 carries
+The Python SDK presentation issues these state operations. Export v13 carries
 the committed named values as JSON and validates their keys, values and quotas
 before seeding the new session's genesis atomically with its history. Export
-v11 imports preserve named values; v10 and older are refused.
+v12 imports preserve named values; v11 and older are refused.
 
 ### 9.9 Typed Python SDK cells
 
@@ -10730,8 +10730,8 @@ contain no anchor, so import is unanchored. A nonempty root genesis seed
 (never a fork, rebind or clear successor) may use the destination's unanchored
 occupancy measure, once, for its first preflight fold; this is not paid admission
 authority.
-The export document is version 12; this build imports versions 12 and 11,
-refusing v10 and older (chapter 02 §2.5.1).
+The export document is version 13; this build imports versions 13 and 12,
+refusing v11 and older (chapter 02 §2.5.1).
 
 A paid fold's **own input must admit under a conservative bound, or on a
 `ReferenceClientEnvelope` contract its enrolled reference envelope (§6.8,
@@ -11157,7 +11157,7 @@ it, so the position survives compaction, reopen and fork unchanged. A
 compaction segment without the record leaves
 the position unknown and the indices are omitted, as native omits an unknown
 position. The record is an optional field of the canonical compaction block
-encoding; exports v11 and v12 carry the turn record in its independent neutral
+encoding; exports v13 and v12 carry the turn record in its independent neutral
 compaction fields, so conversation carry preserves the position (spec 02
 §2.5.1). Carrying a history to
 another binding turns a native compaction block into a plain compaction block

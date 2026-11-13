@@ -437,7 +437,7 @@ fn a_host_tui_shows_a_persistent_notice_only_when_the_installed_build_differs() 
         assert!(key.status.success());
         let key = String::from_utf8(key.stdout).unwrap();
         let probe = json!({
-            "state_key": key.trim(), "export_versions": [11, 12],
+            "state_key": key.trim(), "export_versions": [12, 13],
             "config_error": null, "binary_id": installed_id
         });
         let installed = fixture.root.join("installed");

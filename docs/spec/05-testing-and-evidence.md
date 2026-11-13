@@ -376,9 +376,11 @@ release, including abandonment of a Working provider turn, with terminal rows
 and the number counter preserved. A release receipt alone still yields an
 unknown process outcome. Reload admission reads a process-local host count and
 refuses without closing the terminal.
-Export-v12/v11 fixtures round-trip neutral content (including inline image bytes,
-opaque replay, native compaction bindings and turn counts), retain only the v11
-reader and refuse v10, and reject malformed or oversized input. Explicit account/protocol
+Export-v13/v12 fixtures round-trip neutral content (including inline image bytes,
+opaque replay, native compaction bindings and turn counts), retain only the v12
+reader and refuse v11, and reject malformed or oversized input. Closed-kind
+tests reject missing/unknown/mismatched tags and ownership moves at ordinary import.
+Explicit account/protocol
 loopback bindings pin same-binding equality and cross-provider replay stripping.
 The scripted `history_report` output reports the text actually present in a
 model request, proving a >64 KiB, multi-turn conversation reaches the next
@@ -1517,8 +1519,9 @@ Native freshness tests retain the recorded slot, refuse vertical disagreement,
 and keep full-reference human detail without expanding structured remedy values.
 Named Busy/429 tests discard previous quotas, plans and email, while default
 last-Ready retention keeps its existing regressions.
-Default API binding/configuration and v12 export bytes are pinned to pre-account
-fixtures; seven-vertical tests pair default and named profile/prompt behavior
+Default API binding/configuration and the retained byte-exact v12 writer fixture
+are pinned to pre-account evidence. The current writer uses v13; tests admit v13
+and v12 and refuse v11 and older; seven-vertical tests pair default and named profile/prompt behavior
 and capability decisions. Usage tests preserve provider email detail without
 copying its reading to a sibling or default row.
 
@@ -3129,7 +3132,7 @@ Conflict laws run the real topology tool with distinct operation ids, then
 present its terminals with reused, absent and empty display ids. Every
 operation retains one keyed conflict notice and its own whole path; conflict
 facts still cross the existing process-local tool boundary, not a new store
-encoding. Product schema 37, tree schema 10 and export v12 importing v11 stay
+encoding. Product schema 37, tree schema 10 and export v13 importing v12 stay
 unchanged by these notice corrections.
 The bounded result-mail observation law requires start and finished milestones
 before its result row even on the first read. The spawn/wait/adopt parity
@@ -3700,10 +3703,9 @@ requires the reopen alone to converge before the harness checks idempotence.
 - An alias regression drives pi's `edit` and `write` through one turn and
   checks the committed `exposed_name` on both calls, exact replay of each name
   on every kernel, both history rows' labels and activity kinds, and a
-  previous-document import preserving its exposed name. The v11 fixture, which
-  the 0.0.3 release's writer produced, and `current_and_previous_documents_preserve_every_transcript_row_type` pin
+  previous-document import preserving its exposed name. The synthetic frozen v12 fixture and `current_and_previous_documents_preserve_every_transcript_row_type` pin
   typed rows; `rejected_exports_do_not_create_state_or_reference_files` pins
-  refusal of v10. The v12 neutral round-trip includes presentation subjects,
+  refusal of v10. The v13 neutral round-trip includes presentation subjects,
   base64 media, bounded parsing and closed unknown-field refusals. Production-dialect
   carry fixtures lower sanitized Responses encrypted reasoning, Messages thinking
   signatures and Codex native compaction without dispatch. Unsupported nested
@@ -4530,10 +4532,10 @@ with unchanged provider-dispatch evidence.
 | Selection and carry contract | Offline evidence |
 | --- | --- |
 | v12 selection and committed named-state carry | `v12_document_round_trips_named_state_selection_and_full_history`; the real SDK driver exports committed values; `oversized_named_state_is_refused_before_import` |
-| v11 imports with named state; v10 refused | `v11_import_preserves_named_state_and_v10_is_refused`; `v8_is_refused_before_import_regardless_of_named_state_or_selection` |
-| v12 runner and profile; malformed v12 refused | `v12_names_its_runner_and_profile_and_round_trips`, `malformed_v12_documents_are_refused` |
-| A v11 document from the 0.0.3 release's writer imports onto the local runner under the home default with an identical history | `a_real_v11_document_imports_with_an_identical_canonical_history`, `a_v11_session_imports_and_exports_as_v12_with_an_identical_history` |
-| Typed rows, send times and process commands for v12 and v11 | `current_and_previous_documents_preserve_every_transcript_row_type`, `current_and_previous_documents_carry_send_times_and_process_commands` |
+| v12 imports with named state; v11 refused | `v12_import_preserves_named_state_and_v11_is_refused`; `v8_is_refused_before_import_regardless_of_named_state_or_selection` |
+| v13 kind, runner and profile; malformed v13 refused | `v13_names_its_kind_runner_and_profile_and_round_trips`, `malformed_v13_documents_are_refused` |
+| A frozen v12 document imports with its saved runner and profile with an identical history | `a_frozen_v12_document_imports_with_an_identical_canonical_history`, `a_v12_session_imports_and_exports_as_v13_with_an_identical_history` |
+| Typed rows, send times and process commands for v13 and v12 | `current_and_previous_documents_preserve_every_transcript_row_type`, `current_and_previous_documents_carry_send_times_and_process_commands` |
 | Import rejects pseudo-work and rebuilds durable intents | `current_and_previous_documents_reject_resolved_count_pseudo_work`, `import_intents_survive_reopen_and_rebuild` |
 | Root-only selection and cross-field refusal | `sdk_is_a_root_override_not_a_child_template_capability`, `root_composition_cross_field_rules_apply_on_load_and_save`, `applying_claude_profile_discards_saved_sdk_selection`, `sdk_child_selection_refusals_are_exact_and_create_nothing`, `sdk_spawned_api_binding_refuses_before_discovery_or_creation` |
 | Optional tool/MCP and v8 version refusal before creation or dispatch | `sdk_optional_tools_and_fence_refuse_before_surface_compilation`, `agent_sdk_hello_and_configured_mcp_refusal_are_offline`, `v8_exports_refuse_file_import_without_creating_sessions` |

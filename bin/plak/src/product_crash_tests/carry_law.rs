@@ -41,7 +41,7 @@ fn assert_named_state(paths: &PlakPaths, source: &str, successor: &str) -> TestR
             crate::carry::export_session(paths, &record)
                 .map_err(|error| std::io::Error::other(error.to_string()))?,
         )?;
-        assert_eq!(exported["version"], 12);
+        assert_eq!(exported["version"], 13);
         assert_eq!(
             exported["named_state"],
             serde_json::to_value(named_state())?

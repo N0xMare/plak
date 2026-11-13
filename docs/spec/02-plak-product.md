@@ -76,8 +76,9 @@ before credential-source construction. This applies to run/agent selection,
 resume, and imported documents. An account disagreeing with the recorded target
 returns typed `AccountTargetMismatch` (`account_target_mismatch`) before credentials.
 An unbound empty shell remains valid. An unknown account never
-inherits the target provider's default credentials. Export stays v12 with its
-v11 importer; no binding inputs or document encodings change.
+inherits the target provider's default credentials. Export stays v13 with its
+v12 importer; these account-admission rules do not change binding inputs or
+the document encodings.
 Read-only session labels retain unknown account metadata; unknown does not
 mean a known route omitted from this build, and displaying it admits no work.
 
@@ -1282,7 +1283,7 @@ credential-source construction or successor publication. It never inherits
 the target provider's default key. A named API account binds only its own shelf
 key or refuses; its target must agree with its vertical on both import and resume.
 Valid unbound empty shells remain valid.
-Export remains v12, importing v12 and v11; this refusal changes no encoding.
+Export uses v13, importing v13 and v12; this refusal changes no encoding.
 
 Before leaving a resumable session, `/reload` asks the destination build for
 its state key, importable export versions, and a strict configuration verdict
@@ -1315,8 +1316,12 @@ is a warning, not an export refusal.
 The export document is the sole cross-build carrier. A build imports its own
 version and the immediately previous version; any document change bumps the
 version, and the previous reader survives for exactly one bump. This build
-writes **version 12** and imports **12 and 11**, never older documents. Runtime
-canonical format epochs are not export versions: v12 carries a Plak-owned neutral
+writes **version 13** and imports **13 and 12**, never older documents. Version
+13 requires a closed `kind`: `portable_session` or `host_upgrade`. Ordinary file
+import accepts only `portable_session` and rejects an ownership-move document
+before creating any state. Version 12 has no kind. Dormant identity-preserving
+host moves remain unavailable pending runtime and whole-tree installation.
+Canonical format epochs are not export versions: the carrier uses a neutral
 conversation encoding, not canonical segment bytes, digests, checkpoints, or
 runtime serde representations.
 
@@ -1326,7 +1331,7 @@ invalid target UUIDs refuse the document before import. Missing remedies retain
 their text verbatim; importing never infers an action from words or command
 fragments.
 
-Version 12 adds two fields beside `workspace_root`. `runner` is
+Both admitted versions require two fields beside `workspace_root`. `runner` is
 `{"name", "runner_id"}`, the runner the session's root ran on, taken from the
 record's runner display copy; the host's own local runner is explicitly
 `{"name": "local", "runner_id": "local"}`. `profile` is
@@ -1335,12 +1340,12 @@ epoch when the tree has rows, otherwise the virtual-tree root profile its
 record keeps. Export never reads the live configuration; a session without tree
 rows whose record names no root profile is refused as an integrity error, since
 this build writes one with every such record. Both fields are required in
-version 12 and absent in version 11. A document with the other version's shape
+versions 12 and 13. A document with the wrong version's shape
 refuses before import, naming the field, the version and its JSON path
-(``version 12 requires `runner` at $.runner``), as does a runner name or identity
+(``version 13 requires `runner` at $.runner``), as does a runner name or identity
 that is empty, too long or contains whitespace (`$.runner`), and a profile
 naming an invalid template or listing one twice (`$.profile`). A nonlocal
-version-12 placement imports only when its saved runner id is configured,
+placement imports only when its saved runner id is configured,
 paired and freshly validated at its canonical workspace before any destination
 record, runtime or carry intent commits. Refusal never imports it onto local.
 The saved id is authority; a changed alias does not retarget the import.
@@ -1351,17 +1356,16 @@ lifetime. A running host refuses it before any bind with
 `import_through_running_host` (exit 2): stop the host, or import through an
 attached client. Local import remains direct and starts no daemon.
 The embedded history and
-binding encodings are those of version 11: the neutral history carries no
-backend descriptor or job owner, and jobs are never carried. Frozen tool
-selections are not exported (below), so the document carries no MCP placement;
-the successor freezes the destination's tools, and with them the placement
-each of its MCP servers runs under there. The version 11 reader imports onto the local runner under the
-destination's home default profile, with the notice `this session's export
-records no profile; the home default profile applies`. This is a document bump,
-not an in-place database migration; the product store is schema 37.
+binding encodings are shared by admitted versions v13 and v12: portable
+history carries no backend descriptor or job owner, and ordinary file carry
+never restores jobs. Frozen tool selections are not exported (below), so the
+successor freezes the destination's tools and MCP placement. Both admitted
+versions name their saved runner and profile; there is no v11 fallback reader.
+This build writes v13, imports v13 and v12, and refuses v11 and older. The
+document bump is not an in-place database migration; product schema stays 37.
 
 `plak session export <id> [--out <path>]` writes one JSON document with
-`"format": "plak-session-export", "version": 12` and prints its path. The
+`"format": "plak-session-export", "version": 13` and prints its path. The
 exclusive 0600 file never overwrites an existing path. Without `--out`, it is
 `~/.plak/carry/<id>.<uuid>.json` in a private 0700 directory. Source session,
 state key and producer build provenance (verified binary id, or explicitly
@@ -1374,13 +1378,9 @@ Otherwise the common lease-free projector first catches the views up to the
 feed tail; any required writes remain derived product-view writes, not attach.
 The binding carries `py-sdk` like every other explicit selection. `named_state`
 is a key-ordered JSON map of committed session-owned values (01 §9.8); import
-validates it and seeds it atomically with history. The v11 importer uses the
-same history decoder and preserves named state. Version 10 and older are refused
-with `this build imports versions 11 and 12`. The 0.0.3 release wrote version
-11 and 0.0.2 wrote version 8. There is
-no version-8 importer, so a 0.0.2 session cannot be carried into 0.0.3 by
-`/reload` or export/import. Finish those sessions on 0.0.2, or start new ones.
-0.0.2 state is left untouched for the 0.0.2 binary.
+validates it and seeds it atomically with history. The v12 importer uses the
+same history decoder and preserves named state. Version 11 and older are refused
+with `this build imports versions 12 and 13`; older state is left untouched.
 
 `history` contains `replay_account` (source account reference), `replay_model`
 (model identifier string), and ordered `groups`. Each group contains its
@@ -1561,7 +1561,7 @@ same pre-open transcript anchoring rules as ordinary resume notes: no duplicates
 on republication, and permanent removal when the anchor is no longer provable.
 The export file remains in place for ordinary import.
 
-Versions 11 and 12 carry full conversation rather than a separate archive;
+Versions 13 and 12 carry full conversation rather than a separate archive;
 neither has a restart checkpoint or archive import arm. There is no
 `session reference` command or search/tail archive reader. Old retained
 reference files are never read or used as import authority;
@@ -1667,7 +1667,7 @@ Without such a snapshot the incompatible-session refusal above stands. When no
 snapshot exists, a paid compaction fallback is not offered.
 
 **Host-owned settled carry.** `plak host upgrade --expect-binary <id>` uses
-this same v12 producer and importer, not a database copy or live-tree export
+this same portable-session producer and importer, not a database copy or live-tree export
 (§4.6). Settled carry takes the newest unarchived record of
 each tree, across the whole home rather than the directory's row limit.
 Archived roots remain in their original key. A root with no canonical runtime,
@@ -1684,7 +1684,7 @@ conversation, bounded transcript, generated title and paused queued text under
 the ordinary carry law. Finished children and unresolved source facts remain
 inert references; their tree, candidates, job registry, leases and continuation
 authority are not imported or revived. Their inert facts remain in the retained
-v12 source documents, not executable topology in the successor. Queued images
+portable source documents, not executable topology in the successor. Queued images
 and provider replay are not transported, and historical prompts/tools are never
 re-executed.
 
@@ -2946,7 +2946,7 @@ marker or a product delivery receipt. An unrelated product command id cannot
 prevent inspection of that head.
 
 `plak version --carry-probe <file>` is a hidden machine form: it validates a
-v12/v11 export and reports the destination route, optional total/admitted input
+v13/v12 export and reports the destination route, optional total/admitted input
 windows, estimated history tokens and message count. It performs no inference
 or session creation and emits no startup event.
 
@@ -8489,11 +8489,9 @@ home default, with the notice `this session's profile could not be loaded
 (<reason>); the home default profile applies`. A session whose tree has no
 rows keeps on its record the profile its genesis froze (a virtual tree of
 one). A reload handoff passes the profile to the destination in its private
-sidecar (§2.5.1); otherwise an import binds the profile its version 12
-document names, and the successor's record keeps it. A version 11 document
-names none: its successor binds the home default, with the notice `this
-session's export records no profile; the home default profile applies`, and
-its record keeps that default. `/new`, `/fork`,
+sidecar (§2.5.1); otherwise an import binds the saved profile its v13 or v12
+document names, and the successor's record keeps it. Version 11 and older are
+refused; missing-profile fallback does not admit them. `/new`, `/fork`,
 and `/fork-then-compact` keep the binding they already have. Applying a
 built-in publishes its templates as `{name}-root`, `{name}-worker`,
 `{name}-reviewer`, and `{name}-researcher` together with the pointers; every
@@ -10979,8 +10977,8 @@ Active-lease removal, remote-revocation composition and their crash matrix are
 separate work.
 
 Named slots scope source authority, not provider model/profile behavior. Default
-account binding/configuration identities, prompt renders and v12 export encoding
-remain unchanged; the v11 importer remains. Account/target disagreement refuses
+account binding/configuration identities and prompt renders are unchanged.
+The writer uses v13, the readers admit v13 and v12, and v11 and older refuse. Account/target disagreement refuses
 import and resume before credentials. A missing named slot never selects the
 default or a sibling. Each usage row belongs to one full reference; selecting a
 named account reads only that account. Provider-reported email remains a detail

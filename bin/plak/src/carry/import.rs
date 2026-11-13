@@ -130,7 +130,7 @@ pub(crate) struct CarriedImport {
     pub(crate) record: SessionRecord,
     pub(crate) history: PortableSessionHistory,
     pub(crate) note: String,
-    /// The profile the document names; `None` for a version 11 document,
+    /// The profile the document names; `None` only for callers without a saved profile,
     /// which imports under the home default.
     pub(crate) profile: Option<crate::profiles::SessionSelection>,
 }

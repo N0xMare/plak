@@ -1658,7 +1658,7 @@ key operations and native OAuth remain separate capabilities.
 Account admission is closed to the product's supported vertical vocabulary
 (chapter 02 §8.2). Unknown account strings are typed refusals on fresh selection,
 resume and import before credential-source construction. In particular, a
-named API account in a v12 export cannot select a default API key merely
+named API account in an admitted v13 or v12 export cannot select a default API key merely
 because its target names that provider. Inspecting historical account metadata
 confers no admission or credential authority. API targets carry the validated
 full account reference through runtime and catalog construction. Every product
@@ -2056,7 +2056,8 @@ reconstructs an exact checkpoint; current defaults, rendered transcripts,
 digests alone, and provider wire logs cannot repair missing state.
 
 An explicit cross-build conversation import is construction, not recovery
-repair (chapter 02 §2.5.1). Export v12 carries full canonical content and
+repair (chapter 02 §2.5.1). Ordinary import refuses the closed `host_upgrade` document kind before any state
+is admitted; its spelling cannot grant ownership-move authority. Export v13 carries full canonical content and
 session-owned named values in a
 Plak-owned neutral encoding, including original message roles; it is sensitive
 conversation data, not a sanitized transcript. Exports are as sensitive as
@@ -2520,10 +2521,11 @@ Composition named state is session data in the runtime store, not a credential
 store. It is unencrypted like canonical history, bounded to 64 canonical JSON
 values (1 MiB each, 4 MiB total), and subject to the same store permissions.
 The next-turn harness note reveals only keys and sizes, never saved values.
-Export v12 includes the values themselves, with the same sensitivity as the
+Export v13 includes the values themselves, with the same sensitivity as the
 store. File import preserves them independently of replay stripping and
 validates the key grammar, 64-key, 1 MiB-per-value and 4 MiB-total bounds before
-creating a session. Version 11 preserves named state; version 10 and older are refused.
+creating a session. This build writes v13, imports v13 and v12 with named state,
+and refuses v11 and older.
 The driver alone owns publication; evaluator state requests cannot publish
 outside their own successful terminal checkpoint or address another cell.
 

@@ -49,7 +49,7 @@ These are format identities, not configuration keys. Client wire protocol 10
 and runner protocol 8 require separate exact matches, with no negotiation. Product schema 37 adds
 operator title overrides and archival state; it composes with runtime epoch
 37 without changing the runtime codec or tree encoding. Session export stays
-version 12, with the version 11 importer retained for the previous version.
+version 13; imports admit versions 13 and 12 and refuse version 11 and older.
 The host's private terminal registry renews namespaces every thirty seconds and
 joins shutdown for up to four seconds. Live and retained unknown/lost-instance
 pins prevent idle exit while host memory survives. Unresolved shutdown leaves

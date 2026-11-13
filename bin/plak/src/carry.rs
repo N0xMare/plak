@@ -4,8 +4,8 @@
 //! thing that crosses is a portable session reference: `plak session export` writes it
 //! from this build's state, `plak session import` creates a new linked session
 //! from the full neutral conversation and named state. This build imports
-//! versions 12 and 11; a v11 document lands on the local runner under the home
-//! default profile.
+//! versions 13 and 12, preserves their saved runner/profile, and refuses version
+//! 11 and older. The writer emits version 13.
 
 mod document;
 #[cfg(any(test, feature = "tui"))]

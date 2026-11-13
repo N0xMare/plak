@@ -20,8 +20,8 @@ pub(super) const FORMAT: &str = "plak-session-export";
 /// and of the immediately previous one. Any change to the document, including
 /// the embedded canonical-history and binding encodings, bumps this; the
 /// previous version's importer is kept for one bump only.
-pub(crate) const VERSION: u32 = 12;
-const PREVIOUS_VERSION: u32 = 11;
+pub(crate) const VERSION: u32 = 13;
+const PREVIOUS_VERSION: u32 = 12;
 pub(crate) const IMPORTABLE_VERSIONS: [u32; 2] = [PREVIOUS_VERSION, VERSION];
 const MAX_DOCUMENT_BYTES: usize = 256 * 1024 * 1024;
 
@@ -33,16 +33,15 @@ pub(crate) struct CarryDocument {
     pub(super) local_digest: Option<String>,
     pub(super) format: String,
     pub(super) version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) kind: Option<DocumentKind>,
     pub(super) source: CarrySource,
     pub(super) workspace_root: PathBuf,
-    /// The runner the session's tools ran on. Version 12 names it; a version
-    /// 11 document has none and imports onto the local runner.
+    /// The runner the session's tools ran on, present in both admitted versions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) runner: Option<CarryRunner>,
     /// The session's profile: its tree's when it has rows, otherwise its
-    /// record's, otherwise the home default it ran under. Version 12 names
-    /// it; a version 11 document has none and imports under the
-    /// destination's home default.
+    /// record's, otherwise the home default it ran under.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) profile: Option<RootProfile>,
     pub(super) title: Option<String>,
@@ -66,6 +65,13 @@ pub(crate) struct CarryDocument {
     /// Settled source topology rows omitted from the unresolved ledger.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) source_resolved_count: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum DocumentKind {
+    PortableSession,
+    HostUpgrade,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -234,6 +240,14 @@ pub(super) fn validate_size(
 
 impl CarryDocument {
     pub(super) fn validate(&self) -> Result<(), ImportError> {
+        match (self.version, self.kind) {
+            (VERSION, Some(DocumentKind::PortableSession)) | (PREVIOUS_VERSION, None) => {}
+            _ => {
+                return Err(ImportError::Invalid(
+                    "export kind does not match its version or import operation".to_owned(),
+                ));
+            }
+        }
         if self
             .pending_work
             .iter()
@@ -250,10 +264,9 @@ impl CarryDocument {
             ("profile", self.profile.is_some()),
         ] {
             let mismatch = match (self.version, present) {
-                (VERSION, true) | (PREVIOUS_VERSION, false) => continue,
-                (VERSION, false) => format!("version {VERSION} requires `{field}` at $.{field}"),
-                (PREVIOUS_VERSION, true) => {
-                    format!("version {PREVIOUS_VERSION} has no `{field}`, but one is at $.{field}")
+                (VERSION | PREVIOUS_VERSION, true) => continue,
+                (version @ (VERSION | PREVIOUS_VERSION), false) => {
+                    format!("version {version} requires `{field}` at $.{field}")
                 }
                 (version, _) => format!("version {version} is not importable"),
             };
@@ -282,7 +295,7 @@ impl CarryDocument {
         &self.workspace_root
     }
 
-    /// Saved placement identity; version 11 has no runner and is local.
+    /// Saved placement identity, validated before admission.
     pub(crate) fn runner_id(&self) -> &str {
         self.runner
             .as_ref()
@@ -373,6 +386,9 @@ pub(crate) fn read_document(path: &Path) -> Result<CarryDocument, ImportError> {
             header.version
         )));
     }
+    if header.kind == Some(DocumentKind::HostUpgrade) {
+        return Err(ImportError::Invalid("host_upgrade requires the authorized host ownership-move operation, not portable import".to_owned()));
+    }
     if header.raw_history.is_none() || header.checkpoint_present || header.archive_present {
         return Err(ImportError::Invalid(
             "export payload fields do not match its version".to_owned(),
@@ -409,6 +425,8 @@ struct DocumentHeader<'a> {
     raw_history: Option<&'a serde_json::value::RawValue>,
     format: String,
     version: u32,
+    #[serde(default)]
+    kind: Option<DocumentKind>,
 
     #[serde(default, rename = "checkpoint", deserialize_with = "field_present")]
     checkpoint_present: bool,
@@ -474,6 +492,7 @@ pub(super) fn sample_document() -> CarryDocument {
         local_digest: None,
         format: FORMAT.to_owned(),
         version: VERSION,
+        kind: Some(DocumentKind::PortableSession),
         source: CarrySource {
             session_id: "5f0e2a43-7d3c-4c1e-9a55-4b1f7f0c9a11".to_owned(),
             state_key: "r1.e1.p1.t1".to_owned(),
