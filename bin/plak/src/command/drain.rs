@@ -17,15 +17,22 @@ impl Default for HostDrain {
     }
 }
 
-impl HostDrain {
-    pub(crate) fn valid(self) -> bool {
-        !matches!(self, Self::Bounded { milliseconds } if milliseconds > 3_600_000)
-    }
+#[cfg(feature = "web")]
+mod host {
+    use super::HostDrain;
 
-    pub(crate) fn duration(self) -> Option<std::time::Duration> {
-        match self {
-            Self::Bounded { milliseconds } => Some(std::time::Duration::from_millis(milliseconds)),
-            Self::Idle => None,
+    impl HostDrain {
+        pub(crate) fn valid(self) -> bool {
+            !matches!(self, Self::Bounded { milliseconds } if milliseconds > 3_600_000)
+        }
+
+        pub(crate) fn duration(self) -> Option<std::time::Duration> {
+            match self {
+                Self::Bounded { milliseconds } => {
+                    Some(std::time::Duration::from_millis(milliseconds))
+                }
+                Self::Idle => None,
+            }
         }
     }
 }

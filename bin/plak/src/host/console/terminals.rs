@@ -11,7 +11,7 @@ use super::{
     Console, HostPrincipal, HostRequest, HostRequestContext, HostResponse, PoisonError, refused,
 };
 use crate::terminal_registry::{
-    TerminalController, TerminalError, TerminalHandle, TerminalRegistry,
+    TerminalError, TerminalHandle, TerminalRegistry, controller::TerminalController,
 };
 use plakd_wire_types::{PlakExtension, console as dto};
 use plakous::runner::protocol::operator::{

@@ -111,10 +111,6 @@ impl Receipt {
         }
         Ok(())
     }
-
-    pub(crate) fn path(&self, paths: &PlakPaths) -> PathBuf {
-        root(paths).join(self.id.to_string()).join("receipt.json")
-    }
 }
 
 fn failed(error: std::io::Error) -> CliFailure {

@@ -13,7 +13,7 @@ fn document(services: &Services, receipt: &Receipt, mapping: &Mapping) -> CliRes
         .path(services.paths()?)
         .with_file_name(format!("{}.json", mapping.source));
     let document = read_document(&path).map_err(|error| CliFailure::new(error.to_string()))?;
-    if document.read_digest() != Some(mapping.digest.as_str())
+    if document.local_digest.as_deref() != Some(mapping.digest.as_str())
         || document.source() != (mapping.source.as_str(), receipt.source_key.as_str())
         || document.runner_id() != mapping.runner
     {

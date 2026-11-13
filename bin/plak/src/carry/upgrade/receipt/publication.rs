@@ -1,7 +1,13 @@
 //! Receipt publication is a host operation; admission reads remain feature-independent.
 
-use super::{CliFailure, CliResult, File, MAX_BYTES, PlakPaths, Receipt, failed, root};
+use super::{CliFailure, CliResult, File, MAX_BYTES, PathBuf, PlakPaths, Receipt, failed, root};
 use std::io::Write as _;
+
+impl Receipt {
+    pub(crate) fn path(&self, paths: &PlakPaths) -> PathBuf {
+        root(paths).join(self.id.to_string()).join("receipt.json")
+    }
+}
 
 /// Serializes the host's retry worker and explicit operator disposition.
 #[cfg(feature = "web")]

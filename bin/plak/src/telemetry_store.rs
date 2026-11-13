@@ -32,6 +32,8 @@ pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 22;
 /// Default disposable telemetry retention.
 pub const DEFAULT_TELEMETRY_MAX_BYTES: u64 = 512 * 1024 * 1024;
 pub const DEFAULT_TELEMETRY_MAX_AGE_DAYS: u64 = 90;
+#[cfg(feature = "web")]
+mod account_refresh;
 pub(crate) mod files;
 mod observation;
 #[cfg(all(test, feature = "otel"))]
@@ -1467,18 +1469,6 @@ impl TelemetryStore {
     ) -> Result<Option<CredentialRefreshRow>, TelemetryStoreOpenError> {
         Ok(Self::read_credential_refresh(paths, provider, true, None)?
             .filter(|row| row.phase != "completed"))
-    }
-
-    /// Exact-account settled history for the operator console. Unattributed
-    /// older rows never become evidence for a default or named account.
-    pub(crate) fn latest_account_refresh_outcome(
-        paths: &PlakPaths,
-        account: &plakous_hosted::account::AccountRef,
-    ) -> Result<Option<CredentialRefreshRow>, TelemetryStoreOpenError> {
-        let Some(provider) = account.vertical().capability().native_provider() else {
-            return Ok(None);
-        };
-        Self::read_credential_refresh(paths, provider.as_str(), true, Some(account.as_str()))
     }
 
     fn read_credential_refresh(
