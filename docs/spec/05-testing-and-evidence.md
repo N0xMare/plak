@@ -376,6 +376,22 @@ release, including abandonment of a Working provider turn, with terminal rows
 and the number counter preserved. A release receipt alone still yields an
 unknown process outcome. Reload admission reads a process-local host count and
 refuses without closing the terminal.
+Runtime move authority is tested against memory and SQLite with the same semantic
+contract: exact holds and operation/digest binding, prepared abort, irreversible
+retirement, hidden staging, higher destination fences, abandoned re-open refusal,
+identity conflicts, exhausted floors, higher-generation retired-branch refusal,
+old-batch disposition after partial supersession, and normal archive/delete of
+an installed session. SQLite closes/reopens both prepared and
+staged stores as well as retired/abandoned stores; historical inspection must stay
+available without enabling execution. `host_move_tests::` and
+`host_move_review_tests::` own these contracts. Continued-line cases prepare only
+the current head, recover the exact batch and exercise commit and abort in both
+stores. Regressions reject a second preparation, hide create/fork recovery on
+source and destination, reject insufficient fence floors and post-publication
+abandonment, and verify that commit removes predecessor leases and host claims.
+The existing real-process `host_skeleton::upgrade::` cases still qualify the
+settled successor path; no dormant whole-tree move is advertised by these tests.
+
 Export-v13/v12 fixtures round-trip neutral content (including inline image bytes,
 opaque replay, native compaction bindings and turn counts), retain only the v12
 reader and refuse v11, and reject malformed or oversized input. Closed-kind

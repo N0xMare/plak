@@ -20,7 +20,7 @@ pub(super) struct MemoryLine {
 /// Line rows and unconsumed terminals keyed by line, generation and job.
 #[derive(Clone, Default)]
 pub(super) struct MemoryLines {
-    lines: BTreeMap<LineId, MemoryLine>,
+    pub(super) lines: BTreeMap<LineId, MemoryLine>,
     terminals: BTreeMap<(LineId, u64, u32), LineJobTerminal>,
 }
 
@@ -52,6 +52,7 @@ pub(super) fn require_head(
     line: LineId,
     generation: u64,
 ) -> Result<(), SessionStoreError> {
+    super::host_move::require_line(state, line)?;
     match state.lines.lines.get(&line) {
         Some(row) if row.head == s && row.generation == generation => Ok(()),
         _ => Err(SessionStoreError::NotLineHead),
@@ -259,6 +260,7 @@ pub(super) fn delete_session(state: &mut StoreState, session_id: SessionId) {
         .collect::<Vec<_>>();
     for line in gone {
         state.lines.lines.remove(&line);
+        state.move_lines.remove(&line);
         state
             .lines
             .terminals
@@ -267,6 +269,14 @@ pub(super) fn delete_session(state: &mut StoreState, session_id: SessionId) {
 }
 
 pub(super) fn load(state: &StoreState, line: LineId) -> Result<LineRecord, SessionStoreError> {
+    super::host_move::require_line(state, line)?;
+    load_unchecked(state, line)
+}
+
+pub(super) fn load_unchecked(
+    state: &StoreState,
+    line: LineId,
+) -> Result<LineRecord, SessionStoreError> {
     let row = state
         .lines
         .lines
@@ -278,6 +288,27 @@ pub(super) fn load(state: &StoreState, line: LineId) -> Result<LineRecord, Sessi
         row.generation,
         row.origin.clone(),
     ))
+}
+
+pub(super) fn install_move(
+    state: &mut StoreState,
+    imported: &plakous_agent::internal::host_move::MoveLine,
+) {
+    let line = &imported.line;
+    state.lines.lines.insert(
+        line.line(),
+        MemoryLine {
+            head: line.head(),
+            generation: line.generation(),
+            origin: line.origin().clone(),
+        },
+    );
+    for terminal in &imported.terminals {
+        state.lines.terminals.insert(
+            (line.line(), line.generation(), terminal.number),
+            terminal.clone(),
+        );
+    }
 }
 
 pub(super) fn terminals(

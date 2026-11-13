@@ -7,6 +7,11 @@
 
 use super::*;
 
+#[cfg(feature = "perf-instrumentation")]
+pub(super) fn elapsed_ns(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX)
+}
+
 pub(super) const DEFAULT_QUEUE_CAPACITY: usize = 64;
 
 pub(super) const READ_QUEUE_TIMEOUT: Duration = Duration::from_secs(1);

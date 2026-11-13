@@ -743,7 +743,8 @@ impl DurableSessionStoreError {
             SessionStoreError::LeaseExpired => Self::LeaseExpired,
             SessionStoreError::LeaseDomainMismatch => Self::LeaseDomainMismatch,
             SessionStoreError::FenceSuperseded => Self::FenceSuperseded,
-            SessionStoreError::NotLineHead => Self::NotLineHead,
+            // The host-only diagnostic adds no durable error tag or epoch cut.
+            SessionStoreError::NotLineHead | SessionStoreError::OwnershipMoved => Self::NotLineHead,
             SessionStoreError::Archived => Self::Archived,
             SessionStoreError::Capacity(capacity) => Self::Capacity {
                 bound: capacity.bound,

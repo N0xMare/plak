@@ -437,6 +437,10 @@ pub enum SessionStoreError {
     /// written; continue on the head or fork the branch.
     #[error("session branch is not its line's head")]
     NotLineHead,
+    /// Unsupported host-move retirement, distinct from an ordinary superseded head.
+    #[doc(hidden)]
+    #[error("session line ownership was moved")]
+    OwnershipMoved,
     /// The session is archived and closed to ordinary mutation/load.
     #[error("session is archived")]
     Archived,

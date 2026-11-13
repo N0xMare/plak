@@ -43,8 +43,8 @@ retention-only host/line cannot regain native control by downgrade/reinstall. Na
 lease expiry does not revoke retention authority. Bare connection errors do not
 release retained capacity without positive original-instance/process-loss proof.
 
-The current state directory is `state/r27.e37.p37.t10/`: runtime SQLite
-schema 27, runtime format epoch 37, product schema 37, and tree schema 10.
+The current state directory is `state/r28.e37.p37.t10/`: runtime SQLite
+schema 28, runtime format epoch 37, product schema 37, and tree schema 10.
 These are format identities, not configuration keys. Client wire protocol 10
 and runner protocol 8 require separate exact matches, with no negotiation. Product schema 37 adds
 operator title overrides and archival state; it composes with runtime epoch

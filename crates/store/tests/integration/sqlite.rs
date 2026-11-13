@@ -446,7 +446,7 @@ fn unsupported_detached_wal_inspection_preserves_persistent_bytes() -> Result<()
         let shm_path = db.path.with_extension("sqlite3-shm");
         let wal_before = fs::read(&wal_path)?;
         let shm_before = fs::read(&shm_path)?;
-        assert_eq!(&main_before[60..64], &27_u32.to_be_bytes());
+        assert_eq!(&main_before[60..64], &28_u32.to_be_bytes());
         assert!(
             wal_before.len() > 32,
             "unsupported version lives in WAL frames"
@@ -536,7 +536,7 @@ fn fifo_runtime_path_is_refused_without_waiting_for_a_writer() -> Result<(), Box
 #[test]
 fn unsupported_runtime_schemas_refuse_without_changing_files() -> Result<(), Box<dyn Error>> {
     for version in [
-        13_i64, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 100,
+        13_i64, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 29, 100,
     ] {
         let db = Database::new();
         drop(SqliteSessionStore::open(&db.path)?);
@@ -802,7 +802,7 @@ async fn fresh_schema_has_required_integrity_pragmas_and_reopens() {
         connection
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .expect("version"),
-        27
+        28
     );
     assert_eq!(
         connection

@@ -341,9 +341,9 @@ another session's jobs.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r27.e37.p37.t10/            this build's state (§2.5)
+    r28.e37.p37.t10/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
-      runtime.sqlite3             Plakous semantic runtime and change feed, schema 27, epoch 37
+      runtime.sqlite3             Plakous semantic runtime and change feed, schema 28, epoch 37
       product.sqlite3             Plak intents and feed-derived views, schema 37
       subagents.sqlite3           the agent tree, schema 10
       custody-hosts/<instance>.lock  each live host process's custody liveness lock (chapter 03 §14)
@@ -1049,7 +1049,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r27.e37.p37.t10`. The key is derived from the stores'
+schema>`, for example `r28.e37.p37.t10`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup. State-directory

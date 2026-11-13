@@ -57,7 +57,8 @@ fn line_row(
     .transpose()
 }
 
-/// Refuses unless `s` is `line`'s head at exactly `generation`.
+/// Refuses unless `s` is `line`'s head at exactly `generation`. Callers already
+/// read through gated `branch_row`; do not duplicate its ownership-move gate.
 pub(super) fn require_line_head(
     c: &Connection,
     s: SessionRef,
@@ -236,6 +237,14 @@ pub(super) fn require_carry_source(
 }
 
 pub(in super::super) fn load_line(
+    c: &Connection,
+    line: LineId,
+) -> Result<LineRecord, SessionStoreError> {
+    host_move::require_line(c, line)?;
+    load_line_unchecked(c, line)
+}
+
+pub(super) fn load_line_unchecked(
     c: &Connection,
     line: LineId,
 ) -> Result<LineRecord, SessionStoreError> {

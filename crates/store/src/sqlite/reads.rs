@@ -137,6 +137,9 @@ pub(super) fn list(
             "SELECT session_id,initial_branch,revision,created_s,created_ns,durability,
         archived,(SELECT count(*) FROM branches b WHERE b.session_id=sessions.session_id)
         FROM sessions WHERE (?1 IS NULL OR session_id>?1) AND (?2=1 OR archived=0)
+        AND NOT EXISTS(SELECT 1 FROM runtime_move_sessions member
+          JOIN runtime_moves operation USING(operation)
+          WHERE member.session_id=sessions.session_id AND operation.phase NOT IN(3,5))
         ORDER BY session_id LIMIT ?3",
         )
         .map_err(map_sqlite)?;

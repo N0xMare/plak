@@ -272,6 +272,32 @@ CREATE INDEX fork_receipts_source_session ON fork_receipts(source_session);
 CREATE INDEX branch_horizons_checkpoint ON branch_horizons(horizon_checkpoint);
 CREATE INDEX pruned_checkpoints_branch ON pruned_checkpoints(session_id,branch_id);
 CREATE INDEX lines_head ON lines(head_session,head_branch);
+CREATE TABLE runtime_moves (
+ operation BLOB PRIMARY KEY CHECK(length(operation)=32), digest BLOB NOT NULL CHECK(length(digest)=32),
+ phase INTEGER NOT NULL CHECK(phase BETWEEN 0 AND 5)) WITHOUT ROWID;
+CREATE TABLE runtime_move_lines (
+ line_id TEXT PRIMARY KEY, operation BLOB NOT NULL CHECK(length(operation)=32),
+ FOREIGN KEY(line_id) REFERENCES lines(line_id) ON DELETE CASCADE,
+ FOREIGN KEY(operation) REFERENCES runtime_moves(operation)) WITHOUT ROWID;
+CREATE TABLE runtime_move_members (
+ operation BLOB NOT NULL CHECK(length(operation)=32), line_id TEXT NOT NULL,
+ PRIMARY KEY(operation,line_id), FOREIGN KEY(operation) REFERENCES runtime_moves(operation)) WITHOUT ROWID;
+CREATE TABLE runtime_move_sessions (
+ operation BLOB NOT NULL CHECK(length(operation)=32), session_id TEXT NOT NULL,
+ PRIMARY KEY(operation,session_id), FOREIGN KEY(operation) REFERENCES runtime_moves(operation)) WITHOUT ROWID;
+CREATE TABLE imported_sessions (
+ session_id TEXT PRIMARY KEY, operation BLOB NOT NULL CHECK(length(operation)=32),
+ FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
+ FOREIGN KEY(operation) REFERENCES runtime_moves(operation)) WITHOUT ROWID;
+CREATE TABLE imported_checkpoints (
+ checkpoint_id TEXT PRIMARY KEY,
+ FOREIGN KEY(checkpoint_id) REFERENCES checkpoints(checkpoint_id) ON DELETE CASCADE) WITHOUT ROWID;
+CREATE TABLE imported_branches (
+ session_id TEXT NOT NULL, branch_id TEXT NOT NULL,
+ PRIMARY KEY(session_id,branch_id),
+ FOREIGN KEY(session_id,branch_id) REFERENCES branches(session_id,branch_id) ON DELETE CASCADE) WITHOUT ROWID;
+CREATE INDEX runtime_move_lines_operation ON runtime_move_lines(operation);
+CREATE INDEX imported_sessions_operation ON imported_sessions(operation);
 ";
 
 /// Admits shape, schema, domain and counter integrity. Retained state over
@@ -460,21 +486,23 @@ fn verify_receipt_completeness(c: &Connection) -> Result<(), SessionStoreError> 
         .query_row(
             ("SELECT 1 WHERE
              EXISTS(SELECT 1 FROM sessions s LEFT JOIN create_receipts r USING(session_id)
-                    WHERE r.session_id IS NULL)
+                    WHERE r.session_id IS NULL AND NOT EXISTS(SELECT 1 FROM imported_sessions i WHERE i.session_id=s.session_id))
              OR EXISTS(SELECT 1 FROM sessions s LEFT JOIN archive_receipts r USING(session_id)
                     WHERE (s.archived=1 AND r.session_id IS NULL)
                        OR (s.archived=0 AND r.session_id IS NOT NULL))
              OR EXISTS(SELECT 1 FROM branches b LEFT JOIN fork_receipts r
                     ON r.target_session=b.session_id AND r.target_branch=b.branch_id
-                    WHERE (b.fork_checkpoint IS NOT NULL AND r.target_session IS NULL)
+                    WHERE (b.fork_checkpoint IS NOT NULL AND r.target_session IS NULL AND NOT EXISTS(SELECT 1 FROM imported_branches i WHERE i.session_id=b.session_id AND i.branch_id=b.branch_id))
                        OR (b.fork_checkpoint IS NULL AND r.target_session IS NOT NULL))
              OR EXISTS(SELECT 1 FROM checkpoints c WHERE
                     (c.revision=zeroblob(8)
+                     AND NOT EXISTS(SELECT 1 FROM imported_checkpoints i WHERE i.checkpoint_id=c.checkpoint_id)
                      AND NOT EXISTS(SELECT 1 FROM create_receipts r
                                     WHERE r.checkpoint_id=c.checkpoint_id)
                      AND NOT EXISTS(SELECT 1 FROM fork_receipts r
                                     WHERE r.target_checkpoint=c.checkpoint_id))
                     OR (c.revision<>zeroblob(8)
+                        AND NOT EXISTS(SELECT 1 FROM imported_checkpoints i WHERE i.checkpoint_id=c.checkpoint_id)
                         AND NOT EXISTS(SELECT 1 FROM commit_receipts r
                                        WHERE r.checkpoint_id=c.checkpoint_id)
                         AND NOT EXISTS(SELECT 1 FROM branch_horizons h

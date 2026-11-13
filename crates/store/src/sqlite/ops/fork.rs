@@ -28,6 +28,7 @@ pub(in super::super) fn fork(
     require_bound_domain(&tx, b.domain)?;
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     if let Some(old) = load_fork(&tx, r.workflow_id())? {
+        host_move::require_branch(&tx, r.source().session())?;
         let out = if fork_matches(
             &old,
             r,
@@ -240,6 +241,7 @@ pub(in super::super) fn recover_fork(
     b: &Backend,
     r: &RecoverFork,
 ) -> Result<ForkReceipt, SessionStoreError> {
+    host_move::require_branch(&b.connection, r.source().session())?;
     let receipt = load_fork(&b.connection, r.workflow_id())?.ok_or(SessionStoreError::NotFound)?;
     if !recover_fork_matches(&receipt, r) {
         return Err(SessionStoreError::IdentityConflict);

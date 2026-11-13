@@ -33,10 +33,10 @@ use candidates::{
 };
 pub(crate) mod receipts;
 use receipts::{
-    commit_matches, create_matches, fork_matches, recover_fork_matches, validate_commit,
-    validate_fork, validate_fork_semantic_request, validate_genesis,
-    validate_materialized_fork_receipt,
+    commit_matches, fork_matches, recover_fork_matches, validate_commit, validate_fork,
+    validate_fork_semantic_request, validate_genesis, validate_materialized_fork_receipt,
 };
+mod host_move;
 mod lines;
 mod reads;
 use reads::{branch, stored_checkpoint};
@@ -285,16 +285,12 @@ impl MemorySessionStore {
         require_open(&state)?;
         let checkpoint = validated_checkpoint(request.initial())?;
         validate_genesis(&checkpoint, request)?;
-        let checkpoint_commit_identity = checkpoint.checkpoint_commit_identity();
+        let identity = checkpoint.checkpoint_commit_identity();
         if state.deletes.contains_key(&request.session().session_id()) {
             return Err(SessionStoreError::IdentityConflict);
         }
-        if let Some(receipt) = state.creates.get(&request.session().session_id()) {
-            return if create_matches(receipt, request, reference, checkpoint_commit_identity) {
-                Ok(receipt.clone())
-            } else {
-                Err(SessionStoreError::IdentityConflict)
-            };
+        if state.creates.contains_key(&request.session().session_id()) {
+            return receipts::recover_create(&state, request, reference, identity);
         }
         if state.sessions.contains_key(&request.session().session_id()) {
             return Err(SessionStoreError::IdentityConflict);
@@ -391,16 +387,7 @@ impl MemorySessionStore {
         let checkpoint_commit_identity =
             validated_checkpoint(request.initial())?.checkpoint_commit_identity();
         let state = self.lock()?;
-        match state.creates.get(&request.session().session_id()) {
-            Some(receipt) => {
-                if create_matches(receipt, request, reference, checkpoint_commit_identity) {
-                    Ok(receipt.clone())
-                } else {
-                    Err(SessionStoreError::IdentityConflict)
-                }
-            }
-            None => Err(SessionStoreError::NotFound),
-        }
+        receipts::recover_create(&state, request, reference, checkpoint_commit_identity)
     }
 
     fn acquire_sync(&self, request: AcquireBranch) -> Result<BranchLease, SessionStoreError> {
@@ -788,6 +775,7 @@ impl MemorySessionStore {
         );
         let mut state = self.lock()?;
         require_open(&state)?;
+        host_move::require_branch(&state, request.source().session())?;
         validate_fork_semantic_request(request)?;
         let candidate = publication_candidate(request.target())?;
         if let Some(receipt) = state.forks.get(&request.workflow_id()) {
@@ -958,6 +946,7 @@ impl MemorySessionStore {
 
     fn recover_fork_sync(&self, request: &RecoverFork) -> Result<ForkReceipt, SessionStoreError> {
         let state = self.lock()?;
+        host_move::require_branch(&state, request.source().session())?;
         let receipt = state
             .forks
             .get(&request.workflow_id())
@@ -1172,6 +1161,33 @@ impl MemorySessionStore {
 }
 
 impl SessionStore for MemorySessionStore {
+    fn recover_move(
+        &self,
+        operation: SessionWorkflowId,
+    ) -> StoreFuture<'_, plakous_agent::internal::host_move::MoveInstall> {
+        Box::pin(async move { self.recover_move_sync(operation) })
+    }
+    fn prepare_move(
+        &self,
+        request: plakous_agent::internal::host_move::PrepareMove,
+    ) -> StoreFuture<'_, plakous_agent::internal::host_move::MoveInstall> {
+        Box::pin(async move { self.prepare_move_sync(&request) })
+    }
+    fn stage_move(
+        &self,
+        operation: SessionWorkflowId,
+        install: plakous_agent::internal::host_move::MoveInstall,
+    ) -> StoreFuture<'_, ()> {
+        Box::pin(async move { self.stage_move_sync(operation, install) })
+    }
+    fn finish_move(
+        &self,
+        operation: SessionWorkflowId,
+        digest: plakous_agent::internal::Digest,
+        disposition: plakous_agent::internal::host_move::MoveDisposition,
+    ) -> StoreFuture<'_, ()> {
+        Box::pin(async move { self.finish_move_sync(operation, digest, disposition) })
+    }
     fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
         sample_clock(self.clock.as_ref(), self.domain)
     }
@@ -1365,6 +1381,8 @@ impl SessionStore for MemorySessionStore {
 
 #[derive(Clone, Default)]
 struct StoreState {
+    moves: BTreeMap<SessionWorkflowId, host_move::Receipt>,
+    move_lines: BTreeMap<plakous_agent::internal::LineId, SessionWorkflowId>,
     sessions: BTreeMap<SessionId, SessionRecord>,
     checkpoints: BTreeMap<CheckpointId, CheckpointRecord>,
     objects: BTreeMap<RuntimeObjectAddress, RuntimeObject>,
@@ -1422,6 +1440,7 @@ fn mutable_branch(
     state: &mut StoreState,
     selector: SessionRef,
 ) -> Result<&mut BranchRecord, SessionStoreError> {
+    host_move::require_branch(state, selector)?;
     let session = state
         .sessions
         .get_mut(&selector.session_id())

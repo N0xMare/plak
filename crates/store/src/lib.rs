@@ -26,12 +26,17 @@ pub use sqlite::{
 pub use sqlite::{SqliteCommitTrace, SqliteTraceCollector};
 
 mod memory;
+mod move_install;
 pub use memory::{
     DEFAULT_MAX_BRANCHES_PER_SESSION, DEFAULT_MAX_CHECKPOINTS, DEFAULT_MAX_OBJECT_BYTES,
     DEFAULT_MAX_OBJECTS, DEFAULT_MAX_PAGE_SIZE, DEFAULT_MAX_SESSIONS, MemorySessionStore,
     MemoryStoreLimits, MemoryStoreStats,
 };
 
+#[cfg(test)]
+mod host_move_review_tests;
+#[cfg(test)]
+mod host_move_tests;
 #[cfg(test)]
 #[path = "../tests/fixture.rs"]
 mod integrity_fixture;

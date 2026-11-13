@@ -28,6 +28,7 @@ pub(in super::super) fn create(
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     let expires = expiry(now, r.lease_seconds())?;
     if let Some(old) = load_create(&tx, r.session().session_id())? {
+        host_move::require_branch(&tx, r.session())?;
         let result = if create_matches(
             &old,
             r,
@@ -206,6 +207,7 @@ pub(in super::super) fn recover_create(
     c: &Connection,
     r: &CreateSession,
 ) -> Result<CreateReceipt, SessionStoreError> {
+    host_move::require_branch(c, r.session())?;
     let reference = bundle_ref(r.initial());
     let checkpoint_commit_identity = r
         .initial()

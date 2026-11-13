@@ -284,3 +284,20 @@ pub(super) fn recover_fork_matches(receipt: &ForkReceipt, request: &RecoverFork)
         && operation.transition() == request.transition()
         && operation.semantic_request() == request.semantic_request()
 }
+pub(super) fn recover_create(
+    state: &super::StoreState,
+    request: &CreateSession,
+    reference: CheckpointObjectRef,
+    identity: Digest,
+) -> Result<CreateReceipt, SessionStoreError> {
+    super::host_move::require_branch(state, request.session())?;
+    let receipt = state
+        .creates
+        .get(&request.session().session_id())
+        .ok_or(SessionStoreError::NotFound)?;
+    if create_matches(receipt, request, reference, identity) {
+        Ok(receipt.clone())
+    } else {
+        Err(SessionStoreError::IdentityConflict)
+    }
+}

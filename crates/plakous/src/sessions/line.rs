@@ -137,7 +137,7 @@ impl LeaseOnlyHead {
 /// since both take the source branch's lease.
 #[derive(Debug)]
 pub struct BranchHold {
-    inner: plakous_agent::internal::DurableBranchHold,
+    pub(super) inner: plakous_agent::internal::DurableBranchHold,
 }
 
 impl BranchHold {

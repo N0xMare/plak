@@ -150,6 +150,9 @@ for one version bump, without native protocol compatibility.
   refuse v11 and older, and keep ownership-move capsules out of ordinary session
   import. The 0.0.3 release wrote v11: those exports cannot be carried into this
   build directly.
+- Add hidden host-only runtime retirement and invisible semantic-install seams,
+  with operation-bound abort/commit, permanent abandonment and imported lease
+  floors. Runtime SQLite advances to schema 28; dormant product moves remain off.
 
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.

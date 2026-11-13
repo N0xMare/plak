@@ -2055,6 +2055,21 @@ authorize runtime mutation except through typed facade calls. Resume
 reconstructs an exact checkpoint; current defaults, rendered transcripts,
 digests alone, and provider wire logs cannot repair missing state.
 
+Host-only runtime move preparation freezes every selected line under its exact
+branch holds. The operation persists its exact selected sessions; continued-line
+predecessors are not implicitly imported and need no extra holds. The line-wide
+gate still covers them, and commit releases all source line leases and owned
+host claims. Committed retirement is durable below ordinary and lease-only
+opens, including after source restart; precommit cleanup may undo only its own
+matching preparation. Destination batch staging imports no source lease or host
+claim and grants no execution authority. Hidden and abandoned lines cannot be
+opened or acquire/renew/revive a lease; publication is atomic for the batch and
+fresh acquisition exceeds its imported floors. Only staged batches may be
+abandoned; publication cannot later be undone by abandonment. Hidden sessions
+are excluded from discovery, not erased. These unsupported composition
+seams introduce neither a foreign native-store reader nor a second cross-build
+carrier. Product dormant-tree move remains disabled.
+
 An explicit cross-build conversation import is construction, not recovery
 repair (chapter 02 §2.5.1). Ordinary import refuses the closed `host_upgrade` document kind before any state
 is admitted; its spelling cannot grant ownership-move authority. Export v13 carries full canonical content and

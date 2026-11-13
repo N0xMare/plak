@@ -4,6 +4,8 @@
 //! branch CAS and lease fencing. They never interpret canonical history,
 //! operation-ledger, family-artifact, event, transcript, or presentation state.
 
+#[doc(hidden)]
+pub mod host_move;
 mod store;
 pub use store::SessionStore;
 pub use store::StoreFuture;

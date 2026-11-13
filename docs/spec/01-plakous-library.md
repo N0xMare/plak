@@ -1755,6 +1755,42 @@ object is missing, is not operation evidence, or does not match its address.
 The decoded record and its recovery semantics do not depend on this encoding;
 only record, ledger and checkpoint digests do.
 
+The host layer has unsupported, doc-hidden composition seams for semantic runtime
+move batches. They are not supported embedding APIs, a serialized checkpoint
+carrier, or a topology in L0. Source preparation records the exact selected
+session set and checks every branch hold within those sessions before freezing
+their lines. A continued line includes its current head session, not its
+superseded predecessor sessions; those predecessors need no additional holds.
+Recovery reconstructs that recorded set, never all historical line members.
+The gate nevertheless covers the entire line, and commit clears every source
+branch lease and owned host claim on that line, including predecessors.
+Retirement is operation/digest-bound and permanent
+once committed. Only the matching prepared operation may abort. Dispositions
+require every original batch member still to belong to that operation; a newer partial move
+cannot let an older batch abandon its remaining members. These gates sit
+below product policy: line-head reads, branch opens, create/fork recovery,
+acquisition, renewal and revival cannot authorize a moved or hidden line.
+Historical checkpoint inspection does not grant execution authority.
+
+Destination staging re-encodes checked semantic checkpoints with the current
+codec, retains identities and branch/generation floors, and imports no lease or
+process claim. One atomic batch gate keeps all its lines inaccessible until
+publication; abandonment is permitted only while staged and is permanent.
+Published batches cannot be abandoned, including after a lease is acquired.
+Publication grants no lease, and the next
+acquisition must exceed the imported fence floor. Overflow and identity conflicts
+refuse instead of resetting counters or overwriting rows. Exact imported-row
+inventories justify absent source receipts without weakening checks on later
+ordinary mutations. Initial eligibility is conservative: fully held, quiescent
+branches with terminal job evidence. Whole-tree product reconstruction and
+ownership-move publication are not enabled by these seams.
+Prepared, staged, retired and abandoned sessions are excluded from session
+discovery. Historical checkpoint inspection remains available. Retired lines
+report moved ownership, rather than an ordinary superseded-head refusal; the
+durable error classification remains unchanged. Reclamation of abandoned and
+retired batches is deferred to the product move implementation; these seams
+retain their receipts and do not silently delete session state.
+
 ### 5.2 SQLite
 
 The backend uses bundled SQLite 3.54.0 (dependency policy: chapter 06 §7).

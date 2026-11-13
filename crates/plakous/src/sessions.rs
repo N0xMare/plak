@@ -139,6 +139,8 @@ mod transcript;
 pub use transcript::{
     SessionTranscriptItem, SessionTranscriptPart, SessionTranscriptSource, SessionTranscriptTail,
 };
+#[doc(hidden)]
+pub mod host_move;
 mod line;
 pub use line::{BranchHold, LeaseOnlyHead, LineHead, carried_from_provenance};
 mod presentation;
