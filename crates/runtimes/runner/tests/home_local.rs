@@ -7,6 +7,7 @@
 
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,6 +31,7 @@ use serde_json::Value;
 const HOME_HOST: &str = "00000000-0000-0000-0000-00000000c0de";
 const LINE: &str = "00000000-0000-0000-0000-0000000000a1";
 const BRANCH: &str = "00000000-0000-0000-0000-0000000000b1";
+static NEXT_HOST_INSTANCE: AtomicU64 = AtomicU64::new(1);
 
 #[tokio::test]
 async fn changes_stay_in_process_and_the_home_local_daemon_refuses_the_verb() {
@@ -124,7 +126,11 @@ fn service(root: &Path, source: &str, home_local: bool) -> RunnerService {
 fn bind(host_id: &str, version: VersionTriple, inspect: bool) -> Bind {
     Bind {
         host_id: host_id.into(),
-        host_instance: "1-0000000000000001".into(),
+        // These are independent clients, not reconnects that replace a live peer.
+        host_instance: format!(
+            "1-{:016x}",
+            NEXT_HOST_INSTANCE.fetch_add(1, Ordering::Relaxed)
+        ),
         version,
         inspect,
     }
