@@ -3975,10 +3975,14 @@ owner fenced ends recovery-required instead and is not a loss of its owner:
 its in-place recovery records no interrupt. The open finds the loss in the
 root's feed, not in a view a projection may already have moved past: before it
 projects anything it reads where to start, the earlier of the views' cursor
-and the anchor of the root's latest accepted submission (the lost turn's
-submission is never newer), and after its projection it scans the feed from
-there. The loss is the last root terminal in that range when no root turn was
-admitted after it. A scan start below the feed's retention restarts at the
+and the anchor of the root's latest accepted turn-starting submission
+(`RootStart` or `HostWake`, including mail-triggered wakes). A `SendNowSteer`
+targets the existing turn and never advances this start; queued but unaccepted
+follow-ups do not advance it either. The same start is used by planned
+handoff's fold, which must include the busy turn's admission even after later
+steering, cancellation or other control receipts. After projection it scans
+the feed from there. The loss is the last root terminal in that range when no
+root turn was admitted after it. A scan start below the feed's retention restarts at the
 retained start, since only the last root terminal matters; a lost turn whose
 terminal is itself no longer retained is not found, so it is not held. The
 open records it once the views applied that terminal, at the applied cursor,

@@ -3911,6 +3911,49 @@ fn child_step() -> impl Strategy<Value = ChildStep> {
     ]
 }
 
+#[test]
+fn a_child_handoff_keeps_its_busy_turn_after_an_accepted_steer() {
+    for recorded in [false, true] {
+        let (_tmp, mut tree, child, mut feed) = live_child_run(&[ChildStep::Turn {
+            corrective: false,
+            end: ChildEnd::Open,
+        }]);
+        let attempt = tree.attempt(&child).unwrap().attempt_id.clone();
+        let turn_id = tree
+            .attempt(&child)
+            .unwrap()
+            .turn_id
+            .as_ref()
+            .unwrap()
+            .parse()
+            .unwrap();
+        if recorded {
+            record_child_command(
+                &mut tree,
+                &child,
+                &attempt,
+                "later-steer",
+                AgentCommandKind::MailStart,
+            );
+        }
+        feed.push(vec![FeedFact::CommandAccepted {
+            command_id: CommandId::new("later-steer").unwrap(),
+            kind: FeedCommandKind::Steer,
+            turn_id: Some(turn_id),
+            sequence: 2,
+            operation_id: None,
+        }]);
+        project(&mut tree, &child, &feed);
+        assert_eq!(tree.attempt(&child).unwrap().usage.turns, 1);
+        assert_eq!(tree.record_handoff().unwrap(), vec![child.clone()]);
+        let reopened = ProductAgentTree::reopen(tree.to_persisted());
+        let continuation = reopened.loss_continuation(&child).unwrap();
+        assert_eq!(continuation.cause, ContinuationCause::Handoff);
+        assert_eq!(continuation.state, LossContinuationState::Held);
+        assert_eq!(reopened.attempt(&child).unwrap().attempt_id, attempt);
+    }
+}
+
 fn record_child_command(
     tree: &mut ProductAgentTree,
     agent: &str,

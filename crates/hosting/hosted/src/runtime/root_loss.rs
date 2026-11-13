@@ -26,6 +26,7 @@ use crate::sessions::SessionRecord;
 use crate::sessions::projector::{
     Delivery, ProductIntents, RootContinuation, RootContinuationCause, RootContinuationDecision,
     RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor, SessionViews,
+    SubmissionKind,
 };
 
 /// Prefix of the root's continuation command identity after a loss.
@@ -63,7 +64,7 @@ struct Loss {
 
 /// Where an open's scan for a lost root turn starts: the runtime session
 /// the views follow, and the earlier of their cursor and the anchor of the
-/// root's latest accepted submission. Read before the open projects
+/// root's latest accepted turn-starting submission. Read before the open projects
 /// anything; a projection, here or in another process, never moves either
 /// past a lost turn's terminal, since the lost turn's submission is older.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -199,6 +200,9 @@ fn scan_start(views: &SessionViews, intents: &ProductIntents) -> Option<LossScan
         .iter()
         .filter(|submission| {
             matches!(
+                submission.kind,
+                SubmissionKind::RootStart | SubmissionKind::HostWake
+            ) && matches!(
                 views.state.deliveries.get(&submission.command_id),
                 Some(Delivery::Accepted)
             )

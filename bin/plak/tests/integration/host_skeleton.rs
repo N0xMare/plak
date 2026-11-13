@@ -1108,6 +1108,68 @@ fn root_record(fixture: &Fixture, session: &str) -> (Vec<RootInterruptCause>, us
     )
 }
 
+fn accept_send_now_steer(client: &mut Client, fixture: &Fixture, session: &str, attachment: u64) {
+    use plak::store::session_records::SessionRecordStore as _;
+    use plakous_hosted::sessions::projector::{Delivery, SubmissionKind};
+    let store = plak::store::session_records::SqliteSessionStore::new(
+        plak::home::paths::PlakPaths::explicit(fixture.home()),
+    );
+    let draft = Draft::from("continue with this additional constraint");
+    assert_eq!(
+        client.request(
+            4,
+            Op::Intent {
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
+                attachment,
+                intent: SessionIntent::FollowUp(draft),
+                blobs: Vec::new(),
+            }
+        ),
+        Outcome::Ok(Answer::Accepted { duplicate: false })
+    );
+    let deadline = std::time::Instant::now() + WAIT;
+    let queued = loop {
+        if let Some(item) = store.load(session).unwrap().pending_queue.last().cloned() {
+            break item;
+        }
+        assert!(std::time::Instant::now() < deadline, "draft was not queued");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    assert_eq!(
+        client.request(
+            5,
+            Op::Intent {
+                client_id: None,
+                attachment,
+                intent: SessionIntent::SendQueuedNow {
+                    id: queued.id,
+                    revision: queued.revision
+                },
+                blobs: Vec::new(),
+            }
+        ),
+        Outcome::Ok(Answer::Accepted { duplicate: false })
+    );
+    loop {
+        let intents = store.load_intents(session).unwrap();
+        let views = store.load_views(session).unwrap().unwrap();
+        if intents.submissions.iter().any(|submission| {
+            submission.kind == SubmissionKind::SendNowSteer
+                && matches!(
+                    views.state.deliveries.get(&submission.command_id),
+                    Some(Delivery::Accepted)
+                )
+        }) {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "steer was not admitted"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
 /// A host stopped while a root turn runs hands the turn off; the next
 /// host's start scan continues it once by itself, with no client attached,
 /// and the host after that continues nothing more.
@@ -1127,6 +1189,7 @@ fn a_sigterm_hands_a_running_turn_to_the_next_host_which_continues_it_once() {
     };
     let attachment = client.attach(2, &node);
     client.prompt(3, attachment, "a long turn", PREFIX);
+    accept_send_now_steer(&mut client, &fixture, &session, attachment);
     stop(&mut host);
     let (interrupts, decisions) = root_record(&fixture, &session);
     assert_eq!(interrupts, [RootInterruptCause::Handoff]);

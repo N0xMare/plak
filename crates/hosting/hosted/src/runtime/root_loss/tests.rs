@@ -201,7 +201,7 @@ fn the_loss_waits_for_the_views_to_apply_the_lost_terminal() {
 /// cursor and the root's latest accepted submission, so a projection that
 /// already applied the lost turn's terminal cannot hide it.
 #[test]
-fn the_loss_scan_starts_at_the_latest_accepted_submission() {
+fn the_loss_scan_starts_at_the_latest_accepted_turn_start() {
     let mut intents = ProductIntents::default();
     let mut views = SessionViews::empty();
     assert_eq!(scan_start(&views, &intents), None, "no runtime yet");
@@ -224,6 +224,92 @@ fn the_loss_scan_starts_at_the_latest_accepted_submission() {
     assert_eq!(start(&views, &intents), Some((runtime, 12)));
     views.cursor = FeedSeq::new(9);
     assert_eq!(start(&views, &intents), Some((runtime, 9)));
+}
+
+#[test]
+fn the_loss_scan_keeps_turn_admission_before_later_submissions() {
+    let runtime = plakous::model::SessionId::try_from(uuid::Uuid::new_v4()).unwrap();
+    for root_kind in [SubmissionKind::RootStart, SubmissionKind::HostWake] {
+        for later_kind in [
+            SubmissionKind::RootStart,
+            SubmissionKind::SendNowSteer,
+            SubmissionKind::HostWake,
+        ] {
+            for accepted in [false, true] {
+                let mut intents = ProductIntents::default();
+                let mut views = SessionViews::empty();
+                views.state.runtime_session_id = Some(runtime);
+                views.cursor = FeedSeq::new(40);
+                submitted(&mut intents, "root", 12);
+                intents.submissions.last_mut().unwrap().kind = root_kind;
+                views
+                    .state
+                    .deliveries
+                    .insert("root".into(), Delivery::Accepted);
+                submitted(&mut intents, "later", 30);
+                intents.submissions.last_mut().unwrap().kind = later_kind;
+                if accepted {
+                    views
+                        .state
+                        .deliveries
+                        .insert("later".into(), Delivery::Accepted);
+                }
+                let expected = if accepted && later_kind != SubmissionKind::SendNowSteer {
+                    30
+                } else {
+                    12
+                };
+                assert_eq!(
+                    scan_start(&views, &intents).unwrap().after.get(),
+                    expected,
+                    "root={root_kind:?}, later={later_kind:?}, accepted={accepted}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_handoff_fold_keeps_the_root_across_steering_and_control_receipts() {
+    for kind in [
+        FeedCommandKind::Steer,
+        FeedCommandKind::Cancel,
+        FeedCommandKind::EffectDecision,
+        FeedCommandKind::Shutdown,
+    ] {
+        let mut running = None;
+        fold_handed_off_turn(&mut running, 11, &scan_accepted(1));
+        fold_handed_off_turn(
+            &mut running,
+            21,
+            &FeedFact::CommandAccepted {
+                command_id: plakous::agent::CommandId::new("later-control").unwrap(),
+                kind,
+                turn_id: Some(scan_turn(1)),
+                sequence: 2,
+                operation_id: None,
+            },
+        );
+        fold_handed_off_turn(
+            &mut running,
+            22,
+            &FeedFact::TurnTerminal {
+                turn_id: scan_turn(1),
+                command_id: plakous::agent::CommandId::new("command-1").unwrap(),
+                outcome: FeedTurnOutcome::Cancelled {
+                    cause: FeedCancelCause::Requested,
+                },
+                closed_exchange: false,
+                steering_settled_unapplied: false,
+                usage: plakous::agent::TurnUsage::default(),
+            },
+        );
+        assert_eq!(
+            running.map(|turn| (turn.turn_id, turn.applied_seq)),
+            Some((scan_turn(1).to_string(), 11)),
+            "{kind:?}"
+        );
+    }
 }
 
 /// The scan keeps only the last root terminal with no root turn admitted
