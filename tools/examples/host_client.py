@@ -11,7 +11,7 @@ import sys
 import time
 
 # Exact match, not a negotiated range. Update alongside each wire bump.
-WIRE_VERSION = 9
+WIRE_VERSION = 10
 MAX_LINE_BYTES = 16 * 1024 * 1024
 
 
