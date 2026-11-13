@@ -314,7 +314,7 @@ async fn an_unsent_call_budget_excludes_its_hold() {
         std::task::Poll::Ready(())
     })
     .await;
-    assert!(link.sent().is_empty());
+    assert_eq!(link.sent().len(), 0);
     tokio::time::advance(Duration::from_millis(300)).await;
     services.set_available(true);
     call.await.unwrap();
