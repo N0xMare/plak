@@ -776,4 +776,6 @@ fn journal_answer(answer: RunnerFrame, stopped: bool) -> Result<Answer, Refusal>
 }
 
 #[cfg(test)]
+mod startup_tests;
+#[cfg(test)]
 mod tests;

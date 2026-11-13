@@ -107,6 +107,14 @@ pub(crate) struct Tables {
 }
 
 impl Tables {
+    pub(crate) fn reload_floors(&mut self) -> std::io::Result<()> {
+        if let Some(floors) = &self.floors {
+            floors.reload()?;
+            *self = Self::with_floors(Arc::clone(floors));
+        }
+        Ok(())
+    }
+
     /// Tables whose owners start from `floors`' record.
     pub(crate) fn with_floors(floors: Arc<dyn OwnerFloors>) -> Self {
         let owners = floors

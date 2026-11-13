@@ -433,6 +433,10 @@ fn a_keys_answer_and_acknowledgement_belong_to_the_instance_that_last_sent_it() 
 struct RefusingFloors;
 
 impl crate::floors::OwnerFloors for RefusingFloors {
+    fn reload(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+
     fn load(&self) -> Vec<(String, crate::floors::Floor)> {
         Vec::new()
     }

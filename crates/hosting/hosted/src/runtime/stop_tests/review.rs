@@ -377,6 +377,10 @@ fn a_recorded_stop_propagates_a_non_ownership_open_failure() {
 
 struct RefuseFloors;
 impl plakous::runner::OwnerFloors for RefuseFloors {
+    fn reload(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+
     fn load(&self) -> Vec<(String, plakous::runner::Floor)> {
         Vec::new()
     }

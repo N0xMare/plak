@@ -9,6 +9,9 @@ for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
+- Reload durable runner owner floors and retention-only roles after acquiring
+  the native daemon lock, so replacement startup cannot revive stale authority.
+
 - Client protocol 10 adds required Unix-second `created_at` timestamps to
   session directory rows and safe `detail` text to structured validation
   issues. Profile writes identify empty working sets and missing templates

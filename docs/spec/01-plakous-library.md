@@ -6776,7 +6776,15 @@ the normal recovery-required path before Ready. The driver's placement parking
 The at-most-once law across restarts:
 
 - **Runner restart.** A new `instance` (and every new `boot_id`) has an empty
-  op table, and an owner table holding only its recorded floors. The host
+  op table, and an owner table holding only its recorded floors. Socket-daemon
+  activation acquires the exclusive native socket lock, then reloads its own
+  durable owner floors, holders and retention-only bits before binding either
+  endpoint or serving requests. Construction-time caches are not activation
+  authority: the incumbent may have recorded a later transfer before releasing
+  its lock. A reload error refuses activation rather than using stale floors.
+  This applies to same-triple and protocol-shared home-local replacements;
+  cross-triple retention still reads the original worker's live owner table
+  and performs its CAS there, never by opening foreign floor files. The host
   treats every call outstanding on the old instance as of unknown outcome
   (`RecoveryRequired`, not proven to have had no effect) and transfers each
   line again before its next call there. A process the old instance started

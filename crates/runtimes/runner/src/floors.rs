@@ -28,6 +28,13 @@ pub struct Floor {
 
 /// Where a runner records accepted owners.
 pub trait OwnerFloors: Send + Sync {
+    /// Refreshes external records after exclusive daemon custody is acquired.
+    ///
+    /// # Errors
+    ///
+    /// Durable records cannot be read; activation must not use the old cache.
+    fn reload(&self) -> io::Result<()>;
+
     /// Every recorded floor, with its host.
     fn load(&self) -> Vec<(String, Floor)>;
 
@@ -57,7 +64,18 @@ impl FileOwnerFloors {
     /// keep.
     pub fn open(path: impl Into<PathBuf>) -> io::Result<Self> {
         let path = path.into();
-        let floors = match std::fs::read(&path) {
+        let floors = Self::read(&path, true)?;
+        Ok(Self {
+            path,
+            floors: Mutex::new(floors),
+        })
+    }
+
+    fn read(
+        path: &Path,
+        missing_ok: bool,
+    ) -> io::Result<BTreeMap<String, BTreeMap<String, Floor>>> {
+        match std::fs::read(path) {
             Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -68,14 +86,12 @@ impl FileOwnerFloors {
                         path.display()
                     ),
                 )
-            })?,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => BTreeMap::new(),
-            Err(error) => return Err(error),
-        };
-        Ok(Self {
-            path,
-            floors: Mutex::new(floors),
-        })
+            }),
+            Err(error) if missing_ok && error.kind() == io::ErrorKind::NotFound => {
+                Ok(BTreeMap::new())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// The file.
@@ -86,6 +102,12 @@ impl FileOwnerFloors {
 }
 
 impl OwnerFloors for FileOwnerFloors {
+    fn reload(&self) -> io::Result<()> {
+        let mut floors = self.floors.lock().unwrap_or_else(PoisonError::into_inner);
+        *floors = Self::read(&self.path, floors.is_empty())?;
+        Ok(())
+    }
+
     fn load(&self) -> Vec<(String, Floor)> {
         let floors = self.floors.lock().unwrap_or_else(PoisonError::into_inner);
         floors

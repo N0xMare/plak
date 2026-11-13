@@ -207,6 +207,9 @@ async fn serve_socket_inner(
             .open(socket.with_extension("lock"))?
     };
     take_lock(&lock, socket).await?;
+    // Construction may predate the incumbent's last durable transfer. Only
+    // exclusive native custody makes its final floors safe to cache.
+    service.reload_owner_floors()?;
     // The lock file names its holder, so an operator or a harness can find
     // the daemon that serves a socket; the lock proves the name current.
     record_lock_holder(&lock)?;

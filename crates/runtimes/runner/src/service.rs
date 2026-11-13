@@ -238,6 +238,10 @@ pub struct RunnerOptions {
 }
 
 impl RunnerService {
+    pub(crate) fn reload_owner_floors(&self) -> std::io::Result<()> {
+        lock(&self.inner.tables).reload_floors()
+    }
+
     /// A new runner instance answering from `environment`, with the default
     /// limits.
     ///
