@@ -82,9 +82,9 @@ directive is an error, not a fallback.
 `PLAK_JS_HOST` and `PLAK_PY_HOST` are absolute paths to the evaluator sidecars.
 `PLAK_JS_HOST` names `plakous-js-host`, the JavaScript evaluator used by Code
 Mode and js-ptc. `PLAK_PY_HOST` names `plakous-py-host`, the Python cell worker
-used by py-ptc and py-sdk. By default Plak looks only for a sibling of the running `plak`
-binary; there is no `PATH` search. Each must name an existing regular file, or
-the lookup fails closed. Neither is a credential.
+used by py-ptc and py-sdk. By default Plak looks only for a sibling of the
+running `plak` binary; there is no `PATH` search. Each must name an existing
+regular file, or the lookup fails closed. Neither is a credential.
 
 ## Idle Auto-Continue
 
@@ -423,8 +423,8 @@ start a new session. The root's tools are frozen the same way: editing the
 `[root] agent` template's `tools`, a `[tools.*]` table or an `[mcp_servers.*]`
 table changes newly bound sessions, not an exact resume or a profile Switch now.
 Embedded `/new` retains the current tools; hosted `/new` binds the host's
-default profile afresh. A session keeps its tools when you switch models: a session started on the
-`[root] agent` template's account and model has the template's tools for its
+default profile afresh. A session keeps its tools when you switch models: a
+session started on the `[root] agent` template's account and model has the template's tools for its
 whole life, one started on any other model has none, and a switch to a model
 whose route cannot run one of the session's tools is refused (use `/new` or
 start a new session on that model). A tool listed through `mcp:<id>` whose input schema Plak cannot represent

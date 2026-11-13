@@ -78,8 +78,9 @@ child.
 
 `[orchestration]` holds the tree budget: `subagents`, `max_depth`,
 `max_children`, `max_nodes`, `max_attempts`, `require_review_evidence`.
-`[turn] auto_continue` controls idle wakes. Interactive roots may end a turn while children run;
-the host wakes them with results or questions when auto-continue is enabled.
+`[turn] auto_continue` controls idle wakes. Interactive roots may end a turn
+while children run; the host wakes them with results or questions when
+auto-continue is enabled.
 Use `wait_agent` when a result is needed before continuing the current turn.
 Children never need to sit in a wait either: a child whose turn ends without
 `submit_result` while its own background processes or children are still

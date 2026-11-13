@@ -39,12 +39,13 @@ creates no session.
 part of the default build; `--web` adds the web endpoint and `--ui` its validated
 static build. Run the host under its user unit or a multiplexer. Stop/restart
 it through that unit, or send SIGTERM for planned handoff. Only one host may
-serve a home, even across different state keys; an older running build must be
-stopped explicitly rather than silently replaced.
+serve a home, even across different state keys; use an explicit stop or
+coordinated upgrade rather than silently replacing an older running build.
 
 Programmatic clients can use `plak host connect --stdio`. Stdout carries only
 wire frames; stderr carries connection diagnostics. The client supplies the
-handshake. Closing stdin detaches that client without stopping host sessions.
+handshake (host-control wire version 9, distinct from `plak agent`'s JSONL
+version 1). Closing stdin detaches that client without stopping host sessions.
 An absent or incompatible host refuses; there is no embedded fallback and no
 automatic replay after a broken connection.
 
@@ -63,6 +64,22 @@ environment-first precedence; the bridge does not perform target-host writes.
 This does not change bare `plak`: it attaches to an existing current-key host,
 otherwise runs embedded, and never auto-starts a host. Its hosted transport
 stays direct. `run` and `agent` also remain in-process.
+
+`plak host install --web unix:<absolute-socket> --ui <absolute-directory>
+[--dry-run]` writes a Linux systemd user unit and reloads the user manager;
+it never enables or starts the service. Installation on macOS is not supported
+in this build. Follow the printed commands; see [service setup](host-service.md#install).
+
+`plak host upgrade --expect-binary <id> [--wait <seconds>]` runs from the
+destination build. The wait defaults to 0 and accepts at most 3600 seconds.
+Same-key upgrades hand off; cross-key upgrades carry settled roots into new
+successor sessions. Before surrender, a refusal leaves the old owner
+authoritative; after surrender, recover through the destination's receipts,
+never by reopening the old owner. Retry the same destination command after an
+unknown outcome. `plak host upgrade --abandon <successor-uuid-or-runner-id>`
+irreversibly abandons pending remote successors only. Read
+[upgrade, reload and logs](host-service.md#upgrade-reload-and-logs) before
+changing a host or its paired runners.
 
 ## Exit codes
 

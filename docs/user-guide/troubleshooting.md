@@ -175,8 +175,9 @@ to continue after reloading. `plak run` still obeys its timeout and turn limit.
 
 **Request corrupted in transit (TLS record rejected)** means the peer rejected
 a TLS record of the incomplete upload and closed that connection, not that the
-provider was unreachable. The first resend is immediate on a fresh connection;
-later resends use the incomplete-upload allowance above. Repeated
+provider was unreachable. If this is the call's first physical failure, the
+resend is immediate on a fresh connection; otherwise resends use the
+incomplete-upload backoff above. Repeated
 occurrences indicate in-path corruption. Try the same request from another
 network (for example a mobile hotspot), then compare with VPN/proxy disabled
 where permitted. If that network works, check the original router, VPN/proxy,
@@ -401,8 +402,8 @@ If prompts were queued behind the interrupted turn, they stay queued and
 paused, since they were written for a turn whose outcome nobody saw: review
 them, then focus the paused queue with `Tab` and press `Ctrl+R` in the TUI to
 resume held work and the queue. JSONL `resume_queue` resumes only queue
-delivery; `resume` is the explicit Resume
-for loss-held work. A prompt you type now runs at once.
+delivery; `resume` is the explicit Resume for loss-held work. A prompt you type
+now runs at once.
 
 A `/fork` request a crash interrupted before it started is withdrawn on
 reopen with `fork did not start; run /fork again`. A fork that already landed
@@ -808,9 +809,9 @@ inherits the current process environment and cannot clear this override.
 If the reason names a `sha256:` fingerprint, run `plak key set openrouter`.
 Plak refuses to change key files while an overriding environment variable is set.
 
-A Usage read does not refresh an already expired token. For an expired Codex, Grok or Claude
-token it reports that the credential needs a token refresh: the next turn
-refreshes it, or run `plak refresh <account>`. A still-fresh token rejected by
+A Usage read does not refresh an already expired token. For an expired Codex,
+Grok or Claude token it reports that the credential needs a token refresh: the
+next turn refreshes it, or run `plak refresh <account>`. A still-fresh token rejected by
 the provider can trigger one forced refresh and retry. "Provider reported a
 usage window that has already ended" refers only to provider data; it does not
 mean the local access token expired. A Busy read is local writer or refresh
@@ -910,10 +911,9 @@ any needed files before replacing it with a new agent workspace.
 With the default `workspace = "inherit"`, child edits already affect the shared
 checkout. A child using `workspace = "fork"` instead seals its edits as a
 *candidate*, which reaches your working tree only when an agent with `may_adopt`
-adopts it — as uncommitted
-changes, never a commit. Check Activity's Agents tab (`/tree`; `Ctrl+T` opens
-the last Activity tab) for the child's
-status: `active`, `adopting`, `adopted`, `discarding`, `clean_removed`, `discarded`.
+adopts it — as uncommitted changes, never a commit. Check Activity's Agents
+tab (`/tree`; `Ctrl+T` opens the last Activity tab) for the child's status:
+`active`, `adopting`, `adopted`, `discarding`, `clean_removed`, `discarded`.
 `merge_conflict` and `target_changed` are failed adoptions that keep
 the child's copy intact. See
 [agents and orchestration](agents-and-orchestration.md#candidates-and-adoption).

@@ -420,9 +420,9 @@ nothing either; look, then press `Enter` again. The catalog has 26 commands
 
 `/new` starts a new session in the same window with empty history. Embedded
 mode keeps the current model, account and tools; hosted mode binds the host's
-default profile on the selected placement. The session you leave is not changed; `/resume` returns to
-it. If it still has running agents or background processes, `/new` asks
-first: the pop-up names them, and `[ Stop work + new ]` stops its background
+default profile on the selected placement. The session you leave is not
+changed; `/resume` returns to it. If it still has running agents or background
+processes, `/new` asks first: the pop-up names them, and `[ Stop work + new ]` stops its background
 processes, waits for them to exit, and then starts the new session. Running
 agents are interrupted and resume when you resume that session. `Esc` keeps
 everything as it is. If a process is still running after 10 seconds, nothing
