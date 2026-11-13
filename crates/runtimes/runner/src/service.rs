@@ -38,6 +38,8 @@ use crate::streams::{
 };
 
 mod foreground;
+#[cfg(test)]
+mod native_job_ack_tests;
 mod operator;
 pub(crate) mod qualification;
 

@@ -22,7 +22,7 @@ use super::super::super::{
     JoinedProcessTerminalMode, PrefixFact, ProcessFacts,
 };
 use super::{
-    PollWire, SessionWire, StartedWire, StopWire, WriteWire, encode_polled, encode_reason,
+    AckWire, PollWire, SessionWire, StartedWire, StopWire, WriteWire, encode_polled, encode_reason,
     encode_session, encode_snapshot, encode_start, encode_status, to_value,
 };
 use crate::{JobStatus, JobStopReason, JobView};
@@ -36,6 +36,7 @@ const PINNED: &[(u32, &str)] = &[
     (5, include_str!("pinned/v5.jsonl")),
     (6, include_str!("pinned/v6.jsonl")),
     (7, include_str!("pinned/v7.jsonl")),
+    (8, include_str!("pinned/v8.jsonl")),
 ];
 
 fn session() -> JoinedProcessSessionId {
@@ -176,6 +177,7 @@ fn job(number: u32, status: JobStatus) -> JobView {
 
 fn encoded() -> String {
     let mut lines = starts();
+    lines.push(to_value(&AckWire::new(vec![1, 3]).unwrap()).unwrap());
     lines.push(
         to_value(&StartedWire {
             session: encode_session(session()),

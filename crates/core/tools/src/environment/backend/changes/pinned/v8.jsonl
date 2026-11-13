@@ -1,0 +1,18 @@
+{"query":"status","repository":null}
+{"query":"status","repository":"/workspace"}
+{"entry":{"content":{"digest":"4444444444444444444444444444444444444444444444444444444444444444","size":3,"state":"file"},"head_object":"5555555555555555555555555555555555555555","index_object":"5555555555555555555555555555555555555555","path":"file-0","state":".M"},"observation":{"head":"2222222222222222222222222222222222222222","index":"3333333333333333333333333333333333333333333333333333333333333333"},"query":"diff","repository":{"common_dir":"/workspace/.git","git_dir":"/workspace/.git","git_view":false,"identity":"1111111111111111111111111111111111111111111111111111111111111111","toplevel":"/workspace","workspace":"/workspace"}}
+{"answer":"status","value":{"base_label":"work tree vs HEAD","entries":[{"content":{"digest":"4444444444444444444444444444444444444444444444444444444444444444","size":3,"state":"file"},"head_object":"5555555555555555555555555555555555555555","index_object":"5555555555555555555555555555555555555555","path":"file-0","state":".M"},{"content":{"state":"missing"},"head_object":"5555555555555555555555555555555555555555","index_object":"5555555555555555555555555555555555555555","path":"file-1","state":".M"},{"content":{"size":1048577,"state":"too_large"},"head_object":"5555555555555555555555555555555555555555","index_object":"5555555555555555555555555555555555555555","path":"file-2","state":".M"},{"content":{"state":"unsupported"},"head_object":"5555555555555555555555555555555555555555","index_object":"5555555555555555555555555555555555555555","path":"file-3","state":".M"}],"observation":{"head":"2222222222222222222222222222222222222222","index":"3333333333333333333333333333333333333333333333333333333333333333"},"repository":{"common_dir":"/workspace/.git","git_dir":"/workspace/.git","git_view":false,"identity":"1111111111111111111111111111111111111111111111111111111111111111","toplevel":"/workspace","workspace":"/workspace"}}}
+{"answer":"diff","value":{"kind":"patch","text":"patch\n"}}
+{"answer":"diff","value":{"kind":"binary","numstat":"-\t-\tfile-0\u0000"}}
+{"answer":"refused","value":"not_a_repository"}
+{"answer":"refused","value":"vcs_unavailable"}
+{"answer":"refused","value":"vcs_unsupported"}
+{"answer":"refused","value":"protected_path"}
+{"answer":"refused","value":"unsafe_repository"}
+{"answer":"refused","value":"invalid_request"}
+{"answer":"refused","value":"conflict"}
+{"answer":"refused","value":"too_large"}
+{"answer":"refused","value":"output_limit"}
+{"answer":"refused","value":"deadline"}
+{"answer":"refused","value":"cancelled"}
+{"answer":"refused","value":"io"}

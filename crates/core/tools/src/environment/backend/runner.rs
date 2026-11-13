@@ -117,6 +117,8 @@ pub enum RunnerVerb {
     JobsDisown,
     /// A stream of the line's job views, one line of JSON per change.
     JobsWatch,
+    /// Consume committed terminal job receipts on the native job port.
+    JobsAck,
     /// [`ExecutionEnvironment::spawn_service`], with its stdio as a stream.
     ServiceSpawn,
     /// [`crate::ServiceHandle::terminate`] of a spawned service.
@@ -154,7 +156,7 @@ pub enum RunnerVerbFamily {
 
 impl RunnerVerb {
     /// Every verb.
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::ForegroundStop,
         Self::WorkspaceOptions,
         Self::WorkspaceDiscover,
@@ -173,6 +175,7 @@ impl RunnerVerb {
         Self::JobsStop,
         Self::JobsDisown,
         Self::JobsWatch,
+        Self::JobsAck,
         Self::ServiceSpawn,
         Self::ServiceTerminate,
         Self::ProbeWorkspace,
@@ -203,6 +206,7 @@ impl RunnerVerb {
             Self::JobsStop => "jobs.stop",
             Self::JobsDisown => "jobs.disown",
             Self::JobsWatch => "jobs.watch",
+            Self::JobsAck => "jobs.ack",
             Self::ServiceSpawn => "service.spawn",
             Self::ServiceTerminate => "service.terminate",
             Self::ProbeWorkspace => "probe.workspace",
@@ -242,7 +246,8 @@ impl RunnerVerb {
             | Self::JobsSnapshot
             | Self::JobsStop
             | Self::JobsDisown
-            | Self::JobsWatch => RunnerVerbFamily::Sessions,
+            | Self::JobsWatch
+            | Self::JobsAck => RunnerVerbFamily::Sessions,
         }
     }
 

@@ -217,6 +217,27 @@ pub(super) struct SessionWire {
     pub(super) session: String,
 }
 
+/// Committed terminal consumption; unknown numbers make retries idempotent.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct AckWire {
+    pub(super) numbers: Vec<u32>,
+}
+
+impl AckWire {
+    pub(super) fn new(numbers: Vec<u32>) -> Result<Self, ExecutionBackendError> {
+        let unique: std::collections::BTreeSet<_> = numbers.iter().copied().collect();
+        if numbers.is_empty()
+            || numbers.len() > 128
+            || numbers.contains(&0)
+            || unique.len() != numbers.len()
+        {
+            return Err(malformed());
+        }
+        Ok(Self { numbers })
+    }
+}
+
 /// A started session and the runner instance that holds it.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

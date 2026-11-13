@@ -3,8 +3,8 @@ use super::*;
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
 #[test]
-fn protocol_seven_workspace_payloads_are_pinned() {
-    assert_eq!(plakous_runner_protocol::PROTOCOL_VERSION, 7);
+fn protocol_eight_workspace_payloads_are_pinned() {
+    assert_eq!(plakous_runner_protocol::PROTOCOL_VERSION, 8);
     let mut samples = vec![
         serde_json::to_value(WorkspaceOptions {
             roots: Some(vec!["/workspace".into()]),
@@ -66,7 +66,7 @@ fn protocol_seven_workspace_payloads_are_pinned() {
     ] {
         samples.push(serde_json::to_value(Err::<String, _>(refusal)).unwrap());
     }
-    let pinned = include_str!("pinned/v7.jsonl")
+    let pinned = include_str!("pinned/v8.jsonl")
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .collect::<Vec<_>>();

@@ -44,6 +44,8 @@ pub mod verbs {
     /// Follow the line's job events; the result names the stream that
     /// carries them, one JSON line per change.
     pub const JOBS_WATCH: &str = "jobs.watch";
+    /// Consume committed terminal job receipts, never running jobs.
+    pub const JOBS_ACK: &str = "jobs.ack";
     /// Spawn a service whose stdio is a stream; the result names the stream
     /// in its `stream` field.
     pub const SERVICE_SPAWN: &str = "service.spawn";

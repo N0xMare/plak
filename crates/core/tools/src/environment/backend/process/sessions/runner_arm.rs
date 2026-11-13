@@ -319,6 +319,16 @@ impl RunnerArm {
 
     pub(super) fn consume(&self, numbers: &[u32]) {
         lock(&self.state).consumed.extend(numbers.iter().copied());
+        if numbers.is_empty() {
+            return;
+        }
+        let sessions = Arc::clone(&self.sessions);
+        let numbers = numbers.to_vec();
+        self.runtime.spawn(async move {
+            for chunk in numbers.chunks(128) {
+                let _ = sessions.acknowledge_jobs(chunk.to_vec()).await;
+            }
+        });
     }
 
     pub(super) fn has_unreported_terminal_job(&self) -> bool {

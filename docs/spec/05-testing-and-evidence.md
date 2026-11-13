@@ -6377,7 +6377,7 @@ never partial publication or false no-effect after rename. New template
 exclusive-link and replacement-rename paths are checked separately. The
 legacy remote settings/default/credential-refresh path refuses at role
 classification; local-face dispatch remains available. Schema/DTO and public
-compile contracts follow exact client protocol 8 and runner protocol 7.
+compile contracts follow exact client protocol 9 and runner protocol 8.
 Publication SIGKILL cuts run in the durability lane; injected parent-sync
 failures run offline. Connection-drop and forced-deadline contracts verify
 retirement of pending authority and an explicit unknown outcome for admitted

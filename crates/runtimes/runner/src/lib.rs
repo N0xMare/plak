@@ -1,4 +1,4 @@
-//! The two ends of runner protocol v7 over a Plakous execution environment
+//! The two ends of runner protocol v8 over a Plakous execution environment
 //! (spec 01 §8.4), and an in-process loopback that joins them.
 //!
 //! [`RunnerService`] is the runner end: it answers requests from a local

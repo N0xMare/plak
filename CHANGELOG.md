@@ -94,6 +94,11 @@ one cross-build carrier (a build imports its own and the previous version).
   rejecting only unclaimed mailbox inputs and joining durable admission and
   verdict delivery without carrying a draft registry across generations.
 
+- Runner protocol 8 adds typed `jobs.ack` for committed terminal consumption.
+  Running or cleanup-unresolved jobs cannot be acknowledged away; retries of
+  already consumed numbers are harmless. The job-retention endpoint has its
+  own independent version, not native protocol compatibility.
+
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.
 
@@ -283,7 +288,7 @@ one cross-build carrier (a build imports its own and the previous version).
   handoff. This is not live tree or job migration. Adds ownership receipt
   format 1 with source archival rollback and per-successor Ready acknowledgements,
   and private coordinator protocol 1, not a new session export or state-key
-  format; runner protocol 8 adds paired read-only qualification.
+  format; runner protocol 7 adds paired read-only qualification.
 
 - Recover Prepared host upgrades through plain host startup as well as explicit
   retry; withdraw non-crash preparation failures, make Aborted attempts inert,

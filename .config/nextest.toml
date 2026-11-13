@@ -93,7 +93,8 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
-  test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
+  test(retention_native_job_ack_keeps_running_and_consumes_terminal_once)
+  | test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
   | test(operator_host_acknowledged_unbound_loss_waits_for_deadline_and_resets_on_rebind)
   | test(operator_host_acknowledged_removed_runner_releases_pin_without_claiming_cleanup)
   | test(operator_host_inventory_import_ignores_receipt_fence_exhaustion)
@@ -419,7 +420,8 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
+  test(retention_native_job_ack_keeps_running_and_consumes_terminal_once)
+  | test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
   | test(operator_host_acknowledged_unbound_loss_waits_for_deadline_and_resets_on_rebind)
   | test(operator_host_acknowledged_removed_runner_releases_pin_without_claiming_cleanup)
   | test(operator_host_inventory_import_ignores_receipt_fence_exhaustion)

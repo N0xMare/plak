@@ -23,6 +23,7 @@ const PINNED: &[(u32, &str)] = &[
     (5, include_str!("pinned/v5.jsonl")),
     (6, include_str!("pinned/v6.jsonl")),
     (7, include_str!("pinned/v7.jsonl")),
+    (8, include_str!("pinned/v8.jsonl")),
 ];
 
 fn owner() -> LineOwner {
@@ -335,6 +336,7 @@ fn encoded() -> String {
         verbs::EXECUTE_LITERAL_PROCESS, verbs::PROCESS_START, verbs::PROCESS_WRITE,
         verbs::PROCESS_POLL, verbs::PROCESS_STOP, verbs::PROCESS_PROMOTE,
         verbs::JOBS_SNAPSHOT, verbs::JOBS_STOP, verbs::JOBS_DISOWN, verbs::JOBS_WATCH,
+        verbs::JOBS_ACK,
         verbs::SERVICE_SPAWN, verbs::SERVICE_TERMINATE,
     ]}));
     lines.push(json!({"capabilities": [capabilities::WORKSPACE_VERBS, capabilities::STREAMS, capabilities::OPERATOR_PTY]}));

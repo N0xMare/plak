@@ -36,7 +36,7 @@ is a no-op; edited, unrelated or symlinked units are never overwritten.
 The current state directory is `state/r27.e37.p37.t10/`: runtime SQLite
 schema 27, runtime format epoch 37, product schema 37, and tree schema 10.
 These are format identities, not configuration keys. Client wire protocol 9
-and runner protocol 7 require separate exact matches, with no negotiation. Product schema 37 adds
+and runner protocol 8 require separate exact matches, with no negotiation. Product schema 37 adds
 operator title overrides and archival state; it composes with runtime epoch
 37 without changing the runtime codec or tree encoding. Session export stays
 version 12, with the version 11 importer retained for the previous version.
@@ -417,7 +417,7 @@ error in §5.
 
 Client protocol 9 adds `console.terminal` and `console.terminal_limits`. Socket
 peers are trusted independently; web terminal authority is default-off and captured
-at startup. Terminal DTOs cannot edit this switch. Matching runner protocol 7 is
+at startup. Terminal DTOs cannot edit this switch. Matching runner protocol 8 is
 required; no automatic install or cross-version negotiation occurs.
 
 The console welcome advertises these enforced defaults (byte counts are

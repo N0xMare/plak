@@ -16,7 +16,7 @@ use super::super::{
     LineOwner, OperationContext,
 };
 use super::sessions_wire::{
-    PollWire, SessionWire, StartedWire, StopWire, WriteWire, decode_polled, decode_reason,
+    AckWire, PollWire, SessionWire, StartedWire, StopWire, WriteWire, decode_polled, decode_reason,
     decode_session, decode_snapshot, decode_start, decode_status, encode_polled, encode_reason,
     encode_session, encode_snapshot, encode_start, encode_status,
 };
@@ -374,6 +374,23 @@ impl RunnerSessions {
         .map(drop)
     }
 
+    /// Acknowledge terminal facts only after their host-side consumption commits.
+    ///
+    /// # Errors
+    /// Refuses invalid numbers, running jobs, or a lost owner/link. Repeating a
+    /// committed acknowledgement never starts, stops or replays work.
+    pub async fn acknowledge_jobs(&self, numbers: Vec<u32>) -> Result<(), ExecutionBackendError> {
+        let payload = to_value(&AckWire::new(numbers)?)?;
+        self.send(
+            RunnerVerb::JobsAck,
+            payload,
+            &self.controlled(),
+            Some(RunnerClass::Control),
+        )
+        .await
+        .map(drop)
+    }
+
     /// The line's jobs: every job this handle saw on an earlier runner
     /// instance, as of unknown outcome unless it had ended, then the current
     /// instance's view. Numbers repeat across instances.
@@ -674,6 +691,23 @@ fn effect(
         }
         RunnerVerb::JobsDisown => {
             sessions.disown_leftovers()?;
+            Ok(json!({}))
+        }
+        RunnerVerb::JobsAck => {
+            let ack: AckWire = from_value(payload)?;
+            let ack = AckWire::new(ack.numbers)?;
+            if sessions.jobs().iter().any(|job| {
+                ack.numbers.contains(&job.number)
+                    && sessions
+                        .session_for_number(job.number)
+                        .and_then(|id| sessions.joined_terminal_status(id))
+                        .is_none()
+            }) {
+                return Err(super::super::invalid_request(
+                    "running jobs cannot be acknowledged",
+                ));
+            }
+            sessions.consume_jobs(&ack.numbers);
             Ok(json!({}))
         }
         _ => Err(super::super::backend_error(

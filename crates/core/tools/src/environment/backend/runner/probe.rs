@@ -26,8 +26,8 @@ enum ProbeWire {
 #[cfg(test)]
 #[test]
 #[allow(clippy::unwrap_used, reason = "protocol payload pin")]
-fn protocol_seven_probe_payloads_are_pinned() {
-    assert_eq!(plakous_runner_protocol::PROTOCOL_VERSION, 7);
+fn protocol_eight_probe_payloads_are_pinned() {
+    assert_eq!(plakous_runner_protocol::PROTOCOL_VERSION, 8);
     let path = "/workspace".to_owned();
     let identity: crate::HostFilesystemObjectIdentity =
         serde_json::from_value(json!({"device": 1, "inode": 2})).unwrap();
@@ -41,7 +41,7 @@ fn protocol_seven_probe_payloads_are_pinned() {
         json!({"file": true}),
         json!({"bytes": 42}),
     ];
-    let pinned = include_str!("probe/pinned/v7.jsonl")
+    let pinned = include_str!("probe/pinned/v8.jsonl")
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .collect::<Vec<_>>();
