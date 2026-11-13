@@ -39,6 +39,12 @@ for one version bump, without native protocol compatibility.
   the root's interrupted work. An admitted handoff or owner-loss continuation
   rearms waking durably; later operator stops and interrupts still suppress it.
 
+- Preserve dormant ownership-move interpreter generation floors, acknowledged
+  agent attention, reserved tree decisions and recorded compaction display
+  facts. Pin semantic fidelity through the version-13 carrier and reconstruction,
+  including retained child input and immutable fork/checkpoint provenance.
+  These complete the unshipped context-4/runtime-38/product-38/tree-11 cut.
+
 - Reload durable runner owner floors and retention-only roles after acquiring
   the native daemon lock, so replacement startup cannot revive stale authority.
 
@@ -153,6 +159,16 @@ for one version bump, without native protocol compatibility.
 - Add hidden host-only runtime retirement and invisible semantic-install seams,
   with operation-bound abort/commit, permanent abandonment and imported lease
   floors. Runtime SQLite advances to schema 28; dormant product moves remain off.
+- Compile dormant destination heads from semantic history and named state with
+  unchanged session, branch and line identities, new checkpoint provenance and
+  imported feed floors. Imported compaction selections contain no historical
+  admission or cache grants. Context codec 4 and runtime epoch 38 share the
+  unshipped schema-28 state-key cut; product/tree move publication remains off.
+- Retain immutable product and tree semantic move bases, original pending-input
+  identities and source custody floors. Product schema 38 and tree schema 11 share
+  the same state-key cut. Target preflight rebuilds semantic frozen tool
+  presentations against current executors and checks logical capacity without
+  opening a driver or creating a store. Product move publication remains off.
 
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.

@@ -23,13 +23,11 @@ impl RuntimeContextState {
         &self,
         occupancy_anchor: Option<ContextAnchor>,
     ) -> Result<Self, RuntimeManifestError> {
-        Self::from_parts(
-            self.affinity.clone(),
-            occupancy_anchor,
-            self.transition.clone(),
-            self.compaction.clone(),
-        )?
-        .with_request_anchor(self.request_anchor.clone())
+        let mut state = self.clone();
+        state.occupancy_anchor = occupancy_anchor;
+        state.validate_shape()?;
+        state.identity = runtime_context_state_identity(&state)?;
+        Ok(state)
     }
 
     /// Records item-delta admission authority from a completed response.
@@ -545,7 +543,13 @@ impl RuntimeContextState {
             ModelCacheAffinity::from_runtime_entropy(target_session, target_branch, 0, entropy)
                 .map_err(|_| RuntimeManifestError::InvalidContextState)?;
         let transition = RuntimeContextTransition::new(kind, self, source_checkpoint, &affinity)?;
-        Self::from_parts(affinity, None, Some(transition), self.compaction.clone())
+        let mut state =
+            Self::from_parts(affinity, None, Some(transition), self.compaction.clone())?;
+        state
+            .imported_compaction
+            .clone_from(&self.imported_compaction);
+        state.identity = runtime_context_state_identity(&state)?;
+        Ok(state)
     }
 
     pub(super) fn from_parts(
@@ -560,6 +564,7 @@ impl RuntimeContextState {
             request_anchor: None,
             transition,
             compaction,
+            imported_compaction: None,
             identity: Digest::sha256(DigestDomain::ContextBudget, 1, &[b"initial"])
                 .map_err(|_| RuntimeManifestError::InvalidDigest)?,
         };
@@ -574,6 +579,7 @@ impl RuntimeContextState {
         request_anchor: Option<plakous_model::ContextRequestAnchor>,
         transition: Option<RuntimeContextTransition>,
         compaction: Option<CompactionProvenance>,
+        imported_compaction: Option<ImportedCompactionSelection>,
         identity: Digest,
     ) -> Result<Self, RuntimeManifestError> {
         let state = Self {
@@ -582,6 +588,7 @@ impl RuntimeContextState {
             request_anchor,
             transition,
             compaction,
+            imported_compaction: imported_compaction.map(Box::new),
             identity,
         };
         state.validate_shape()?;
@@ -592,6 +599,12 @@ impl RuntimeContextState {
     }
 
     pub(super) fn validate_shape(&self) -> Result<(), RuntimeManifestError> {
+        if self.compaction.is_some() && self.imported_compaction.is_some() {
+            return Err(RuntimeManifestError::InvalidCompactionProvenance);
+        }
+        if let Some(imported) = &self.imported_compaction {
+            imported.validate()?;
+        }
         validate_digest(self.affinity.identity(), DigestDomain::CacheAffinity)?;
         if let Some(transition) = &self.transition {
             transition.validate()?;
@@ -628,6 +641,9 @@ impl RuntimeContextState {
         if let Some(provenance) = &self.compaction {
             provenance.validate_history_prefix(history)?;
         }
+        if let Some(imported) = &self.imported_compaction {
+            imported.validate_history(history)?;
+        }
         Ok(())
     }
 
@@ -655,6 +671,7 @@ impl RuntimeContextState {
             expected,
             RuntimeContextTransitionKind::OrdinaryFork | RuntimeContextTransitionKind::Rebind
         ) || self.compaction != source.compaction
+            || self.imported_compaction != source.imported_compaction
             || self.occupancy_anchor.is_some()
             || self.request_anchor.is_some()
         {
@@ -734,6 +751,7 @@ impl fmt::Debug for RuntimeContextState {
             .field("occupancy_anchor", &self.occupancy_anchor)
             .field("transition", &self.transition)
             .field("compaction", &self.compaction)
+            .field("imported_compaction", &self.imported_compaction)
             .finish_non_exhaustive()
     }
 }

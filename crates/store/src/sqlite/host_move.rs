@@ -45,6 +45,32 @@ fn receipt(
     .transpose()
 }
 
+fn require_held_head(
+    c: &Connection,
+    row: &BranchRow,
+    held: &BTreeMap<SessionRef, &BranchLease>,
+    now: LeaseInstant,
+) -> Result<LineId, SessionStoreError> {
+    let selector = row.head.session();
+    let (line, _) = lines::branch_line(c, selector)?.ok_or(SessionStoreError::corrupt())?;
+    let current = lines::load_line_unchecked(c, line)?.head();
+    if current == selector {
+        require_lease(
+            row,
+            held.get(&selector).ok_or(SessionStoreError::LeaseHeld)?,
+            now,
+        )?;
+    } else {
+        if held.contains_key(&selector) {
+            return Err(SessionStoreError::NotLineHead);
+        }
+        if !held.contains_key(&current) {
+            return Err(SessionStoreError::LeaseHeld);
+        }
+    }
+    Ok(line)
+}
+
 pub(super) fn prepare(
     b: &mut Backend,
     request: &PrepareMove,
@@ -69,25 +95,11 @@ pub(super) fn prepare(
     let mut line_ids = BTreeSet::new();
     for sid in sessions {
         let session = session_head(&tx, sid)?.ok_or(SessionStoreError::NotFound)?;
-        let mut statement = tx
-            .prepare("SELECT branch_id FROM branches WHERE session_id=?1 ORDER BY branch_id")
-            .map_err(map_sqlite)?;
-        let ids = statement
-            .query_map([id(sid)], |r| r.get::<_, String>(0))
-            .map_err(map_sqlite)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(map_sqlite)?;
         let mut branches = Vec::new();
-        for branch in ids {
+        for branch in branch_ids(&tx, sid)? {
             let selector = SessionRef::new(sid, parse(&branch)?);
             let row = branch_row_unchecked(&tx, selector)?.ok_or(SessionStoreError::NotFound)?;
-            require_lease(
-                &row,
-                held.get(&selector).ok_or(SessionStoreError::LeaseHeld)?,
-                now,
-            )?;
-            let (line, _) =
-                lines::branch_line(&tx, selector)?.ok_or(SessionStoreError::corrupt())?;
+            let line = require_held_head(&tx, &row, &held, now)?;
             let own = tx
                 .query_row(
                     "SELECT operation FROM runtime_move_lines WHERE line_id=?1",
@@ -110,6 +122,7 @@ pub(super) fn prepare(
         let checkpoints = session_checkpoints(&tx, sid)?;
         snapshot.push(MoveSession {
             session,
+            feed_tail_floor: feed::tail(&tx, sid)?.tail().get(),
             branches,
             checkpoints,
         });
@@ -140,7 +153,7 @@ pub(super) fn prepare(
     )
     .map_err(map_sqlite)?;
     for session in install.sessions() {
-        record_session(&tx, request.operation, session.session.session_id())?;
+        record_session(&tx, request.operation, session)?;
     }
     for line in host_move::line_ids(&install) {
         tx.execute("INSERT INTO runtime_move_lines VALUES(?1,?2) ON CONFLICT(line_id) DO UPDATE SET operation=excluded.operation", params![id(line), workflow_id_bytes(request.operation)]).map_err(map_sqlite)?;
@@ -149,6 +162,15 @@ pub(super) fn prepare(
     bump(&tx)?;
     tx.commit().map_err(map_sqlite)?;
     Ok(install)
+}
+
+fn branch_ids(c: &Connection, session: SessionId) -> Result<Vec<String>, SessionStoreError> {
+    c.prepare("SELECT branch_id FROM branches WHERE session_id=?1 ORDER BY branch_id")
+        .map_err(map_sqlite)?
+        .query_map([id(session)], |row| row.get(0))
+        .map_err(map_sqlite)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(map_sqlite)
 }
 
 pub(super) fn recover_backend(
@@ -207,6 +229,7 @@ fn recover(c: &Connection, operation: SessionWorkflowId) -> Result<MoveInstall, 
             .collect::<Result<Vec<_>, SessionStoreError>>()?;
         sessions.push(MoveSession {
             session,
+            feed_tail_floor: feed::tail(c, sid)?.tail().get(),
             branches,
             checkpoints: session_checkpoints(c, sid)?,
         });
@@ -351,14 +374,21 @@ fn stage_session(
 ) -> Result<(), SessionStoreError> {
     let s = session.session;
     tx.execute(
-        "INSERT INTO sessions VALUES(?1,?2,?3,?4,?5,?6,0,0,1,0)",
+        "INSERT INTO sessions VALUES(?1,?2,?3,?4,?5,?6,0,?7,?8,0)",
         params![
             id(s.session_id()),
             id(s.initial_branch()),
             u64b(s.revision().get()),
             u64b(s.created_at().seconds()),
             i64::from(s.created_at().nanoseconds()),
-            durability_tag(s.durability())?
+            durability_tag(s.durability())?,
+            i64n(session.feed_tail_floor)?,
+            i64n(
+                session
+                    .feed_tail_floor
+                    .checked_add(1)
+                    .ok_or(SessionStoreError::IdentityConflict)?
+            )?
         ],
     )
     .map_err(map_sqlite)?;
@@ -367,7 +397,7 @@ fn stage_session(
         params![id(s.session_id()), workflow_id_bytes(operation)],
     )
     .map_err(map_sqlite)?;
-    record_session(tx, operation, s.session_id())?;
+    record_session(tx, operation, session)?;
     for branch in &session.branches {
         let row = checkpoint_row(tx, branch.checkpoint)?.ok_or(SessionStoreError::corrupt())?;
         let topology = session
@@ -398,29 +428,49 @@ fn stage_session(
         }
     }
     for checkpoint in &session.checkpoints {
+        if let Some(fork) = checkpoint.manifest().topology().fork
+            && checkpoint_row(tx, fork.checkpoint_id)?.is_none()
+        {
+            mark_provenance(tx, fork.checkpoint_id, fork.session_id, fork.branch_id)?;
+        }
         if let Some(parent) = checkpoint.manifest().topology().parent_checkpoint_id
             && checkpoint_row(tx, parent)?.is_none()
         {
             let topology = checkpoint.manifest().topology();
-            tx.execute(
-                "INSERT OR IGNORE INTO pruned_checkpoints VALUES(?1,?2,?3)",
-                params![id(parent), id(topology.session_id), id(topology.branch_id)],
-            )
-            .map_err(map_sqlite)?;
+            mark_provenance(tx, parent, topology.session_id, topology.branch_id)?;
         }
     }
     meta(tx, 1, u64n(session.branches.len()))?;
     Ok(())
 }
 
+fn mark_provenance(
+    c: &Connection,
+    checkpoint: CheckpointId,
+    session: SessionId,
+    branch: plakous_agent::internal::BranchId,
+) -> Result<(), SessionStoreError> {
+    let count = c.execute(
+        "INSERT INTO pruned_checkpoints VALUES(?1,?2,?3) ON CONFLICT(checkpoint_id) DO UPDATE SET checkpoint_id=excluded.checkpoint_id WHERE pruned_checkpoints.session_id=excluded.session_id AND pruned_checkpoints.branch_id=excluded.branch_id",
+        params![id(checkpoint), id(session), id(branch)],
+    ).map_err(map_sqlite)?;
+    if count != 1 {
+        return Err(SessionStoreError::IdentityConflict);
+    }
+    Ok(())
+}
+
 fn record_session(
     c: &Connection,
     operation: SessionWorkflowId,
-    session: SessionId,
+    session: &MoveSession,
 ) -> Result<(), SessionStoreError> {
     c.execute(
         "INSERT INTO runtime_move_sessions VALUES(?1,?2)",
-        params![workflow_id_bytes(operation), id(session)],
+        params![
+            workflow_id_bytes(operation),
+            id(session.session.session_id())
+        ],
     )
     .map_err(map_sqlite)?;
     Ok(())

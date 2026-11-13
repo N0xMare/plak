@@ -286,6 +286,15 @@ fn commit(tx: rusqlite::Transaction<'_>) -> Result<(), TreeStoreError> {
 }
 
 impl TreeStore for SqliteTreeStore {
+    fn install_move_seed(
+        &self,
+        operation: &str,
+        digest: &str,
+        seed: &plakous_recursive_subagents::tree::host_move::DormantTree,
+        source: &plakous_recursive_subagents::tree::CustodyRecord,
+    ) -> Result<(), TreeStoreError> {
+        crate::move_seed::install(self, operation, digest, seed, source)
+    }
     fn delete(
         &self,
         tree_id: &str,

@@ -8,6 +8,9 @@ use plakous_agent::internal::{
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
+#[cfg(all(unix, feature = "sqlite"))]
+mod preflight;
+
 async fn seed(store: &dyn SessionStore, durability: RuntimeDurability) -> TestResult<BranchLease> {
     seed_at(store, durability, 0).await
 }
@@ -309,6 +312,9 @@ async fn host_move_rejects_missing_holds_conflicts_and_overflow() -> TestResult 
         "an imported floor cannot precede its checkpoint's recorded lease fence"
     );
     let mut sessions = install.sessions().to_vec();
+    sessions[0].feed_tail_floor = u64::MAX;
+    assert!(MoveInstall::new(sessions, install.lines().to_vec()).is_err());
+    let mut sessions = install.sessions().to_vec();
     sessions[0].branches[0].fence_floor = u64::MAX;
     assert!(MoveInstall::new(sessions, install.lines().to_vec()).is_err());
     let mut lines = install.lines().to_vec();
@@ -430,6 +436,7 @@ async fn generation_floors(store: &dyn SessionStore, durability: RuntimeDurabili
     let current = fixture::checkpoint(topology, 2, durability)?;
     let install = MoveInstall::new(
         vec![MoveSession {
+            feed_tail_floor: 0,
             session: SessionHead::from_store(
                 sid,
                 old.branch_id(),

@@ -38,7 +38,8 @@ pub enum MailDurableState {
 
 /// One node of the tree: who it is, what it was asked for, and where its work
 /// happens. Status and cost live on its [`AttemptRecord`], not here.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodeRecord {
     /// Durable id, assigned by the tree (`c1`, `c1-c2`); never a session id.
     pub agent_id: String,
@@ -104,7 +105,8 @@ pub struct NodeRecord {
 /// work, so the node is where the fact waits until the caller's face reads it.
 /// It is cleared once said, because it describes one reopen rather than a
 /// standing condition.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AbandonedChildTurn {
     /// The operations the abandonment closed.
     pub operations: Vec<u64>,
@@ -117,7 +119,8 @@ pub struct AbandonedChildTurn {
 
 /// One attempt of one node: the unit of status, token, and result.
 /// A `followup` opens a fresh row on the same node.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AttemptRecord {
     /// Immutable schema admitted when this attempt was created.
     pub output_schema_json: String,
@@ -214,7 +217,8 @@ pub enum CandidateKind {
 }
 
 /// Retained work or a pinned conflicted merge, with immutable resolution lineage.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CandidateRecord {
     /// Exact target snapshot after the last successful reversal.
     pub reverted_at: Option<String>,
@@ -275,7 +279,8 @@ pub struct CandidateRecord {
 
 /// One checkout the tree is responsible for: the launch
 /// checkout itself, or a copy minted for one node.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceRecord {
     /// Original source when this copy was minted as a conflict resolver.
     pub resolves: Option<CandidateId>,

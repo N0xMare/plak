@@ -74,7 +74,8 @@ impl std::fmt::Display for NodeLineId {
 
 /// Where a node's tools run. The default is the host's own local runner and
 /// the node's `path`, which is every node today.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodePlacement {
     /// The runner that hosts the node's workspace; `None` is the local one.
     pub runner_id: Option<String>,
@@ -92,7 +93,8 @@ impl NodePlacement {
 
 /// A node's workspace on its runner: the registered root and the working
 /// directory inside it, both as the runner names them.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodeWorkspace {
     /// The workspace root the runner registered.
     pub root: PathBuf,
@@ -130,7 +132,8 @@ pub enum ForkedFrom {
 
 /// A tree's epochs. Epoch 0 is the header snapshot every tree has; successor
 /// epochs are rows numbered from 1. `current` is the epoch new spawns bind.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TreeEpochs {
     /// The epoch new spawns bind; 0 is the header snapshot.
     pub current: u64,

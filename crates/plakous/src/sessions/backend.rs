@@ -53,6 +53,24 @@ impl SessionBackend {
 
 #[cfg(feature = "sessions-sqlite")]
 impl SessionBackend {
+    /// Read-only own-key admission of a reconstructed group before source surrender.
+    /// This host seam does not open a writer, driver or execution lease.
+    ///
+    /// # Errors
+    /// Refuses conflicting identities, unsupported shape, corruption or logical capacity.
+    #[doc(hidden)]
+    pub fn preflight_move_install_sqlite(
+        path: impl AsRef<Path>,
+        install: &super::host_move::MoveInstall,
+    ) -> Result<(), AgentSessionsError> {
+        SqliteSessionStore::inspect_move_install(
+            path,
+            install,
+            plakous_store::SqliteStoreOptions::default(),
+        )
+        .map_err(store_error)
+    }
+
     /// Reads, for every session of one SQLite store, its retained checkpoints
     /// and the object bytes they reach, largest first, without opening the
     /// store for use. Returns an empty list when no current-shape database

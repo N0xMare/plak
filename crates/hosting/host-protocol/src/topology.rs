@@ -1459,7 +1459,8 @@ pub struct AdoptOutcome {
     pub files_truncated: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 /// What one node may see and do, derived from its place in the tree.
 pub struct TopologyGrant {
     /// Nodes this node may see in `list_agents`.

@@ -341,11 +341,11 @@ another session's jobs.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r28.e37.p37.t10/            this build's state (§2.5)
+    r28.e38.p38.t11/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
-      runtime.sqlite3             Plakous semantic runtime and change feed, schema 28, epoch 37
-      product.sqlite3             Plak intents and feed-derived views, schema 37
-      subagents.sqlite3           the agent tree, schema 10
+      runtime.sqlite3             Plakous semantic runtime and change feed, schema 28, epoch 38
+      product.sqlite3             Plak intents and feed-derived views, schema 38
+      subagents.sqlite3           the agent tree, schema 11
       custody-hosts/<instance>.lock  each live host process's custody liveness lock (chapter 03 §14)
       host.lock                   held by this build's `plak host` for its life, naming its pid and binary (§4.6); not state
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
@@ -626,7 +626,14 @@ Each pass snapshots same-runtime ancestry once with a narrow metadata read and
 loads only ancestor submissions. It never hydrates ancestor records, transcripts
 or unrelated intents. Own intents are read after each feed page.
 
-Product schema 37 holds the intents of §2.6 in `submissions` (keyed by command id),
+Product schema 38 additionally holds `session_move_seeds`: the immutable semantic
+ownership-move base (intent, keyed by product session), including its view seed,
+original projection floor and acknowledged agent-attention occurrences. Views
+rebuild from this base and subsequent feed facts; the seed is not a synthetic
+historical feed. Attention acknowledgements retain their original occurrence
+and acknowledgement timestamps so a move does not resurface acknowledged work.
+
+Product schema 38 holds the intents of §2.6 in `submissions` (keyed by command id),
 `workflow_requests` (keyed by operation id), `operator_notices` (keyed by notice
 id, unique per `(anchor, ordinal)`; an imported transcript is written there once
 at anchor 0 in document order) and `host_intents` (the `wake_suppression`,
@@ -647,7 +654,7 @@ them for a session is the rebuild. All keyed views cascade with the session.
 
 Workflow requests and feed-derived workflow completions are the only workflow
 model. Session records carry no workflow journal or two-phase workflow states,
-and product schema 37 has no legacy `workflows` table. Recovery
+and product schema 38 has no legacy `workflows` table. Recovery
 blocking reads the runtime's context disposition, not a product journal flag.
 
 **Operator-terminal pins.** The private host registry owns terminals separately
@@ -1049,7 +1056,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r28.e37.p37.t10`. The key is derived from the stores'
+schema>`, for example `r28.e38.p38.t11`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup. State-directory
@@ -1316,11 +1323,29 @@ is a warning, not an export refusal.
 The export document is the sole cross-build carrier. A build imports its own
 version and the immediately previous version; any document change bumps the
 version, and the previous reader survives for exactly one bump. This build
-writes **version 13** and imports **13 and 12**, never older documents. Version
-13 requires a closed `kind`: `portable_session` or `host_upgrade`. Ordinary file
+writes **version 13** and imports **13 and 12**, never older documents.
+The host-upgrade binding family includes semantic frozen tool schemas, names,
+descriptions and exposure, with per-head source configuration and the original
+named-state namespace. The interpreter observation carries only the generation
+floor and affected cell, reconstructed as reset on reopen; no kernel state or
+source is replayed and no generation number is reused. Original ForkLineage is imported provenance, not a
+request to recreate old checkpoint bytes or compile a historical fork point.
+A continued line cannot silently inherit its current head's newer binding.
+Native tool registry bytes and cached plan grants are
+never a carrier. Reconstruction applies the existing presentation-override and
+current-executor compatibility path before fresh checkpoint compilation.
+
+Version 13 requires a closed `kind`: `portable_session` or `host_upgrade`. Ordinary file
 import accepts only `portable_session` and rejects an ownership-move document
 before creating any state. Version 12 has no kind. Dormant identity-preserving
 host moves remain unavailable pending runtime and whole-tree installation.
+The reserved ownership-move contract preserves public product/runtime session,
+branch, line, node, tree, queue/mail and continuation-command identities. An
+internal checkpoint head is not one of those identities: reconstruction mints a
+deterministic new checkpoint/revision from the move operation, with the source
+checkpoint retained as provenance, rather than overwriting immutable content.
+Runtime feed floors and explicit product/tree anchors survive without replaying
+old admissions or dropping pending accepted input.
 Canonical format epochs are not export versions: the carrier uses a neutral
 conversation encoding, not canonical segment bytes, digests, checkpoints, or
 runtime serde representations.
@@ -2066,7 +2091,7 @@ opening note `session <id> was carried forward as <successor>; resuming it`,
 instead of a read-only refusal; the headless faces print it on stderr.
 
 Carries keep their own write-ahead marker rather than a `workflow_requests`
-row. Product schema 37 retains the node, virtual root profile, runner display
+row. Product schema 38 retains the node, virtual root profile, runner display
 copy, frozen MCP placement, `switch` workflow kind, root interrupt cause and
 continuation decision intents. It also owns terminal workspace pins (§2.2);
 none of those pins turns a carry into a terminal or an agent job.
@@ -7336,7 +7361,7 @@ row's own start-to-finish span; a failed wait keeps its timeout and actual
 wait. The live tool line carries the same wait facts as the persisted row. The
 projector writes rows into the product transcript
 (`transcript_rows.row`, one JSON payload per row with its ordering key,
-schema 37) by the provenance rules of §2.6; the export document carries them
+schema 38) by the provenance rules of §2.6; the export document carries them
 (§2.5.1), the host emits the same row live as one `Row` observation once the
 projector wrote it, and restore reads them as the rows of the presentation
 snapshot. Live and restored rows are the same values; the renderer maps a row

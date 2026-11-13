@@ -428,7 +428,10 @@ pub(super) fn load_object(
     .transpose()
 }
 
-fn object_exists(c: &Connection, a: RuntimeObjectAddress) -> Result<bool, SessionStoreError> {
+pub(super) fn object_exists(
+    c: &Connection,
+    a: RuntimeObjectAddress,
+) -> Result<bool, SessionStoreError> {
     Ok(c.query_row(
         "SELECT 1 FROM runtime_objects WHERE kind=?1 AND codec=?2 AND digest=?3",
         params![

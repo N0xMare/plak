@@ -3,6 +3,7 @@
 //! through.
 
 mod local_runner;
+mod quiet_telemetry;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -931,6 +932,23 @@ impl ProductStateRoots {
         frozen: Arc<plakous::sessions::FrozenSessionPresentation>,
     ) -> Self {
         self.frozen_presentation = Some(frozen);
+        self
+    }
+
+    /// Detached semantic inputs for host-move compilation, never live custody or a driver.
+    /// This unsupported host-layer seam has no embedder stability claim.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_move_compilation_data(
+        mut self,
+        frozen: Arc<plakous::sessions::FrozenSessionPresentation>,
+        trees: Arc<dyn TreeStore>,
+    ) -> Self {
+        self.frozen_presentation = Some(frozen);
+        self.tree_store = Arc::new(Mutex::new(Some(trees)));
+        self.telemetry_factory = Arc::new(quiet_telemetry::NoTelemetry);
+        self.telemetry = Arc::new(Mutex::new(None));
+        self.extra_telemetry_sink = Arc::new(Mutex::new(None));
         self
     }
 

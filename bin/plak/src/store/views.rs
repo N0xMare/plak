@@ -706,7 +706,7 @@ impl ProductStore {
     clippy::too_many_lines,
     reason = "View commit keeps session revision CAS, transcript replacement, queue publication, and transaction completion together."
 )]
-fn commit_views(
+pub(super) fn commit_views(
     tx: &Connection,
     session_id: &str,
     writes: &ViewWrites,

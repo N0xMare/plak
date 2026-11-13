@@ -259,22 +259,27 @@ impl InterpreterObservation {
         })
     }
 
+    /// Last observed interpreter generation; reopening must not reuse it.
     #[must_use]
     pub const fn generation(&self) -> u64 {
         self.generation
     }
+    /// Whether the observed external generation remains available.
     #[must_use]
     pub const fn availability(&self) -> InterpreterAvailability {
         self.availability
     }
+    /// Why an unavailable interpreter generation was reset.
     #[must_use]
     pub const fn reset_reason(&self) -> Option<InterpreterResetReason> {
         self.reset_reason
     }
+    /// Cell affected by the reset, without its source or evaluator state.
     #[must_use]
     pub fn affected_cell(&self) -> Option<&str> {
         self.affected_cell.as_deref()
     }
+    /// Last external acknowledgement, not authority to replay the cell.
     #[must_use]
     pub const fn last_acknowledged(&self) -> Option<InterpreterAcknowledgedBoundary> {
         self.last_acknowledged

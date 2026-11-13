@@ -25,16 +25,31 @@ pub(super) struct CommittedCompactionFacts {
 pub(super) fn committed_compaction_facts(
     checkpoint: &RuntimeCheckpoint,
 ) -> Option<CommittedCompactionFacts> {
-    checkpoint
-        .manifest()
-        .canonical()
-        .context()
+    let context = checkpoint.manifest().canonical().context();
+    context
         .compaction_provenance()
         .map(facts_from_provenance)
+        .or_else(|| {
+            let imported = context.imported_compaction()?;
+            let facts = imported.facts();
+            Some(CommittedCompactionFacts {
+                summary_segment: imported.summary_identity(),
+                replaced_segments: facts.replaced_segments?,
+                pass: compaction_pass(facts.strategy?),
+            })
+        })
 }
 
 fn facts_from_provenance(provenance: &CompactionProvenance) -> CommittedCompactionFacts {
-    let pass = match provenance.strategy() {
+    CommittedCompactionFacts {
+        summary_segment: provenance.summary_segment_identity(),
+        replaced_segments: provenance.selected_range().2,
+        pass: compaction_pass(provenance.strategy()),
+    }
+}
+
+fn compaction_pass(strategy: RuntimeCompactionStrategy) -> SessionHistoryCompactionPass {
+    match strategy {
         RuntimeCompactionStrategy::SemanticSummaryPrefixV1 => {
             SessionHistoryCompactionPass::SemanticSummary
         }
@@ -46,11 +61,6 @@ fn facts_from_provenance(provenance: &CompactionProvenance) -> CommittedCompacti
         RuntimeCompactionStrategy::ResidencyPlaceholdersV1 => {
             SessionHistoryCompactionPass::Residency
         }
-    };
-    CommittedCompactionFacts {
-        summary_segment: provenance.summary_segment_identity(),
-        replaced_segments: provenance.selected_range().2,
-        pass,
     }
 }
 

@@ -2392,6 +2392,19 @@ admission. Retry and disposition serialize receipt publication under a private
 owned kernel-held file lock so neither can overwrite the other's terminal state.
 Embedded daemon-held-process refusals remain in force.
 
+The unsupported dormant-move preparation seams do not relax those authorities.
+The export-v13 host kind contains semantic history, binding/presentation facts,
+identity floors and product/tree cuts, never opaque native checkpoint, registry
+or resolved-plan bytes. Its private target probe compiles only against current
+exact route/account credentials, current executor enrollment, existing workspace
+placement and strict capacity. It uses detached semantic tree data and opens no
+execution driver, owner lease, recovery sweep or VCS hook. Runtime identity and
+logical-capacity inspection reads only the destination's own current-key store;
+a missing store is not created. Ordinary session import cannot open this kind,
+and these preparation seams alone do not advertise move installation support.
+Native source fork checkpoints remain provenance through an explicit imported
+branch/pruned-point marker, not a reason to read or recreate foreign objects.
+
 Protocol-7 console writes trust transport-verified same-user socket peers by
 default, independently of `web.*`; they still enforce consent, exact targets,
 etags and quotas aggregated by verified uid. Clients cannot declare a local

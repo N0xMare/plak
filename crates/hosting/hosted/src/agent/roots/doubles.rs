@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use super::{
-    ProductTelemetry, RosterSource, TelemetryHealth, TelemetrySinkFactory, TreeStoreFactory,
-};
+pub(crate) use super::quiet_telemetry::NoTelemetry;
+use super::{RosterSource, TreeStoreFactory};
 use crate::CliResult;
-use crate::agent_tree::{MemoryTreeStore, TopologyObserver, TreeStore};
+use crate::agent_tree::{MemoryTreeStore, TreeStore};
 
 /// The conformance-tested in-memory tree store, opened once per factory.
 pub struct MemoryTreeStoreFactory;
@@ -42,40 +41,6 @@ impl RosterSource for UnpinnedRosterSource {
 
     fn topology_admitted(&self) -> CliResult<bool> {
         Ok(true)
-    }
-}
-
-/// Telemetry that records nothing and is never unavailable.
-pub struct NoTelemetry;
-
-impl TelemetrySinkFactory for NoTelemetry {
-    fn open(
-        &self,
-        _extra_sink: Option<Arc<dyn super::ExtraTelemetrySink>>,
-    ) -> Arc<dyn ProductTelemetry> {
-        Arc::new(Self)
-    }
-
-    fn log_unavailable(&self, _session_id: &str, _reason: &str) {}
-}
-
-impl ProductTelemetry for NoTelemetry {
-    fn agent_emitter(&self) -> Option<Arc<plakous::agent::TelemetryEmitter>> {
-        None
-    }
-
-    fn topology_observer(&self) -> Option<Arc<dyn TopologyObserver>> {
-        None
-    }
-
-    fn emit(&self, _observation: crate::product_observation::ProductObservation) {}
-
-    fn health(&self) -> TelemetryHealth {
-        TelemetryHealth::Missing
-    }
-
-    fn unavailable_reason(&self) -> Option<String> {
-        None
     }
 }
 

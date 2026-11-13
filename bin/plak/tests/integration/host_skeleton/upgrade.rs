@@ -622,21 +622,42 @@ fn replacement_image(fixture: &Fixture) -> PathBuf {
     image
 }
 
+fn seed_binding_heads(fixture: &Fixture) {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/hosting/hosted/tests/fixtures/current-bindings");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(source.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest["runtime_schema"],
+        plakous::sessions::RUNTIME_STORE_SCHEMA_VERSION
+    );
+    assert_eq!(
+        manifest["runtime_epoch"],
+        plakous::sessions::RUNTIME_FORMAT_EPOCH
+    );
+    assert_eq!(manifest["cases"].as_array().unwrap().len(), 17);
+    let bytes = std::fs::read(source.join("runtime.sqlite3")).unwrap();
+    assert_eq!(plakous::model::sha256_hex(&[&bytes]), manifest["sha256"]);
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    std::fs::create_dir_all(paths.runtime_database().parent().unwrap()).unwrap();
+    std::fs::write(paths.runtime_database(), bytes).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(
+            paths.runtime_database(),
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+    }
+}
+
 #[test]
 fn host_upgrade_binding_regression_refuses_before_surrender_and_prints_live_rows() {
-    use std::os::unix::fs::PermissionsExt as _;
     let Some(fixture) = fixture() else { return };
-    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
-    let database = paths.runtime_database();
-    std::fs::create_dir_all(database.parent().unwrap()).unwrap();
-    std::fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-            "../../crates/hosting/hosted/tests/fixtures/previous-release/previous-runtime.sqlite3",
-        ),
-        &database,
-    )
-    .unwrap();
-    std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o600)).unwrap();
+    // Binding compatibility is independent of a native-format cut. Produce the
+    // source in this format instead of treating an old native database as current.
+    seed_binding_heads(&fixture);
     let image = replacement_image(&fixture);
     let cut = image.to_str().unwrap().to_owned();
     let mut host = start_env(&fixture, &[], &[("PLAK_TEST_BINDING_CUT_IMAGE", cut)]);

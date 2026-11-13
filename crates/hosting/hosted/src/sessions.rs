@@ -18,6 +18,8 @@ use crate::binding::{
     CompositionSelection as ProductCompositionSelection, TargetSelection as ProductTargetSelection,
 };
 
+#[doc(hidden)]
+pub mod host_move;
 mod journal;
 mod node;
 pub mod projector;

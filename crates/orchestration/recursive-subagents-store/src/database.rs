@@ -18,7 +18,7 @@ use crate::rows::load_agent_tree;
 /// `subagents.sqlite3` starts at schema version 1. It is not the
 /// product schema's number and never follows it; both name the state
 /// directory.
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 11;
 
 /// Every object the tree's database holds, name and exact DDL. The
 /// fingerprint is taken over this list, so a changed byte here needs a new
@@ -67,6 +67,10 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     (
         "agent_commands",
         "CREATE TABLE agent_commands(tree_id TEXT NOT NULL,command_id TEXT NOT NULL,recipient_agent_id TEXT NOT NULL,attempt_id TEXT,kind TEXT NOT NULL CHECK(kind IN('root_batch','start','wake','mail_start','followup','corrective','resume')),canonical_text TEXT NOT NULL,message_ids TEXT NOT NULL,withdrawn INTEGER NOT NULL CHECK(withdrawn IN(0,1)),fact TEXT CHECK(fact IS NULL OR fact IN('accepted','rejected','returned')),turn_id TEXT CHECK(turn_id IS NULL OR fact IS NOT NULL),accepted_seq INTEGER CHECK(accepted_seq IS NULL OR accepted_seq>=1),PRIMARY KEY(tree_id,command_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
+    ),
+    (
+        "agent_move_seeds",
+        "CREATE TABLE agent_move_seeds(tree_id TEXT PRIMARY KEY REFERENCES agent_trees(tree_id) ON DELETE CASCADE,operation TEXT NOT NULL,capsule_digest TEXT NOT NULL CHECK(length(capsule_digest)=64),seed_digest TEXT NOT NULL CHECK(length(seed_digest)=64),seed TEXT NOT NULL CHECK(json_valid(seed)))",
     ),
     (
         "agent_feed_cursors",

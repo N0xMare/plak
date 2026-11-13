@@ -814,9 +814,11 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/sessions.rs"): {"thread_local"},
     ("plak", "src/store/mod.rs"): {"params"},
     ("plak", "src/store/views.rs"): {"params", "debug_assert"},
+    ("plak", "src/store/host_move.rs"): {"params"},
     ("plak", "src/store/tree.rs"): {"params", "warn"},
     ("plakous-recursive-subagents-store", "src/admission.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/rows.rs"): {"params"},
+    ("plakous-recursive-subagents-store", "src/move_seed.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/rows/codec.rs"): {"params"},
     ("plakous-recursive-subagents", "src/epoch.rs"): {"json"},
     ("plakous-recursive-subagents", "src/hub.rs"): {"error"},
@@ -1615,6 +1617,56 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    # Unsupported host-only semantic reconstruction seams (spec 01 sec. 5).
+    ("plak", "src/carry/host_move.rs"): {
+        'sessions': {
+            'MoveDurability',
+            'MoveOperation',
+            'MoveBinding',
+            'MoveHeadRequest',
+            'host_move',
+        }
+    },
+    ("plak", "src/carry/host_move/admission.rs"): {'sessions': {'host_move'}},
+    ("plak", "src/carry/host_move/context.rs"): {
+        'sessions': {'ImportedCompactionFacts', 'MoveCompactionStrategy', 'host_move'}
+    },
+    ("plak", "src/carry/host_move/jobs.rs"): {
+        'sessions': {
+            'MoveJobStatus',
+            'MoveJobTerminal',
+            'MoveJob',
+            'MoveProcessId',
+            'MoveProcessGeneration',
+            'host_move',
+            'MoveJobs',
+            'MoveLineTerminal',
+        }
+    },
+    ("plak", "src/carry/host_move/presentation.rs"): {
+        'sessions': {
+            'SemanticSessionPresentation',
+            'MoveToolNesting',
+            'host_move',
+            'FrozenSessionPresentation',
+        },
+        'tools': {'SemanticToolRegistration'},
+    },
+    ("plak", "src/carry/host_move/presentation/definition.rs"): {
+        'model': {'ToolResourceKey', 'McpServerId'}
+    },
+    ("plak", "src/carry/host_move/reconstruction.rs"): {
+        'sessions': {
+            'MoveLineRecord',
+            'MoveLine',
+            'MoveSessionRevision',
+            'MoveSessionHeader',
+            'MoveSessionRef',
+            'host_move',
+            'MoveLineOrigin',
+        }
+    },
+    ("plak", "src/carry/host_move/validation.rs"): {'tools': {'RunnerId'}},
     # Frozen construction data and pure metadata checks, not runtime authority.
     ("plak", "src/commands/session/check_binding.rs"): {"sessions": {"rehearsal"}},
     ("plakous-hosted", "src/agent/binding_inspection.rs"): {

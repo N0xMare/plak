@@ -66,6 +66,7 @@ fn decode_id_list(value: &str) -> Result<Vec<String>, String> {
 /// never see a parent disappear under a child.
 pub fn delete_agent_tree_rows(tx: &Transaction<'_>, tree_id: &str) -> Result<(), TreeStoreError> {
     for statement in [
+        "DELETE FROM agent_move_seeds WHERE tree_id=?1",
         "DELETE FROM agent_tree_runner_ancestors WHERE tree_id=?1",
         "DELETE FROM agent_tree_epochs WHERE tree_id=?1",
         "DELETE FROM agent_feed_cursors WHERE tree_id=?1",
@@ -318,28 +319,27 @@ pub fn load_agent_tree(
         .transpose()
         .map_err(|_| "agent tree provenance is invalid".to_owned())?;
     let runner_ancestors = load_runner_ancestors(tx, tree_id)?;
-    Ok(Some(
-        PersistedTree::from_rows(
-            tree_id.to_owned(),
-            root_agent_id,
-            revision,
-            host_generation,
-            state,
-            writer_mode,
-            selected_tuple,
-            launch_checkout,
-            snapshot,
-            nodes,
-            grants,
-            attempts,
-            candidates,
-            workspaces,
-            messages,
-            operations,
-        )
-        .with_feed_rows(commands, feed_cursors)
-        .with_lineage_rows(epochs, forked_from, runner_ancestors),
-    ))
+    let tree = PersistedTree::from_rows(
+        tree_id.to_owned(),
+        root_agent_id,
+        revision,
+        host_generation,
+        state,
+        writer_mode,
+        selected_tuple,
+        launch_checkout,
+        snapshot,
+        nodes,
+        grants,
+        attempts,
+        candidates,
+        workspaces,
+        messages,
+        operations,
+    )
+    .with_feed_rows(commands, feed_cursors)
+    .with_lineage_rows(epochs, forked_from, runner_ancestors);
+    Ok(Some(crate::move_seed::attach(tx, tree_id, tree)?))
 }
 
 fn load_nodes(tx: &Transaction<'_>, tree_id: &str) -> Result<BTreeMap<String, NodeRecord>, String> {

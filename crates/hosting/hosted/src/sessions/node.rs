@@ -13,7 +13,8 @@ use crate::agent_tree_protocol::TemplateName;
 
 /// The agent node a session is: its tree and its agent in that tree. Written
 /// once, when the record is created, and never rewritten.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SessionNode {
     /// The tree the node belongs to.
     pub tree_id: String,

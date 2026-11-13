@@ -1347,7 +1347,7 @@ that spells the string with escapes is refused because decoding a segment
 requires its bytes to equal their re-encoding. Canonical segment bytes and
 identities are therefore a function of the media bytes alone. The encoded
 text is bounded before decoding, and inline media bytes are bounded at 16 MiB
-like every canonical block. This is runtime checkpoint format epoch 37.
+like every canonical block. This is runtime checkpoint format epoch 38.
 
 Reconstructive components have a 4 MiB byte budget except `Operation`, whose
 budget is 64 MiB because it retains complete requests and outcomes. This is a
@@ -1756,8 +1756,16 @@ The decoded record and its recovery semantics do not depend on this encoding;
 only record, ledger and checkpoint digests do.
 
 The host layer has unsupported, doc-hidden composition seams for semantic runtime
-move batches. They are not supported embedding APIs, a serialized checkpoint
-carrier, or a topology in L0. Source preparation records the exact selected
+move batches and detached target-owned checkpoint compilation. They have no
+stability claim and are not supported embedding APIs, a serialized checkpoint
+carrier, or a topology in L0. The binding family carries semantic frozen tool
+presentation (PortableToolSchemaV2, names, descriptions and exposure), not native
+registry descriptors, cached schema hashes or resolved plan bytes. Target
+compilation reuses presentation overrides against currently enrolled capabilities
+and compatible executor bindings. A presentation-only release preserves the
+source presentation; a missing or changed executor refuses before surrender.
+Compilation has no driver, execution lease, provider dispatch or tool effects.
+Source preparation records the exact selected
 session set and checks every branch hold within those sessions before freezing
 their lines. A continued line includes its current head session, not its
 superseded predecessor sessions; those predecessors need no additional holds.
@@ -1772,11 +1780,32 @@ below product policy: line-head reads, branch opens, create/fork recovery,
 acquisition, renewal and revival cannot authorize a moved or hidden line.
 Historical checkpoint inspection does not grant execution authority.
 
+A semantic move carries each runtime session's feed-tail floor. Its destination
+starts with a retained-empty window at `floor + 1`, not a reset feed: every new
+fact appends above that floor. Product and tree owners seed their explicit
+views and intents at that cut without replaying historical admissions or
+silently consuming pending inputs. Source preparation, acknowledgement-loss
+recovery, and destination staging bind the floor into the batch fingerprint.
+
+Dormant reconstruction preserves public product/runtime session, branch, line,
+node, tree, queue/mail and continuation-command identities. It derives a new
+destination checkpoint identity and revision from the move operation, retaining
+the source checkpoint identity as provenance. This is a normal head advance,
+not replacement of an immutable source checkpoint with recompiled content.
+No source checkpoint or component codec becomes a cross-build reader.
+The original ForkLineage is retained verbatim as provenance. A missing old fork
+checkpoint is allowed only through the explicit imported-branch and matching
+pruned-provenance markers; ordinary fork creation still validates its actual
+source checkpoint. Schema 28 removes the physical fork/pruned-point foreign keys
+that would require recreating that old native branch, while logical admission
+checks both the imported provenance and later ordinary descendants of the same
+branch. No historical fork point is recompiled. Its last imported owner's
+deletion removes orphan provenance, while shared referenced provenance remains.
+
 Destination staging re-encodes checked semantic checkpoints with the current
 codec, retains identities and branch/generation floors, and imports no lease or
 process claim. One atomic batch gate keeps all its lines inaccessible until
-publication; abandonment is permitted only while staged and is permanent.
-Published batches cannot be abandoned, including after a lease is acquired.
+publication. Unguarded abandonment is Staged-only and permanent.
 Publication grants no lease, and the next
 acquisition must exceed the imported fence floor. Overflow and identity conflicts
 refuse instead of resetting counters or overwriting rows. Exact imported-row
@@ -2658,7 +2687,7 @@ keeps the original checkpoint and conversation bindings and dispatches nothing;
 a different canonical input under the same command identity remains refused.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 37 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 38 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -3986,7 +4015,7 @@ committed and the working bounds, the two parts of the request's encoding the
 view identity leaves out. Plan validation therefore never re-serializes the
 request or its history. The plan digest is recorded in prepared-call and
 response records and re-derived on recovery, so it is part of runtime
-checkpoint format epoch 37.
+checkpoint format epoch 38.
 
 **Read-only model lookup exchanges.** The shared bounded GET retry in
 `plakous-exchange` applies where the operator is waiting on a bind: `plak run`,
@@ -5860,7 +5889,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 37.
+runtime checkpoint format epoch 38.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -8748,7 +8777,7 @@ runtime under the ordinary mutating write-ahead claim, so a crash after the
 claim settles `OutcomeUnknown` and is never replayed. Provider-hosted MCP and
 connectors stay in the stop class below. Its
 serialized variant names are part of the canonical history encoding and so of
-runtime checkpoint format epoch 37.
+runtime checkpoint format epoch 38.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse
@@ -10663,7 +10692,20 @@ admission-headroom reserve, the explicit pre-send overflow rule of §6.8, or a
 current-binding provider refusal can force compaction before a credible anchor
 exists.
 
-The context-state encoding and digest are version 3. Compaction provenance
+The context-state encoding and digest are version 4. A host move may install an
+explicit imported-compaction selection instead of native compaction provenance:
+the summary entry, retained prefix and trailing segment counts, recorded
+strategy and replaced-segment count, and source checkpoint/operation provenance.
+The history reader projects those recorded display facts without inventing old
+audit evidence. No inactive per-turn cap placeholder is encoded. It carries no
+old observation, request admission or cache affinity. The destination derives
+the canonical prefix and summary identities from the imported history and
+creates fresh destination cache authority. Missing historical audits stay
+absent; this value is not evidence that a provider request was dispatched or
+admitted in the destination. Native compaction provenance and the imported
+selection are mutually exclusive; a later genuine compaction publishes its own
+native provenance. This is runtime epoch 38, not a migration of epoch 37.
+Compaction provenance
 records the retained segment count and how many of those segments follow the
 summary segment: a native successor's protected current-round tail, zero for
 every other strategy. Native provenance carries strategy revision 2. Its encoded bound and the

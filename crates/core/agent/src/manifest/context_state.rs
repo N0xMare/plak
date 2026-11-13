@@ -7,6 +7,8 @@
 )]
 
 mod codec;
+mod imported;
+pub use imported::{ImportedCompactionFacts, ImportedCompactionSelection};
 mod provenance;
 mod state;
 pub(super) use codec::compaction_provenance_identity;
@@ -169,5 +171,6 @@ pub struct RuntimeContextState {
     request_anchor: Option<plakous_model::ContextRequestAnchor>,
     transition: Option<RuntimeContextTransition>,
     compaction: Option<CompactionProvenance>,
+    imported_compaction: Option<Box<ImportedCompactionSelection>>,
     pub(super) identity: Digest,
 }

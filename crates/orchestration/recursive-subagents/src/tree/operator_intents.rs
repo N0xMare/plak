@@ -11,12 +11,25 @@ pub(super) const CLOSE_KIND: &str = "close";
 pub(super) const SUBMITTED_KIND: &str = "submitted";
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct OperatorIntent {
+#[serde(deny_unknown_fields)]
+pub(super) struct OperatorIntent {
     attempt_id: Option<AttemptId>,
     decision: Decision,
 }
 
+impl OperatorIntent {
+    pub(super) const fn kind(&self) -> &'static str {
+        match self.decision {
+            Decision::Submitted { .. } => SUBMITTED_KIND,
+            Decision::Close { .. } => CLOSE_KIND,
+            Decision::Interrupt { .. } => INTERRUPT_KIND,
+            Decision::RecoveryAbandoned { .. } => RECOVERY_ABANDONED_KIND,
+        }
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) enum Decision {
     Submitted {
         output_json: String,

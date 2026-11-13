@@ -146,7 +146,7 @@ pub use line::{BranchHold, LeaseOnlyHead, LineHead, carried_from_provenance};
 mod presentation;
 mod registry;
 #[doc(hidden)]
-pub use presentation::FrozenSessionPresentation;
+pub use presentation::{FrozenSessionPresentation, SemanticSessionPresentation};
 mod types;
 pub use attached::OpenedSession;
 pub use error::{AgentSessionsError, SessionStoreAdmission, SessionStorePressure};

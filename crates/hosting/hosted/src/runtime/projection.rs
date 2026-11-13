@@ -319,9 +319,7 @@ async fn project_to_tail_controlled(
                 ..
             } if records.is_empty() => {
                 let previous = views.state.clone();
-                if retained_from.get() > 1 {
-                    views.state.retained_from = Some(retained_from.get());
-                }
+                views.state.observe_retained_from(retained_from.get());
                 views.consume_before_retention(&intents);
                 if views.state != previous {
                     let mut writes =
@@ -420,7 +418,10 @@ async fn project_to_tail_controlled(
                         .await
                         .map_err(|error| error.to_string())?;
                 if retained_from.get() > 1 {
-                    projection.views.state.retained_from = Some(retained_from.get());
+                    projection
+                        .views
+                        .state
+                        .observe_retained_from(retained_from.get());
                 }
                 (
                     projection.views,
@@ -490,11 +491,26 @@ async fn load_views(
 ) -> Result<SessionViews, String> {
     #[cfg(test)]
     probe::view_read(product_id);
-    Ok(blocking(store, product_id, |store, id| {
-        store.load_views(id).map_err(ReadFailure::from)
+    blocking(store, product_id, |store, id| {
+        if let Some(views) = store.load_views(id)? {
+            return Ok(views);
+        }
+        let Some(base) = store.move_projection_base(id)? else {
+            return Ok(SessionViews::empty());
+        };
+        let writes = ViewWrites::between(&SessionViews::empty(), &base);
+        match store
+            .commit_projection_views(id, &writes, &base.state)
+            .map_err(String::from)?
+        {
+            ProjectionCommit::Applied => Ok(base),
+            ProjectionCommit::CursorMoved => store.load_views(id)?.ok_or_else(|| {
+                ReadFailure::from("semantic move projection restore lost its cursor".to_owned())
+            }),
+        }
     })
-    .await?
-    .unwrap_or_else(SessionViews::empty))
+    .await
+    .map_err(String::from)
 }
 
 async fn page_with_intents(

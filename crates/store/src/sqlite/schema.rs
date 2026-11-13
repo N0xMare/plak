@@ -127,7 +127,7 @@ INSERT INTO store_meta VALUES(1,0,0,0,0,0,0,0,0,0,zeroblob(48));
 CREATE TABLE runtime_objects (
  id INTEGER PRIMARY KEY,
  kind INTEGER NOT NULL CHECK(kind BETWEEN 1 AND 20),
- codec INTEGER NOT NULL CHECK(codec=37), digest BLOB NOT NULL CHECK(length(digest)=32),
+ codec INTEGER NOT NULL CHECK(codec=38), digest BLOB NOT NULL CHECK(length(digest)=32),
  byte_len INTEGER NOT NULL CHECK(byte_len>=0), UNIQUE(kind,codec,digest));
 CREATE TABLE runtime_object_bytes (
  id INTEGER PRIMARY KEY REFERENCES runtime_objects(id), bytes BLOB NOT NULL);
@@ -156,7 +156,6 @@ CREATE TABLE checkpoints (
  validation_seal BLOB CHECK(validation_seal IS NULL OR length(validation_seal)=32),
  UNIQUE(root_kind,root_codec,root_digest),
  FOREIGN KEY(root_kind,root_codec,root_digest) REFERENCES runtime_objects(kind,codec,digest),
- FOREIGN KEY(fork_checkpoint) REFERENCES checkpoints(checkpoint_id),
  CHECK((base_kind IS NULL)=(base_codec IS NULL) AND (base_kind IS NULL)=(base_digest IS NULL)),
  CHECK((fork_session IS NULL)=(fork_branch IS NULL)
    AND (fork_session IS NULL)=(fork_checkpoint IS NULL)
@@ -178,7 +177,6 @@ CREATE TABLE branches (
  line_id TEXT NOT NULL, line_generation BLOB NOT NULL CHECK(length(line_generation)=8),
  PRIMARY KEY(session_id,branch_id), FOREIGN KEY(session_id) REFERENCES sessions(session_id),
  FOREIGN KEY(checkpoint_id) REFERENCES checkpoints(checkpoint_id),
- FOREIGN KEY(fork_checkpoint) REFERENCES checkpoints(checkpoint_id),
  CHECK((fork_session IS NULL)=(fork_branch IS NULL)
    AND (fork_session IS NULL)=(fork_checkpoint IS NULL)
    AND (fork_session IS NULL)=(fork_revision IS NULL))) WITHOUT ROWID;
@@ -239,8 +237,7 @@ CREATE TABLE branch_horizons (
  FOREIGN KEY(session_id,branch_id) REFERENCES branches(session_id,branch_id),
  FOREIGN KEY(horizon_checkpoint) REFERENCES checkpoints(checkpoint_id)) WITHOUT ROWID;
 CREATE TABLE pruned_checkpoints (
- checkpoint_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, branch_id TEXT NOT NULL,
- FOREIGN KEY(session_id,branch_id) REFERENCES branches(session_id,branch_id)) WITHOUT ROWID;
+ checkpoint_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, branch_id TEXT NOT NULL) WITHOUT ROWID;
 CREATE TABLE session_feed (
  session_id TEXT NOT NULL, seq INTEGER NOT NULL CHECK(seq>=1), branch_id TEXT NOT NULL,
  change INTEGER NOT NULL CHECK(change BETWEEN 1 AND 7), checkpoint_id TEXT,
@@ -459,6 +456,25 @@ fn verify_authority(c: &Connection) -> Result<(), SessionStoreError> {
     feed::verify(c)
 }
 
+// Imported ancestry is provenance, not a foreign native branch to recreate.
+// Ordinary future checkpoints inherit only their imported branch's exact fork.
+const IMPORTED_FORK_CHECKS: &str = "
+ OR EXISTS(SELECT 1 FROM pruned_checkpoints p
+   WHERE NOT EXISTS(SELECT 1 FROM branches b WHERE b.session_id=p.session_id AND b.branch_id=p.branch_id)
+     AND NOT EXISTS(SELECT 1 FROM branches x JOIN imported_branches i USING(session_id,branch_id)
+       WHERE x.fork_checkpoint=p.checkpoint_id AND x.fork_session=p.session_id AND x.fork_branch=p.branch_id))
+ OR EXISTS(SELECT 1 FROM branches x LEFT JOIN checkpoints source ON source.checkpoint_id=x.fork_checkpoint
+   WHERE x.fork_checkpoint IS NOT NULL AND NOT (
+     (source.checkpoint_id IS NOT NULL AND source.session_id=x.fork_session AND source.branch_id=x.fork_branch AND source.revision=x.fork_revision)
+     OR (EXISTS(SELECT 1 FROM imported_branches i WHERE i.session_id=x.session_id AND i.branch_id=x.branch_id)
+       AND EXISTS(SELECT 1 FROM pruned_checkpoints p WHERE p.checkpoint_id=x.fork_checkpoint AND p.session_id=x.fork_session AND p.branch_id=x.fork_branch))))
+ OR EXISTS(SELECT 1 FROM checkpoints x LEFT JOIN checkpoints source ON source.checkpoint_id=x.fork_checkpoint
+   WHERE x.fork_checkpoint IS NOT NULL AND NOT (
+     (source.checkpoint_id IS NOT NULL AND source.session_id=x.fork_session AND source.branch_id=x.fork_branch AND source.revision=x.fork_revision)
+     OR (EXISTS(SELECT 1 FROM imported_branches i JOIN branches b USING(session_id,branch_id)
+       WHERE i.session_id=x.session_id AND i.branch_id=x.branch_id AND b.fork_checkpoint=x.fork_checkpoint AND b.fork_session=x.fork_session AND b.fork_branch=x.fork_branch AND b.fork_revision=x.fork_revision)
+       AND EXISTS(SELECT 1 FROM pruned_checkpoints p WHERE p.checkpoint_id=x.fork_checkpoint AND p.session_id=x.fork_session AND p.branch_id=x.fork_branch))))";
+
 /// Every line head names a branch of that line at the line's generation, and
 /// every recorded terminal belongs to its line's current generation.
 fn verify_lines(c: &Connection) -> Result<(), SessionStoreError> {
@@ -521,7 +537,7 @@ fn verify_receipt_completeness(c: &Connection) -> Result<(), SessionStoreError> 
                     AND NOT EXISTS(SELECT 1 FROM pruned_checkpoints p
                                    WHERE p.checkpoint_id=c.parent_id))"
                 .to_owned()
-                + feed::COMPLETENESS)
+                + feed::COMPLETENESS + IMPORTED_FORK_CHECKS)
                 .as_str(),
             [],
             |row| row.get::<_, i64>(0),

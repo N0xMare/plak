@@ -38,7 +38,8 @@ pub struct RebindSelection {
 
 /// A profile switch of the root node onto the same line (live succession):
 /// the target binding, the profile and its frozen roster.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SwitchSelection {
     /// The successor's binding, as a rebind names it.
     pub rebind: RebindSelection,
@@ -122,7 +123,8 @@ impl SwitchSelection {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionWorkflowKind {
     Compact(ProductCompactReason),
     /// `/new`: a new session (a new node, tree and line) on the current
@@ -151,7 +153,8 @@ impl SessionWorkflowKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProductCompactReason {
     Manual,
     Scheduled,

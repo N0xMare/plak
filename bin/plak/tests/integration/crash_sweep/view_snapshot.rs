@@ -14,6 +14,7 @@ const NON_VIEWS: &[&str] = &[
     "prompt_history",
     "queue_attachments",
     "queue_items",
+    "session_move_seeds",
     "sessions",
     "submissions",
     "workflow_requests",

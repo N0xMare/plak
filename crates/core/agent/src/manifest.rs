@@ -23,9 +23,9 @@ mod operations;
 mod state;
 pub(crate) use context_state::ResidencySelectionAudit;
 pub use context_state::{
-    CompactionInvalidation, CompactionProvenance, ContextEvaluationAudit,
-    RuntimeCompactionStrategy, RuntimeContextState, RuntimeContextTransition,
-    RuntimeContextTransitionKind, SemanticCompactionPublication,
+    CompactionInvalidation, CompactionProvenance, ContextEvaluationAudit, ImportedCompactionFacts,
+    ImportedCompactionSelection, RuntimeCompactionStrategy, RuntimeContextState,
+    RuntimeContextTransition, RuntimeContextTransitionKind, SemanticCompactionPublication,
 };
 #[allow(
     clippy::wildcard_imports,
@@ -94,7 +94,7 @@ use crate::{HARNESS_PLAN_COMPONENT_FORMAT_VERSION, RUNTIME_POLICY_REVISION};
 use crate::{HarnessPlanReadiness, ResolvedHarnessPlan, rehydrate_harness_plan};
 
 /// Canonical binary revision for [`RuntimeContextState`].
-pub(crate) const RUNTIME_CONTEXT_STATE_CODEC_REVISION: u32 = 3;
+pub(crate) const RUNTIME_CONTEXT_STATE_CODEC_REVISION: u32 = 4;
 /// Canonical binary revision for [`RuntimeLifecycle`].
 const RUNTIME_LIFECYCLE_CODEC_REVISION: u32 = 3;
 /// Canonical JSON revision for reconstruction-complete provider configuration.

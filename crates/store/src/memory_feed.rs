@@ -85,6 +85,13 @@ pub(crate) struct SessionFeed {
 }
 
 impl SessionFeed {
+    pub(crate) fn retained_empty(floor: u64) -> Self {
+        Self {
+            tail: FeedSeq::new(floor),
+            ..Self::default()
+        }
+    }
+
     fn window(&self) -> FeedTail {
         let retained = u64::try_from(self.records.len()).unwrap_or(u64::MAX);
         FeedTail::from_store(

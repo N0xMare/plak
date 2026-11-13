@@ -50,10 +50,14 @@ pub(super) fn runtime_context_state_identity(
     if let Some(compaction) = &state.compaction {
         writer.digest(compaction.identity)?;
     }
+    writer.optional(state.imported_compaction.is_some());
+    if let Some(imported) = &state.imported_compaction {
+        imported.write(&mut writer)?;
+    }
     Digest::sha256(
         DigestDomain::ContextBudget,
-        3,
-        &[b"plakous-agent/runtime-context-state-v3", &writer.bytes],
+        4,
+        &[b"plakous-agent/runtime-context-state-v4", &writer.bytes],
     )
     .map_err(|_| RuntimeManifestError::InvalidDigest)
 }
@@ -200,6 +204,10 @@ pub(super) fn encode_runtime_context_state(
         write_compaction_provenance_fields(&mut writer, provenance)?;
         writer.digest(provenance.identity)?;
     }
+    writer.optional(state.imported_compaction.is_some());
+    if let Some(imported) = &state.imported_compaction {
+        imported.write(&mut writer)?;
+    }
     writer.digest(state.identity)?;
     let integrity = root_integrity(b"runtime-context-state", &writer.bytes)?;
     encode_envelope(
@@ -240,6 +248,10 @@ pub(super) fn decode_runtime_context_state(
         .optional()?
         .then(|| read_compaction_provenance(&mut reader))
         .transpose()?;
+    let imported = reader
+        .optional()?
+        .then(|| ImportedCompactionSelection::read(&mut reader))
+        .transpose()?;
     let identity = reader.digest(Some(DigestDomain::ContextBudget))?;
     reader.finish()?;
     RuntimeContextState::from_recorded(
@@ -248,6 +260,7 @@ pub(super) fn decode_runtime_context_state(
         request_anchor,
         transition,
         compaction,
+        imported,
         identity,
     )
 }

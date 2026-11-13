@@ -32,7 +32,7 @@ pub(crate) struct BindingRecordDisposition {
     pub(crate) superseded: bool,
 }
 
-pub(crate) const SCHEMA_VERSION: i64 = 37;
+pub(crate) const SCHEMA_VERSION: i64 = 38;
 const MAX_LIST_SESSIONS_SQL: i64 = 500;
 const MAX_LIST_PROMPTS_SQL: i64 = 500;
 const MAX_LIST_PROMPT_BYTES: usize = 1024 * 1024;
@@ -1459,6 +1459,10 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
         "CREATE TABLE identity_bindings(identity TEXT PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN('create','queue','delivery','command','workflow')),owner_session_id TEXT NOT NULL,binding_digest TEXT NOT NULL,terminal_disposition TEXT,terminal_outcome TEXT,CHECK((kind='create' AND terminal_disposition IS NULL AND terminal_outcome IS NULL) OR (kind='queue' AND ((terminal_disposition IS NULL AND terminal_outcome IS NULL) OR (terminal_disposition='consumed' AND terminal_outcome IS NOT NULL) OR (terminal_disposition='deleted' AND terminal_outcome IS NULL))) OR (kind IN('delivery','command') AND terminal_disposition IN('rejected','product_committed') AND terminal_outcome IS NULL) OR (kind='workflow' AND ((terminal_disposition IS NULL AND terminal_outcome IS NULL) OR (terminal_disposition='product_committed' AND terminal_outcome IS NOT NULL) OR (terminal_disposition IN('terminal_no_change','discarded') AND terminal_outcome IS NULL)))))",
     ),
     (
+        "session_move_seeds",
+        "CREATE TABLE session_move_seeds(session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,operation TEXT NOT NULL,capsule_digest TEXT NOT NULL CHECK(length(capsule_digest)=64),seed_digest TEXT NOT NULL CHECK(length(seed_digest)=64),seed TEXT NOT NULL CHECK(json_valid(seed)))",
+    ),
+    (
         "queue_items",
         "CREATE TABLE queue_items(session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,item_id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,submitted_at INTEGER NOT NULL CHECK(submitted_at>=0),UNIQUE(session_id,position))",
     ),
@@ -1546,6 +1550,7 @@ mod binding_inspection;
 pub mod directory;
 /// Who holds a session another process has open.
 pub mod holders;
+mod host_move;
 mod lifecycle;
 #[cfg(test)]
 pub(crate) use lifecycle::crash_cut as lifecycle_crash_cut;

@@ -11,6 +11,9 @@ use plakous::sessions::{
     SessionInputWindow, SessionLocator, SessionRuntimeBinding, SessionTargetBinding,
 };
 
+#[path = "move_compilation.rs"]
+mod move_compilation;
+
 #[cfg(any(test, feature = "test-support"))]
 pub(super) mod test_rebind;
 #[cfg(not(any(test, feature = "test-support")))]
@@ -60,6 +63,17 @@ pub trait TurnObserver: Send {
 pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
     sealed::Sealed + Any + Send + Sync
 {
+    /// Unsupported host-move compilation against detached semantic topology.
+    #[doc(hidden)]
+    fn move_runtime<'a>(
+        &'a self,
+        config: &'a HostConfig<P>,
+        _tree: Option<&'a crate::agent_tree::ProductAgentTree>,
+        _plan_authority: &'a str,
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
+        self.runtime(config, RuntimeRole::Rebind, stderr)
+    }
     fn runtime<'a>(
         &'a self,
         config: &'a HostConfig<P>,
@@ -164,6 +178,20 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
 pub struct ProductionRuntimeFactory;
 impl sealed::Sealed for ProductionRuntimeFactory {}
 impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for ProductionRuntimeFactory {
+    fn move_runtime<'a>(
+        &'a self,
+        config: &'a HostConfig<P>,
+        tree: Option<&'a crate::agent_tree::ProductAgentTree>,
+        plan_authority: &'a str,
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
+        Box::pin(move_compilation::runtime(
+            config,
+            tree,
+            plan_authority,
+            stderr,
+        ))
+    }
     fn configure(&self, config: &mut HostConfig<P>) {
         config.state_roots = config
             .state_roots

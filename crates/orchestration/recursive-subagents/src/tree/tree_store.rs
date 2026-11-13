@@ -231,6 +231,20 @@ impl PersistedTree {
     pub fn rows(&self) -> &ProductAgentTree {
         &self.0
     }
+
+    /// Attaches the immutable semantic base stored beside destination rows.
+    ///
+    /// # Errors
+    /// Refuses a foreign or malformed base; it never replaces the current rows.
+    #[doc(hidden)]
+    pub fn with_move_base(mut self, base: super::host_move::DormantTree) -> Result<Self, String> {
+        base.validate()?;
+        if base.tree_id() != self.0.tree_id {
+            return Err("semantic tree base has a different owner".into());
+        }
+        self.0.move_base = Some(std::sync::Arc::new(base));
+        Ok(self)
+    }
 }
 
 impl ProductAgentTree {
@@ -275,6 +289,7 @@ impl ProductAgentTree {
         );
         rows.commands.clone_from(&self.commands);
         rows.feed_cursors.clone_from(&self.feed_cursors);
+        rows.move_base.clone_from(&self.move_base);
         rows.lineage.clone_from(&self.lineage);
         rows.ensure_cell_budgets();
         PersistedTree(rows)
@@ -333,6 +348,25 @@ pub trait TreeStore: Send + Sync {
     ) -> Result<Revision, TreeStoreError>;
     /// Raw rows; the caller applies the reopen law.
     fn load(&self, tree_id: &str) -> Result<Option<PersistedTree>, TreeStoreError>;
+
+    /// Host-owned once-only semantic installation, before group publication.
+    /// This grants no driver or custody; the first claimant must exceed the source floor.
+    ///
+    /// # Errors
+    /// Refuses conflicting identities, malformed semantic data or an unsupported store.
+    #[doc(hidden)]
+    fn install_move_seed(
+        &self,
+        operation: &str,
+        digest: &str,
+        seed: &super::host_move::DormantTree,
+        source: &CustodyRecord,
+    ) -> Result<(), TreeStoreError> {
+        let _ = (operation, digest, seed, source);
+        Err(TreeStoreError::unavailable(
+            "this tree store does not install semantic move seeds",
+        ))
+    }
 
     /// Deletes every row of one tree, compare-and-swapped on the revision the
     /// caller saw and fenced by `claim`, which must hold the tree's custody;
@@ -447,8 +481,9 @@ pub fn fence_revision(
 /// An in-process [`TreeStore`]: the rows of each tree, keyed by id. Runs the
 /// same conformance suite as the SQLite store.
 pub struct MemoryTreeStore {
-    trees: Mutex<BTreeMap<String, ProductAgentTree>>,
-    custody: Mutex<BTreeMap<String, CustodyRecord>>,
+    pub(super) trees: Mutex<BTreeMap<String, ProductAgentTree>>,
+    pub(super) custody: Mutex<BTreeMap<String, CustodyRecord>>,
+    pub(super) move_installs: Mutex<BTreeMap<String, (String, String, String)>>,
     scope: u64,
 }
 
@@ -458,6 +493,7 @@ impl Default for MemoryTreeStore {
         Self {
             trees: Mutex::default(),
             custody: Mutex::default(),
+            move_installs: Mutex::default(),
             scope: NEXT_SCOPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }
@@ -472,6 +508,15 @@ impl MemoryTreeStore {
 }
 
 impl TreeStore for MemoryTreeStore {
+    fn install_move_seed(
+        &self,
+        operation: &str,
+        digest: &str,
+        seed: &super::host_move::DormantTree,
+        source: &CustodyRecord,
+    ) -> Result<(), TreeStoreError> {
+        self.install_move_seed_inner(operation, digest, seed, source)
+    }
     fn exists(&self, tree_id: &str) -> Result<bool, TreeStoreError> {
         let trees = self
             .trees

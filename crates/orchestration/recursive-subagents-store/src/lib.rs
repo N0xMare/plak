@@ -24,6 +24,7 @@ pub mod admission;
 mod custody;
 pub mod database;
 mod image;
+mod move_seed;
 pub mod rows;
 pub mod store;
 

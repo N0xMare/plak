@@ -36,7 +36,9 @@ static RELEASE_EXECUTOR_NAMESPACES: LazyLock<Result<BTreeSet<String>, serde_json
 pub fn check_frozen_binding(
     frozen: &FrozenSessionPresentation,
 ) -> CliResult<Option<BindingChange>> {
-    let configuration = frozen.configuration();
+    let configuration = frozen.configuration().ok_or_else(|| {
+        CliFailure::new("binding inspection needs a recorded native configuration")
+    })?;
     let composition = [
         CompositionSelection::NativePtc,
         CompositionSelection::JsPtc,
@@ -129,7 +131,9 @@ fn check_native_selection(
     frozen: &FrozenSessionPresentation,
     composition: CompositionSelection,
 ) -> CliResult<Option<BindingChange>> {
-    let configuration = frozen.configuration();
+    let configuration = frozen.configuration().ok_or_else(|| {
+        CliFailure::new("native selection inspection needs a recorded configuration")
+    })?;
     let route = configuration.selected().route();
     let model = route.requested_model();
     for provider in [

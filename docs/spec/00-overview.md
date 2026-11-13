@@ -208,9 +208,9 @@ directly. Older native state remains untouched for its matching build.
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **28** (adds operation-bound runtime retirement and invisible semantic-install batches, with exact operation/session membership and imported-row inventories) |
-| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **37** (authenticates the root-bound count of retired dispatched local-tool attempts; component revisions remain frozen) |
-| Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **37** (adds operator title overrides and archival state; terminal state is process-local) |
-| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **10** |
+| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **38** (context codec **4** adds semantic imported-compaction selections and recorded strategy/count facts, with destination-native identities and no carried admission/cache grants) |
+| Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **38** (adds immutable semantic move seeds and permanent identity claims; terminal state is process-local) |
+| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **11** (adds immutable semantic move bases and imported custody floors) |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **22**, disposable, never recovery authority |
 | Session export document | Plak | version **13** (closed portable-session and reserved host-upgrade kinds), imports **13** and **12**; 0.0.3 v11 exports cannot be carried directly |
 | Host-upgrade ownership receipt | Plak | version **1**, outside state keys; operation identities, export digests, source archival intent, placement and per-successor Ready/abandoned disposition only |
@@ -240,11 +240,22 @@ named state and saved placement/profile; v11 and older are refused. Version 13
 introduces the closed `portable_session` / `host_upgrade` kind. Ordinary import
 accepts only portable sessions; dormant ownership move remains unavailable.
 The carrier cut itself changes no native schema. The host-only runtime move seam
-changes runtime SQLite 27 → 28 and the state key to `r28.e37.p37.t10`; checkpoint/
-feed epoch 37, product schema 37 and tree schema 10 remain unchanged. Schema 28
-records each move's exact selected session set, including across continued lines.
+changes runtime SQLite 27 → 28 and the state key to `r28.e38.p38.t11`; checkpoint/
+feed epoch 37 → 38 incorporates context codec 3 → 4 in the same unshipped cut;
+product schema 37 → 38 and tree schema 10 → 11 add native semantic bases in
+that same state-key cut. Schema 28 records each move's exact selected session
+set, including across continued lines.
 Move receipt fingerprints use version-1 length-framed semantic fields, not
 debug formatting. No native migration or foreign native-store reader is added.
+The imported compaction value contains only semantic summary/retained/trailing
+selection, committed per-turn cap facts and source provenance. The destination
+recomputes its canonical identities; no historical measurement, admission or
+cache grant is invented or carried. A retained-empty native feed begins above
+the exported tail floor, with product/tree views seeded semantically at the cut.
+Product schema 38 retains the immutable projection base, anchored intents and
+permanent content bindings after ordinary view-cache deletion. Tree schema 11
+retains its semantic base and source custody floor; refolding starts at that
+base, not at invented old feed records or fresh admissions.
 
 Host-upgrade receipts do not carry history, bindings, topology or job registries.
 They coordinate the unchanged export carrier and record surrender/reconnect
@@ -258,7 +269,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r28.e37.p37.t10`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r28.e38.p38.t11`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is

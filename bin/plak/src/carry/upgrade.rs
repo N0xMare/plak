@@ -85,6 +85,14 @@ pub(crate) fn print_probe(
     if let Some(service) = service {
         probe_service(services, service)?;
     }
+    if let Some(path) = capacity
+        && let Some(capsule) = super::host_move::read_if_move(path)?
+    {
+        serde_json::to_writer(&mut *out, &super::host_move::probe(services, capsule)?)
+            .map_err(|_| CliFailure::new("stdout failed"))?;
+        writeln!(out).map_err(|_| CliFailure::new("stdout failed"))?;
+        return Ok(crate::ProcessOutcome::Success);
+    }
     match capacity {
         Some(path) => serde_json::to_writer(
             &mut *out,

@@ -69,8 +69,8 @@ fn operator_host_memory_pin_keeps_residency_and_reclamation_until_proof() {
     assert_eq!(count.get(), 0);
     assert!(registry.admit_local("local", directory.path()).is_ok());
     assert!(!registry.paths.product_database().exists());
-    assert_eq!(crate::store::SCHEMA_VERSION, 37);
-    assert!(crate::home::state::state_key().contains(".p37."));
+    assert_eq!(crate::store::SCHEMA_VERSION, 38);
+    assert!(crate::home::state::state_key().contains(".p38."));
 }
 
 #[test]

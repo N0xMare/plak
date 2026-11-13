@@ -223,6 +223,12 @@ pub(in super::super) fn delete(
         [id(r.session_id())],
     )
     .map_err(map_sqlite)?;
+    // Imported fork points may name an absent source branch. Keep shared
+    // provenance while referenced; remove it with its last imported owner.
+    tx.execute(
+        "DELETE FROM pruned_checkpoints AS p WHERE NOT EXISTS(SELECT 1 FROM branches b WHERE b.session_id=p.session_id AND b.branch_id=p.branch_id) AND NOT EXISTS(SELECT 1 FROM checkpoints c WHERE c.fork_checkpoint=p.checkpoint_id) AND NOT EXISTS(SELECT 1 FROM branches b WHERE b.fork_checkpoint=p.checkpoint_id)",
+        [],
+    ).map_err(map_sqlite)?;
 
     let receipt = DeleteReceipt::from_store(r, archived, checkpoints);
     let integrity = delete_receipt_integrity(receipt)?;

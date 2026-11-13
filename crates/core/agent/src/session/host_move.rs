@@ -7,6 +7,10 @@
 use super::{
     BranchLease, BranchRevision, SessionHead, SessionRef, SessionStoreError, SessionWorkflowId,
 };
+pub use crate::manifest::{
+    ImportedCompactionFacts, ImportedCompactionSelection, ProcessSessionId,
+    ProcessSessionOwnerGeneration,
+};
 use crate::session::LineRecord;
 use crate::{RuntimeCheckpoint, RuntimeCheckpointKind};
 use plakous_model::{CheckpointId, Digest, DigestDomain, LineId};
@@ -31,6 +35,7 @@ pub struct MoveBranch {
 #[derive(Clone, Debug)]
 pub struct MoveSession {
     pub session: SessionHead,
+    pub feed_tail_floor: u64,
     pub branches: Vec<MoveBranch>,
     pub checkpoints: Vec<RuntimeCheckpoint>,
 }
@@ -39,6 +44,53 @@ pub struct MoveSession {
 pub struct MoveLine {
     pub line: LineRecord,
     pub terminals: Vec<crate::manifest::LineJobTerminal>,
+}
+
+/// Target-owned compilation inputs, not a source checkpoint or execution grant.
+#[derive(Clone, Debug)]
+pub struct MoveHeadSeed {
+    pub operation: SessionWorkflowId,
+    pub source: SessionRef,
+    pub source_checkpoint: CheckpointId,
+    pub source_fork: Option<crate::manifest::ForkLineage>,
+    pub source_revision: BranchRevision,
+    pub fence_floor: u64,
+    pub line: LineId,
+    pub generation: u64,
+    pub history: plakous_model::CanonicalHistory,
+    pub named_state: crate::manifest::NamedState,
+    pub jobs: crate::manifest::JobLedger,
+    pub compaction: Option<ImportedCompactionFacts>,
+    pub interpreter: Option<MoveInterpreter>,
+}
+
+/// Reopen floor and affected cell, never a live interpreter or source to replay.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveInterpreter {
+    pub generation: u64,
+    pub affected_cell: Option<String>,
+}
+
+impl MoveInterpreter {
+    pub(crate) fn observation(
+        &self,
+    ) -> Result<crate::manifest::InterpreterObservation, crate::manifest::RuntimeManifestError>
+    {
+        crate::manifest::InterpreterObservation::new(
+            self.generation,
+            crate::manifest::InterpreterAvailability::Reset,
+            Some(crate::manifest::InterpreterResetReason::ProcessReopen),
+            self.affected_cell.clone(),
+            None,
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ReconstructedMoveHead {
+    pub branch: MoveBranch,
+    pub checkpoint: RuntimeCheckpoint,
 }
 
 /// An opaque, checked installation batch reconstructed from semantic values.
@@ -68,6 +120,7 @@ impl MoveInstall {
         fingerprint_part(&mut bytes, &(lines.len() as u64).to_be_bytes());
         for session in &mut sessions {
             if !session_ids.insert(session.session.session_id())
+                || session.feed_tail_floor == u64::MAX
                 || session.session.is_archived()
                 || session.branches.is_empty()
                 || session.branches.len() > 1024
@@ -165,6 +218,7 @@ fn fingerprint_part(bytes: &mut Vec<u8>, value: &[u8]) {
 impl MoveSession {
     fn fingerprint_into(&self, bytes: &mut Vec<u8>) {
         fingerprint_part(bytes, self.session.session_id().to_string().as_bytes());
+        fingerprint_part(bytes, &self.feed_tail_floor.to_be_bytes());
         fingerprint_part(bytes, self.session.initial_branch().to_string().as_bytes());
         fingerprint_part(bytes, &self.session.revision().get().to_be_bytes());
         fingerprint_part(bytes, &self.session.created_at().seconds().to_be_bytes());

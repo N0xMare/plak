@@ -1397,7 +1397,7 @@ pub mod tools {
         ReadOnlyToolPolicy, RecordedLiteralProcess, RegisteredToolId, RegisteredToolIdentity,
         RepositoryMatchCase, RepositoryQuery, RepositoryQueryLimits, RepositoryQueryMatch,
         RepositoryQueryResult, RepositoryQueryStopReason, RunnerId, SafeErrorMessage, SchemaLimits,
-        ToolBindingError, ToolContext, ToolDescriptorError, ToolExecutor,
+        SemanticToolRegistration, ToolBindingError, ToolContext, ToolDescriptorError, ToolExecutor,
         ToolExecutorBindingIdentity, ToolExecutorBindings, ToolExecutorBindingsBuilder,
         ToolExecutorId, ToolExposure, ToolExposureBinding, ToolExposureMap, ToolFuture,
         ToolInvocation, ToolInvocationRequest, ToolOutcome, ToolOutcomeKind, ToolOutcomeLimits,

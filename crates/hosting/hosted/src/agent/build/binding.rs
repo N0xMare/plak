@@ -486,6 +486,22 @@ pub async fn coding_session_runtime_binding(
     .await
 }
 
+/// Detached construction keeps semantic overrides, without acquiring topology custody.
+pub(crate) async fn coding_move_runtime_binding(
+    spec: ProductAgentSpec,
+    stderr: &mut (dyn Write + Send),
+) -> CliResult<SessionRuntimeBinding> {
+    Box::pin(coding_session_runtime_binding_for(
+        spec,
+        stderr,
+        false,
+        SessionToolFence::Full,
+        crate::topology_runtime::TopologyHubAttach::Inspect,
+        &mut None,
+    ))
+    .await
+}
+
 /// Fresh conversation create (`/new`) must attach a new root tree, not look
 /// up the previous hub lease.
 pub async fn coding_session_runtime_binding_attaching_root(

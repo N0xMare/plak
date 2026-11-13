@@ -4,17 +4,17 @@ use super::{
     Arc, AttemptId, BTreeMap, BindingReference, BranchId, CallId, CheckpointId, Digest,
     DigestAlgorithm, DigestDomain, DurableCommandDisposition, DurableCommandRecord,
     DurableOperationKind, DurableOperationRecord, DurableOperationState,
-    DurableOperationTransition, FamilyArtifact, ForkLineage, HistorySegment, LIFECYCLE_MAGIC,
-    LineId, MAX_CHECKPOINT_HISTORY_SEGMENT_BYTES, MAX_DURABLE_OPERATION_TRANSITIONS, MAX_ID_BYTES,
-    MAX_RUNTIME_COMPONENT_BYTES, MAX_RUNTIME_LIFECYCLE_BYTES, MAX_RUNTIME_RECORDS,
-    ModelAdapterProfileId, ModelFamilyId, ModelId, ModelRouteBinding, PROCESS_SESSION_ID_BYTES,
-    PendingEffectDecisionState, ProcessSessionId, ProcessSessionOwnerGeneration, ProtocolId,
-    RUNTIME_LIFECYCLE_CODEC_REVISION, ReconstructiveComponent, RecoveryAction,
-    RecoveryHandlerSignature, RecoveryObligation, RecoveryObligationKind, RevalidationFact,
-    RouteId, RuntimeComponentKind, RuntimeLifecycle, RuntimeManifestError, RuntimeOperationRoot,
-    RuntimeTopology, RuntimeWorkingRoot, SessionId, SessionWorkflowRootId, StableRequestPrefix,
-    Timestamp, ToolRuntimeManifest, TurnId, WorkingRecoveryPhase, root_integrity,
-    validate_lifecycle_shape,
+    DurableOperationTransition, EntryId, FamilyArtifact, ForkLineage, HistorySegment,
+    LIFECYCLE_MAGIC, LineId, MAX_CHECKPOINT_HISTORY_SEGMENT_BYTES,
+    MAX_DURABLE_OPERATION_TRANSITIONS, MAX_ID_BYTES, MAX_RUNTIME_COMPONENT_BYTES,
+    MAX_RUNTIME_LIFECYCLE_BYTES, MAX_RUNTIME_RECORDS, ModelAdapterProfileId, ModelFamilyId,
+    ModelId, ModelRouteBinding, PROCESS_SESSION_ID_BYTES, PendingEffectDecisionState,
+    ProcessSessionId, ProcessSessionOwnerGeneration, ProtocolId, RUNTIME_LIFECYCLE_CODEC_REVISION,
+    ReconstructiveComponent, RecoveryAction, RecoveryHandlerSignature, RecoveryObligation,
+    RecoveryObligationKind, RevalidationFact, RouteId, RuntimeComponentKind, RuntimeLifecycle,
+    RuntimeManifestError, RuntimeOperationRoot, RuntimeTopology, RuntimeWorkingRoot, SessionId,
+    SessionWorkflowRootId, StableRequestPrefix, Timestamp, ToolRuntimeManifest, TurnId,
+    WorkingRecoveryPhase, root_integrity, validate_lifecycle_shape,
 };
 
 /// Single canonical lifecycle/obligation representation used by manifests and
@@ -542,6 +542,9 @@ impl<'a> Reader<'a> {
     }
     pub(super) fn turn_id(&mut self) -> Result<TurnId, RuntimeManifestError> {
         TurnId::try_from(self.uuid()?).map_err(|_| RuntimeManifestError::Malformed)
+    }
+    pub(super) fn entry_id(&mut self) -> Result<EntryId, RuntimeManifestError> {
+        EntryId::try_from(self.uuid()?).map_err(|_| RuntimeManifestError::Malformed)
     }
     pub(super) fn workflow_id(&mut self) -> Result<SessionWorkflowRootId, RuntimeManifestError> {
         SessionWorkflowRootId::new(

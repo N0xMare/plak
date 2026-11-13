@@ -13,6 +13,7 @@ pub(crate) mod epoch;
 mod export;
 pub(crate) mod handoff;
 mod history;
+pub(crate) mod host_move;
 mod import;
 pub(crate) mod intent;
 #[cfg(any(test, feature = "tui"))]

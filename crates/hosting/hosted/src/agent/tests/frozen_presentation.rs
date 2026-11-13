@@ -540,7 +540,13 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             "superseded bindings must still be decoded and reported"
         );
         let rebound = sessions.created_tool_presentation(target).await?;
-        assert_eq!(rebound.configuration().selected_identity(), fresh_identity);
+        assert_eq!(
+            rebound
+                .configuration()
+                .ok_or("recorded configuration")?
+                .selected_identity(),
+            fresh_identity
+        );
         assert_ne!(fresh_identity, identities.0);
         let incompatible = previous_send_extensions(&current, CompositionSelection::Direct, true)?;
         let live = coding_tool_registry_with_extensions(

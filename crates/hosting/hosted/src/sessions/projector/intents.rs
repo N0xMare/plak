@@ -10,7 +10,8 @@ use super::views::{Lane, RowKey};
 use crate::sessions::{ProductCompactReason, SessionWorkflowKind, TranscriptRow};
 
 /// Which command a submission carries.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SubmissionKind {
     /// A queued item started a root turn.
     RootStart,
@@ -45,7 +46,8 @@ impl SubmissionKind {
 
 /// One command submission: its exact bytes and identity, immutable once
 /// written.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Submission {
     /// The command id Plakous deduplicates on.
     pub command_id: String,
@@ -89,13 +91,15 @@ impl Submission {
 
 /// One workflow request, written before submission and joined to its facts by
 /// its operation id, never by the derived workflow identity.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkflowRequest {
     /// The workflow operation id.
     pub operation_id: String,
     /// What was asked for.
     pub kind: SessionWorkflowKind,
     /// The source checkpoint it was asked against.
+    #[serde(with = "crate::sessions::host_move::locator_serde")]
     pub source_locator: SessionLocator,
 }
 
@@ -169,7 +173,8 @@ impl WorkflowRequest {
 
 /// A host-authored transcript row no feed fact implies, in lane 1 at the
 /// cursor the authoring host had applied.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct OperatorNotice {
     /// The product-local notice identity.
     pub notice_id: String,
@@ -443,7 +448,8 @@ impl RootLossIntent {
 }
 
 /// Every intent of one product session the projector reads.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProductIntents {
     /// Command submissions.
     pub submissions: Vec<Submission>,

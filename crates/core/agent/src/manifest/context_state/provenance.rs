@@ -216,6 +216,17 @@ impl ContextEvaluationAudit {
 }
 
 impl RuntimeCompactionStrategy {
+    pub(in crate::manifest) fn from_tag(tag: u8) -> Result<Self, RuntimeManifestError> {
+        match tag {
+            1 => Ok(Self::SemanticSummaryPrefixV1),
+            2 => Ok(Self::NativeResponsesTriggerV1),
+            3 => Ok(Self::ToolResultPlaceholdersV1),
+            4 => Ok(Self::ReplayOmissionV1),
+            5 => Ok(Self::ResidencyPlaceholdersV1),
+            _ => Err(RuntimeManifestError::InvalidCompactionProvenance),
+        }
+    }
+
     pub(in crate::manifest) const fn tag(self) -> u8 {
         match self {
             Self::SemanticSummaryPrefixV1 => 1,

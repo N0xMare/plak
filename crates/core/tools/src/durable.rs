@@ -19,6 +19,10 @@ use crate::{
     ToolRuntimeError, ValidatedToolSchema,
 };
 
+mod semantic;
+#[doc(hidden)]
+pub use semantic::SemanticToolRegistration;
+
 /// Pre-integration V1 registry revision used only by the retained custom-profile path.
 pub const TOOL_REGISTRY_DESCRIPTOR_CODEC_REVISION: u32 = 2;
 /// Pre-integration V1 exposure revision used only by the retained custom-profile path.

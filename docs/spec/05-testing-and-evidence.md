@@ -94,6 +94,23 @@ The verdict barrier pins cancellation and its ten-second finite-budget floor;
 its client delivery promise remains an attempted write, not receipt. A hold itself changes no persisted format: before a durable planned
 handoff a crash is owner loss, not an upgrade receipt or permission to replay.
 
+Dormant-move contracts exercise memory and SQLite semantic bases at an
+exported feed-tail floor: owed inputs remain owed, consumed decisions stay
+consumed, projection-cache loss rebuilds the same data, and destination facts
+start strictly above the cut. Native reconstruction preserves public IDs but
+uses a deterministic new checkpoint with original fork provenance. An absent
+source fork point remains imported/pruned provenance; no source checkpoint is
+recreated. Read-only target preflight checks identity conflicts and ordinary
+logical store capacity without creating a database, execution lease or driver.
+Semantic tool-presentation tests preserve old schemas/descriptions against
+current capability/executor compatibility and reject a different capability
+sharing the executor. Constructor/export tests assert no model dispatch.
+Previous-build native fixture bytes and their hash remain pinned: a different
+state key refuses native reopen and requires the export carrier, not migration.
+Context codec 4 / epoch 38 has fresh graph and publication goldens. Imported
+compaction data is boxed internally so its optional semantic facts do not grow
+the live driver's stack frame; nested settlement keeps its normal stack budget.
+
 Settled host-upgrade regressions use isolated real-binary homes and a
 test-hooks-only `PLAK_TEST_STATE_KEY` override to make producer and destination
 keys differ without changing the v12 carrier. Production builds ignore that

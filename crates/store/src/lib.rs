@@ -34,6 +34,10 @@ pub use memory::{
 };
 
 #[cfg(test)]
+mod host_move_feed_tests;
+#[cfg(test)]
+mod host_move_rebind_tests;
+#[cfg(test)]
 mod host_move_review_tests;
 #[cfg(test)]
 mod host_move_tests;

@@ -17,6 +17,60 @@ use crate::{
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 #[test]
+fn semantic_move_presentations_restore_old_data_but_require_current_executors() -> TestResult {
+    let (source, calls) = registry_in_order(&[0])?;
+    let original = FrozenToolRegistryDescriptor::capture(&source)?.semantic_registrations();
+    let mut changed = original.clone();
+    let definition = &changed[0].definition;
+    changed[0].definition = ToolDefinition::new(
+        definition.name().clone(),
+        definition.semantic_version(),
+        "new presentation, same executable",
+        definition.input().clone(),
+        definition.output().clone(),
+        definition.concurrency(),
+        definition.effect(),
+    )?;
+    let current = FrozenToolRegistryDescriptor::restore_semantic_registrations(&changed, &source)?;
+    let restored =
+        FrozenToolRegistryDescriptor::restore_semantic_registrations(&original, &current)?;
+    assert_eq!(restored.definitions(), source.definitions());
+    assert_ne!(restored.definitions(), current.definitions());
+    let mut revised = original.clone();
+    revised[0].executor_binding = ToolExecutorBindingIdentity::new(99, &[b"different semantics"])?;
+    assert!(
+        FrozenToolRegistryDescriptor::restore_semantic_registrations(&revised, &current).is_err()
+    );
+    assert!(
+        FrozenToolRegistryDescriptor::restore_semantic_registrations(
+            &original,
+            &ToolRegistryBuilder::default().freeze()
+        )
+        .is_err()
+    );
+    let mut foreign_capability = ToolRegistryBuilder::default();
+    foreign_capability.register(ToolRegistration::new(
+        RegisteredToolId::new("different-capability")?,
+        ToolExecutorId::new(original[0].executor_id.clone())?,
+        original[0].executor_binding,
+        original[0].definition.clone(),
+        Arc::new(CountingExecutor {
+            calls: calls.clone(),
+        }),
+    ))?;
+    assert!(
+        FrozenToolRegistryDescriptor::restore_semantic_registrations(
+            &original,
+            &foreign_capability.freeze()
+        )
+        .is_err(),
+        "an executor binding alone cannot restore a removed capability"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[test]
 fn frozen_process_contract_accepts_shell_replacement_without_rewriting_identity() -> TestResult {
     let (base, calls) = registry_in_order(&[0])?;
     let definition = base.definitions()[0].clone();

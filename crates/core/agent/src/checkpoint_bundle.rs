@@ -21,9 +21,9 @@ pub(crate) use object::{component_object_digest, object_address};
 /// Format epoch of the complete persisted checkpoint object graph. Every
 /// object address carries it and nothing from another epoch decodes. Any
 /// pre-release change to a persisted runtime encoding bumps this one number;
-/// the per-component revision constants inside the graph are frozen.
-/// Epoch 37 authenticates the root-bound count of retired local-tool attempts.
-pub const RUNTIME_FORMAT_EPOCH: u32 = 37;
+/// component revisions change only with an explicit semantic format cut.
+/// Epoch 38 adds context-codec-4 imported compaction selections without old grants.
+pub const RUNTIME_FORMAT_EPOCH: u32 = 38;
 
 const OBJECT_ADDRESS_BYTES: usize = 1 + 4 + 32;
 const MAX_CHECKPOINT_OBJECTS: usize =

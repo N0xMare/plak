@@ -68,7 +68,7 @@ pub(crate) fn read(
     }))
 }
 
-fn write(
+pub(crate) fn write(
     tx: &Transaction<'_>,
     tree_id: &str,
     record: &CustodyRecord,

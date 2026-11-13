@@ -8,7 +8,7 @@ use super::{
 use plakous_agent::internal::host_move::{
     self, MoveBranch, MoveDisposition, MoveInstall, MoveLine, MoveSession, MoveState, PrepareMove,
 };
-use plakous_agent::internal::{Digest, LineId};
+use plakous_agent::internal::{BranchLease, Digest, LeaseInstant, LineId};
 
 #[derive(Clone)]
 pub(super) struct Receipt {
@@ -66,6 +66,36 @@ pub(super) fn session_visible(
     })
 }
 
+fn require_held_head(
+    state: &StoreState,
+    row: &BranchRecord,
+    held: &BTreeMap<SessionRef, &BranchLease>,
+    now: LeaseInstant,
+) -> Result<(), SessionStoreError> {
+    let selector = row.head.session();
+    let checkpoint = state
+        .checkpoints
+        .get(&row.head.checkpoint().checkpoint_id())
+        .ok_or(SessionStoreError::corrupt())?;
+    let line = checkpoint.checkpoint.manifest().topology().line;
+    let current = lines::load_unchecked(state, line)?.head();
+    if current == selector {
+        require_lease(
+            row,
+            held.get(&selector).ok_or(SessionStoreError::LeaseHeld)?,
+            now,
+        )?;
+    } else {
+        if held.contains_key(&selector) {
+            return Err(SessionStoreError::NotLineHead);
+        }
+        if !held.contains_key(&current) {
+            return Err(SessionStoreError::LeaseHeld);
+        }
+    }
+    Ok(())
+}
+
 impl MemorySessionStore {
     pub(super) fn recover_move_sync(
         &self,
@@ -108,11 +138,7 @@ impl MemorySessionStore {
             let mut branches = Vec::new();
             for row in session.branches.values() {
                 let selector = row.head.session();
-                require_lease(
-                    row,
-                    held.get(&selector).ok_or(SessionStoreError::LeaseHeld)?,
-                    now,
-                )?;
+                require_held_head(&state, row, &held, now)?;
                 let checkpoint = state
                     .checkpoints
                     .get(&row.head.checkpoint().checkpoint_id())
@@ -131,6 +157,11 @@ impl MemorySessionStore {
             }
             snapshot.push(MoveSession {
                 session: session.head,
+                feed_tail_floor: crate::memory_feed::tail(
+                    state.feeds.get(&id).ok_or(SessionStoreError::corrupt())?,
+                )
+                .tail()
+                .get(),
                 branches,
                 checkpoints: state
                     .checkpoints
@@ -243,6 +274,10 @@ impl MemorySessionStore {
                     },
                 );
             }
+            next.feeds.insert(
+                session.session.session_id(),
+                crate::memory_feed::SessionFeed::retained_empty(session.feed_tail_floor),
+            );
             next.sessions.insert(
                 session.session.session_id(),
                 SessionRecord {

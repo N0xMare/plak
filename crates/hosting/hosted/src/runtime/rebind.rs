@@ -525,7 +525,7 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
         );
         let instructions_before = instruction_sources(opened);
         let mut attached_tree = None;
-        let branched = attach_profile_branch(
+        let branched = Box::pin(attach_profile_branch(
             watch,
             config,
             opened,
@@ -546,7 +546,7 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
                 operation: &operation,
                 succession: succession.as_ref(),
             },
-        )
+        ))
         .await;
         if let Some(tree_id) = attached_tree {
             release_profile_build_lease(events, &tree_id).await?;

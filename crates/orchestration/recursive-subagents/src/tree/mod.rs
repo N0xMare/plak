@@ -6,6 +6,8 @@
 
 mod bootstrap;
 mod effects;
+#[doc(hidden)]
+pub mod host_move;
 mod ledger;
 #[cfg(test)]
 mod placement_hold_tests;
@@ -309,8 +311,22 @@ pub const TURN_ABANDONED: &str = "turn_abandoned";
 /// rejoin resumes the budget rather than restarting it, and it is a type
 /// rather than a `u8` because the ceiling is the whole point: a value above
 /// it is refused at construction, never clamped into looking admitted.
-#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "u8", into = "u8")]
 pub struct SubmitNudgeBudget(u8);
+
+impl TryFrom<u8> for SubmitNudgeBudget {
+    type Error = &'static str;
+    fn try_from(rounds: u8) -> Result<Self, Self::Error> {
+        Self::spent(rounds).ok_or("submit-harness budget exceeds its ceiling")
+    }
+}
+
+impl From<SubmitNudgeBudget> for u8 {
+    fn from(budget: SubmitNudgeBudget) -> Self {
+        budget.rounds()
+    }
+}
 
 impl SubmitNudgeBudget {
     /// Harness Starts one attempt may admit in total.
@@ -750,6 +766,8 @@ pub struct ProductAgentTree {
     commands: BTreeMap<String, AgentCommand>,
     /// The tree projector's cursor per runtime session (`agent_feed_cursors`).
     feed_cursors: BTreeMap<String, u64>,
+    /// Imported semantic floor; native feeds intentionally start after this cut.
+    move_base: Option<Arc<host_move::DormantTree>>,
     compaction_views: BTreeMap<AttemptId, plakous_host_protocol::views::AttemptCompaction>,
     compaction_cursors: BTreeMap<String, (u64, Option<AttemptId>, bool)>,
     /// Process-local work list, never evidence that a close was applied.

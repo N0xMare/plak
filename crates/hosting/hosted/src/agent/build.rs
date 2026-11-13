@@ -24,7 +24,8 @@ pub(super) use binding::coding_session_runtime_binding_for;
 pub(super) use binding::ensure_workspace_excludes_product_state;
 pub(crate) use binding::{
     api_session_runtime_binding, api_session_runtime_binding_for,
-    api_session_runtime_binding_with_owner, coding_session_runtime_binding_with_attach,
+    api_session_runtime_binding_with_owner, coding_move_runtime_binding,
+    coding_session_runtime_binding_with_attach,
 };
 pub use binding::{
     coding_session_runtime_binding, coding_session_runtime_binding_attaching_root,

@@ -224,6 +224,10 @@ pub struct SessionViewState {
     /// Set by a behind-retention rebuild: the cursor proves nothing below
     /// this sequence.
     pub retained_from: Option<u64>,
+    /// Immutable semantic state covers the imported native cut through this sequence.
+    /// Its empty native window is not evidence that still-owed intents were pruned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imported_through: Option<u64>,
     /// A behind-retention history seed already contains prose through this
     /// feed sequence. Retained facts still derive usage, calls and counters.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -231,6 +235,18 @@ pub struct SessionViewState {
 }
 
 impl SessionViewState {
+    /// Distinguishes a deliberately empty imported window from actual later pruning.
+    pub fn observe_retained_from(&mut self, retained_from: u64) {
+        if self
+            .imported_through
+            .is_some_and(|cut| retained_from <= cut.saturating_add(1))
+        {
+            return;
+        }
+        if retained_from > 1 {
+            self.retained_from = Some(retained_from);
+        }
+    }
     /// Settles historical intents without inventing feed facts.
     pub fn consume_before_retention(&mut self, intents: &ProductIntents) {
         for submission in &intents.submissions {

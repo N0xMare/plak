@@ -551,6 +551,7 @@ fn snapshot(tree: &ProductAgentTree) -> Value {
             "agent_feed_cursors",
             "agent_grants",
             "agent_messages",
+            "agent_move_seeds",
             "agent_nodes",
             "agent_operations",
             "agent_tree_custody",
