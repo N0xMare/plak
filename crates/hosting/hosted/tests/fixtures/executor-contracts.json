@@ -1,0 +1,1416 @@
+{
+  "plak.skills.skill.executor.v1/3d105aae4ec8e8dc6ceb00afba5ae390ad3e09113092e590016902bfaf8a7733": {
+    "accepted": {
+      "2b79b10865417e6c2ca620dee4ef5cde8d366a681ba77b63decc0702acb324bc": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "description": "Optional arguments for the skill",
+            "type": "string"
+          },
+          "skill": {
+            "description": "The name of a skill from the available-skills list. Do not guess names.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "3d105aae4ec8e8dc6ceb00afba5ae390ad3e09113092e590016902bfaf8a7733",
+    "executor_id": "plak.skills.skill.executor.v1"
+  },
+  "plak.topology.adopt_candidate.executor.v1/945c3ee39b5402e96fd1086886fb1c7666c6ce19eea7745742269a0a9ade4606": {
+    "accepted": {
+      "b3b4a7572b5dab68aa6942d944869b13dbb849e849cba5c36fd3a138f8a92b9f": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "accept_conflicts": {
+            "description": "Explicitly accept text conflict markers into your checkout. Required for a conflict candidate or an unresolved resolver.",
+            "type": "boolean"
+          },
+          "candidate_id": {
+            "type": "string"
+          },
+          "evidence": {
+            "description": "Review attempt ids recorded with the adoption.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expected_target": {
+            "description": "Snapshot of your copy the adoption must land on; a moved copy is refused target_changed.",
+            "type": "string"
+          },
+          "revert": {
+            "description": "Undo this adoption's delta, preserving later edits.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "candidate_id"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "945c3ee39b5402e96fd1086886fb1c7666c6ce19eea7745742269a0a9ade4606",
+    "executor_id": "plak.topology.adopt_candidate.executor.v1"
+  },
+  "plak.topology.close_agent.executor.v1/f274ad5a7aecdac1ec00b43cd74bbf2f83c65f9bfdd4e973b87b77c5f3a49798": {
+    "accepted": {
+      "67ccb8988d8ed8592b9ad113bb5b2f86735ccde05b1435cb6b1d743196afe85e": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "expected_attempt_id": {
+            "description": "Refused with attempt_mismatch unless it is the child's current attempt.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "f274ad5a7aecdac1ec00b43cd74bbf2f83c65f9bfdd4e973b87b77c5f3a49798",
+    "executor_id": "plak.topology.close_agent.executor.v1"
+  },
+  "plak.topology.discard_workspace.executor.v1/a3f5b2ae3ad13625be16e262ccad0558d5514136ccd217286895f283804d3dc5": {
+    "accepted": {
+      "f03c33b8c8d18a1a4008d4a5b4283ce5fe74df3432e8a3582a9fe8933d993198": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "a3f5b2ae3ad13625be16e262ccad0558d5514136ccd217286895f283804d3dc5",
+    "executor_id": "plak.topology.discard_workspace.executor.v1"
+  },
+  "plak.topology.get_command_or_subagent_output.executor.v1/eff03d639fc4fe9acd45ff90ddb721d53f0d2b6af514d9557f9565edb66a11a0": {
+    "accepted": {
+      "7d4e6b53bf5e0df6732119dc6c7cd4932ec2942804bbd2552f142071a5f36430": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "task_ids": {
+            "description": "Process ids returned by run_terminal_command (N or pN) and child agent ids.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "type": "array"
+          },
+          "timeout_ms": {
+            "description": "How long to await, in milliseconds, when this turn needs the result; clamped to 3600000 (1 hour). Omit or pass 0 for an immediate snapshot.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "task_ids"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "eff03d639fc4fe9acd45ff90ddb721d53f0d2b6af514d9557f9565edb66a11a0",
+    "executor_id": "plak.topology.get_command_or_subagent_output.executor.v1"
+  },
+  "plak.topology.interrupt_agent.executor.v1/ae3ed5004cba6a3f50580917fc75312a012e8e825151e35287eb5056526e9542": {
+    "accepted": {
+      "67ccb8988d8ed8592b9ad113bb5b2f86735ccde05b1435cb6b1d743196afe85e": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "expected_attempt_id": {
+            "description": "Refused with attempt_mismatch unless it is the child's current attempt.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "ae3ed5004cba6a3f50580917fc75312a012e8e825151e35287eb5056526e9542",
+    "executor_id": "plak.topology.interrupt_agent.executor.v1"
+  },
+  "plak.topology.kill_command_or_subagent.executor.v1/9ec394c1bb27cb424930259fae14ce41c37125fcb4bca71b31f2d98ee985a302": {
+    "accepted": {
+      "6cf2a5e96c21b6c971900c624f45a4eb2ff06bca3407db292aad507b472801eb": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Process id (N or pN) to stop, or child agent id to interrupt.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "9ec394c1bb27cb424930259fae14ce41c37125fcb4bca71b31f2d98ee985a302",
+    "executor_id": "plak.topology.kill_command_or_subagent.executor.v1"
+  },
+  "plak.topology.list_agents.executor.v1/e260746a0171193f698d614353f0867e1ddfd451a49dd5143995e3eb58de404a": {
+    "accepted": {
+      "ec2690cc256e67dfc7a341988819bd3e5d9b5dcce6495f2afdbfa5fe432d8606": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "include_completed": {
+            "type": "boolean"
+          },
+          "include_read": {
+            "type": "boolean"
+          },
+          "include_self": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "binding_identity": "e260746a0171193f698d614353f0867e1ddfd451a49dd5143995e3eb58de404a",
+    "executor_id": "plak.topology.list_agents.executor.v1"
+  },
+  "plak.topology.send_agent_message.executor.v1/186005c0617dc1d2130af414b85ae9caf155afba562285da44b5c8119dfbc15d": {
+    "accepted": {
+      "cb460ef3078963b391ef02e3caf5130b31f3b12d6fe60aa97c328560fedc59df": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "in_reply_to": {
+            "description": "Omit on the first message to a child. Required only when purpose is reply.",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "output_schema_json": {
+            "description": "Optional, and only with purpose=followup: a new result schema for the new attempt. Omit to keep the schema the child already has.",
+            "type": "string"
+          },
+          "priority": {
+            "description": "Omit for urgent from a parent to its running child; deferred otherwise.",
+            "enum": [
+              "deferred",
+              "urgent"
+            ],
+            "type": "string"
+          },
+          "purpose": {
+            "description": "Omit for coordinate. Use reply only with in_reply_to set to an existing message_id. Finished children are revivable until retired. Use followup to re-task one on a new attempt; a running child takes priority=urgent instead.",
+            "enum": [
+              "coordinate",
+              "finding",
+              "question",
+              "reply",
+              "followup"
+            ],
+            "type": "string"
+          },
+          "refresh": {
+            "description": "Followup only; merge the parent's current state into a live-fork copy when clean. False keeps its base.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent_id",
+          "message"
+        ],
+        "type": "object"
+      },
+      "d5ece43b3503634a182a7b5a4ef155ec6b3ea7a1630ede30afd03a5dcaab4add": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "acknowledge_recovery": {
+            "description": "Followup only, from the direct parent: the child's current attempt_id. Explicitly acknowledge that a tool may have changed this workspace. The host settles recovery without replaying uncertain work before starting a fresh attempt; ownership/effect-evidence refusals still block it.",
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "in_reply_to": {
+            "description": "Omit on the first message to a child. Required only when purpose is reply.",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "output_schema_json": {
+            "description": "Optional, and only with purpose=followup: a new result schema for the new attempt. Omit to keep the schema the child already has.",
+            "type": "string"
+          },
+          "priority": {
+            "description": "Omit for urgent from a parent to its running child; deferred otherwise.",
+            "enum": [
+              "deferred",
+              "urgent"
+            ],
+            "type": "string"
+          },
+          "purpose": {
+            "description": "Omit for coordinate. Use reply only with in_reply_to set to an existing message_id. Finished children are revivable until retired. Use followup to re-task one on a new attempt; a running child takes priority=urgent instead.",
+            "enum": [
+              "coordinate",
+              "finding",
+              "question",
+              "reply",
+              "followup"
+            ],
+            "type": "string"
+          },
+          "refresh": {
+            "description": "Followup only; merge the parent's current state into a live-fork copy when clean. False keeps its base.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent_id",
+          "message"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "186005c0617dc1d2130af414b85ae9caf155afba562285da44b5c8119dfbc15d",
+    "executor_id": "plak.topology.send_agent_message.executor.v1"
+  },
+  "plak.topology.spawn_agent.executor.v1/e9a139c5d043db73ce4859b9bbec3e39e56e6273f9d47cda44140674c7e1a20c": {
+    "accepted": {
+      "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "Short label for the attempt; does not select bind.",
+            "type": "string"
+          },
+          "inputs": {
+            "description": "One candidate id, from a finished child's wait or list row, to start this child's copy from instead of your current state. Requires workspace=fork: inherit has no copy of its own.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "output_schema_json": {
+            "description": "JSON string holding the child's submit_result object schema. Property types are object, array, string, number, integer, or boolean; no $ref and no combinators.",
+            "type": "string"
+          },
+          "prompt": {
+            "description": "Task brief for the child agent.",
+            "type": "string"
+          },
+          "request_key": {
+            "description": "Your own key for this spawn. A repeat with the same key and the same brief returns the same child instead of spawning a second one; the same key on a different brief is refused request_key_conflict.",
+            "type": "string"
+          },
+          "template": {
+            "description": "Template to spawn, from the cards below.",
+            "enum": [
+              "implementer",
+              "reviewer"
+            ],
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "read_only",
+              "execute",
+              "mutate"
+            ],
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Omit or inherit to share your checkout. fork mints an isolated copy.",
+            "enum": [
+              "inherit",
+              "fork"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "template",
+          "prompt",
+          "output_schema_json",
+          "tier"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "e9a139c5d043db73ce4859b9bbec3e39e56e6273f9d47cda44140674c7e1a20c",
+    "executor_id": "plak.topology.spawn_agent.executor.v1"
+  },
+  "plak.topology.stop.executor.v1/eb000c9ee394944a393d10817e723d0cb7b5cdcfc8202b769e492e5635d546de": {
+    "accepted": {
+      "ea5293564cbfe6504907dbb78102350ff6c1f2e70d0d214924b2355773000f33": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Process id returned by bash (N or pN) to stop, or child agent id to interrupt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "eb000c9ee394944a393d10817e723d0cb7b5cdcfc8202b769e492e5635d546de",
+    "executor_id": "plak.topology.stop.executor.v1"
+  },
+  "plak.topology.submit_result.executor.v1/e95ad7bdaecfdf03aaefcb1172028e6cfa3a1a2651544272b8bd110e58f54483": {
+    "accepted": {
+      "cfbb1dc00dae592455da83242f9b931b400909f3a48ade8f9ce918f4aa2da3bc": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "output_json": {
+            "type": "string"
+          },
+          "turn_token": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turn_token",
+          "output_json"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "e95ad7bdaecfdf03aaefcb1172028e6cfa3a1a2651544272b8bd110e58f54483",
+    "executor_id": "plak.topology.submit_result.executor.v1"
+  },
+  "plak.topology.wait.executor.v1/2db89aa8c97b4c4d1316d36e835f130fd73b9194ef6f9efc3da9f913550ae1b1": {
+    "accepted": {
+      "1ec9f71dd37402c07253368cdd271d1926d3ef3e40c672f46a5dba44b8c8fd78": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "description": "Process ids returned by bash (N or pN) and child agent ids; omit for every child that has not reported and every own process",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "type": "array"
+          },
+          "timeout_ms": {
+            "description": "Omit for 300000; clamped to 3600000; 0 returns a snapshot",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "binding_identity": "2db89aa8c97b4c4d1316d36e835f130fd73b9194ef6f9efc3da9f913550ae1b1",
+    "executor_id": "plak.topology.wait.executor.v1"
+  },
+  "plak.topology.wait_agent.executor.v1/bc6e732439b518e54f57a26ec6cf1625f520ef770c12bad9bef59ecf860549ea": {
+    "accepted": {
+      "0e706bb0a1fd1efbfb5c2994369dc6da39e8d61209a840cca8d22cda6d4e6b21": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "agent_ids": {
+            "description": "Child ids to watch; omit for the children that have not reported yet. Returns when any of them settles, with a row per watched id.",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "timeout_ms": {
+            "description": "Omit for 300000. Capped at 3600000.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "binding_identity": "bc6e732439b518e54f57a26ec6cf1625f520ef770c12bad9bef59ecf860549ea",
+    "executor_id": "plak.topology.wait_agent.executor.v1"
+  },
+  "plakous.codex-code-mode.driver-marker.v1/40adf2d4d1d5eed1f7d66816932223a253805f3e6dd040e25bd7d1fab909403f": {
+    "accepted": {
+      "35eb2e563b83ecbda39e6a0b275d24a5d4e3cded102f49d8549bb59c99136d2c": {
+        "Utf8": {
+          "max_bytes": 1048576
+        }
+      },
+      "7833678ed344572be194c84a70c4281bb6c207e02242117fbd6e0e2709df9b37": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "cell_id": {
+            "description": "Identifier of the running exec cell.",
+            "type": "string"
+          },
+          "max_tokens": {
+            "description": "Output token budget for this wait call. Defaults to 10000 tokens.",
+            "type": "number"
+          },
+          "terminate": {
+            "description": "True stops the running exec cell; false or omitted waits for output.",
+            "type": "boolean"
+          },
+          "yield_time_ms": {
+            "description": "Wait before yielding more output. Defaults to 10000 ms; clamped to at most 600000 ms.",
+            "maximum": 600000,
+            "type": "number"
+          }
+        },
+        "required": [
+          "cell_id"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "40adf2d4d1d5eed1f7d66816932223a253805f3e6dd040e25bd7d1fab909403f",
+    "executor_id": "plakous.codex-code-mode.driver-marker.v1"
+  },
+  "plakous.merge-plan.v1/10936c5fa5ecf6991aad2f6c7186f5af46d2747582f925bf9f4e2a2da5cd84c6": {
+    "accepted": {
+      "3f197c8831202668baf19c45659872edc1dfbc18ec76fb08408392496dfe993b": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "merge": {
+            "type": "boolean"
+          },
+          "todos": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "completed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "todos"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "10936c5fa5ecf6991aad2f6c7186f5af46d2747582f925bf9f4e2a2da5cd84c6",
+    "executor_id": "plakous.merge-plan.v1"
+  },
+  "plakous.process-session-executor.v3/697a9f6d18281f9f3f1fe184e84b6acd419e6ebee590e1b431b67357ac5dac31": {
+    "accepted": {
+      "19f45c0d8f89d9631350c087278ab79e7b6a0048b72ffcff9584c2643f239657": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_output_bytes": {
+            "maximum": 40000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_output_records": {
+            "maximum": 256,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "read_so_far": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session_ids": {
+            "items": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "type": "array"
+          },
+          "wait_for_exit": {
+            "type": "boolean"
+          },
+          "wake": {
+            "enum": [
+              "any"
+            ],
+            "type": "string"
+          },
+          "yield_time_ms": {
+            "maximum": 3600000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "yield_time_ms",
+          "max_output_bytes",
+          "max_output_records"
+        ],
+        "type": "object"
+      },
+      "5accf5623f03dc0e7e4646e5c65f0852933bf968f263de5f824b2e57fc0b2fc5": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "enum": [
+              "keep_open",
+              "close"
+            ],
+            "type": "string"
+          },
+          "input": {
+            "type": "string"
+          },
+          "max_output_bytes": {
+            "maximum": 40000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session_id": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "yield_time_ms": {
+            "maximum": 300000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "input",
+          "disposition"
+        ],
+        "type": "object"
+      },
+      "a1c861b9d893cb7eda9ddced3da1abda03e6ca1ced0128fccda13d1c3a9ac283": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "hint_source": {
+            "enum": [
+              "default",
+              "model_hint",
+              "background"
+            ],
+            "type": "string"
+          },
+          "keep_stdin_open": {
+            "type": "boolean"
+          },
+          "login": {
+            "type": "boolean"
+          },
+          "max_output_bytes": {
+            "maximum": 40000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "model_description": {
+            "type": "string"
+          },
+          "tty": {
+            "type": "boolean"
+          },
+          "workdir": {
+            "type": "string"
+          },
+          "yield_time_ms": {
+            "maximum": 600000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command",
+          "workdir",
+          "login",
+          "tty",
+          "keep_stdin_open",
+          "yield_time_ms",
+          "max_output_bytes"
+        ],
+        "type": "object"
+      },
+      "b94bb9eef1360bbdf549e0270e94cc9be73953b4739ec12ef20823c84731fe83": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "697a9f6d18281f9f3f1fe184e84b6acd419e6ebee590e1b431b67357ac5dac31",
+    "executor_id": "plakous.process-session-executor.v3"
+  },
+  "plakous.process.exec.v1/3407e4111daeafe3856959f80aa4f600360fd343dcf421ad2cee6845c7ca9d4a": {
+    "accepted": {
+      "0f95a433d7c26b520c03de41007ffcbf8bdff9e61cc9669e8310c8a1c7cb7eee": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "argv": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 257,
+            "minItems": 1,
+            "type": "array"
+          },
+          "max_output_bytes": {
+            "maximum": 40000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "stdin": {
+            "type": "boolean"
+          },
+          "tty": {
+            "type": "boolean"
+          },
+          "workdir": {
+            "type": "string"
+          },
+          "yield_time_ms": {
+            "maximum": 600000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "argv",
+          "workdir",
+          "yield_time_ms",
+          "max_output_bytes"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "3407e4111daeafe3856959f80aa4f600360fd343dcf421ad2cee6845c7ca9d4a",
+    "executor_id": "plakous.process.exec.v1"
+  },
+  "plakous.product-javascript-composition.driver-marker.v1/3d46fe0a00636bf0eee27205aec9d2654c9022befbe36c87d6f66da1670406e9": {
+    "accepted": {
+      "60ec312f95cb8920b5241209193b78c4adeab311e6fecde03fd13b7da1b13af7": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "max_output_tokens": {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "source": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "yield_time_ms": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "type": "object"
+      },
+      "cda0be4b4c05a04717502b1e6f552d9b3feeb4232c174bde69a9625438e9cbf5": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "cell_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "max_tokens": {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "terminate": {
+            "type": "boolean"
+          },
+          "yield_time_ms": {
+            "maximum": 600000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cell_id"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "3d46fe0a00636bf0eee27205aec9d2654c9022befbe36c87d6f66da1670406e9",
+    "executor_id": "plakous.product-javascript-composition.driver-marker.v1"
+  },
+  "plakous.python-ptc.driver-marker.v1/2506215458f5dc759c8a8a161fbfa0b968c6b2fd83dacc6a720309c54aeda76b": {
+    "accepted": {
+      "331c4fc4157363635b570f705199da15c1ff7472e0c7ba3dd08bd0afe7a22734": {
+        "Utf8": {
+          "max_bytes": 262144
+        }
+      },
+      "5c6900c3bf1d81d25dbdfb574de035b3274478e7379a601c3ede0b6cd30a3950": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "max_output_bytes": {
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "yield_time_ms": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "8cb8fd5d2fe49d2011cec77d9fdad504969cd1abf7c0428ae2a5d40dcd387af5": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "cell_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "max_output_bytes": {
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "terminate": {
+            "type": "boolean"
+          },
+          "yield_time_ms": {
+            "maximum": 600000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cell_id"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "2506215458f5dc759c8a8a161fbfa0b968c6b2fd83dacc6a720309c54aeda76b",
+    "executor_id": "plakous.python-ptc.driver-marker.v1"
+  },
+  "plakous.python-sdk.driver-marker.v1/76e87193a802e063085d2a8a268ecf2b9dc188ccc41c407443ce6725b2bc1f4d": {
+    "accepted": {
+      "5411a5a68ecf547ef48b156e97b27b1b47178fa9a1842c6d20bac3e5f15d98ba": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 262144,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "76e87193a802e063085d2a8a268ecf2b9dc188ccc41c407443ce6725b2bc1f4d",
+    "executor_id": "plakous.python-sdk.driver-marker.v1"
+  },
+  "plakous.standard.apply-patch.v3/bfba6b4c23a9b07094917becff1de9976410087367b875f17e0e34fd362a7c9f": {
+    "accepted": {
+      "0231b1042058080355647ca7a6afc529ffad712e5f2b4c9b49fb6aa1071421bc": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "edits": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "new_string": {
+                  "type": "string"
+                },
+                "old_string": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "old_string",
+                "new_string"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "file_path": {
+            "type": "string"
+          },
+          "new_string": {
+            "type": "string"
+          },
+          "old_string": {
+            "type": "string"
+          },
+          "patch": {
+            "type": "string"
+          },
+          "replace_all": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "35eb2e563b83ecbda39e6a0b275d24a5d4e3cded102f49d8549bb59c99136d2c": {
+        "Utf8": {
+          "max_bytes": 1048576
+        }
+      }
+    },
+    "binding_identity": "bfba6b4c23a9b07094917becff1de9976410087367b875f17e0e34fd362a7c9f",
+    "executor_id": "plakous.standard.apply-patch.v3"
+  },
+  "plakous.standard.edit-files.v3/c4af1eb6255f379c36f2b44ec853931fe8fea44b305fa91ad6b0a1a6356e56c9": {
+    "accepted": {
+      "b5bc72cd2170e2875b8b0064eaaf549688ebf8c3d8138687c2c0183de2e86489": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "ops": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "all": {
+                  "type": "boolean"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "expect": {
+                  "type": "string"
+                },
+                "new": {
+                  "type": "string"
+                },
+                "old": {
+                  "type": "string"
+                },
+                "op": {
+                  "enum": [
+                    "patch",
+                    "replace",
+                    "write",
+                    "delete",
+                    "move"
+                  ],
+                  "type": "string"
+                },
+                "patch": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op"
+              ],
+              "type": "object"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "ops"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "c4af1eb6255f379c36f2b44ec853931fe8fea44b305fa91ad6b0a1a6356e56c9",
+    "executor_id": "plakous.standard.edit-files.v3"
+  },
+  "plakous.standard.inspect-image.v3/ba9496dc203ee03f0b6fcf2d197660af3bf2ea67fcf0ae8f0421b35f8c29668c": {
+    "accepted": {
+      "e728f6ac4610f45273e41ddf4449452b053e1cd26f0d633dedbbada6ea0b8e26": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "ba9496dc203ee03f0b6fcf2d197660af3bf2ea67fcf0ae8f0421b35f8c29668c",
+    "executor_id": "plakous.standard.inspect-image.v3"
+  },
+  "plakous.standard.list-entries.v3/1e3c3370c854b77c9d60a272709fe3b682b2e0e51a175cde60b42b38113511f1": {
+    "accepted": {
+      "e9609b068d3970084e23ce616b983863325a157be9244fb452ed413c39fedd66": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "depth": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "glob": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "1e3c3370c854b77c9d60a272709fe3b682b2e0e51a175cde60b42b38113511f1",
+    "executor_id": "plakous.standard.list-entries.v3"
+  },
+  "plakous.standard.read-file.v3/df0e2a38696ce7a6db087ebe4860b277e78255c875c3db721d58a87bc21d3fb6": {
+    "accepted": {
+      "0072c9690806ae65f5a164d062746e6814044a49a09b3c4c35e7db5a0197c190": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "maximum": 2000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "df0e2a38696ce7a6db087ebe4860b277e78255c875c3db721d58a87bc21d3fb6",
+    "executor_id": "plakous.standard.read-file.v3"
+  },
+  "plakous.standard.search-repository.v3/a83314d4b70f5061402ec41281ced802f950a3e466e1bc4b8cedd878d8129883": {
+    "accepted": {
+      "a1716afaa728b708b4073ae295351bff3fbe4487074420924b5ca0986cb45ce2": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "after_context": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "before_context": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "context": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "counts_only": {
+            "type": "boolean"
+          },
+          "filename_glob": {
+            "type": "string"
+          },
+          "head_limit": {
+            "maximum": 4096,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "list_directory": {
+            "type": "boolean"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "paths_only": {
+            "type": "boolean"
+          },
+          "query": {
+            "type": "string"
+          },
+          "use_regex": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "query"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "a83314d4b70f5061402ec41281ced802f950a3e466e1bc4b8cedd878d8129883",
+    "executor_id": "plakous.standard.search-repository.v3"
+  },
+  "plakous.standard.update-plan.v1.plak.session.executor-contract.r1/2907a3f6a7d650c0f99d762af7191f87605c388ffdca818adf23b5c40f5995c6": {
+    "accepted": {
+      "dc676b124c78c2e302606ffba1b4227a097f8ef0840abcc56934c29fb845d790": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "status": {
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "completed"
+                  ],
+                  "type": "string"
+                },
+                "step": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "step",
+                "status"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "2907a3f6a7d650c0f99d762af7191f87605c388ffdca818adf23b5c40f5995c6",
+    "executor_id": "plakous.standard.update-plan.v1.plak.session.executor-contract.r1"
+  },
+  "plakous.standard.view-image.v3/512deda443f99c314ace97d4f21060de90e66e19ce4c7a3bdea6a071da1e0d7b": {
+    "accepted": {
+      "e07ceff9d8ce98fdd3338009f55cac1d26803439eb4dd1c60ff133cfcdb5b316": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "description": "Local filesystem path to an image file.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "512deda443f99c314ace97d4f21060de90e66e19ce4c7a3bdea6a071da1e0d7b",
+    "executor_id": "plakous.standard.view-image.v3"
+  },
+  "plakous.web.fetch_url.executor.v1/9eb809e101fe285b4bfb6843b2714516fc92e18bc0adf9f70f50f517831c5384": {
+    "accepted": {
+      "3f92b559845df2004255b7904eb5a6299c6d9c9f2a70777887fec3d20426e00f": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "max_bytes": {
+            "maximum": 8388608,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "url": {
+            "maxLength": 2048,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "9eb809e101fe285b4bfb6843b2714516fc92e18bc0adf9f70f50f517831c5384",
+    "executor_id": "plakous.web.fetch_url.executor.v1"
+  },
+  "plakous.web.image_gen.executor.v1/277ba7144e8167c70455ced270f69d2182b044baf507b40e9365da27887bf553": {
+    "accepted": {
+      "e018c2710284c4b4919eb6250f40d3e05ff81e1e4368011db709532f96d0a7da": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "edit_from": {
+            "items": {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "prompt": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "size": {
+            "maxLength": 11,
+            "minLength": 4,
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt",
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "277ba7144e8167c70455ced270f69d2182b044baf507b40e9365da27887bf553",
+    "executor_id": "plakous.web.image_gen.executor.v1"
+  },
+  "plakous.web.web_fetch.executor.v1/6a2c6bdc3ca32141015dae53338ef3092a55b33aa11b32b09c500d2e9bb46736": {
+    "accepted": {
+      "76c486e8aa886baad1635b2c1bcb49d11c8619bbe25b2885244711b92957a337": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "prompt": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "prompt"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "6a2c6bdc3ca32141015dae53338ef3092a55b33aa11b32b09c500d2e9bb46736",
+    "executor_id": "plakous.web.web_fetch.executor.v1"
+  },
+  "plakous.web.web_search.executor.v1/dd64e72478e1556c5f44877f066a792cfebfc1342aee1f03a129a5d2a73a71ff": {
+    "accepted": {
+      "c321f6afcc5f33c2dbb6cf68ad4f0ab747021ef3c55316687d0c7d8625bc8502": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "allowed_domains": {
+            "items": {
+              "maxLength": 253,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "blocked_domains": {
+            "items": {
+              "maxLength": 253,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "query": {
+            "maxLength": 512,
+            "minLength": 2,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "dd64e72478e1556c5f44877f066a792cfebfc1342aee1f03a129a5d2a73a71ff",
+    "executor_id": "plakous.web.web_search.executor.v1"
+  },
+  "plakous.web.web_search.executor.v1/e967dc29398cad4c10f5f5ce39a6582d8f9728dda30f6de87307000ca55512bf": {
+    "accepted": {
+      "654f3c025bfdec42d189849d84db4a8db0bf9a04086d78e7f2f878482bf0ce02": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "maxLength": 512,
+            "minLength": 2,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "e967dc29398cad4c10f5f5ce39a6582d8f9728dda30f6de87307000ca55512bf",
+    "executor_id": "plakous.web.web_search.executor.v1"
+  },
+  "plakous.web.x_search.executor.v1/31e712f04aab1aa43df857ac0ae5318ba0d9b6195355388f78549d7d0c607811": {
+    "accepted": {
+      "a7820ca78c04d061788c7248cf7095d7c82203dadb94e02b898c11832fffa5f6": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "from_date": {
+            "maxLength": 10,
+            "minLength": 10,
+            "type": "string"
+          },
+          "handles": {
+            "items": {
+              "maxLength": 15,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "query": {
+            "maxLength": 512,
+            "minLength": 2,
+            "type": "string"
+          },
+          "to_date": {
+            "maxLength": 10,
+            "minLength": 10,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "31e712f04aab1aa43df857ac0ae5318ba0d9b6195355388f78549d7d0c607811",
+    "executor_id": "plakous.web.x_search.executor.v1"
+  }
+}
