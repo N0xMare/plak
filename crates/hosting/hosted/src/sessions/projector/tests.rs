@@ -25,6 +25,7 @@ use crate::sessions::{NoticeScope, ProductCompactReason, SessionWorkflowKind, Tr
 
 #[cfg(test)]
 mod perf_commit;
+mod wake_continuation;
 
 fn project(
     views: SessionViews,

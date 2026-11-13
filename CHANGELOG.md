@@ -13,6 +13,10 @@ for one version bump, without native protocol compatibility.
   total. Reopening after a host restart starts empty; reconnecting a client to
   the same runtime does not reset it. Durable per-turn usage is unchanged.
 
+- Fix child-result wakes remaining suppressed after a host restart continued
+  the root's interrupted work. An admitted handoff or owner-loss continuation
+  rearms waking durably; later operator stops and interrupts still suppress it.
+
 - Reload durable runner owner floors and retention-only roles after acquiring
   the native daemon lock, so replacement startup cannot revive stale authority.
 

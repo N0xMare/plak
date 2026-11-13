@@ -252,6 +252,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
             {
                 Ok(after_ack) => {
                     session.queue_commands = after_ack.commands;
+                    session.child_wake_suppressed = after_ack.wake_suppressed;
                     projected_root_turns = Some(after_ack.root_turns);
                 }
                 Err(error) => {
@@ -526,6 +527,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
         return Ok(DrivenTurn::continuing(outcome));
     }
     let turn = turn.ok_or_else(|| "new command omitted its turn authority".to_owned())?;
+    job_agent.set_notice_delivery_available(host_wakes && !session.child_wake_suppressed);
     // The product save above is the admission boundary: the turn's owner now
     // exists, so the correlated lifecycle marker opens here.
     emit_turn_lifecycle(

@@ -3,6 +3,7 @@ use super::{
     OpenTurn, PauseCause, ROUND_PROSE_ORDINAL, ReadActor, ReadItem, ReadPart, RowKey,
     TranscriptRow, control_error_label, host_owns_subject, item_rows, session_wide, tool_row,
 };
+use crate::sessions::projector::{RootContinuationCause, RootContinuationDecision};
 
 impl Applier<'_> {
     pub(super) fn command_rejected(
@@ -64,12 +65,31 @@ impl Applier<'_> {
                         },
                     );
                 }
-                if !host_wake {
+                // A loss continuation resumes the interrupted work, including
+                // its permission to wake for children. Ordinary host wakes and
+                // transient retries must not clear an operator's suppression.
+                let resumes_loss = self.intents.root_continuations.iter().any(|intent| {
+                    intent.anchor < self.seq()
+                        && matches!(
+                            intent.value.cause,
+                            RootContinuationCause::Handoff | RootContinuationCause::OwnerLost
+                        )
+                        && matches!(
+                            &intent.value.decision,
+                            RootContinuationDecision::NewTurn {
+                                command_id: resumed, ..
+                            } if resumed == command_id
+                        )
+                });
+                if !host_wake || resumes_loss {
                     let anchor = self.seq();
                     self.views.state.wake = Some(Anchored {
                         anchor,
                         value: false,
                     });
+                }
+                if !host_wake {
+                    let anchor = self.seq();
                     self.views.state.pause = Some(Anchored {
                         anchor,
                         value: None,

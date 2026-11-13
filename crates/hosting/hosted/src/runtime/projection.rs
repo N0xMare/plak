@@ -40,10 +40,11 @@ pub(in crate::runtime) async fn queue_join(
 }
 
 /// What the after-ack pass leaves: the queue the projected views and the
-/// stored intents name, and the views' root-turn count.
+/// stored intents name, and the views' root-turn count and wake permission.
 pub(in crate::runtime) struct AfterAck {
     pub(in crate::runtime) commands: crate::sessions::QueueCommands,
     pub(in crate::runtime) root_turns: u64,
+    pub(in crate::runtime) wake_suppressed: bool,
 }
 
 /// The projector pass after an acknowledged command. The session's live
@@ -86,6 +87,7 @@ async fn after_ack_pass(
     Ok(AfterAck {
         commands: crate::sessions::QueueCommands::from_join(&intents, Some(&views)),
         root_turns: views.state.counters.root_turns,
+        wake_suppressed: views.wake_suppressed(&intents),
     })
 }
 

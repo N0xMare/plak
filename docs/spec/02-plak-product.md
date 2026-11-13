@@ -1996,7 +1996,7 @@ view, and nothing is both.
 | Workflow completion | view | `WorkflowAdmitted`, `WorkflowSettled` with the request's operation id; for new, the successor session's `SessionCreated` with the derived create operation id | admitted without settlement belongs to the runtime; settled ends the request; neither means never admitted |
 | Pause causes | intent-backed view | the facts that pause (a context-capacity or `RecoveryRequired` `TurnTerminal`, a session-wide `CommandRejected`, a `WorkflowSettled` of a scheduled pass that did not compact) and `pause_cause` intents the host writes for causes no fact carries (an unrecorded session-wide refusal, a failed wake preflight); a workflow fact joins its request by the request's operation id, never by the derived workflow identity | the newest applied cause, by anchor, for the restored note; drain itself is process-local and never stored |
 | Counters: root turns, tool calls, compactions | view | root `CommandAccepted`; the distinct call ids of effect `OperationAdvanced` facts and of the tool results `HistoryAppended` commits (so a call rejected before preparation counts once); each `WorkflowSettled { Compacted }` once, whatever its reason (endpoint or turn fence) | monotonic over the applied records; a successor starts from its source's values at the `Branched` record; after a `BehindRetention` rebuild they restart from zero |
-| Child-wake suppression | intent-backed view | `wake_suppression` intents the host writes on an idle interrupt and on a failed or discarded wake; the cancel of a running `HostWake` turn (`CommandAccepted` of a cancel naming it), a context-capacity `TurnTerminal` of a `HostWake` root, and a `QuotaExceeded` failed `TurnTerminal` of any root turn | suppressed from the newest such intent or fact until a `CommandAccepted` of a `UserPrompt` root anchored after it |
+| Child-wake suppression | intent-backed view | `wake_suppression` intents the host writes on an idle interrupt and on a failed or discarded wake; the cancel of a running `HostWake` turn (`CommandAccepted` of a cancel naming it), a context-capacity `TurnTerminal` of a `HostWake` root, and a `QuotaExceeded` failed `TurnTerminal` of any root turn | suppressed from the newest such intent or fact until a later `CommandAccepted` of a `UserPrompt` root or of the exact new-turn command in a recorded root `handoff`/`owner_lost` continuation decision |
 | Agent attention acknowledgements | intent | `(tree, agent, attempt, attention)` | operator-authored presentation bookkeeping |
 | Identity registry | intent | each identity and its content digest | permanent; a discarded unadmitted workflow binding refuses even identical replay; it holds no runtime outcomes |
 | Carry and export bookkeeping: carried-forward lineage, carry files, retained references, deleted-artifact tombstones | intent and files | §2.5 | lineage is written by import; files and tombstones live outside the store and keep their own rules |
@@ -6883,8 +6883,14 @@ counter. It is set by the cancel of a running wake turn, a wake's
 context-capacity terminal, or any root turn's failed terminal typed
 `QuotaExceeded` (feed facts), or by a `wake_suppression` intent the
 host writes on an idle interrupt and on a failed or discarded wake; a user
-prompt's accepted root anchored after it clears it, and nothing else does, so it
-survives reopen and rebuild. Fresh completions can keep waking the root without a user
+prompt's accepted root anchored after it clears it. Acceptance of the exact
+new-turn command in a recorded root handoff or owner-loss continuation decision
+also rearms child wakes: cancelling work to release its host is not a lasting
+operator pause once that work is continued. Recording the decision or reopening
+alone does not clear suppression; ordinary host wakes and transient retries do
+not clear it. A later operator Stop or interrupt suppresses wakes again in
+anchor order. These transitions survive reopen and view rebuild. Fresh completions
+can keep waking the root without a user
 prompt. While the root is idle, one `PendingContinuation` observation carries
 undelivered root results, undelivered root questions, process exits not yet
 seen by a turn, auto-continue paused, and tree paused. Auto-continue counts as

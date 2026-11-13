@@ -313,6 +313,7 @@ not (
   | test(jj_cli_doctor_bounds_output_wait_after_leader_exit)
   | test(pending_wakes_return_the_wait_and_are_consumed)
   | test(durability::)
+  | test(host_skeleton::root_wake::)
   |
   test(service::delegation::tests::loss::)
   | test(operator_host_loss_sigkill_cuts_retain_pins_and_first_bind_waits_for_proof)
@@ -654,6 +655,8 @@ default-filter = '''
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
+  test(host_skeleton::root_wake::)
+  |
   test(service::delegation::tests::loss::)
   |
   test(operator_host_loss_sigkill_cuts_retain_pins_and_first_bind_waits_for_proof)

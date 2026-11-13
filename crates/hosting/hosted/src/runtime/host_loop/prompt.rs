@@ -1155,8 +1155,7 @@ impl<'o, P: plakous_host_protocol::ProtocolExtension>
             user_text.clone(),
             super::super::TurnHost {
                 job_agent: agent,
-                host_wakes: self.role.config.prompt_host_facts().host_wakes
-                    && !self.role.config.session.child_wake_suppressed,
+                host_wakes: self.role.config.prompt_host_facts().host_wakes,
                 quit_started_at: &mut self.quit_started_at,
                 quit_job_stops: &mut self.quit_job_stops,
                 actions: self.role.actions,

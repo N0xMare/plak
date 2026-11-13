@@ -1822,6 +1822,7 @@ mod directory;
 mod profiles;
 mod reload;
 mod requests;
+mod root_wake;
 mod runner;
 mod singleton;
 pub(crate) mod sweep;
