@@ -143,6 +143,10 @@ impl SessionRecordStore for PresentingStore {
         self.inner.load_intents(id)
     }
 
+    fn submission_owner(&self, command_id: &str) -> Result<Option<String>, String> {
+        self.inner.submission_owner(command_id)
+    }
+
     fn load_inherited_submissions(&self, id: &str) -> Result<Vec<Submission>, String> {
         self.inner.load_inherited_submissions(id)
     }

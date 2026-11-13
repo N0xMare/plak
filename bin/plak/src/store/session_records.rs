@@ -291,6 +291,10 @@ impl SessionRecordStore for SqliteSessionStore {
         self.with_store(|store| store.load_intents(id))
     }
 
+    fn submission_owner(&self, command_id: &str) -> Result<Option<String>, String> {
+        self.with_store(|store| store.submission_owner(command_id))
+    }
+
     fn load_inherited_submissions(
         &self,
         id: &str,

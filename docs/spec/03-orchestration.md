@@ -3903,6 +3903,11 @@ attempt; a parent followup supersedes it only with `acknowledge_recovery`
 Consent is the one durable continuation decision intent of kind
 `continuation` for the attempt, cause, host generation, round 1 and anchor,
 deciding a new turn under its own command id (`plak:resume-loss:`). It is
+namespaced by the durable tree identity as well as the child, attempt and
+stopped-turn or command anchor; equal local child and attempt ids in different
+trees cannot alias. Reopen reads an existing decision's stored command id,
+including an older unnamespaced id, rather than deriving a replacement. An
+accepted or otherwise facted decision is never dispatched again. It is
 written and published before anything is dispatched; a refused publication
 rolls it back and nothing runs. With consent recorded and the turn not yet
 admitted the continuation is **pending**: every recovery run resubmits it
@@ -3994,7 +3999,26 @@ whose command was accepted; the lost turn's own submission is older, so a new
 operator prompt ends the hold, which is the later-turn rule applied to the
 root). Consent is one product-store root continuation naming the loss's stop
 anchor, deciding a new turn under a `plak:resume-loss:root:` command id
-derived from the loss intent's position. It records host generation 1: a
+derived from the durable product session id and the loss intent's position
+(anchor and ordinal). Equal feed positions in different sessions cannot alias.
+Reopen identifies an already-recorded decision by its stored loss anchor and
+cause within that session, using its stored command id rather than recomputing
+it. This also preserves older decisions: an unconsumed one continues under its
+original id; an accepted one is not continued again.
+
+An older pending id whose verified global product submission belongs to a
+different session could not have been admitted for this session: product
+submission precedes runtime admission. Only that proven collision may be
+superseded. The owner records a new decision in round 2, under the namespaced
+id, with the displaced unadmitted id in `withdrawn`, before preparing anything.
+It never edits or withdraws the other session's submission or runtime command.
+Reopen chooses the highest recorded decision round for the same loss, so a
+crash before preparation reuses that replacement rather than issuing it again.
+A submission owned by this session is never superseded; an unreadable,
+inconsistent or ambiguous ownership verdict refuses preparation visibly.
+There is no schema migration or re-encoding of stored canonical command ids.
+
+It records host generation 1: a
 loss names the one root turn a lost host left, so one decision per loss is
 already one per host generation. It is written before the turn is
 prepared; the turn is a host instruction (a host-wake submission under that

@@ -35,6 +35,216 @@ fn read(intents: &ProductIntents, views: &SessionViews) -> Option<RootLossState>
     state(&latest_loss(intents)?, intents, views)
 }
 
+#[test]
+fn root_continuation_equal_loss_positions_in_distinct_sessions_do_not_collide() {
+    let directory = tempfile::tempdir().unwrap();
+    let rows = crate::runtime::test_kit::MemoryRows::new();
+    let store: &dyn SessionRecordStore = rows.records();
+    let mut commands = Vec::new();
+    for _ in 0..2 {
+        let mut session = SessionRecord::new(directory.path().to_path_buf());
+        store.save(&mut session).unwrap();
+        record_root_handoff(
+            store,
+            &session,
+            &LostRootTurn {
+                turn_id: "equal-feed-position".into(),
+                applied_seq: 0,
+            },
+        )
+        .unwrap();
+        let command = record_root_consent(store, &session).unwrap().unwrap();
+        assert_eq!(
+            record_root_consent(store, &session).unwrap(),
+            Some(command.clone())
+        );
+        commands.push(command);
+    }
+    assert_ne!(commands[0], commands[1]);
+}
+
+#[test]
+fn root_continuation_recorded_legacy_decisions_are_reused_not_rederived() {
+    use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
+    use crate::sessions::projector::ViewWrites;
+    struct UnknownOwner;
+    impl StoreFaults for UnknownOwner {
+        fn before(&self, call: StoreCall, _: Option<&SessionRecord>) -> Result<(), String> {
+            if call == StoreCall::SubmissionOwner {
+                return Err("submission ownership cannot be verified".into());
+            }
+            Ok(())
+        }
+    }
+    for consumed in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let rows = std::sync::Arc::new(crate::session_store::MemoryStore::new());
+        let store: &dyn SessionRecordStore = rows.as_ref();
+        let mut session = SessionRecord::new(directory.path().to_path_buf());
+        store.save(&mut session).unwrap();
+        record_root_handoff(
+            store,
+            &session,
+            &LostRootTurn {
+                turn_id: "legacy-turn".into(),
+                applied_seq: 0,
+            },
+        )
+        .unwrap();
+        let intents = store.load_intents(&session.id).unwrap();
+        let loss = latest_loss(&intents).unwrap();
+        let digest = plakous_workspace::occupancy_vcs::digest_text(&loss.identity);
+        let legacy = format!("{ROOT_LOSS_RESUME_PREFIX}{}", &digest[..32]);
+        assert_ne!(legacy, command_id(&session.id, &loss.identity));
+        store
+            .write_root_loss(
+                &session.id,
+                RootLossIntent::Continuation(RootContinuation {
+                    anchor: loss.anchor,
+                    host_generation: 1,
+                    cause: loss.cause,
+                    round: 1,
+                    decided_at_ms: 1,
+                    decision: RootContinuationDecision::NewTurn {
+                        command_id: legacy.clone(),
+                        withdrawn: Vec::new(),
+                    },
+                }),
+            )
+            .unwrap();
+        let unknown = FaultStore::new(rows.clone(), UnknownOwner);
+        assert!(record_root_consent(&unknown, &session).is_err());
+        assert_eq!(
+            store
+                .load_intents(&session.id)
+                .unwrap()
+                .root_continuations
+                .len(),
+            1
+        );
+        if consumed {
+            let before = SessionViews::empty();
+            let mut after = before.clone();
+            after
+                .state
+                .deliveries
+                .insert(legacy.clone(), Delivery::Accepted);
+            store
+                .commit_projection_views(
+                    &session.id,
+                    &ViewWrites::between(&before, &after),
+                    &after.state,
+                )
+                .unwrap();
+        }
+        for _ in 0..2 {
+            assert_eq!(
+                record_root_consent(store, &session).unwrap(),
+                (!consumed).then(|| legacy.clone())
+            );
+            assert_eq!(
+                store
+                    .load_intents(&session.id)
+                    .unwrap()
+                    .root_continuations
+                    .len(),
+                1
+            );
+        }
+    }
+}
+
+#[test]
+fn root_continuation_foreign_legacy_submission_is_superseded_once_without_touching_its_owner() {
+    use crate::sessions::projector::ViewWrites;
+    let directory = tempfile::tempdir().unwrap();
+    let rows = crate::runtime::test_kit::MemoryRows::new();
+    let store: &dyn SessionRecordStore = rows.records();
+    let mut sessions = [
+        SessionRecord::new(directory.path().to_path_buf()),
+        SessionRecord::new(directory.path().to_path_buf()),
+    ];
+    let mut legacy = String::new();
+    for session in &mut sessions {
+        store.save(session).unwrap();
+        record_root_handoff(
+            store,
+            session,
+            &LostRootTurn {
+                turn_id: "old-handoff".into(),
+                applied_seq: 0,
+            },
+        )
+        .unwrap();
+        let loss = latest_loss(&store.load_intents(&session.id).unwrap()).unwrap();
+        let digest = plakous_workspace::occupancy_vcs::digest_text(&loss.identity);
+        legacy = format!("{ROOT_LOSS_RESUME_PREFIX}{}", &digest[..32]);
+        store
+            .write_root_loss(
+                &session.id,
+                RootLossIntent::Continuation(RootContinuation {
+                    anchor: loss.anchor,
+                    host_generation: 1,
+                    cause: loss.cause,
+                    round: 1,
+                    decided_at_ms: 1,
+                    decision: RootContinuationDecision::NewTurn {
+                        command_id: legacy.clone(),
+                        withdrawn: Vec::new(),
+                    },
+                }),
+            )
+            .unwrap();
+    }
+    let submission = Submission {
+        command_id: legacy.clone(),
+        kind: SubmissionKind::HostWake,
+        queue_item_id: "legacy-item".into(),
+        queue_item_revision: 1,
+        target_turn_id: None,
+        canonical_command: ROOT_HANDOFF_RESUME_TEXT.into(),
+        submitted_at_ms: 1,
+    };
+    store
+        .save_submission(&mut sessions[0], &submission)
+        .unwrap();
+    assert_eq!(
+        record_root_consent(store, &sessions[0]).unwrap(),
+        Some(legacy.clone())
+    );
+    let before = SessionViews::empty();
+    let mut consumed = before.clone();
+    consumed
+        .state
+        .deliveries
+        .insert(legacy.clone(), Delivery::Accepted);
+    store
+        .commit_projection_views(
+            &sessions[0].id,
+            &ViewWrites::between(&before, &consumed),
+            &consumed.state,
+        )
+        .unwrap();
+    let replacement = record_root_consent(store, &sessions[1]).unwrap().unwrap();
+    assert_ne!(legacy, replacement);
+    for _ in 0..2 {
+        assert_eq!(record_root_consent(store, &sessions[0]).unwrap(), None);
+        assert_eq!(
+            record_root_consent(store, &sessions[1]).unwrap(),
+            Some(replacement.clone())
+        );
+        assert_eq!(
+            store.submission_owner(&legacy).unwrap(),
+            Some(sessions[0].id.clone())
+        );
+        let intents = store.load_intents(&sessions[1].id).unwrap();
+        assert_eq!(intents.root_continuations.len(), 2);
+        assert!(matches!(&intents.root_continuations[1].value.decision,
+            RootContinuationDecision::NewTurn { command_id, withdrawn }
+            if command_id == &replacement && withdrawn == std::slice::from_ref(&legacy)));
+    }
+}
+
 /// The root's owner-lost interrupt holds its continuation until a
 /// decision names it, and the decision is pending until its command is
 /// admitted, running while its turn is open, then over.
@@ -46,7 +256,7 @@ fn a_root_loss_holds_then_pends_then_runs_its_continuation() {
     lost(&mut intents, 9, RootInterruptCause::OwnerLost);
     assert_eq!(read(&intents, &views), Some(RootLossState::Held));
     let loss = latest_loss(&intents).unwrap();
-    let command = command_id(&loss.identity);
+    let command = command_id("session-one", &loss.identity);
     assert!(is_root_loss_command(&command));
     assert!(command.len() <= 128);
     intents.root_continuations.push(AnchoredIntent {

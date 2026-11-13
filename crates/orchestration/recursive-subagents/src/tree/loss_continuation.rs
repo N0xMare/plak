@@ -49,7 +49,8 @@ impl ProductAgentTree {
     /// The continuation command identity for one attempt and what the loss
     /// stopped: the same every time, so a resubmission is exact.
     #[must_use]
-    pub fn loss_resume_command_id(
+    fn loss_resume_command_id(
+        &self,
         agent_id: &str,
         attempt: &AttemptId,
         anchor: &ContinuationAnchor,
@@ -60,7 +61,7 @@ impl ProductAgentTree {
         };
         // A runtime command id is at most 128 portable characters, so the
         // attempt and anchor enter it as a digest.
-        let digest = super::digest_text(&format!("{attempt}\n{kind}\n{id}"));
+        let digest = super::digest_text(&format!("{}\n{attempt}\n{kind}\n{id}", self.tree_id));
         format!(
             "{}{agent_id}:{}",
             Self::LOSS_RESUME_COMMAND_PREFIX,
@@ -203,7 +204,7 @@ impl ProductAgentTree {
             return Ok(command_id);
         }
         let command_id =
-            Self::loss_resume_command_id(agent_id, &continuation.attempt_id, &continuation.anchor);
+            self.loss_resume_command_id(agent_id, &continuation.attempt_id, &continuation.anchor);
         let intent = ContinuationIntent {
             attempt_id: Some(continuation.attempt_id),
             anchor: continuation.anchor,

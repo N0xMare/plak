@@ -96,8 +96,9 @@ pub(crate) fn is_root_loss_command(command_id: &str) -> bool {
     command_id.starts_with(ROOT_LOSS_RESUME_PREFIX)
 }
 
-fn command_id(identity: &str) -> String {
-    let digest = plakous_workspace::occupancy_vcs::digest_text(identity);
+fn command_id(session_id: &str, identity: &str) -> String {
+    let digest =
+        plakous_workspace::occupancy_vcs::digest_text(&format!("{session_id}\n{identity}"));
     format!("{ROOT_LOSS_RESUME_PREFIX}{}", &digest[..32])
 }
 
@@ -114,8 +115,17 @@ fn latest_loss(intents: &ProductIntents) -> Option<Loss> {
     let decided = intents
         .root_continuations
         .iter()
-        .filter(|decision| decision.value.anchor == latest.value.anchor)
-        .find_map(|decision| match &decision.value.decision {
+        .filter(|decision| {
+            decision.value.anchor == latest.value.anchor && decision.value.cause == cause
+        })
+        .filter(|decision| {
+            matches!(
+                decision.value.decision,
+                RootContinuationDecision::NewTurn { .. }
+            )
+        })
+        .max_by_key(|decision| (decision.value.round, decision.anchor, decision.ordinal))
+        .and_then(|decision| match &decision.value.decision {
             RootContinuationDecision::NewTurn { command_id, .. } => Some(command_id.clone()),
             _ => None,
         });
@@ -667,7 +677,9 @@ pub(crate) fn stop_root_continuation(
 /// The decision records host generation 1: the root's decision is keyed by
 /// the loss it names, and a loss names the one root turn a lost host left,
 /// so one decision per loss is already one per host generation. The product
-/// store keeps no host generation of its own to record instead.
+/// store keeps no host generation of its own to record instead. Round 2 is
+/// reserved for the proven foreign-submission collision of an unadmitted
+/// legacy decision; it never replaces an accepted command.
 ///
 /// # Errors
 /// A product store read or write refused.
@@ -682,12 +694,34 @@ pub(crate) fn record_root_consent(
     let views = store
         .load_views(&session.id)?
         .unwrap_or_else(SessionViews::empty);
-    match state(&loss, &intents, &views) {
-        Some(RootLossState::Pending(command)) => return Ok(Some(command)),
-        Some(RootLossState::Held) => {}
+    let withdrawn = match state(&loss, &intents, &views) {
+        Some(RootLossState::Pending(command)) => {
+            match store.submission_owner(&command)? {
+                Some(owner) if owner != session.id => {
+                    let digest = plakous_workspace::occupancy_vcs::digest_text(&loss.identity);
+                    let legacy = format!("{ROOT_LOSS_RESUME_PREFIX}{}", &digest[..32]);
+                    if command != legacy || intents.submission(&command).is_some() {
+                        return Err("continuation submission ownership is inconsistent; continuation remains held".to_owned());
+                    }
+                    // The global durable submission belongs elsewhere, so
+                    // this session could not have admitted it. Never alter
+                    // that foreign row or its canonical runtime command.
+                    vec![command]
+                }
+                _ => return Ok(Some(command)),
+            }
+        }
+        Some(RootLossState::Held) => Vec::new(),
         Some(RootLossState::Running) | None => return Ok(None),
+    };
+    let command = command_id(&session.id, &loss.identity);
+    if store
+        .submission_owner(&command)?
+        .is_some_and(|owner| owner != session.id)
+    {
+        return Err("namespaced continuation submission belongs to another session; continuation remains held".to_owned());
     }
-    let command = command_id(&loss.identity);
+    let round = if withdrawn.is_empty() { 1 } else { 2 };
     let decided_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| {
@@ -700,11 +734,11 @@ pub(crate) fn record_root_consent(
                 anchor: loss.anchor,
                 host_generation: 1,
                 cause: loss.cause,
-                round: 1,
+                round,
                 decided_at_ms,
                 decision: RootContinuationDecision::NewTurn {
                     command_id: command.clone(),
-                    withdrawn: Vec::new(),
+                    withdrawn,
                 },
             }),
         )

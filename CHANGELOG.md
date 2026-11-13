@@ -7,6 +7,12 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Fix continuation command collisions between distinct sessions at equal feed
+  positions, and namespace child loss continuations by their tree. Reopen keeps
+  recorded decision identities, including older pending and consumed decisions.
+  A proven foreign-submission collision gets one durable replacement decision;
+  the other session's submission and accepted work remain untouched.
+
 - Fixed a busy root's graceful host handoff being lost after an accepted
   send-now steer; restarting the host continues the handed-off turn once.
 

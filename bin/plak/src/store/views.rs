@@ -487,6 +487,16 @@ impl ProductStore {
         intents_of(&self.connection, &mut self.verified_submissions, session_id)
     }
 
+    pub(crate) fn submission_owner(&mut self, command_id: &str) -> Result<Option<String>, String> {
+        let submissions = load_submissions_where(
+            &self.connection,
+            &mut self.verified_submissions,
+            "command_id=?1",
+            command_id,
+        )?;
+        Ok(submissions.into_iter().next().map(|(owner, _)| owner))
+    }
+
     /// The stored views of one session, or `None` before its first projector
     /// transaction (or after the views were deleted for a rebuild).
     pub fn load_views(&mut self, session_id: &str) -> Result<Option<SessionViews>, String> {

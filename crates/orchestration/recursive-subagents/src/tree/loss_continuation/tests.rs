@@ -21,6 +21,78 @@ fn reopened_after_loss() -> (tempfile::TempDir, ProductAgentTree, String) {
     (root, reopened, child)
 }
 
+#[test]
+fn child_continuation_equal_attempts_and_anchors_in_distinct_trees_do_not_collide() {
+    let (_root, mut first, child) = reopened_after_loss();
+    let mut second = ProductAgentTree::reopen(first.to_persisted());
+    second.tree_id = "other-tree".to_owned();
+    let first_command = first.record_loss_continuation(&child, 7).unwrap();
+    let second_command = second.record_loss_continuation(&child, 7).unwrap();
+    assert_ne!(first_command, second_command);
+}
+
+#[test]
+fn child_continuation_recorded_legacy_decisions_are_reused_across_reopens() {
+    for consumed in [false, true] {
+        let (_root, mut tree, child) = reopened_after_loss();
+        let continuation = tree.loss_continuation(&child).unwrap();
+        let (kind, id) = match &continuation.anchor {
+            ContinuationAnchor::Turn { turn_id } => ("turn", turn_id),
+            ContinuationAnchor::Command { command_id } => ("command", command_id),
+        };
+        let digest = digest_text(&format!("{}\n{kind}\n{id}", continuation.attempt_id));
+        let legacy = format!(
+            "{}{child}:{}",
+            ProductAgentTree::LOSS_RESUME_COMMAND_PREFIX,
+            &digest[..32]
+        );
+        let intent = ContinuationIntent {
+            attempt_id: Some(continuation.attempt_id.clone()),
+            anchor: continuation.anchor,
+            host_generation: tree.host_generation.max(1),
+            cause: continuation.cause,
+            round: 1,
+            decided_at_ms: 7,
+            decision: ContinuationDecision::NewTurn {
+                command_id: legacy.clone(),
+                withdrawn: Vec::new(),
+            },
+        };
+        let operation = intent.to_operation(&child, None).unwrap();
+        tree.operations
+            .insert(operation.operation_id.clone(), operation);
+        if consumed {
+            tree.record_command(AgentCommand::intent(
+                legacy.clone(),
+                &child,
+                Some(continuation.attempt_id),
+                AgentCommandKind::Resume,
+                "continue",
+                Vec::new(),
+            ))
+            .unwrap();
+            tree.commands.get_mut(&legacy).unwrap().fact = Some(CommandFact::Rejected);
+        }
+        for _ in 0..2 {
+            tree = ProductAgentTree::reopen(tree.to_persisted());
+            if consumed {
+                assert_eq!(tree.loss_continuation(&child), None);
+                assert!(tree.record_loss_continuation(&child, 8).is_err());
+            } else {
+                assert_eq!(tree.record_loss_continuation(&child, 8).unwrap(), legacy);
+            }
+            assert_eq!(
+                tree.loss_decisions(
+                    &child,
+                    tree.node(&child).unwrap().attempt_id.as_ref().unwrap()
+                )
+                .len(),
+                1
+            );
+        }
+    }
+}
+
 fn view(tree: &ProductAgentTree, agent_id: &str) -> plakous_host_protocol::views::NodeView {
     view::project_tree_view(tree)
         .nodes

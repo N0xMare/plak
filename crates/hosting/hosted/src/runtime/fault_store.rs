@@ -17,6 +17,7 @@ pub(crate) enum StoreCall {
     WithdrawUnadmittedWorkflows,
     ListForWorkspace,
     LoadIntents,
+    SubmissionOwner,
     LoadInheritedSubmissions,
     LoadViews,
     LoadQueueCommands,
@@ -226,6 +227,11 @@ impl<F: StoreFaults + 'static> SessionRecordStore for FaultStore<F> {
     fn load_intents(&self, id: &str) -> Result<sessions::projector::ProductIntents, String> {
         self.faults.before(StoreCall::LoadIntents, None)?;
         self.inner.load_intents(id)
+    }
+
+    fn submission_owner(&self, command_id: &str) -> Result<Option<String>, String> {
+        self.faults.before(StoreCall::SubmissionOwner, None)?;
+        self.inner.submission_owner(command_id)
     }
 
     fn load_inherited_submissions(

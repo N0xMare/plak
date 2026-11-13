@@ -256,6 +256,13 @@ pub trait SessionRecordStore: Send + Sync {
     /// A message when the store cannot be read or a row is invalid.
     fn load_intents(&self, id: &str) -> Result<ProductIntents, String>;
 
+    /// Verified owner of an immutable product submission, across sessions.
+    /// Absence is not proof of canonical runtime non-admission.
+    ///
+    /// # Errors
+    /// Refuses unreadable or inconsistent submission authority.
+    fn submission_owner(&self, command_id: &str) -> Result<Option<String>, String>;
+
     /// The immutable submissions of same-runtime ancestors. Reads only ancestry
     /// metadata and submissions, not full records.
     ///
@@ -756,6 +763,16 @@ mod memory {
     }
 
     impl SessionRecordStore for MemoryStore {
+        fn submission_owner(&self, command_id: &str) -> Result<Option<String>, String> {
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            Ok(state
+                .intents
+                .iter()
+                .find_map(|(owner, intents)| intents.submission(command_id).map(|_| owner.clone())))
+        }
         /// Memory writes never park, so there is no wait to interrupt.
         fn with_storage_interrupt(
             self: std::sync::Arc<Self>,
