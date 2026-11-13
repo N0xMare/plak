@@ -175,12 +175,21 @@ in a change; amend the chapter that owns them.
 - Do not preserve backward compatibility. Remove obsolete paths instead of
   adding compatibility layers, fallbacks, or migrations. Unshipped prototype
   APIs and databases have no compatibility claim.
-- The one exception is cross-build session reference: the export document is the one
-  cross-build carrier. A build MUST import export documents of its own version
+- The first exception is cross-build session reference: the export document is the
+  cross-build session carrier. A build MUST import export documents of its own version
   and of the immediately previous version. Any change to the document,
   including the embedded canonical-history and binding encodings, bumps the
   version; the previous version's importer is kept for one bump only. Older
   builds need not import newer documents.
+- The second exception is the runner job-retention endpoint: a runner daemon MUST
+  serve, and the next build's daemon MUST speak, the retention endpoint of its own
+  version and of the immediately previous version, so that jobs started by the
+  previous build survive a planned upgrade. The endpoint is a same-user,
+  same-machine private socket with a fixed verb set (lines, transfer, jobs
+  snapshot/watch, read/poll, write, stop, disown, ack); it never starts work,
+  performs workspace effects or replays effects. Any change to its verbs or
+  encodings bumps its version; the previous version's speaker is kept for one
+  bump only.
 - Choose the simplest implementation that fully meets the current architecture.
   Avoid speculative abstractions, configuration, and indirection.
 - Grow in layers: smallest end-to-end product first, then add capability on a

@@ -246,7 +246,7 @@ Their introduction changes no state-key component or export encoding.
 
 There are no released persisted-format obligations. Each store has exactly one
 supported version, and nothing is migrated. The session export document is the
-cross-build carrier exception: a build imports documents of its own version and
+first cross-build exception: a build imports documents of its own version and
 of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
@@ -256,6 +256,23 @@ session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is
 refused with one message (chapter 01 §5.4).
+
+The second exception is the runner job-retention endpoint: a runner daemon MUST
+serve, and the next build's daemon MUST speak, the retention endpoint of its own
+version and of the immediately previous version, so that jobs started by the
+previous build survive a planned upgrade. The endpoint is a same-user,
+same-machine private socket with a fixed verb set (lines, transfer, jobs
+snapshot/watch, read/poll, write, stop, disown, ack); it never starts work,
+performs workspace effects or replays effects. Any change to its verbs or
+encodings bumps its version; the previous version's speaker is kept for one
+bump only.
+
+Retention-only authority is irreversible for a host/line during that worker's
+lifetime. Downgrading or reinstalling the drainer's own build triple does not
+restore native control of that line: native adoption refuses until its retained
+jobs are finished and consumed or explicitly disowned through a compatible
+retention endpoint. Unrelated native lines remain usable. This exception grants
+no cross-build native-store reader and changes no runtime schema or state key.
 
 ## How to read the rest of these docs
 
