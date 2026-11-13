@@ -1604,6 +1604,12 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    # Frozen construction data and pure metadata checks, not runtime authority.
+    ("plak", "src/commands/session/check_binding.rs"): {"sessions": {"rehearsal"}},
+    ("plakous-hosted", "src/agent/binding_inspection.rs"): {
+        "sessions": {"FrozenSessionPresentation"},
+        "tools": {"RegisteredToolIdentity", "ToolBindingError"},
+    },
     # Operator inspection uses only unkeyed, contained execution reads.
     ("plak", "src/host/console/files.rs"): {
         "tools": {
@@ -1836,7 +1842,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         'tools': {'runner', 'runner::LocalDaemonBackend'},
     },
     ("plakous-hosted", "src/agent/roots.rs"): {
-        "sessions": {"LeaseOnlyHead"},
+        "sessions": {"LeaseOnlyHead", "FrozenSessionPresentation"},
         'runner': {'RunnerClient', 'RunnerRegistry', 'RunnerServices', 'RunnerStatus'},
         'tools': {'runner::LocalDaemonBackend'},
     },
@@ -2016,6 +2022,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/frozen_tools.rs"): {"mcp": {"McpToolRecord"}},
     # The untrusted-data paragraph an MCP tool earns.
     ("plakous-hosted", "src/tools.rs"): {
+        "sessions": {"FrozenSessionPresentation"},
         "tools": {"ProcessPackConfig"},
         "prompts": {"UNTRUSTED_TOOL_DATA_AGREEMENTS", "UNTRUSTED_TOOL_DATA_CONTRIBUTION_ID"},
         "runner": {"RunnerServices"},

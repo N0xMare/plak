@@ -37,6 +37,9 @@ const PROJECTION_REVISION: &str = "messages.projection.v3";
 const ACCOUNTING_REVISION: &str = "messages.accounting.v1";
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
+#[cfg(feature = "test-clock")]
+mod test_support;
+
 /// Production API-key model with an explicit caller-owned input envelope.
 pub struct AnthropicLanguageModel {
     resolved: ResolvedAnthropicMessages,
@@ -191,38 +194,6 @@ impl AnthropicLanguageModel {
             client,
             Some(dial_origin),
             Arc::new(SystemClock),
-        )
-        .map(|(configured, _)| configured)
-    }
-
-    /// Builds synthetic binding evidence with an explicit clock, without dispatch.
-    /// Production constructors always use the system clock.
-    ///
-    /// # Errors
-    /// Returns the same configuration and route validation failures.
-    #[cfg(feature = "test-clock")]
-    #[doc(hidden)]
-    pub fn configured_with_fixture_clock(
-        source: Arc<AnthropicKeySource>,
-        account: &str,
-        model: &crate::AnthropicApiModel,
-        admitted_facts: &[u8],
-        behavior: ProviderBehaviorConfiguration,
-        maximum_projected_input: NonZeroU64,
-        clock: Arc<dyn Clock>,
-    ) -> Result<ConfiguredLanguageModel, AnthropicError> {
-        Self::build(
-            source,
-            account,
-            model,
-            admitted_facts,
-            behavior,
-            maximum_projected_input,
-            Client::new_http1(Limits::for_streaming_inference())
-                .map_err(configuration_error)?
-                .pooled(),
-            None,
-            clock,
         )
         .map(|(configured, _)| configured)
     }

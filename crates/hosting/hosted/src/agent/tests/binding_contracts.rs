@@ -37,19 +37,30 @@ fn normalize_strings(value: &mut Value, workspace: &Path) {
     }
 }
 
+fn json_bytes(value: &Value) -> Option<Vec<u8>> {
+    value
+        .as_array()?
+        .iter()
+        .map(|byte| byte.as_u64().and_then(|byte| u8::try_from(byte).ok()))
+        .collect()
+}
+
 fn readable_schemas(value: &mut Value) {
     match value {
         Value::Object(fields) => {
-            if let Some(Value::Array(bytes)) = fields.get("canonical") {
-                let bytes = bytes
-                    .iter()
-                    .map(|byte| byte.as_u64().and_then(|byte| u8::try_from(byte).ok()))
-                    .collect::<Option<Vec<_>>>();
-                if let Some(document) =
-                    bytes.and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-                {
-                    fields.insert("canonical".to_owned(), document);
-                }
+            if fields.get("algorithm").and_then(Value::as_str) == Some("Sha256")
+                && let Some(bytes) = fields.get("bytes").and_then(json_bytes)
+                && bytes.len() == 32
+            {
+                fields.insert(
+                    "bytes".to_owned(),
+                    Value::String(plakous::model::hex_lower(&bytes)),
+                );
+            }
+            if let Some(bytes) = fields.get("canonical").and_then(json_bytes)
+                && let Ok(document) = serde_json::from_slice::<Value>(&bytes)
+            {
+                fields.insert("canonical".to_owned(), document);
             }
             for value in fields.values_mut() {
                 readable_schemas(value);
