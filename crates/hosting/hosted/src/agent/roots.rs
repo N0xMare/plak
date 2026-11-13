@@ -921,6 +921,11 @@ impl ProductStateRoots {
         self.reopen_sidecars.as_ref().unwrap_or(&self.sidecars)
     }
 
+    pub(super) fn without_frozen_presentation(mut self) -> Self {
+        self.frozen_presentation = None;
+        self
+    }
+
     pub(super) fn without_reopen_artifact(mut self) -> Self {
         self.frozen_presentation = None;
         self.reopen_sidecars = None;

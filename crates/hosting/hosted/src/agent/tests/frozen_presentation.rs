@@ -19,6 +19,8 @@ use std::sync::{Arc, Mutex};
 
 struct NeverInvoked;
 
+const PLAN_AUTHORITY: &str = "00000000-0000-4000-8000-000000000011";
+
 impl ToolExecutor for NeverInvoked {
     fn execute(
         self: Arc<Self>,
@@ -35,7 +37,7 @@ pub(crate) fn previous_send_extensions(
     incompatible: bool,
 ) -> Result<crate::tools::ProductToolExtensions, Box<dyn std::error::Error>> {
     let registry =
-        coding_tool_registry_with_extensions("frozen-fixture", composition, false, extensions)?;
+        coding_tool_registry_with_extensions(PLAN_AUTHORITY, composition, false, extensions)?;
     let mut registrations = Vec::new();
     for registration in extensions.registrations() {
         if registration.name().as_str() != "send_agent_message" {
@@ -187,7 +189,7 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
         )?;
         let previous = previous_send_extensions(&current, CompositionSelection::Direct, false)?;
         let registry = coding_tool_registry_with_extensions(
-            "frozen-fixture",
+            PLAN_AUTHORITY,
             CompositionSelection::Direct,
             false,
             &previous,
@@ -247,12 +249,12 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
         assert!(roots.frozen_presentation().is_some());
         assert!(
             roots
-                .without_reopen_artifact()
+                .without_frozen_presentation()
                 .frozen_presentation()
                 .is_none()
         );
         let current_registry = coding_tool_registry_with_extensions(
-            "frozen-fixture",
+            PLAN_AUTHORITY,
             CompositionSelection::Direct,
             false,
             &current,
@@ -275,7 +277,12 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             .open(OpenSessionRequest::new(
                 SessionOperationId::new(format!("unfrozen:{child}"))?,
                 locator,
-                builder(fresh, current_registry, Arc::clone(&workspace), false),
+                builder(
+                    fresh,
+                    current_registry.clone(),
+                    Arc::clone(&workspace),
+                    false,
+                ),
             ))
             .await
             .expect_err("current presentation must not silently rebind old history");
@@ -287,7 +294,7 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             .clone()
             .with_frozen_presentation(Some(frozen.clone()));
         let registry = coding_tool_registry_with_extensions(
-            "frozen-fixture",
+            PLAN_AUTHORITY,
             CompositionSelection::Direct,
             false,
             &restored,
@@ -327,9 +334,36 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
         };
         assert_eq!(session.locator(), locator);
         session.release().await?;
+        let fresh = node_session(
+            plakous::tools::JobConfig::default(),
+            standard_claude_model(&selected)?,
+            &current_registry,
+            &current,
+            &extras,
+            SessionToolFence::Full,
+            None,
+        )?;
+        let fresh_identity = fresh.configuration.selected_identity();
+        let runtime = builder(fresh, current_registry, Arc::clone(&workspace), true);
+        let rebound = Box::pin(sessions.rebind(
+            plakous::sessions::RebindSessionRequest::recompiling_target(
+                SessionOperationId::new(format!("rebind-current:{child}"))?,
+                locator,
+                runtime.target_binding(),
+                runtime,
+            ),
+        ))
+        .await?;
+        let plakous::sessions::RebindSessionOutcome::Rebound { target, .. } = rebound else {
+            panic!("explicit rebind must admit current presentation: {rebound:?}");
+        };
+        assert_eq!(target.session_id(), locator.session_id());
+        let rebound = sessions.created_tool_presentation(target).await?;
+        assert_eq!(rebound.configuration().selected_identity(), fresh_identity);
+        assert_ne!(fresh_identity, identities.0);
         let incompatible = previous_send_extensions(&current, CompositionSelection::Direct, true)?;
         let live = coding_tool_registry_with_extensions(
-            "frozen-fixture",
+            PLAN_AUTHORITY,
             CompositionSelection::Direct,
             false,
             &incompatible,

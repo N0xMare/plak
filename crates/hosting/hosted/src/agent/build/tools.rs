@@ -45,6 +45,15 @@ pub(crate) fn coding_tool_registry_with_extensions(
 ) -> CliResult<FrozenToolRegistry> {
     let identity = PlanStateIdentity::new(format!("plak.session.{plan_state_authority}"), 1)
         .map_err(|_| CliFailure::new("plan-state authority identity is invalid"))?;
+    coding_tool_registry_for_plan(identity, composition, attach_native, extensions)
+}
+
+pub(crate) fn coding_tool_registry_for_plan(
+    identity: PlanStateIdentity,
+    composition: CompositionSelection,
+    attach_native: bool,
+    extensions: &ProductToolExtensions,
+) -> CliResult<FrozenToolRegistry> {
     let process = Arc::new(
         ProcessSessionTools::posix_sh()
             .map_err(|_| CliFailure::new("process-session tools could not be initialized"))?

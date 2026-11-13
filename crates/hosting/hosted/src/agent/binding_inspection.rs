@@ -1,13 +1,15 @@
 //! Offline release binding checks without runtime or external-service authority.
 
-use crate::agent::build::coding_tool_registry;
+use crate::agent::build::coding_tool_registry_for_plan;
 use crate::binding::CompositionSelection;
 use crate::{CliFailure, CliResult};
 use plakous::agent::BindingChange;
 use plakous::model::{ReasoningEffortDisposition, SelectedProviderConfiguration, ToolName};
 use plakous::sessions::FrozenSessionPresentation;
 use plakous::subscriptions::NativeProvider;
-use plakous::tools::{ToolBindingError, ToolExecutorBindingIdentity, ToolExecutorId};
+use plakous::tools::{
+    PlanStateIdentity, ToolBindingError, ToolExecutorBindingIdentity, ToolExecutorId,
+};
 
 /// Checks frozen data against this release's executable and native selection
 /// metadata. No credential, model, runner, workspace or sidecar is opened.
@@ -37,23 +39,11 @@ pub fn check_frozen_binding(
         })
     })
     .unwrap_or(CompositionSelection::Direct);
-    let plan = frozen
-        .executor_id(
-            &ToolName::new("update_plan")
-                .map_err(|_| CliFailure::new("invalid inspection tool"))?,
-        )
-        .ok_or_else(|| CliFailure::new("stored plan-state executor is absent"))?;
-    let authority = plan
-        .as_str()
-        .strip_prefix("plakous.standard.update-plan.v1.plak.session.")
-        .and_then(|name| name.strip_suffix(".r1"))
-        .ok_or_else(|| {
-            CliFailure::new("stored plan-state executor requires an explicit binding cut")
-        })?;
-    let registry = coding_tool_registry(
-        authority,
+    let registry = coding_tool_registry_for_plan(
+        stored_plan_identity(frozen)?,
         composition,
         composition == CompositionSelection::NativePtc,
+        &crate::tools::ProductToolExtensions::empty(),
     )?;
     let check = frozen.check_executor_identities(|name, id| {
         registry
@@ -115,6 +105,29 @@ pub fn check_frozen_binding(
         break;
     }
     Ok(None)
+}
+
+fn stored_plan_identity(frozen: &FrozenSessionPresentation) -> CliResult<PlanStateIdentity> {
+    let plan = frozen
+        .executor_id(
+            &ToolName::new("update_plan")
+                .map_err(|_| CliFailure::new("invalid inspection tool"))?,
+        )
+        .ok_or_else(|| CliFailure::new("stored plan-state executor is absent"))?;
+    let (authority, revision) = plan
+        .as_str()
+        .strip_prefix("plakous.standard.update-plan.v1.")
+        .and_then(|name| name.rsplit_once(".r"))
+        .ok_or_else(|| {
+            CliFailure::new("stored plan-state executor requires an explicit binding cut")
+        })?;
+    PlanStateIdentity::new(
+        authority,
+        revision
+            .parse()
+            .map_err(|_| CliFailure::new("stored plan-state revision is invalid"))?,
+    )
+    .map_err(|_| CliFailure::new("stored plan-state identity is invalid"))
 }
 
 fn extension_identity(name: &ToolName, id: &ToolExecutorId) -> Option<ToolExecutorBindingIdentity> {

@@ -563,6 +563,16 @@ fn host_upgrade_same_key_uses_planned_handoff_and_preserves_daemon_jobs() {
     let probe: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
     let id = probe["binary_id"].as_str().unwrap();
     assert_ne!(id, binary(&fixture));
+    let bindings = image_command(&fixture, &image)
+        .args(["session", "check-binding", "--all"])
+        .output()
+        .unwrap();
+    assert!(
+        bindings.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&bindings.stdout),
+        String::from_utf8_lossy(&bindings.stderr)
+    );
     let replaced = image_command(&fixture, &image)
         .args(["host", "upgrade", "--expect-binary", id])
         .output()

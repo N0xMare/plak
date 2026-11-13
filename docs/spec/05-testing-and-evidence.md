@@ -30,8 +30,13 @@ then retain the execution-environment refusal. The manifest records source,
 schema, epoch and SHA-256; the committed generator recipe runs only predecessor
 code in a detached checkout with isolated build artifacts. No private state,
 credentials or inference enters either fixture. A live-lease inspection test
-also requires unchanged durable database and WAL bytes. These checks do not
-qualify credential, runner or remote-catalog availability.
+also requires unchanged durable database and WAL bytes. An explicit recompiling
+rebind must take current definitions on the same session identity, while exact
+open of those definitions against old history must still refuse. The real-host
+same-key daemon-job upgrade checks the read-only verdict before surrender;
+plan-state authority labels are opaque data reconstructed through the current
+registration compiler, not assumed to use one product naming prefix. These
+checks do not qualify credential, runner or remote-catalog availability.
 
 Settled host-upgrade regressions use isolated real-binary homes and a
 test-hooks-only `PLAK_TEST_STATE_KEY` override to make producer and destination

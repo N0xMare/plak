@@ -325,7 +325,7 @@ pub(crate) async fn api_session_runtime_binding_for(
 ) -> CliResult<PreparedApiRuntime> {
     let mut parent = parent.clone();
     if !opening_durable_session {
-        parent.state_roots = parent.state_roots.without_reopen_artifact();
+        parent.state_roots = parent.state_roots.without_frozen_presentation();
     }
     api_session_runtime_binding_with_owner(
         &parent,
@@ -492,7 +492,7 @@ pub async fn coding_session_runtime_binding_attaching_root(
     mut spec: ProductAgentSpec,
     stderr: &mut (dyn Write + Send),
 ) -> CliResult<SessionRuntimeBinding> {
-    spec.state_roots = spec.state_roots.without_reopen_artifact();
+    spec.state_roots = spec.state_roots.without_frozen_presentation();
     Box::pin(coding_session_runtime_binding_for(
         spec,
         stderr,
@@ -512,7 +512,7 @@ pub(crate) async fn coding_session_runtime_binding_with_attach(
     attach: crate::topology_runtime::TopologyHubAttach,
     attached_tree: &mut Option<String>,
 ) -> CliResult<SessionRuntimeBinding> {
-    spec.state_roots = spec.state_roots.without_reopen_artifact();
+    spec.state_roots = spec.state_roots.without_frozen_presentation();
     Box::pin(coding_session_runtime_binding_for(
         spec,
         stderr,
