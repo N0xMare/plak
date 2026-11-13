@@ -135,7 +135,7 @@ pub struct ToolInvocation {
     attempt_id: AttemptId,
     call_id: CallId,
     identity: RegisteredToolIdentity,
-    definition: ToolDefinition,
+    definition: Arc<ToolDefinition>,
     correlation: ToolCorrelation,
     arguments: ValidatedArguments,
     exposure: Option<ToolExposureBinding>,
@@ -178,7 +178,7 @@ impl ToolInvocation {
             attempt_id: request.attempt_id,
             call_id: request.call_id,
             identity,
-            definition,
+            definition: Arc::new(definition),
             correlation: request.correlation,
             arguments,
             exposure: None,
@@ -236,7 +236,7 @@ impl ToolInvocation {
 
     /// The frozen definition whose input contract validated this invocation.
     #[must_use]
-    pub const fn definition(&self) -> &ToolDefinition {
+    pub fn definition(&self) -> &ToolDefinition {
         &self.definition
     }
 
