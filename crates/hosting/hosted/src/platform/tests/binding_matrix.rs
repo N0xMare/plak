@@ -60,7 +60,7 @@ pub(crate) async fn binding_matrix_facts(
         let clock: Arc<dyn plakous::model::Clock> = Arc::new(plakous::model::FixedClock::new(
             plakous::model::Timestamp::new(1, 0)?,
         ));
-        let configured = plakous::anthropic::AnthropicLanguageModel::configured_with_fixture_clock(
+        let configured = plakous_anthropic::AnthropicLanguageModel::configured_with_fixture_clock(
             Credentials("binding-fixture-key").anthropic(&spec.account)?,
             &spec.account.source_authority("plak/anthropic"),
             row.anthropic

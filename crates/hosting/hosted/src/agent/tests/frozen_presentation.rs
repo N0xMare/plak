@@ -449,28 +449,20 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             refusal.binding_change(),
             Some(&plakous::agent::BindingChange::ProviderConfiguration)
         );
-        let changed_node = node_session(
+        let refusal = node_session(
             plakous::tools::JobConfig::default(),
             changed,
             &registry,
-            &current,
+            &restored,
             &extras,
             SessionToolFence::Full,
             None,
-        )?;
-        let refusal = sessions
-            .open(OpenSessionRequest::new(
-                SessionOperationId::new(format!("changed-effort:{child}"))?,
-                locator,
-                builder(
-                    changed_node,
-                    registry.clone(),
-                    Arc::clone(&workspace),
-                    false,
-                ),
-            ))
-            .await
-            .expect_err("an exact reopen must still reject changed non-tool configuration");
+        )
+        .err()
+        .expect("frozen reopen construction must reject changed non-tool configuration");
+        let refusal = std::error::Error::source(&refusal)
+            .and_then(|error| error.downcast_ref::<plakous::sessions::AgentSessionsError>())
+            .expect("construction must preserve its typed binding refusal");
         assert_eq!(
             refusal.binding_change(),
             Some(&plakous::agent::BindingChange::ProviderConfiguration)

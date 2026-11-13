@@ -31,13 +31,13 @@ use plakous_tool_plan::InMemoryPlanState;
 use plakous_tool_process::ProcessSessionTools;
 use plakous_tools::{
     CodingPresentation, FrozenToolProjectionDescriptorV2, FrozenToolRegistry,
-    FrozenToolRegistryDescriptor, JoinedProcessShellProfile, NestedToolEligibility,
-    PROCESS_SESSION_EXECUTOR_ID, PROCESS_SESSION_POLL_REGISTERED_TOOL_ID,
-    PROCESS_SESSION_REGISTERED_TOOL_ID, PROCESS_SESSION_TERMINATE_REGISTERED_TOOL_ID,
-    PROCESS_SESSION_WRITE_REGISTERED_TOOL_ID, PROCESS_TOOL_PROJECTION_REVISION, PlanStateIdentity,
-    ProviderModelProjectionIdentityV2, RegisteredToolId, ToolContext, ToolExecutor,
-    ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation, ToolOutcome,
-    ToolProjectionMap, ToolRegistration, ToolRegistryBuilder, register_packs,
+    FrozenToolRegistryDescriptor, NestedToolEligibility, PROCESS_SESSION_EXECUTOR_ID,
+    PROCESS_SESSION_POLL_REGISTERED_TOOL_ID, PROCESS_SESSION_REGISTERED_TOOL_ID,
+    PROCESS_SESSION_TERMINATE_REGISTERED_TOOL_ID, PROCESS_SESSION_WRITE_REGISTERED_TOOL_ID,
+    PROCESS_TOOL_PROJECTION_REVISION, PlanStateIdentity, ProviderModelProjectionIdentityV2,
+    RegisteredToolId, ToolContext, ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorId,
+    ToolFuture, ToolInvocation, ToolOutcome, ToolProjectionMap, ToolRegistration,
+    ToolRegistryBuilder, register_packs,
 };
 use serde_json::json;
 
@@ -307,32 +307,18 @@ fn registry(with_topology: bool) -> Result<FrozenToolRegistry, TestError> {
     stable_serialization_fixture(&builder.freeze())
 }
 
-// A shell's device/inode is execution authority, not portable format identity.
+// A shell's device/inode is a runtime observation, not portable format identity.
 // Keep the real pack's definitions, IDs, eligibility and other bindings exact;
 // use existing registration construction to substitute only the process binding.
 // These executors are never invoked by descriptor/projection serialization.
 pub(super) fn stable_serialization_fixture(
     real: &FrozenToolRegistry,
 ) -> Result<FrozenToolRegistry, TestError> {
-    let shell = JoinedProcessShellProfile::new("/bin/sh", [String::from("-c")])?;
-    let login =
-        JoinedProcessShellProfile::new("/bin/sh", [String::from("-l"), String::from("-c")])?;
     let expected = ToolExecutorBindingIdentity::new(
         1,
         &[
             b"process-session-leftover-jobs",
-            b"non-login-shell",
-            &shell
-                .identity()
-                .binding_identity()
-                .digest()
-                .identity_bytes(),
-            b"login-shell",
-            &login
-                .identity()
-                .binding_identity()
-                .digest()
-                .identity_bytes(),
+            b"posix-sh-non-login-and-login-v1",
         ],
     )?;
     let stable = ToolExecutorBindingIdentity::new(1, &[b"golden.process-shell-authority"])?;
@@ -347,7 +333,7 @@ pub(super) fn stable_serialization_fixture(
             assert_eq!(
                 identity.executor_binding_identity(),
                 expected,
-                "real process registration must bind both exact enrolled shells"
+                "real process registration must bind the fixed POSIX shell contract"
             );
             process_ids.push(identity.tool_id().as_str());
             stable

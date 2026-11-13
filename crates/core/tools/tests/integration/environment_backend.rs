@@ -536,9 +536,9 @@ async fn joined_process_shell_multicall_dispatch_preserves_enrolled_name() -> Re
         sessions.terminate(id)?;
     }
 
-    // Retargeting the enrolled alias must still refuse before any execution.
+    // A replacement must still satisfy the executable-file contract.
     let replacement = workspace.path().join("replacement");
-    fs::copy(&multicall, &replacement)?;
+    fs::write(&replacement, b"#!/bin/sh\nexit 0\n")?;
     fs::remove_file(&enrolled)?;
     symlink(&replacement, &enrolled)?;
     for mode in [
@@ -567,12 +567,15 @@ async fn joined_process_shell_multicall_dispatch_preserves_enrolled_name() -> Re
 
 #[tokio::test]
 async fn joined_process_shell_replacement_revalidates_before_spawn() -> Result<(), TestError> {
+    use std::os::unix::fs::PermissionsExt as _;
     let workspace = tempfile::tempdir()?;
-    let source = unix_program(&["/bin/sh", "/usr/bin/sh"])?;
     let enrolled = workspace.path().join("enrolled-sh");
     let replacement = workspace.path().join("replacement-sh");
-    fs::copy(source, &enrolled)?;
-    fs::copy(source, &replacement)?;
+    fs::write(&enrolled, b"#!/bin/sh\nexit 73\n")?;
+    fs::write(&replacement, b"#!/bin/sh\nexec /bin/sh \"$@\"\n")?;
+    for path in [&enrolled, &replacement] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    }
     let profile = JoinedProcessShellProfile::new(&enrolled, [String::from("-c")])?;
     fs::rename(&replacement, &enrolled)?;
 
