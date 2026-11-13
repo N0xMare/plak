@@ -144,7 +144,13 @@ fn kill_at(fixture: &Fixture, session: &str, target: &Value) {
             .filter(|row| row["kind"] == "assistant_done")
             .count();
         if !quit && completed == 3 {
-            agent.send(&quit_frame());
+            // A late commit cut can kill the process after the poll above.
+            // The signal and exact final trace below still have to match.
+            let stdin = agent.stdin.as_mut().unwrap();
+            if let Err(error) = writeln!(stdin, "{}", quit_frame()).and_then(|()| stdin.flush()) {
+                assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe, "{target}");
+                break;
+            }
             quit = true;
         }
         std::thread::sleep(Duration::from_millis(10));

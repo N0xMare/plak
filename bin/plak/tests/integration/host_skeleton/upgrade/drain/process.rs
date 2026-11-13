@@ -134,6 +134,11 @@ fn foreground(
             1
         }
     );
+    // Subsequent waits use process/store evidence, not transcript events.
+    assert_eq!(
+        client.request(4, Op::Detach { attachment }),
+        Outcome::Ok(Answer::Detached)
+    );
     (host, client, session, node, pid)
 }
 

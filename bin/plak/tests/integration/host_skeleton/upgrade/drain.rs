@@ -76,6 +76,11 @@ fn busy(fixture: &Fixture) -> (Host, Client, String, NodeAddress, PathBuf) {
         Outcome::Ok(Answer::Accepted { duplicate: false })
     );
     wait_for_provider_dispatch(fixture);
+    // These callers observe progress out of band and reuse only control ops.
+    assert_eq!(
+        client.request(4, Op::Detach { attachment }),
+        Outcome::Ok(Answer::Detached)
+    );
     (host, client, session, node, release)
 }
 
@@ -203,6 +208,10 @@ fn host_step_drain_tool_and_paid_fold_at_bound_refuse_without_cancelling_either(
         assert!(Instant::now() < deadline, "process never dispatched");
         std::thread::sleep(Duration::from_millis(10));
     }
+    assert_eq!(
+        client.request(90, Op::Detach { attachment }),
+        Outcome::Ok(Answer::Detached)
+    );
     let node = client
         .rows(3)
         .into_iter()
@@ -313,6 +322,11 @@ fn compact_and_wait(
             }
         ),
         Outcome::Ok(Answer::Accepted { duplicate: false })
+    );
+    // Summary evidence, not this connection's transcript, gates the wait.
+    assert_eq!(
+        client.request(91, Op::Detach { attachment }),
+        Outcome::Ok(Answer::Detached)
     );
     let summaries = fixture.root.join("evidence.summary.jsonl");
     while !read_evidence(&summaries).is_ok_and(|rows| !rows.is_empty()) {
