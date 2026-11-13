@@ -1638,7 +1638,7 @@ async fn read_lane_deadline_refuses_a_stalled_actor() -> TestResult {
     // The timeout is proven; joining the real SQLite actor is only liveness.
     tokio::time::resume();
     release.send(())?;
-    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         parked.await?;
         queued.await?;
         Ok::<(), SessionStoreError>(())

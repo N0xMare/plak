@@ -94,6 +94,19 @@ fn quiet_line(handle: u64) -> String {
     format!("No new output; process {handle} is still running. Its exit is reported automatically.")
 }
 
+fn assert_poll_delay(elapsed: Duration, expected: Duration) {
+    if expected.is_zero() {
+        assert_eq!(elapsed, Duration::ZERO);
+        return;
+    }
+    // Real-clock setup can leave a fractional tick when time is paused again.
+    // Tokio rounds positive timers up to its one-millisecond resolution.
+    assert!(
+        elapsed >= expected && elapsed <= expected + Duration::from_millis(1),
+        "poll took {elapsed:?}, expected {expected:?} rounded up by at most one timer tick"
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn first_quiet_poll_keeps_hint_and_repeat_uses_900_second_ceiling() -> TestResult {
     let directory = tempfile::tempdir()?;
@@ -101,7 +114,7 @@ async fn first_quiet_poll_keeps_hint_and_repeat_uses_900_second_ceiling() -> Tes
     let handle = start(&env, true).await?;
     let before = tokio::time::Instant::now();
     let result = poll(&env, handle, 5000, &control()).await?;
-    assert_eq!(before.elapsed(), Duration::from_secs(5));
+    assert_poll_delay(before.elapsed(), Duration::from_secs(5));
     assert_eq!(result.projection.output, "");
     let before = tokio::time::Instant::now();
     let result = ProcessSessionTools::poll_canonical(
@@ -118,7 +131,7 @@ async fn first_quiet_poll_keeps_hint_and_repeat_uses_900_second_ceiling() -> Tes
         &control(),
     )
     .await?;
-    assert_eq!(before.elapsed(), Duration::from_secs(900));
+    assert_poll_delay(before.elapsed(), Duration::from_secs(900));
     assert_eq!(result.projection.session_id, Some(handle));
     assert_eq!(result.projection.output, quiet_line(handle));
     Ok(())
@@ -232,7 +245,7 @@ async fn completion_notices_off_keeps_repeat_poll_window() -> TestResult {
     for _ in 0..3 {
         let before = tokio::time::Instant::now();
         let result = poll(&env, handle, 300_000, &control()).await?;
-        assert_eq!(before.elapsed(), Duration::from_secs(300));
+        assert_poll_delay(before.elapsed(), Duration::from_secs(300));
         assert_eq!(result.projection.output, "");
     }
     Ok(())
@@ -266,7 +279,7 @@ async fn output_and_nonempty_writes_reset_the_quiet_counter() -> TestResult {
     assert_eq!(result.projection.output, "progress");
     let before = tokio::time::Instant::now();
     poll(&env, handle, 5000, &control()).await?;
-    assert_eq!(before.elapsed(), Duration::from_secs(5));
+    assert_poll_delay(before.elapsed(), Duration::from_secs(5));
     let before = tokio::time::Instant::now();
     let result = ProcessSessionTools::write_canonical(
         &env,
@@ -281,10 +294,10 @@ async fn output_and_nonempty_writes_reset_the_quiet_counter() -> TestResult {
     )
     .await?;
     assert!(!result.joined);
-    assert_eq!(before.elapsed(), Duration::from_millis(250));
+    assert_poll_delay(before.elapsed(), Duration::from_millis(250));
     let before = tokio::time::Instant::now();
     poll(&env, handle, 5000, &control()).await?;
-    assert_eq!(before.elapsed(), Duration::from_secs(5));
+    assert_poll_delay(before.elapsed(), Duration::from_secs(5));
     Ok(())
 }
 
@@ -376,7 +389,7 @@ async fn preempted_first_poll_does_not_earn_a_repeat_hold() -> TestResult {
     poll(&env, handle, 5000, &control().with_preempt(receiver)).await?;
     let began = tokio::time::Instant::now();
     poll(&env, handle, 5000, &control()).await?;
-    assert_eq!(began.elapsed(), Duration::from_secs(5));
+    assert_poll_delay(began.elapsed(), Duration::from_secs(5));
     Ok(())
 }
 
@@ -439,7 +452,7 @@ async fn revoked_host_notice_availability_disables_holds_for_existing_jobs() -> 
     for _ in 0..2 {
         let began = tokio::time::Instant::now();
         poll(&env, handle, 5000, &control()).await?;
-        assert_eq!(began.elapsed(), Duration::from_secs(5));
+        assert_poll_delay(began.elapsed(), Duration::from_secs(5));
     }
     Ok(())
 }
@@ -510,7 +523,7 @@ async fn alternate_observations_and_stdin_close_reset_quiet_state() -> TestResul
         }
         let began = tokio::time::Instant::now();
         poll(&env, handle, 5000, &control()).await?;
-        assert_eq!(began.elapsed(), Duration::from_secs(5));
+        assert_poll_delay(began.elapsed(), Duration::from_secs(5));
         ProcessSessionTools::write_canonical(
             &env,
             &CanonicalProcessWriteRequest {
@@ -560,7 +573,7 @@ async fn canonical_tail_and_exit_awaits_do_not_inherit_a_repeat_hold() -> TestRe
                 &control(),
             )
             .await?;
-            assert_eq!(began.elapsed(), Duration::from_millis(expected));
+            assert_poll_delay(began.elapsed(), Duration::from_millis(expected));
             assert_eq!(result.projection.output, "");
         }
     }
@@ -577,7 +590,7 @@ async fn unread_mail_keeps_later_polls_bounded_and_names_the_end_turn_reason() -
     for _ in 0..3 {
         let began = tokio::time::Instant::now();
         let result = poll(&env, handle, 5000, &control()).await?;
-        assert_eq!(began.elapsed(), Duration::from_secs(5));
+        assert_poll_delay(began.elapsed(), Duration::from_secs(5));
         assert_eq!(
             result.projection.output,
             "New messages are waiting; end this turn to receive them."
@@ -586,7 +599,7 @@ async fn unread_mail_keeps_later_polls_bounded_and_names_the_end_turn_reason() -
     let (_sender, receiver) = tokio::sync::watch::channel(ToolPreempt::Notice(true));
     let began = tokio::time::Instant::now();
     let result = poll(&env, handle, 5000, &control().with_preempt(receiver)).await?;
-    assert_eq!(began.elapsed(), Duration::ZERO);
+    assert_poll_delay(began.elapsed(), Duration::ZERO);
     assert_eq!(result.projection.session_id, Some(handle));
     assert_eq!(
         result.projection.output,
