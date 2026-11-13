@@ -31,7 +31,6 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
     let disposition = dispositions::inspect(paths)?;
     let sources = plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(
         paths.runtime_database(),
-        &disposition.excluded,
     )
     .map_err(CliFailure::from)?;
     let mut compatible = true;

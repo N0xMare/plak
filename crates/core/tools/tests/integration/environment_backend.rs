@@ -536,9 +536,13 @@ async fn joined_process_shell_multicall_dispatch_preserves_enrolled_name() -> Re
         sessions.terminate(id)?;
     }
 
-    // A replacement must still satisfy the executable-file contract.
+    // Retargeting the enrolled alias must refuse even to an executable file.
     let replacement = workspace.path().join("replacement");
     fs::write(&replacement, b"#!/bin/sh\nexit 0\n")?;
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o700))?;
+    }
     fs::remove_file(&enrolled)?;
     symlink(&replacement, &enrolled)?;
     for mode in [
@@ -586,8 +590,21 @@ async fn joined_process_shell_replacement_revalidates_before_spawn() -> Result<(
         ExecutionEnvironmentConfig::new(limits(4096, 4096, 8192, 4096)?, [], [])?,
     )?;
     let sessions = environment.joined_process_sessions()?;
+    let error = sessions
+        .start(
+            joined_request(
+                JoinedProcessCommand::shell(profile, "printf unsafe > spawned")?,
+                false,
+            )?,
+            control(),
+        )
+        .err()
+        .ok_or("replacement must refuse until the runtime re-enrolls it")?;
+    assert_eq!(error.kind(), ExecutionBackendErrorKind::InvalidRequest);
+    assert!(!workspace.path().join("spawned").exists());
+    let reenrolled = JoinedProcessShellProfile::new(&enrolled, [String::from("-c")])?;
     let id = sessions.start(
-        joined_request(JoinedProcessCommand::shell(profile, "exit 0")?, false)?,
+        joined_request(JoinedProcessCommand::shell(reenrolled, "exit 0")?, false)?,
         control(),
     )?;
     let (_, status) = collect_joined_output(&sessions, id).await?;

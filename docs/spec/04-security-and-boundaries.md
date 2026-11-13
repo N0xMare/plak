@@ -2008,8 +2008,11 @@ runner or credential authority. It reports release-owned executable compatibilit
 and inactive lineage separately; an MCP contract remains externally owned and
 unaffected rather than being upgraded or guessed from its name. Differential
 upgrade refusal is described in chapter 02 §4.5. Shell filesystem observations
-are revalidated at process invocation, not frozen as machine-specific executor
-identity inputs (chapter 01 §5); existing exact route/auth checks do not change.
+are not persisted as machine-specific executor identity inputs (chapter 01 §5).
+Within one runtime enrollment, each spawn revalidates the same canonical target,
+device/inode, regular-file kind and executable mode. Replacement or alias
+retarget refuses until a new runtime re-enrolls it. Existing exact route/auth
+checks do not change.
 
 
 Events, transcripts, product logs, telemetry, and rendered UI are observations.

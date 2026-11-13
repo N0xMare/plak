@@ -123,7 +123,7 @@ pub struct BindingCheckpointInspection {
     pub archived: bool,
     /// Current line-head status.
     pub line_head: bool,
-    /// Inactive rows have no payload; active read failures remain per-row facts.
+    /// Decoded payload, including inactive rows; read failures remain per-row facts.
     pub stored: Option<Result<StoredCheckpoint, SessionStoreError>>,
 }
 

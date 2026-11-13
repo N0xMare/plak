@@ -104,6 +104,15 @@ def main():
                     original.backup(copied)
             manifest = json.loads((produced / "manifest.json").read_text())
             manifest["sha256"] = hashlib.sha256(database.read_bytes()).hexdigest()
+            manifest["injected_candidate_files"] = {
+                path: hashlib.sha256((root / path).read_bytes()).hexdigest()
+                for path in (
+                    "tools/dev/fixtures/previous_release.rs",
+                    "crates/hosting/hosted/src/agent/tests/production_predecessor.rs",
+                    "crates/plakous/src/subscriptions/test_support.rs",
+                    "crates/hosting/hosted/src/platform/tests/previous_fixture.rs",
+                )
+            }
             (destination / "manifest.json").write_text(
                 json.dumps(manifest, indent=2, sort_keys=True) + "\n"
             )

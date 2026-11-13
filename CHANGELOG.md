@@ -23,7 +23,8 @@ one cross-build carrier (a build imports its own and the previous version).
   send-now steer; restarting the host continues the handed-off turn once.
 
 - Keep process executor contracts stable across shell-file replacement, while
-  revalidating shell file kind and permissions at use. Preserve recorded IDs.
+  refusing replacement or retarget during a runtime enrollment. Fresh runtime
+  enrollment accepts the new shell without changing recorded IDs.
 - Preserve frozen tool presentations during manual compaction and inherited
   skills and pending epochs during fresh binding workflows. Recovery remedies
   respect the session's presented schema.

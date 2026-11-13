@@ -5395,12 +5395,16 @@ branch heads, including children, through one read-only SQLite snapshot for
 listing and loading. It opens no runtime, runner, credential source or
 diagnostics writer and acquires no custody or runtime lease. Product archival
 and succession metadata, and archived trees' node locators, are read separately
-without reopening a tree. Archived and superseded rows are reported but their
-checkpoint bodies do not gate upgrade. Active rows verify checkpoint/plan and
-presentation integrity, current release-owned executor bindings (including both
+without reopening a tree. Every retained head is decoded and its actual verdict
+reported, including archived and superseded rows; inactive verdicts do not gate
+upgrade. Inspection checks checkpoint/plan and presentation integrity, current
+release-owned executor bindings (including both
 fetch image-result variants and optional web/image packs), and native selected
 policy with frozen tool data. MCP contracts are reported as externally owned
-and unaffected, not as a release incompatibility.
+and unaffected, not as a release incompatibility. A missing release-owned
+executor (standard/process, topology, optional web, skills or composition
+markers) is a `ToolBinding` change; an unknown external executor is unavailable,
+not an invented binding refusal.
 
 Same-key host upgrade runs both source and destination inspections before
 surrender. It refuses only a live row that the source found compatible and the

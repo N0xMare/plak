@@ -214,6 +214,11 @@ impl JoinedProcessShellProfile {
     pub(super) fn revalidated_executable(&self) -> Result<&Path, ExecutionBackendError> {
         let canonical = fs::canonicalize(self.executable.as_ref())
             .map_err(|_| invalid_request("joined process shell could not be revalidated"))?;
+        if canonical != *self.canonical_executable {
+            return Err(invalid_request(
+                "joined process shell target changed after enrollment",
+            ));
+        }
         let metadata = fs::metadata(&canonical)
             .map_err(|_| invalid_request("joined process shell metadata changed"))?;
         if !metadata.is_file() {
@@ -221,12 +226,16 @@ impl JoinedProcessShellProfile {
                 "joined process shell is no longer a regular file",
             ));
         }
-        if metadata.mode() & 0o111 == 0 {
+        if metadata.dev() != self.identity.executable_device
+            || metadata.ino() != self.identity.executable_inode
+            || metadata.mode() & self.identity.executable_mode_mask == 0
+        {
             return Err(invalid_request(
-                "joined process shell is no longer executable",
+                "joined process shell object identity changed after enrollment",
             ));
         }
-        Ok(self.executable.as_ref())
+        // Pin the admitted target; the spawn boundary preserves the enrolled argv[0].
+        Ok(self.canonical_executable.as_ref())
     }
 }
 

@@ -80,7 +80,7 @@ fn check_executors(
                     tool: id.to_string(),
                 }));
             }
-            None if registry.identity(&name).is_some() => {
+            None if registry.identity(&name).is_some() || release_owned_executor(&id) => {
                 return Ok(Some(BindingChange::ToolBinding {
                     tool: id.to_string(),
                 }));
@@ -93,6 +93,22 @@ fn check_executors(
         }
     }
     Ok(None)
+}
+
+fn release_owned_executor(id: &ToolExecutorId) -> bool {
+    [
+        "plakous.standard.",
+        "plakous.process-",
+        "plak.topology.",
+        "plakous.web.",
+        "plak.skills.",
+        "plakous.product-javascript-composition.",
+        "plakous.python-ptc.",
+        "plakous.python-sdk.",
+        "plakous.codex-code-mode.",
+    ]
+    .iter()
+    .any(|prefix| id.as_str().starts_with(prefix))
 }
 
 fn check_native_selection(

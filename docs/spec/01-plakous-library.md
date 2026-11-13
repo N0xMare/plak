@@ -2286,8 +2286,12 @@ revision. The shell's canonical path, device and inode are observed runtime
 facts, not frozen equality inputs: replacing an executable regular shell during
 an OS update does not change its executor contract. Existing inode-bearing
 recorded identities resolve by that same id/revision rule, without rewriting any
-stored identity. Every invocation revalidates the enrolled shell's existence,
-regular-file kind and executable permissions. Other executable bindings retain
+stored identity. Each runtime enrollment retains the canonical target and Unix
+device/inode. Before spawning, it requires the enrolled name to resolve to that
+same executable regular object; replacement or retarget refuses. Only a fresh
+runtime enrollment accepts the replacement, without changing the persisted
+executor contract. The canonical target and enrolled argv[0] follow §8's process
+rules. Other executable bindings retain
 their exact configuration identity checks. Invocation metadata carries the
 actual frozen definition used for argument validation, so current executors can
 render remedies that the presented input contract supports.

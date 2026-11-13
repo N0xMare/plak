@@ -51,6 +51,13 @@ fn frozen_process_contract_accepts_shell_replacement_without_rewriting_identity(
         recorded
     );
     descriptor.check_executor_identities(|_, _| Some(current))?;
+    assert!(
+        !current.accepts(
+            &ToolExecutorId::new("fixture.non-process-executor")?,
+            recorded
+        ),
+        "same-revision configuration drift is not allowed for other executors"
+    );
     assert_eq!(
         descriptor.canonical_authority_identity()?,
         FrozenToolRegistryDescriptor::capture(&make(current)?)?.canonical_authority_identity()?

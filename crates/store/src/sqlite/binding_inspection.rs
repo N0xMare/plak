@@ -3,7 +3,7 @@ use super::{
     BindingCheckpointInspection, SessionRef, SessionStoreError, SqliteSessionStore,
     admit_inspection_snapshot, load_checkpoint, map_sqlite,
 };
-use std::{collections::BTreeSet, path::Path};
+use std::path::Path;
 
 impl SqliteSessionStore {
     /// Loads retained branch checkpoints and liveness through one read-only snapshot.
@@ -13,7 +13,6 @@ impl SqliteSessionStore {
     /// Returns schema, shape or read failures. An absent store is empty.
     pub fn inspect_binding_checkpoints(
         path: impl AsRef<Path>,
-        excluded: &BTreeSet<SessionRef>,
     ) -> Result<Vec<BindingCheckpointInspection>, SessionStoreError> {
         let Some(connection) = Self::open_inspection(path.as_ref())? else {
             return Ok(Vec::new());
@@ -43,8 +42,7 @@ impl SqliteSessionStore {
                     session.parse().map_err(|_| SessionStoreError::corrupt())?,
                     branch.parse().map_err(|_| SessionStoreError::corrupt())?,
                 );
-                let stored = (!archived && head && !excluded.contains(&session))
-                    .then(|| load_checkpoint(&snapshot, id));
+                let stored = Some(load_checkpoint(&snapshot, id));
                 Ok(BindingCheckpointInspection {
                     session,
                     checkpoint: id,

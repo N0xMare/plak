@@ -6,7 +6,6 @@ use std::collections::{HashMap, HashSet};
 
 pub(super) struct Dispositions {
     pub(super) rows: HashMap<String, (bool, bool)>,
-    pub(super) excluded: Vec<SessionLocator>,
 }
 
 pub(super) fn key(locator: SessionLocator) -> String {
@@ -22,13 +21,9 @@ pub(super) fn inspect(paths: &PlakPaths) -> CliResult<Dispositions> {
         .map(|record| record.tree.clone())
         .collect::<HashSet<_>>();
     let mut rows = HashMap::new();
-    let mut excluded = Vec::new();
     for record in records {
         if let Some(locator) = record.locator {
             rows.insert(key(locator), (record.archived, record.superseded));
-            if record.archived || record.superseded {
-                excluded.push(locator);
-            }
         }
     }
     if !archived_trees.is_empty() {
@@ -42,9 +37,8 @@ pub(super) fn inspect(paths: &PlakPaths) -> CliResult<Dispositions> {
                     .parse::<SessionLocator>()
                     .map_err(|error| CliFailure::new(error.to_string()))?;
                 rows.entry(key(locator)).or_insert((true, false)).0 = true;
-                excluded.push(locator);
             }
         }
     }
-    Ok(Dispositions { rows, excluded })
+    Ok(Dispositions { rows })
 }

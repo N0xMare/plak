@@ -32,36 +32,29 @@ pub struct BindingHeadInspection {
 #[doc(hidden)]
 pub fn inspect_binding_presentations_sqlite(
     path: impl AsRef<Path>,
-    excluded: &[SessionLocator],
 ) -> Result<Vec<BindingHeadInspection>, AgentSessionsError> {
     let path = path.as_ref();
-    let excluded = excluded
-        .iter()
-        .map(|locator| locator.session_ref())
-        .collect();
-    Ok(
-        SqliteSessionStore::inspect_binding_checkpoints(path, &excluded)
-            .map_err(store_error)?
-            .into_iter()
-            .map(|head| {
-                let locator = SessionLocator::new(
-                    head.session.session_id(),
-                    head.session.branch_id(),
-                    head.checkpoint,
-                );
-                BindingHeadInspection {
-                    locator,
-                    archived: head.archived,
-                    line_head: head.line_head,
-                    presentation: head.stored.map(|stored| {
-                        stored.map_err(store_error).and_then(|stored| {
-                            super::FrozenSessionPresentation::from_checkpoint(stored.checkpoint())
-                        })
-                    }),
-                }
-            })
-            .collect::<Vec<_>>(),
-    )
+    Ok(SqliteSessionStore::inspect_binding_checkpoints(path)
+        .map_err(store_error)?
+        .into_iter()
+        .map(|head| {
+            let locator = SessionLocator::new(
+                head.session.session_id(),
+                head.session.branch_id(),
+                head.checkpoint,
+            );
+            BindingHeadInspection {
+                locator,
+                archived: head.archived,
+                line_head: head.line_head,
+                presentation: head.stored.map(|stored| {
+                    stored.map_err(store_error).and_then(|stored| {
+                        super::FrozenSessionPresentation::from_checkpoint(stored.checkpoint())
+                    })
+                }),
+            }
+        })
+        .collect::<Vec<_>>())
 }
 
 /// What the pure resume predicates permit, before credentialed reconstruction.

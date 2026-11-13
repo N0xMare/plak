@@ -81,7 +81,7 @@ async fn binding_inspection_timing_for_two_hundred_checkpoint_heads()
         session.release().await?;
     }
     let started = std::time::Instant::now();
-    let heads = plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database, &[])?;
+    let heads = plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database)?;
     let mut output = Vec::new();
     for head in heads {
         assert_eq!(
@@ -117,14 +117,14 @@ pub(crate) fn previous_send_extensions(
     composition: CompositionSelection,
     incompatible: bool,
 ) -> Result<crate::tools::ProductToolExtensions, Box<dyn std::error::Error>> {
-    previous_extensions(extensions, composition, incompatible, false)
+    previous_extensions(extensions, composition, incompatible, None)
 }
 
 fn previous_extensions(
     extensions: &crate::tools::ProductToolExtensions,
     composition: CompositionSelection,
     incompatible: bool,
-    unknown: bool,
+    executor_override: Option<&str>,
 ) -> Result<crate::tools::ProductToolExtensions, Box<dyn std::error::Error>> {
     let registry =
         coding_tool_registry_with_extensions(PLAN_AUTHORITY, composition, false, extensions)?;
@@ -156,13 +156,12 @@ fn previous_extensions(
         let identity = registry.identity(definition.name()).unwrap();
         let replacement = ToolRegistration::new(
             identity.tool_id().clone(),
-            if unknown {
-                plakous::tools::ToolExecutorId::new("fixture.unknown.send.executor")?
-            } else {
-                identity.executor_id().clone()
+            match executor_override {
+                Some(id) => plakous::tools::ToolExecutorId::new(id)?,
+                None => identity.executor_id().clone(),
             },
             if incompatible {
-                ToolExecutorBindingIdentity::new(2, &[b"incompatible"])?
+                ToolExecutorBindingIdentity::new(1, &[b"incompatible"])?
             } else {
                 identity.executor_binding_identity()
             },
@@ -361,7 +360,7 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
         let wal = directory.path().join("runtime.sqlite3-wal");
         let before_wal = std::fs::read(&wal).ok();
         let inspected =
-            plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database, &[])?;
+            plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database)?;
         assert!(inspected.iter().any(|head| head.locator == locator));
         for head in inspected {
             if head.locator != locator {
@@ -526,6 +525,20 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             panic!("explicit rebind must admit current presentation: {rebound:?}");
         };
         assert_eq!(target.session_id(), locator.session_id());
+        let inspected =
+            plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database)?;
+        let old_head = inspected
+            .iter()
+            .find(|head| {
+                head.locator.session_id() == locator.session_id()
+                    && head.locator.branch_id() == locator.branch_id()
+            })
+            .unwrap();
+        assert!(!old_head.line_head);
+        assert!(
+            old_head.presentation.as_ref().unwrap().is_ok(),
+            "superseded bindings must still be decoded and reported"
+        );
         let rebound = sessions.created_tool_presentation(target).await?;
         assert_eq!(rebound.configuration().selected_identity(), fresh_identity);
         assert_ne!(fresh_identity, identities.0);
@@ -565,7 +578,12 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             )?,
             Some(plakous::agent::BindingChange::ToolBinding { .. })
         ));
-        let unknown = previous_extensions(&current, CompositionSelection::Direct, false, true)?;
+        let unknown = previous_extensions(
+            &current,
+            CompositionSelection::Direct,
+            false,
+            Some("fixture.unknown.send.executor"),
+        )?;
         let registry = coding_tool_registry_with_extensions(
             PLAN_AUTHORITY,
             CompositionSelection::Direct,
@@ -594,6 +612,58 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
         assert!(
             crate::agent::check_frozen_binding(&sessions.created_tool_presentation(locator).await?)
                 .is_err()
+        );
+        let missing_release = previous_extensions(
+            &current,
+            CompositionSelection::Direct,
+            false,
+            Some("plakous.standard.removed-executor.v1"),
+        )?;
+        let registry = coding_tool_registry_with_extensions(
+            PLAN_AUTHORITY,
+            CompositionSelection::Direct,
+            false,
+            &missing_release,
+        )?;
+        let node = node_session(
+            plakous::tools::JobConfig::default(),
+            standard_claude_model(&selected)?,
+            &registry,
+            &missing_release,
+            &extras,
+            SessionToolFence::Full,
+            None,
+        )?;
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(CreateSessionRequest::new(
+                SessionOperationId::new(format!("missing-release:{child}"))?,
+                builder(node, registry, Arc::clone(&workspace), true),
+            ))
+            .await?
+        else {
+            panic!("create missing release executor fixture")
+        };
+        let locator = session.release().await?;
+        assert!(matches!(
+            crate::agent::check_frozen_binding(
+                &sessions.created_tool_presentation(locator).await?
+            )?,
+            Some(plakous::agent::BindingChange::ToolBinding { .. })
+        ));
+        sessions.archive(locator).await?;
+        let inspected =
+            plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database)?;
+        let archived = inspected
+            .into_iter()
+            .find(|head| head.locator == locator)
+            .unwrap();
+        assert!(archived.archived);
+        assert!(
+            matches!(
+                crate::agent::check_frozen_binding(&archived.presentation.unwrap()?)?,
+                Some(plakous::agent::BindingChange::ToolBinding { .. })
+            ),
+            "archived heads retain their actual non-gating verdict"
         );
     }
     Ok(())

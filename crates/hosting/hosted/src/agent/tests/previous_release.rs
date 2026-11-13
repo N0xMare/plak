@@ -271,6 +271,18 @@ async fn previous_build_native_bindings_reopen_without_rebinding_or_rewriting_id
         plakous::sessions::RUNTIME_FORMAT_EPOCH
     );
     let bytes = std::fs::read(fixtures.join("previous-runtime.sqlite3"))?;
+    let injected = manifest["injected_candidate_files"].as_object().unwrap();
+    assert_eq!(injected.len(), 4);
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    for (path, expected) in injected {
+        assert_eq!(
+            plakous::model::hex_lower(
+                Sha256::digest(std::fs::read(checkout.join(path))?).as_slice()
+            ),
+            expected.as_str().unwrap(),
+            "injected candidate file changed: {path}"
+        );
+    }
     assert_eq!(
         plakous::model::hex_lower(Sha256::digest(&bytes).as_slice()),
         manifest["sha256"].as_str().unwrap()
@@ -283,8 +295,7 @@ async fn previous_build_native_bindings_reopen_without_rebinding_or_rewriting_id
         use std::os::unix::fs::PermissionsExt as _;
         std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o600))?;
     }
-    let inspected =
-        plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database, &[])?;
+    let inspected = plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database)?;
     assert_eq!(inspected.len(), manifest["cases"].as_array().unwrap().len());
     for head in inspected {
         let frozen = head.presentation.unwrap()?;

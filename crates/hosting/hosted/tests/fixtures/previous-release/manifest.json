@@ -4516,6 +4516,12 @@
       }
     }
   ],
+  "injected_candidate_files": {
+    "crates/hosting/hosted/src/agent/tests/production_predecessor.rs": "948474edc0a51c654b6c55b6aeaba1a8c0a0483e94da07e6d15ba0039cedcc41",
+    "crates/hosting/hosted/src/platform/tests/previous_fixture.rs": "dac894992d7fc7e6298411c875ed2642a82f7938726461f1a63c58f7d52bb393",
+    "crates/plakous/src/subscriptions/test_support.rs": "f26680eae8af15e54f92b17f7dd4b018de301ce1ccf14f545b2547c6dcc3d6e4",
+    "tools/dev/fixtures/previous_release.rs": "be8634fe1d7343f74164418b35c3085351bfa9ca764d7096822a932d0292b556"
+  },
   "platform": "linux",
   "runtime_epoch": 37,
   "runtime_schema": 27,

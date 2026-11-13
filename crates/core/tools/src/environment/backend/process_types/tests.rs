@@ -25,9 +25,10 @@ fn shell_replacement_keeps_the_contract_and_revalidates_runtime_file_facts()
         profile.identity().binding_identity(),
         updated.identity().binding_identity()
     );
-    assert_eq!(profile.revalidated_executable()?, shell);
-    fs::set_permissions(&shell, fs::Permissions::from_mode(0o600))?;
     assert!(profile.revalidated_executable().is_err());
+    assert_eq!(updated.revalidated_executable()?, shell);
+    fs::set_permissions(&shell, fs::Permissions::from_mode(0o600))?;
+    assert!(updated.revalidated_executable().is_err());
     fs::remove_file(&shell)?;
     assert!(profile.revalidated_executable().is_err());
     fs::create_dir(&shell)?;

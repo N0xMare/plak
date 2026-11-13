@@ -8,6 +8,10 @@ predecessor's actual builders and compilers created and released these sessions.
 The native resolution and key sources are non-dispatching test doubles, not
 credentials or retained old executors. No user history or product state was
 copied. Empty genesis histories isolate the binding boundary.
+Resolution uses the injected candidate-owned doubles, not predecessor credential
+resolution. The manifest records SHA-256 for every injected Rust source file
+(producer, native builder, resolution double and API builder), separately from
+the predecessor commit and the resulting database hash.
 
 The Linux fixture uses `/` as an inert workspace and never invokes tools. On
 Linux the candidate must reopen every exact locator with unchanged configuration

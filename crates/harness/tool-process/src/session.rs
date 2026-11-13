@@ -634,6 +634,8 @@ impl ProcessSessionTools {
                 "canonical process-session executor requires the fixed /bin/sh profiles",
             ));
         }
+        // These labels and their revision form one semantic contract. Changing
+        // the accepted behavior requires a revision bump, not only a new label.
         let executor_binding_identity = ToolExecutorBindingIdentity::new(
             1,
             &[

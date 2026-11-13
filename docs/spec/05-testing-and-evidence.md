@@ -35,8 +35,9 @@ bindings, including native Code Mode and JS/Python through production builders
 with non-dispatching authority doubles. The Linux candidate opens the exact
 locators; other platforms check all frozen data and require the Linux execution
 binding cut on Direct cases rather than attempting Linux composition runtimes.
-The manifest pins source, schema, epoch, SHA-256, and never-invoked process
-bindings. The committed recipe uses a detached predecessor checkout and isolated
+The manifest pins source, schema, epoch, database SHA-256, every injected
+candidate source file's SHA-256, and never-invoked process bindings. Resolution
+uses explicitly injected candidate-owned doubles. The committed recipe uses a detached predecessor checkout and isolated
 artifacts. Its explicit immutable dummy-sidecar prefix has fixed synthetic path
 and bytes, not old executable code; conflicting artifacts refuse. No private
 state or inference enters the fixtures. Compact-admission checks reach unpaid
@@ -45,8 +46,8 @@ and restored source presentations. Recovery remedies are tested for both schema
 shapes, and native/API production successors preserve inherited skills and epochs.
 
 Read-only inspection tests preserve durable database and WAL bytes, report
-archival/succession before decoding inactive checkpoint bodies, and use one
-runtime snapshot for list/load. An ignored, explicit 200-head measurement with
+archival/succession with decoded inactive checkpoint verdicts, and use one
+runtime snapshot for list/load. Inactive refusals remain non-gating. An ignored, explicit 200-head measurement with
 128 KiB of distinct retained state per head records store size, output size and
 elapsed inspection time. Differential preflight
 contracts separate new live regressions from pre-existing failures, inactive
