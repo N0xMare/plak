@@ -14,6 +14,8 @@ fn chat_review_clock() -> Arc<dyn plakous::model::Clock> {
 }
 
 use super::*;
+#[path = "tests/binding_matrix.rs"]
+pub(super) mod binding_matrix;
 use std::path::PathBuf;
 
 #[test]

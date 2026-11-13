@@ -238,6 +238,19 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
         assert_eq!(std::fs::read(&wal).ok(), before_wal);
         session.release().await?;
         let frozen = Arc::new(sessions.created_tool_presentation(locator).await?);
+        let roots = crate::agent::ProductStateRoots::with_doubles(
+            directory.path().to_path_buf(),
+            directory.path().join("state"),
+        )
+        .for_exact_reopen(&sessions, locator)
+        .await?;
+        assert!(roots.frozen_presentation().is_some());
+        assert!(
+            roots
+                .without_reopen_artifact()
+                .frozen_presentation()
+                .is_none()
+        );
         let current_registry = coding_tool_registry_with_extensions(
             "frozen-fixture",
             CompositionSelection::Direct,
@@ -247,6 +260,28 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
         assert_ne!(
             registry.registry_identity_digest()?,
             current_registry.registry_identity_digest()?
+        );
+        let fresh = node_session(
+            plakous::tools::JobConfig::default(),
+            resolved.clone(),
+            &current_registry,
+            &current,
+            &extras,
+            SessionToolFence::Full,
+            None,
+        )?;
+        assert_ne!(fresh.configuration.selected_identity(), identities.0);
+        let refusal = sessions
+            .open(OpenSessionRequest::new(
+                SessionOperationId::new(format!("unfrozen:{child}"))?,
+                locator,
+                builder(fresh, current_registry, Arc::clone(&workspace), false),
+            ))
+            .await
+            .expect_err("current presentation must not silently rebind old history");
+        assert_eq!(
+            refusal.binding_change(),
+            Some(&plakous::agent::BindingChange::ToolPresentation)
         );
         let restored = current
             .clone()

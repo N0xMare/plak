@@ -50,7 +50,7 @@ plakous-tools.workspace = true
 plakous-host-protocol = { workspace = true, features = ["test-support"] }
 plakous-recursive-subagents = { workspace = true, features = ["test-support"] }
 plakous-workspace = { workspace = true, features = ["test-support"] }
-plakous-anthropic.workspace = true
+plakous-anthropic = { workspace = true, features = ["test-clock"] }
 plakous-compose.workspace = true
 plakous-chat-completions.workspace = true
 plakous-messages.workspace = true

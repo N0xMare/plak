@@ -323,8 +323,12 @@ pub(crate) async fn api_session_runtime_binding_for(
     topology_attach: crate::topology_runtime::TopologyHubAttach,
     acquired_owner: &mut Option<String>,
 ) -> CliResult<PreparedApiRuntime> {
+    let mut parent = parent.clone();
+    if !opening_durable_session {
+        parent.state_roots = parent.state_roots.without_reopen_artifact();
+    }
     api_session_runtime_binding_with_owner(
-        parent,
+        &parent,
         opening_durable_session,
         SessionToolFence::Full,
         topology_attach,
@@ -485,9 +489,10 @@ pub async fn coding_session_runtime_binding(
 /// Fresh conversation create (`/new`) must attach a new root tree, not look
 /// up the previous hub lease.
 pub async fn coding_session_runtime_binding_attaching_root(
-    spec: ProductAgentSpec,
+    mut spec: ProductAgentSpec,
     stderr: &mut (dyn Write + Send),
 ) -> CliResult<SessionRuntimeBinding> {
+    spec.state_roots = spec.state_roots.without_reopen_artifact();
     Box::pin(coding_session_runtime_binding_for(
         spec,
         stderr,
@@ -502,11 +507,12 @@ pub async fn coding_session_runtime_binding_attaching_root(
 /// Builds a native runtime with the caller's attach choice and reports the
 /// tree id when that build took an `AttachRoot` lease.
 pub(crate) async fn coding_session_runtime_binding_with_attach(
-    spec: ProductAgentSpec,
+    mut spec: ProductAgentSpec,
     stderr: &mut (dyn Write + Send),
     attach: crate::topology_runtime::TopologyHubAttach,
     attached_tree: &mut Option<String>,
 ) -> CliResult<SessionRuntimeBinding> {
+    spec.state_roots = spec.state_roots.without_reopen_artifact();
     Box::pin(coding_session_runtime_binding_for(
         spec,
         stderr,

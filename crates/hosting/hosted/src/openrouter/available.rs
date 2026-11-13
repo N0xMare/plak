@@ -866,3 +866,5 @@ pub(crate) fn carry_input_window<P: plakous_host_protocol::ProtocolExtension>(
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::binding_matrix::binding_matrix_facts;

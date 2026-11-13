@@ -213,6 +213,7 @@ fn configured(
         NonZeroU64::new(64_000).unwrap(),
         client,
         Some(origin),
+        Arc::new(SystemClock),
     )?
     .0)
 }
@@ -331,6 +332,7 @@ async fn production_api_key_admits_required_caching_and_emits_three_one_hour_bre
         NonZeroU64::new(64_000).ok_or("input bound")?,
         client,
         Some(origin),
+        Arc::new(SystemClock),
     )?
     .0;
     let descriptor = binding.registered().descriptor();
@@ -792,6 +794,7 @@ async fn production_api_tool_result_continues_without_redispatching_effect() -> 
         NonZeroU64::new(64_000).unwrap(),
         client,
         Some(origin),
+        Arc::new(SystemClock),
     )?
     .0;
     let root = tempfile::tempdir()?;

@@ -14,8 +14,11 @@ use crate::binding::CompositionSelection;
 use crate::platform::ApiWindow;
 use crate::platform::{platform_model, platform_models};
 use plakous::agent::ReasoningEffort;
+#[path = "tests/binding_matrix.rs"]
+mod binding_matrix;
 #[path = "tests/default_bindings.rs"]
 mod default_bindings;
+pub(crate) use binding_matrix::binding_matrix_facts;
 
 struct Credentials(&'static str);
 impl OpenAiCredentials for Credentials {

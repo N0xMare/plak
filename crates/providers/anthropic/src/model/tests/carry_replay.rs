@@ -13,6 +13,7 @@ async fn sanitized_production_messages_thinking_signature_validates_for_carry() 
         NonZeroU64::new(65536).ok_or("window")?,
         Client::new_http1(Limits::for_streaming_inference())?.pooled(),
         None,
+        Arc::new(SystemClock),
     )?;
     let target = crate::AnthropicMessagesTargetBinding::from_resolved(model.resolved())?;
     let replay_policy = plakous_messages::MessagesRequestPolicy::new(

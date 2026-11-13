@@ -118,6 +118,7 @@ impl AnthropicLanguageModel {
             maximum_projected_input,
             client,
             None,
+            Arc::new(SystemClock),
         )?;
         let effort = crate::retrieval::lowest_effort(model.efforts());
         Ok((
@@ -145,6 +146,7 @@ impl AnthropicLanguageModel {
             maximum_projected_input,
             client,
             None,
+            Arc::new(SystemClock),
         )
         .map(|(configured, _)| configured)
     }
@@ -188,6 +190,39 @@ impl AnthropicLanguageModel {
             maximum_projected_input,
             client,
             Some(dial_origin),
+            Arc::new(SystemClock),
+        )
+        .map(|(configured, _)| configured)
+    }
+
+    /// Builds synthetic binding evidence with an explicit clock, without dispatch.
+    /// Production constructors always use the system clock.
+    ///
+    /// # Errors
+    /// Returns the same configuration and route validation failures.
+    #[cfg(feature = "test-clock")]
+    #[doc(hidden)]
+    pub fn configured_with_fixture_clock(
+        source: Arc<AnthropicKeySource>,
+        account: &str,
+        model: &crate::AnthropicApiModel,
+        admitted_facts: &[u8],
+        behavior: ProviderBehaviorConfiguration,
+        maximum_projected_input: NonZeroU64,
+        clock: Arc<dyn Clock>,
+    ) -> Result<ConfiguredLanguageModel, AnthropicError> {
+        Self::build(
+            source,
+            account,
+            model,
+            admitted_facts,
+            behavior,
+            maximum_projected_input,
+            Client::new_http1(Limits::for_streaming_inference())
+                .map_err(configuration_error)?
+                .pooled(),
+            None,
+            clock,
         )
         .map(|(configured, _)| configured)
     }
@@ -209,6 +244,7 @@ impl AnthropicLanguageModel {
         maximum_projected_input: NonZeroU64,
         client: Client,
         dial_origin: Option<Origin>,
+        clock: Arc<dyn Clock>,
     ) -> Result<(ConfiguredLanguageModel, Arc<Self>), AnthropicError> {
         if model.status() != &crate::AnthropicApiModelStatus::Usable {
             return Err(configuration_error("Anthropic API model is not admitted"));
@@ -254,14 +290,14 @@ impl AnthropicLanguageModel {
             .stable_binding()
             .ok_or_else(|| configuration_error("Anthropic account binding unavailable"))?;
         let credential_binding = route.credential_binding()?;
-        let now = SystemClock.now();
+        let now = clock.now();
         let context = caller_context(
             account_binding,
             credential_binding,
             maximum_projected_input,
             now,
         )?;
-        let resolved = AnthropicPlatformModelResolver::new(route.clone())
+        let resolved = AnthropicPlatformModelResolver::with_runtime(route.clone(), clock)
             .resolve(config)?
             .with_context_envelope(context);
         validate_descriptor(&resolved, Some(&route))?;

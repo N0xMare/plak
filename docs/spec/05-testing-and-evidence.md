@@ -11,6 +11,28 @@ composition, and protocol it named — nothing adjacent. The second is that
 symbol that is nameable, a command that parses, and a route that renders are all
 accessibility facts. None of them is a support or correctness promise.
 
+Release-binding contracts are offline and data-only. The hosted route matrix
+pins canonical selected/effective configurations and their IDs, model-binding
+facts, registry/projection digests and compiled plan digests for native routes,
+direct APIs and all three OpenRouter wire families, with root/leaf, Direct,
+native Code Mode and JS/Python compositions. Its explicit synthetic workspace,
+platform and fixed model authority are compilation inputs, not patched digests;
+canonical schema documents remain readable and failures name changed field paths.
+Fixture-clock OpenRouter evidence uses the normal discovery parsers without
+network or standard integration authority. The Anthropic binding fixture supplies
+a fixed construction clock; ordinary constructors retain the system clock. Repinning requires review, not an
+automatic update during ordinary tests.
+
+An independently predecessor-authored SQLite fixture pins native root/leaf
+selected/effective and plan identities. The Linux candidate actually opens its
+exact locators, while other platforms first pass pure binding inspection and
+then retain the execution-environment refusal. The manifest records source,
+schema, epoch and SHA-256; the committed generator recipe runs only predecessor
+code in a detached checkout with isolated build artifacts. No private state,
+credentials or inference enters either fixture. A live-lease inspection test
+also requires unchanged durable database and WAL bytes. These checks do not
+qualify credential, runner or remote-catalog availability.
+
 Settled host-upgrade regressions use isolated real-binary homes and a
 test-hooks-only `PLAK_TEST_STATE_KEY` override to make producer and destination
 keys differ without changing the v12 carrier. Production builds ignore that
