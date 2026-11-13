@@ -639,6 +639,16 @@ model). Editing the template or a table changes new sessions only. A wildcard
 `mcp:<id>` tool omitted at creation leaves one Settings notice in the
 transcript.
 
+Root and child exact reopen both reconstruct the model-facing tool data frozen
+in their own runtime, not the release's newest topology definitions. This
+applies to Direct outer menus and to native Code Mode and JavaScript/Python
+nested catalogs. A leaf keeps its own frozen grant and presentation; it never
+inherits the parent's reopen data. New children and explicit binding successors
+compile current definitions. Executors are current code with separately checked
+binding identities: a revision cut refuses incompatible old inputs rather than
+silently upgrading their schemas. Keeping frozen data does not retain old code
+or weaken the exact provider, registry, projection or harness-plan identities.
+
 ### 3.1 The spawn graph is the capability grant
 
 A child gets exactly its own template's `tools`, whatever its parent was bound

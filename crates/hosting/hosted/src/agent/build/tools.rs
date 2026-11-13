@@ -97,7 +97,13 @@ pub(crate) fn coding_tool_registry_with_extensions(
         }
         CompositionSelection::FollowCatalog | CompositionSelection::NativePtc => {}
     }
-    Ok(builder.freeze())
+    let live = builder.freeze();
+    match extensions.frozen_presentation() {
+        Some(frozen) => frozen.restore_registry(&live).map_err(|error| {
+            CliFailure::new(format!("frozen tool executor binding refused: {error}"))
+        }),
+        None => Ok(live),
+    }
 }
 
 /// The projection identity of one resolved target; `subject` names the
@@ -155,7 +161,13 @@ pub(in crate::agent) fn node_session(
         registry,
         direct_extras,
     )?;
-    let configured_model = if direct_extras.is_empty() {
+    let configuration = match extensions.frozen_presentation() {
+        Some(frozen) => frozen
+            .restore_configuration(&configuration)
+            .map_err(CliFailure::from)?,
+        None => configuration,
+    };
+    let configured_model = if configuration == *resolved.configuration() {
         resolved
     } else {
         ConfiguredLanguageModel::from_registered(

@@ -207,6 +207,20 @@ impl AgentSessions {
             .map_err(|error| runtime_error(&error).for_session(locator.session_id))
     }
 
+    /// Reads construction-bound tool data without acquiring runtime ownership.
+    /// This is a host-layer reconstruction seam, not a supported embedder API.
+    ///
+    /// # Errors
+    /// Returns exact-head, integrity or descriptor failures.
+    #[doc(hidden)]
+    pub async fn created_tool_presentation(
+        &self,
+        locator: SessionLocator,
+    ) -> Result<super::FrozenSessionPresentation, AgentSessionsError> {
+        let exact = self.load_exact(locator).await?;
+        super::FrozenSessionPresentation::from_checkpoint(&exact.checkpoint)
+    }
+
     /// Verifies and loads the exact recorded evaluator before runtime compilation.
     /// No current sidecar locator participates, and this read never changes a head.
     ///

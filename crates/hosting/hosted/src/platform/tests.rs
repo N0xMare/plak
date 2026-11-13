@@ -1268,12 +1268,15 @@ async fn grok_api_hub_creates_and_reopens(
         crate::agent_tree_protocol::WriterMode::SingleLease,
     )
     .unwrap();
-    let extensions = crate::topology_extensions::topology_tool_extensions_in(
+    let current_extensions = crate::topology_extensions::topology_tool_extensions_in(
         Arc::new(std::sync::Mutex::new(tree)),
         "root",
         crate::agent_tree_tools::TopologyVocabulary::TaskTools,
     )
     .unwrap();
+    let extensions =
+        crate::agent::previous_send_extensions(&current_extensions, composition, false)
+            .map_err(|error| error.to_string())?;
     let mut spec = ApiRuntimeSpec {
         runner_services: None,
         job_config: plakous::tools::JobConfig::default(),
@@ -1315,6 +1318,13 @@ async fn grok_api_hub_creates_and_reopens(
     };
     let locator = session.locator();
     session.release().await.unwrap();
+    let restored = current_extensions.with_frozen_presentation(Some(Arc::new(
+        sessions
+            .created_tool_presentation(locator)
+            .await
+            .map_err(|error| error.to_string())?,
+    )));
+    spec.topology_extensions = &restored;
     spec.opening_durable_session = true;
     let runtime =
         construct_platform_runtime(provider, &Credentials("fixture-key-one"), &spec, None)

@@ -374,6 +374,7 @@ pub(crate) async fn api_session_runtime_binding_with_owner(
         )
         .await?
     }
+    .with_frozen_presentation(parent.state_roots.frozen_presentation())
     .with_plan(&tool_plan)?
     .with_skills(&node_skills(
         &parent.state_roots,
@@ -680,6 +681,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
         )
         .await?
     }
+    .with_frozen_presentation(state_roots.frozen_presentation())
     .with_plan(&tool_plan)?
     .with_skills(&native_node_skills(
         &state_roots,

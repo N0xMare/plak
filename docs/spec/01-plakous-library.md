@@ -2259,6 +2259,22 @@ constants; no credential, account bytes or content enters a change. A missing or
 quarantined credential, an unavailable binding, a recovery requirement and a
 storage failure carry no binding change.
 
+Tool presentations are construction data, not current release defaults. An
+exact reopen reconstructs its registered definitions, selected/effective outer
+tool menus, projection and plan from the checkpoint before compiling the host
+attachment. Current executable capabilities are bound separately by executor
+id and executor binding identity/revision. A matching revision promises that
+the executor accepts the frozen input contract; incompatible semantics require
+an explicit revision cut and refuse reconstruction. Adding an optional input
+to today's definition does not change an existing session's presentation.
+Fresh and explicitly rebound sessions receive current definitions. No digest
+is patched and no identity comparison is relaxed. This is reconstruction of
+frozen data, not retained implementation code or a compatibility layer.
+The hidden `FrozenSessionPresentation` facade seam and construction-data read
+exist for host-layer reconstruction only and carry no embedder stability claim.
+Non-tool provider behavior, model authority and workspace policy still undergo
+the ordinary strict exact-open checks.
+
 `AgentSessions::verify_open(locator, runtime)` answers whether `open` of that
 exact head would attach, without owning it. It performs the same exact-head
 validation, runtime admission and runtime construction (persisted plan, tools,

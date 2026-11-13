@@ -81,6 +81,8 @@ mod product_gate_tests;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::frozen_presentation::previous_send_extensions;
 
 #[cfg(test)]
 pub(crate) use build::coding_tool_registry_with_extensions;

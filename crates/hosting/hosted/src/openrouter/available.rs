@@ -235,14 +235,22 @@ async fn prepare_openrouter(spec: &ProductOpenRouterSpec) -> CliResult<PreparedO
         .created_output_bound
         .unwrap_or(OutputBoundDisposition::DerivedFromRoute(derived_bound));
     let output_bound = output_bound_disposition.bound().unwrap_or(derived_bound);
-    let behavior = openrouter_behavior(
-        reasoning_effort,
-        spec.composition,
-        spec.wire,
-        &registry,
-        &extra_refs,
-        output_bound_disposition,
-    )?;
+    let behavior = match spec.topology_extensions.frozen_presentation() {
+        Some(frozen) => openrouter_behavior_from_tools(
+            reasoning_effort,
+            spec.wire,
+            frozen.selected_tools().to_vec(),
+            output_bound_disposition,
+        )?,
+        None => openrouter_behavior(
+            reasoning_effort,
+            spec.composition,
+            spec.wire,
+            &registry,
+            &extra_refs,
+            output_bound_disposition,
+        )?,
+    };
     let maximum_projected_input =
         openrouter_maximum_projected_input(&evidence, spec.wire, reasoning_on_wire, output_bound)?;
     // The discovered `context_length` is the model's total window the meter and
@@ -379,6 +387,15 @@ fn openrouter_behavior(
         registry,
         extra_names,
     )?;
+    openrouter_behavior_from_tools(reasoning_effort, wire, tools, output_bound)
+}
+
+fn openrouter_behavior_from_tools(
+    reasoning_effort: ReasoningEffortDisposition,
+    wire: ResolvedProtocol,
+    tools: Vec<plakous::model::ConfiguredTool>,
+    output_bound: OutputBoundDisposition,
+) -> CliResult<ProviderBehaviorConfiguration> {
     Ok(ProviderBehaviorConfiguration {
         processing_tier: ProcessingTierDisposition::Standard,
         tool_mode: ToolPresentationMode::Direct,

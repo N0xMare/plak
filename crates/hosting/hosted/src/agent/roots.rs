@@ -215,6 +215,7 @@ pub struct ProductStateRoots {
     /// The semantic evidence an exact reopen was created with; `None` for a
     /// new session.
     created_semantic_evidence: Option<Arc<[u8]>>,
+    frozen_presentation: Option<Arc<plakous::sessions::FrozenSessionPresentation>>,
     sidecars: Arc<dyn plakous::tools::SidecarLocator>,
     reopen_sidecars: Option<Arc<dyn plakous::tools::SidecarLocator>>,
     telemetry_factory: Arc<dyn TelemetrySinkFactory>,
@@ -321,6 +322,7 @@ impl ProductStateRoots {
             api: api::ApiState::new(platform_credentials),
             named_secrets: Arc::new(crate::mcp_binding::NoNamedSecrets),
             created_semantic_evidence: None,
+            frozen_presentation: None,
             sidecars,
             reopen_sidecars: None,
             telemetry_factory: telemetry,
@@ -920,6 +922,7 @@ impl ProductStateRoots {
     }
 
     pub(super) fn without_reopen_artifact(mut self) -> Self {
+        self.frozen_presentation = None;
         self.reopen_sidecars = None;
         self.created_semantic_evidence = None;
         self.frozen_skills = None;
@@ -943,6 +946,8 @@ impl ProductStateRoots {
         locator: plakous::sessions::SessionLocator,
     ) -> Result<Self, plakous::sessions::AgentSessionsError> {
         self.job_config = sessions.created_job_config(locator).await?;
+        self.frozen_presentation =
+            Some(Arc::new(sessions.created_tool_presentation(locator).await?));
         self.created_semantic_evidence = Some(
             sessions
                 .created_provider_semantic_evidence(locator)
@@ -951,6 +956,12 @@ impl ProductStateRoots {
         );
         self.reopen_sidecars = recorded_sidecar::recorded_sidecars(sessions, locator).await?;
         self.with_frozen_skills(sessions, locator).await
+    }
+
+    pub(crate) fn frozen_presentation(
+        &self,
+    ) -> Option<Arc<plakous::sessions::FrozenSessionPresentation>> {
+        self.frozen_presentation.clone()
     }
 
     /// Replaces the roster a genesis built from these roots freezes. A carry
@@ -1039,6 +1050,7 @@ impl ProductStateRoots {
             api: api::ApiState::new(Arc::new(crate::platform::UnavailableCredentials)),
             named_secrets: Arc::new(crate::mcp_binding::NoNamedSecrets),
             created_semantic_evidence: None,
+            frozen_presentation: None,
             sidecars: Arc::new(doubles::NoSidecars),
             reopen_sidecars: None,
             telemetry_factory: Arc::new(doubles::NoTelemetry),

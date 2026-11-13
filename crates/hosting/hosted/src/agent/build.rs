@@ -69,6 +69,8 @@ pub(crate) use session::{
 #[cfg(test)]
 pub(super) use session::{recovery_refusal, reopen_refusal};
 #[cfg(test)]
+pub(super) use tools::NodeSession;
+#[cfg(test)]
 pub(crate) use tools::coding_tool_registry;
 pub(crate) use tools::coding_tool_registry_with_extensions;
 #[cfg(test)]

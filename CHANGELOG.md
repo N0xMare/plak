@@ -22,6 +22,9 @@ one cross-build carrier (a build imports its own and the previous version).
 - Fixed a busy root's graceful host handoff being lost after an accepted
   send-now steer; restarting the host continues the handed-off turn once.
 
+- Preserve each session's frozen tool presentation on exact reopen across
+  release changes, while checking current executor compatibility separately.
+
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.
 

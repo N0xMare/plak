@@ -141,7 +141,10 @@ pub use transcript::{
 };
 mod line;
 pub use line::{BranchHold, LeaseOnlyHead, LineHead, carried_from_provenance};
+mod presentation;
 mod registry;
+#[doc(hidden)]
+pub use presentation::FrozenSessionPresentation;
 mod types;
 pub use attached::OpenedSession;
 pub use error::{AgentSessionsError, SessionStoreAdmission, SessionStorePressure};

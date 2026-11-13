@@ -8,6 +8,7 @@ use crate::runtime::test_kit::BlockOn as _;
 
 use super::*;
 
+pub(super) mod frozen_presentation;
 mod remote_skills;
 
 #[test]

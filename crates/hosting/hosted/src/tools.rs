@@ -54,6 +54,7 @@ use plakous::prompts::identity::{
 /// what it is, and the host adds no text of its own.
 #[derive(Clone, Default)]
 pub struct ProductToolExtensions {
+    frozen_presentation: Option<Arc<plakous::sessions::FrozenSessionPresentation>>,
     registrations: Arc<[ToolRegistration]>,
     host_facts: plakous_host_protocol::PromptHostFacts,
     retrieval: Option<Arc<crate::tool_plan::DeferredRetrievalPort>>,
@@ -73,6 +74,20 @@ pub struct ProductToolExtensions {
 }
 
 impl ProductToolExtensions {
+    pub(crate) fn with_frozen_presentation(
+        mut self,
+        presentation: Option<Arc<plakous::sessions::FrozenSessionPresentation>>,
+    ) -> Self {
+        self.frozen_presentation = presentation;
+        self
+    }
+
+    pub(crate) fn frozen_presentation(
+        &self,
+    ) -> Option<&plakous::sessions::FrozenSessionPresentation> {
+        self.frozen_presentation.as_deref()
+    }
+
     pub(crate) const fn tool_result_images(&self) -> bool {
         !self.omit_tool_images
     }
@@ -117,6 +132,7 @@ impl ProductToolExtensions {
             }
         }
         Ok(Self {
+            frozen_presentation: None,
             omit_tool_images: false,
             registrations: registrations.into(),
             host_facts: plakous_host_protocol::PromptHostFacts::default(),
@@ -274,6 +290,7 @@ impl ProductToolExtensions {
             Self::from_nested_registrations(self.registrations.iter().cloned().chain(appended))?
                 .with_host_facts(host_facts);
         extended.retrieval = slot;
+        extended.frozen_presentation = self.frozen_presentation;
         extended.image_gen = image_slot;
         extended.omit_tool_images = self.omit_tool_images;
         if let Some(earning) = earning {
@@ -335,6 +352,11 @@ impl ProductToolExtensions {
             .iter()
             .map(ToolRegistration::name)
             .filter(|name| self.skill_presented || name.as_str() != crate::skills::SKILL_TOOL_NAME)
+            .filter(|name| {
+                self.frozen_presentation
+                    .as_ref()
+                    .is_none_or(|frozen| frozen.contains(name))
+            })
     }
 }
 

@@ -192,13 +192,16 @@ pub(crate) async fn construct_platform_runtime_with(
         effort,
         &row,
         native_ptc,
-        crate::agent::build::api::configured_tools(
-            crate::coding_routes::platform_presentation(provider),
-            composition,
-            spec.wire,
-            &registry,
-            &extra,
-        )?,
+        match spec.topology_extensions.frozen_presentation() {
+            Some(frozen) => frozen.selected_tools().to_vec(),
+            None => crate::agent::build::api::configured_tools(
+                crate::coding_routes::platform_presentation(provider),
+                composition,
+                spec.wire,
+                &registry,
+                &extra,
+            )?,
+        },
     )?;
     let maximum = NonZeroU64::new(window)
         .ok_or_else(|| CliFailure::new("API context envelope is invalid"))?;
