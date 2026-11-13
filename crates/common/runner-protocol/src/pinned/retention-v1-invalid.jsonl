@@ -1,0 +1,13 @@
+{"kind":"status","value":{"status":"running","unexpected":true}}
+{"kind":"status","value":{"status":"released","unexpected":true}}
+{"kind":"status","value":{"status":"outcome_unknown","unexpected":true}}
+{"kind":"process_status","value":{"status":"running","unexpected":true}}
+{"kind":"process_status","value":{"status":"released","unexpected":true}}
+{"kind":"process_status","value":{"status":"outcome_unknown","unexpected":true}}
+{"kind":"process_status","value":{"status":"terminated","unexpected":true}}
+{"kind":"process_status","value":{"status":"cancelled","unexpected":true}}
+{"kind":"process_status","value":{"status":"timed_out","unexpected":true}}
+{"kind":"process_status","value":{"status":"output_limit","unexpected":true}}
+{"kind":"process_status","value":{"status":"failed","unexpected":true}}
+{"kind":"process_status","value":{"status":"cleanup_unresolved","unexpected":true}}
+{"kind":"answer","value":{"answer":"ok","unexpected":true}}

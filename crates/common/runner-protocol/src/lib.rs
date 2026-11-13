@@ -17,6 +17,7 @@ pub mod frame;
 mod message;
 pub mod operator;
 mod owner;
+pub mod retention;
 
 pub use message::{
     Bind, Hello, HostFrame, LineStatus, Operation, Refusal, Request, RequestClass, RunnerFrame,

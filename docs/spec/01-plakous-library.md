@@ -6938,6 +6938,72 @@ not insert a job terminal. Same-owner wake itself stops nothing. The runner’s
 lease clock excludes suspend. Floors, socket, lock and log are isolated by exact
 triple; no floors migration crosses a protocol/revision/flavor boundary.
 
+**Job-retention endpoint (version 1).** Native runner protocol 8 remains an
+exact-triple protocol. Separately, each daemon serves the frozen same-user,
+same-machine `builds/<triple>/retention-v1.sock` endpoint. The next build speaks
+its current and immediately previous endpoint versions (initially only v1).
+The closed verbs are lines, transfer, jobs snapshot/watch, read/poll, write,
+stop, disown and ack. It never starts a process, performs workspace effects,
+looks up arbitrary effects or replays source effects. Strict JSON fixtures pin
+v1; any change to its verbs or encodings requires an endpoint-version bump.
+Frames are at most 1 MiB, data controls at most 64 KiB, and inventory pages are
+bounded by both encoded bytes and 64 rows. Poll/watch waits are at most one
+second; stop grace is at most five seconds. Neither native framing nor native
+version negotiation crosses this boundary. Discovery preserves the endpoint
+version through connection and Bind; calls and replies dispatch through that
+admitted version's codec. All tagged variants, including payload-free outcomes,
+reject unknown fields while valid v1 fixture bytes remain unchanged.
+
+The receiver derives host and instance from its authenticated native peer; the
+original trusts the same-UID retention peer's Bind and checks the exact owner CAS.
+Transfer compares the exact same-host, same-line owner tuple, or recovers that
+same destination tuple already accepted for that instance. The receiver syncs
+its intended source/destination tuple and direct-original inventory before CAS;
+the original syncs the accepted owner and irreversible retention-only role
+before replying. Its reply carries the atomic job-number floor and whether
+jobs remain. A lost reply never authorizes leapfrogging another owner. Source
+foreground work and native-only foreground reports must already be settled;
+the retention transfer refuses them rather than stopping or adopting them.
+Retention-only authority is independent of the same instance's native lease
+expiry and foreground cleanup. Native adoption of a retention-only line always
+refuses, including downgrade
+or reinstall of that build; finish, consume or disown through a compatible
+retention peer instead. This rule is per host/line, not a ban on unrelated work.
+
+Original workers retain process handles, output cursors, wait status and hard
+caps. A new native daemon exposes one logical job port and delegates directly
+to every original, including across three or more builds. It never routes
+through a chain of intervening daemons. Stable allocation identities deduplicate
+job views; carried number floors prevent reuse. Retained running or unsettled
+jobs count once against the receiver's job_bound, including during temporary
+I/O failure. Read-only maintenance refreshes inventory without a native rebind
+or ownership transfer. There is no drainer-count cap or live-drainer eviction.
+Bare connection refusal or NotFound never proves original-worker loss. A
+different hello instance, changed observed socket inode, or socket absence with
+the original native lock free supplies positive evidence. A private hard link
+to that lock permits a liveness check without reading native stores.
+A known original-instance loss records unknown terminal facts, never adopts
+PIDs or silently starts replacements. Known terminal outcomes do not regress.
+
+Job controls retain their original key, digest, replay age and original-worker
+receipt; ambiguous input is not resent. Proven answers survive a failed later
+inventory refresh. Consumption is persisted at the receiver, so a late snapshot
+cannot resurrect an acknowledged allocation. Stop/disown attempts continue to
+other independently validated originals when one is unavailable, reporting
+unknown overall rather than suppressing healthy cleanup. Job watch ends on
+loss of the native controller's authority or closure of its consumer. Native
+reply acks are forwarded only for control IDs actually relayed to that original,
+skipping lost and empty origins. Lines remains scoped observation.
+
+A drainer stays alive until every job is terminal/disowned and consumed, or
+until 24 hours after its last original terminal when no unsettled job remains.
+The retention clock never kills running jobs or restarts their existing caps.
+Old immutable executable snapshots and matching sidecars remain available until
+explicit operator cleanup, not merely until host Ready or acknowledgement.
+The private owner-floor role and receiver delegation/consumption receipts are
+build-local synced JSON. They add no runtime SQLite schema, checkpoint epoch,
+product/tree schema, export-document version or state-key component.
+
 ### 8.5 Execution environment and process sessions
 
 Runner protocol 6 adds `workspace.changes`, an ownerless `BuildRead` with a
