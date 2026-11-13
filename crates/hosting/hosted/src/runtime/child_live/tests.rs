@@ -9,6 +9,8 @@ use crate::runtime::test_support::empty_transcript_call;
 use crate::surface_protocol::ContentEvent;
 use plakous::model::UsageUpdate;
 
+mod coverage;
+
 #[test]
 fn child_success_uses_the_root_done_vocabulary() {
     let lineage = plakous::agent::ToolCallerLineageView::direct();
@@ -766,6 +768,16 @@ async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
     if let HostEvent::TranscriptPatch(patch) = gap {
         state.apply(patch).unwrap();
     }
+    assert_eq!(
+        state
+            .items()
+            .values()
+            .filter(|row| row.text()
+                == Some("Live view starts here · earlier streaming output not shown"))
+            .count(),
+        2,
+        "attach and lag each start one coverage segment"
+    );
     finish.release();
     turn.result().await.unwrap();
     let ended = next_agent_transcript(&received, &mut state, &mut ops).await;
@@ -778,6 +790,10 @@ async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
     assert!(
         !ops.iter().any(|op| carries_text(op, GAP)),
         "a single lag produces one gap notice"
+    );
+    assert!(
+        !ended.rows.iter().any(|row| row.text() == Some(GAP)),
+        "canonical terminal refresh retires coverage notices"
     );
     drop(observers);
     attached.release().await.unwrap();
@@ -1532,6 +1548,10 @@ async fn a_failed_read_keeps_the_last_good_rows_and_stale_serves_send_nothing() 
     }];
     assert!(!context.send_transcript(Ok(retired), true));
     assert!(!(context.emitter())(HostEvent::AssistantDone));
+    assert!(!(context.emitter())(HostEvent::Row(TranscriptRow::info(
+        NoticeScope::Tree,
+        "Live view starts here · earlier streaming output not shown",
+    ))));
     assert!(received.try_recv().is_err(), "a stale serve sends nothing");
     assert_eq!(
         *context.last_good.lock().unwrap(),

@@ -22,7 +22,7 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::topology_runtime::ProductTopologyRuntime;
 
 const MAX_CHILDREN: usize = 8;
-pub(super) const GAP: &str = "earlier activity not shown";
+pub(super) const GAP: &str = "Live view starts here · earlier streaming output not shown";
 
 type ObservedChild = (String, TurnId, Agent, Arc<ChildObservation>);
 

@@ -5298,8 +5298,17 @@ canonical items, and a turn ending during the history read refreshes the committ
 baseline. The admission-created `TurnEvents` is owned by the reducer, not retained
 for later viewing. A face attachment does not replay prior uncommitted
 streaming text or reasoning: when prior activity is not covered, or the tail loses activity
-or lags out, an addressed `earlier activity not shown` marker makes the gap
-explicit. Closing drops this subscription; a lagged tail reattaches, at most once
+or lags out, an addressed Tree notice,
+`Live view starts here · earlier streaming output not shown`, makes the gap
+explicit. Its initial cutoff is the canonical attachment cursor, not the start
+of the turn or a client timestamp. Text emitted during the history read but
+at or before that cursor is not replayed as live output. Each subsequent source
+or face gap starts a new coverage segment with one bounded notice; it does not
+claim uninterrupted delivery or reconstruct missing output. Scope resync keeps
+the existing notice instead of adding another, and canonical terminal refresh
+replaces provisional coverage notices with committed history. Every notice
+uses the same view-generation fence as the content it addresses.
+Closing drops this subscription; a lagged tail reattaches, at most once
 a second, with an explicit gap. Live content uses the same keyed row reducer
 and bounded scoped publication channel as the root. A refused patch marks that
 scope for a full resync baseline, including its current previews.

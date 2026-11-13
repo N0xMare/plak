@@ -7,6 +7,12 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Clarify running-child transcript coverage with the addressed notice
+  `Live view starts here · earlier streaming output not shown`. Attach and
+  later gaps disclose unavailable streaming output without replaying it;
+  resync preserves the notice and terminal refresh restores committed history.
+  No persisted or wire format change; client protocol remains 9.
+
 - Fix continuation command collisions between distinct sessions at equal feed
   positions, and namespace child loss continuations by their tree. Reopen keeps
   recorded decision identities, including older pending and consumed decisions.
