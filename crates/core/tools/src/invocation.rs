@@ -5,7 +5,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use plakous_model::{AttemptId, CallId, Digest, RunId, ToolCorrelation, ToolName, TurnId};
+use plakous_model::{
+    AttemptId, CallId, Digest, RunId, ToolCorrelation, ToolDefinition, ToolName, TurnId,
+};
 
 use crate::registry::RegistryProvenance;
 use crate::{
@@ -133,6 +135,7 @@ pub struct ToolInvocation {
     attempt_id: AttemptId,
     call_id: CallId,
     identity: RegisteredToolIdentity,
+    definition: ToolDefinition,
     correlation: ToolCorrelation,
     arguments: ValidatedArguments,
     exposure: Option<ToolExposureBinding>,
@@ -150,6 +153,7 @@ impl fmt::Debug for ToolInvocation {
             .field("attempt_id", &self.attempt_id)
             .field("call_id", &self.call_id)
             .field("identity", &self.identity)
+            .field("definition", &self.definition)
             .field("correlation", &"<redacted>")
             .field("arguments", &self.arguments)
             .field("exposure", &self.exposure)
@@ -164,6 +168,7 @@ impl ToolInvocation {
     pub(crate) fn validated(
         request: ToolInvocationRequest,
         identity: RegisteredToolIdentity,
+        definition: ToolDefinition,
         arguments: ValidatedArguments,
         provenance: Arc<RegistryProvenance>,
     ) -> Self {
@@ -173,6 +178,7 @@ impl ToolInvocation {
             attempt_id: request.attempt_id,
             call_id: request.call_id,
             identity,
+            definition,
             correlation: request.correlation,
             arguments,
             exposure: None,
@@ -226,6 +232,12 @@ impl ToolInvocation {
     #[must_use]
     pub const fn identity(&self) -> &RegisteredToolIdentity {
         &self.identity
+    }
+
+    /// The frozen definition whose input contract validated this invocation.
+    #[must_use]
+    pub const fn definition(&self) -> &ToolDefinition {
+        &self.definition
     }
 
     /// Returns remote correlation and lineage.

@@ -242,6 +242,19 @@ impl ToolExecutorBindingIdentity {
     pub const fn digest(self) -> Digest {
         self.0
     }
+
+    /// Checks an executable contract without treating shell filesystem facts
+    /// as frozen authority. Process sessions revalidate their enrolled shell
+    /// at invocation; all other bindings retain exact configuration equality.
+    #[must_use]
+    #[doc(hidden)]
+    pub fn accepts(self, id: &ToolExecutorId, recorded: Self) -> bool {
+        if id.as_str() == crate::capabilities::PROCESS_SESSION_EXECUTOR_ID {
+            self.0.version() == recorded.0.version()
+        } else {
+            self == recorded
+        }
+    }
 }
 
 /// Immutable identity captured when a tool is registered.
@@ -847,6 +860,7 @@ impl FrozenToolRegistry {
         Ok(ToolInvocation::validated(
             request,
             entry.identity.clone(),
+            entry.definition.clone(),
             arguments,
             Arc::clone(&self.inner.provenance),
         ))

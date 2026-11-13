@@ -2275,6 +2275,23 @@ and construction-data read
 exist for host-layer reconstruction only and carry no embedder stability claim.
 Non-tool provider behavior, model authority and workspace policy still undergo
 the ordinary strict exact-open checks.
+Manual/host compaction reconstructs that same frozen presentation before building
+its compact runtime, on native and API routes and for root and child sessions.
+Only its admitted compaction output limit differs; the one-dispatch paid-work
+rule is unchanged. A fresh fork, Switch or rebind clears only presentation
+reopen data, preserving inherited skills and the pending orchestration epoch.
+
+The process-session executable contract is its executor id and semantic binding
+revision. The shell's canonical path, device and inode are observed runtime
+facts, not frozen equality inputs: replacing an executable regular shell during
+an OS update does not change its executor contract. Existing inode-bearing
+recorded identities resolve by that same id/revision rule, without rewriting any
+stored identity. Every invocation revalidates the enrolled shell's existence,
+regular-file kind and executable permissions. Other executable bindings retain
+their exact configuration identity checks. Invocation metadata carries the
+actual frozen definition used for argument validation, so current executors can
+render remedies that the presented input contract supports.
+
 
 `AgentSessions::verify_open(locator, runtime)` answers whether `open` of that
 exact head would attach, without owning it. It performs the same exact-head

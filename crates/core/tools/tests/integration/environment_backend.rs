@@ -565,8 +565,8 @@ async fn joined_process_shell_multicall_dispatch_preserves_enrolled_name() -> Re
     Ok(())
 }
 
-#[test]
-fn joined_process_shell_replacement_fails_before_spawn() -> Result<(), TestError> {
+#[tokio::test]
+async fn joined_process_shell_replacement_revalidates_before_spawn() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
     let source = unix_program(&["/bin/sh", "/usr/bin/sh"])?;
     let enrolled = workspace.path().join("enrolled-sh");
@@ -583,15 +583,12 @@ fn joined_process_shell_replacement_fails_before_spawn() -> Result<(), TestError
         ExecutionEnvironmentConfig::new(limits(4096, 4096, 8192, 4096)?, [], [])?,
     )?;
     let sessions = environment.joined_process_sessions()?;
-    let error = sessions
-        .start(
-            joined_request(JoinedProcessCommand::shell(profile, "exit 0")?, false)?,
-            control(),
-        )
-        .err()
-        .ok_or("replaced shell unexpectedly started")?;
-    assert_eq!(error.kind(), ExecutionBackendErrorKind::InvalidRequest);
-    assert!(sessions.is_drained());
+    let id = sessions.start(
+        joined_request(JoinedProcessCommand::shell(profile, "exit 0")?, false)?,
+        control(),
+    )?;
+    let (_, status) = collect_joined_output(&sessions, id).await?;
+    assert_eq!(status, JoinedProcessStatus::Exited(Some(0)));
     Ok(())
 }
 

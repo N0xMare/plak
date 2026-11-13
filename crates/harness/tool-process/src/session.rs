@@ -634,26 +634,11 @@ impl ProcessSessionTools {
                 "canonical process-session executor requires the fixed /bin/sh profiles",
             ));
         }
-        let shell = self
-            .shell
-            .identity()
-            .binding_identity()
-            .digest()
-            .identity_bytes();
-        let login_shell = self
-            .login_shell
-            .identity()
-            .binding_identity()
-            .digest()
-            .identity_bytes();
         let executor_binding_identity = ToolExecutorBindingIdentity::new(
             1,
             &[
                 b"process-session-leftover-jobs",
-                b"non-login-shell",
-                &shell,
-                b"login-shell",
-                &login_shell,
+                b"posix-sh-non-login-and-login-v1",
             ],
         )?;
         let executor: Arc<dyn ToolExecutor> = self;

@@ -17,6 +17,54 @@ use crate::{
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 #[test]
+fn frozen_process_contract_accepts_shell_replacement_without_rewriting_identity() -> TestResult {
+    let (base, calls) = registry_in_order(&[0])?;
+    let definition = base.definitions()[0].clone();
+    let recorded = ToolExecutorBindingIdentity::new(1, &[b"shell-host-one-inode"])?;
+    let current = ToolExecutorBindingIdentity::new(1, &[b"stable-posix-shell-contract"])?;
+    let make = |binding| -> TestResult<FrozenToolRegistry> {
+        let mut builder = ToolRegistryBuilder::default();
+        builder.register(ToolRegistration::new(
+            RegisteredToolId::new("fixture-process")?,
+            ToolExecutorId::new(crate::capabilities::PROCESS_SESSION_EXECUTOR_ID)?,
+            binding,
+            definition.clone(),
+            Arc::new(CountingExecutor {
+                calls: Arc::clone(&calls),
+            }),
+        ))?;
+        Ok(builder.freeze())
+    };
+    let source = make(recorded)?;
+    let descriptor = FrozenToolRegistryDescriptor::capture(&source)?;
+    let restored = descriptor.resolve(&ToolExecutorBindings::capture(&make(current)?))?;
+    assert_eq!(
+        source.registry_identity_digest()?,
+        restored.registry_identity_digest()?
+    );
+    assert_eq!(
+        restored
+            .identities()
+            .next()
+            .unwrap()
+            .executor_binding_identity(),
+        recorded
+    );
+    descriptor.check_executor_identities(|_, _| Some(current))?;
+    assert_eq!(
+        descriptor.canonical_authority_identity()?,
+        FrozenToolRegistryDescriptor::capture(&make(current)?)?.canonical_authority_identity()?
+    );
+    let revised = ToolExecutorBindingIdentity::new(2, &[b"incompatible-shell-contract"])?;
+    assert!(matches!(
+        descriptor.resolve(&ToolExecutorBindings::capture(&make(revised)?)),
+        Err(ToolBindingError::BindingIdentityMismatch { .. })
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[test]
 fn offline_executor_identity_check_uses_exact_bindings_without_invocation() -> TestResult {
     let (registry, calls) = registry_in_order(&[0, 1, 2])?;
     let descriptor = FrozenToolRegistryDescriptor::capture(&registry)?;

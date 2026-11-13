@@ -13,6 +13,9 @@ use super::{
 };
 use crate::environment::metadata::MetadataExt;
 
+#[cfg(all(test, unix))]
+mod tests;
+
 /// Opaque, allocation-local process-session identity. It is never an OS PID.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct JoinedProcessSessionId(pub(super) [u8; 16]);
@@ -49,13 +52,11 @@ pub enum JoinedProcessTerminalMode {
 pub struct JoinedProcessShellProfile {
     pub(super) executable: Arc<PathBuf>,
     pub(super) canonical_executable: Arc<PathBuf>,
-    pub(super) executable_device: u64,
-    pub(super) executable_inode: u64,
     pub(super) arguments: Arc<[String]>,
     pub(super) identity: JoinedProcessShellProfileIdentity,
 }
 
-/// Immutable identity of one exact enrolled shell filesystem object and argv profile.
+/// Enrolled shell contract and observed, non-frozen filesystem facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JoinedProcessShellProfileIdentity {
     pub(super) semantic_revision: u32,
@@ -89,7 +90,7 @@ impl JoinedProcessShellProfileIdentity {
     pub fn arguments(&self) -> &[String] {
         &self.arguments
     }
-    /// Returns the content-addressed identity used by executable registration.
+    /// Returns the enrolled path/argv contract, excluding observed filesystem facts.
     #[must_use]
     pub const fn binding_identity(&self) -> ToolExecutorBindingIdentity {
         self.binding_identity
@@ -143,20 +144,15 @@ impl JoinedProcessShellProfile {
         let enrolled_text = executable
             .to_str()
             .ok_or_else(|| invalid_request("joined process shell path must be UTF-8"))?;
-        let canonical_text = canonical_executable
+        canonical_executable
             .to_str()
             .ok_or_else(|| invalid_request("canonical joined process shell path must be UTF-8"))?;
         let mut identity_parts = vec![
             b"joined-process-shell-profile".to_vec(),
             enrolled_text.as_bytes().to_vec(),
-            canonical_text.as_bytes().to_vec(),
             b"regular-file-required".to_vec(),
+            b"executable-required".to_vec(),
         ];
-        {
-            identity_parts.push(metadata.dev().to_be_bytes().to_vec());
-            identity_parts.push(metadata.ino().to_be_bytes().to_vec());
-            identity_parts.push(0o111_u32.to_be_bytes().to_vec());
-        }
         for argument in &arguments {
             identity_parts.push(b"argv".to_vec());
             identity_parts.push(argument.as_bytes().to_vec());
@@ -188,8 +184,6 @@ impl JoinedProcessShellProfile {
         Ok(Self {
             executable: enrolled_executable,
             canonical_executable,
-            executable_device: metadata.dev(),
-            executable_inode: metadata.ino(),
             arguments,
             identity,
         })
@@ -220,11 +214,6 @@ impl JoinedProcessShellProfile {
     pub(super) fn revalidated_executable(&self) -> Result<&Path, ExecutionBackendError> {
         let canonical = fs::canonicalize(self.executable.as_ref())
             .map_err(|_| invalid_request("joined process shell could not be revalidated"))?;
-        if canonical != *self.canonical_executable {
-            return Err(invalid_request(
-                "joined process shell target changed after enrollment",
-            ));
-        }
         let metadata = fs::metadata(&canonical)
             .map_err(|_| invalid_request("joined process shell metadata changed"))?;
         if !metadata.is_file() {
@@ -232,17 +221,12 @@ impl JoinedProcessShellProfile {
                 "joined process shell is no longer a regular file",
             ));
         }
-        if metadata.dev() != self.executable_device
-            || metadata.ino() != self.executable_inode
-            || metadata.mode() & 0o111 == 0
-        {
+        if metadata.mode() & 0o111 == 0 {
             return Err(invalid_request(
-                "joined process shell object identity changed after enrollment",
+                "joined process shell is no longer executable",
             ));
         }
-        // Execute the admitted target, not an alias that may have moved since
-        // enrollment. The spawn boundary separately preserves the enrolled argv[0].
-        Ok(self.canonical_executable.as_ref())
+        Ok(self.executable.as_ref())
     }
 }
 

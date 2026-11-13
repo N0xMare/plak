@@ -295,6 +295,14 @@ fn canonical_executor_authority(
     const PRODUCT_PLAN_PREFIX: &str = "plakous.standard.update-plan.v1.plak.session.";
     const PRODUCT_PLAN_SUFFIX: &str = ".r1";
     const NORMALIZED_PRODUCT_PLAN_ID: &str = "plakous.standard.update-plan.v1.product-session.r1";
+    if registration.executor_id == crate::capabilities::PROCESS_SESSION_EXECUTOR_ID {
+        let identity = ToolExecutorBindingIdentity::new(
+            registration.executor_binding_identity.version(),
+            &[b"process-session-semantic-contract"],
+        )
+        .map_err(invalid_runtime)?;
+        return Ok((registration.executor_id.clone(), identity.digest()));
+    }
 
     let Some(branch_identity) = registration.executor_id.strip_prefix(PRODUCT_PLAN_PREFIX) else {
         return Ok((
@@ -508,6 +516,42 @@ impl FrozenToolRegistryDescriptor {
         })
     }
 
+    /// Frozen construction data; this grants no executable authority.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn definition(&self, name: &ToolName) -> Option<&ToolDefinition> {
+        self.wire
+            .registrations
+            .iter()
+            .find(|entry| entry.definition.name() == name)
+            .map(|entry| &entry.definition)
+    }
+
+    /// Data-only executable requirements for host binding inspection.
+    ///
+    /// # Errors
+    /// Returns an invalid stored executor identifier.
+    #[doc(hidden)]
+    pub fn executor_requirements(
+        &self,
+    ) -> Result<Vec<(ToolName, ToolExecutorId, ToolExecutorBindingIdentity)>, ToolDescriptorError>
+    {
+        self.wire
+            .registrations
+            .iter()
+            .map(|registration| {
+                Ok((
+                    registration.identity.name.clone(),
+                    ToolExecutorId::new(registration.executor_id.clone())
+                        .map_err(invalid_runtime)?,
+                    ToolExecutorBindingIdentity::from_digest(
+                        registration.executor_binding_identity,
+                    ),
+                ))
+            })
+            .collect()
+    }
+
     /// Checks current executable identities without constructing executors.
     /// This host inspection seam grants no executable capability.
     ///
@@ -526,7 +570,7 @@ impl FrozenToolRegistryDescriptor {
                 ToolExecutorBindingIdentity::from_digest(registration.executor_binding_identity);
             let found = current(&registration.identity.name, &id)
                 .ok_or_else(|| ToolBindingError::MissingBinding { id: id.clone() })?;
-            if found != expected {
+            if !found.accepts(&id, expected) {
                 return Err(ToolBindingError::BindingIdentityMismatch {
                     id,
                     expected,
@@ -657,7 +701,7 @@ impl FrozenToolRegistryDescriptor {
                     id: executor_id.clone(),
                 }
             })?;
-            if binding.identity != expected {
+            if !binding.identity.accepts(&executor_id, expected) {
                 return Err(ToolBindingError::BindingIdentityMismatch {
                     id: executor_id,
                     expected,
