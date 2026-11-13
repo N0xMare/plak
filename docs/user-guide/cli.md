@@ -72,10 +72,13 @@ Linux installation reloads the user manager; macOS installation never invokes
 `launchctl`. Neither enables or starts the service. Follow the printed
 commands; see [service setup](host-service.md#install).
 
-`plak host upgrade --expect-binary <id> [--wait <seconds>]` runs from the
-destination build. The wait defaults to 0 and accepts at most 3600 seconds.
-Same-key upgrades hand off; cross-key upgrades carry settled roots into new
-successor sessions. Before surrender, a refusal leaves the old owner
+`plak host upgrade --expect-binary <id> [--wait <seconds> | --drain <duration|idle>]`
+runs from the destination build. Same-key upgrades drain roots and children at
+joined runtime boundaries before handing off, with a 60-second natural-drain
+budget by default; `--drain` changes that budget. Cross-key upgrades carry
+settled roots into new successor sessions. The separate settling wait defaults
+to 0 and accepts at most 3600 seconds; explicit `--drain` and `--wait` cannot
+be combined. Before surrender, a refusal leaves the old owner
 authoritative; after surrender, recover through the destination's receipts,
 never by reopening the old owner. Retry the same destination command after an
 unknown outcome. `plak host upgrade --abandon <successor-uuid-or-runner-id>`
