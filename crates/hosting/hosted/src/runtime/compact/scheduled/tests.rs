@@ -29,6 +29,8 @@ use plakous::sessions::SessionOperationId;
 use std::cell::RefCell;
 use std::sync::Arc;
 
+mod unavailable;
+
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 
 #[test]

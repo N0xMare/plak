@@ -4708,6 +4708,13 @@ verdicts) are addressed, the session profile and workspace chrome states.
   unchanged. Reserve the id alone atomically host-wide, digesting session,
   target, intent kind and exact body/images. Changed input is malformed.
   Mailbox entry answers `accepted {duplicate:false}`, not durable admission.
+  During a long scheduled compaction, a further draft can remain deferred in
+  that mailbox without a queue intent or durable verdict. Its pending UUID
+  is not evidence that the text was saved. Conversely, the already admitted
+  item that triggered the compaction remains a durable queue intent until its
+  own command is accepted; neither a compaction dispatch nor a crash consumes
+  it. Correlate queue items by id, revision and text, not their position or the
+  total number of provider requests.
   Identical pending input refuses `draft_pending {client_id}`. Before
   delivering DraftAccepted, retain the durable verdict independent of the
   originating connection; only that state answers `accepted {duplicate:true}`

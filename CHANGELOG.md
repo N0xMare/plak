@@ -13,6 +13,13 @@ one cross-build carrier (a build imports its own and the previous version).
   resync preserves the notice and terminal refresh restores committed history.
   No persisted or wire format change; client protocol remains 9.
 
+- Pin prompt queue durability across a host crash inside paid scheduled
+  compaction: durably admitted input survives with its identity and resumes
+  once, while a deferred mailbox draft is not reported as saved. Distinguish
+  summary dispatch from ordinary turns and consumed input from missing input.
+  Add coverage for the unavailable-compaction queue remedy. No runtime, wire
+  or persisted-format change.
+
 - Fix continuation command collisions between distinct sessions at equal feed
   positions, and namespace child loss continuations by their tree. Reopen keeps
   recorded decision identities, including older pending and consumed decisions.

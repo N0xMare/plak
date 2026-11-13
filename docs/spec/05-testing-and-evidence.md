@@ -5785,6 +5785,29 @@ no workflow request left pending.
 request no feed fact settles and requires `gc --all` to skip the session as
 `workflow pending` and `session export` to refuse it (`open the session once
 to settle it`); once the request is withdrawn both proceed.
+`host_skeleton::crash::compaction_queue::` cuts the real host after fsynced
+**summary-specific** dispatch evidence, while the paid fold is still pending.
+It correlates the triggering item's id, revision and exact text with a
+read-only `queue_items` query, `DraftAccepted` and an accepted same-UUID
+duplicate for a previously queued follow-up. A further follow-up arriving
+inside that fold has only a mailbox acknowledgement and `DraftPending`, not a
+durable item. SIGKILL and reopen preserve the accepted item, pause its drain,
+and dispatch neither the uncertain summary nor the pending draft. Explicit
+Resume authorizes a new paid workflow and consumes the preserved input once;
+repeated Resume cannot replay it. The test checks distinct workflow identities
+and one physical summary dispatch per workflow, not a false prohibition on
+an explicitly authorized new compaction.
+The small one-answer fixture separately pins that two physical provider
+dispatches can be two ordinary turns, with no paid summary at all. A consumed
+follow-up remains in the canonical transcript even when its joined queue is
+empty. The restored fixture retains the exact model-capability contract;
+changing its context limit would instead exercise a read-only bind refusal.
+`an_unavailable_compaction_endpoint_preserves_the_item_and_names_the_queue_remedy`
+uses a real public driver shutdown to reach the hosted scheduled-pass
+unavailable path. It preserves the exact item without a replacement provider
+dispatch and emits one typed `ResumeQueueOrStartFresh` remedy. This is a
+hosted runtime test of endpoint loss, not evidence that an ordinary
+crash/reopen itself emits that remedy.
 `full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape` covers all 14 sweep
 shapes: every SQL view cell equals the incremental lifecycle, including after
 one plain reopen with no harness repair.

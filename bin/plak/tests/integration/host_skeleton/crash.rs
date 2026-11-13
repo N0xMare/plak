@@ -14,6 +14,7 @@ use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
 use super::*;
 
 pub(super) mod client_control;
+mod compaction_queue;
 mod tui;
 mod wire;
 
