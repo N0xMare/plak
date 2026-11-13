@@ -1818,6 +1818,7 @@ mod bridge;
 mod child_continuation;
 mod continuation_identity;
 mod crash;
+mod directory;
 mod profiles;
 mod reload;
 mod requests;

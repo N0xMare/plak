@@ -1,4 +1,5 @@
 use super::*;
+mod validation;
 use crate::home::paths::PlakPaths;
 use plakd_wire_types::console::{
     ConfigChange, ConfiguredSwitches, ProfileBody, SettingValue, TemplateChange,

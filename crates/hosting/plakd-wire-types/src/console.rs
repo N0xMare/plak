@@ -401,6 +401,8 @@ impl std::fmt::Debug for HostResponse {
 pub struct ValidationIssue {
     pub field: String,
     pub code: ValidationCode,
+    /// Safe bounded operator guidance; never a parser message or supplied value.
+    pub detail: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -408,6 +410,9 @@ pub struct ValidationIssue {
 pub enum ValidationCode {
     InvalidAction,
     InvalidValue,
+    TypeMismatch,
+    Empty,
+    UnknownTemplate,
     ReadOnly,
     InvalidAccount,
     UnknownAccount,

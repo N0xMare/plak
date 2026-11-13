@@ -107,6 +107,7 @@ fn row(session: &str, updated_at: u64) -> SessionRow {
         title: None,
         workspace: "/w".into(),
         profile: None,
+        created_at: 1,
         updated_at,
         residency: SessionResidency::Dormant,
         activity: SessionActivity::Idle,

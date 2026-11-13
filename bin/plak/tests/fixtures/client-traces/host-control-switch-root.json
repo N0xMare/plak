@@ -1,6 +1,6 @@
 {
   "fixture": "host-control-switch-root",
-  "source": "real public TUI capture",
+  "source": "real public TUI capture; protocol-10 directory projection",
   "seed_session": "@uuid:0",
   "entries": [
     {
@@ -14,7 +14,7 @@
         "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
-        "proto": 9
+        "proto": 10
       }
     },
     {
@@ -137,7 +137,7 @@
         },
         "frame": "welcome",
         "host_generation": "@generation:0",
-        "proto": 9
+        "proto": 10
       }
     },
     {
@@ -191,6 +191,7 @@
                 },
                 "session": "@uuid:0",
                 "title": "original source",
+                "created_at": "@time",
                 "updated_at": "@time",
                 "workspace": "@workspace"
               }
@@ -482,6 +483,7 @@
                   "status": "ready"
                 },
                 "session": "@uuid:3",
+                "created_at": "@time",
                 "updated_at": "@time",
                 "workspace": "@workspace"
               },
@@ -514,6 +516,7 @@
                 },
                 "session": "@uuid:0",
                 "title": "original source",
+                "created_at": "@time",
                 "updated_at": "@time",
                 "workspace": "@workspace"
               }
@@ -645,7 +648,7 @@
         "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
-        "proto": 9
+        "proto": 10
       }
     },
     {
@@ -768,7 +771,7 @@
         },
         "frame": "welcome",
         "host_generation": "@generation:1",
-        "proto": 9
+        "proto": 10
       }
     },
     {
@@ -827,6 +830,7 @@
                 },
                 "session": "@uuid:0",
                 "title": "original source",
+                "created_at": "@time",
                 "updated_at": "@time",
                 "workspace": "@workspace"
               },
@@ -863,6 +867,7 @@
                   "status": "blocked"
                 },
                 "session": "@uuid:3",
+                "created_at": "@time",
                 "updated_at": "@time",
                 "workspace": "@workspace"
               }

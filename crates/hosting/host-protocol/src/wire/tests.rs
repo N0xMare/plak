@@ -227,6 +227,7 @@ fn row() -> SessionRow {
         title: None,
         workspace: "/w".into(),
         profile: None,
+        created_at: 5,
         updated_at: 9,
         residency: SessionResidency::Dormant,
         activity: SessionActivity::Idle,
@@ -331,7 +332,7 @@ fn the_directory_answers_and_frames_round_trip_with_pinned_bytes() {
                 id: 1,
                 outcome: Outcome::Ok(Answer::Sessions { rows: vec![row()] }),
             },
-            r#"{"frame":"response","id":1,"outcome":{"ok":{"answer":"sessions","rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"workspace":"/w","runner":{"name":"local","runner_id":"local"},"runner_status":{"status":"unknown"},"needs_operator":false,"activity_seq":0,"archived":false,"differences":[],"updated_at":9,"residency":"dormant","activity":"idle","live_work":{"children":0,"processes":0,"held_children":0},"environment":"host"}]}}}"#,
+            r#"{"frame":"response","id":1,"outcome":{"ok":{"answer":"sessions","rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"workspace":"/w","runner":{"name":"local","runner_id":"local"},"runner_status":{"status":"unknown"},"needs_operator":false,"activity_seq":0,"archived":false,"differences":[],"created_at":5,"updated_at":9,"residency":"dormant","activity":"idle","live_work":{"children":0,"processes":0,"held_children":0},"environment":"host"}]}}}"#,
         ),
         (
             Host::Response {
@@ -392,7 +393,7 @@ fn the_directory_answers_and_frames_round_trip_with_pinned_bytes() {
                 snapshot: false,
                 rows: vec![held_elsewhere()],
             },
-            r#"{"frame":"directory","attachment":4,"seq":2,"snapshot":false,"rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"title":"fix the build","workspace":"/w","runner":{"name":"local","runner_id":"local"},"runner_status":{"status":"unknown"},"needs_operator":false,"activity_seq":0,"archived":false,"profile":"coder","differences":[],"updated_at":9,"residency":"resident","activity":"busy","live_work":{"children":1,"processes":2,"held_children":0},"environment":"cli","hosted_elsewhere":{"host_name":"desk","pid":42}}]}"#,
+            r#"{"frame":"directory","attachment":4,"seq":2,"snapshot":false,"rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"title":"fix the build","workspace":"/w","runner":{"name":"local","runner_id":"local"},"runner_status":{"status":"unknown"},"needs_operator":false,"activity_seq":0,"archived":false,"profile":"coder","differences":[],"created_at":5,"updated_at":9,"residency":"resident","activity":"busy","live_work":{"children":1,"processes":2,"held_children":0},"environment":"cli","hosted_elsewhere":{"host_name":"desk","pid":42}}]}"#,
         ),
         (
             Host::Detached { attachment: 3 },
@@ -404,7 +405,7 @@ fn the_directory_answers_and_frames_round_trip_with_pinned_bytes() {
                 session: None,
                 ..welcome()
             }),
-            r#"{"frame":"welcome","extension":null,"proto":9,"binary_id":"b1","host_generation":7,"caps":[]}"#,
+            r#"{"frame":"welcome","extension":null,"proto":10,"binary_id":"b1","host_generation":7,"caps":[]}"#,
         ),
     ];
     for (frame, pinned) in host {

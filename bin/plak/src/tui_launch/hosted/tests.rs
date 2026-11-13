@@ -178,6 +178,7 @@ fn select_previous(stream: &mut UnixStream, reader: &mut BufReader<UnixStream>) 
                 title: None,
                 workspace: "/workspace".into(),
                 profile: None,
+                created_at: 1,
                 updated_at: 0,
                 residency: SessionResidency::Resident,
                 activity: SessionActivity::Idle,

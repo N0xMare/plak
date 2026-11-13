@@ -655,7 +655,7 @@ an already resident session and its recorded node workspace; acquiring its
 `ResidencyHold` must not open an agent or admit a turn. Every live or unresolved
 terminal retains that hold and prevents dormancy and host idle exit, including
 when another principal requests release. The private residency outcome is
-`operator_terminal` on client protocol 9. Release never implicitly closes another
+`operator_terminal` on client protocol 10. Release never implicitly closes another
 principal's shell; confirmed close of the requester's terminals precedes normal release.
 Completed unpinned rows
 are skipped, and ambiguous close dispatch reports `operation_outcome_unknown`.
@@ -4153,6 +4153,24 @@ latency, and nothing else. Prompt text never reaches a span.
 
 ### 4.4 Wire v2
 
+Current client protocol **10** adds required `created_at` Unix seconds to
+`SessionRow`, from the durable product `sessions.created_at`. Creation time is
+independent of `updated_at` and unchanged by attach, turns or reopen; it is not
+a zero/unknown sentinel. The shared neutral directory type remains in
+`plakous-host-protocol`; product extension DTOs remain in `plakd-wire-types`.
+
+Protocol 10 also requires `ValidationIssue {field, code, detail}` in console
+`validation_failed` refusals. `detail` is short safe operator guidance, at most
+512 UTF-8 bytes, never supplied values or raw parser/resolver errors. Codes add
+`empty`, `unknown_template` and `type_mismatch`. Profile fields identify
+`body.root`, `body.working_set` or an indexed `body.working_set[n]`; a different
+profile invalidated by a write is identified under `profiles.<id>`. Config
+semantic type refusals name the dotted setting key. Empty named-profile
+working sets and missing templates fail before publication. Raw malformed
+JSON or wrong JSON types that cannot decode as a client frame remain protocol
+errors; no decode-refusal hook or permissive decoding is added. The protocol
+match is exact, with no negotiation or format/export migration.
+
 Protocol 9 adds attachment-free `terminal_open`, `terminal_list`,
 `terminal_attach`, `terminal_resize`, `terminal_close`, `terminal_detach`,
 `terminal_input`, `terminal_credit_batch` and `terminal_release_session` through
@@ -4282,7 +4300,7 @@ repositories using jj answer `vcs_unsupported`; colocated ones say git view.
 The fixed execution policy is chapter 04 §2.6.
 
 `config_patch`, `template_put` and `profile_put`, introduced in protocol 7
-(current client protocol 9), use the P6
+(current client protocol 10), use the P6
 attachment-free seam, typed allowlisted fields and mandatory if_match etags.
 Prepare/confirm binds the exact target/revision; conflict never auto-merges.
 Publication replies distinguish Saved from published/durability-uncertain
@@ -4589,7 +4607,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   from 1 as an attachment's events: first a snapshot of every row, which
   replaces what the client holds, then the rows that changed. A row names
   the session, its root `node`, its `title`, `workspace`, `profile` and
-  `updated_at` (unix seconds), its `residency` (`dormant`, `opening`,
+  required `created_at` and `updated_at` (Unix seconds), its `residency` (`dormant`, `opening`,
   `resident` or `releasing`), its `activity` (`idle`, `busy`,
   `held_after_loss`, `continuing` or `stopped`), its
   `live_work {children, processes, held_children}`, its tools'
@@ -5322,7 +5340,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
 
 ### 4.5 The web endpoint
 
-Console operations introduced in protocol 7 (current client protocol 9)
+Console operations introduced in protocol 7 (current client protocol 10)
 have structured host audit evidence: time,
 verified login or socket uid, face, connection/request ID, action and safe
 target, outcome category and applicable revision. This is an ordinary bounded
@@ -5679,7 +5697,7 @@ read ownership receipts, acquire custody or resend an ambiguously accepted
 submission. The upgrade command reports success only after destination
 acknowledgement; a timeout names an unknown outcome and the retry remedy.
 
-Native login, introduced in protocol 7 (current client protocol 9), runs in
+Native login, introduced in protocol 7 (current client protocol 10), runs in
 a dedicated account-service worker, never the
 session intent mailbox or host action loop. Only the owning authenticated
 connection receives its challenge; poll returns sanitized phase, not a replay
@@ -8129,7 +8147,7 @@ These are in-process host observations, not new JSONL v1 lines.
 ### 5.5 The Menu
 
 Host-client Accounts/Providers/login and config-builder presentation belongs
-to the private clients. Both use host operator requests introduced in protocol 7 (current client protocol 9), host
+to the private clients. Both use host operator requests introduced in protocol 7 (current client protocol 10), host
 identity, consequence/Confirm affordance, masked secret input and typed
 remedies. No credential form uses the chat composer. The retained embedded
 menu's local-face operations remain unchanged; this public increment does not
@@ -8147,7 +8165,7 @@ vertical whose credential needs a refresh (an expired access token, a
 `RefreshRequired` posture, or SuperGrok's reclaimable quarantine), refreshes it
 and re-reads Usage; the retained embedded view offers CLI login repair.
 Private host clients use Accounts/Providers operator forms introduced in
-protocol 7 (current client protocol 9) instead. The label is muted until the pointer
+protocol 7 (current client protocol 10) instead. The label is muted until the pointer
 hovers it or Up/Down has focused it.
 
 No Menu read blocks the host's action loop. A subscription posture read takes
@@ -10520,7 +10538,7 @@ product observations without moving product vocabulary into the agent sink.
 
 ### 7.2 Usage and allowances
 
-`account_refresh`, introduced in protocol 7 (current client protocol 9), is
+`account_refresh`, introduced in protocol 7 (current client protocol 10), is
 a confirmed, explicit claimed refresh, not
 `accounts_status`/`accounts_usage` or automatic login. The exact account is
 selected throughout; an unaccepted/inactive integration refuses before provider
@@ -10979,7 +10997,7 @@ caller-supplied endpoint, discovered client id, or copied token can promote a
 profile's provenance.
 
 **Login, logout and API keys are explicit operator operations:** the CLI and
-authenticated host console (introduced in protocol 7; current client protocol 9)
+authenticated host console (introduced in protocol 7; current client protocol 10)
 share the account service. Private TUI
 and web forms consume that wire contract; they do not own credentials. The
 retained embedded TUI does not run an OAuth flow or capture key material; the Providers tab reads status

@@ -14,7 +14,7 @@ Operator-facing instructions live in
 ## 1. Files and discovery
 
 Host operators may edit a home template through confirmed, typed
-`template_put`, introduced in protocol 7 (current client protocol 9). This is
+`template_put`, introduced in protocol 7 (current client protocol 10). This is
 the explicit exception to file-authored template
 bodies: ordinary config saves and `config_patch` still refuse body changes.
 User-profile writes use root/working_set only; built-ins are read-only. No
@@ -45,7 +45,7 @@ release retained capacity without positive original-instance/process-loss proof.
 
 The current state directory is `state/r27.e37.p37.t10/`: runtime SQLite
 schema 27, runtime format epoch 37, product schema 37, and tree schema 10.
-These are format identities, not configuration keys. Client wire protocol 9
+These are format identities, not configuration keys. Client wire protocol 10
 and runner protocol 8 require separate exact matches, with no negotiation. Product schema 37 adds
 operator title overrides and archival state; it composes with runtime epoch
 37 without changing the runtime codec or tree encoding. Session export stays
@@ -209,7 +209,7 @@ set` and the file); Fork now never writes them, and local Use now, offered only
 while a session has no model and the home has no loadable default, also records
 its profile as the default. Remote Use now binds only its session; publishing
 home defaults requires the confirmed etag path introduced in protocol 7
-(current client protocol 9). Changing the
+(current client protocol 10). Changing the
 default never changes an existing session, which keeps the root template and
 working set its tree froze, re-resolved against the template files at its next
 `/reload` (chapter 02 §5.5).
@@ -967,11 +967,11 @@ fresh unshared name (`default`, `default-2`, and so on), preserving its other
 fields and leaving the previous template file untouched. Saves preflight all
 existing template bodies and refuse changes to them; edit user or project
 files directly, or use the confirmed home `template_put` exception introduced
-in protocol 7 (current client protocol 9).
+in protocol 7 (current client protocol 10).
 `config_patch` never edits a body. Unrelated settings saves do not rewrite templates.
 
 `config_patch`, `template_put` and `profile_put`, introduced in protocol 7
-(current client protocol 9), publish one file per request. All require a matching content etag and one-use consent; stale
+(current client protocol 10), publish one file per request. All require a matching content etag and one-use consent; stale
 etags return conflict and no write. The shared home publication lock covers
 read-current, comparison, complete candidate validation and atomic publication;
 CLI home key edits reread under this lock as well. Recheck actual bytes before

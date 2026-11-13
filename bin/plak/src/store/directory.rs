@@ -43,7 +43,7 @@ fn directory_sql(workspace: bool, nonlocal: bool) -> String {
         (false, _) => "?1 IS NULL",
     };
     format!(
-        "SELECT sessions.id,sessions.workspace_root,sessions.updated_at,COALESCE(sessions.title_override,sessions.title),sessions.account,sessions.model,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,sessions.archived FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE {predicate} AND (?3 OR sessions.archived=0) AND (?4 IS NULL OR COALESCE(json_extract(sessions.runner_display,'$.runner_id'),'local')=?4) ORDER BY sessions.updated_at DESC, sessions.id ASC LIMIT ?2"
+        "SELECT sessions.id,sessions.workspace_root,sessions.updated_at,COALESCE(sessions.title_override,sessions.title),sessions.account,sessions.model,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,sessions.archived,sessions.created_at FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE {predicate} AND (?3 OR sessions.archived=0) AND (?4 IS NULL OR COALESCE(json_extract(sessions.runner_display,'$.runner_id'),'local')=?4) ORDER BY sessions.updated_at DESC, sessions.id ASC LIMIT ?2"
     )
 }
 
@@ -52,6 +52,7 @@ fn directory_sql(workspace: bool, nonlocal: bool) -> String {
 pub struct DirectoryEntry {
     pub id: String,
     pub workspace_root: PathBuf,
+    pub created_at_unix: u64,
     pub updated_at_unix: u64,
     pub title: Option<String>,
     pub archived: bool,
@@ -264,6 +265,7 @@ impl ProductStore {
                         id: row.get(0)?,
                         workspace_root: PathBuf::from(row.get::<_, String>(1)?),
                         updated_at_unix: from_i64(row.get(2)?)?,
+                        created_at_unix: from_i64(row.get(11)?)?,
                         title: row.get(3)?,
                         archived: row.get(10)?,
                         account: row.get(4)?,
@@ -624,6 +626,7 @@ mod tests {
         std::fs::create_dir_all(&two).unwrap();
         let mut store = ProductStore::open(&paths).unwrap();
         let mut older = sessions::SessionRecord::new(one.clone());
+        older.created_at_unix = 5;
         older.updated_at_unix = 10;
         older.title = Some("older".into());
         store.commit(&mut older).unwrap();
@@ -649,6 +652,8 @@ mod tests {
         assert_eq!(of_one.len(), 2);
         assert_eq!(of_one[1].title.as_deref(), Some("older"));
         assert_eq!(of_one[1].workspace_root, one);
+        assert_eq!(of_one[1].created_at_unix, 5);
+        assert_eq!(of_one[1].updated_at_unix, 10);
         assert_eq!(
             store.head_of_tree(&older.node.tree_id).unwrap(),
             Some(successor.id.clone())

@@ -4,6 +4,40 @@ use plakd_wire_types::console::{HostRequest, HostResponse};
 use serde_json::json;
 
 #[test]
+fn semantic_validation_issues_require_a_field_code_and_safe_detail()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (field, code, detail) in [
+        (
+            "body.working_set",
+            "empty",
+            "working_set must contain at least one template",
+        ),
+        (
+            "body.root",
+            "unknown_template",
+            "the root template does not exist",
+        ),
+        (
+            "roster.working_set",
+            "type_mismatch",
+            "the value has the wrong kind for this setting",
+        ),
+    ] {
+        let example = json!({"response":"refused","reason":{"reason":"validation_failed",
+            "issues":[{"field":field,"code":code,"detail":detail}]}});
+        let response: HostResponse = serde_json::from_value(example.clone())?;
+        assert_eq!(serde_json::to_value(response)?, example);
+        let mut missing = example;
+        missing["reason"]["issues"][0]
+            .as_object_mut()
+            .ok_or("issue object")?
+            .remove("detail");
+        assert!(serde_json::from_value::<HostResponse>(missing).is_err());
+    }
+    Ok(())
+}
+
+#[test]
 fn every_console_request_has_an_exact_attachment_free_body()
 -> Result<(), Box<dyn std::error::Error>> {
     for example in [

@@ -9,6 +9,13 @@ for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
+- Client protocol 10 adds required Unix-second `created_at` timestamps to
+  session directory rows and safe `detail` text to structured validation
+  issues. Profile writes identify empty working sets and missing templates
+  by field path and code; config writes identify decoded values of the wrong
+  kind. Refusals never echo supplied values. Clients must adopt protocol 10
+  together; runtime, export and persisted formats are unchanged.
+
 - Clarify running-child transcript coverage with the addressed notice
   `Live view starts here · earlier streaming output not shown`. Attach and
   later gaps disclose unavailable streaming output without replaying it;

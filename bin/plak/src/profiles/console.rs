@@ -4,15 +4,85 @@ use super::{
     AgentTemplate, ProductConfig, ProfileRow, Resolved, TemplateName, UserFile, builtins,
     resolve_builtin, resolve_profile_file, row,
 };
+use plakd_wire_types::console::{ValidationCode, ValidationIssue};
 use std::collections::BTreeMap;
 
 pub(crate) fn builtin_id(id: &str) -> bool {
     builtins().any(|builtin| builtin.id == id)
 }
 
-pub(crate) fn validate_user(config: &ProductConfig, id: &str, text: &str) -> Result<(), String> {
-    let resolved = resolve_user(config, id, text)?;
-    super::prepare_resolved(config, resolved).map(|_| ())
+pub(crate) fn validate_user(
+    config: &ProductConfig,
+    id: &str,
+    text: &str,
+) -> Result<(), ValidationIssue> {
+    let issue = |field: &str, code, detail: &'static str| ValidationIssue {
+        field: field.to_owned(),
+        code,
+        detail: detail.to_owned(),
+    };
+    let file: UserFile = toml::from_str(text).map_err(|_| {
+        issue(
+            "body",
+            ValidationCode::InvalidValue,
+            "the profile must contain a root and a list of template names",
+        )
+    })?;
+    if file.root.is_empty() {
+        return Err(issue(
+            "root",
+            ValidationCode::Empty,
+            "a root template is required",
+        ));
+    }
+    if file.working_set.is_empty() {
+        return Err(issue(
+            "working_set",
+            ValidationCode::Empty,
+            "working_set must contain at least one template",
+        ));
+    }
+    plakous_hosted::agent_tree_protocol::WorkingSet::parse(file.working_set.clone()).map_err(
+        |_| {
+            issue(
+                "working_set",
+                ValidationCode::InvalidValue,
+                "working_set must contain valid template names",
+            )
+        },
+    )?;
+    if !config.templates.contains_key(&file.root) {
+        return Err(issue(
+            "root",
+            ValidationCode::UnknownTemplate,
+            "the root template does not exist",
+        ));
+    }
+    for (index, name) in file.working_set.iter().enumerate() {
+        if !config.templates.contains_key(name) {
+            return Err(issue(
+                &format!("working_set[{index}]"),
+                ValidationCode::UnknownTemplate,
+                "the working_set template does not exist",
+            ));
+        }
+    }
+    let resolved = resolve_profile_file(config, id, file).map_err(|_| {
+        issue(
+            "body",
+            ValidationCode::InvalidValue,
+            "the profile cannot be resolved",
+        )
+    })?;
+    super::prepare_resolved(config, resolved)
+        .map(|_| ())
+        .map_err(|_| {
+            issue(
+                "root",
+                ValidationCode::InvalidValue,
+                "the profile is incompatible with the current configuration",
+            )
+        })
 }
 
 pub(crate) fn hash_builtins(hash: &mut impl sha2::Digest) {

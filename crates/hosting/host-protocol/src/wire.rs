@@ -68,7 +68,8 @@ pub use tool::WireToolItem;
 /// 7 adds consented account/configuration writes; 8 adds bounded saved-workspace
 /// Files/Changes reads and per-account credential-refresh observations.
 /// 9 adds consented operator terminals, independent credited streams and residency.
-pub const WIRE_VERSION: u32 = 9;
+/// 10 adds directory creation timestamps and detailed semantic validation issues.
+pub const WIRE_VERSION: u32 = 10;
 
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;

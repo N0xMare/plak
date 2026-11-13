@@ -282,6 +282,7 @@ impl ProductSessions {
             title: entry.title.clone(),
             workspace: entry.workspace_root.display().to_string(),
             profile,
+            created_at: entry.created_at_unix,
             updated_at: entry.updated_at_unix,
             residency: SessionResidency::Dormant,
             activity,

@@ -315,6 +315,7 @@ fn row() -> SessionRow {
         title: Some("shared transcript".into()),
         workspace: "/workspace".into(),
         profile: None,
+        created_at: 1,
         updated_at: 12,
         residency: SessionResidency::Resident,
         activity: SessionActivity::Idle,

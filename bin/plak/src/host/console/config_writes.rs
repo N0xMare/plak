@@ -132,7 +132,7 @@ impl Console {
                     other => other,
                 }
             })?;
-        validate_profiles(&before, &candidate)?;
+        validate_profiles(request, &before, &candidate)?;
         if let HostRequest::ConfigPatch { changes, .. } = request {
             if changes
                 .iter()
@@ -197,9 +197,11 @@ fn candidate<'a>(
                 return Err(invalid("changes"));
             }
             let mut config = before.config.clone();
-            config
-                .apply_console_changes(changes)
-                .map_err(|_| invalid("changes"))?;
+            config.apply_console_changes(changes).map_err(|issue| {
+                ReadRefusal::ValidationFailed {
+                    issues: vec![issue],
+                }
+            })?;
             let bytes =
                 crate::product_config::console::edit_config(files.config.as_deref(), &config)
                     .map_err(|_| invalid("changes"))?;
@@ -272,6 +274,7 @@ fn candidate<'a>(
 }
 
 fn validate_profiles(
+    request: &HostRequest,
     before: &definitions::Snapshot,
     candidate: &definitions::Snapshot,
 ) -> Result<(), ReadRefusal> {
@@ -284,9 +287,23 @@ fn validate_profiles(
         });
         let changed = before.files.profiles.get(id) != Some(text);
         if (changed || previously_valid)
-            && crate::profiles::console::validate_user(&candidate.config, id, text).is_err()
+            && let Err(mut issue) =
+                crate::profiles::console::validate_user(&candidate.config, id, text)
         {
-            return Err(invalid("references"));
+            let prefix = if matches!(request, HostRequest::ProfilePut { id: target, .. } if target == id)
+            {
+                "body".to_owned()
+            } else {
+                format!("profiles.{id}")
+            };
+            issue.field = if issue.field == "body" {
+                prefix
+            } else {
+                format!("{prefix}.{}", issue.field)
+            };
+            return Err(ReadRefusal::ValidationFailed {
+                issues: vec![issue],
+            });
         }
     }
     Ok(())

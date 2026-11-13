@@ -404,6 +404,24 @@ fn validation(field: &str, code: ValidationCode) -> ReadRefusal {
         issues: vec![ValidationIssue {
             field: field.to_owned(),
             code,
+            detail: match code {
+                ValidationCode::TypeMismatch => "the value has the wrong kind for this field",
+                ValidationCode::Empty => "this field must not be empty",
+                ValidationCode::UnknownTemplate => "the referenced template does not exist",
+                ValidationCode::InvalidAction => "this action is not valid",
+                ValidationCode::InvalidValue => "the value is not valid for this field",
+                ValidationCode::ReadOnly => "this field is read-only",
+                ValidationCode::InvalidAccount => "the account identifier is not valid",
+                ValidationCode::UnknownAccount => "the account does not exist",
+                ValidationCode::AccountSignedIn => "the account is signed in",
+                ValidationCode::InvalidId => "the identifier is not valid",
+                ValidationCode::UnknownId => "the definition does not exist",
+                ValidationCode::InvalidWindow => "the usage window is not valid",
+                ValidationCode::InvalidLimit => "the requested limit is not valid",
+                ValidationCode::InvalidCursor => "the cursor is not valid for this request",
+                ValidationCode::CursorExpired => "the cursor expired; refresh this view",
+            }
+            .to_owned(),
         }],
     }
 }

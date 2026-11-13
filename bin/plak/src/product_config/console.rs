@@ -85,31 +85,55 @@ impl ProductConfig {
     pub(crate) fn apply_console_changes(
         &mut self,
         changes: &[plakd_wire_types::console::ConfigChange],
-    ) -> Result<(), String> {
-        use plakd_wire_types::console::SettingValue;
+    ) -> Result<(), plakd_wire_types::console::ValidationIssue> {
+        use plakd_wire_types::console::{SettingValue, ValidationCode, ValidationIssue};
+        let invalid = |field: &str, code| ValidationIssue {
+            field: field.to_owned(),
+            code,
+            detail: if code == ValidationCode::TypeMismatch {
+                "the value has the wrong kind for this setting"
+            } else {
+                "the value is not valid for this setting or configuration"
+            }
+            .to_owned(),
+        };
         let mut candidate = self.clone();
         // Root selection clears an inherited composition before an explicitly
         // supplied composition in the same complete candidate is assigned.
         for change in changes.iter().filter(|change| change.key == "root.agent") {
             match &change.value {
                 SettingValue::Null => candidate.clear_root_binding(),
-                SettingValue::String(value) => candidate.assign_field(
-                    super::config_key("root.agent").ok_or("unknown key")?,
-                    super::keys::FieldValue::Toml(&toml::Value::String(value.clone())),
-                )?,
-                _ => return Err("invalid root agent value".into()),
+                SettingValue::String(value) => candidate
+                    .assign_field(
+                        super::config_key("root.agent")
+                            .ok_or_else(|| invalid("root.agent", ValidationCode::InvalidValue))?,
+                        super::keys::FieldValue::Toml(&toml::Value::String(value.clone())),
+                    )
+                    .map_err(|_| invalid("root.agent", ValidationCode::InvalidValue))?,
+                _ => return Err(invalid("root.agent", ValidationCode::TypeMismatch)),
             }
         }
         if candidate.root_agent != self.root_agent {
             candidate.root_composition = None;
         }
         for change in changes.iter().filter(|change| change.key != "root.agent") {
-            let key = super::config_key(&change.key).ok_or("unknown key")?;
+            let key = super::config_key(&change.key)
+                .ok_or_else(|| invalid(&change.key, ValidationCode::InvalidValue))?;
             if matches!(change.value, SettingValue::Null)
                 && key.field == ConfigField::RootComposition
             {
                 candidate.root_composition = None;
                 continue;
+            }
+            let correct_kind = matches!(
+                (&change.value, key.kind),
+                (SettingValue::Bool(_), "bool")
+                    | (SettingValue::Integer(_), "integer")
+                    | (SettingValue::Strings(_), "array of string")
+                    | (SettingValue::String(_), "string" | "enum")
+            );
+            if !correct_kind {
+                return Err(invalid(&change.key, ValidationCode::TypeMismatch));
             }
             let value = match &change.value {
                 SettingValue::Bool(value) => toml::Value::Boolean(*value),
@@ -118,11 +142,17 @@ impl ProductConfig {
                 SettingValue::Strings(value) => {
                     toml::Value::Array(value.iter().cloned().map(toml::Value::String).collect())
                 }
-                SettingValue::Null => return Err("this setting cannot be null".into()),
+                SettingValue::Null => {
+                    return Err(invalid(&change.key, ValidationCode::TypeMismatch));
+                }
             };
-            candidate.assign_field(key, super::keys::FieldValue::Toml(&value))?;
+            candidate
+                .assign_field(key, super::keys::FieldValue::Toml(&value))
+                .map_err(|_| invalid(&change.key, ValidationCode::InvalidValue))?;
         }
-        candidate.validate()?;
+        candidate
+            .validate()
+            .map_err(|_| invalid("changes", ValidationCode::InvalidValue))?;
         *self = candidate;
         Ok(())
     }

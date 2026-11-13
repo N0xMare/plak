@@ -35,6 +35,8 @@ pub struct SessionRow {
     pub profile: Option<String>,
     /// Bounded differences from the nearest current-config profile.
     pub differences: Vec<crate::views::ProfileDifference>,
+    /// Unix seconds of its durable product-session creation, unchanged on reopen.
+    pub created_at: u64,
     /// Unix seconds of its last change.
     pub updated_at: u64,
     /// Whether this host holds it now.

@@ -81,7 +81,7 @@ impl Bindings {
     }
 
     fn compare_at(&mut self, expected: &Value, actual: &Value, key: &str) {
-        if key == "updated_at" && expected == "@time" {
+        if matches!(key, "created_at" | "updated_at") && expected == "@time" {
             assert!(actual.is_u64(), "timestamp: {actual}");
             return;
         }
