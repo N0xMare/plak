@@ -432,6 +432,55 @@ fn a_keys_answer_and_acknowledgement_belong_to_the_instance_that_last_sent_it() 
 
 struct RefusingFloors;
 
+#[test]
+fn owner_floor_query_reloads_without_orphaning_owners_or_forgetting_live_effects() {
+    use crate::floors::OwnerFloors as _;
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("floors.json");
+    let floors = std::sync::Arc::new(crate::floors::FileOwnerFloors::open(&path).unwrap());
+    let mut tables = Tables::with_floors(floors);
+    let head = owner(1, 1);
+    transferred(&mut tables, &head);
+    let now = Instant::now();
+    assert!(matches!(
+        tables.admit(HOST, INSTANCE, &effect("running", &head, "d", false), now),
+        Admission::Run(Some(_))
+    ));
+    let external = crate::floors::FileOwnerFloors::open(&path).unwrap();
+    let mut newer = owner(4, 9);
+    newer.line = "other-line".into();
+    external
+        .record(
+            HOST,
+            &crate::floors::Floor {
+                owner: newer.clone(),
+                holder: "retained-instance".into(),
+                retention_only: true,
+            },
+        )
+        .unwrap();
+    let queried = tables
+        .read_owner_floors(HOST, &["other-line".into()])
+        .unwrap();
+    assert_eq!(queried[0].owner.as_ref(), Some(&newer));
+    assert_eq!(tables.owner(HOST, "other-line"), None);
+    assert_eq!(tables.owner(HOST, &head.line), Some((head.clone(), true)));
+    assert_eq!(
+        tables.admit(HOST, INSTANCE, &effect("retry", &head, "d", true), now),
+        Admission::Answer(RunnerFrame::InProgress {
+            request_id: "retry".into()
+        })
+    );
+    std::fs::write(&path, b"not json").unwrap();
+    assert!(
+        tables
+            .read_owner_floors(HOST, std::slice::from_ref(&head.line))
+            .is_err()
+    );
+    assert!(tables.holds_unacknowledged(now));
+    assert_eq!(tables.owner(HOST, &head.line), Some((head, true)));
+}
+
 impl crate::floors::OwnerFloors for RefusingFloors {
     fn reload(&self) -> std::io::Result<()> {
         Ok(())

@@ -151,18 +151,13 @@ pub(crate) async fn qualify(
     destination: &str,
     command: &str,
 ) -> CliResult<Dialed> {
-    let host_id = std::fs::read_to_string(paths.home().join("host-id")).map_err(|_| {
-        CliFailure::new("runner qualification requires this home existing paired identity")
-    })?;
-    let host_id = host_id.trim();
-    uuid::Uuid::parse_str(host_id)
-        .map_err(|_| CliFailure::new("runner qualification home identity is invalid"))?;
+    let host_id = super::existing_host_id(paths)?;
     let (child, stream) = ssh_stream(destination, command).map_err(|failure| {
         CliFailure::new(format!(
             "runner qualification transport failed: {failure:?}"
         ))
     })?;
-    let (client, hello) = RunnerClient::connect_qualification(stream, host_id.to_owned(), version(), crate::test_hooks::runner_windows()).await
+    let (client, hello) = RunnerClient::connect_qualification(stream, host_id, version(), crate::test_hooks::runner_windows()).await
         .map_err(|failure| CliFailure::new(format!("host_upgrade_runner_qualification: {failure:?}; advance the runner dedicated link to the matching snapshot first; retain the old build to inspect and drain old workers")))?;
     Ok(Dialed {
         client,

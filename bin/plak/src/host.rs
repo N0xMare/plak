@@ -28,6 +28,10 @@ mod scan_tests;
 
 pub(crate) const AVAILABLE: bool = true;
 
+pub(crate) fn finish_move_source(services: &Services, id: uuid::Uuid) -> CliResult<()> {
+    crate::carry::host_move::source::finish_source(services, id)
+}
+
 pub(crate) fn preflight_upgrade_service(
     services: &Services,
     command: &HostCommand,
@@ -131,7 +135,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
     let (home_lock, lock) = lock::HostLock::take_home(paths, &binary)?;
-    if let Some(replacement) = upgrade::startup_replacement(paths)? {
+    if let Some(replacement) = upgrade::startup_replacement(services)? {
         drop(lock);
         drop(home_lock);
         runtime.shutdown_timeout(Duration::from_secs(1));
@@ -173,17 +177,9 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         }
     };
     runner::host::start(&services, local, &environment, &runtime);
-    let receipt_recovery = upgrade::start_retry(&services, &host, runtime.handle());
+    let scanning = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     announce_host(&bound, &environment, services.paths()?);
-    let scanning = Arc::new(std::sync::atomic::AtomicBool::new(!owed.is_empty()));
-    scan(
-        &host,
-        owed,
-        move || stop.stopped(),
-        &services,
-        runtime.handle(),
-        Arc::clone(&scanning),
-    );
+    let receipt_recovery = startup_scan(&services, &host, &runtime, stop, owed, &scanning);
     let reload_requests = runtime.spawn(requested_reload::serve(
         Arc::clone(&host),
         services.paths()?.clone(),
@@ -233,6 +229,32 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         &host_arguments,
         home_lock,
     )
+}
+
+fn startup_scan(
+    services: &Services,
+    host: &Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
+    runtime: &tokio::runtime::Runtime,
+    stop: crate::web::StopProbe,
+    owed: Vec<String>,
+    scanning: &Arc<std::sync::atomic::AtomicUsize>,
+) -> upgrade::Recovery {
+    let recovery = upgrade::start_retry(
+        services,
+        host,
+        runtime.handle(),
+        &owed,
+        Arc::clone(scanning),
+    );
+    scan(
+        host,
+        owed,
+        move || stop.stopped(),
+        services,
+        runtime.handle(),
+        Arc::clone(scanning),
+    );
+    recovery
 }
 
 fn announce_host(
@@ -334,12 +356,13 @@ fn scan(
     stopped: impl Fn() -> bool + Send + 'static,
     services: &Services,
     runtime: &tokio::runtime::Handle,
-    scanning: Arc<std::sync::atomic::AtomicBool>,
+    scanning: Arc<std::sync::atomic::AtomicUsize>,
 ) {
     if owed.is_empty() {
         eprintln!("plak host: continuation scan complete");
         return;
     }
+    scanning.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     let host = Arc::clone(host);
     let services = services.clone();
     let runtime = runtime.clone();
@@ -405,7 +428,7 @@ fn scan(
         }
         drop(pending);
         host.changed();
-        scanning.store(false, std::sync::atomic::Ordering::Release);
+        scanning.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
         eprintln!("plak host: continuation scan complete");
     });
 }
@@ -446,6 +469,11 @@ fn placement_ready(services: &Services, session: &str) -> bool {
     let Ok(paths) = services.paths() else {
         return false;
     };
+    if !crate::carry::upgrade::receipt::withheld_targets(paths)
+        .is_ok_and(|withheld| !withheld.contains(session))
+    {
+        return false;
+    }
     let Ok(mut product) = crate::store::ProductStore::open(paths) else {
         return false;
     };

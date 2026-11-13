@@ -9,6 +9,10 @@ for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
+- Fix child-result wakes remaining suppressed after a host restart continued
+  the root's interrupted work. An admitted handoff or owner-loss continuation
+  rearms waking durably; later operator stops and interrupts still suppress it.
+
 - Shorten integration and worker gates without weakening release qualification:
   share platform-independent checks, narrow worker lint roots, keep macOS batch
   checks to fmt/clippy, builds and parallel tests, and require exact-tree Mac
@@ -35,9 +39,10 @@ for one version bump, without native protocol compatibility.
   total. Reopening after a host restart starts empty; reconnecting a client to
   the same runtime does not reset it. Durable per-turn usage is unchanged.
 
-- Fix child-result wakes remaining suppressed after a host restart continued
-  the root's interrupted work. An admitted handoff or owner-loss continuation
-  rearms waking durably; later operator stops and interrupts still suppress it.
+- Recover partially prepared ownership moves after an aborted foreign startup,
+  without relying on source archival. Uncertain surrender writes stop the paused
+  owner for receipt recovery; committed retirement failures retry forward.
+  Group abandonment reports guard failures and backs off automatic retries.
 
 - Preserve dormant ownership-move interpreter generation floors, acknowledged
   agent attention, reserved tree decisions and recorded compaction display
@@ -166,9 +171,18 @@ for one version bump, without native protocol compatibility.
   unshipped schema-28 state-key cut; product/tree move publication remains off.
 - Retain immutable product and tree semantic move bases, original pending-input
   identities and source custody floors. Product schema 38 and tree schema 11 share
-  the same state-key cut. Target preflight rebuilds semantic frozen tool
-  presentations against current executors and checks logical capacity without
-  opening a driver or creating a store. Product move publication remains off.
+  the same state-key cut. Lease-only reconciliation stays distinct from a durable
+  execution open; a guarded withdrawal cannot revoke a destination that opened,
+  even if its idle checkpoint never advanced. Product move publication remains off.
+- Add a bounded, normally bound owner-floor read for identity-preserving host
+  moves, and an exact-CAS client path that returns foreign witnesses without
+  retrying from them. Native runner protocol 9 pins the new request and reply;
+  ordinary owner transfers and both inspection modes keep their authority.
+- Add capability-gated connected-group orchestration: reversible source freezes,
+  irreversible native retirement, passive semantic installation, exact-owner
+  reconciliation and atomic group readiness. Guarded never-Ready abandonment
+  cannot revoke an opened driver; pending targets refuse metadata mutation and
+  normal readoption. The public dormant move remains disabled pending qualification.
 
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.

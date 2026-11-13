@@ -407,7 +407,29 @@ stores. Regressions reject a second preparation, hide create/fork recovery on
 source and destination, reject insufficient fence floors and post-publication
 abandonment, and verify that commit removes predecessor leases and host claims.
 The existing real-process `host_skeleton::upgrade::` cases still qualify the
-settled successor path; no dormant whole-tree move is advertised by these tests.
+settled successor path. The private test-capability `upgrade::dormant::` cases
+exercise the separate connected-group coordinator without enabling its public
+capability. Receipt tests pin atomic membership/readiness, permanent abandoned
+reservations, three-key surrendered-copy exclusion and inert aborted receipts.
+Passive-install tests cut between native staging and its acknowledgement,
+recover the frozen stage rather than recompile it, and exercise guarded
+Published abandonment. Source and target native-store ports separately pin
+continued-line recovery, imported feed floors and execution-open refusal.
+Review regressions additionally exercise cleanup-intent and group-export cuts,
+a foreign startup aborting with an unverifiable producer, repeated native
+withdrawal, and both outcomes of uncertain decision publication. A committed
+retirement failure must retry forward. Direct native phase and line-head checks
+pin retirement before its receipt acknowledgement. Before-stage receipt checks
+pin the target digest before native staging. Exact-transfer mismatch and final
+owner-sweep fault hooks withhold Published groups; explicit CLI abandonment
+disposes them without opening a driver. These are test-only response-boundary
+faults, not substitutes for the separate remote-runner outage rehearsal.
+The bound-child case uses the real spawn/session binder, interrupts its admitted
+turn and moves both native sessions. It checks immutable allocation-marker
+agreement, the child's own frozen account/target, rebuilt child head, unchanged
+public IDs and no repeated parent dispatch. Unit cuts reject mismatched markers
+and unrelated unanchored operations. Source tree projection consumes the actual
+final close facts to the native cut; it never advances a cursor by assertion.
 
 Export-v13/v12 fixtures round-trip neutral content (including inline image bytes,
 opaque replay, native compaction bindings and turn counts), retain only the v12
@@ -6557,7 +6579,7 @@ never partial publication or false no-effect after rename. New template
 exclusive-link and replacement-rename paths are checked separately. The
 legacy remote settings/default/credential-refresh path refuses at role
 classification; local-face dispatch remains available. Schema/DTO and public
-compile contracts follow exact client protocol 9 and runner protocol 8.
+compile contracts follow exact client protocol 10 and runner protocol 9.
 Publication SIGKILL cuts run in the durability lane; injected parent-sync
 failures run offline. Connection-drop and forced-deadline contracts verify
 retirement of pending authority and an explicit unknown outcome for admitted

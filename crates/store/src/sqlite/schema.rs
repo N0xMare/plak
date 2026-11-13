@@ -281,9 +281,16 @@ CREATE TABLE runtime_move_members (
  PRIMARY KEY(operation,line_id), FOREIGN KEY(operation) REFERENCES runtime_moves(operation)) WITHOUT ROWID;
 CREATE TABLE runtime_move_sessions (
  operation BLOB NOT NULL CHECK(length(operation)=32), session_id TEXT NOT NULL,
+ revision BLOB NOT NULL CHECK(length(revision)=8),
+ feed_floor INTEGER NOT NULL CHECK(feed_floor>=0),
  PRIMARY KEY(operation,session_id), FOREIGN KEY(operation) REFERENCES runtime_moves(operation)) WITHOUT ROWID;
+CREATE TABLE runtime_move_heads (
+ operation BLOB NOT NULL CHECK(length(operation)=32), session_id TEXT NOT NULL,branch_id TEXT NOT NULL,
+ checkpoint_id TEXT NOT NULL,revision BLOB NOT NULL CHECK(length(revision)=8),fence_floor BLOB NOT NULL CHECK(length(fence_floor)=8),
+ PRIMARY KEY(operation,session_id,branch_id),FOREIGN KEY(operation) REFERENCES runtime_moves(operation)) WITHOUT ROWID;
 CREATE TABLE imported_sessions (
  session_id TEXT PRIMARY KEY, operation BLOB NOT NULL CHECK(length(operation)=32),
+ execution_open INTEGER NOT NULL DEFAULT 0 CHECK(execution_open IN (0,1)),
  FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
  FOREIGN KEY(operation) REFERENCES runtime_moves(operation)) WITHOUT ROWID;
 CREATE TABLE imported_checkpoints (

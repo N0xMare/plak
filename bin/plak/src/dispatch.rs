@@ -284,6 +284,14 @@ pub(super) fn execute_status_all(
     // a surprise into a fact the reader can act on.
     writeln!(stdout, "{}", credential_locations_line(services))
         .map_err(|_| CliFailure::new("stdout failed"))?;
+    for group in carry::upgrade::receipt::abandoning(services.paths()?)? {
+        writeln!(
+            stdout,
+            "Host upgrade withheld: {}",
+            cli_output::safe_terminal_block(&group)
+        )
+        .map_err(|_| CliFailure::new("stdout failed"))?;
+    }
     writeln!(
         stdout,
         "Local credential state only; no provider request was made."

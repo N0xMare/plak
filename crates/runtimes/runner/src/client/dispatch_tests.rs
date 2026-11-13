@@ -87,6 +87,56 @@ fn request() -> Request {
     }
 }
 
+#[tokio::test]
+async fn dropped_owner_floor_query_releases_only_its_reply_slot_and_never_claims_a_key() {
+    let root = tempfile::tempdir().unwrap();
+    let journal = Arc::new(ClosingJournal {
+        files: FileCallJournal::open(root.path()).unwrap(),
+        closer: CancellationToken::new(),
+        claims: AtomicU64::new(0),
+    });
+    let (client, mut frames) = connected(&journal);
+    let reading = client.clone();
+    let first = tokio::spawn(async move { reading.owner_floors(&["line".into()]).await });
+    let HostFrame::OwnerFloors {
+        request_id: lost, ..
+    } = frames.recv().await.unwrap()
+    else {
+        panic!("floor read")
+    };
+    let reading = client.clone();
+    let second = tokio::spawn(async move { reading.owner_floors(&["other".into()]).await });
+    let HostFrame::OwnerFloors {
+        request_id: live, ..
+    } = frames.recv().await.unwrap()
+    else {
+        panic!("second floor read")
+    };
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+    assert!(!lock(&client.inner.state).questions.contains_key(&lost));
+    assert!(lock(&client.inner.state).questions.contains_key(&live));
+    client.inner.receive(RunnerFrame::OwnerFloors {
+        request_id: lost,
+        floors: vec![],
+    });
+    client.inner.receive(RunnerFrame::OwnerFloors {
+        request_id: live,
+        floors: vec![plakous_runner_protocol::OwnerFloor {
+            line: "other".into(),
+            owner: None,
+        }],
+    });
+    assert_eq!(second.await.unwrap().unwrap()[0].line, "other");
+    assert!(lock(&client.inner.state).questions.is_empty());
+    assert_eq!(journal.pending().unwrap(), []);
+    assert_eq!(journal.claims.load(Ordering::Relaxed), 0);
+    assert!(
+        frames.try_recv().is_err(),
+        "read replies need no acknowledgement"
+    );
+}
+
 #[test]
 fn disconnected_link_rejects_dispatch_before_claiming_or_queuing() {
     assert_not_sent(true);

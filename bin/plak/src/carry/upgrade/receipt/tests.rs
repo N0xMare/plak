@@ -1,6 +1,6 @@
 use super::*;
 
-fn receipt(record: &SessionRecord, destination: bool) -> Receipt {
+pub(super) fn receipt(record: &SessionRecord, destination: bool) -> Receipt {
     let own = crate::home::state::state_key();
     Receipt {
         version: VERSION,
@@ -24,6 +24,7 @@ fn receipt(record: &SessionRecord, destination: bool) -> Receipt {
         destination: PathBuf::from("/fixture/bin/plak"),
         phase: Phase::Prepared,
         source_archival_pending: false,
+        groups: Vec::new(),
         mappings: vec![Mapping {
             ready: false,
             abandoned: false,
@@ -60,7 +61,7 @@ fn source_surrender_precedes_target_execution_admission() {
             receipt.mappings[0].ready = phase == Phase::Acknowledged;
             receipt.save(&paths).unwrap();
             let expected = if destination {
-                phase == Phase::Acknowledged
+                matches!(phase, Phase::Acknowledged | Phase::Aborted)
             } else {
                 matches!(phase, Phase::Prepared | Phase::Aborted)
             };

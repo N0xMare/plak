@@ -965,6 +965,34 @@ impl ScriptedRuntimeFactory {
 impl super::factory::sealed::Sealed for ScriptedRuntimeFactory {}
 
 impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for ScriptedRuntimeFactory {
+    fn move_runtime<'a>(
+        &'a self,
+        config: &'a HostConfig<P>,
+        tree: Option<&'a crate::agent_tree::ProductAgentTree>,
+        _plan_authority: &'a str,
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
+        if tree.is_some_and(|tree| {
+            tree.nodes()
+                .get(&config.session.node.agent_id)
+                .is_some_and(|node| node.parent_agent_id.is_some())
+        }) {
+            return Box::pin(async move {
+                let binding = self
+                    .child_runtime
+                    .as_ref()
+                    .ok_or_else(|| CliFailure::new("move fixture has no child binding"))?;
+                let path = config
+                    .cwd
+                    .to_str()
+                    .ok_or_else(|| CliFailure::new("move child path is not UTF-8"))?;
+                binding(&config.session.node.agent_id, path, &config.state_roots)
+                    .map_err(CliFailure::new)
+            });
+        }
+        self.runtime(config, Self::role(config), stderr)
+    }
+
     fn clear<'a>(
         &'a self,
         config: &'a mut HostConfig<P>,

@@ -14,16 +14,17 @@ use std::sync::Arc;
 
 const MAX_BYTES: u64 = 256 * 1024 * 1024;
 
-#[derive(Serialize)]
+#[derive(serde::Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GroupProbe {
-    group: String,
-    trees: Vec<String>,
-    sessions: Vec<String>,
+    pub(crate) group: String,
+    pub(crate) trees: Vec<String>,
+    pub(crate) sessions: Vec<String>,
+    pub(crate) install_protocol: Option<u32>,
     capacities: Vec<HeadProbe>,
 }
 
-#[derive(Serialize)]
+#[derive(serde::Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct HeadProbe {
     source: String,
@@ -37,6 +38,10 @@ struct Header<'a> {
 }
 
 pub(crate) fn read_if_move(path: &Path) -> CliResult<Option<Capsule>> {
+    Ok(read_with_digest(path)?.map(|(capsule, _)| capsule))
+}
+
+pub(super) fn read_with_digest(path: &Path) -> CliResult<Option<(Capsule, String)>> {
     let file = std::fs::File::open(path).map_err(|e| CliFailure::new(e.to_string()))?;
     if file
         .metadata()
@@ -65,10 +70,33 @@ pub(crate) fn read_if_move(path: &Path) -> CliResult<Option<Capsule>> {
     let document: Capsule = serde_json::from_slice(&bytes)
         .map_err(|_| CliFailure::new("invalid ownership-move document"))?;
     document.validate().map_err(CliFailure::new)?;
-    Ok(Some(document))
+    Ok(Some((document, plakous::model::sha256_hex(&[&bytes]))))
 }
 
 pub(crate) fn probe(services: &Services, capsule: Capsule) -> CliResult<GroupProbe> {
+    if capsule.source_host != crate::commands::runner::existing_host_id(services.paths()?)? {
+        return Err(CliFailure::new("host upgrade capsule names another home"));
+    }
+    let (report, install) = compile(services, capsule, CompileMode::Preflight)?;
+    plakous::sessions::SessionBackend::preflight_move_install_sqlite(
+        services.paths()?.runtime_database(),
+        &install,
+    )
+    .map_err(|e| CliFailure::new(e.to_string()))?;
+    Ok(report)
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum CompileMode {
+    Preflight,
+    Host,
+}
+
+pub(super) fn compile(
+    services: &Services,
+    capsule: Capsule,
+    mode: CompileMode,
+) -> CliResult<(GroupProbe, plakous::sessions::host_move::MoveInstall)> {
     capsule.validate().map_err(CliFailure::new)?;
     let tree_store = Arc::new(MemoryTreeStore::new());
     let operation = plakous::model::hex_lower(&capsule.operation);
@@ -111,15 +139,14 @@ pub(crate) fn probe(services: &Services, capsule: Capsule) -> CliResult<GroupPro
                 .get(&head.context.product)
                 .ok_or_else(|| CliFailure::new("move head has no source product configuration"))?
                 .clone();
-            let (capacity, rebuilt) = probe_head(
+            let (capacity, rebuilt) = HeadCompiler {
                 services,
-                &executor,
-                &compiler,
-                tree_store.clone(),
-                head,
-                record,
+                executor: &executor,
+                tree_store: tree_store.clone(),
                 operation,
-            )?;
+                mode,
+            }
+            .head(&compiler, head, record)?;
             capacities.push(capacity);
             branches.push(rebuilt.branch);
             checkpoints.push(rebuilt.checkpoint);
@@ -139,106 +166,131 @@ pub(crate) fn probe(services: &Services, capsule: Capsule) -> CliResult<GroupPro
         .map_err(CliFailure::new)?;
     let install = plakous::sessions::host_move::MoveInstall::new(rebuilt_sessions, lines)
         .map_err(|e| CliFailure::new(e.to_string()))?;
-    plakous::sessions::SessionBackend::preflight_move_install_sqlite(
-        services.paths()?.runtime_database(),
-        &install,
-    )
-    .map_err(|e| CliFailure::new(e.to_string()))?;
-    Ok(GroupProbe {
-        group: capsule.group,
-        trees: capsule
-            .trees
-            .iter()
-            .map(|tree| tree.cut.tree_id().into())
-            .collect(),
-        sessions: native_sessions,
-        capacities,
-    })
+    Ok((
+        GroupProbe {
+            install_protocol: super::install_protocol(),
+            group: capsule.group,
+            trees: capsule
+                .trees
+                .iter()
+                .map(|tree| tree.cut.tree_id().into())
+                .collect(),
+            sessions: native_sessions,
+            capacities,
+        },
+        install,
+    ))
 }
 
-fn probe_head(
-    services: &Services,
-    executor: &tokio::runtime::Runtime,
-    compiler: &AgentSessions,
+struct HeadCompiler<'a> {
+    services: &'a Services,
+    executor: &'a tokio::runtime::Runtime,
     tree_store: Arc<MemoryTreeStore>,
-    head: super::Head,
-    mut record: plakous_hosted::sessions::SessionRecord,
     operation: plakous::sessions::host_move::MoveOperation,
-) -> CliResult<(
-    HeadProbe,
-    plakous::sessions::host_move::ReconstructedMoveHead,
-)> {
-    head.context
-        .configuration
-        .clone()
-        .apply(&mut record)
-        .map_err(CliFailure::new)?;
-    record.workspace_root.clone_from(&head.context.workspace);
-    record.model = Some(head.binding.model.clone());
-    record.node =
-        plakous_hosted::sessions::SessionNode::parse(&head.context.tree, &head.context.agent)
-            .map_err(CliFailure::new)?;
-    record.plakous_locator = None;
-    record.source_product_session_id = None;
-    record.source_workflow_operation_id = None;
-    let placement = crate::carry::upgrade::remote::Placement::prepare(
-        services,
-        &head.context.runner,
-        &head.context.workspace,
-    )?;
-    let mut config = crate::commands::session::move_host_config(&placement.services, record)?;
-    config.session.plakous_locator = None;
-    let presentation = Arc::new(
-        head.presentation
+    mode: CompileMode,
+}
+
+impl HeadCompiler<'_> {
+    fn head(
+        &self,
+        compiler: &AgentSessions,
+        head: super::Head,
+        mut record: plakous_hosted::sessions::SessionRecord,
+    ) -> CliResult<(
+        HeadProbe,
+        plakous::sessions::host_move::ReconstructedMoveHead,
+    )> {
+        let Self {
+            services,
+            executor,
+            tree_store,
+            operation,
+            mode,
+        } = self;
+        head.context
+            .configuration
             .clone()
-            .decode()
-            .map_err(CliFailure::new)?,
-    );
-    config.state_roots = config
-        .state_roots
-        .with_move_compilation_data(presentation, tree_store.clone());
-    let tree = tree_store
-        .load(&head.context.tree)
-        .map_err(|e| CliFailure::new(e.detail))?
-        .map(ProductAgentTree::reopen);
-    let estimated_tokens = head.history.estimated_tokens();
-    let messages = head.history.message_count();
-    let source = head.source.clone();
-    let plan_authority = head.context.plan_authority.clone();
-    let (capacity, reconstructed) = executor.block_on(async {
-        let runtime = config
-            .runtime_factory
-            .move_runtime(&config, tree.as_ref(), &plan_authority, &mut Vec::new())
-            .await?;
-        let window = runtime.input_window();
-        let capacity = crate::carry::CarryCapacityProbe {
-            route: window.route,
-            total_window: window.total_window,
-            admitted_input: window.admitted_input,
-            estimated_tokens,
-            messages,
+            .apply(&mut record)
+            .map_err(CliFailure::new)?;
+        record.workspace_root.clone_from(&head.context.workspace);
+        record.model = Some(head.binding.model.clone());
+        record.node =
+            plakous_hosted::sessions::SessionNode::parse(&head.context.tree, &head.context.agent)
+                .map_err(CliFailure::new)?;
+        record.plakous_locator = None;
+        record.source_product_session_id = None;
+        record.source_workflow_operation_id = None;
+        let placement = match mode {
+            CompileMode::Preflight => crate::carry::upgrade::remote::Placement::prepare(
+                services,
+                &head.context.runner,
+                &head.context.workspace,
+            )?,
+            CompileMode::Host => crate::carry::upgrade::remote::Placement::for_import(
+                services,
+                &head.context.runner,
+                &head.context.workspace,
+            )?,
         };
-        crate::carry::upgrade::require_capacity(&capacity)?;
-        let request = head.into_request(operation).map_err(CliFailure::new)?;
-        let rebuilt = compiler
-            .reconstruct_move_head(runtime, request)
-            .await
-            .map_err(|e| CliFailure::new(e.to_string()))?;
-        Ok::<_, CliFailure>((capacity, rebuilt))
-    })?;
-    let target = plakous::sessions::SessionLocator::new(
-        reconstructed.branch.session.session_id(),
-        reconstructed.branch.session.branch_id(),
-        reconstructed.checkpoint.id(),
-    );
-    Ok((
-        HeadProbe {
-            source,
-            target: target.to_string(),
-            capacity,
-        },
-        reconstructed,
-    ))
+        let mut config = crate::commands::session::move_host_config(&placement.services, record)?;
+        config.session.plakous_locator = None;
+        let presentation = Arc::new(
+            head.presentation
+                .clone()
+                .decode()
+                .map_err(CliFailure::new)?,
+        );
+        config.state_roots = config
+            .state_roots
+            .with_move_compilation_data(presentation, tree_store.clone());
+        let tree = tree_store
+            .load(&head.context.tree)
+            .map_err(|e| CliFailure::new(e.detail))?
+            .map(ProductAgentTree::reopen);
+        let estimated_tokens = head.history.estimated_tokens();
+        let messages = head.history.message_count();
+        let source = head.source.clone();
+        let address = format!("{}/{}", head.context.tree, head.context.agent);
+        let plan_authority = head.context.plan_authority.clone();
+        let (capacity, reconstructed) = executor.block_on(async {
+            let runtime = config
+                .runtime_factory
+                .move_runtime(&config, tree.as_ref(), &plan_authority, &mut Vec::new())
+                .await?;
+            let window = runtime.input_window();
+            let capacity = crate::carry::CarryCapacityProbe {
+                route: window.route,
+                total_window: window.total_window,
+                admitted_input: window.admitted_input,
+                estimated_tokens,
+                messages,
+            };
+            if matches!(mode, CompileMode::Preflight) {
+                crate::carry::upgrade::require_capacity(&capacity)?;
+            } else if let Some(warning) = capacity.warning() {
+                eprintln!("{}", crate::cli_output::safe_terminal_block(&warning));
+            }
+            let request = head.into_request(*operation).map_err(CliFailure::new)?;
+            let rebuilt = compiler
+                .reconstruct_move_head(runtime, request)
+                .await
+                .map_err(|e| CliFailure::new(format!("move head {address}: {e}")))?;
+            Ok::<_, CliFailure>((capacity, rebuilt))
+        })?;
+        let target = plakous::sessions::SessionLocator::new(
+            reconstructed.branch.session.session_id(),
+            reconstructed.branch.session.branch_id(),
+            reconstructed.checkpoint.id(),
+        );
+        Ok((
+            HeadProbe {
+                source,
+                target: target.to_string(),
+                capacity,
+            },
+            reconstructed,
+        ))
+    }
 }
 
 impl Custody {

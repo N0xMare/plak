@@ -26,6 +26,25 @@ pub type StoreFuture<'a, T> =
 /// revival, acquisition, refused mutations and `recover_*` append nothing,
 /// and an exact recovery returns the sequence the record already holds.
 pub trait SessionStore: Send + Sync + 'static {
+    /// Unsupported move extension: persist execution-open before returning an ordinary
+    /// durable driver. A store implementing move installation must override this atomically.
+    /// Stores without that optional extension have no imported rows to mark.
+    #[doc(hidden)]
+    fn record_execution_open(&self, lease: BranchLease) -> StoreFuture<'_, ()> {
+        let _ = lease;
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Withdraw a Published batch only under exact current holds and unchanged heads,
+    /// with no execution-open bit ever set. The caller owns the never-Ready receipt lock.
+    #[doc(hidden)]
+    fn abandon_unopened_move(
+        &self,
+        request: super::host_move::AbandonUnopenedMove,
+    ) -> StoreFuture<'_, ()> {
+        let _ = request;
+        Box::pin(async { Err(super::host_move::blocked()) })
+    }
     /// Unsupported historical recovery of an exact prepared/staged move; grants no lease.
     #[doc(hidden)]
     fn recover_move(

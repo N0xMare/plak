@@ -50,7 +50,6 @@ impl From<Strategy> for MoveCompactionStrategy {
 }
 
 impl Compaction {
-    #[cfg(test)]
     pub(crate) fn capture(facts: ImportedCompactionFacts) -> Self {
         Self {
             source_checkpoint: facts.source_checkpoint.to_string(),

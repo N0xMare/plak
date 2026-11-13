@@ -20,7 +20,7 @@ pub(crate) mod ownership;
 pub(crate) mod registry;
 pub(crate) mod services;
 
-pub(crate) use home::{host_id, private_directory};
+pub(crate) use home::{existing_host_id, host_id, private_directory};
 
 use std::path::Path;
 use std::sync::Arc;

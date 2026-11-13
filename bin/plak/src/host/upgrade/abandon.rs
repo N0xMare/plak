@@ -87,13 +87,29 @@ pub(super) fn apply(services: &Services, request: &Request) -> CliResult<Vec<Aba
         .as_deref()
         .ok_or_else(|| CliFailure::new("abandon selector missing"))?;
     let paths = services.paths()?;
-    let _lock = receipt::lock(paths)?;
+    let _lock = receipt::publication::lock(paths)?;
     let mut abandoned = Vec::new();
     for mut receipt in receipt::all(paths)?.into_iter().filter(|receipt| {
         receipt.destination_key == own
             && receipt.destination_binary == crate::build_identity::binary_id()
             && matches!(receipt.phase, Phase::Committed | Phase::Acknowledged)
     }) {
+        if !receipt.groups.is_empty() {
+            let Some(index) = crate::carry::host_move::disposition::select(&receipt, target)?
+            else {
+                continue;
+            };
+            crate::carry::host_move::disposition::abandon(services, &mut receipt, index)?;
+            for product in &receipt.groups[index].products {
+                abandoned.push(Abandoned {
+                    successor: product.clone(),
+                    export: receipt
+                        .path(paths)
+                        .with_file_name(format!("{product}.json")),
+                });
+            }
+            continue;
+        }
         let selected = abandoned.len();
         for mapping in &mut receipt.mappings {
             if mapping.runner == "local"

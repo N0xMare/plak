@@ -581,10 +581,20 @@ async fn reconcile_remote(
     let sessions = roots
         .runtime_sessions()
         .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
-    let (readopted, failures) =
-        plakous_hosted::runner_adoption::readopt_lines(client, &roots, "plak:host:readopt")
-            .await
-            .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    let withheld = crate::carry::upgrade::receipt::withheld_lines(
+        services
+            .paths()
+            .map_err(|_| unavailable(ProbePhase::Reconcile, false))?,
+    )
+    .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    let (readopted, failures) = plakous_hosted::runner_adoption::readopt_lines_excluding(
+        client,
+        &roots,
+        "plak:host:readopt",
+        &withheld,
+    )
+    .await
+    .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
     if let Some(failure) = failures.iter().find(|failure| !failure.held_elsewhere) {
         tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
         return Err(unavailable(ProbePhase::Reconcile, false));

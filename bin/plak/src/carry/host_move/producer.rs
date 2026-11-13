@@ -1,5 +1,8 @@
 //! Source-owned projection; native checkpoints never enter the document codec.
-use super::*;
+use super::{
+    BTreeMap, BTreeSet, Binding, Capsule, Compaction, DormantSessionDocument, Durability, Fork,
+    Head, HeadContext, Jobs, Line, Origin, Presentation, RunnerOwner, Session, Terminal, Tree,
+};
 use plakous::sessions::SessionLocator;
 use plakous::sessions::host_move::{MoveDurability, MoveHeadFacts, MoveInstall, MoveLineOrigin};
 use plakous_hosted::sessions::host_move::MoveGroups;

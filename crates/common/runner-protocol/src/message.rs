@@ -342,6 +342,19 @@ pub enum Refusal {
     },
 }
 
+/// A read-only witness for one explicitly requested line of the bound host.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OwnerFloor {
+    /// The requested line, including when no floor has ever been recorded.
+    pub line: String,
+    /// The durable accepted owner, not a new lease or adoption.
+    pub owner: Option<LineOwner>,
+}
+
+/// Maximum number of explicitly named lines in one owner-floor read.
+pub const OWNER_FLOOR_QUERY_LIMIT: usize = 256;
+
 /// Frames the host sends.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -386,6 +399,14 @@ pub enum HostFrame {
     Lines {
         /// Names the answer.
         request_id: String,
+    },
+    /// Reads only these durable owner floors, scoped to the normally bound host.
+    /// Neither inspection nor qualification admits this request.
+    OwnerFloors {
+        /// Names the answer.
+        request_id: String,
+        /// Unique, nonempty line IDs, at most [`OWNER_FLOOR_QUERY_LIMIT`].
+        lines: Vec<String>,
     },
     /// Liveness.
     Ping {
@@ -483,6 +504,13 @@ pub enum RunnerFrame {
         request_id: String,
         /// The lines, in line order.
         lines: Vec<LineStatus>,
+    },
+    /// Read-only owner-floor witnesses, in the request's order.
+    OwnerFloors {
+        /// The question.
+        request_id: String,
+        /// Exactly one witness for each requested line, without side effects.
+        floors: Vec<OwnerFloor>,
     },
     /// The frame was refused without running anything.
     Refused {

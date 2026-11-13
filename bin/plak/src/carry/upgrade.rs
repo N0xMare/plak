@@ -85,6 +85,7 @@ pub(crate) fn print_probe(
     if let Some(service) = service {
         probe_service(services, service)?;
     }
+    #[cfg(feature = "web")]
     if let Some(path) = capacity
         && let Some(capsule) = super::host_move::read_if_move(path)?
     {

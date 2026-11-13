@@ -29,7 +29,7 @@ fn a_stop_ends_the_start_scan_with_an_unready_continuation() {
         .enable_all()
         .build()
         .unwrap();
-    let scanning = Arc::new(AtomicBool::new(true));
+    let scanning = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let stopped = Arc::new(AtomicBool::new(false));
     let stop = Arc::clone(&stopped);
     scan(
@@ -42,7 +42,7 @@ fn a_stop_ends_the_start_scan_with_an_unready_continuation() {
     );
     stopped.store(true, Ordering::Release);
     let deadline = Instant::now() + Duration::from_secs(5);
-    while scanning.load(Ordering::Acquire) {
+    while scanning.load(Ordering::Acquire) != 0 {
         assert!(
             Instant::now() < deadline,
             "Stop left the startup scan retrying"

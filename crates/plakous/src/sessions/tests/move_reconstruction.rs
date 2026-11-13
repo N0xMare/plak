@@ -219,6 +219,10 @@ async fn move_reconstruction_preserves_fork_provenance_without_recreating_source
     let sessions = AgentSessions::new(SessionBackend::sqlite(
         directory.path().join("runtime.sqlite3"),
     )?)?;
+    assert_readonly_move_source(
+        &directory.path().join("runtime.sqlite3"),
+        target.session_id(),
+    )?;
     sessions.archive(advanced).await?;
     sessions
         .delete_archived(target.session_id())
@@ -227,6 +231,98 @@ async fn move_reconstruction_preserves_fork_provenance_without_recreating_source
     sessions.runtime.shutdown().await?;
     let verified = SqliteSessionStore::open_verified(directory.path().join("runtime.sqlite3"))?;
     verified.shutdown().await?;
+    Ok(())
+}
+
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+fn assert_readonly_move_source(path: &Path, session: SessionId) -> TestResult {
+    let before = std::fs::read(path)?;
+    let dependencies = SessionBackend::inspect_move_dependencies_sqlite(path, &[session])?;
+    assert_eq!(
+        dependencies[&session],
+        std::collections::BTreeSet::from([session])
+    );
+    let snapshot = SessionBackend::inspect_move_source_sqlite(path, &[session])?;
+    assert_eq!(snapshot.sessions().len(), 1);
+    assert_eq!(
+        snapshot.sessions()[0].checkpoints.len(),
+        snapshot.sessions()[0].branches.len(),
+        "only current heads, not the entire old working-checkpoint journal, are snapshotted"
+    );
+    assert_eq!(before, std::fs::read(path)?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn move_guarded_abandon_distinguishes_read_only_verification_from_idle_driver_open()
+-> TestResult {
+    for execute in [false, true] {
+        let directory = tempfile::tempdir()?;
+        let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+        let runtime = runtime_binding_for(workspace.clone(), descriptor()?, b"account-alpha")?;
+        let sessions = AgentSessions::new(SessionBackend::memory()?)?;
+        let request = request(&runtime)?;
+        let source = request.source;
+        let operation = request.operation;
+        let compiled = sessions.reconstruct_move_head(runtime, request).await?;
+        let target = SessionLocator::new(
+            source.session_id(),
+            source.branch_id(),
+            compiled.checkpoint.id(),
+        );
+        let install = single_install(source, compiled)?;
+        sessions.stage_move(operation, install.clone()).await?;
+        sessions
+            .finish_move(
+                operation,
+                install.digest(),
+                host_move::MoveDisposition::Publish,
+            )
+            .await?;
+        if execute {
+            let OpenSessionOutcome::Opened { session, .. } = sessions
+                .open(OpenSessionRequest::new(
+                    SessionOperationId::new("move:idle-open")?,
+                    target,
+                    runtime_binding_for(workspace.clone(), descriptor()?, b"account-alpha")?,
+                ))
+                .await?
+            else {
+                return Err("idle session did not open".into());
+            };
+            assert_eq!(
+                session.release().await?,
+                target,
+                "idle open must not advance the checkpoint"
+            );
+        } else {
+            assert!(matches!(
+                sessions
+                    .verify_open(
+                        target,
+                        runtime_binding_for(workspace.clone(), descriptor()?, b"account-alpha")?
+                    )
+                    .await?,
+                OpenVerification::Opens
+            ));
+        }
+        let hold = sessions
+            .hold_branch(&SessionOperationId::new("move:guard")?, target)
+            .await?;
+        let result = sessions
+            .abandon_unopened_move(operation, install.digest(), &[&hold])
+            .await;
+        if execute {
+            assert!(
+                result.is_err(),
+                "even an idle ordinary open irrevocably prevents guarded abandonment"
+            );
+            hold.release().await?;
+        } else {
+            result?;
+        }
+        sessions.runtime.shutdown().await?;
+    }
     Ok(())
 }
 

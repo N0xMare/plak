@@ -1786,6 +1786,16 @@ fact appends above that floor. Product and tree owners seed their explicit
 views and intents at that cut without replaying historical admissions or
 silently consuming pending inputs. Source preparation, acknowledgement-loss
 recovery, and destination staging bind the floor into the batch fingerprint.
+Source read-only inspection loads complete-session dependency metadata and only
+current branch-head checkpoints, not historical checkpoint graphs; it takes no
+execution lease or retirement. Eligibility joins checkpoint job rows with their
+exact durable line-terminal evidence (process identity and allocation generation
+as well as job number), never with a process list's apparent idleness.
+A Published but never-executed target batch can recover its original install
+fingerprint after lease-only reconciliation: its journal retains the original
+branch floors and feed cut separately from later lease counters and facts.
+A changed head, session header, membership or execution-open bit refuses that
+recovery instead of recompiling an already staged checkpoint.
 
 Dormant reconstruction preserves public product/runtime session, branch, line,
 node, tree, queue/mail and continuation-command identities. It derives a new
@@ -1805,7 +1815,16 @@ deletion removes orphan provenance, while shared referenced provenance remains.
 Destination staging re-encodes checked semantic checkpoints with the current
 codec, retains identities and branch/generation floors, and imports no lease or
 process claim. One atomic batch gate keeps all its lines inaccessible until
-publication. Unguarded abandonment is Staged-only and permanent.
+publication. Unguarded abandonment is Staged-only and permanent. A separate
+unsupported host seam can abandon a Published batch only while the coordinator
+holds its never-Ready receipt lock, every current head is under an exact presented
+BranchHold, every installed checkpoint/revision is unchanged, and no member's
+execution-open bit has ever been set. Lease-only reconciliation does not set that
+bit. Every ordinary durable-driver construction, including consuming a hold, sets
+it durably before recovery publication or returning the driver; read-only
+verification does not. Store wrappers forward this operational marker. Abandon
+clears every member lease atomically; even an idle ordinary open that did not
+advance the checkpoint permanently refuses guarded abandonment.
 Publication grants no lease, and the next
 acquisition must exceed the imported fence floor. Overflow and identity conflicts
 refuse instead of resetting counters or overwriting rows. Exact imported-row
@@ -6218,7 +6237,7 @@ agent named on its execution environment at construction
 (`ExecutionEnvironment::with_line_owner`, from the job owner of §8.5). The
 direct local backend carries the owner, class and budget without reading them;
 they are the fence and idempotency key a runner checks once execution leaves
-the process (runner protocol v8, below). The owner a runner checks comes from
+the process (runner protocol v9, below). The owner a runner checks comes from
 the session's current job owner (§8.5), not from an owner a joined process
 service stored when it started. `LineOwner` lives in `plakous-tools`; it never
 enters `plakous-model`.
@@ -6340,7 +6359,8 @@ needs no stream because that instance can spawn no terminals. All terminal state
 is process-local; product schema and state key are unchanged (chapter 02 §2.2). `RunnerConnectionRevision::is_current` is a read-only connection
 fence for that registry, not permission to skip namespace table reconciliation.
 
-**Runner protocol v8.** `jobs.ack` consumes committed terminal job receipts on
+**Runner protocol v9.** This version adds the bounded `OwnerFloors` request/reply
+above protocol 8, whose `jobs.ack` consumes committed terminal job receipts on
 the native logical job port. Its bounded, duplicate-free nonzero number list
 refuses atomically if any named job is running; absent numbers are idempotent
 no-ops. Consumption occurs only after the host commits its terminal observation,
@@ -6533,6 +6553,29 @@ the normal recovery-required path before Ready. The driver's placement parking
   to have had no effect, and takes no new call on it. A call sent on an
   earlier connection, or replayed on this one, may have run there: it is
   `OutcomeUnknown` and its journal claim stays.
+- **Bounded ownership witnesses.** Only a normally bound host may send
+  `OwnerFloors { request_id, lines }`: 1–256 distinct, nonempty line IDs, each
+  at most 128 printable non-whitespace ASCII bytes. The reply has one
+  `{ line, owner }` row per requested ID in request order; an unseen line has
+  `owner = null`. The authenticated bound host supplies the namespace, never
+  a request field. This reads recorded floors even when no process-session
+  environment exists, without expiring leases, allocating environments,
+  registering owners, adopting lines or changing any floor. It does not list
+  historical floors. Each durable query calls the same floor backend reload
+  used after native custody acquisition; read failure refuses the query, never
+  returns a stale cache. Unlike activation, the read does not rebuild live
+  owner/adoption or operation tables. Inspection and qualification refuse it. The unsupported
+  host-layer exact-transfer client sends the existing `TransferOwner` CAS once
+  and returns a mismatching witness, never retrying from it or trusting a
+  cached acceptance. Ordinary transfer/reopen retry semantics are unchanged.
+  A move coordinator must reject every witness except its imported source
+  owner or its own durably recorded intended owner; a higher proposed fence
+  does not authorize leapfrogging an unrelated witness.
+  A source witness may still name an exact retained predecessor branch before
+  the continued head's first runner call. Its line/generation, runner and fence
+  must match a carried source branch and its floor; it is not relabeled as the
+  current head or silently raised. An unrepresented or ahead-of-source witness
+  refuses before surrender.
 - **Read-only qualification.** Instead of binding, a paired host may answer
   Hello with `Qualify { host_id, version }`. All three version components
   must match, and the runner's allowlist must admit the home. This mode is
@@ -6590,7 +6633,7 @@ the normal recovery-required path before Ready. The driver's placement parking
   environment's own schema (the runner seam of §8.5); the protocol frames,
   keys and orders them without interpreting them, except that a result which
   opens a stream names it in its `stream` field. Control frames are `Cancel`,
-  `Preempt`, `Ack`, `TransferOwner`, `Lines` and `Ping`. `Preempt { request_id, value }`
+  `Preempt`, `Ack`, `TransferOwner`, `Lines`, `OwnerFloors` and `Ping`. `Preempt { request_id, value }`
   sets the running request's yield signal on the runner, as the host's own
   signal changes; a waiting `process.poll` returns as soon as a yield is
   set.
@@ -6840,6 +6883,12 @@ the normal recovery-required path before Ready. The driver's placement parking
   host, the call could not be journaled, the link never carries the verb) is
   `Unavailable`. Both are proven to have had no effect; neither is inferred
   from prose. Streams end with their link.
+  The doc-hidden `RunnerRegistry::retain_connection` / `RunnerConnectionHold`
+  pair is an unsupported host-layer seam. Its scoped demand survives registry
+  refresh and prevents idle retirement, without granting effects, leases or
+  new-call admission. Source preparation refreshes only capsule-named runners
+  under these holds before sampling owners; dropping a hold never clears a
+  separate durable reconnect requirement.
 
 The at-most-once law across restarts:
 
@@ -7014,7 +7063,7 @@ not insert a job terminal. Same-owner wake itself stops nothing. The runner’s
 lease clock excludes suspend. Floors, socket, lock and log are isolated by exact
 triple; no floors migration crosses a protocol/revision/flavor boundary.
 
-**Job-retention endpoint (version 1).** Native runner protocol 8 remains an
+**Job-retention endpoint (version 1).** Native runner protocol 9 remains an
 exact-triple protocol. Separately, each daemon serves the frozen same-user,
 same-machine `builds/<triple>/retention-v1.sock` endpoint. The next build speaks
 its current and immediately previous endpoint versions (initially only v1).

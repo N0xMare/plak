@@ -24,6 +24,7 @@ const PINNED: &[(u32, &str)] = &[
     (6, include_str!("pinned/v6.jsonl")),
     (7, include_str!("pinned/v7.jsonl")),
     (8, include_str!("pinned/v8.jsonl")),
+    (9, include_str!("pinned/v9.jsonl")),
 ];
 
 fn owner() -> LineOwner {
@@ -81,6 +82,7 @@ const fn host_variant(frame: &HostFrame) -> &'static str {
         HostFrame::Ack { .. } => "ack",
         HostFrame::TransferOwner(_) => "transfer_owner",
         HostFrame::Lines { .. } => "lines",
+        HostFrame::OwnerFloors { .. } => "owner_floors",
         HostFrame::Ping { .. } => "ping",
         HostFrame::Stream(_) => "stream",
     }
@@ -100,6 +102,7 @@ const fn runner_variant(frame: &RunnerFrame) -> &'static str {
         RunnerFrame::TransferRefused { .. } => "transfer_refused",
         RunnerFrame::Expired { .. } => "expired",
         RunnerFrame::Lines { .. } => "lines",
+        RunnerFrame::OwnerFloors { .. } => "owner_floors",
         RunnerFrame::Refused { .. } => "refused",
         RunnerFrame::Pong { .. } => "pong",
         RunnerFrame::Stream(_) => "stream",
@@ -214,6 +217,10 @@ fn host_frames() -> Vec<HostFrame> {
         HostFrame::Lines {
             request_id: "request".into(),
         },
+        HostFrame::OwnerFloors {
+            request_id: "request".into(),
+            lines: vec!["line".into(), "unknown".into()],
+        },
         HostFrame::Ping { nonce: 9 },
     ];
     frames.extend(classes().into_iter().map(request).map(HostFrame::Request));
@@ -294,6 +301,19 @@ fn runner_frames() -> Vec<RunnerFrame> {
                 jobs: json!({"jobs": []}),
             }],
         },
+        RunnerFrame::OwnerFloors {
+            request_id: "request".into(),
+            floors: vec![
+                crate::OwnerFloor {
+                    line: "line".into(),
+                    owner: Some(owner()),
+                },
+                crate::OwnerFloor {
+                    line: "unknown".into(),
+                    owner: None,
+                },
+            ],
+        },
         RunnerFrame::Pong { nonce: 11 },
     ];
     frames.extend(refusals().into_iter().map(|refusal| RunnerFrame::Refused {
@@ -314,8 +334,8 @@ fn encoded() -> String {
         names.dedup();
         names.len()
     };
-    assert_eq!(named(hosts.iter().map(host_variant).collect()), 10);
-    assert_eq!(named(runners.iter().map(runner_variant).collect()), 15);
+    assert_eq!(named(hosts.iter().map(host_variant).collect()), 11);
+    assert_eq!(named(runners.iter().map(runner_variant).collect()), 16);
     assert_eq!(named(classes().iter().map(class_variant).collect()), 6);
     assert_eq!(named(events().iter().map(event_variant).collect()), 3);
     assert_eq!(named(refusals().iter().map(refusal_variant).collect()), 7);

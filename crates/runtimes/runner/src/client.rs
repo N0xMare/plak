@@ -39,6 +39,8 @@ type ForegroundReporter =
     Arc<dyn Fn(&str, &plakous_runner_protocol::StoppedForeground) + Send + Sync>;
 
 mod foreground;
+pub(crate) mod owner_transfer;
+pub use owner_transfer::ExactOwnerTransfer;
 mod probe;
 mod requests;
 use requests::{
@@ -170,6 +172,11 @@ struct Inner {
     transferred: Mutex<Transferred>,
 }
 
+enum InspectionAnswer {
+    Lines(Vec<LineStatus>),
+    OwnerFloors(Vec<plakous_runner_protocol::OwnerFloor>),
+}
+
 struct State {
     sender: Option<mpsc::UnboundedSender<HostFrame>>,
     connection: u64,
@@ -182,7 +189,7 @@ struct State {
     instance: String,
     pending: HashMap<String, Pending>,
     transfers: HashMap<String, oneshot::Sender<RunnerFrame>>,
-    questions: HashMap<String, oneshot::Sender<Result<Vec<LineStatus>, RunnerFailure>>>,
+    questions: HashMap<String, oneshot::Sender<Result<InspectionAnswer, RunnerFailure>>>,
     /// Why the runner refused the connection itself, such as an unpaired
     /// host.
     refusal: Option<Refusal>,
@@ -550,7 +557,12 @@ impl RunnerClient {
             return Err(RunnerFailure::NotSent("the runner is not connected".into()));
         }
         if let Ok(Ok(lines)) = tokio::time::timeout(self.inner.windows.read, answer).await {
-            return lines;
+            return match lines? {
+                InspectionAnswer::Lines(lines) => Ok(lines),
+                InspectionAnswer::OwnerFloors(_) => Err(RunnerFailure::ReadInterrupted(
+                    "invalid line inspection answer".into(),
+                )),
+            };
         }
         let mut state = lock(&self.inner.state);
         state.questions.remove(&request_id);
@@ -848,7 +860,13 @@ impl Inner {
             }
             RunnerFrame::Lines { request_id, lines } => {
                 if let Some(waiter) = lock(&self.state).questions.remove(&request_id) {
-                    let _ = waiter.send(Ok(lines));
+                    let _ = waiter.send(Ok(InspectionAnswer::Lines(lines)));
+                }
+                return;
+            }
+            RunnerFrame::OwnerFloors { request_id, floors } => {
+                if let Some(waiter) = lock(&self.state).questions.remove(&request_id) {
+                    let _ = waiter.send(Ok(InspectionAnswer::OwnerFloors(floors)));
                 }
                 return;
             }
@@ -955,80 +973,6 @@ impl Inner {
             self.ids,
             self.next.fetch_add(1, Ordering::Relaxed)
         )
-    }
-
-    /// Sends `owner`'s transfer before its first call, unless it is the
-    /// owner last transferred for its line. A transfer from an owner the
-    /// runner no longer accepts is answered with the one it does; a newer
-    /// `owner` (a fresher lease) transfers again from that one, once.
-    async fn transfer(
-        &self,
-        owner: &LineOwner,
-    ) -> Result<Vec<plakous_runner_protocol::StoppedForeground>, RunnerFailure> {
-        if self.qualification {
-            return Err(RunnerFailure::NotSent(
-                "qualification never transfers an owner".into(),
-            ));
-        }
-        let (instance, connection) = {
-            let state = lock(&self.state);
-            (state.instance.clone(), state.connection)
-        };
-        let line = {
-            let mut transferred = lock(&self.transferred);
-            if transferred.instance != instance {
-                *transferred = Transferred {
-                    instance,
-                    lines: HashMap::new(),
-                };
-            }
-            Arc::clone(transferred.lines.entry(owner.line.clone()).or_default())
-        };
-        let mut transferred = line.lock().await;
-        if transferred.owner.as_ref() == Some(owner) && transferred.connection == connection {
-            return Ok(Vec::new());
-        }
-        let mut from = transferred.owner.clone();
-        for _ in 0..2 {
-            match self.send_transfer(from.clone(), owner).await? {
-                RunnerFrame::TransferAccepted {
-                    mut stopped,
-                    unpromoted,
-                    ..
-                } => {
-                    let reporter = lock(&self.foreground_reporter).clone();
-                    if let Some(reporter) = reporter {
-                        let reports = stopped.clone();
-                        transferred
-                            .reported
-                            .retain(|key| reports.iter().any(|report| &report.call_key == key));
-                        stopped.retain(|process| {
-                            transferred.reported.insert(process.call_key.clone())
-                        });
-                        for process in &stopped {
-                            reporter(&owner.line, process);
-                        }
-                        for process in &reports {
-                            self.acknowledge_foreground(&owner.line, process);
-                        }
-                    }
-                    transferred.owner = Some(owner.clone());
-                    transferred.unpromoted = unpromoted;
-                    transferred.connection = connection;
-                    return Ok(stopped);
-                }
-                RunnerFrame::StaleOwner { current, .. }
-                    if owner.is_newer_than(&current) && from.as_ref() != Some(&current) =>
-                {
-                    from = Some(current);
-                }
-                RunnerFrame::TransferRefused { detail, .. } => {
-                    return Err(RunnerFailure::Unavailable(detail));
-                }
-                _ => return Err(RunnerFailure::StaleOwner),
-            }
-        }
-        Err(RunnerFailure::StaleOwner)
     }
 
     /// Sends one transfer and waits for its answer.

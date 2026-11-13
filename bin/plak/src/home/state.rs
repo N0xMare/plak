@@ -1027,6 +1027,7 @@ pub fn foreign_session(paths: &PlakPaths, prefix: &str) -> Option<(String, Strin
     if prefix.chars().count() < crate::commands::session::MIN_SESSION_ID_PREFIX {
         return None;
     }
+    let surrendered = crate::carry::upgrade::receipt::outgoing_sources(paths).ok()?;
     let mut matches = other_state(paths).into_iter().flat_map(|root| {
         let key = root
             .file_name()
@@ -1034,7 +1035,9 @@ pub fn foreign_session(paths: &PlakPaths, prefix: &str) -> Option<(String, Strin
             .map(str::to_owned);
         let mut ids = logged_sessions(&root, prefix);
         ids.extend(logged_sessions(&root.join("sessions"), prefix));
+        let omitted = key.as_ref().and_then(|key| surrendered.get(key));
         ids.into_iter()
+            .filter(move |id| omitted.is_none_or(|omitted| !omitted.contains(id)))
             .filter_map(move |id| key.clone().map(|key| (key, id)))
     });
     let first = matches.next()?;

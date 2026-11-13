@@ -1,0 +1,8 @@
+{"op":"filesystem_identity","path":"/workspace"}
+{"op":"canonicalize","path":"/workspace"}
+{"op":"is_file","path":"/workspace"}
+{"op":"tree_bytes","path":"/workspace"}
+{"device":1,"inode":2}
+{"path":"/workspace"}
+{"file":true}
+{"bytes":42}

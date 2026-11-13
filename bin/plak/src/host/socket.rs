@@ -15,7 +15,7 @@
 use std::collections::VecDeque;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -119,7 +119,7 @@ impl Bound {
         host: &Arc<SessionHost<PlakExtension>>,
         stopped: impl Fn() -> bool + Send + Sync + 'static,
         idle: Option<super::idle::IdleExit>,
-        scanning: Arc<AtomicBool>,
+        scanning: Arc<AtomicUsize>,
     ) {
         let stopped: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(stopped);
         let mut tick = tokio::time::interval(STOP_POLL);
@@ -157,7 +157,7 @@ impl Bound {
                         next_idle_check = now + Duration::from_secs(1);
                         let blocked = pending.load(Ordering::Acquire) != 0
                             || admitted.load(Ordering::Acquire) != 0
-                            || scanning.load(Ordering::Acquire)
+                            || scanning.load(Ordering::Acquire) != 0
                             || host.idle_residents_blocked();
                         if idle.expired(now, blocked, host).await {
                             match self.retire_idle_listener() {

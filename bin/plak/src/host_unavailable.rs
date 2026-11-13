@@ -4,6 +4,11 @@ use plakous_hosted::error::{CliResult, ProcessOutcome};
 
 use crate::shell::services::Services;
 
+pub(crate) fn finish_move_source(_services: &Services, _id: uuid::Uuid) -> CliResult<()> {
+    crate::build_features::require_feature("web")?;
+    Err(crate::CliFailure::new("host service is unavailable"))
+}
+
 pub(crate) const AVAILABLE: bool = false;
 
 pub(crate) fn preflight_upgrade_service(

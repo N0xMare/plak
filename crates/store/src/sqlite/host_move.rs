@@ -6,6 +6,9 @@ use plakous_agent::internal::host_move::{
     self, MoveBranch, MoveDisposition, MoveInstall, MoveLine, MoveSession, MoveState, PrepareMove,
 };
 
+mod guards;
+pub(super) use guards::{abandon_unopened, record_execution_open};
+
 pub(super) fn require_line(c: &Connection, line: LineId) -> Result<(), SessionStoreError> {
     let phase = c.query_row("SELECT m.phase FROM runtime_move_lines l JOIN runtime_moves m USING(operation) WHERE l.line_id=?1", [id(line)], |r| r.get::<_,i64>(0)).optional().map_err(map_sqlite)?;
     require_visible(phase)
@@ -164,7 +167,10 @@ pub(super) fn prepare(
     Ok(install)
 }
 
-fn branch_ids(c: &Connection, session: SessionId) -> Result<Vec<String>, SessionStoreError> {
+pub(super) fn branch_ids(
+    c: &Connection,
+    session: SessionId,
+) -> Result<Vec<String>, SessionStoreError> {
     c.prepare("SELECT branch_id FROM branches WHERE session_id=?1 ORDER BY branch_id")
         .map_err(map_sqlite)?
         .query_map([id(session)], |row| row.get(0))
@@ -184,7 +190,10 @@ pub(super) fn recover_backend(
 
 fn recover(c: &Connection, operation: SessionWorkflowId) -> Result<MoveInstall, SessionStoreError> {
     let (digest, phase) = receipt(c, operation)?.ok_or(SessionStoreError::NotFound)?;
-    if !matches!(phase, MoveState::Prepared | MoveState::Staged) {
+    if phase == MoveState::Published {
+        guards::check_session_headers(c, operation)?;
+        guards::check_published_heads(c, operation)?;
+    } else if !matches!(phase, MoveState::Prepared | MoveState::Staged) {
         return Err(SessionStoreError::Conflict);
     }
     let mut statement = c
@@ -223,13 +232,23 @@ fn recover(c: &Connection, operation: SessionWorkflowId) -> Result<MoveInstall, 
                     session: selector,
                     revision: row.head.revision(),
                     checkpoint: row.head.checkpoint().checkpoint_id(),
-                    fence_floor: row.last_fence,
+                    fence_floor: if phase == MoveState::Published {
+                        let floor: Vec<u8> = c.query_row(
+                            "SELECT fence_floor FROM runtime_move_heads WHERE operation=?1 AND session_id=?2 AND branch_id=?3",
+                            params![workflow_id_bytes(operation), id(sid), id(selector.branch_id())],
+                            |row| row.get(0),
+                        ).map_err(map_sqlite)?;
+                        read_u64(&floor)?
+                    } else { row.last_fence },
                 })
             })
             .collect::<Result<Vec<_>, SessionStoreError>>()?;
         sessions.push(MoveSession {
             session,
-            feed_tail_floor: feed::tail(c, sid)?.tail().get(),
+            feed_tail_floor: if phase == MoveState::Published {
+                let floor: i64 = c.query_row("SELECT feed_floor FROM runtime_move_sessions WHERE operation=?1 AND session_id=?2", params![workflow_id_bytes(operation), id(sid)], |row| row.get(0)).map_err(map_sqlite)?;
+                nonnegative(floor)?
+            } else { feed::tail(c, sid)?.tail().get() },
             branches,
             checkpoints: session_checkpoints(c, sid)?,
         });
@@ -393,7 +412,7 @@ fn stage_session(
     )
     .map_err(map_sqlite)?;
     tx.execute(
-        "INSERT INTO imported_sessions VALUES(?1,?2)",
+        "INSERT INTO imported_sessions(session_id,operation) VALUES(?1,?2)",
         params![id(s.session_id()), workflow_id_bytes(operation)],
     )
     .map_err(map_sqlite)?;
@@ -466,13 +485,29 @@ fn record_session(
     session: &MoveSession,
 ) -> Result<(), SessionStoreError> {
     c.execute(
-        "INSERT INTO runtime_move_sessions VALUES(?1,?2)",
+        "INSERT INTO runtime_move_sessions VALUES(?1,?2,?3,?4)",
         params![
             workflow_id_bytes(operation),
-            id(session.session.session_id())
+            id(session.session.session_id()),
+            u64b(session.session.revision().get()),
+            i64n(session.feed_tail_floor)?
         ],
     )
     .map_err(map_sqlite)?;
+    for branch in &session.branches {
+        c.execute(
+            "INSERT INTO runtime_move_heads VALUES(?1,?2,?3,?4,?5,?6)",
+            params![
+                workflow_id_bytes(operation),
+                id(branch.session.session_id()),
+                id(branch.session.branch_id()),
+                id(branch.checkpoint),
+                u64b(branch.revision.get()),
+                u64b(branch.fence_floor)
+            ],
+        )
+        .map_err(map_sqlite)?;
+    }
     Ok(())
 }
 
@@ -494,7 +529,7 @@ fn session_checkpoints(
     sid: SessionId,
 ) -> Result<Vec<RuntimeCheckpoint>, SessionStoreError> {
     let mut statement = c
-        .prepare("SELECT checkpoint_id FROM checkpoints WHERE session_id=?1 ORDER BY checkpoint_id")
+        .prepare("SELECT checkpoint_id FROM branches WHERE session_id=?1 ORDER BY checkpoint_id")
         .map_err(map_sqlite)?;
     let ids = statement
         .query_map([id(sid)], |r| r.get::<_, String>(0))

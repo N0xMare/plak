@@ -938,6 +938,14 @@ home exclusions and runner-owned skill authority apply without fallback to
 the host filesystem. A successful qualification session leaves no durable
 runner authority. Unpaired inspection remains Lines/Ping only.
 
+The normally bound `OwnerFloors` read (native runner protocol 9) is scoped to
+that authenticated host and to at most 256 explicitly named lines. It returns
+only exact persisted owners or absence, including floor-only lines, without
+new environments, effects, leases, transfers or adoption. Neither inspection
+mode admits it. A host ownership move uses exact-CAS transfer and treats any
+owner other than its imported source tuple or its own recorded intended tuple
+as an integrity failure, not permission to raise a fence over that witness.
+
 Runner placement uses pin-backed stable machine identity and effective canonical
 roots even while a runner is offline. Same-machine pin/root admission and local
 workspace admission share a home-local cross-process file lock through the local
@@ -2064,11 +2072,22 @@ opens, including after source restart; precommit cleanup may undo only its own
 matching preparation. Destination batch staging imports no source lease or host
 claim and grants no execution authority. Hidden and abandoned lines cannot be
 opened or acquire/renew/revive a lease; publication is atomic for the batch and
-fresh acquisition exceeds its imported floors. Only staged batches may be
-abandoned; publication cannot later be undone by abandonment. Hidden sessions
+fresh acquisition exceeds its imported floors. Unguarded abandonment is
+Staged-only. The narrow host-owned Published abandonment seam additionally
+requires never-Ready proof under the receipt lock, exact current BranchHolds,
+unchanged installed checkpoints/revisions and execution-open=false. Every
+ordinary durable driver open sets that bit before returning, even when idle;
+read-only verification and lease-only importer reconciliation do not. A failed
+guard leaves the group withheld, never revokes an ordinary active owner. Hidden sessions
 are excluded from discovery, not erased. These unsupported composition
 seams introduce neither a foreign native-store reader nor a second cross-build
 carrier. Product dormant-tree move remains disabled.
+Committed/Acknowledged outgoing receipts exclude surrendered copies from
+cross-key resume/foreign-session discovery. Prepared and Aborted sources are
+not excluded; Aborted receipts impose no target gate. Pending and abandoned
+destination reservations refuse execution and metadata mutation (including
+archive/delete), so an ordinary lifecycle command cannot invalidate publication
+or turn an abandoned reservation into authority.
 
 An explicit cross-build conversation import is construction, not recovery
 repair (chapter 02 §2.5.1). Ordinary import refuses the closed `host_upgrade` document kind before any state

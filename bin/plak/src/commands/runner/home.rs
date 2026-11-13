@@ -268,6 +268,15 @@ pub(crate) fn host_id(paths: &PlakPaths) -> CliResult<String> {
     Ok(host_id)
 }
 
+/// Read-only upgrade qualification must not mint a missing home identity.
+pub(crate) fn existing_host_id(paths: &PlakPaths) -> CliResult<String> {
+    let host_id = read_id(&paths.home().join("host-id"))?.ok_or_else(|| {
+        CliFailure::new("host upgrade requires the source home's existing host identity")
+    })?;
+    validate_host_id(&host_id)?;
+    Ok(host_id)
+}
+
 /// A host identity as `plak runner allow` takes it: a lowercase uuid.
 pub(crate) fn validate_host_id(host_id: &str) -> CliResult<()> {
     match uuid::Uuid::parse_str(host_id) {

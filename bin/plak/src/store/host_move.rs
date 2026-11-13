@@ -15,12 +15,12 @@ use rusqlite::{OptionalExtension as _, Transaction, TransactionBehavior, params}
 mod tests;
 
 impl ProductStore {
-    #[cfg(test)]
+    #[cfg(any(feature = "web", test))]
     pub(crate) fn move_acknowledgements(
-        &self,
+        connection: &rusqlite::Connection,
         tree: &str,
     ) -> Result<Vec<plakous_hosted::sessions::host_move::MoveAgentAcknowledgement>, String> {
-        let mut query = self.connection.prepare("SELECT agent_id,attempt_id,attention,ended_at,acknowledged_at FROM agent_acknowledgements WHERE tree_id=?1 ORDER BY agent_id,attempt_id,attention,ended_at")
+        let mut query = connection.prepare("SELECT agent_id,attempt_id,attention,ended_at,acknowledged_at FROM agent_acknowledgements WHERE tree_id=?1 ORDER BY agent_id,attempt_id,attention,ended_at")
             .map_err(|_| "could not read move acknowledgements")?;
         query
             .query_map([tree], |row| {
@@ -42,6 +42,59 @@ impl ProductStore {
             .map_err(|_| "invalid move acknowledgements".into())
     }
 
+    #[cfg(feature = "web")]
+    pub(crate) fn inspect_move_context(
+        paths: &crate::home::paths::PlakPaths,
+        session: plakous::model::SessionId,
+        branch: plakous::model::BranchId,
+    ) -> Result<Option<(plakous_hosted::sessions::SessionRecord, String)>, String> {
+        Self::read_only_snapshot(paths, |snapshot| {
+            let prefix = format!("{session}/{branch}/%");
+            let ids = snapshot
+                .prepare("SELECT id FROM sessions WHERE locator LIKE ?1 ORDER BY id")
+                .and_then(|mut statement| {
+                    statement
+                        .query_map([prefix], |row| row.get::<_, String>(0))?
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .map_err(|_| "could not inspect exact move construction context")?;
+            if ids.len() > 1 {
+                return Err("native branch has ambiguous product construction authority".into());
+            }
+            ids.first()
+                .map(|id| {
+                    let record = super::load_record(
+                        snapshot,
+                        &mut views::VerifiedSubmissions::default(),
+                        id,
+                    )?;
+                    let authority = plan_authority_on(snapshot, &record)?;
+                    Ok((record, authority))
+                })
+                .transpose()
+        })
+    }
+
+    #[cfg(any(feature = "web", test))]
+    pub(crate) fn inspect_move_source(
+        paths: &crate::home::paths::PlakPaths,
+        id: &str,
+        floor: plakous::sessions::feed::FeedSeq,
+    ) -> Result<DormantSession, String> {
+        Self::read_only_snapshot(paths, |snapshot| {
+            let mut verified = views::VerifiedSubmissions::default();
+            let record = super::load_record(snapshot, &mut verified, id)?;
+            let projected = views::views_of(snapshot, id)?
+                .ok_or("ownership move requires a complete source projection")?;
+            let intents = views::intents_of(snapshot, &mut verified, id)?;
+            let authority = plan_authority_on(snapshot, &record)?;
+            let acknowledgements = Self::move_acknowledgements(snapshot, &record.node.tree_id)?;
+            DormantSession::prepare(record, projected, intents, floor)?
+                .with_identity_claims(claims_on(snapshot, id)?)?
+                .with_acknowledgements(acknowledgements)?
+                .with_plan_authority(authority)
+        })
+    }
     pub(crate) fn move_plan_authority(&self, id: &str) -> Result<Option<String>, String> {
         let authority = self.connection.query_row(
             "SELECT json_extract(seed,'$.plan_authority') FROM session_move_seeds WHERE session_id=?1",
@@ -65,23 +118,7 @@ impl ProductStore {
         &self,
         owner: &str,
     ) -> Result<Vec<MoveIdentityClaim>, String> {
-        let mut query = self.connection.prepare("SELECT identity,kind,binding_digest,terminal_disposition,terminal_outcome FROM identity_bindings WHERE owner_session_id=?1 ORDER BY identity")
-            .map_err(|_| "could not read move identity claims")?;
-        query
-            .query_map([owner], |row| {
-                let kind: String = row.get(1)?;
-                Ok(MoveIdentityClaim {
-                    identity: row.get(0)?,
-                    kind: MoveIdentityKind::parse(&kind).ok_or(rusqlite::Error::InvalidQuery)?,
-                    owner: owner.into(),
-                    binding: row.get(2)?,
-                    disposition: row.get(3)?,
-                    outcome: row.get(4)?,
-                })
-            })
-            .map_err(|_| "could not read move identity claims")?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| "invalid move identity claims".into())
+        claims_on(&self.connection, owner)
     }
 
     pub(crate) fn move_projection_base(&self, id: &str) -> Result<Option<SessionViews>, String> {
@@ -180,6 +217,68 @@ impl ProductStore {
             .map_err(|error| write_error(error, "could not commit semantic move seed"))?;
         self.baselines.remove(&id);
         Ok(())
+    }
+}
+
+fn claims_on(
+    connection: &rusqlite::Connection,
+    owner: &str,
+) -> Result<Vec<MoveIdentityClaim>, String> {
+    let mut query = connection.prepare("SELECT identity,kind,binding_digest,terminal_disposition,terminal_outcome FROM identity_bindings WHERE owner_session_id=?1 ORDER BY identity")
+        .map_err(|_| "could not read move identity claims")?;
+    query
+        .query_map([owner], |row| {
+            let kind: String = row.get(1)?;
+            Ok(MoveIdentityClaim {
+                identity: row.get(0)?,
+                kind: MoveIdentityKind::parse(&kind).ok_or(rusqlite::Error::InvalidQuery)?,
+                owner: owner.into(),
+                binding: row.get(2)?,
+                disposition: row.get(3)?,
+                outcome: row.get(4)?,
+            })
+        })
+        .map_err(|_| "could not read move identity claims")?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "invalid move identity claims".into())
+}
+
+#[cfg(any(feature = "web", test))]
+fn plan_authority_on(
+    connection: &rusqlite::Connection,
+    record: &plakous_hosted::sessions::SessionRecord,
+) -> Result<String, String> {
+    let mut current = record.clone();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut verified = views::VerifiedSubmissions::default();
+    loop {
+        if !seen.insert(current.id.clone()) {
+            return Err("fork plan authority has cyclic lineage".into());
+        }
+        let imported: Option<String> = connection.query_row(
+            "SELECT json_extract(seed,'$.plan_authority') FROM session_move_seeds WHERE session_id=?1", [&current.id], |row| row.get(0),
+        ).optional().map_err(|_| "could not read move plan-state namespace")?.flatten();
+        if let Some(imported) = imported {
+            return Ok(imported);
+        }
+        let (Some(source), Some(operation)) = (
+            &current.source_product_session_id,
+            &current.source_workflow_operation_id,
+        ) else {
+            return Ok(current.id);
+        };
+        if current.carried_forward_from().is_some() {
+            return Ok(current.id);
+        }
+        if !views::intents_of(connection, &mut verified, source)?
+            .workflow_request(operation)
+            .is_some_and(|request| {
+                request.kind == plakous_hosted::sessions::SessionWorkflowKind::Fork
+            })
+        {
+            return Ok(current.id);
+        }
+        current = super::load_record(connection, &mut verified, source)?;
     }
 }
 

@@ -85,6 +85,26 @@ pub async fn readopt_lines(
     roots: &crate::agent::ProductStateRoots,
     operation_prefix: &str,
 ) -> Result<(Vec<Readopted>, Vec<ReadoptFailure>), RunnerFailure> {
+    readopt_lines_excluding(
+        client,
+        roots,
+        operation_prefix,
+        &std::collections::BTreeSet::new(),
+    )
+    .await
+}
+
+/// Host-only sweep seam: pending ownership-move groups remain wholly withheld.
+///
+/// # Errors
+/// The runtime store could not open, or the runner could not list its lines.
+#[doc(hidden)]
+pub async fn readopt_lines_excluding(
+    client: &RunnerClient,
+    roots: &crate::agent::ProductStateRoots,
+    operation_prefix: &str,
+    withheld: &std::collections::BTreeSet<LineId>,
+) -> Result<(Vec<Readopted>, Vec<ReadoptFailure>), RunnerFailure> {
     if crate::test_support_runner::selected(HostCut::SkipReadopt) {
         return Ok((Vec::new(), Vec::new()));
     }
@@ -94,6 +114,13 @@ pub async fn readopt_lines(
     let mut readopted = Vec::new();
     let mut failed = Vec::new();
     for status in client.lines().await? {
+        if status
+            .line
+            .parse()
+            .is_ok_and(|line| withheld.contains(&line))
+        {
+            continue;
+        }
         if let Ok(line) = LineId::from_str(&status.line)
             && sessions
                 .line_head(line)

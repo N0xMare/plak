@@ -1,11 +1,27 @@
 //! Reconstructed identities are current-native data, never serialized source bytes.
-use super::{Line, Origin, Session, Terminal};
+use super::{Capsule, HeadContext, Line, Origin, Session, Terminal};
 use plakous::model::{LineId, Timestamp};
 use plakous::sessions::SessionLocator;
 use plakous::sessions::host_move::{
     MoveLine, MoveLineOrigin, MoveLineRecord, MoveSessionHeader, MoveSessionRef,
     MoveSessionRevision,
 };
+
+impl Capsule {
+    pub(super) fn current_context(&self, line: &Line) -> Result<&HeadContext, String> {
+        self.sessions
+            .iter()
+            .filter(|session| session.id == line.session)
+            .flat_map(|session| &session.heads)
+            .find(|head| {
+                head.source
+                    .parse::<SessionLocator>()
+                    .is_ok_and(|source| source.branch_id().to_string() == line.branch)
+            })
+            .map(|head| &head.context)
+            .ok_or_else(|| "move line has no exact current context".into())
+    }
+}
 
 impl Session {
     pub(super) fn header(&self) -> Result<MoveSessionHeader, String> {

@@ -33,6 +33,8 @@ pub use registry::{
     RunnerProbeFuture, RunnerProgress, RunnerRegistry, RunnerRow, RunnerStatus,
 };
 mod service;
+#[doc(hidden)]
+pub use registry::RunnerConnectionHold;
 mod state;
 mod streams;
 mod workspace;
@@ -44,6 +46,8 @@ pub use workspace::{
     WorkspaceOptions, WorkspaceRefusal,
 };
 
+#[doc(hidden)]
+pub use client::ExactOwnerTransfer;
 pub use client::{
     ClientWindows, ConnectError, OperatorReclamationGuard, OperatorTerminalStream, RecoveredCall,
     RunnerClient, RunnerConnectionRevision,

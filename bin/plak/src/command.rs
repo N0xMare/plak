@@ -263,6 +263,9 @@ pub(crate) enum Command {
     HostUpgradeCapacity {
         path: PathBuf,
     },
+    HostUpgradeFinishSource {
+        receipt: uuid::Uuid,
+    },
     /// Hidden `plak version --reopen-probe <id>`.
     ReopenProbe {
         session: String,
@@ -481,6 +484,7 @@ impl Command {
             | Self::ReloadProbe
             | Self::HostUpgradeProbe { .. }
             | Self::HostUpgradeCapacity { .. }
+            | Self::HostUpgradeFinishSource { .. }
             | Self::WriteBinaryManifest { .. }
             | Self::CarryProbe { .. }
             | Self::ReopenProbe { .. }

@@ -182,6 +182,13 @@ mod test_hooks {
     }
     #[allow(dead_code, reason = "only the optional host coordinates upgrades")]
     pub(crate) fn upgrade_crash_cut(_name: &str) {}
+    #[allow(
+        dead_code,
+        reason = "only the optional host coordinates ownership moves"
+    )]
+    pub(crate) const fn upgrade_move_failure(_name: &str) -> bool {
+        false
+    }
     #[allow(dead_code, reason = "only the optional host prepares upgrades")]
     pub(crate) const fn upgrade_preparation_refused(_name: &str) -> bool {
         false
@@ -439,6 +446,7 @@ fn log_command_start(command: &Command) {
         Command::StateKey
         | Command::HostUpgradeProbe { .. }
         | Command::HostUpgradeCapacity { .. }
+        | Command::HostUpgradeFinishSource { .. }
         | Command::ReloadProbe
         | Command::ReopenProbe { .. }
         | Command::WriteBinaryManifest { .. }
@@ -528,6 +536,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let services = Services::from_env(None, launch.as_deref());
     if matches!(&command, Command::SessionCheckBinding) {
         return commands::session::check_binding::run(services.paths()?, &mut io::stdout().lock());
+    }
+    if let Command::HostUpgradeFinishSource { receipt } = command {
+        host::finish_move_source(&services, receipt)?;
+        return Ok(ProcessOutcome::Success);
     }
     if matches!(
         command,
@@ -797,6 +809,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         Command::WriteBinaryManifest { .. }
         | Command::HostUpgradeProbe { .. }
         | Command::HostUpgradeCapacity { .. } => {
+            Err(CliFailure::new("internal command dispatch error"))
+        }
+        Command::HostUpgradeFinishSource { .. } => {
             Err(CliFailure::new("internal command dispatch error"))
         }
         Command::StateKey => {
@@ -1471,6 +1486,7 @@ fn execute_command(
         | Command::ReloadProbe
         | Command::HostUpgradeProbe { .. }
         | Command::HostUpgradeCapacity { .. }
+        | Command::HostUpgradeFinishSource { .. }
         | Command::ReopenProbe { .. }
         | Command::CarryProbe { .. }
         | Command::ExportVersion

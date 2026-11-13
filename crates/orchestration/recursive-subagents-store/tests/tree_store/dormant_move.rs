@@ -129,3 +129,50 @@ fn dormant_tree_sqlite_install_keeps_its_semantic_cut_and_custody_floor_after_re
     assert_eq!(reopened.feed_cursor(SESSION), 20);
     assert!(reopened.command("owed").is_some());
 }
+
+#[test]
+fn dormant_tree_source_inspection_reads_rows_and_custody_on_one_snapshot_without_a_take() {
+    let root = tempfile::tempdir().unwrap();
+    let absent = root.path().join("missing").join("subagents.sqlite3");
+    assert!(
+        SqliteTreeStore::inspect_move_tree(&absent, "move-tree")
+            .unwrap()
+            .is_none()
+    );
+    assert!(!absent.parent().unwrap().exists());
+    let path = root.path().join("subagents.sqlite3");
+    let store = SqliteTreeStore::open(&path).unwrap();
+    let cut = seed(root.path());
+    check_install(&store, &cut);
+    let before = std::fs::read(&path).unwrap();
+    let custody = store
+        .custody_port()
+        .custody(cut.tree_id())
+        .unwrap()
+        .unwrap();
+    let (observed, floor) = SqliteTreeStore::inspect_move_tree(&path, cut.tree_id())
+        .unwrap()
+        .unwrap();
+    assert_eq!(floor, custody);
+    assert_eq!(floor.fence, 18);
+    assert!(!floor.released);
+    assert_eq!(
+        DormantTree::capture(observed.rows())
+            .unwrap()
+            .digest()
+            .unwrap(),
+        DormantTree::capture(store.load(cut.tree_id()).unwrap().unwrap().rows())
+            .unwrap()
+            .digest()
+            .unwrap()
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(
+        store
+            .custody_port()
+            .custody(cut.tree_id())
+            .unwrap()
+            .unwrap(),
+        custody
+    );
+}

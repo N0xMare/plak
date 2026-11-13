@@ -1161,6 +1161,15 @@ impl MemorySessionStore {
 }
 
 impl SessionStore for MemorySessionStore {
+    fn record_execution_open(&self, lease: BranchLease) -> StoreFuture<'_, ()> {
+        Box::pin(async move { self.record_execution_open_sync(&lease) })
+    }
+    fn abandon_unopened_move(
+        &self,
+        request: plakous_agent::internal::host_move::AbandonUnopenedMove,
+    ) -> StoreFuture<'_, ()> {
+        Box::pin(async move { self.abandon_unopened_move_sync(&request) })
+    }
     fn recover_move(
         &self,
         operation: SessionWorkflowId,
@@ -1383,6 +1392,7 @@ impl SessionStore for MemorySessionStore {
 struct StoreState {
     moves: BTreeMap<SessionWorkflowId, host_move::Receipt>,
     move_lines: BTreeMap<plakous_agent::internal::LineId, SessionWorkflowId>,
+    move_execution_open: BTreeSet<SessionId>,
     sessions: BTreeMap<SessionId, SessionRecord>,
     checkpoints: BTreeMap<CheckpointId, CheckpointRecord>,
     objects: BTreeMap<RuntimeObjectAddress, RuntimeObject>,

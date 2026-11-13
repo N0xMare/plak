@@ -24,6 +24,15 @@ pub enum MoveDisposition {
     Abandon,
 }
 
+/// Host-only guarded withdrawal of an installed, never-executed destination batch.
+/// The coordinator must hold its never-Ready receipt lock across this call.
+#[derive(Clone, Debug)]
+pub struct AbandonUnopenedMove {
+    pub operation: SessionWorkflowId,
+    pub digest: Digest,
+    pub leases: Vec<BranchLease>,
+}
+
 #[derive(Clone, Debug)]
 pub struct MoveBranch {
     pub session: SessionRef,
@@ -154,12 +163,7 @@ impl MoveInstall {
                     || topology.lease_fence > branch.fence_floor
                     || branch.fence_floor == u64::MAX
                     || checkpoint.kind() != RuntimeCheckpointKind::Quiescent
-                    || checkpoint
-                        .manifest()
-                        .jobs()
-                        .rows()
-                        .iter()
-                        .any(|job| job.terminal.is_none())
+                    || !jobs_settled(checkpoint, &lines)?
                     || branches
                         .insert(branch.session, (topology.line, topology.line_generation))
                         .is_some()
@@ -208,6 +212,25 @@ impl MoveInstall {
     pub const fn digest(&self) -> Digest {
         self.digest
     }
+}
+
+fn jobs_settled(
+    checkpoint: &RuntimeCheckpoint,
+    lines: &[MoveLine],
+) -> Result<bool, SessionStoreError> {
+    let line = checkpoint.manifest().topology().line;
+    let index = lines
+        .binary_search_by_key(&line, |entry| entry.line.line())
+        .map_err(|_| SessionStoreError::IdentityConflict)?;
+    let terminals = &lines[index].terminals;
+    Ok(checkpoint
+        .manifest()
+        .jobs()
+        .with_line_terminals(terminals)
+        .map_err(|_| SessionStoreError::IdentityConflict)?
+        .rows()
+        .iter()
+        .all(|row| row.terminal.is_some()))
 }
 
 fn fingerprint_part(bytes: &mut Vec<u8>, value: &[u8]) {

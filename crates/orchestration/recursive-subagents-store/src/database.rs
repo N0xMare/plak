@@ -192,6 +192,27 @@ pub struct SubagentsDatabase {
 }
 
 impl SubagentsDatabase {
+    pub(crate) fn inspect_move_tree(
+        database: &Path,
+        tree_id: &str,
+    ) -> Result<
+        Option<(
+            PersistedTree,
+            plakous_recursive_subagents::tree::CustodyRecord,
+        )>,
+        OpenError,
+    > {
+        Self::inspect_rows(database, None, |tx| {
+            let Some(tree) = load_agent_tree(tx, tree_id).map_err(OpenError::unavailable)? else {
+                return Ok(None);
+            };
+            let custody = crate::custody::read(tx, tree_id)
+                .map_err(|error| OpenError::unavailable(error.detail))?
+                .ok_or_else(|| OpenError::unavailable("move source tree has no custody floor"))?;
+            Ok(Some((tree, custody)))
+        })
+    }
+
     /// Reads an existing tree on one read-only snapshot without opening a
     /// writer, creating directories, or applying the tree reopen law.
     pub(crate) fn inspect_tree(

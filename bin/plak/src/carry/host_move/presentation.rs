@@ -26,7 +26,6 @@ struct Registration {
 }
 
 impl Presentation {
-    #[cfg(test)]
     pub(crate) fn capture(data: SemanticSessionPresentation) -> Result<Self, String> {
         Ok(Self {
             registrations: data

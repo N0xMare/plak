@@ -2,13 +2,14 @@
 
 mod abandon;
 mod bindings;
+mod moves;
 mod preparation;
 mod process_safety;
 mod requester;
 mod startup;
 mod step_drain;
 pub(super) use abandon::request as abandon;
-pub(super) use startup::{prepare_host, start_retry};
+pub(super) use startup::{Recovery, prepare_host, start_retry};
 
 use std::io::{BufRead as _, Write as _};
 use std::os::unix::net::UnixStream;
@@ -97,6 +98,7 @@ impl From<&crate::carry::ExportRefusal> for BlockerKind {
 }
 
 pub(super) struct Ready {
+    move_guard: Option<moves::Frozen>,
     step_drain: Option<plakous_hosted::host_service::wire::HostStepDrain>,
     pub(super) executable: PathBuf,
     pub(super) key: String,
@@ -255,15 +257,24 @@ impl StartupReplacement {
 
 /// Called only under the home guard: a prepared transfer's previous host
 /// is gone, so it is withdrawn; a committed source never becomes owner again.
-pub(super) fn startup_replacement(paths: &PlakPaths) -> CliResult<Option<StartupReplacement>> {
+pub(super) fn startup_replacement(services: &Services) -> CliResult<Option<StartupReplacement>> {
+    let paths = services.paths()?;
     let own = crate::home::state::state_key();
     let mut receipts = receipt::all(paths)?;
     for receipt in &mut receipts {
-        if receipt.phase == Phase::Aborted
-            && receipt.source_key == own
-            && receipt.source_archival_pending
+        if receipt.source_key == own
+            && matches!(receipt.phase, Phase::Committed | Phase::Acknowledged)
+            && receipt.groups.iter().any(|group| !group.source_retired)
         {
-            preparation::withdraw(paths, receipt)?;
+            // The old-key executable, not the destination, understands these native rows.
+            crate::carry::host_move::source::finish_source(services, receipt.id)?;
+        }
+        if receipt.phase == Phase::Aborted && receipt.source_key == own {
+            if receipt.source_archival_pending {
+                preparation::withdraw(paths, receipt)?;
+            } else if !receipt.groups.is_empty() {
+                crate::carry::host_move::source::withdraw(paths, receipt)?;
+            }
         }
     }
     let Some(mut receipt) = receipts.pop() else {
@@ -271,9 +282,6 @@ pub(super) fn startup_replacement(paths: &PlakPaths) -> CliResult<Option<Startup
     };
     let unresolved = matches!(receipt.phase, Phase::Prepared | Phase::Committed);
     if receipt.phase == Phase::Aborted {
-        if receipt.source_key == own && receipt.source_archival_pending {
-            preparation::withdraw(paths, &mut receipt)?;
-        }
         return Ok(None);
     }
     if !unresolved && receipt.source_key != own && receipt.destination_key != own {
@@ -726,7 +734,9 @@ fn handle(
         let mut last = last_progress
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if last.is_some_and(|sent| sent.elapsed() < Duration::from_secs(1)) {
+        if !detail.starts_with("preflight connected ")
+            && last.is_some_and(|sent| sent.elapsed() < Duration::from_secs(1))
+        {
             return Ok(());
         }
         let mut output = output
@@ -790,6 +800,11 @@ fn prepare(
     let destination_version = qualify_destination(services, &request, arguments)?;
     process_safety::check(services, &destination_version, runtime)?;
     let cross_key = request.source_key != request.destination_key;
+    if cross_key && crate::carry::host_move::install_protocol().is_some() {
+        return moves::prepare(
+            host, services, request, cancelled, arguments, runtime, progress,
+        );
+    }
     if cross_key {
         match settled_roots(services) {
             Ok(roots) => preflight_capacities(services, &request, &roots)?,
@@ -817,6 +832,7 @@ fn prepare(
         }
     }
     let ready = Ready {
+        move_guard: None,
         step_drain: None,
         executable: request.destination.clone(),
         key: request.destination_key.clone(),
@@ -955,6 +971,7 @@ fn new_receipt(services: &Services, request: Request, arguments: &[String]) -> C
         phase: Phase::Prepared,
         source_archival_pending: false,
         mappings: Vec::new(),
+        groups: Vec::new(),
     })
 }
 

@@ -14,7 +14,54 @@ use plakous_hosted::sessions::{
 use plakous_offline_crash_harness::BoundaryController;
 use plakous_offline_crash_harness::protocol::CrashBoundary;
 
+mod installation;
+
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+#[tokio::test]
+async fn move_source_owner_accepts_an_exact_retained_predecessor_but_not_foreign_floors()
+-> TestResult {
+    let root = PathFixture(tempfile::tempdir()?);
+    let capsule = source(&root).await?;
+    let head = &capsule.sessions[0].heads[0];
+    let source: SessionLocator = head.source.parse()?;
+    let mut line: Line = serde_json::from_value(serde_json::to_value(&capsule.lines[0])?)?;
+    line.generation += 1;
+    line.branch = uuid::Uuid::from_u128(99).to_string();
+    let owner = RunnerOwner {
+        runner: head.context.runner.clone(),
+        host: capsule.source_host.clone(),
+        line: line.id.clone(),
+        generation: head.generation,
+        session: source.session_id().to_string(),
+        branch: source.branch_id().to_string(),
+        fence: head.fence_floor,
+    };
+    // A newly continued head need not have made its first runner call yet.
+    capsule.validate_runner_owner(&line, &owner)?;
+    for field in [
+        "line",
+        "host",
+        "session",
+        "branch",
+        "runner",
+        "generation",
+        "fence",
+    ] {
+        let mut value = serde_json::to_value(&owner)?;
+        value[field] = match field {
+            "generation" => serde_json::json!(head.generation + 1),
+            "fence" => serde_json::json!(head.fence_floor + 1),
+            _ => serde_json::json!("foreign"),
+        };
+        let changed = serde_json::from_value(value)?;
+        assert!(
+            capsule.validate_runner_owner(&line, &changed).is_err(),
+            "unproven {field} accepted"
+        );
+    }
+    Ok(())
+}
 
 async fn source(root: &PathFixture) -> TestResult<Capsule> {
     source_with_fidelity(root, false).await

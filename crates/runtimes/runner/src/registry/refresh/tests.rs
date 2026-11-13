@@ -16,6 +16,41 @@ fn registry(count: usize) -> RunnerRegistry {
 }
 
 #[test]
+fn scoped_source_connection_demand_survives_refresh_without_clearing_other_requirements() {
+    let registry = registry(1);
+    assert!(registry.retain_connection("missing").is_none());
+    let first = registry.retain_connection("runner-0").unwrap();
+    let second = registry.retain_connection("runner-0").unwrap();
+    assert!(registry.needs_connection("runner-0"));
+    assert!(
+        registry.client("runner-0").is_none(),
+        "demand does not itself bind"
+    );
+    registry.configure(ConfiguredRunner {
+        runner_id: "runner-0".into(),
+        names: vec!["renamed".into()],
+    });
+    drop(first);
+    assert!(registry.needs_connection("runner-0"));
+    registry.require_connection("runner-0", true);
+    drop(second);
+    assert!(
+        registry.needs_connection("runner-0"),
+        "drop cannot clear another owner's durable requirement"
+    );
+    registry
+        .entries
+        .write()
+        .unwrap()
+        .get_mut("runner-0")
+        .unwrap()
+        .row
+        .status = RunnerStatus::Ready;
+    registry.require_connection("runner-0", false);
+    assert!(!registry.needs_connection("runner-0"));
+}
+
+#[test]
 fn request_projects_its_deadline_while_the_owner_executor_is_not_polling() {
     let owner = tokio::runtime::Builder::new_current_thread()
         .enable_all()

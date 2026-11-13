@@ -394,6 +394,18 @@ pub(super) fn continuation_owed(services: &Services, id: &str) -> CliResult<bool
     if record.archived {
         return Ok(false);
     }
+    if crate::carry::upgrade::receipt::all(paths)?
+        .iter()
+        .any(|receipt| {
+            receipt.destination_key == crate::home::state::state_key()
+                && receipt
+                    .mappings
+                    .iter()
+                    .any(|mapping| mapping.successor == id && mapping.abandoned)
+        })
+    {
+        return Ok(false);
+    }
     let continue_losses = crate::product_config::ProductConfig::load(paths)
         .map_err(CliFailure::new)?
         .resume_after_loss

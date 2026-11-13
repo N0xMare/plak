@@ -246,7 +246,7 @@ fn an_admitted_connection_is_welcomed_to_the_directory_and_a_stop_ends_the_host(
             &host,
             move || stopping.load(Ordering::Acquire),
             None,
-            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicUsize::new(0)),
         ));
         bound
     });
@@ -342,7 +342,7 @@ fn a_hello_of_another_version_is_refused() {
             &host,
             move || stopping.load(Ordering::Acquire),
             None,
-            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicUsize::new(0)),
         ));
     });
     let mut client = std::os::unix::net::UnixStream::connect(&socket).unwrap();
@@ -441,7 +441,7 @@ fn serve_idle_expiry_hides_discovery_before_releasing_the_home_lock() {
                     Some(super::super::idle::IdleExit::with_window(
                         Duration::from_millis(1),
                     )),
-                    Arc::new(AtomicBool::new(false)),
+                    Arc::new(AtomicUsize::new(0)),
                 ),
             )
             .await
@@ -512,7 +512,7 @@ fn serve_welcomes_a_connection_queued_before_the_expiry_tick() {
                     Some(super::super::idle::IdleExit::with_window(
                         Duration::from_millis(1),
                     )),
-                    Arc::new(AtomicBool::new(false)),
+                    Arc::new(AtomicUsize::new(0)),
                 ),
             )
             .await
@@ -571,7 +571,7 @@ fn serve_stops_on_idle_retirement_failure() {
                 Some(super::super::idle::IdleExit::with_window(
                     Duration::from_millis(1),
                 )),
-                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicUsize::new(0)),
             ),
         )
         .await

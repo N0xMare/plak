@@ -246,6 +246,7 @@ async fn qualification_client_uses_only_workspace_reads_and_never_registers_a_ho
         ])
     );
     assert!(client.lines().await.is_err());
+    assert!(client.owner_floors(&["line".into()]).await.is_err());
     let workspace = fixture.root.path().join("workspace");
     assert!(
         client
@@ -378,6 +379,10 @@ async fn qualification_refuses_transfer_and_all_non_read_frames_and_leaves_unpai
         HostFrame::Lines {
             request_id: "lines".into(),
         },
+        HostFrame::OwnerFloors {
+            request_id: "floors".into(),
+            lines: vec!["line".into()],
+        },
         HostFrame::Cancel {
             request_id: "read".into(),
         },
@@ -409,32 +414,135 @@ async fn qualification_refuses_transfer_and_all_non_read_frames_and_leaves_unpai
         ));
         peer.close().await;
     }
+    for frame in [
+        HostFrame::Request(fixture.request(RunnerVerb::ProbeWorkspace)),
+        HostFrame::OwnerFloors {
+            request_id: "floors".into(),
+            lines: vec!["line".into()],
+        },
+    ] {
+        let mut peer = Peer::connect(
+            &fixture,
+            HostFrame::Bind(Bind {
+                host_id: "unpaired".into(),
+                host_instance: "inspection".into(),
+                version: fixture.service.hello().version.clone(),
+                inspect: true,
+            }),
+        )
+        .await;
+        peer.send(HostFrame::Lines {
+            request_id: "lines".into(),
+        })
+        .await;
+        assert!(matches!(peer.next().await, RunnerFrame::Lines { lines, .. } if lines.is_empty()));
+        peer.send(HostFrame::Ping { nonce: 8 }).await;
+        assert_eq!(peer.next().await, RunnerFrame::Pong { nonce: 8 });
+        peer.send(frame).await;
+        assert!(matches!(
+            peer.next().await,
+            RunnerFrame::Refused {
+                refusal: Refusal::InspectOnly,
+                ..
+            }
+        ));
+        peer.close().await;
+    }
+    fixture.untouched();
+}
+
+#[tokio::test]
+async fn owner_floors_are_bounded_host_scoped_and_do_not_create_authority() {
+    let fixture = Fixture::new();
+    let owner = LineOwner {
+        line: "line".into(),
+        generation: 1,
+        branch: "branch".into(),
+        fence: 7,
+    };
+    lock(&fixture.service.inner.tables).transfer(
+        "other",
+        "other-instance",
+        "seed".into(),
+        None,
+        owner,
+    );
+    let before = fixture.floors.load();
     let mut peer = Peer::connect(
         &fixture,
         HostFrame::Bind(Bind {
-            host_id: "unpaired".into(),
-            host_instance: "inspection".into(),
+            host_id: "paired".into(),
+            host_instance: "normal".into(),
             version: fixture.service.hello().version.clone(),
-            inspect: true,
+            inspect: false,
         }),
     )
     .await;
-    peer.send(HostFrame::Lines {
-        request_id: "lines".into(),
+    for lines in [
+        vec![],
+        vec!["line".into(), "line".into()],
+        vec!["line".into(); 257],
+        vec!["a".repeat(129)],
+        vec!["not a line".into()],
+    ] {
+        peer.send(HostFrame::OwnerFloors {
+            request_id: "bad".into(),
+            lines,
+        })
+        .await;
+        assert!(
+            matches!(peer.next().await, RunnerFrame::Refused { request_id: Some(id), refusal: Refusal::Malformed { .. } } if id == "bad")
+        );
+    }
+    let lines = (0..256)
+        .map(|number| {
+            if number == 0 {
+                "line".into()
+            } else {
+                format!("unknown-{number}")
+            }
+        })
+        .collect::<Vec<_>>();
+    peer.send(HostFrame::OwnerFloors {
+        request_id: "bounded".into(),
+        lines: lines.clone(),
     })
     .await;
-    assert!(matches!(peer.next().await, RunnerFrame::Lines { lines, .. } if lines.is_empty()));
-    peer.send(HostFrame::Request(
-        fixture.request(RunnerVerb::ProbeWorkspace),
-    ))
-    .await;
-    assert!(matches!(
-        peer.next().await,
-        RunnerFrame::Refused {
-            refusal: Refusal::InspectOnly,
-            ..
-        }
-    ));
+    assert!(
+        matches!(peer.next().await, RunnerFrame::OwnerFloors { request_id, floors } if request_id == "bounded" && floors.len() == lines.len() && floors.iter().zip(&lines).all(|(row, line)| &row.line == line && row.owner.is_none()))
+    );
+    assert_eq!(fixture.floors.load(), before);
+    assert!(lock(&fixture.service.inner.lines).is_empty());
+    assert!(lock(&fixture.service.inner.running).is_empty());
+    assert!(lock(&fixture.service.inner.services).is_empty());
     peer.close().await;
-    fixture.untouched();
+    assert_eq!(fixture.floors.load(), before);
+}
+
+#[tokio::test]
+async fn owner_floor_query_refuses_a_failed_reload_without_falling_back_to_cache() {
+    let fixture = Fixture::new();
+    let mut peer = Peer::connect(
+        &fixture,
+        HostFrame::Bind(Bind {
+            host_id: "paired".into(),
+            host_instance: "normal".into(),
+            version: fixture.service.hello().version.clone(),
+            inspect: false,
+        }),
+    )
+    .await;
+    std::fs::write(fixture.floors.path(), b"not json").unwrap();
+    peer.send(HostFrame::OwnerFloors {
+        request_id: "reload".into(),
+        lines: vec!["line".into()],
+    })
+    .await;
+    assert!(
+        matches!(peer.next().await, RunnerFrame::Refused { request_id: Some(id), refusal: Refusal::Unsupported { .. } } if id == "reload")
+    );
+    assert!(lock(&fixture.service.inner.lines).is_empty());
+    peer.send(HostFrame::Ping { nonce: 9 }).await;
+    assert!(matches!(peer.next().await, RunnerFrame::Pong { nonce: 9 }));
+    peer.close().await;
 }

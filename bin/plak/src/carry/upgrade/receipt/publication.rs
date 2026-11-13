@@ -10,7 +10,6 @@ impl Receipt {
 }
 
 /// Serializes the host's retry worker and explicit operator disposition.
-#[cfg(feature = "web")]
 pub(crate) fn lock(paths: &PlakPaths) -> CliResult<File> {
     use rustix::fs::{Mode, OFlags};
     use std::os::unix::fs::MetadataExt as _;

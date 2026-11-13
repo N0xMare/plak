@@ -126,17 +126,7 @@ impl Capsule {
             }
             current_lines.insert(id, (session, line.generation));
             if let Some(owner) = &line.source_owner {
-                if owner.host != self.source_host
-                    || owner.line != line.id
-                    || owner.session != line.session
-                    || owner.branch != line.branch
-                    || owner.generation != line.generation
-                    || owner.fence == 0
-                    || owner.fence == u64::MAX
-                    || plakous::tools::RunnerId::new(owner.runner.clone()).is_err()
-                {
-                    return Err("move runner owner does not name its source line".into());
-                }
+                self.validate_runner_owner(line, owner)?;
             }
         }
         let mut dependencies: BTreeMap<SessionId, BTreeSet<SessionId>> = BTreeMap::new();
@@ -160,6 +150,44 @@ impl Capsule {
             || groups.groups()[0].sessions().len() != self.sessions.len()
         {
             return Err("move capsule is not its exact connected group".into());
+        }
+        Ok(())
+    }
+}
+
+impl Capsule {
+    pub(super) fn validate_runner_owner(
+        &self,
+        line: &super::Line,
+        owner: &super::RunnerOwner,
+    ) -> Result<(), String> {
+        let head = self
+            .sessions
+            .iter()
+            .find(|session| session.id == owner.session)
+            .into_iter()
+            .flat_map(|session| &session.heads)
+            .find(|head| {
+                head.source
+                    .parse::<SessionLocator>()
+                    .is_ok_and(|source| source.branch_id().to_string() == owner.branch)
+            });
+        if owner.host != self.source_host
+            || owner.line != line.id
+            || owner.fence == 0
+            || owner.fence == u64::MAX
+            || plakous::tools::RunnerId::new(owner.runner.clone()).is_err()
+            || head.is_none_or(|head| {
+                head.line != line.id
+                    || owner.generation != head.generation
+                    || owner.generation > line.generation
+                    || (owner.generation == line.generation
+                        && (owner.session != line.session || owner.branch != line.branch))
+                    || owner.fence > head.fence_floor
+                    || owner.runner != head.context.runner
+            })
+        {
+            return Err("move runner owner has no exact retained source branch and floor".into());
         }
         Ok(())
     }

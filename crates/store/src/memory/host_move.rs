@@ -10,6 +10,8 @@ use plakous_agent::internal::host_move::{
 };
 use plakous_agent::internal::{BranchLease, Digest, LeaseInstant, LineId};
 
+mod guards;
+
 #[derive(Clone)]
 pub(super) struct Receipt {
     pub(super) install: MoveInstall,
@@ -107,7 +109,9 @@ impl MemorySessionStore {
             .moves
             .get(&operation)
             .ok_or(SessionStoreError::NotFound)?;
-        if !matches!(receipt.state, MoveState::Prepared | MoveState::Staged) {
+        if receipt.state == MoveState::Published {
+            guards::require_unopened(&state, operation, &receipt.install)?;
+        } else if !matches!(receipt.state, MoveState::Prepared | MoveState::Staged) {
             return Err(SessionStoreError::Conflict);
         }
         Ok(receipt.install.clone())
@@ -155,6 +159,16 @@ impl MemorySessionStore {
                     fence_floor: row.last_fence,
                 });
             }
+            let checkpoints = branches
+                .iter()
+                .map(|branch| {
+                    state
+                        .checkpoints
+                        .get(&branch.checkpoint)
+                        .map(|row| row.checkpoint.as_ref().clone())
+                        .ok_or(SessionStoreError::corrupt())
+                })
+                .collect::<Result<_, _>>()?;
             snapshot.push(MoveSession {
                 session: session.head,
                 feed_tail_floor: crate::memory_feed::tail(
@@ -163,12 +177,7 @@ impl MemorySessionStore {
                 .tail()
                 .get(),
                 branches,
-                checkpoints: state
-                    .checkpoints
-                    .values()
-                    .filter(|c| c.checkpoint.manifest().topology().session_id == id)
-                    .map(|c| c.checkpoint.as_ref().clone())
-                    .collect(),
+                checkpoints,
             });
         }
         let lines = line_ids

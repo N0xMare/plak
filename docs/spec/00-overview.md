@@ -244,7 +244,9 @@ changes runtime SQLite 27 → 28 and the state key to `r28.e38.p38.t11`; checkpo
 feed epoch 37 → 38 incorporates context codec 3 → 4 in the same unshipped cut;
 product schema 37 → 38 and tree schema 10 → 11 add native semantic bases in
 that same state-key cut. Schema 28 records each move's exact selected session
-set, including across continued lines.
+set, including across continued lines, and its original installed heads.
+Its execution-open marker distinguishes ordinary durable drivers from read-only
+verification and lease-only importer reconciliation before guarded withdrawal.
 Move receipt fingerprints use version-1 length-framed semantic fields, not
 debug formatting. No native migration or foreign native-store reader is added.
 The imported compaction value contains only semantic summary/retained/trailing
@@ -258,9 +260,14 @@ retains its semantic base and source custody floor; refolding starts at that
 base, not at invented old feed records or fresh admissions.
 
 Host-upgrade receipts do not carry history, bindings, topology or job registries.
-They coordinate the unchanged export carrier and record surrender/reconnect
+They coordinate the versioned export carrier and record surrender/reconnect
 authority; no destination opens the source key's databases (chapter 02 §4.6).
 Their introduction changes no state-key component or export encoding.
+The unshipped version-1 receipt also journals connected-group membership,
+source retirement acknowledgements, destination install digests and exact
+owner-transfer intents. Its global Committed decision precedes native retirement;
+only whole-group Ready releases the destination admission/readoption gate.
+Receipts remain operational authority, not a second session-data carrier.
 
 There are no released persisted-format obligations. Each store has exactly one
 supported version, and nothing is migrated. The session export document is the

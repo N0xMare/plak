@@ -45,6 +45,25 @@ type Writers = BTreeMap<(u64, u64), Weak<Mutex<Writer>>>;
 static WRITERS: LazyLock<Mutex<Writers>> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 impl SqliteTreeStore {
+    /// Reads exact source rows and their custody floor on one read-only snapshot.
+    /// This neither reopens a tree nor takes, renews or releases its custody.
+    ///
+    /// # Errors
+    /// Refuses unsupported native shape, unreadable rows or a tree missing its floor.
+    #[doc(hidden)]
+    pub fn inspect_move_tree(
+        database: &Path,
+        tree_id: &str,
+    ) -> Result<
+        Option<(
+            PersistedTree,
+            plakous_recursive_subagents::tree::CustodyRecord,
+        )>,
+        OpenError,
+    > {
+        SubagentsDatabase::inspect_move_tree(database, tree_id)
+    }
+
     /// Content-free node binding locators, without loading tree images or custody.
     pub fn inspect_node_locators(database: &Path) -> Result<Vec<(String, String)>, OpenError> {
         SubagentsDatabase::inspect_node_locators(database)

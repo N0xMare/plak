@@ -5622,6 +5622,52 @@ weaken the home-local protocol-only admission rule
 or any remote exact-triple rule. Cross-key live trees/jobs remain outside this
 settled carrier.
 
+The unsupported dormant-move capability uses a separate v13 `host_upgrade`
+capsule and version-1 group journal; normal builds do not advertise it yet.
+It preserves public/addressable IDs and moves ownership, not a duplicate copy.
+Preflight reports the connected composition, verifies every retained branch's
+binding/presentation and current placement, and reserves readiness-journal space
+before surrender.
+A bound child's configuration comes from its own frozen node/template epoch,
+not its parent's account, target, effort or root profile. The source completes
+its detached tree projection from real final feed facts before checking the
+exact native floor; conflicts or newly owed effects refuse before surrender. The 16 MiB receipt bound includes conservative space for all
+future exact-CAS intents; each semantic capsule is bounded to 256 MiB.
+Prepared source cleanup is reversible; a durable global Committed decision is
+not. Source native retirement completes through the exact retained producer,
+with retryable acknowledgements, before any target group is installed.
+Every source-key startup withdraws the native preparations of Aborted group
+receipts, even when no source archive was attempted. A recovered preparation
+digest is recorded before withdrawal so repeated cleanup stays exact. An
+uncertain Committed publication stops the paused source and lets startup resolve
+the durable decision; it never replies with a precommit refusal or reopens
+admissions. A retirement failure after a known durable decision is deferred to
+the retained producer, not treated as rollback.
+Target stages stay invisible until every product/tree seed commits. Publication
+alone is insufficient: receipt-aware execution, metadata mutation and ordinary
+runner readoption remain blocked for the entire group until a fresh exact-owner
+reconciliation saves whole-group Ready. Registry-owned connections are reused.
+Source preparation holds scoped connection demand for capsule-named runners,
+refreshes them through the source host's existing reconciliation path, and keeps
+that demand across all group probes. A cached picker Ready row is not a live
+bind; idle retirement or replacement cannot drop a later group's required link.
+The hold itself grants no effect, lease or new-call admission. Unavailable
+runners still refuse before surrender; unrelated runner failures do not block.
+All exact transfers finish before the final observational sweep of every
+runner, followed by hold renewal and the Ready publication.
+An unrelated group may become Ready while a missing runner withholds another.
+The guarded `--abandon <group-id>` path can dispose an unexecuted, never-Ready
+published group under exact holds and unchanged heads; an idle execution open
+already prevents it. Multi-tree groups require the explicit group ID, not a
+member ID. Abandoned reservations remain invisible forever. Failed abandonment
+retains its bounded guard error in the receipt, visible in `plak status` and
+`plak doctor`. Automatic retries back off for three minutes; an explicit retry
+still rechecks the same guards immediately. Retained ordinary
+portable-session backups can be copied and imported under new identities;
+`host_upgrade` capsules cannot be used as ordinary imports. Outgoing committed
+copies are excluded from cross-key uniqueness checks; Aborted receipts are inert.
+No public switch enables this capability in a normal build.
+
 Cross-key upgrade is the **settled-root** operation of §2.5.1. Without
 `--wait`, blockers are returned before stopping admissions, as a list with
 session ID, closed kind and detail. The optional wait is bounded to 3600 seconds

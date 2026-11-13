@@ -4217,6 +4217,23 @@ by forked trees and current-line-head dependencies form one connected group;
 an unmapped head refuses, unrelated groups remain independent, and selecting
 one member for abandonment must name the explicit multi-tree group. These
 composition seams do not yet enable the public dormant ownership move.
+The capability-gated coordinator journals each connected group before freezing
+its complete native batch. Source tree custody and branch holds remain held
+through the global surrender decision; Prepared withdrawal restores archival
+and undoes only that preparation. Committed retirement is irreversible and is
+completed by the retained source producer, never by reading its native stores
+from the destination build. A lost acknowledgement is retried from its exact
+operation/digest. Passive installation recovers the already compiled stage,
+seeds every member's semantic stores, then publishes the native batch together.
+Fresh reconciliation accepts only the imported source witness or a destination
+CAS intent already persisted in the same receipt. Any other owner withholds the
+whole group; it is never a reason to raise a fence. Only a group-wide Ready write
+allows drivers and ordinary readoption. Newly Ready remote groups schedule owed
+continuations through the ordinary durable admission path, not prompt replay.
+The source can inspect a tree's exact persisted rows and custody floor in one
+read-only snapshot before pausing admissions. This does not apply the reopen
+law or claim, renew or release custody. A present tree without its custody floor
+refuses; an absent store/tree is absence, never a fabricated owner tuple.
 
 **Stops.** Every interrupt intent records its cause: a parent's
 `interrupt_agent` records `parent`, the operator's interrupt of a node

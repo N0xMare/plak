@@ -82,6 +82,7 @@ pub(super) fn delete_confirmed(
     abandon_children: bool,
 ) -> Result<(), LifecycleError> {
     let paths = services.paths()?;
+    crate::carry::upgrade::receipt::ensure_metadata_available(paths, id)?;
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     product.lifecycle_metadata(id)?;
@@ -172,6 +173,7 @@ pub(crate) fn delete_session(
 ) -> CliResult<()> {
     let paths = services.paths()?;
     let record = load_metadata_product_session(paths, services.session_records()?.as_ref(), id)?;
+    crate::carry::upgrade::receipt::ensure_metadata_available(paths, &record.id)?;
     refuse_stranding_a_carry(services, &record)?;
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;

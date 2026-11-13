@@ -72,7 +72,11 @@ pub(super) fn exports(
     Ok(())
 }
 
-fn archive_sources(paths: &PlakPaths, receipt: &Receipt, archived: bool) -> CliResult<()> {
+pub(super) fn archive_sources(
+    paths: &PlakPaths,
+    receipt: &Receipt,
+    archived: bool,
+) -> CliResult<()> {
     if receipt.source_key != crate::home::state::state_key() {
         return Err(CliFailure::new(
             "source archival requires its own state key",
@@ -92,6 +96,7 @@ fn archive_sources(paths: &PlakPaths, receipt: &Receipt, archived: bool) -> CliR
 }
 
 pub(super) fn withdraw(paths: &PlakPaths, receipt: &mut Receipt) -> CliResult<()> {
+    crate::carry::host_move::source::withdraw(paths, receipt)?;
     let restored = archive_sources(paths, receipt, false);
     if restored.is_ok() {
         receipt.source_archival_pending = false;

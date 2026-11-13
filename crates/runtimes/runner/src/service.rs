@@ -42,6 +42,7 @@ mod foreground;
 #[cfg(test)]
 mod native_job_ack_tests;
 mod operator;
+mod owner_floors;
 pub(crate) mod qualification;
 mod retention;
 
@@ -795,6 +796,9 @@ impl RunnerService {
                     let lines = service.lines(Some(&host)).await;
                     let _ = sender.send(RunnerFrame::Lines { request_id, lines });
                 });
+            }
+            HostFrame::OwnerFloors { request_id, lines } => {
+                let _ = sender.send(self.owner_floors(host, request_id, &lines));
             }
             HostFrame::Ping { nonce } => {
                 let _ = sender.send(RunnerFrame::Pong { nonce });

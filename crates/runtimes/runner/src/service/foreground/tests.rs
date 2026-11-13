@@ -13,6 +13,111 @@ use plakous_tools::{
 };
 use std::time::Duration;
 
+#[tokio::test]
+async fn exact_move_cas_returns_foreign_witness_without_leapfrogging_or_using_cached_acceptance() {
+    let root = tempfile::tempdir().unwrap();
+    let scope =
+        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
+    let (service, _link) = queued_link(root.path(), scope).await;
+    let (host, runner) = tokio::io::duplex(64 * 1024);
+    let serving = service.clone();
+    let task = tokio::spawn(async move { serving.serve_connection(runner).await });
+    let (client, _) = crate::RunnerClient::connect(
+        host,
+        Bind {
+            host_id: "home".into(),
+            host_instance: "exact".into(),
+            version: service.hello().version.clone(),
+            inspect: false,
+        },
+        ClientWindows::default(),
+    )
+    .await
+    .unwrap();
+    let line = "00000000-0000-0000-0000-0000000000a1";
+    let branch = "00000000-0000-0000-0000-0000000000b1";
+    let owner = |fence| {
+        plakous_tools::LineOwner::new(line.parse().unwrap(), 1, branch.parse().unwrap(), fence)
+    };
+    let source = owner(1);
+    client.transfer_owner(&source).await.unwrap();
+    let wire = |fence| LineOwner {
+        line: line.into(),
+        generation: 1,
+        branch: branch.into(),
+        fence,
+    };
+    let foreign = wire(2);
+    assert!(matches!(
+        lock(&service.inner.tables).transfer(
+            "home",
+            "exact",
+            "foreign".into(),
+            Some(&wire(1)),
+            foreign.clone()
+        ),
+        RunnerFrame::TransferAccepted { .. }
+    ));
+    assert!(
+        service.lines(Some("home")).await.is_empty(),
+        "a floor-only line has no process-session table entry"
+    );
+    let floors = client
+        .owner_floors(&[line.into(), "missing".into()])
+        .await
+        .unwrap();
+    assert_eq!(floors[0].owner, Some(foreign.clone()));
+    assert_eq!(floors[1].owner, None);
+    assert!(
+        matches!(client.transfer_owner_exact(Some(&source), &owner(3)).await.unwrap(), crate::ExactOwnerTransfer::WitnessMismatch(actual) if actual == foreign)
+    );
+    assert_eq!(
+        lock(&service.inner.tables).owner("home", line).unwrap().0,
+        foreign
+    );
+    assert!(matches!(
+        client
+            .transfer_owner_exact(Some(&owner(2)), &owner(3))
+            .await
+            .unwrap(),
+        crate::ExactOwnerTransfer::Accepted(_)
+    ));
+    assert!(
+        matches!(
+            client
+                .transfer_owner_exact(Some(&source), &owner(3))
+                .await
+                .unwrap(),
+            crate::ExactOwnerTransfer::Accepted(_)
+        ),
+        "lost acknowledgement recovers the persisted intended owner"
+    );
+    let newer_foreign = wire(4);
+    assert!(matches!(
+        lock(&service.inner.tables).transfer(
+            "home",
+            "exact",
+            "foreign-again".into(),
+            Some(&wire(3)),
+            newer_foreign.clone()
+        ),
+        RunnerFrame::TransferAccepted { .. }
+    ));
+    assert!(
+        matches!(client.transfer_owner_exact(Some(&owner(3)), &owner(3)).await.unwrap(), crate::ExactOwnerTransfer::WitnessMismatch(actual) if actual == newer_foreign),
+        "exact reconciliation must not return a cached acceptance"
+    );
+    // Ordinary reopening keeps its existing fresher-fence retry behavior.
+    client.transfer_owner(&owner(5)).await.unwrap();
+    assert_eq!(
+        lock(&service.inner.tables).owner("home", line).unwrap().0,
+        wire(5)
+    );
+    assert!(lock(&service.inner.lines).is_empty());
+    client.disconnect();
+    task.await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reports_survive_a_new_owner_until_the_consumers_receipt_is_acknowledged() {
     let root = tempfile::tempdir().unwrap();

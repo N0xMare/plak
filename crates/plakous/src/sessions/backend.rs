@@ -53,6 +53,36 @@ impl SessionBackend {
 
 #[cfg(feature = "sessions-sqlite")]
 impl SessionBackend {
+    /// Source-owned, read-only native line dependencies before upgrade admission pauses.
+    ///
+    /// # Errors
+    /// Refuses hidden, archived, unknown or excessive source inventories.
+    #[doc(hidden)]
+    pub fn inspect_move_dependencies_sqlite(
+        path: impl AsRef<Path>,
+        sessions: &[plakous_model::SessionId],
+    ) -> Result<
+        std::collections::BTreeMap<
+            plakous_model::SessionId,
+            std::collections::BTreeSet<plakous_model::SessionId>,
+        >,
+        AgentSessionsError,
+    > {
+        SqliteSessionStore::inspect_move_dependencies(path, sessions).map_err(store_error)
+    }
+
+    /// Source-owned, read-only head snapshot, not a lease or retirement.
+    ///
+    /// # Errors
+    /// Refuses working or incomplete source groups and invalid native data.
+    #[doc(hidden)]
+    pub fn inspect_move_source_sqlite(
+        path: impl AsRef<Path>,
+        sessions: &[plakous_model::SessionId],
+    ) -> Result<super::host_move::MoveInstall, AgentSessionsError> {
+        SqliteSessionStore::inspect_move_source(path, sessions).map_err(store_error)
+    }
+
     /// Read-only own-key admission of a reconstructed group before source surrender.
     /// This host seam does not open a writer, driver or execution lease.
     ///

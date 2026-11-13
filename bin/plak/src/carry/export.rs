@@ -236,7 +236,7 @@ fn export_projected(
 /// The profile a session runs under: its tree's current epoch when the tree
 /// has rows, else the virtual tree's profile its record keeps. Never the
 /// live configuration.
-fn session_profile(
+pub(super) fn session_profile(
     paths: &PlakPaths,
     record: &SessionRecord,
 ) -> Result<plakous_hosted::sessions::RootProfile, ExportRefusal> {

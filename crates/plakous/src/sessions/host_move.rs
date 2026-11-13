@@ -164,6 +164,27 @@ impl AgentSessions {
         ))
     }
 
+    /// Host-only withdrawal of a Published group before Ready and before any driver open.
+    /// The caller holds its durable never-Ready receipt lock for the whole call.
+    ///
+    /// # Errors
+    /// Refuses stale/incomplete holds, changed heads, or any execution-open marker.
+    #[doc(hidden)]
+    pub async fn abandon_unopened_move(
+        &self,
+        operation: MoveOperation,
+        digest: Digest,
+        holds: &[&BranchHold],
+    ) -> Result<(), AgentSessionsError> {
+        self.backend
+            .abandon_unopened_move(plakous_agent::internal::host_move::AbandonUnopenedMove {
+                operation,
+                digest,
+                leases: holds.iter().map(|hold| hold.inner.move_lease()).collect(),
+            })
+            .await
+            .map_err(store_error)
+    }
     /// Rebuilds a dormant head under exact target replay scope and fresh authority.
     /// No driver, store mutation, lease, provider dispatch or tool dispatch is created.
     ///
@@ -175,10 +196,29 @@ impl AgentSessions {
         runtime: super::SessionRuntimeBinding,
         request: MoveHeadRequest,
     ) -> Result<ReconstructedMoveHead, AgentSessionsError> {
-        if request.binding != MoveBinding::from_runtime(&runtime) {
+        let current = MoveBinding::from_runtime(&runtime);
+        if request.binding != current {
+            let changed = [
+                ("protocol", request.binding.protocol != current.protocol),
+                ("route", request.binding.route != current.route),
+                ("model", request.binding.model != current.model),
+                (
+                    "selected configuration",
+                    request.binding.selected != current.selected,
+                ),
+                (
+                    "effective configuration",
+                    request.binding.effective != current.effective,
+                ),
+                ("account", request.binding.account != current.account),
+            ]
+            .into_iter()
+            .filter_map(|(field, changed)| changed.then_some(field))
+            .collect::<Vec<_>>()
+            .join(", ");
             return Err(AgentSessionsError::new(
                 super::AgentSessionsErrorKind::InvalidInput,
-                "host move source route, account, model or provider configuration changed",
+                format!("host move source binding changed: {changed}"),
             ));
         }
         if !request.history.retains_replay_for(&runtime) {

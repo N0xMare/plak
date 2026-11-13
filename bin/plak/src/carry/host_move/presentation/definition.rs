@@ -1,5 +1,4 @@
 //! Exact semantic schemas and exposure, with target-recomputed content identities.
-#[cfg(test)]
 use plakous::model::ToolExecutionOwner;
 use plakous::model::{
     ConfiguredTool, ToolCallerDisposition, ToolConcurrency, ToolDefinition, ToolEffect,
@@ -52,7 +51,6 @@ enum Concurrency {
 }
 
 impl Definition {
-    #[cfg(test)]
     pub(super) fn capture(value: &ToolDefinition) -> Result<Self, String> {
         Ok(Self {
             name: value.name().as_str().into(),
@@ -138,7 +136,6 @@ impl Definition {
 }
 
 impl Exposure {
-    #[cfg(test)]
     pub(super) fn capture(value: &ConfiguredTool) -> Result<Self, String> {
         Ok(Self {
             definition: Definition::capture(value.definition())?,

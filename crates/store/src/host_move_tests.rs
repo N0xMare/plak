@@ -8,6 +8,8 @@ use plakous_agent::internal::{
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
+mod guards;
+mod jobs;
 #[cfg(all(unix, feature = "sqlite"))]
 mod preflight;
 

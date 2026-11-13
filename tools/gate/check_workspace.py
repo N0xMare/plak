@@ -444,6 +444,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "PLAK_TEST_BINDING_CUT_IMAGE"),)),
         ("var", (("string", "PLAK_TEST_FORCE_HOST_UPGRADE"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_CUT"),)),
+        ("var", (("string", "PLAK_TEST_HOST_UPGRADE_FAILURE"),)),
         ("var_os", (("string", "PLAK_TEST_HOST_UPGRADE_DRAIN_GATE"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE"),)),
         ("var_os", (("string", "PLAK_TEST_STORAGE_CAPACITY"),)),
@@ -1653,7 +1654,38 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         'tools': {'SemanticToolRegistration'},
     },
     ("plak", "src/carry/host_move/presentation/definition.rs"): {
-        'model': {'ToolResourceKey', 'McpServerId'}
+        'model': {'ToolResourceKey', 'McpServerId', 'ToolExecutionOwner'}
+    },
+    ("plak", "src/carry/host_move/disposition.rs"): {
+        'sessions': {'host_move', 'MoveDisposition', 'MoveOperation'},
+    },
+    ("plak", "src/carry/host_move/installation.rs"): {
+        'sessions': {'host_move', 'MoveDisposition', 'MoveInstall', 'MoveOperation'},
+    },
+    ("plak", "src/carry/host_move/producer.rs"): {
+        'sessions': {
+            'host_move',
+            'MoveDurability',
+            'MoveHeadFacts',
+            'MoveInstall',
+            'MoveLineOrigin',
+        },
+    },
+    ("plak", "src/carry/host_move/reconciliation.rs"): {
+        'runner': {'protocol', 'LineOwner', 'ExactOwnerTransfer'},
+        'sessions': {'LeaseOnlyHead'},
+        'tools': {'LineOwner', 'runner::decode_jobs_snapshot'},
+    },
+    ("plak", "src/carry/host_move/source.rs"): {
+        'sessions': {'host_move', 'MoveDisposition', 'MoveInstall', 'MoveOperation'},
+        'tools': {'runner::decode_jobs_snapshot'},
+    },
+    ("plak", "src/carry/upgrade/receipt/groups.rs"): {
+        'runner': {'protocol', 'LineOwner'},
+    },
+    ("plak", "src/host/upgrade/moves.rs"): {
+        'sessions': {'host_move', 'MoveOperation'},
+        'runner': {'RunnerConnectionHold'},
     },
     ("plak", "src/carry/host_move/reconstruction.rs"): {
         'sessions': {

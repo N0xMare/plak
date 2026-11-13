@@ -192,6 +192,7 @@ impl RunnerRegistry {
                 return;
             };
             let needed = entry.required
+                || Arc::strong_count(&entry.connection_users) > 1
                 || match &entry.connection {
                     Some(Connection::Remote(client, services)) => {
                         client.has_pending_calls() || services.has_node_users()

@@ -62,6 +62,7 @@ mod inspection;
 mod lease_sync_tests;
 mod lines;
 mod move_preflight;
+mod move_source;
 mod objects;
 mod open;
 mod ops;
@@ -1167,6 +1168,19 @@ impl Backend {
 }
 
 impl SessionStore for SqliteSessionStore {
+    fn record_execution_open(&self, lease: BranchLease) -> StoreFuture<'_, ()> {
+        self.dispatch("record_execution_open", move |backend| {
+            host_move::record_execution_open(backend, &lease)
+        })
+    }
+    fn abandon_unopened_move(
+        &self,
+        request: plakous_agent::internal::host_move::AbandonUnopenedMove,
+    ) -> StoreFuture<'_, ()> {
+        self.dispatch("abandon_unopened_move", move |backend| {
+            host_move::abandon_unopened(backend, &request)
+        })
+    }
     fn recover_move(&self, operation: SessionWorkflowId) -> StoreFuture<'_, MoveInstall> {
         self.dispatch_read("recover_move", move |b| {
             host_move::recover_backend(b, operation)

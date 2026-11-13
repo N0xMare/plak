@@ -8,18 +8,35 @@ use std::collections::{BTreeMap, BTreeSet};
 mod admission;
 mod configuration;
 mod context;
+pub(crate) mod disposition;
+pub(crate) mod installation;
 mod jobs;
+mod portable;
 mod presentation;
-#[cfg(test)]
 mod producer;
+pub(crate) mod reconciliation;
 mod reconstruction;
+pub(crate) mod source;
 #[cfg(test)]
 mod tests;
 mod validation;
+pub(crate) use admission::GroupProbe;
 pub(crate) use admission::{probe, read_if_move};
 pub(crate) use context::Compaction;
 pub(crate) use jobs::{Jobs, Terminal};
 pub(crate) use presentation::Presentation;
+
+// Open only when the complete source/recovery/publication chain is qualified.
+pub(crate) const INSTALL_PROTOCOL: Option<u32> = None;
+
+pub(crate) fn install_protocol() -> Option<u32> {
+    INSTALL_PROTOCOL.or_else(|| {
+        crate::test_hooks::host_start_environment()
+            .iter()
+            .any(|(name, value)| *name == "PLAK_TEST_HOST_UPGRADE_DORMANT" && value == "1")
+            .then_some(1)
+    })
+}
 
 /// Exactly one connected group; no checkpoint/component bytes are present.
 #[derive(Deserialize, Serialize)]

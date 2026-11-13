@@ -217,6 +217,7 @@ pub(super) fn rebind_host_config(
     build_attached_host_config(services, record, AttachedPurpose::Rebind)
 }
 
+#[cfg(feature = "web")]
 pub(crate) fn move_host_config(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,

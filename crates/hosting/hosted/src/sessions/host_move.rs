@@ -9,6 +9,9 @@ mod claims;
 mod document;
 pub use claims::{MoveIdentityClaim, MoveIdentityKind};
 mod groups;
+mod tree;
+#[doc(hidden)]
+pub use tree::project_move_tree;
 pub(crate) mod locator_serde;
 pub use document::DormantSessionDocument;
 pub use groups::{GroupPlanError, MoveGroup, MoveGroups};

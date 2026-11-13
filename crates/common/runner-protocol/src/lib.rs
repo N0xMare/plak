@@ -20,9 +20,9 @@ mod owner;
 pub mod retention;
 
 pub use message::{
-    Bind, Hello, HostFrame, LineStatus, Operation, Refusal, Request, RequestClass, RunnerFrame,
-    StoppedForeground, StreamEvent, StreamFrame, TransferOwner, UnpromotedProcess, WireError,
-    capabilities, verbs,
+    Bind, Hello, HostFrame, LineStatus, OWNER_FLOOR_QUERY_LIMIT, Operation, OwnerFloor, Refusal,
+    Request, RequestClass, RunnerFrame, StoppedForeground, StreamEvent, StreamFrame, TransferOwner,
+    UnpromotedProcess, WireError, capabilities, verbs,
 };
 pub use owner::LineOwner;
 
@@ -30,7 +30,7 @@ pub use owner::LineOwner;
 /// A home-local runner binds any build of it, so every change to the
 /// runner's semantics bumps it (spec 01 §8.4); the frames of each version
 /// are pinned by a test.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Stable stopped-foreground receipt identity, independent of the connection
 /// and owner generation. Another call reusing the PID cannot match it.

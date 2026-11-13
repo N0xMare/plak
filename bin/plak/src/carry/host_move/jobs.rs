@@ -66,7 +66,6 @@ enum Stopper {
 }
 
 impl Jobs {
-    #[cfg(test)]
     pub(crate) fn capture(jobs: &MoveJobs) -> Result<Self, String> {
         Ok(Self {
             next_number: jobs.next_id(),
@@ -145,7 +144,6 @@ impl Jobs {
 }
 
 impl Terminal {
-    #[cfg(test)]
     pub(crate) fn capture(evidence: &MoveLineTerminal) -> Result<Self, String> {
         let status = match evidence.terminal.status {
             MoveJobStatus::Exited => Status::Exited {

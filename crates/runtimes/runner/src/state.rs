@@ -115,6 +115,40 @@ impl Tables {
         Ok(())
     }
 
+    pub(crate) fn read_owner_floors(
+        &self,
+        host: &str,
+        lines: &[String],
+    ) -> std::io::Result<Vec<plakous_runner_protocol::OwnerFloor>> {
+        let durable = self
+            .floors
+            .as_ref()
+            .map(|floors| {
+                floors.reload()?;
+                Ok::<_, std::io::Error>(
+                    floors
+                        .load()
+                        .into_iter()
+                        .filter_map(|(recorded_host, floor)| {
+                            (recorded_host == host)
+                                .then_some((floor.owner.line.clone(), floor.owner))
+                        })
+                        .collect::<HashMap<_, _>>(),
+                )
+            })
+            .transpose()?;
+        Ok(lines
+            .iter()
+            .map(|line| plakous_runner_protocol::OwnerFloor {
+                line: line.clone(),
+                owner: durable.as_ref().map_or_else(
+                    || self.owner(host, line).map(|(owner, _)| owner),
+                    |floors| floors.get(line).cloned(),
+                ),
+            })
+            .collect())
+    }
+
     /// Tables whose owners start from `floors`' record.
     pub(crate) fn with_floors(floors: Arc<dyn OwnerFloors>) -> Self {
         let owners = floors

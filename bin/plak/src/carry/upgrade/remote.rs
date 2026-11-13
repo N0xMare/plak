@@ -21,7 +21,7 @@ impl Placement {
     }
 
     #[cfg(feature = "web")]
-    pub(super) fn for_import(services: &Services, id: &str, workspace: &Path) -> CliResult<Self> {
+    pub(crate) fn for_import(services: &Services, id: &str, workspace: &Path) -> CliResult<Self> {
         if services
             .runner_ownership()
             .is_none_or(crate::commands::runner::ownership::RunnerOwnership::is_standalone)

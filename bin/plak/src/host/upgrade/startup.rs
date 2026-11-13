@@ -17,9 +17,32 @@ use crate::{CliFailure, CliResult};
 pub(in crate::host) fn prepare_host(
     services: &Services,
 ) -> CliResult<(Services, Arc<plakous::runner::WorkspaceCatalog>)> {
+    for receipt in pending(services)? {
+        if let Err(failure) = finish_source(services, &receipt) {
+            deferred("source retirement", &failure);
+        }
+    }
     let services = runner::custody(services)?;
-    for receipt in pending(&services)? {
+    for mut receipt in pending(&services)? {
         crash_cut("before-import");
+        if !receipt.groups.is_empty() {
+            let _lock = receipt::publication::lock(services.paths()?)?;
+            for index in 0..receipt.groups.len() {
+                let group = &receipt.groups[index];
+                if group.phase != receipt::GroupPhase::Ready
+                    && group.phase != receipt::GroupPhase::Abandoned
+                    && group.runners.iter().all(|runner| runner == "local")
+                    && let Err(failure) = crate::carry::host_move::installation::install(
+                        &services,
+                        &mut receipt,
+                        index,
+                    )
+                {
+                    deferred("group", &failure);
+                }
+            }
+            continue;
+        }
         for mapping in receipt
             .mappings
             .iter()
@@ -42,6 +65,24 @@ fn pending(services: &Services) -> CliResult<Vec<Receipt>> {
                 && receipt.phase == Phase::Committed
         })
         .collect())
+}
+
+fn finish_source(services: &Services, receipt: &Receipt) -> CliResult<()> {
+    if receipt.groups.iter().all(|group| group.source_retired) {
+        return Ok(());
+    }
+    // The producer takes the publication lock itself; never call it under that lock.
+    super::process::verify_image(&receipt.source_executable, &receipt.source_binary)?;
+    let mut command = super::process::command(
+        &receipt.source_executable,
+        services.paths()?.home(),
+        &receipt.source_key,
+    );
+    command
+        .args(["version", "--host-upgrade-finish-source"])
+        .arg(receipt.id.to_string());
+    super::process::run(command, Duration::from_secs(30))?;
+    Ok(())
 }
 
 fn deferred(successor: &str, failure: &CliFailure) {
@@ -84,6 +125,8 @@ pub(in crate::host) fn start_retry(
         plakous_hosted::host_service::wire::SessionHost<crate::surface_protocol::PlakExtension>,
     >,
     runtime: &tokio::runtime::Handle,
+    initial_owed: &[String],
+    scanning: Arc<std::sync::atomic::AtomicUsize>,
 ) -> Recovery {
     let stop = Arc::new(AtomicBool::new(false));
     let cancelled = Arc::clone(&stop);
@@ -92,6 +135,10 @@ pub(in crate::host) fn start_retry(
     let services = services.clone();
     let host = Arc::clone(host);
     let runtime = runtime.clone();
+    let mut scheduled = initial_owed
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
     let worker = std::thread::spawn(move || {
         let mut changes = services.runners().changes();
         let mut delay = Duration::from_secs(5);
@@ -108,8 +155,29 @@ pub(in crate::host) fn start_retry(
                 if cancelled.load(Ordering::Acquire) {
                     return;
                 }
+                let path = match services.paths() {
+                    Ok(paths) => receipt.path(paths),
+                    Err(failure) => {
+                        deferred("receipt", &failure);
+                        return;
+                    }
+                };
                 if let Err(failure) = advance(&services, &runtime, receipt, &cancelled, &host) {
                     deferred("receipt", &failure);
+                }
+                match receipt::read(&path).and_then(|receipt| {
+                    resume_ready(
+                        &services,
+                        &host,
+                        &runtime,
+                        &receipt,
+                        &cancelled,
+                        &scanning,
+                        &mut scheduled,
+                    )
+                }) {
+                    Ok(()) => {}
+                    Err(failure) => deferred("group continuation", &failure),
                 }
                 host.changed();
             }
@@ -126,6 +194,44 @@ pub(in crate::host) fn start_retry(
         wake,
         worker: Some(worker),
     }
+}
+
+fn resume_ready(
+    services: &Services,
+    host: &Arc<
+        plakous_hosted::host_service::wire::SessionHost<crate::surface_protocol::PlakExtension>,
+    >,
+    runtime: &tokio::runtime::Handle,
+    receipt: &Receipt,
+    stop: &Arc<AtomicBool>,
+    scanning: &Arc<std::sync::atomic::AtomicUsize>,
+    scheduled: &mut std::collections::BTreeSet<String>,
+) -> CliResult<()> {
+    let mut owed = Vec::new();
+    for product in receipt
+        .groups
+        .iter()
+        .filter(|group| group.phase == receipt::GroupPhase::Ready)
+        .flat_map(|group| &group.products)
+    {
+        if scheduled.contains(product) {
+            continue;
+        }
+        if super::super::sessions::continuation_owed(services, product)? {
+            owed.push(product.clone());
+        }
+        scheduled.insert(product.clone());
+    }
+    let stop = Arc::clone(stop);
+    super::super::scan(
+        host,
+        owed,
+        move || stop.load(Ordering::Acquire),
+        services,
+        runtime,
+        Arc::clone(scanning),
+    );
+    Ok(())
 }
 
 async fn wait(
@@ -166,6 +272,102 @@ fn advance(
     stop: &AtomicBool,
     host: &plakous_hosted::host_service::wire::SessionHost<crate::surface_protocol::PlakExtension>,
 ) -> CliResult<()> {
+    if !receipt.groups.is_empty() {
+        finish_source(services, &receipt)?;
+        return advance_groups(services, &receipt, stop, host);
+    }
+    advance_mappings(services, runtime, receipt, stop, host)
+}
+
+fn advance_groups(
+    services: &Services,
+    receipt: &Receipt,
+    stop: &AtomicBool,
+    host: &plakous_hosted::host_service::wire::SessionHost<crate::surface_protocol::PlakExtension>,
+) -> CliResult<()> {
+    for index in 0..receipt.groups.len() {
+        if stop.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let _lock = receipt::publication::lock(services.paths()?)?;
+        let mut latest = receipt::read(&receipt.path(services.paths()?))?;
+        let group = &latest.groups[index];
+        if matches!(
+            group.phase,
+            receipt::GroupPhase::Ready | receipt::GroupPhase::Abandoned
+        ) {
+            continue;
+        }
+        if group.phase == receipt::GroupPhase::Abandoning {
+            if !group.abandon_retry_due() {
+                continue;
+            }
+            if let Err(failure) =
+                crate::carry::host_move::disposition::abandon(services, &mut latest, index)
+            {
+                deferred("group abandon", &failure);
+            }
+            host.changed();
+            continue;
+        }
+        for runner in &group.runners {
+            let required = services.runners().needs_connection(runner);
+            services.runners().require_connection(runner, true);
+            let ready = services.runners().rows().iter().any(|row| {
+                &row.runner.runner_id == runner
+                    && row.status == plakous::runner::RunnerStatus::Ready
+            });
+            if (!required && !ready) || (ready && services.runners().services(runner).is_err()) {
+                services.runners().reconcile_when_available(runner);
+            }
+        }
+        if group.runners.iter().any(|runner| {
+            !services.runners().rows().iter().any(|row| {
+                &row.runner.runner_id == runner
+                    && row.status == plakous::runner::RunnerStatus::Ready
+            })
+        }) {
+            continue;
+        }
+        if let Err(failure) =
+            crate::carry::host_move::installation::install(services, &mut latest, index)
+        {
+            deferred("group", &failure);
+            continue;
+        }
+        if let Err(failure) =
+            crate::carry::host_move::reconciliation::ready(services, &mut latest, index)
+        {
+            deferred("group", &failure);
+            continue;
+        }
+        for runner in &latest.groups[index].runners {
+            if latest
+                .groups
+                .iter()
+                .filter(|group| group.runners.contains(runner))
+                .all(|group| {
+                    matches!(
+                        group.phase,
+                        receipt::GroupPhase::Ready | receipt::GroupPhase::Abandoned
+                    )
+                })
+            {
+                services.runners().require_connection(runner, false);
+            }
+        }
+        host.changed();
+    }
+    Ok(())
+}
+
+fn advance_mappings(
+    services: &Services,
+    runtime: &tokio::runtime::Handle,
+    receipt: Receipt,
+    stop: &AtomicBool,
+    host: &plakous_hosted::host_service::wire::SessionHost<crate::surface_protocol::PlakExtension>,
+) -> CliResult<()> {
     let paths = services.paths()?;
     let mut order = (0..receipt.mappings.len()).collect::<Vec<_>>();
     order.sort_by_key(|index| receipt.mappings[*index].runner != "local");
@@ -173,7 +375,7 @@ fn advance(
         if stop.load(Ordering::Acquire) {
             return Ok(());
         }
-        let _lock = receipt::lock(paths)?;
+        let _lock = receipt::publication::lock(paths)?;
         let mut latest = receipt::read(&receipt.path(paths))?;
         let mapping = &latest.mappings[index];
         if latest.phase != Phase::Committed || mapping.ready || mapping.abandoned {
@@ -227,7 +429,7 @@ fn advance(
         }
         host.changed();
     }
-    let _lock = receipt::lock(paths)?;
+    let _lock = receipt::publication::lock(paths)?;
     let mut latest = receipt::read(&receipt.path(paths))?;
     acknowledge(&mut latest);
     latest.save(paths)?;

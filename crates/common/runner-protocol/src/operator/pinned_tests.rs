@@ -19,6 +19,7 @@ fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
     let pins = [
         (7, include_str!("../pinned/operator-v7.jsonl")),
         (8, include_str!("../pinned/operator-v8.jsonl")),
+        (9, include_str!("../pinned/operator-v9.jsonl")),
     ];
     let (_, text) = pins
         .iter()

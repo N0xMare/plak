@@ -4,7 +4,7 @@ use super::*;
 use std::os::unix::fs::PermissionsExt as _;
 mod retry;
 
-fn seed(fixture: &Fixture, path: &str, id: &str, ordinal: usize) -> String {
+pub(super) fn seed(fixture: &Fixture, path: &str, id: &str, ordinal: usize) -> String {
     seed_at(fixture, path, id, ordinal, &fixture.workspace())
 }
 
@@ -58,7 +58,12 @@ fn upgrade(fixture: &Fixture, path: &str, binary: &str) -> std::process::Output 
     )
 }
 
-fn export(fixture: &Fixture, path: &str, session: &str, name: &str) -> serde_json::Value {
+pub(super) fn export(
+    fixture: &Fixture,
+    path: &str,
+    session: &str,
+    name: &str,
+) -> serde_json::Value {
     let file = fixture.root.join(name);
     let exported = output_env(
         fixture,

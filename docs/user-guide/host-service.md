@@ -169,6 +169,13 @@ requires settled jobs and trees.
 `--drain` cannot be combined with `--wait` or `--abandon`.
 
 Cross-key upgrade supports **settled roots**, locally or on paired runners.
+The dormant identity-preserving group mover is an internal, capability-gated
+foundation only; normal builds do not advertise it. The public procedure below
+still creates settled successors, rather than moving a live tree or its jobs.
+For that internal mover, an uncertain surrender stops the paused source for
+receipt reconciliation instead of reopening admissions. `plak status` and
+`plak doctor` report groups whose guarded abandonment is still withheld;
+automatic retries wait three minutes, while an explicit retry checks immediately.
 Let turns, children, workspace operations and daemon jobs finish; resolve held
 work first. `--wait 60` closes admissions while waiting up to 60 seconds and
 restores them on timeout. Unsupported destination/configuration/capacity
