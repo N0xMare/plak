@@ -39,6 +39,53 @@ def attach_entries():
 
 
 class ClientTraceTests(unittest.TestCase):
+    def test_session_directory_times_are_capture_specific(self):
+        raw = {
+            'fixture': 'directory-times',
+            'session': 'source',
+            'workspace': '/fixture',
+            'entries': [
+                {'connection': 1, 'opened': True},
+                {
+                    'connection': 1,
+                    'direction': 'client',
+                    'frame': {'frame': 'request', 'id': 1, 'op': {'op': 'list_sessions'}},
+                },
+                {
+                    'connection': 1,
+                    'direction': 'host',
+                    'frame': {
+                        'frame': 'response',
+                        'id': 1,
+                        'outcome': {
+                            'ok': {
+                                'answer': 'sessions',
+                                'rows': [
+                                    {
+                                        'session': 'source',
+                                        'created_at': 100,
+                                        'updated_at': 200,
+                                        'title': 'keep this title',
+                                    }
+                                ],
+                            }
+                        },
+                    },
+                },
+            ],
+        }
+        pinned = MODULE.normalize(raw)
+        row = pinned['entries'][2]['frame']['outcome']['ok']['rows'][0]
+        self.assertEqual(row['created_at'], '@time')
+        self.assertEqual(row['updated_at'], '@time')
+        changed = copy.deepcopy(raw)
+        changed_row = changed['entries'][2]['frame']['outcome']['ok']['rows'][0]
+        changed_row.update(created_at=300, updated_at=400)
+        MODULE.compare_controls(pinned, MODULE.normalize(changed))
+        changed_row['title'] = 'different semantics'
+        with self.assertRaises(ValueError):
+            MODULE.compare_controls(pinned, MODULE.normalize(changed))
+
     def test_directional_comparison_allows_only_causal_duplex_interleavings(self):
         def request(number, name):
             return {

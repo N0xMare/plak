@@ -196,7 +196,7 @@ def normalize(raw: dict) -> dict:
             return {name: value(part, name) for name, part in item.items()}
         if isinstance(item, list):
             return [value(part, key) for part in item]
-        if type(item) is int and key == 'updated_at':
+        if type(item) is int and key in {'created_at', 'updated_at'}:
             return '@time'
         if type(item) is int and key == 'host_generation':
             return generations.setdefault(item, f'@generation:{len(generations)}')
