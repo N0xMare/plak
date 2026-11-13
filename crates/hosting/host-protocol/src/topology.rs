@@ -430,6 +430,8 @@ impl Delegation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TopologyErrorCode {
+    /// A reversible host step pause outlasted this caller; park or retry.
+    StepHeld,
     /// The request object carried a field the schema does not define.
     UnknownField,
     /// The request parsed but its field combination is not a legal call.

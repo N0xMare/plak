@@ -441,6 +441,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_IMPORT_REFUSAL"),)),
         ("var_os", (("string", "PLAK_TEST_BINDING_CUT_IMAGE"),)),
+        ("var", (("string", "PLAK_TEST_FORCE_HOST_UPGRADE"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_CUT"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE"),)),
         ("var_os", (("string", "PLAK_TEST_STORAGE_CAPACITY"),)),
@@ -779,6 +780,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/runtime/network_watch.rs"): {"select"},
     ("plakous-hosted", "src/host_service/wire/host.rs"): {"info", "select"},
     ("plakous-hosted", "src/runtime/host_loop/idle.rs"): {"select"},
+    ("plakous-hosted", "src/runtime/host_loop/step_hold.rs"): {"select"},
     ("plakous-hosted", "src/driver/transient.rs"): {"pin", "select", "debug_assert"},
     ("plakous-hosted", "src/runtime/turn_drive/admission.rs"): {"thread_local"},
     ("plakous-hosted", "src/interrupt.rs"): {"pin", "select"},
@@ -1672,6 +1674,18 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     ("plakous-hosted", "src/runtime/child_live.rs"): {
         "agent": {"TurnViewState"},
+    },
+    ("plakous-hosted", "src/runtime/step_hold.rs"): {
+        "agent": {"WeakAgent"},
+    },
+    # The unsupported host-only boundary hold, not a raw runtime endpoint.
+    ("plakous-hosted", "src/host_service/wire/host/step_drain.rs"): {
+        "agent": {
+            "host_control::BoundaryHold",
+            "host_control::BoundaryPhase",
+            "host_control::BoundaryProgress",
+            "host_control::hold_step_boundary",
+        },
     },
     # The turn drive's event source is the admitted turn's own event stream.
     ("plakous-hosted", "src/node.rs"): {"agent": {"TurnEvents"}},

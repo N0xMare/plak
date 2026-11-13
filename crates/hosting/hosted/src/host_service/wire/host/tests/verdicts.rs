@@ -17,10 +17,20 @@ fn draft_verdict_barrier_requires_its_own_pause_and_empty_zero_budget_succeeds()
     let pause = first.pause_admissions().unwrap();
     assert!(
         second
-            .resolve_paused_drafts(&pause, Instant::now())
+            .resolve_paused_drafts(
+                &pause,
+                Instant::now(),
+                &std::sync::atomic::AtomicBool::new(false)
+            )
             .is_err()
     );
-    first.resolve_paused_drafts(&pause, Instant::now()).unwrap();
+    first
+        .resolve_paused_drafts(
+            &pause,
+            Instant::now(),
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
     drop(pause);
     assert!(first.pause_admissions().is_ok());
 }
@@ -60,10 +70,22 @@ fn draft_verdict_barrier_withdraws_under_pause_and_joins_the_real_connection_wri
         Outcome::Ok(Answer::Accepted { duplicate: false })
     );
     let pause = host.pause_admissions().unwrap();
-    assert!(host.resolve_paused_drafts(&pause, Instant::now()).is_err());
+    assert!(
+        host.resolve_paused_drafts(
+            &pause,
+            Instant::now(),
+            &std::sync::atomic::AtomicBool::new(false)
+        )
+        .is_err()
+    );
     connection.flush().unwrap();
     assert!(
-        host.resolve_paused_drafts(&pause, Instant::now()).is_err(),
+        host.resolve_paused_drafts(
+            &pause,
+            Instant::now(),
+            &std::sync::atomic::AtomicBool::new(false)
+        )
+        .is_err(),
         "buffered output is not a transport send"
     );
     let frames = out.take();
@@ -71,7 +93,12 @@ fn draft_verdict_barrier_withdraws_under_pause_and_joins_the_real_connection_wri
         client_id: Some(id), observation: SessionObservation::DraftRejected(_), ..
     } if *id == client_id)));
     connection.output_sent();
-    host.resolve_paused_drafts(&pause, Instant::now()).unwrap();
+    host.resolve_paused_drafts(
+        &pause,
+        Instant::now(),
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap();
     assert_eq!(
         fake.0.queued.load(Ordering::SeqCst),
         0,

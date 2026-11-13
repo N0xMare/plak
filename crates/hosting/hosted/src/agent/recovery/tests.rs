@@ -184,6 +184,16 @@ pub(crate) struct Fixture {
 }
 
 #[tokio::test]
+async fn tree_step_pause_closed_recovery_is_not_retryable_step_held() {
+    let fixture = Fixture::new("closed-recovery-not-held");
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+    assert!(matches!(
+        claim_child(&fixture.runtime, "root").await,
+        Err(ChildOwner::Closed)
+    ));
+}
+
+#[tokio::test]
 async fn sql_deleted_cascade_views_rebuild_through_real_reopen_in_postorder() {
     use crate::agent_tree::{AgentCommand, AgentCommandKind};
     use crate::agent_tree_protocol::AttemptScopedRequest;

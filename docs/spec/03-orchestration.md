@@ -4081,8 +4081,30 @@ under either policy. The attached root sets the policy on its tree's hub
 wherever the custody-take scan runs (every root attach) and again when it
 opens.
 
-**A planned handoff.** A reload (and, once they exist, a host restart or an
-upgrade) releases its session as a planned handoff: the face requests the
+A host-owned same-key upgrade first closes client ingress and joins prior
+draft verdict attempts, then requests reversible step holds. The root owner
+rendezvous is separate from the L0 driver: it parks outer host actions while
+ordinary active-turn result/control processing continues. A hub pause does not
+refuse startup from an already-dispatched spawn, mail or follow-up effect:
+that effect must join, and refresh holds its newly published resident. Only
+host-initiated wakes and fresh recovery claims defer on the pause-release
+notification within their caller deadlines. A surfaced `StepHeld` means
+retry/park, never durable retirement, `RecoveryRequired` or slot failure.
+Existing startup and recovery owners are joined, never mistaken for dormancy;
+a claim counts even before its task is registered. Tree effect scopes and the
+writer rendezvous, not the lifetime of the retained-owner task set, establish
+joined work: held child actors and terminal waiters remain owned without being
+in-flight effects. Effect scopes follow owed work through caller loss and
+held-effect cleanup. Owed result/workspace settlement continues. A terminal driver whose
+outer attempt/result projection has not finished is still a transition.
+Dropping an aborted coordinator reopens tree admission before runtime gates,
+then outer-owner admission. Deferred recovery work is retained for retry. None of those process-local guards retires a line,
+changes a runner owner, writes a handoff decision or authorizes continuation.
+Only the ordinary joined planned release below does so. A host crash before
+that decision remains ordinary owner loss, with its existing hold/consent law.
+
+**A planned handoff.** A reload, host restart or admitted host upgrade
+releases its session as a planned handoff: the face requests the
 release with the handoff armed (`request_handoff_and_release`), and the
 release takes the flag first, so a refused or failed release leaves none
 armed and a later plain release never inherits it. The release's cancel of

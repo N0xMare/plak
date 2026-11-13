@@ -94,7 +94,11 @@ pub(in crate::agent) async fn recover_owed_children(
                 settle_owed(runtime, &agent_id).await;
                 continue;
             }
-            Err(crate::agent::recovery::ChildOwner::Recovery) => continue,
+            Err(
+                crate::agent::recovery::ChildOwner::Recovery
+                | crate::agent::recovery::ChildOwner::StepHeld
+                | crate::agent::recovery::ChildOwner::Closed,
+            ) => continue,
         };
         if let Some(child) = bound.get(&agent_id) {
             match recover_bound_child(parent, runtime, child).await {

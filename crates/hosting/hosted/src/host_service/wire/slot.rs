@@ -62,6 +62,12 @@ type Opener<P> = Box<dyn Fn(&str) -> CliResult<OpenedSession<P>> + Send + Sync>;
 
 type HeldSession<P> = (Arc<WireSession<P>>, ResidencyHold, u64);
 
+pub(crate) enum StepOwnerHold {
+    Busy,
+    Dormant,
+    Held(crate::runtime::step_hold::WorkerStepPause),
+}
+
 enum Slot<P: ProtocolExtension> {
     Resident {
         session: Arc<WireSession<P>>,
@@ -384,6 +390,22 @@ where
     /// The worker did not end in time, or ended with a failure.
     pub fn hand_off(&self, deadline: Duration) -> CliResult<()> {
         self.end(deadline, WireSession::hand_off)
+    }
+
+    pub(crate) fn pause_steps(&self) -> CliResult<StepOwnerHold> {
+        let slot = match self.slot.try_lock() {
+            Ok(slot) => slot,
+            Err(TryLockError::WouldBlock) => return Ok(StepOwnerHold::Busy),
+            Err(TryLockError::Poisoned(_)) => {
+                return Err(CliFailure::new("host step owner lock is unavailable"));
+            }
+        };
+        match &*slot {
+            Slot::Resident { worker, .. } if !worker.is_finished() => {
+                worker.steps.pause().map(StepOwnerHold::Held)
+            }
+            Slot::Resident { .. } | Slot::Dormant { .. } => Ok(StepOwnerHold::Dormant),
+        }
     }
 
     /// Serializes an actor-fenced release, product carry/re-resolution and

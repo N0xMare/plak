@@ -4,6 +4,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
+mod step_activity;
+
 use futures_util::FutureExt as _;
 use futures_util::future::{Either, select};
 

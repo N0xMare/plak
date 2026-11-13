@@ -348,6 +348,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
     }
 
     fn ready(&self) -> impl Future<Output = RootWake> {
+        self.host
+            .events
+            .step_control
+            .observe_agent(Some(self.host.job_agent));
+        if self.host.events.step_control.requested() {
+            self.host.events.step_control.owner_boundary(
+                Some(self.host.job_agent),
+                Some(self.control.turn_id()),
+                crate::topology_runtime::lookup(&self.host.live_target.tree_id),
+            );
+        }
         let actions = self.host.actions;
         let takes_actions = self.takes_actions();
         let deferred_ready = takes_actions && self.host.deferred.borrow().has_deferred();

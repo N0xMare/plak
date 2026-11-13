@@ -56,6 +56,7 @@ where
         &self,
         pause: &AdmissionPause,
         deadline: Instant,
+        cancelled: &std::sync::atomic::AtomicBool,
     ) -> CliResult<()> {
         if !Arc::ptr_eq(&pause.gate, &self.upgrade_admission)
             || !*self
@@ -72,6 +73,8 @@ where
                 session.reject_queued_wire_drafts();
             }
         }
-        self.drafts.wait_resolved(deadline).map_err(CliFailure::new)
+        self.drafts
+            .wait_resolved(deadline, cancelled)
+            .map_err(CliFailure::new)
     }
 }

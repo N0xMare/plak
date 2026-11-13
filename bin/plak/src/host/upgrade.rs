@@ -3,7 +3,9 @@
 mod abandon;
 mod bindings;
 mod preparation;
+mod requester;
 mod startup;
+mod step_drain;
 pub(super) use abandon::request as abandon;
 pub(super) use startup::{prepare_host, start_retry};
 
@@ -44,6 +46,7 @@ struct Request {
     destination_key: String,
     expected_binary: String,
     wait_seconds: u64,
+    drain: crate::command::HostDrain,
     abandon: Option<String>,
 }
 
@@ -92,6 +95,7 @@ impl From<&crate::carry::ExportRefusal> for BlockerKind {
 }
 
 pub(super) struct Ready {
+    step_drain: Option<plakous_hosted::host_service::wire::HostStepDrain>,
     pub(super) executable: PathBuf,
     pub(super) key: String,
     pub(super) binary: String,
@@ -323,7 +327,13 @@ pub(super) fn request(
     services: &Services,
     expected: &str,
     wait: Duration,
+    drain: crate::command::HostDrain,
 ) -> CliResult<ProcessOutcome> {
+    if drain == crate::command::HostDrain::Idle {
+        return Err(CliFailure::new(
+            "host_step_drain_idle_unavailable: --drain idle is not yet available; use a bounded drain until observation yields are enabled",
+        ));
+    }
     if !crate::carry::upgrade::binary_id_valid(expected)
         || expected != crate::build_identity::binary_id()
     {
@@ -344,7 +354,11 @@ pub(super) fn request(
     let mut stream = crate::wire_transport::hosts::socket_until(&socket(paths), Instant::now() + PROBE_BOUND)
         .map_err(|_| CliFailure::new("host_upgrade_unsupported_source: source has no supported upgrade coordinator; retain its executable and settle it using its own lifecycle"))?;
     stream
-        .set_read_timeout(Some(wait + Duration::from_secs(600)))
+        .set_read_timeout(
+            drain
+                .duration()
+                .map(|duration| wait + duration + Duration::from_secs(600)),
+        )
         .map_err(io_failure)?;
     stream
         .set_write_timeout(Some(PROBE_BOUND))
@@ -359,7 +373,10 @@ pub(super) fn request(
             "host upgrade source identity changed during discovery",
         ));
     }
-    if identity.binary == expected && identity.key == crate::home::state::state_key() {
+    if identity.binary == expected
+        && identity.key == crate::home::state::state_key()
+        && !crate::test_hooks::force_host_upgrade()
+    {
         if let Some(receipt) = receipt::all(paths)?.into_iter().rev().find(|receipt| {
             receipt.destination_binary == expected
                 && receipt.destination_key == identity.key
@@ -373,6 +390,7 @@ pub(super) fn request(
     let destination =
         std::fs::canonicalize(std::env::current_exe().map_err(io_failure)?).map_err(io_failure)?;
     process::verify_image(&destination, expected)?;
+    let prior_instance = identity.instance.clone();
     write(
         &mut stream,
         &Request {
@@ -382,6 +400,7 @@ pub(super) fn request(
             destination_key: crate::home::state::state_key(),
             expected_binary: expected.to_owned(),
             wait_seconds: wait.as_secs(),
+            drain,
             abandon: None,
         },
     )?;
@@ -398,7 +417,12 @@ pub(super) fn request(
                 )?;
                 print_mappings(&record)?;
             } else {
-                wait_host(paths, &crate::home::state::state_key(), expected)?;
+                wait_host(
+                    paths,
+                    &crate::home::state::state_key(),
+                    expected,
+                    Some(&prior_instance),
+                )?;
             }
             Ok(ProcessOutcome::Success)
         }
@@ -482,7 +506,12 @@ fn coordinator_is_ready(paths: &PlakPaths) -> bool {
     read::<Identity>(&stream).is_ok()
 }
 
-fn wait_host(paths: &PlakPaths, key: &str, binary: &str) -> CliResult<()> {
+fn wait_host(
+    paths: &PlakPaths,
+    key: &str,
+    binary: &str,
+    prior_instance: Option<&str>,
+) -> CliResult<()> {
     let deadline = Instant::now() + Duration::from_secs(90);
     while Instant::now() < deadline {
         if let Ok(stream) = crate::wire_transport::hosts::socket_until(
@@ -490,7 +519,7 @@ fn wait_host(paths: &PlakPaths, key: &str, binary: &str) -> CliResult<()> {
             Instant::now() + Duration::from_millis(100),
         ) {
             let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
-            if matches!(read::<Identity>(&stream), Ok(identity) if identity.key == key && identity.binary == binary)
+            if matches!(read::<Identity>(&stream), Ok(identity) if identity.key == key && identity.binary == binary && prior_instance.is_none_or(|prior| identity.instance != prior))
             {
                 return Ok(());
             }
@@ -556,7 +585,7 @@ fn recover(paths: &PlakPaths, expected: &str) -> CliResult<ProcessOutcome> {
         let _ = child.wait();
     });
     drop(home_lock);
-    wait_host(paths, key, binary)?;
+    wait_host(paths, key, binary, None)?;
     if restore_source {
         Err(CliFailure::new(
             "host_upgrade_aborted: the interrupted preparation was withdrawn and the old host is usable; retry the upgrade",
@@ -610,9 +639,12 @@ pub(super) async fn serve(
         let pending = Arc::clone(&pending);
         let cancel = Arc::clone(&cancelled);
         let arguments = Arc::clone(&arguments);
+        let runtime = tokio::runtime::Handle::current();
         let (finished, completion) = tokio::sync::oneshot::channel();
         let handle = std::thread::spawn(move || {
-            let _ = handle(stream, &host, &services, &pending, &cancel, &arguments);
+            let _ = handle(
+                stream, &host, &services, &pending, &cancel, &arguments, &runtime,
+            );
             let _ = finished.send(());
         });
         *worker
@@ -634,8 +666,9 @@ fn handle(
     host: &Arc<SessionHost<PlakExtension>>,
     services: &Services,
     pending: &Pending,
-    cancelled: &std::sync::atomic::AtomicBool,
+    cancelled: &Arc<std::sync::atomic::AtomicBool>,
     arguments: &[String],
+    runtime: &tokio::runtime::Handle,
 ) -> CliResult<()> {
     stream
         .set_read_timeout(Some(PROBE_BOUND))
@@ -666,9 +699,23 @@ fn handle(
         };
         return write(&mut stream, &answer);
     }
-    let result = prepare(host, services, request, cancelled, arguments);
+    let caller = requester::Caller::watch(&stream, Arc::clone(cancelled))?;
+    let result = prepare(
+        host,
+        services,
+        request,
+        &caller.cancelled,
+        arguments,
+        runtime,
+    );
     match result {
         Ok((ready, receipt)) => {
+            if receipt.is_none() && caller.cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(CliFailure::new(
+                    "host upgrade requester left before Ready; source preparation withdrawn",
+                ));
+            }
+            caller.ready();
             crate::carry::upgrade::crash_cut("before-answer");
             *pending
                 .lock()
@@ -690,6 +737,7 @@ fn prepare(
     request: Request,
     cancelled: &std::sync::atomic::AtomicBool,
     arguments: &[String],
+    runtime: &tokio::runtime::Handle,
 ) -> CliResult<(Ready, Option<uuid::Uuid>)> {
     let paths = services.paths()?;
     check_cancel(cancelled)?;
@@ -712,7 +760,9 @@ fn prepare(
     }
     let standalone = crate::carry::upgrade::admission(paths, true)?;
     let pause = host.pause_admissions()?;
-    let deadline = Instant::now() + Duration::from_secs(request.wait_seconds);
+    let budget = step_drain::Budget::new(request.drain)?;
+    host.resolve_paused_drafts(&pause, budget.barrier_deadline, cancelled)?;
+    let deadline = budget.start + Duration::from_secs(request.wait_seconds);
     if cross_key {
         loop {
             check_cancel(cancelled)?;
@@ -727,6 +777,7 @@ fn prepare(
         }
     }
     let ready = Ready {
+        step_drain: None,
         executable: request.destination.clone(),
         key: request.destination_key.clone(),
         binary: request.expected_binary.clone(),
@@ -735,6 +786,15 @@ fn prepare(
         _standalone: standalone,
     };
     if !cross_key {
+        let mut ready = ready;
+        ready.step_drain = Some(step_drain::prepare(
+            host,
+            services,
+            &ready.pause,
+            budget,
+            cancelled,
+            runtime,
+        )?);
         return Ok((ready, None));
     }
     let failures = host.hand_off_paused(
@@ -757,6 +817,11 @@ fn qualify_destination(
     request: &Request,
     arguments: &[String],
 ) -> CliResult<()> {
+    if request.drain == crate::command::HostDrain::Idle {
+        return Err(CliFailure::new(
+            "host_step_drain_idle_unavailable: --drain idle is not yet available; use a bounded drain until observation yields are enabled",
+        ));
+    }
     let paths = services.paths()?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     if request.source_instance != identity.instance.to_string()
@@ -764,6 +829,7 @@ fn qualify_destination(
         || !request.destination.is_absolute()
         || !crate::carry::upgrade::state_key_valid(&request.destination_key)
         || request.wait_seconds > 3600
+        || !request.drain.valid()
     {
         return Err(CliFailure::new(
             "host_upgrade_stale_source: source instance or state key changed",

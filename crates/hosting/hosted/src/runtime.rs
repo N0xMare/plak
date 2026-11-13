@@ -231,6 +231,8 @@ pub(crate) use resources::sample_children_rusage_cumulative;
 pub use resources::sample_process_resources;
 pub use source_release::SourceReleases;
 pub use startup::HostWorker;
+mod sender;
+pub(crate) mod step_hold;
 mod worker;
 pub use startup::spawn_deferred_host;
 pub use startup::spawn_deferred_host_with_clear_publication;
@@ -299,6 +301,7 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     request_tools: Arc<std::sync::Mutex<Vec<String>>>,
     session_id: Option<Arc<str>>,
     quit_receipt: worker::QuitReceipt,
+    step_control: Arc<step_hold::StepControl>,
     /// The correlation of the `IntentStarted` window the session's answers
     /// are in now, shared by every clone; `None` before the first window
     /// and after a correlation reset.
@@ -339,45 +342,6 @@ pub(crate) struct PendingNoticeIntent {
 const MAX_PENDING_NOTICE_INTENTS: usize = 256;
 
 impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
-    /// Wrap a bounded observation channel.
-    #[must_use]
-    pub fn over(inner: crate::surface_protocol::HostEventSender<P>) -> Self {
-        Self {
-            inner,
-            notices: Arc::default(),
-            presentations: Arc::default(),
-            request_tools: Arc::default(),
-            session_id: None,
-            quit_receipt: worker::QuitReceipt::default(),
-            window: Arc::default(),
-            answers: None,
-            usage: Arc::default(),
-            processes: Arc::default(),
-            session_info: Arc::default(),
-            #[cfg(test)]
-            recorded: None,
-        }
-    }
-    /// A clone for a publisher that outlives the host's current step (a
-    /// background recovery pass, a source finalization): the notices it keeps
-    /// are appended only while the host still owns `session_id`.
-    pub(crate) fn pinned_to(&self, session_id: &str) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            notices: Arc::clone(&self.notices),
-            presentations: Arc::clone(&self.presentations),
-            request_tools: Arc::clone(&self.request_tools),
-            session_id: Some(Arc::from(session_id)),
-            quit_receipt: self.quit_receipt.clone(),
-            window: Arc::clone(&self.window),
-            answers: self.answers.clone(),
-            usage: Arc::clone(&self.usage),
-            processes: Arc::clone(&self.processes),
-            session_info: Arc::clone(&self.session_info),
-            #[cfg(test)]
-            recorded: self.recorded.clone(),
-        }
-    }
     /// Publish producer content; false when the driver has gone. Keyed
     /// publication frames are owned by the presentation publisher, not callers.
     ///

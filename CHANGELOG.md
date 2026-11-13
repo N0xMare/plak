@@ -57,6 +57,14 @@ one cross-build carrier (a build imports its own and the previous version).
 - Publish `plak wire schema` as a supported command and attach target-specific
   JSON Schemas to releases.
 
+- Drain same-key host upgrades at runtime step boundaries with `--drain`
+  (60 seconds by default, bounded durations; `idle` is not yet available).
+  Resolve earlier draft verdicts with a ten-second minimum barrier before
+  freezing roots and children; requester loss or rollback reopens source gates.
+  Existing planned handoff preserves identities and once-only continuation.
+  Cross-key carry remains settled-only, and this adds no background-job
+  retention across different native runner builds.
+
 - Add an internal, generation-scoped runtime step hold for host coordination.
   It parks at joined operation boundaries, preserves ordinary timeout budgets,
   and revokes on coordinator drop without occupying command ingress. It does

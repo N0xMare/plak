@@ -589,11 +589,14 @@ enum HostAction {
         #[arg(long, required_unless_present = "abandon", conflicts_with = "abandon")]
         expect_binary: Option<String>,
         /// Permanently abandon pending remote successors selected by UUID or runner ID.
-        #[arg(long, conflicts_with = "wait")]
+        #[arg(long, conflicts_with_all = ["wait", "drain"])]
         abandon: Option<String>,
         /// Wait for settled work for this many seconds (at most 3600).
         #[arg(long, default_value = "0", value_parser = clap::value_parser!(u64).range(0..=3600))]
         wait: u64,
+        /// Same-key boundary drain: default 60s; 0, integer ms/s/m/h, or idle.
+        #[arg(long, conflicts_with = "wait")]
+        drain: Option<crate::command::HostDrain>,
     },
     /// Relay wire bytes to this home's host without consuming its handshake.
     Connect {

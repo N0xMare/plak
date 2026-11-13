@@ -169,6 +169,13 @@ mod test_hooks {
     pub(crate) const fn upgrade_import_refused() -> bool {
         false
     }
+    #[allow(
+        dead_code,
+        reason = "only the optional host can exercise same-image handoff"
+    )]
+    pub(crate) const fn force_host_upgrade() -> bool {
+        false
+    }
     #[allow(dead_code, reason = "only the optional host coordinates upgrades")]
     pub(crate) fn upgrade_crash_cut(_name: &str) {}
     #[allow(dead_code, reason = "only the optional host prepares upgrades")]
@@ -684,11 +691,13 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             expect_binary,
             abandon,
             wait,
+            drain,
         } => {
             return host::upgrade(
                 &services,
                 expect_binary.as_deref(),
                 wait,
+                drain.unwrap_or_default(),
                 abandon.as_deref(),
             );
         }

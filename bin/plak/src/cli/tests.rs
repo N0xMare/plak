@@ -4,6 +4,64 @@
 )]
 
 #[test]
+fn host_step_drain_accepts_bounded_and_idle_without_settlement_or_abandon_flags() {
+    for (value, expected) in [
+        ("0", crate::command::HostDrain::Bounded { milliseconds: 0 }),
+        (
+            "5m",
+            crate::command::HostDrain::Bounded {
+                milliseconds: 300_000,
+            },
+        ),
+        (
+            "250ms",
+            crate::command::HostDrain::Bounded { milliseconds: 250 },
+        ),
+        ("idle", crate::command::HostDrain::Idle),
+    ] {
+        assert!(
+            matches!(parse(args(&["host", "upgrade", "--expect-binary", "0123456789ab", "--drain", value])).unwrap(), Command::HostUpgrade { drain: Some(actual), .. } if actual == expected)
+        );
+    }
+    for value in [
+        "-1",
+        "1.5s",
+        "2h",
+        "infinity",
+        "1m30s",
+        "18446744073709551615h",
+    ] {
+        assert!(
+            parse(args(&[
+                "host",
+                "upgrade",
+                "--expect-binary",
+                "0123456789ab",
+                "--drain",
+                value
+            ]))
+            .is_err(),
+            "{value}"
+        );
+    }
+    for extra in ["--wait", "--abandon"] {
+        assert!(
+            parse(args(&[
+                "host",
+                "upgrade",
+                "--expect-binary",
+                "0123456789ab",
+                "--drain",
+                "0",
+                extra,
+                "1"
+            ]))
+            .is_err()
+        );
+    }
+}
+
+#[test]
 fn host_stdio_bridge_requires_transport_and_refuses_server_flags() {
     assert!(matches!(
         parse(args(&["host", "connect", "--stdio"])).unwrap(),

@@ -646,6 +646,10 @@ pub(crate) async fn read_tree_feed(
 /// Who in this process already owns a child [`claim_child`] refused.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ChildOwner {
+    /// Shutdown is not a reversible pause and cannot promise a later release.
+    Closed,
+    /// Caller deadline expired during a reversible host pause; retry/park.
+    StepHeld,
     /// A live turn, startup, or retirement, or its turn waiter's recycle.
     Process,
     /// Another `recover_node` run.
@@ -660,15 +664,33 @@ pub(super) async fn claim_child(
     runtime: &Arc<ProductTopologyRuntime>,
     agent_id: &str,
 ) -> Result<crate::topology_runtime::RecoveryClaim, ChildOwner> {
-    if runtime.live.lock().await.contains_key(agent_id) {
-        return Err(ChildOwner::Process);
+    let deadline = tokio::time::Instant::now() + operator_recover_lease_wait();
+    loop {
+        if runtime.is_closed() {
+            return Err(ChildOwner::Closed);
+        }
+        if runtime.live.lock().await.contains_key(agent_id) {
+            return Err(ChildOwner::Process);
+        }
+        match runtime.claim_recovery(agent_id) {
+            Ok(claim) => return Ok(claim),
+            Err(crate::topology_runtime::RecoveryClaimRefusal::StepHeld) => {
+                runtime.wait_step_release(deadline).await.map_err(|_| {
+                    if runtime.is_closed() {
+                        ChildOwner::Closed
+                    } else {
+                        ChildOwner::StepHeld
+                    }
+                })?;
+            }
+            Err(crate::topology_runtime::RecoveryClaimRefusal::Recycling) => {
+                return Err(ChildOwner::Process);
+            }
+            Err(crate::topology_runtime::RecoveryClaimRefusal::Recovering) => {
+                return Err(ChildOwner::Recovery);
+            }
+        }
     }
-    runtime
-        .claim_recovery(agent_id)
-        .map_err(|refusal| match refusal {
-            crate::topology_runtime::RecoveryClaimRefusal::Recycling => ChildOwner::Process,
-            crate::topology_runtime::RecoveryClaimRefusal::Recovering => ChildOwner::Recovery,
-        })
 }
 
 /// Settles one child, or refuses without settling.
@@ -686,7 +708,13 @@ pub(super) async fn recover_child(
     // recovery never reopens under it and never waits for it.
     let _claim = claim_child(runtime, agent_id)
         .await
-        .map_err(|_| owner_live())?;
+        .map_err(|owner| match owner {
+            ChildOwner::StepHeld => refusal(
+                TopologyErrorCode::StepHeld,
+                "host step pause is still active; retry recovery after it releases",
+            ),
+            ChildOwner::Process | ChildOwner::Recovery | ChildOwner::Closed => owner_live(),
+        })?;
     recover_claimed_child(runtime, port, agent_id, expected_attempt_id).await
 }
 
@@ -1042,8 +1070,8 @@ pub(super) async fn recover_unresolved_children(
         // A child another run holds is that run's to report.
         let claim = match claim_child(runtime, &agent_id).await {
             Ok(claim) => claim,
-            Err(ChildOwner::Recovery) => continue,
-            Err(ChildOwner::Process) => {
+            Err(ChildOwner::Recovery | ChildOwner::StepHeld) => continue,
+            Err(ChildOwner::Process | ChildOwner::Closed) => {
                 report.refused.push((agent_id, owner_live()));
                 continue;
             }

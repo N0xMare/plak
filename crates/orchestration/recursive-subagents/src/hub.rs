@@ -13,6 +13,8 @@ pub use startup::{ChildStartup, ChildStartupStage, STARTUP_SLOT_OCCUPIED};
 
 mod registry;
 mod runtime;
+mod step_hold;
+pub use step_hold::{TreeStepPause, TreeStepSnapshot};
 mod shutdown;
 use shutdown::shutdown_runtime;
 pub use shutdown::{
@@ -548,6 +550,8 @@ impl Drop for RecoveryClaim {
 /// Why [`ProductTopologyRuntime::claim_recovery`] refused a child.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecoveryClaimRefusal {
+    /// A reversible host step pause, not a recovery or runtime fault.
+    StepHeld,
     /// Its turn waiter is recycling it: this process owns it.
     Recycling,
     /// Another `recover_node` run holds it.
@@ -569,6 +573,9 @@ pub struct ProductTopologyRuntime {
     /// publish for this tree goes through it.
     driver: TreeDriver,
     closed: AtomicBool,
+    step_paused: AtomicBool,
+    step_released: tokio::sync::Notify,
+    step_recovery_due: AtomicBool,
     /// Children whose fenced turn's owner is releasing and reopening their
     /// session. Recovery treats them as owned.
     recycling: Mutex<HashSet<String>>,

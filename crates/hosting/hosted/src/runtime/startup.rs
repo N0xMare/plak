@@ -80,9 +80,10 @@ pub fn spawn_host_worker<P: plakous_host_protocol::ProtocolExtension>(
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel();
     let (startup_tx, startup_rx) = std::sync::mpsc::sync_channel(1);
     let event_tx = Sender::over(event_tx);
-    let handle = HostWorkerHandle::spawn_with_receipt(move |receipt| {
+    let handle = HostWorkerHandle::spawn_with_receipt(move |receipt, steps| {
         let mut event_tx = event_tx;
         event_tx.quit_receipt = receipt;
+        event_tx.step_control = steps;
         let result = run_host_loop(
             config,
             &action_rx,
@@ -169,9 +170,10 @@ pub fn spawn_deferred_host_with_clear_publication<P: plakous_host_protocol::Prot
     let (action_tx, action_rx) = crate::surface_protocol::user_action_channel();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel();
     let event_tx = Sender::over(event_tx);
-    let handle = HostWorkerHandle::spawn_with_receipt(move |receipt| {
+    let handle = HostWorkerHandle::spawn_with_receipt(move |receipt, steps| {
         let mut event_tx = event_tx;
         event_tx.quit_receipt = receipt;
+        event_tx.step_control = steps;
         let _ = event_tx.send(ContentEvent::Activity {
             label: "discovering providers and preparing session".into(),
             active: true,

@@ -2286,6 +2286,21 @@ destination's probes and importer must agree on its exact binary and key.
 Nothing is selected through a client role, relative executable, shell string
 or arbitrary source-store path.
 
+Same-key step holds are process-local coordination, not custody or a grant to
+raise a fence. The caller must own this host's active admission pause; a foreign
+pause refuses before any runtime is held. Root owners publish weak driver
+capabilities themselves, and a separate joined-owner rendezvous is required:
+client views, cached directory activity and socket disconnects do not prove a
+boundary. Requester EOF or hangup revokes preparation, including its verdict
+barrier, while source authority is still held; after Ready it cannot revoke a
+transfer. Tree pauses defer host wakes/recovery without refusing effects already
+dispatched under that authority. Rollback reopens trees before driver gates.
+Generation-scoped guard revocation works with full command ingress.
+Paid compaction and unjoined effects block planned surrender rather than being
+cancelled by the upgrade hold. Neither the draft registry nor step-control
+memory is a cross-build carrier. The existing home guard, exact native runner
+triple and normal handoff remain the execution authorities.
+
 Ownership receipts are private bounded regular files opened without following
 links, atomically published and synced. Their directories and operation IDs
 are validated; corrupt or ambiguous receipts never grant execution authority.

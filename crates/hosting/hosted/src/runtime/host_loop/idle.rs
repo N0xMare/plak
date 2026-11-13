@@ -74,6 +74,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             tokio::select! {
                 biased;
                 () = self.role.actions.ready() => {}
+                () = self.role.events.step_control.changed.notified() => return Err(RecvTimeoutError::Timeout),
                 () = tokio::time::sleep_until(deadline) => return Err(RecvTimeoutError::Timeout),
             }
         }

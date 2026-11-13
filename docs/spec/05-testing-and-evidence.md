@@ -58,6 +58,29 @@ hook. The daemon-job upgrade still checks the ordinary exact-reopen probes and
 preserves processes. These contracts do not qualify credentials, runner or
 future remote-catalog availability.
 
+Same-key step-drain cases use the same isolated real-binary homes. A
+`test-hooks`-only `PLAK_TEST_FORCE_HOST_UPGRADE` bypasses the current-image no-op
+so the ordinary same-key planned handoff is exercised; it bypasses no image,
+source-instance, custody or binding check. Production ignores it. Durability
+cases cover zero-bound interruption/continuation, finite natural completion,
+requester-loss rollback and refusal of unavailable idle draining, with unchanged
+session, branch and node identities. A foreground process and a paid fold
+running together at the bound must refuse surrender, reopen admissions, and
+finish once without cancellation or redispatch. Core parallel cases pin
+full-ingress guard revocation, stale generations, idle and internally admitted
+holds, preparation-window re-resolution, restored undispatched slots and the
+first paid fold after deferred image residency. L0 clock evidence is generic:
+Held lies outside the model-operation deadline and a running operation remains
+Draining. Real retry-after and semantic-stall composition tests belong to the
+provider layer and use its real watchdogs; foreground deadlines are pinned at
+the process executor owner. No provider dependency enters agent/model to test
+host coordination. Hub/host cases pin dispatched child startup under a pause,
+parent/child hold rollback, deferred recovery notification, claims not yet
+registered as tasks, busy-slot retry, foreign pause refusal and timeout cleanup.
+The verdict barrier pins cancellation and its ten-second finite-budget floor;
+its client delivery promise remains an attempted write, not receipt. A hold itself changes no persisted format: before a durable planned
+handoff a crash is owner loss, not an upgrade receipt or permission to replay.
+
 Settled host-upgrade regressions use isolated real-binary homes and a
 test-hooks-only `PLAK_TEST_STATE_KEY` override to make producer and destination
 keys differ without changing the v12 carrier. Production builds ignore that

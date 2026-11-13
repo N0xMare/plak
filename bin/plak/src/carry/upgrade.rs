@@ -9,7 +9,7 @@ use crate::{CliFailure, CliResult};
 pub(crate) mod process;
 pub(crate) mod remote;
 
-pub(crate) const PROTOCOL: u32 = 1;
+pub(crate) const PROTOCOL: u32 = 2;
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

@@ -65,6 +65,10 @@ pub(crate) fn binding_executor_cut() -> bool {
     })
 }
 
+pub(crate) fn force_host_upgrade() -> bool {
+    std::env::var("PLAK_TEST_FORCE_HOST_UPGRADE").as_deref() == Ok("1")
+}
+
 pub(crate) fn upgrade_crash_cut(name: &str) {
     if std::env::var("PLAK_TEST_HOST_UPGRADE_CUT").is_ok_and(|cut| cut == name) {
         std::process::exit(86);

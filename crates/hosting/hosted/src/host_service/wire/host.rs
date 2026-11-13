@@ -1407,6 +1407,8 @@ mod reads;
 pub use admission::{AdmissionPause, HostReadLimits};
 pub use reads::{HostPrincipal, HostReadTask, HostRequestContext};
 mod admission;
+mod step_drain;
+pub use step_drain::HostStepDrain;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]

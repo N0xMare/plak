@@ -366,12 +366,14 @@ impl TopCommand {
                         expect_binary,
                         wait,
                         abandon,
+                        drain,
                     }),
                 ..
             } => Ok(Command::HostUpgrade {
                 expect_binary,
                 abandon,
                 wait: std::time::Duration::from_secs(wait),
+                drain,
             }),
             Self::Host {
                 action: None,

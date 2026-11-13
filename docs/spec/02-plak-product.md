@@ -5452,11 +5452,13 @@ database or WAL bytes are written.
 
 ### 4.6 `plak host`
 
-`plak host upgrade --expect-binary <id> [--wait <seconds>]` is an explicit
+`plak host upgrade --expect-binary <id> [--wait <seconds> | --drain <duration|idle>]` is an explicit
 same-user operator action, invoked using the destination executable and its own
 binary ID. It discovers exactly one live source host across keys, then echoes
 that host's key and instance on its private upgrade control socket. Missing or
 older unsupported coordinators refuse without signalling or stopping anything.
+The private coordinator protocol is 2: it includes the drain budget; operational
+receipt version 1 and export document version 12 are unchanged.
 The source independently hashes the destination image and probes its host
 capability, key, import versions and configuration. Cross-key capacity and
 credential probes must give a usable known input window; an insufficient or
@@ -5489,8 +5491,46 @@ when to call it, after closing ingress and before freezing runtime steps.
 A same-key upgrade uses planned handoff of the same sessions, not export/import.
 Its exact-reopen probe refuses known binding/configuration/credential changes;
 an unfinished-turn verdict retains the existing planned-handoff recovery law.
-A changed local-runner protocol refuses before handoff. There is no promise to
-preserve jobs across incompatible worker protocols.
+The source closes ingress and resolves earlier draft verdicts before requesting
+runtime holds. `--drain` defaults to 60 seconds; integer `ms`, `s`, `m`, `h`
+suffixes and bare seconds accept 0 through one hour. It is exclusive with
+`--wait` and `--abandon`. Finite modes share one absolute host-wide natural-drain
+deadline across every agent. The earlier verdict barrier uses the later of that
+deadline and ten seconds after preparation began, including for `--drain 0`;
+that floor does not extend natural draining. `idle` currently refuses before
+pausing admissions, until observation yields are available. Its reserved policy
+is a bounded 60-second verdict barrier followed by unbounded boundary draining,
+not a wait for all tasks to finish or jobs to exit.
+
+The existing root owner freezes outer actions, the hub defers host-initiated
+wakes and recovery claims, and each admitted root/child driver
+parks before its next operation through the hidden host seam (chapter 01 §3.1).
+Startups from already-dispatched tool effects remain admitted and must join;
+refresh discovers and holds their new residents. Already-owned result projection,
+recovery and workspace effects must also join. The pause never becomes custody, a durable tree state, or another agent
+loop. Holds publish exact runtime progress, not a presentation-derived idle
+claim. A reserved child without an acknowledged turn or a terminal child still
+publishing its result prevents a completed freeze. Dormant-root trees with live
+children participate too. Each source runtime, tree and outer-owner gate is
+reopened on precommit error; tree admission reopens before driver holds. Caller
+EOF or hangup cancels preparation before surrender, including the verdict
+barrier. After Ready, requester loss cannot cancel the committed transfer.
+The home and source leases never move on a hold.
+
+At the natural-drain bound, ordinary model generations may reach the existing
+planned interrupt and once-only continuation law; 0 skips the natural wait.
+Known effect or compaction work that has not joined instead refuses before
+handoff. No upgrade hold cancels paid compaction. Mandatory owner/placement
+rendezvous and planned-release acknowledgements keep their existing bounded
+joins; their allowance is host-wide, not multiplied by the number of sessions.
+A replacement acknowledgement requires a fresh source-instance identity even
+when a test forces the same image to restart. An already running exact target
+remains an ordinary no-op.
+
+A changed local-runner protocol refuses before handoff. Step draining adds no
+job-retention channel across different native runner triples: settle jobs before
+changing revision, flavor or protocol until that capability is separately
+admitted. Cross-key live trees/jobs remain outside this settled carrier.
 
 Cross-key upgrade is the **settled-root** operation of §2.5.1. Without
 `--wait`, blockers are returned before stopping admissions, as a list with

@@ -34,6 +34,9 @@ impl ProductTopologyRuntime {
             })),
             driver,
             closed: AtomicBool::new(false),
+            step_paused: AtomicBool::new(false),
+            step_released: tokio::sync::Notify::new(),
+            step_recovery_due: AtomicBool::new(false),
             recycling: Mutex::new(HashSet::new()),
             recovering: Mutex::new(HashSet::new()),
             recoveries: Mutex::new(Vec::new()),
@@ -413,6 +416,10 @@ impl ProductTopologyRuntime {
         let Ok(mut recovering) = self.recovering.lock() else {
             return Err(RecoveryClaimRefusal::Recovering);
         };
+        if self.step_paused.load(Ordering::Acquire) {
+            self.step_recovery_due.store(true, Ordering::Release);
+            return Err(RecoveryClaimRefusal::StepHeld);
+        }
         if !recovering.insert(agent_id.to_owned()) {
             return Err(RecoveryClaimRefusal::Recovering);
         }
@@ -547,6 +554,7 @@ impl ProductTopologyRuntime {
     /// before the drain takes the live lock, never after.
     pub(super) fn close_for_shutdown(&self) {
         self.closed.store(true, Ordering::SeqCst);
+        self.step_released.notify_waiters();
         self.driver.shutdown_storage_waits();
     }
 

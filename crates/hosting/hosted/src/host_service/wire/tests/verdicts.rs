@@ -4,6 +4,7 @@ use super::*;
 use crate::host_service::drafts::{DraftRegistry, DraftReservation};
 use plakous_host_protocol::wire::ClientDraftId;
 use plakous_host_protocol::{Core, IntentReceiver, intent_channel};
+use std::sync::atomic::AtomicBool;
 
 fn setup() -> (
     WireConnection<Core, Vec<u8>>,
@@ -37,6 +38,29 @@ fn reserve<W: Write>(
         .intent_correlated(attachment, intent, Some(&id.to_string()))
         .unwrap();
     id
+}
+
+#[test]
+fn draft_verdict_barrier_requester_loss_withdraws_the_wait_not_the_admission_verdict() {
+    let (mut wire, receiver, registry) = setup();
+    reserve(&wire, &registry, "already claimed");
+    let delivery = receiver.try_recv().unwrap();
+    let cancelled = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let waiting = scope
+            .spawn(|| registry.wait_resolved(Instant::now() + Duration::from_secs(30), &cancelled));
+        cancelled.store(true, std::sync::atomic::Ordering::Release);
+        assert!(waiting.join().unwrap().unwrap_err().contains("cancelled"));
+    });
+    wire.service.observe(delivery.started().unwrap().into());
+    wire.service
+        .observe(SessionObservation::DraftAccepted(SessionIntent::Prompt(
+            Draft::from("already claimed"),
+        )));
+    wire.flush().unwrap();
+    registry
+        .wait_resolved(Instant::now(), &AtomicBool::new(false))
+        .unwrap();
 }
 
 #[test]
@@ -92,11 +116,13 @@ fn draft_barrier_waits_while_the_verdict_write_is_in_flight() {
     armed.store(true, Ordering::SeqCst);
     let worker = std::thread::spawn(move || wire.flush());
     entering.recv_timeout(Duration::from_secs(5)).unwrap();
-    let pending = registry.wait_resolved(Instant::now());
+    let pending = registry.wait_resolved(Instant::now(), &AtomicBool::new(false));
     release.send(()).unwrap();
     worker.join().unwrap().unwrap();
     assert!(pending.is_err(), "taking an output is not writing it");
-    registry.wait_resolved(Instant::now()).unwrap();
+    registry
+        .wait_resolved(Instant::now(), &AtomicBool::new(false))
+        .unwrap();
 }
 
 #[test]
@@ -116,11 +142,15 @@ fn draft_barrier_withdraws_only_unclaimed_inputs_and_joins_verdict_writes() {
         "withdrawn input must never reach the actor"
     );
     assert!(
-        registry.wait_resolved(Instant::now()).is_err(),
+        registry
+            .wait_resolved(Instant::now(), &AtomicBool::new(false))
+            .is_err(),
         "not written yet"
     );
     wire.flush().unwrap();
-    registry.wait_resolved(Instant::now()).unwrap();
+    registry
+        .wait_resolved(Instant::now(), &AtomicBool::new(false))
+        .unwrap();
     let verdicts: Vec<_> = host_frames(&wire.stdout)
         .into_iter()
         .filter_map(|frame| match frame {
@@ -154,14 +184,18 @@ fn draft_barrier_disconnect_is_not_a_verdict_for_an_already_claimed_input() {
     drop(wire);
     service.reject_queued_wire_drafts();
     assert!(
-        registry.wait_resolved(Instant::now()).is_err(),
+        registry
+            .wait_resolved(Instant::now(), &AtomicBool::new(false))
+            .is_err(),
         "a lost reply proves no admission outcome"
     );
     service.observe(delivery.started().unwrap().into());
     service.observe(SessionObservation::DraftAccepted(SessionIntent::Prompt(
         Draft::from("in flight"),
     )));
-    registry.wait_resolved(Instant::now()).unwrap();
+    registry
+        .wait_resolved(Instant::now(), &AtomicBool::new(false))
+        .unwrap();
     assert!(matches!(
         registry.reserve(id, [1; 32]),
         Ok(DraftReservation::Duplicate)
@@ -184,7 +218,9 @@ fn draft_barrier_uses_explicit_rejection_id_not_another_child_mail_window() {
     wire.mails.insert("another-window".into(), 100);
     wire.service.reject_queued_wire_drafts();
     wire.flush().unwrap();
-    registry.wait_resolved(Instant::now()).unwrap();
+    registry
+        .wait_resolved(Instant::now(), &AtomicBool::new(false))
+        .unwrap();
     let frames = host_frames(&wire.stdout);
     assert!(frames.iter().any(|frame| matches!(frame, HostFrame::Response { id: 99, outcome: Outcome::Refused(RequestRefusal::MailRefused { detail }) } if detail.contains("upgrading"))));
     assert!(wire.mails.contains_key("another-window"));
@@ -198,7 +234,7 @@ fn draft_barrier_refuses_unknown_service_end_instead_of_surrendering() {
     wire.service.clear_wire_drafts();
     assert!(
         registry
-            .wait_resolved(Instant::now())
+            .wait_resolved(Instant::now(), &AtomicBool::new(false))
             .unwrap_err()
             .contains("verdict_unknown")
     );

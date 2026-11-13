@@ -128,6 +128,30 @@ Keep the old and new snapshots, including sidecars, until the command confirms
 success. Installation does not itself replace the running host.
 
 Same-key upgrade uses planned handoff and the existing session identities.
+It closes new admissions, resolves earlier draft verdicts, then drains roots
+and children at runtime step boundaries. The default natural-drain budget is
+60 seconds. Use `--drain 0` to skip that wait or `--drain 5m` for five minutes.
+`--drain idle` refuses before pausing admissions: unbounded draining is not yet
+available until observation yields are enabled. Integer `ms`, `s`, `m`, `h` and
+bare seconds are accepted, up to one hour. Finite modes use one natural-drain
+deadline for all agents, not a separate wait per session. The earlier verdict
+barrier gets at least 10 seconds, including with `--drain 0`; that floor does
+not extend the natural-drain deadline.
+Mandatory freeze and planned-release acknowledgements still have bounded
+joins. An unfinished model call continues through the existing planned
+interrupt; its continuation is a new call, not prompt replay. Unjoined effects
+or paid compaction refuse preparation rather than being cancelled by a hold;
+failed preparation reopens the source's gates. Losing the upgrade requester's
+connection before surrender cancels preparation and reopens those gates; after
+Ready, disconnection cannot cancel the transfer. A lost client connection proves
+neither admission failure nor receipt of a verdict: the barrier joins a
+delivery attempt, not an acknowledgement from that client.
+
+Step draining does not retain jobs across a change to the runner's native
+revision/flavor/protocol triple. Settle those jobs first; the separate
+cross-build retention capability is not supplied by this command yet.
+`--drain` cannot be combined with `--wait` or `--abandon`.
+
 Cross-key upgrade supports **settled roots**, locally or on paired runners.
 Let turns, children, workspace operations and daemon jobs finish; resolve held
 work first. `--wait 60` closes admissions while waiting up to 60 seconds and

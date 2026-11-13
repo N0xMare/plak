@@ -47,6 +47,7 @@ pub(in crate::host) fn request(services: &Services, target: &str) -> CliResult<P
             destination_key: identity.key,
             expected_binary: identity.binary,
             wait_seconds: 0,
+            drain: crate::command::HostDrain::default(),
             abandon: Some(target.to_owned()),
         },
     )?;

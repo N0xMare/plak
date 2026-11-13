@@ -142,6 +142,8 @@ type ParkSender = tokio::sync::mpsc::UnboundedSender<ParkRequest>;
 /// The order writers run in, and how the running one reaches its caller.
 #[derive(Default)]
 pub(super) struct TreeWriter {
+    /// Owed effects also span gaps between writer turns, not child actor lifetimes.
+    pub(super) effect_activity: super::step_activity::EffectActivity,
     /// Tokio's mutex is fair: writers take it in the order they asked.
     order: Arc<tokio::sync::Mutex<()>>,
     /// The running writer's park channel, with the blocking worker it runs

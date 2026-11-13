@@ -1,5 +1,6 @@
 //! The tree driver: one tree, its store and its VCS port, and the effects it settles.
 
+use super::step_activity;
 use super::*;
 
 /// One tree with its store and its VCS port: the engine every tree mutation
@@ -409,6 +410,10 @@ impl TreeDriver {
     /// The set [`Self::spawn_release_owner`] spawns on.
     pub fn release_owners(&self) -> crate::task_set::TaskSet {
         self.release_owners.clone()
+    }
+
+    pub(crate) fn step_effects_joined(&self) -> bool {
+        self.writer.effect_activity.is_idle() && self.writer.order().try_lock_owned().is_ok()
     }
 
     /// Joins tool-side receipt, job-stop and effect settlement after child release.
@@ -914,7 +919,9 @@ impl TreeDriver {
             return;
         }
         let driver = self.clone();
+        let activity = self.writer.effect_activity.enter();
         drop(self.spawn_release_owner(async move {
+            let _activity = activity;
             if let Err(error) = driver.settle_here(effects).await {
                 tracing::error!(target: "plak.topology", code = ?error.code,
                     "effects settled for a departed caller were refused");
@@ -927,6 +934,7 @@ impl TreeDriver {
     /// settled by a release owner.
     pub fn hold_effects(&self, effects: Effects) -> HeldEffects {
         HeldEffects {
+            _activity: (!effects.is_empty()).then(|| self.writer.effect_activity.enter()),
             driver: self.clone(),
             effects: Some(effects),
         }
@@ -1003,7 +1011,13 @@ impl TreeDriver {
         F: Future<Output = Result<T, TopologyError>> + Send + 'static,
         T: Send + 'static,
     {
-        self.spawn_release_owner(work).await.map_err(|_| {
+        let activity = self.writer.effect_activity.enter();
+        self.spawn_release_owner(async move {
+            let _activity = activity;
+            work.await
+        })
+        .await
+        .map_err(|_| {
             TopologyError::new(
                 TopologyErrorCode::OperationRecoveryRequired,
                 "the tree's release owner failed",
@@ -1464,6 +1478,7 @@ mod test_support;
 /// [`TreeDriver::hold_effects`].
 #[must_use = "dropped unsettled, the effects go to a release owner"]
 pub struct HeldEffects {
+    _activity: Option<step_activity::EffectGuard>,
     driver: TreeDriver,
     effects: Option<Effects>,
 }

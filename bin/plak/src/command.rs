@@ -1,6 +1,8 @@
 //! The parsed `plak` command and the classifiers the dispatcher reads.
 
 use std::path::PathBuf;
+mod drain;
+pub(crate) use drain::HostDrain;
 
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::{NativeLoginMode, NativeProvider};
@@ -372,6 +374,7 @@ pub(crate) enum Command {
         expect_binary: Option<String>,
         abandon: Option<String>,
         wait: std::time::Duration,
+        drain: Option<HostDrain>,
     },
     /// A byte-transparent bridge to the home's existing host.
     HostConnect {

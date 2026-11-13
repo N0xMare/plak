@@ -109,9 +109,18 @@ impl DraftRegistry {
         }))
     }
 
-    pub(crate) fn wait_resolved(&self, deadline: Instant) -> Result<(), &'static str> {
+    pub(crate) fn wait_resolved(
+        &self,
+        deadline: Instant,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), &'static str> {
         let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
         loop {
+            if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(
+                    "host_upgrade_cancelled: requester left before admission verdicts settled",
+                );
+            }
             if state.unresolved_drop {
                 return Err(
                     "host_upgrade_draft_verdict_unknown: a service ended without resolving a reserved input",
@@ -129,7 +138,10 @@ impl DraftRegistry {
             state = self
                 .0
                 .changed
-                .wait_timeout(state, deadline - now)
+                .wait_timeout(
+                    state,
+                    (deadline - now).min(std::time::Duration::from_millis(100)),
+                )
                 .unwrap_or_else(PoisonError::into_inner)
                 .0;
         }

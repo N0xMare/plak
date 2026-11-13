@@ -6,6 +6,7 @@ use super::*;
 
 const DESTINATION: &str = "r999.e999.p999.t999";
 
+mod drain;
 mod recovery;
 mod remote;
 mod selection;
@@ -403,7 +404,8 @@ fn host_upgrade_stale_source_instance_or_key_refuses_without_draining() {
         let mut request = json!({
             "source_instance":identity["instance"], "source_key":identity["key"],
             "destination":env!("CARGO_BIN_EXE_plak"), "destination_key":DESTINATION,
-            "expected_binary":binary, "wait_seconds":0
+            "expected_binary":binary, "wait_seconds":0,
+            "drain":{"mode":"bounded","milliseconds":60000}
         });
         request[field] = json!(if field == "source_key" {
             DESTINATION

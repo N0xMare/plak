@@ -38,8 +38,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
 
     /// Whether [`Self::poll_actions`] takes an action: after a quit it no
     /// longer reads the mailbox, so readiness must not wake the loop.
-    pub(super) const fn takes_actions(&self) -> bool {
+    pub(super) fn takes_actions(&self) -> bool {
         !self.quit_after_terminal
+            && (!self.host.events.step_control.requested()
+                || self.host.actions.abandon_and_release_requested()
+                || self.host.deferred.borrow().has_deferred_quit())
     }
 
     /// Suppresses child wakes before the tree stop and the root record. A
@@ -137,6 +140,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         reason = "The running-turn owner serializes queue edits, steering, cancellation, navigation, usage, and shutdown intents against one admission."
     )]
     pub(super) async fn poll_actions(&mut self) -> bool {
+        if self.host.events.step_control.requested() {
+            crate::interrupt::InterruptWatch::deferring(self.host.actions, self.host.deferred)
+                .poll();
+        }
         crate::call_detail::note_attached(&self.host.session.id);
         self.host
             .last_tree_revision
