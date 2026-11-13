@@ -51,7 +51,7 @@ nix.workspace = true
 plakous-runner-protocol.workspace = true
 proptest = { workspace = true, features = ["std"] }
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }
 
 [lints]
 workspace = true

@@ -423,7 +423,17 @@ mod cleanup_contention_tests {
             assert!(Instant::now() < deadline, "leader did not exit");
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert_eq!(super::super::GroupProbe::new(group).members(), 0);
+        // A bounded ps scan may time out under contention. Unknown is
+        // conservatively live, not evidence that the zombie was counted.
+        let count = loop {
+            if let Some(count) = super::super::GroupProbe::new(group).known_members() {
+                break count;
+            }
+            eprintln!("group scan was unknown after observed leader exit; retrying");
+            assert!(Instant::now() < deadline, "group scans stayed unknown");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(count, 0, "a complete scan counted the unreaped zombie");
         assert!(leader.try_wait().expect("reap").is_some());
     }
 

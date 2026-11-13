@@ -9,6 +9,7 @@ use super::client_control::*;
 use super::*;
 
 mod cuts;
+mod directory_tests;
 mod legal_reads;
 pub(super) mod transcript;
 
@@ -38,6 +39,13 @@ fn fixture_trace(child: bool, switching: bool) -> Value {
 }
 
 struct Bindings(BTreeMap<String, Value>);
+
+fn directory_sort_key(row: &Value) -> (std::cmp::Reverse<u64>, &str) {
+    (
+        std::cmp::Reverse(row["updated_at"].as_u64().expect("directory timestamp")),
+        row["session"].as_str().expect("directory session identity"),
+    )
+}
 
 impl Bindings {
     fn new(session: &str, workspace: &Path) -> Self {
@@ -80,6 +88,30 @@ impl Bindings {
         self.compare_at(expected, actual, "");
     }
 
+    fn compare_directory_rows(&mut self, expected: &[Value], actual: &[Value]) {
+        assert_eq!(expected.len(), actual.len(), "directory row count");
+        let order = actual.iter().map(directory_sort_key).collect::<Vec<_>>();
+        assert!(
+            order.windows(2).all(|pair| pair[0] < pair[1]),
+            "directory rows violate updated_at DESC, session ASC: {actual:?}"
+        );
+        // @time deliberately discards capture-time ordering facts. Check the
+        // live sort above, then compare every complete row by bound identity.
+        let mut expected = expected
+            .iter()
+            .map(|row| {
+                let identity = self.outgoing(&row["session"], "session");
+                (identity.as_str().unwrap().to_owned(), row)
+            })
+            .collect::<Vec<_>>();
+        expected.sort_by(|left, right| left.0.cmp(&right.0));
+        let mut actual = actual.iter().collect::<Vec<_>>();
+        actual.sort_by_key(|row| row["session"].as_str().unwrap().to_owned());
+        for ((_, expected), actual) in expected.into_iter().zip(actual) {
+            self.compare_at(expected, actual, "rows");
+        }
+    }
+
     fn compare_at(&mut self, expected: &Value, actual: &Value, key: &str) {
         if matches!(key, "created_at" | "updated_at") && expected == "@time" {
             assert!(actual.is_u64(), "timestamp: {actual}");
@@ -114,6 +146,10 @@ impl Bindings {
                 }
             }
             (Value::Array(left), Value::Array(right)) => {
+                if key == "rows" {
+                    self.compare_directory_rows(left, right);
+                    return;
+                }
                 assert_eq!(left.len(), right.len(), "{left:?} != {right:?}");
                 for (left, right) in left.iter().zip(right) {
                     self.compare_at(left, right, key);

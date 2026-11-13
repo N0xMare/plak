@@ -4345,6 +4345,19 @@ allowing the receiver to drain replies after a write half-close. Missing,
 duplicate, extra or within-direction-reordered controls fail. No frames are
 sorted or additionally filtered. Identity alias allocation uses direction order
 so independent duplex interleaving cannot change an alias.
+The socket replay checks directory rows against the live
+`updated_at DESC, session ASC` order, then compares every complete row by its
+bound session identity. Capture timestamps are opaque aliases, so they cannot
+freeze row positions across runs: a current-second tie legitimately uses the
+current UUID order. This does not reorder frames, omit rows or fields, or hide
+changed titles, activity or placement. Wrong live ordering and missing or
+changed rows have explicit refusal witnesses.
+Runner-hold budget evidence enters the unsent hold before advancing a paused
+Tokio clock and requires the exact budget shift; task scheduling and early
+timer wakeups are not held time. The unreaped-leader fixture waits for observed
+exit, then requires a complete process scan to report zero. A bounded scanner
+timeout is unknown, not a positive zombie count: only unknown scans are retried
+within the existing fixture bound, and a confirmed nonzero count still fails.
 `client_traces.py --check` compares normalized directional controls and checks
 the complete reads audit against that capture's own raw recording. Audit UUIDs,
 legal-read pairs and SHA provenance are capture-specific, not cross-capture

@@ -296,24 +296,32 @@ async fn an_interrupted_model_read_is_read_again_at_its_cursor_after_release() {
     assert_eq!(link.sent().len(), 1);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(start_paused = true)]
 async fn an_unsent_call_budget_excludes_its_hold() {
     let link = Scripted::answering([]);
     let services = held_services(Arc::clone(&link));
     services.set_available(false);
     let budget = Timestamp::new(plakous_model::now_unix_secs() + 60, 0).unwrap();
-    let call = tokio::spawn(services.backend().link().call(RunnerCall::new(
+    let mut call = services.backend().link().call(RunnerCall::new(
         RunnerVerb::ProcessStart,
         json!({}),
         &model(&CancellationToken::new()).with_budget(budget),
-    )));
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    ));
+    // Enter the hold before advancing its clock; task scheduling time is
+    // not time spent held, and timer wakeups need not be exactly 300 ms.
+    std::future::poll_fn(|context| {
+        assert!(call.as_mut().poll(context).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    assert!(link.sent().is_empty());
+    tokio::time::advance(Duration::from_millis(300)).await;
     services.set_available(true);
-    call.await.unwrap().unwrap();
+    call.await.unwrap();
     let sent = link.sent()[0].3.unwrap();
     let moved = (u128::from(sent.seconds()) * 1_000_000_000 + u128::from(sent.nanoseconds()))
         - u128::from(budget.seconds()) * 1_000_000_000;
-    assert!(moved >= 300_000_000, "moved by {moved} ns");
+    assert_eq!(moved, 300_000_000);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
