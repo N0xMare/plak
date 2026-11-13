@@ -164,7 +164,7 @@ async fn boundary_hold_never_interrupts_paid_compaction_or_starts_another_fold()
         tokio::task::yield_now().await;
     }
     let endpoint = agent.session_endpoint();
-    let mut hold = endpoint.hold_step_boundary()?;
+    let hold = endpoint.hold_step_boundary()?;
     assert_eq!(
         hold.progress()?,
         BoundaryProgress::Draining {
@@ -181,6 +181,12 @@ async fn boundary_hold_never_interrupts_paid_compaction_or_starts_another_fold()
             ..
         }
     ));
+    drop(hold);
+    assert!(
+        !compaction.is_finished(),
+        "hold rollback cannot cancel the paid call"
+    );
+    let mut hold = endpoint.hold_step_boundary()?;
     tokio::time::advance(Duration::from_secs(2)).await;
     let outcome = compaction
         .await?
@@ -382,6 +388,20 @@ async fn boundary_hold_effect_must_join_before_held() -> TestResult {
             phase: BoundaryPhase::Effect
         }
     );
+    let control = agent.turn_control(turn.id()).ok_or("active effect turn")?;
+    control.background().await?;
+    control.notice().await?;
+    assert!(
+        matches!(
+            hold.progress()?,
+            BoundaryProgress::Draining {
+                phase: BoundaryPhase::Effect,
+                ..
+            }
+        ),
+        "control acknowledgement is not the effect result or its durable fold"
+    );
+    assert!(!tool.release.load(Ordering::Acquire));
     tool.release.store(true, Ordering::Release);
     held(&mut hold, Some(turn.id())).await?;
     assert_eq!(model.calls.load(Ordering::Acquire), 1);

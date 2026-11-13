@@ -117,6 +117,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> InterruptWatchState<P> {
             .iter()
             .any(|delivery| IntentClass::of(&**delivery) == IntentClass::Quit)
     }
+
+    pub(crate) fn has_deferred_stop_or_interrupt(&self) -> bool {
+        self.deferred.iter().any(|delivery| {
+            matches!(
+                IntentClass::of(&**delivery),
+                IntentClass::Urgent | IntentClass::Stop | IntentClass::Quit
+            )
+        })
+    }
 }
 
 /// Defers an urgent `item` behind the urgent actions already deferred and

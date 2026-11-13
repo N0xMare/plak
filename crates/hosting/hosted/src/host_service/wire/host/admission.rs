@@ -115,6 +115,24 @@ impl Rate {
 /// A reversible host-upgrade admission pause. It never cancels running work.
 pub struct AdmissionPause {
     pub(super) gate: Arc<std::sync::RwLock<bool>>,
+    committed: Arc<std::sync::atomic::AtomicBool>,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl AdmissionPause {
+    /// Linearizes surrender against an existing-session stop, without opening ingress.
+    ///
+    /// # Errors
+    /// An operator control or requester loss cancelled preparation.
+    pub fn commit(&self) -> CliResult<()> {
+        let _gate = self.gate.write().unwrap_or_else(PoisonError::into_inner);
+        if self.cancelled.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(CliFailure::new("host upgrade cancelled before surrender"));
+        }
+        self.committed
+            .store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
 }
 
 impl Drop for AdmissionPause {
@@ -137,6 +155,18 @@ where
     /// # Errors
     /// Another upgrade already paused this host, or the host is stopping.
     pub fn pause_admissions(&self) -> CliResult<AdmissionPause> {
+        self.pause_admissions_for_upgrade(Arc::default())
+    }
+
+    /// Pauses ingress with the coordinator's cancellation flag. Existing-session
+    /// stop/interrupt requests cancel reversible preparation before ordinary handling.
+    ///
+    /// # Errors
+    /// Another pause exists or the host is stopping.
+    pub fn pause_admissions_for_upgrade(
+        &self,
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+    ) -> CliResult<AdmissionPause> {
         let mut paused = self
             .upgrade_admission
             .write()
@@ -145,8 +175,16 @@ where
             return Err(CliFailure::new("the host is already upgrading or stopping"));
         }
         *paused = true;
+        self.upgrade_committed
+            .store(false, std::sync::atomic::Ordering::Release);
+        *self
+            .upgrade_cancelled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::clone(&cancelled));
         Ok(AdmissionPause {
             gate: Arc::clone(&self.upgrade_admission),
+            committed: Arc::clone(&self.upgrade_committed),
+            cancelled,
         })
     }
 

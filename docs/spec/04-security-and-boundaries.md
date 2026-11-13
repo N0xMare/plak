@@ -2295,6 +2295,18 @@ boundary. Requester EOF or hangup revokes preparation, including its verdict
 barrier, while source authority is still held; after Ready it cannot revoke a
 transfer. Tree pauses defer host wakes/recovery without refusing effects already
 dispatched under that authority. Rollback reopens trees before driver gates.
+During reversible preparation, the admission gate admits only an existing-session
+StopSession or an interrupt on this connection's exact live attachment. It first
+sets the coordinator's cancellation flag, then follows the ordinary control path;
+it never reopens ingress or admits a prompt. Surrender serializes with that gate:
+once committed, a source control is refused and must reconnect to the destination.
+Private coordinator protocol 3 progress reports are bounded observations, never
+custody, admission or effect authority. Upgrade Notice can yield observation waits
+and promote foreground processes, but acknowledgements do not prove joined work
+and cannot authorize cancellation of paid compaction. Until cross-build retention
+is available, one changed-triple process gate inspects the source's existing bound
+clients before drain and before surrender; unknown state fails closed. It never
+creates a second bind under the serving instance or weakens runner admission.
 Generation-scoped guard revocation works with full command ingress.
 Paid compaction and unjoined effects block planned surrender rather than being
 cancelled by the upgrade hold. Neither the draft registry nor step-control

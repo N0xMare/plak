@@ -3,6 +3,7 @@
 mod abandon;
 mod bindings;
 mod preparation;
+mod process_safety;
 mod requester;
 mod startup;
 mod step_drain;
@@ -53,6 +54,7 @@ struct Request {
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum Answer {
+    Progress { detail: String },
     Ready { receipt: Option<uuid::Uuid> },
     Abandoned { mappings: Vec<abandon::Abandoned> },
     Refused { detail: String },
@@ -329,11 +331,6 @@ pub(super) fn request(
     wait: Duration,
     drain: crate::command::HostDrain,
 ) -> CliResult<ProcessOutcome> {
-    if drain == crate::command::HostDrain::Idle {
-        return Err(CliFailure::new(
-            "host_step_drain_idle_unavailable: --drain idle is not yet available; use a bounded drain until observation yields are enabled",
-        ));
-    }
     if !crate::carry::upgrade::binary_id_valid(expected)
         || expected != crate::build_identity::binary_id()
     {
@@ -364,8 +361,12 @@ pub(super) fn request(
         .set_write_timeout(Some(PROBE_BOUND))
         .map_err(io_failure)?;
     let identity: Identity = read(&stream)?;
-    if identity.protocol != crate::carry::upgrade::PROTOCOL
-        || identity.key != source.key
+    if identity.protocol != crate::carry::upgrade::PROTOCOL {
+        return Err(CliFailure::new(
+            "host_upgrade_unsupported_source: coordinator protocol differs; settle and drain using the retained source build before starting this destination",
+        ));
+    }
+    if identity.key != source.key
         || !crate::carry::upgrade::binary_id_valid(&identity.binary)
         || plakous_recursive_subagents::tree::HostInstance::parse(&identity.instance).is_err()
     {
@@ -404,27 +405,42 @@ pub(super) fn request(
             abandon: None,
         },
     )?;
-    match read::<Answer>(&stream)? {
-        Answer::Abandoned { .. } => Err(CliFailure::new("unexpected abandon reply to upgrade")),
-        Answer::Refused { detail } => Err(CliFailure::new(detail)),
-        Answer::Ready { receipt } => {
-            if let Some(id) = receipt {
-                wait_ack(paths, id)?;
-                let record = receipt::read(
-                    &receipt::root(paths)
-                        .join(id.to_string())
-                        .join("receipt.json"),
-                )?;
-                print_mappings(&record)?;
-            } else {
-                wait_host(
-                    paths,
-                    &crate::home::state::state_key(),
-                    expected,
-                    Some(&prior_instance),
-                )?;
+    finish_request(paths, expected, &prior_instance, &stream)
+}
+
+fn finish_request(
+    paths: &PlakPaths,
+    expected: &str,
+    prior_instance: &str,
+    stream: &UnixStream,
+) -> CliResult<ProcessOutcome> {
+    let mut replies = std::io::BufReader::new(stream);
+    loop {
+        match read_frame::<Answer>(&mut replies)? {
+            Answer::Progress { detail } => eprintln!("host upgrade: {detail}"),
+            Answer::Abandoned { .. } => {
+                return Err(CliFailure::new("unexpected abandon reply to upgrade"));
             }
-            Ok(ProcessOutcome::Success)
+            Answer::Refused { detail } => return Err(CliFailure::new(detail)),
+            Answer::Ready { receipt } => {
+                if let Some(id) = receipt {
+                    wait_ack(paths, id)?;
+                    let record = receipt::read(
+                        &receipt::root(paths)
+                            .join(id.to_string())
+                            .join("receipt.json"),
+                    )?;
+                    print_mappings(&record)?;
+                } else {
+                    wait_host(
+                        paths,
+                        &crate::home::state::state_key(),
+                        expected,
+                        Some(prior_instance),
+                    )?;
+                }
+                return Ok(ProcessOutcome::Success);
+            }
         }
     }
 }
@@ -700,6 +716,31 @@ fn handle(
         return write(&mut stream, &answer);
     }
     let caller = requester::Caller::watch(&stream, Arc::clone(cancelled))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(1)))
+        .map_err(io_failure)?;
+    let output = Mutex::new(stream.try_clone().map_err(io_failure)?);
+    let progress_start = Instant::now();
+    let last_progress = Mutex::new(None::<Instant>);
+    let progress = |detail: &str| {
+        let mut last = last_progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if last.is_some_and(|sent| sent.elapsed() < Duration::from_secs(1)) {
+            return Ok(());
+        }
+        let mut output = output
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        write(
+            &mut output,
+            &Answer::Progress {
+                detail: format!("waiting {}s: {detail}", progress_start.elapsed().as_secs()),
+            },
+        )?;
+        *last = Some(Instant::now());
+        Ok(())
+    };
     let result = prepare(
         host,
         services,
@@ -707,14 +748,10 @@ fn handle(
         &caller.cancelled,
         arguments,
         runtime,
+        &progress,
     );
     match result {
         Ok((ready, receipt)) => {
-            if receipt.is_none() && caller.cancelled.load(std::sync::atomic::Ordering::Acquire) {
-                return Err(CliFailure::new(
-                    "host upgrade requester left before Ready; source preparation withdrawn",
-                ));
-            }
             caller.ready();
             crate::carry::upgrade::crash_cut("before-answer");
             *pending
@@ -735,9 +772,10 @@ fn prepare(
     host: &Arc<SessionHost<PlakExtension>>,
     services: &Services,
     request: Request,
-    cancelled: &std::sync::atomic::AtomicBool,
+    cancelled: &Arc<std::sync::atomic::AtomicBool>,
     arguments: &[String],
     runtime: &tokio::runtime::Handle,
+    progress: &(dyn Fn(&str) -> CliResult<()> + Sync),
 ) -> CliResult<(Ready, Option<uuid::Uuid>)> {
     let paths = services.paths()?;
     check_cancel(cancelled)?;
@@ -749,7 +787,8 @@ fn prepare(
             "host_upgrade_pending_ack: finish the recorded destination's pending successors before another upgrade",
         ));
     }
-    qualify_destination(services, &request, arguments)?;
+    let destination_version = qualify_destination(services, &request, arguments)?;
+    process_safety::check(services, &destination_version, runtime)?;
     let cross_key = request.source_key != request.destination_key;
     if cross_key {
         match settled_roots(services) {
@@ -759,8 +798,9 @@ fn prepare(
         }
     }
     let standalone = crate::carry::upgrade::admission(paths, true)?;
-    let pause = host.pause_admissions()?;
+    let pause = host.pause_admissions_for_upgrade(Arc::clone(cancelled))?;
     let budget = step_drain::Budget::new(request.drain)?;
+    progress("resolving earlier admission verdicts")?;
     host.resolve_paused_drafts(&pause, budget.barrier_deadline, cancelled)?;
     let deadline = budget.start + Duration::from_secs(request.wait_seconds);
     if cross_key {
@@ -794,7 +834,10 @@ fn prepare(
             budget,
             cancelled,
             runtime,
+            progress,
         )?);
+        process_safety::check(services, &destination_version, runtime)?;
+        ready.pause.commit()?;
         return Ok((ready, None));
     }
     let failures = host.hand_off_paused(
@@ -816,12 +859,7 @@ fn qualify_destination(
     services: &Services,
     request: &Request,
     arguments: &[String],
-) -> CliResult<()> {
-    if request.drain == crate::command::HostDrain::Idle {
-        return Err(CliFailure::new(
-            "host_step_drain_idle_unavailable: --drain idle is not yet available; use a bounded drain until observation yields are enabled",
-        ));
-    }
+) -> CliResult<plakous::runner::protocol::VersionTriple> {
     let paths = services.paths()?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     if request.source_instance != identity.instance.to_string()
@@ -868,6 +906,7 @@ fn qualify_destination(
     )
     .map_err(|_| CliFailure::new("host upgrade destination did not answer its capability probe"))?;
     if probe.protocol != crate::carry::upgrade::PROTOCOL
+        || probe.runner_protocol != probe.runner_version.protocol
         || probe.receipt_version != receipt::VERSION
         || !probe.host_available
         || probe.binary_id != request.expected_binary
@@ -892,7 +931,7 @@ fn qualify_destination(
         }
         preflight_same_key(services, request)?;
     }
-    Ok(())
+    Ok(probe.runner_version)
 }
 
 fn new_receipt(services: &Services, request: Request, arguments: &[String]) -> CliResult<Receipt> {
@@ -948,6 +987,7 @@ fn carry_settled(
     }
     crate::carry::upgrade::crash_cut("after-receipt");
     if let Err(failure) = preparation::exports(services, &ready, &mut receipt, documents, cancelled)
+        .and_then(|()| ready.pause.commit())
     {
         if let Err(cleanup) = preparation::withdraw(paths, &mut receipt) {
             eprintln!(
@@ -1228,9 +1268,13 @@ fn io_failure(error: std::io::Error) -> CliFailure {
 }
 
 fn read<T: serde::de::DeserializeOwned>(stream: &UnixStream) -> CliResult<T> {
+    read_frame(&mut std::io::BufReader::new(stream))
+}
+
+fn read_frame<T: serde::de::DeserializeOwned>(reader: &mut impl std::io::BufRead) -> CliResult<T> {
     use std::io::Read as _;
     let mut bytes = Vec::new();
-    std::io::BufReader::new(stream)
+    reader
         .take(64 * 1024 + 1)
         .read_until(b'\n', &mut bytes)
         .map_err(io_failure)?;

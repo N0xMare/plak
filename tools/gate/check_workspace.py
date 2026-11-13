@@ -439,10 +439,12 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     ("plak", "src/test_hooks.rs"): [
         ("var", (("string", "PLAK_TEST_STATE_KEY"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT"),)),
+        ("var", (("string", "PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_IMPORT_REFUSAL"),)),
         ("var_os", (("string", "PLAK_TEST_BINDING_CUT_IMAGE"),)),
         ("var", (("string", "PLAK_TEST_FORCE_HOST_UPGRADE"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_CUT"),)),
+        ("var_os", (("string", "PLAK_TEST_HOST_UPGRADE_DRAIN_GATE"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE"),)),
         ("var_os", (("string", "PLAK_TEST_STORAGE_CAPACITY"),)),
         ("var", (("string", "PLAK_TEST_MODEL"),)),
@@ -779,6 +781,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/runtime/turn_drive/mod.rs"): {"pin", "select", "debug_assert"},
     ("plakous-hosted", "src/runtime/network_watch.rs"): {"select"},
     ("plakous-hosted", "src/host_service/wire/host.rs"): {"info", "select"},
+    ("plakous-hosted", "src/host_service/wire/host/step_drain/cutover.rs"): {"pin", "select"},
     ("plakous-hosted", "src/runtime/host_loop/idle.rs"): {"select"},
     ("plakous-hosted", "src/runtime/host_loop/step_hold.rs"): {"select"},
     ("plakous-hosted", "src/driver/transient.rs"): {"pin", "select", "debug_assert"},
@@ -1654,6 +1657,11 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "tools": {"runner::RunnerBackend"},
     },
     ("plak", "src/host/upgrade/startup.rs"): {"runner": {"WorkspaceCatalog", "RunnerStatus"}},
+    ("plak", "src/carry/upgrade.rs"): {"runner": {"protocol", "VersionTriple"}},
+    ("plak", "src/host/upgrade.rs"): {"runner": {"protocol", "VersionTriple"}},
+    ("plak", "src/host/upgrade/process_safety.rs"): {
+        "runner": {"protocol", "LineStatus", "VersionTriple"}
+    },
     ("plak", "src/host/sessions.rs"): {"runner": {"RunnerRow"}},
     ("plakous-hosted", "src/jobs.rs"): {"tools": {"LineOwner"}},
     ("plak", "src/platform_product/anthropic.rs"): {

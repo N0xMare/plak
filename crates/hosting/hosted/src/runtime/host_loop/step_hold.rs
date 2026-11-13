@@ -21,6 +21,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 &self.role.interrupt_state,
             );
             watch.poll();
+            if self
+                .role
+                .interrupt_state
+                .borrow()
+                .has_deferred_stop_or_interrupt()
+            {
+                control.interrupt();
+            }
             if self.role.actions.abandon_and_release_requested()
                 || self.role.interrupt_state.borrow().has_deferred_quit()
             {

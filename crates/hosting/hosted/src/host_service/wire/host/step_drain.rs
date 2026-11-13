@@ -16,6 +16,16 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+mod cutover;
+
+/// Host-layer cancellation and categorical progress; neither grants runtime authority.
+pub struct StepDrainMonitor<'a> {
+    /// Requester loss or operator cancellation, checked throughout the rendezvous.
+    pub cancelled: &'a AtomicBool,
+    /// Bounded status text without model input, tool arguments or credentials.
+    pub progress: &'a (dyn Fn(&str) -> CliResult<()> + Sync),
+}
+
 struct HeldDriver {
     agent: Agent,
     hold: BoundaryHold,
@@ -30,6 +40,39 @@ pub struct HostStepDrain {
 }
 
 impl HostStepDrain {
+    async fn pause_tree(
+        &mut self,
+        tree: Arc<crate::topology_runtime::ProductTopologyRuntime>,
+        deadline: Option<Instant>,
+        monitor: &StepDrainMonitor<'_>,
+    ) -> CliResult<()> {
+        let identity = Arc::as_ptr(&tree) as usize;
+        if self.trees.contains_key(&identity) {
+            return Ok(());
+        }
+        let mut pausing = Box::pin(tree.pause_step_admissions());
+        loop {
+            if monitor.cancelled.load(Ordering::Acquire) {
+                return Err(CliFailure::new(
+                    "host step drain cancelled while joining tree admissions",
+                ));
+            }
+            if let Ok(result) =
+                tokio::time::timeout(Duration::from_millis(20), pausing.as_mut()).await
+            {
+                self.trees
+                    .insert(identity, result.map_err(CliFailure::new)?);
+                return Ok(());
+            }
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                return Err(CliFailure::new(
+                    "host_step_drain_blocked: tree admissions did not join within the host-wide freeze budget",
+                ));
+            }
+            (monitor.progress)("joining tree admissions")?;
+        }
+    }
+
     fn hold(&mut self, agent: Agent) -> CliResult<()> {
         if let std::collections::btree_map::Entry::Vacant(entry) = self.drivers.entry(agent.id()) {
             let hold = hold_step_boundary(&agent)
@@ -86,41 +129,43 @@ impl HostStepDrain {
         Ok(joined)
     }
 
-    fn at_boundaries(&self, model_bound: bool) -> CliResult<bool> {
+    fn pending_boundary(&self, model_bound: bool) -> CliResult<Option<&'static str>> {
         for driver in self.drivers.values() {
             let progress = driver.hold.progress().map_err(|error| {
                 CliFailure::new(format!("host_step_owner_unavailable: {error}"))
             })?;
             if matches!(progress, BoundaryProgress::Held { turn: Some(turn), .. } if driver.agent.turn_control(turn).is_none())
             {
-                return Ok(false);
+                return Ok(Some("turn_control_unavailable"));
             }
-            if !(matches!(progress, BoundaryProgress::Held { .. })
-                || (model_bound
-                    && matches!(
-                        progress,
-                        BoundaryProgress::Draining {
-                            phase: BoundaryPhase::Model,
-                            ..
-                        }
-                    )))
-            {
-                return Ok(false);
+            match progress {
+                BoundaryProgress::Held { .. } => {}
+                BoundaryProgress::Draining {
+                    phase: BoundaryPhase::Model,
+                    ..
+                } if model_bound => {}
+                BoundaryProgress::Draining {
+                    phase: BoundaryPhase::Compaction,
+                    ..
+                } => {
+                    return Ok(Some("paid_compaction_in_flight"));
+                }
+                BoundaryProgress::Draining {
+                    phase: BoundaryPhase::Effect,
+                    ..
+                } => {
+                    return Ok(Some("effect_in_flight"));
+                }
+                BoundaryProgress::Draining {
+                    phase: BoundaryPhase::Model,
+                    ..
+                } => {
+                    return Ok(Some("model_in_flight"));
+                }
+                BoundaryProgress::Requested => return Ok(Some("boundary_requested")),
             }
         }
-        Ok(true)
-    }
-
-    fn blocked_at_bound(&self) -> bool {
-        self.drivers.values().any(|driver| {
-            matches!(
-                driver.hold.progress(),
-                Ok(BoundaryProgress::Draining {
-                    phase: BoundaryPhase::Compaction | BoundaryPhase::Effect,
-                    ..
-                })
-            )
-        })
+        Ok(None)
     }
 }
 
@@ -136,11 +181,11 @@ where
         &self,
         drain: &mut HostStepDrain,
         deadline: Option<Instant>,
-        cancelled: &AtomicBool,
+        monitor: &StepDrainMonitor<'_>,
     ) -> CliResult<()> {
         let mut pending = self.slots();
         loop {
-            if cancelled.load(Ordering::Acquire) || self.closed() {
+            if monitor.cancelled.load(Ordering::Acquire) || self.closed() {
                 return Err(CliFailure::new(
                     "host step drain cancelled while joining session owners",
                 ));
@@ -167,6 +212,7 @@ where
                 ));
             }
             pending = busy;
+            (monitor.progress)("joining session owners")?;
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
@@ -182,7 +228,7 @@ where
         pause: &super::AdmissionPause,
         drain_until: Option<Instant>,
         freeze_budget: Duration,
-        cancelled: &AtomicBool,
+        monitor: &StepDrainMonitor<'_>,
         trees: Vec<Arc<crate::topology_runtime::ProductTopologyRuntime>>,
     ) -> CliResult<HostStepDrain> {
         if !Arc::ptr_eq(&pause.gate, &self.upgrade_admission)
@@ -210,44 +256,11 @@ where
             trees: BTreeMap::new(),
             owners: Vec::new(),
         };
-        self.pause_step_owners(&mut drain, freeze_until, cancelled)
+        self.pause_step_owners(&mut drain, freeze_until, monitor)
             .await?;
         for tree in trees {
-            let identity = Arc::as_ptr(&tree) as usize;
-            if let std::collections::btree_map::Entry::Vacant(entry) = drain.trees.entry(identity) {
-                entry.insert(
-                    tree.pause_step_admissions()
-                        .await
-                        .map_err(CliFailure::new)?,
-                );
-            }
+            drain.pause_tree(tree, freeze_until, monitor).await?;
         }
-        loop {
-            if cancelled.load(Ordering::Acquire) || self.closed() {
-                return Err(CliFailure::new(
-                    "host step drain was cancelled before surrender",
-                ));
-            }
-            let at_bound = drain_until.is_some_and(|deadline| Instant::now() >= deadline);
-            if at_bound && drain.blocked_at_bound() {
-                return Err(CliFailure::new(
-                    "host_step_drain_blocked: compaction or effects have not joined at the drain bound; source remains authoritative",
-                ));
-            }
-            let effects_joined = match freeze_until {
-                Some(deadline) => tokio::time::timeout(deadline.saturating_duration_since(Instant::now()), drain.refresh())
-                    .await.map_err(|_| CliFailure::new("host_step_drain_blocked: the freeze rendezvous did not join within its host-wide bound"))??,
-                None => drain.refresh().await?,
-            };
-            if effects_joined && drain.at_boundaries(at_bound)? {
-                return Ok(drain);
-            }
-            if freeze_until.is_some_and(|deadline| Instant::now() >= deadline) {
-                return Err(CliFailure::new(
-                    "host_step_drain_blocked: compaction, effects or tree transitions remain in flight; source remains authoritative",
-                ));
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        cutover::finish(self, drain, drain_until, freeze_until, monitor).await
     }
 }

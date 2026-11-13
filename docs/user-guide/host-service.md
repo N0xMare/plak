@@ -131,25 +131,41 @@ Same-key upgrade uses planned handoff and the existing session identities.
 It closes new admissions, resolves earlier draft verdicts, then drains roots
 and children at runtime step boundaries. The default natural-drain budget is
 60 seconds. Use `--drain 0` to skip that wait or `--drain 5m` for five minutes.
-`--drain idle` refuses before pausing admissions: unbounded draining is not yet
-available until observation yields are enabled. Integer `ms`, `s`, `m`, `h` and
-bare seconds are accepted, up to one hour. Finite modes use one natural-drain
-deadline for all agents, not a separate wait per session. The earlier verdict
-barrier gets at least 10 seconds, including with `--drain 0`; that floor does
-not extend the natural-drain deadline.
-Mandatory freeze and planned-release acknowledgements still have bounded
-joins. An unfinished model call continues through the existing planned
-interrupt; its continuation is a new call, not prompt replay. Unjoined effects
-or paid compaction refuse preparation rather than being cancelled by a hold;
-failed preparation reopens the source's gates. Losing the upgrade requester's
-connection before surrender cancels preparation and reopens those gates; after
-Ready, disconnection cannot cancel the transfer. A lost client connection proves
-neither admission failure nor receipt of a verdict: the barrier joins a
-delivery attempt, not an acknowledgement from that client.
+`--drain idle` waits without a natural deadline; Ctrl-C cancels preparation.
+Integer `ms`, `s`, `m`, `h` and bare seconds are accepted, up to one hour.
+Finite modes use one natural-drain deadline for all agents, not a separate wait
+per session. The earlier verdict barrier gets at least 10 seconds, including
+with `--drain 0`; that floor does not extend natural draining. Idle's verdict
+barrier is bounded to 60 seconds before the unbounded boundary drain begins.
 
-Step draining does not retain jobs across a change to the runner's native
-revision/flavor/protocol triple. Settle those jobs first; the separate
-cross-build retention capability is not supplied by this command yet.
+| Work still running | Finite drain at its bound | Idle |
+| --- | --- | --- |
+| Model call | Planned interrupt and one new continuation call | Finishes naturally under normal clocks |
+| Paid compaction | Finishes within the global freeze allowance or preparation aborts; never cancelled | Finishes naturally under normal clocks |
+| Child, mail or job observation wait | Notice requests a prompt result | Notice immediately |
+| Foreground process tool | Notice requests promotion; the tool result must join | Notice immediately; result must join |
+| Other tools, workspace/tree operations and result projection | Finish within the freeze allowance or preparation aborts | Finish naturally, with operator cancellation available |
+
+Progress on stderr names the still-running categories, bounded driver IDs and
+how long preparation has waited. A control acknowledgement is not a finished
+operation. A refused promotion must finish naturally or preparation aborts.
+The freeze and planned-release acknowledgements keep bounded joins in finite
+modes. Idle starts surrender only after natural work reaches boundaries.
+Unsuccessful preparation reopens the source's gates. Losing the requester's
+connection or Ctrl-C before surrender cancels preparation; after Ready,
+disconnection cannot cancel the transfer. An explicit session stop takes
+precedence and is never converted into a continuation. The admission-verdict
+barrier joins a delivery attempt, not receipt by a disconnected client.
+
+Promoted jobs continue only with an unchanged exact runner revision/flavor/protocol
+triple. Until cross-build job retention lands, changed-triple requests with live
+foreground/background processes or unknown runner state refuse before drain;
+settle and drain them using the old build, then retry. Source-owned runner
+clients are checked again before surrender, without another bind or custody
+transfer, including child placements. A process started during preparation can
+already have been promoted by Notice when the final check refuses; it keeps
+running on the source and can be stopped or drained there. Cross-key carry still
+requires settled jobs and trees.
 `--drain` cannot be combined with `--wait` or `--abandon`.
 
 Cross-key upgrade supports **settled roots**, locally or on paired runners.

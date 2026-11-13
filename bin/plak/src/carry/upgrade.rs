@@ -9,7 +9,7 @@ use crate::{CliFailure, CliResult};
 pub(crate) mod process;
 pub(crate) mod remote;
 
-pub(crate) const PROTOCOL: u32 = 2;
+pub(crate) const PROTOCOL: u32 = 3;
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -168,6 +168,7 @@ pub(crate) struct DestinationProbe {
     pub(crate) export_versions: Vec<u32>,
     pub(crate) host_available: bool,
     pub(crate) runner_protocol: u32,
+    pub(crate) runner_version: plakous::runner::protocol::VersionTriple,
     pub(crate) config_error: Option<String>,
 }
 
@@ -183,6 +184,10 @@ pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationPro
     } else {
         export_versions
     };
+    let mut runner_version = crate::commands::runner::version();
+    if let Some(revision) = crate::test_hooks::upgrade_runner_revision() {
+        runner_version.source_revision = revision;
+    }
     Ok(DestinationProbe {
         protocol: PROTOCOL,
         receipt_version: receipt::VERSION,
@@ -191,6 +196,7 @@ pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationPro
         export_versions,
         host_available: crate::host::AVAILABLE,
         runner_protocol: crate::commands::runner::version().protocol,
+        runner_version,
         config_error: config
             .and(policy.map(|_| ()))
             .err()

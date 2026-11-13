@@ -63,12 +63,25 @@ Same-key step-drain cases use the same isolated real-binary homes. A
 so the ordinary same-key planned handoff is exercised; it bypasses no image,
 source-instance, custody or binding check. Production ignores it. Durability
 cases cover zero-bound interruption/continuation, finite natural completion,
-requester-loss rollback and refusal of unavailable idle draining, with unchanged
+requester-loss rollback, idle natural completion and visible progress/Cancel, with unchanged
 session, branch and node identities. A foreground process and a paid fold
-running together at the bound must refuse surrender, reopen admissions, and
-finish once without cancellation or redispatch. Core parallel cases pin
+running together past the bounded freeze must refuse surrender, reopen admissions, and
+finish once without cancellation or redispatch. Same-triple foreground promotion
+must preserve the real process PID through handoff, with one continuation and
+no process redispatch. Operator stop must abort before surrender without
+continuing stopped work. Private coordinator protocol 3 progress framing is
+checked with consecutive buffered replies; native runner/client protocols do
+not change. Changed-triple process probes fail closed until cross-build
+retention is available. A scheduled in-turn paid fold past the zero-drain
+bound must refuse with `paid_compaction_in_flight`, keep its single summary
+dispatch, and complete after rollback. A process starting after the initial
+changed-triple check must be found by the final check, remain source-owned and
+survive refusal. Coordinator parallel cases pin a slow joined lock computation
+across progress ticks, cancellation, and the single freeze bound; polling must
+not drop and restart that computation. Core parallel cases pin
 full-ingress guard revocation, stale generations, idle and internally admitted
-holds, preparation-window re-resolution, restored undispatched slots and the
+holds, preparation-window re-resolution, restored undispatched slots, approval expiry
+extended by actual parked time, closed-tree versus StepHeld recovery, and the
 first paid fold after deferred image residency. L0 clock evidence is generic:
 Held lies outside the model-operation deadline and a running operation remains
 Draining. Real retry-after and semantic-stall composition tests belong to the
@@ -84,7 +97,9 @@ handoff a crash is owner loss, not an upgrade receipt or permission to replay.
 Settled host-upgrade regressions use isolated real-binary homes and a
 test-hooks-only `PLAK_TEST_STATE_KEY` override to make producer and destination
 keys differ without changing the v12 carrier. Production builds ignore that
-variable. The durability profile owns `host_skeleton::upgrade::`, excluded
+variable. `PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION` alters only the destination
+capability probe under test-hooks to pin changed-triple foreground refusal;
+production ignores it and the source runner triple is untouched. The durability profile owns `host_skeleton::upgrade::`, excluded
 from offline: named state and paused queue round trips, source reopen refusal,
 recorded-root redirects, lost-ack retry, precommit rollback, postcommit-only
 destination recovery, wait timeout and preflight failures. Receipt cuts cover

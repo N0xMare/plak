@@ -30,11 +30,13 @@ Upgrade is invoked using the destination build and its exact binary id.
 Same-key upgrades use planned handoff with a host-wide step drain (default
 60 seconds). --drain accepts 0, integer ms/s/m/h, bare seconds, or idle;
 finite durations are at most one hour. 0 skips natural model-call drain;
-idle is parsed but not yet available until observation yields are enabled.
+idle waits naturally without a bound; Ctrl-C cancels preparation.
 Finite drain uses one absolute natural-drain deadline for all agents, not a
 fresh allowance per session. The draft-verdict barrier gets at least 10 seconds,
 including for 0. Effects and paid compaction must join;
-an unsuccessful preparation reopens the source's gates. Mandatory freeze and
+an unsuccessful preparation reopens the source's gates. Notice requests
+joined tool results, never permission to cancel paid compaction. Progress shows
+what remains running and waiting time on stderr. Mandatory freeze and
 planned-release acknowledgements retain their ordinary bounded joins.
 This does not add cross-build background-job retention: settle jobs before
 changing their runner's native build triple. Cross-key upgrade carries settled

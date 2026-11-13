@@ -4,7 +4,9 @@ use crate::command::HostDrain;
 use crate::shell::services::Services;
 use crate::surface_protocol::PlakExtension;
 use crate::{CliFailure, CliResult};
-use plakous_hosted::host_service::wire::{AdmissionPause, HostStepDrain, SessionHost};
+use plakous_hosted::host_service::wire::{
+    AdmissionPause, HostStepDrain, SessionHost, StepDrainMonitor,
+};
 use std::sync::{Arc, atomic::AtomicBool};
 use std::time::{Duration, Instant};
 
@@ -42,7 +44,18 @@ pub(super) fn prepare(
     budget: Budget,
     cancelled: &AtomicBool,
     runtime: &tokio::runtime::Handle,
+    progress: &(dyn Fn(&str) -> CliResult<()> + Sync),
 ) -> CliResult<HostStepDrain> {
+    while crate::test_hooks::upgrade_preparation_refused("step-drain-gate") {
+        if cancelled.load(std::sync::atomic::Ordering::Acquire)
+            || Instant::now() >= budget.barrier_deadline
+        {
+            return Err(CliFailure::new(
+                "host step-drain test rendezvous was cancelled or expired",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
     let roots = crate::store::ProductStore::inspect_upgrade_roots(services.paths()?)
         .map_err(CliFailure::new)?;
     let trees = roots
@@ -54,7 +67,10 @@ pub(super) fn prepare(
             pause,
             budget.deadline,
             super::super::HANDOFF_DEADLINE.saturating_sub(super::super::STOP_MARGIN),
-            cancelled,
+            &StepDrainMonitor {
+                cancelled,
+                progress,
+            },
             trees,
         )
         .await

@@ -5457,7 +5457,9 @@ same-user operator action, invoked using the destination executable and its own
 binary ID. It discovers exactly one live source host across keys, then echoes
 that host's key and instance on its private upgrade control socket. Missing or
 older unsupported coordinators refuse without signalling or stopping anything.
-The private coordinator protocol is 2: it includes the drain budget; operational
+The private coordinator protocol is 3: it includes bounded categorical progress
+replies as well as the drain budget; older coordinator identities refuse before
+any drain, without a compatibility reader. Operational
 receipt version 1 and export document version 12 are unchanged.
 The source independently hashes the destination image and probes its host
 capability, key, import versions and configuration. Cross-key capacity and
@@ -5497,10 +5499,13 @@ suffixes and bare seconds accept 0 through one hour. It is exclusive with
 `--wait` and `--abandon`. Finite modes share one absolute host-wide natural-drain
 deadline across every agent. The earlier verdict barrier uses the later of that
 deadline and ten seconds after preparation began, including for `--drain 0`;
-that floor does not extend natural draining. `idle` currently refuses before
-pausing admissions, until observation yields are available. Its reserved policy
-is a bounded 60-second verdict barrier followed by unbounded boundary draining,
-not a wait for all tasks to finish or jobs to exit.
+that floor does not extend natural draining. `idle` uses a bounded 60-second
+verdict barrier followed by unbounded natural boundary draining. Model calls
+and paid compaction finish under their ordinary clocks; there is no absolute
+freeze deadline while they run. Observation/process waits receive Notice immediately. This is not a wait for every task or job to exit.
+The requester prints categorical waiting time and active driver identities to
+stderr at most once per second; no prompt, tool arguments or credentials are
+included. Ctrl-C or requester loss aborts reversible preparation.
 
 The existing root owner freezes outer actions, the hub defers host-initiated
 wakes and recovery claims, and each admitted root/child driver
@@ -5517,20 +5522,46 @@ EOF or hangup cancels preparation before surrender, including the verdict
 barrier. After Ready, requester loss cannot cancel the committed transfer.
 The home and source leases never move on a hold.
 
-At the natural-drain bound, ordinary model generations may reach the existing
-planned interrupt and once-only continuation law; 0 skips the natural wait.
-Known effect or compaction work that has not joined instead refuses before
-handoff. No upgrade hold cancels paid compaction. Mandatory owner/placement
-rendezvous and planned-release acknowledgements keep their existing bounded
-joins; their allowance is host-wide, not multiplied by the number of sessions.
+At a finite natural-drain bound (immediately for 0), the following policy
+applies. Idle uses the same yielding policy immediately, but never cancels a
+model call and starts surrender only after natural work reaches boundaries.
+
+| Work at the cutover | Finite drain | Idle drain |
+| --- | --- | --- |
+| Ordinary model generation | Existing planned interrupt at the bound; once-only continuation is a new call | Finish naturally under normal clocks |
+| Paid compaction | Join within the global freeze allowance, otherwise abort precommit; never cancel | Finish naturally under normal clocks; never cancel |
+| Child/mail/job observation waits | Existing exact-turn Notice requests a result | Notice immediately |
+| Foreground process tools | Existing exact-turn Notice requests promotion, then join the tool result | Notice immediately, then join |
+| Other effectful tools, workspace/tree operations, result projection | Join within the freeze allowance or abort precommit | Join naturally; operator cancellation remains available |
+
+Notice acknowledgements are not joined results. Controls address
+only already-admitted dispatches and are retried without latching future calls.
+Failed/refused promotion must join naturally or preparation aborts; no promotion
+receipt is added. Upgrade yields use Notice, not Background: Background remains the manual
+process-only control and must not mask observation waits. No in-flight effect
+journal crosses surrender. A root or child
+stop/interrupt wins over preparation, which reopens the source gates rather than
+continuing stopped work. Mandatory owner/placement rendezvous and planned-release
+acknowledgements keep bounded joins; finite modes share one natural deadline
+plus one freeze allowance, never multiplied by sessions. Idle's freeze
+rendezvous completes only when natural work has reached boundaries.
 A replacement acknowledgement requires a fresh source-instance identity even
 when a test forces the same image to restart. An already running exact target
 remains an ordinary no-op.
 
 A changed local-runner protocol refuses before handoff. Step draining adds no
-job-retention channel across different native runner triples: settle jobs before
-changing revision, flavor or protocol until that capability is separately
-admitted. Cross-key live trees/jobs remain outside this settled carrier.
+job-retention channel across different native runner triples. One read-only gate
+checks the source's existing bound runner clients before drain and again before
+surrender: a changed-triple request with live foreground/background processes or
+unknown process state refuses with the remedy to settle/drain using the old
+build. Promoted-job continuation is qualified only for an unchanged exact triple;
+If a process begins after the first check, Notice may already have promoted its
+wait by the final check. Refusal leaves that process running under the source;
+it does not stop the process or surrender its custody. The gate checks child
+runner placements too, not just each root's runner. This temporary gate does not
+weaken the home-local protocol-only admission rule
+or any remote exact-triple rule. Cross-key live trees/jobs remain outside this
+settled carrier.
 
 Cross-key upgrade is the **settled-root** operation of §2.5.1. Without
 `--wait`, blockers are returned before stopping admissions, as a list with

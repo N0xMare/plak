@@ -58,7 +58,10 @@ one cross-build carrier (a build imports its own and the previous version).
   JSON Schemas to releases.
 
 - Drain same-key host upgrades at runtime step boundaries with `--drain`
-  (60 seconds by default, bounded durations; `idle` is not yet available).
+  (60 seconds by default, bounded durations or unbounded `idle`).
+  Yield observation waits and promote foreground processes with Notice;
+  join results before surrender, never cancel paid compaction. Show waiting
+  categories and elapsed time; Ctrl-C or session stop withdraws preparation.
   Resolve earlier draft verdicts with a ten-second minimum barrier before
   freezing roots and children; requester loss or rollback reopens source gates.
   Existing planned handoff preserves identities and once-only continuation.

@@ -99,12 +99,15 @@ pub struct Creation<'a> {
 }
 
 mod product;
+mod upgrade_controls;
 mod verdicts;
 pub use product::HostSessions;
 
 /// The sessions one host serves.
 pub struct SessionHost<P: ProtocolExtension> {
     upgrade_admission: Arc<std::sync::RwLock<bool>>,
+    upgrade_cancelled: Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>,
+    upgrade_committed: Arc<std::sync::atomic::AtomicBool>,
     admission: admission::Admission,
     next_connection: AtomicU64,
     drafts: super::super::drafts::DraftRegistry,
@@ -166,6 +169,8 @@ where
         let admission = admission::Admission::new(sessions.host_read_limits());
         Arc::new(Self {
             upgrade_admission: Arc::default(),
+            upgrade_cancelled: Mutex::default(),
+            upgrade_committed: Arc::default(),
             admission,
             next_connection: AtomicU64::new(1),
             drafts: super::super::drafts::DraftRegistry::default(),
@@ -568,7 +573,7 @@ where
             }
             Ok(frame) => frame,
         };
-        if *paused {
+        if *paused && !self.cancel_upgrade_for_control(&frame) {
             if let ClientFrame::Request { id, .. } = frame {
                 write_frame(
                     &mut self.out,
@@ -1408,7 +1413,7 @@ pub use admission::{AdmissionPause, HostReadLimits};
 pub use reads::{HostPrincipal, HostReadTask, HostRequestContext};
 mod admission;
 mod step_drain;
-pub use step_drain::HostStepDrain;
+pub use step_drain::{HostStepDrain, StepDrainMonitor};
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]

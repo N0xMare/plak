@@ -169,6 +169,10 @@ mod test_hooks {
     pub(crate) const fn upgrade_import_refused() -> bool {
         false
     }
+
+    pub(crate) const fn upgrade_runner_revision() -> Option<String> {
+        None
+    }
     #[allow(
         dead_code,
         reason = "only the optional host can exercise same-image handoff"

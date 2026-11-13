@@ -143,6 +143,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         if self.host.events.step_control.requested() {
             crate::interrupt::InterruptWatch::deferring(self.host.actions, self.host.deferred)
                 .poll();
+            if self.host.deferred.borrow().has_deferred_stop_or_interrupt() {
+                self.host.events.step_control.interrupt();
+            }
         }
         crate::call_detail::note_attached(&self.host.session.id);
         self.host

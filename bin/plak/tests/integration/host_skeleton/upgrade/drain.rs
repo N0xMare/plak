@@ -4,6 +4,12 @@ use super::*;
 use plak::store::session_records::{SessionRecordStore as _, SqliteSessionStore};
 use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
 
+mod observations;
+mod paid_fold;
+mod process;
+mod protocol;
+mod stop;
+
 fn store(fixture: &Fixture) -> SqliteSessionStore {
     SqliteSessionStore::new(plak::home::paths::PlakPaths::explicit(fixture.home()))
 }
@@ -112,9 +118,14 @@ fn process_script(fixture: &Fixture) -> serde_json::Value {
 }
 
 fn folding_seed(fixture: &Fixture) -> String {
-    fixture.write_script(
+    folding_seed_with(
+        fixture,
         &json!({"version":1,"process_tools":true,"steps":[{"output":{"text":"retained answer"},"finish":"stop"}]}),
-    );
+    )
+}
+
+fn folding_seed_with(fixture: &Fixture, script: &serde_json::Value) -> String {
+    fixture.write_script(script);
     let consent = fixture.root.join("seed-consent");
     write_private(&consent, "y\n");
     let first = fixture
@@ -223,29 +234,66 @@ fn host_step_drain_tool_and_paid_fold_at_bound_refuse_without_cancelling_either(
     assert_eq!(client.request(6, Op::Ping), Outcome::Ok(Answer::Pong));
     assert!(!fixture.home().join("host/upgrades").exists());
     std::fs::write(&provider_release, "continue").unwrap();
-    std::fs::write(&process_release, "continue").unwrap();
-    settled(&fixture, &process_session);
     settled(&fixture, &folding_session);
     assert_eq!(
         read_evidence(summaries).unwrap().len(),
         1,
         "paid fold is never retried"
     );
-    let process = store(&fixture).load_intents(&process_session).unwrap();
+    finish_process_after_rollback(&fixture, &mut client, &process_session);
+    std::fs::write(&process_release, "continue").unwrap();
+    stop(&mut host);
+}
+
+fn finish_process_after_rollback(fixture: &Fixture, client: &mut Client, process_session: &str) {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let views = store(fixture).load_views(process_session).unwrap().unwrap();
+        if views.state.counters.root_turns == 1 && views.state.open_turns.is_empty() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "joined process result did not finish after rollback"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let process = store(fixture).load_intents(process_session).unwrap();
     assert_eq!(process.root_continuations.len(), 0);
     assert_eq!(
-        store(&fixture)
-            .load(&process_session)
+        store(fixture)
+            .load(process_session)
             .unwrap()
             .root_turn_count,
         1
     );
     assert_eq!(
-        dispatches(&fixture),
+        dispatches(fixture),
         5,
         "two seed turns, one process-call generation, its answer and one fold"
     );
-    stop(&mut host);
+    assert!(
+        client
+            .rows(7)
+            .iter()
+            .find(|row| row.session == process_session)
+            .unwrap()
+            .live_work
+            .processes
+            > 0,
+        "Notice must not stop the promoted process"
+    );
+    assert_eq!(
+        client.request(
+            8,
+            Op::StopSession {
+                session: process_session.to_owned()
+            }
+        ),
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
+    );
 }
 
 fn compact_and_wait(
@@ -493,36 +541,32 @@ fn host_step_drain_finite_finishes_the_existing_call_without_continuation() {
 }
 
 #[test]
-fn host_step_drain_idle_refuses_before_pause_until_observation_yields_are_available() {
-    let Some(fixture) = fixture() else { return };
-    let (mut host, mut client, _session, _node, release) = busy(&fixture);
-    let id = binary(&fixture);
-    let result = output_env(
-        &fixture,
-        &["host", "upgrade", "--expect-binary", &id, "--drain", "idle"],
-        false,
-        &[("PLAK_TEST_FORCE_HOST_UPGRADE", "1")],
-    );
-    assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("not yet available"));
-    assert_eq!(client.request(10, Op::Ping), Outcome::Ok(Answer::Pong));
-    assert!(!fixture.home().join("host/upgrades").exists());
-    std::fs::write(release, "continue").unwrap();
-    stop(&mut host);
+fn host_step_drain_idle_finishes_the_existing_call_without_continuation() {
+    natural_boundary("idle");
 }
 
 #[test]
 fn host_step_drain_requester_loss_reopens_admissions_and_finishes_the_same_turn() {
+    requester_loss("1m");
+}
+
+#[test]
+fn host_step_drain_idle_progress_and_ctrl_c_reopen_admissions() {
+    requester_loss("idle");
+}
+
+fn requester_loss(mode: &str) {
     let Some(fixture) = fixture() else { return };
     let (mut host, mut client, session, _node, release) = busy(&fixture);
     let _cleanup = HomeHost(fixture.home());
     let id = binary(&fixture);
+    let progress = fixture.root.join("upgrade-progress.log");
     let mut command = fixture.command();
     command
-        .args(["host", "upgrade", "--expect-binary", &id, "--drain", "1m"])
+        .args(["host", "upgrade", "--expect-binary", &id, "--drain", mode])
         .env("PLAK_TEST_FORCE_HOST_UPGRADE", "1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(std::fs::File::create(&progress).unwrap());
     let mut requester = Requester(Some(command.spawn().unwrap()));
     let deadline = Instant::now() + WAIT;
     loop {
@@ -536,7 +580,26 @@ fn host_step_drain_requester_loss_reopens_admissions_and_finishes_the_same_turn(
         assert!(requester.0.as_mut().unwrap().try_wait().unwrap().is_none());
         std::thread::sleep(Duration::from_millis(10));
     }
-    requester.0.as_mut().unwrap().kill().unwrap();
+    if mode == "idle" {
+        loop {
+            let message = std::fs::read_to_string(&progress).unwrap();
+            if message.contains("model=1") && message.contains("waiting ") {
+                break;
+            }
+            assert!(Instant::now() < deadline, "no model progress: {message}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let pid = i32::try_from(requester.0.as_ref().unwrap().id()).unwrap();
+        assert!(
+            std::process::Command::new("kill")
+                .args(["-INT", &pid.to_string()])
+                .status()
+                .unwrap()
+                .success()
+        );
+    } else {
+        requester.0.as_mut().unwrap().kill().unwrap();
+    }
     requester.0.take().unwrap().wait().unwrap();
     loop {
         match client.request(11, new_session(&fixture.root.join("absent-workspace"))) {

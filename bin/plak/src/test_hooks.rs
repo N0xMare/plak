@@ -54,6 +54,10 @@ pub(crate) fn upgrade_input_limit() -> Option<String> {
     std::env::var("PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT").ok()
 }
 
+pub(crate) fn upgrade_runner_revision() -> Option<String> {
+    std::env::var("PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION").ok()
+}
+
 pub(crate) fn upgrade_import_refused() -> bool {
     std::env::var("PLAK_TEST_HOST_UPGRADE_IMPORT_REFUSAL").as_deref() == Ok("1")
 }
@@ -76,6 +80,10 @@ pub(crate) fn upgrade_crash_cut(name: &str) {
 }
 
 pub(crate) fn upgrade_preparation_refused(name: &str) -> bool {
+    if name == "step-drain-gate" {
+        return std::env::var_os("PLAK_TEST_HOST_UPGRADE_DRAIN_GATE")
+            .is_some_and(|path| !Path::new(&path).exists());
+    }
     std::env::var("PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE").is_ok_and(|cut| cut == name)
 }
 
