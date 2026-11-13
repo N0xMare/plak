@@ -18,6 +18,7 @@ use crate::store::ProductStore;
 
 mod admission;
 mod control;
+#[cfg(feature = "web")]
 pub(crate) use control::TerminalController;
 mod lifecycle;
 mod pins;
