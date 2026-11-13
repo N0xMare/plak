@@ -59,6 +59,20 @@ struct Mirror {
 }
 
 impl Mirror {
+    fn snapshot(&mut self, instance: &str, jobs: Vec<JobView>) {
+        let current = self.observe(instance);
+        for old in current.values_mut() {
+            if old.status == JobStatus::Running
+                && !jobs.iter().any(|job| job.session_id == old.session_id)
+            {
+                old.status = JobStatus::OutcomeUnknown;
+            }
+        }
+        for job in jobs {
+            current.insert(job.number, job);
+        }
+    }
+
     /// The jobs of the instance a result came from. Jobs an earlier
     /// instance held that had not ended are of unknown outcome: the restart
     /// lost them.
@@ -82,10 +96,18 @@ impl Mirror {
     }
 
     fn jobs(&self) -> Vec<JobView> {
-        self.instances
-            .iter()
-            .flat_map(|(_, jobs)| jobs.values().cloned())
-            .collect()
+        // A retained allocation keeps its original identity when a new native
+        // peer reports it. Prefer that peer's fresh fact over the old instance's
+        // synthetic loss; never count the same original job twice.
+        let mut allocations = BTreeMap::new();
+        for (_, jobs) in &self.instances {
+            for job in jobs.values() {
+                allocations.insert(job.session_id, job.clone());
+            }
+        }
+        let mut jobs = allocations.into_values().collect::<Vec<_>>();
+        jobs.sort_by_key(|job| job.number);
+        jobs
     }
 
     /// Records that a session took `number`.
@@ -187,11 +209,7 @@ impl RunnerSessions {
             };
             let jobs = {
                 let mut mirror = lock(&self.mirror);
-                let current = mirror.observe(&instance);
-                current.clear();
-                for job in jobs {
-                    current.insert(job.number, job);
-                }
+                mirror.snapshot(&instance, jobs);
                 mirror.jobs()
             };
             on_jobs(jobs);
@@ -380,15 +398,20 @@ impl RunnerSessions {
     /// Refuses invalid numbers, running jobs, or a lost owner/link. Repeating a
     /// committed acknowledgement never starts, stops or replays work.
     pub async fn acknowledge_jobs(&self, numbers: Vec<u32>) -> Result<(), ExecutionBackendError> {
-        let payload = to_value(&AckWire::new(numbers)?)?;
+        let payload = to_value(&AckWire::new(numbers.clone())?)?;
         self.send(
             RunnerVerb::JobsAck,
             payload,
             &self.controlled(),
             Some(RunnerClass::Control),
         )
-        .await
-        .map(drop)
+        .await?;
+        let mut mirror = lock(&self.mirror);
+        mirror.next = mirror.next_number();
+        for (_, jobs) in &mut mirror.instances {
+            jobs.retain(|number, _| !numbers.contains(number));
+        }
+        Ok(())
     }
 
     /// The line's jobs: every job this handle saw on an earlier runner
@@ -415,10 +438,7 @@ impl RunnerSessions {
                 .count()
         };
         let before = ended(&mirror.jobs());
-        let current = mirror.observe(&instance);
-        for job in jobs {
-            current.insert(job.number, job);
-        }
+        mirror.snapshot(&instance, jobs);
         let jobs = mirror.jobs();
         if ended(&jobs) != before {
             self.terminal_changes

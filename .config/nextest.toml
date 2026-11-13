@@ -93,6 +93,11 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
+  test(service::delegation::tests::review::)
+  | test(retention_three_workers_delegate_directly_fence_old_control_and_count_once)
+  | test(retention_three_workers_consumed_original_can_exit_before_the_next_upgrade)
+  | test(retention_lifetime_never_expires_a_running_job_and_uses_original_terminal_time)
+  |
   test(retention_native_job_ack_keeps_running_and_consumes_terminal_once)
   | test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
   | test(operator_host_acknowledged_unbound_loss_waits_for_deadline_and_resets_on_rebind)
@@ -308,7 +313,8 @@ not (
   | test(pending_wakes_return_the_wait_and_are_consumed)
   | test(durability::)
   |
-  test(operator_host_loss_sigkill_cuts_retain_pins_and_first_bind_waits_for_proof)
+  test(service::delegation::tests::loss::)
+  | test(operator_host_loss_sigkill_cuts_retain_pins_and_first_bind_waits_for_proof)
   | test(operator_runner_loss_with_a_real_orphaned_shell_reports_lost_not_dead)
   | test(operator_runner_loss_pid_reuse_never_authorizes_a_signal)
   | test(operator_runner_loss_sigkill_does_not_recover_or_recreate_shell)
@@ -420,6 +426,11 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
+  test(service::delegation::tests::review::)
+  | test(retention_three_workers_delegate_directly_fence_old_control_and_count_once)
+  | test(retention_three_workers_consumed_original_can_exit_before_the_next_upgrade)
+  | test(retention_lifetime_never_expires_a_running_job_and_uses_original_terminal_time)
+  |
   test(retention_native_job_ack_keeps_running_and_consumes_terminal_once)
   | test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
   | test(operator_host_acknowledged_unbound_loss_waits_for_deadline_and_resets_on_rebind)
@@ -641,6 +652,8 @@ default-filter = '''
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
+  test(service::delegation::tests::loss::)
+  |
   test(operator_host_loss_sigkill_cuts_retain_pins_and_first_bind_waits_for_proof)
   | test(operator_runner_loss_with_a_real_orphaned_shell_reports_lost_not_dead)
   | test(operator_runner_loss_pid_reuse_never_authorizes_a_signal)

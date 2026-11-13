@@ -57,6 +57,7 @@ async fn retention_native_job_ack_keeps_running_and_consumes_terminal_once() {
     }
     port.acknowledge_jobs(vec![number]).await.unwrap();
     port.acknowledge_jobs(vec![number]).await.unwrap();
+    assert_eq!(port.jobs().await.unwrap(), Vec::new());
     let actual = lock(&service.inner.lines)
         .get(&("home".into(), owner.line().to_string()))
         .unwrap()

@@ -764,7 +764,7 @@ fn a_floors_file_of_an_earlier_format_is_refused_by_name() {
     let message = error.to_string();
     assert!(message.contains(&path.display().to_string()), "{message}");
     assert!(
-        message.contains("stop every host of the paired homes, then remove"),
+        message.contains("without discarding owner fences"),
         "{message}"
     );
 }

@@ -1146,6 +1146,15 @@ pub fn lost_process_owner() -> ServeFailure {
     ))
 }
 
+/// A dispatched control whose original worker can no longer prove its outcome.
+#[must_use]
+pub fn operation_outcome_unknown(detail: &str) -> ServeFailure {
+    backend_failure(&ExecutionBackendError::new(
+        ExecutionBackendErrorKind::RecoveryRequired,
+        detail,
+    ))
+}
+
 fn backend_failure(error: &ExecutionBackendError) -> ServeFailure {
     ServeFailure::Backend {
         error: wire::encode_error(error),

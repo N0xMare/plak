@@ -22,6 +22,8 @@ mod machine;
 pub mod operator;
 mod overlap;
 mod registry;
+#[cfg(unix)]
+mod retention;
 
 pub use overlap::{AdmissionSnapshot, MachineOverlapGuard, RunnerPin};
 

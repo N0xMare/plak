@@ -33,6 +33,16 @@ not a refusal.
 Dry run prints without writing or contacting a manager. Exact re-installation
 is a no-op; edited, unrelated or symlinked units are never overwritten.
 
+Runner job-retention endpoint v1 has fixed limits, not configuration keys:
+1 MiB frames, 64 KiB data controls, byte-bounded pages of at most 64 rows,
+one-second poll/watch waits and five-second stop grace. Retained running or
+unsettled original jobs count once against job_bound even while disconnected.
+Drainers block idle exit until terminals are consumed, or 24 hours after their
+last terminal with no unsettled jobs; expiry never kills running work. A
+retention-only host/line cannot regain native control by downgrade/reinstall. Native
+lease expiry does not revoke retention authority. Bare connection errors do not
+release retained capacity without positive original-instance/process-loss proof.
+
 The current state directory is `state/r27.e37.p37.t10/`: runtime SQLite
 schema 27, runtime format epoch 37, product schema 37, and tree schema 10.
 These are format identities, not configuration keys. Client wire protocol 9

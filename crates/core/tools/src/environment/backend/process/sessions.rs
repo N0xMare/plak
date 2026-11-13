@@ -445,6 +445,7 @@ pub(super) struct JoinedProcessHostCapacityState {
     pub(super) services: Vec<Weak<JoinedProcessServiceInner>>,
     /// The bound when it is not the host default.
     pub(super) limit: Option<usize>,
+    pub(super) external_jobs: std::collections::HashMap<String, usize>,
 }
 
 impl fmt::Debug for JoinedProcessHostCapacity {
@@ -464,6 +465,14 @@ impl Drop for HostStartReservation {
 }
 
 impl JoinedProcessHostCapacity {
+    pub(crate) fn external_jobs(&self, identity: String, count: usize) {
+        let mut state = lock(&self.state);
+        if count == 0 {
+            state.external_jobs.remove(&identity);
+        } else {
+            state.external_jobs.insert(identity, count);
+        }
+    }
     /// A shared bound of `limit` running starts, as a runner's job bound.
     pub(crate) fn with_limit(limit: usize) -> Self {
         let capacity = Self::default();
@@ -481,7 +490,15 @@ impl JoinedProcessHostCapacity {
             .filter_map(Weak::upgrade)
             .map(|service| JoinedProcessSessions::running_sessions(&lock(&service.state)))
             .sum::<usize>();
-        if running.saturating_add(state.starting) >= limit {
+        let external = state
+            .external_jobs
+            .values()
+            .fold(0_usize, |sum, count| sum.saturating_add(*count));
+        if running
+            .saturating_add(external)
+            .saturating_add(state.starting)
+            >= limit
+        {
             return Err(ExecutionBackendError::new(
                 ExecutionBackendErrorKind::ResourceLimit,
                 format!("host running process limit ({limit}) was reached"),

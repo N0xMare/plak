@@ -37,11 +37,13 @@ use crate::streams::{
     Credit, INITIAL_CREDIT, Outbound, StreamEnds, Window, receive_stream, send_stream,
 };
 
+mod delegation;
 mod foreground;
 #[cfg(test)]
 mod native_job_ack_tests;
 mod operator;
 pub(crate) mod qualification;
+mod retention;
 
 /// One runner process: its identity, its environment and the state every
 /// connection to it shares. A new service is a new instance.
@@ -51,6 +53,7 @@ pub struct RunnerService {
 }
 
 struct Inner {
+    retention: retention::State,
     operator: Option<crate::operator::OperatorTerminalService>,
     environment: ExecutionEnvironment,
     changes_git_enabled: bool,
@@ -312,6 +315,7 @@ impl RunnerService {
         }
         Ok(Self {
             inner: Arc::new(Inner {
+                retention: retention::State::default(),
                 operator,
                 environment,
                 changes_git_enabled: options.changes_git_enabled,
@@ -690,6 +694,7 @@ impl RunnerService {
                 }),
             });
         }
+        self.delegated_line_inventory(host, &mut lines);
         lines
     }
 
@@ -699,6 +704,9 @@ impl RunnerService {
     #[must_use]
     pub fn is_idle(&self) -> bool {
         let now = Instant::now();
+        if self.retention_keeps_alive(now) {
+            return false;
+        }
         self.expire_leases(self.lease_now());
         self.inner.foreground.prune();
         if self
@@ -757,6 +765,7 @@ impl RunnerService {
                 }
             }
             HostFrame::Ack { request_id } => {
+                self.relay_acknowledgement(host, instance, &request_id);
                 self.inner
                     .foreground
                     .acknowledge(host, instance, &request_id);
@@ -851,6 +860,9 @@ impl RunnerService {
                     detail: "a process-session request names its owner".into(),
                 },
             ));
+            return;
+        }
+        if self.relay_jobs(host, instance, connection, &request, sender) {
             return;
         }
         let cancellation = CancellationToken::new();
@@ -1193,6 +1205,7 @@ impl RunnerService {
     /// Losing the endpoint ends the daemon, not merely a host's link lease.
     pub(crate) async fn shutdown(&self) {
         self.inner.closing.store(true, Ordering::Release);
+        self.stop_retention_maintenance();
         if let Some(operator) = &self.inner.operator {
             operator.close_all();
         }

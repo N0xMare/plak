@@ -33,10 +33,11 @@ pub mod runner {
         RunnerVerbFamily, RunnerWorkspaceProbe, ServeFailure, ServeFuture, ServeServiceFuture,
         adopt_runner_process_sessions, answer_too_large, call_blocking, decode_jobs_snapshot,
         decode_preempt, encode_preempt, environment_failure, hex, job_capacity, line_sessions,
-        local_daemon_environment, lost_process_owner, requested_workspace, runner_descriptor,
-        runner_environment, serve, serve_failure, serve_jobs_watch, serve_probe,
-        serve_service_spawn, serve_service_terminate, serve_sessions, service_spawned,
-        terminated_service, unhex, with_runner_secrets, workspace_refusal,
+        local_daemon_environment, lost_process_owner, operation_outcome_unknown,
+        requested_workspace, runner_descriptor, runner_environment, serve, serve_failure,
+        serve_jobs_watch, serve_probe, serve_service_spawn, serve_service_terminate,
+        serve_sessions, service_spawned, terminated_service, unhex, with_runner_secrets,
+        workspace_refusal,
     };
 }
 
@@ -163,6 +164,14 @@ pub fn next_job_number(sessions: &crate::JoinedProcessSessions) -> u32 {
     sessions.next_job_number()
 }
 
+/// Original monotonic terminal instants, never the observer's polling time.
+#[must_use]
+pub fn job_terminal_times(
+    sessions: &crate::JoinedProcessSessions,
+) -> Vec<([u8; 16], std::time::Instant)> {
+    sessions.job_terminal_times()
+}
+
 pub fn promote(
     sessions: &crate::JoinedProcessSessions,
     id: crate::JoinedProcessSessionId,
@@ -208,6 +217,15 @@ pub fn promote_reserved(
 
 pub fn consume_jobs(sessions: &crate::JoinedProcessSessions, numbers: &[u32]) {
     sessions.consume_jobs(numbers);
+}
+
+/// Account original-worker jobs once under a stable direct-worker identity.
+pub fn account_external_jobs(
+    capacity: &crate::JoinedProcessHostCapacity,
+    identity: String,
+    count: usize,
+) {
+    capacity.external_jobs(identity, count);
 }
 
 /// What a job's output tail starts with when it was cut inside its only

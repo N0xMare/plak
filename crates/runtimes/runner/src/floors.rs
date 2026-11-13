@@ -22,6 +22,8 @@ pub struct Floor {
     pub owner: LineOwner,
     /// The host instance holding the line.
     pub holder: String,
+    /// Irreversible native-control ban after job-only retention transfer.
+    pub retention_only: bool,
 }
 
 /// Where a runner records accepted owners.
@@ -60,9 +62,9 @@ impl FileOwnerFloors {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
-                        "the runner's owner floors cannot be read ({error}); stop every host \
-                         of the paired homes, then remove {} to start the runner with no \
-                         floors, so the first owner of each line is accepted once",
+                        "the runner's owner floors cannot be read ({error}); keep {} intact \
+                         and use the retained matching build to finish, consume or disown \
+                         its jobs before repairing the record without discarding owner fences",
                         path.display()
                     ),
                 )
@@ -114,7 +116,7 @@ impl OwnerFloors for FileOwnerFloors {
 /// Writes `bytes` to `path` through a synced temporary file in the same
 /// directory, then syncs the directory, so a crash leaves the old file or
 /// the new one.
-fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let directory = path.parent().unwrap_or_else(|| Path::new("."));
     let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
     {

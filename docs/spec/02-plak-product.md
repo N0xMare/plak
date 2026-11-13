@@ -286,6 +286,18 @@ they reach the loop as data and ports, never as a loop of their own.
 
 ## 2. Homes and files
 
+Planned runner replacement can preserve promoted jobs through the versioned
+job-retention endpoint (chapter 01 §8.4), without weakening exact native runner
+matching. Home-local retention endpoints use `<home>/builds/<triple>/` to keep
+Unix socket paths short; the protocol-local `host/runner/v<N>/run/runner.sock`
+attach path is unchanged. The new daemon is the sole native peer; original daemons retain their
+own processes and expose only fixed job controls. This does not itself enable
+a live cross-key host move. Connection-bound services and operator terminals
+retain their existing rebuild/closure laws. A downgraded or reinstalled drainer
+never re-promotes its retention-only host/line; the remedy is to finish, consume
+or disown its jobs through a compatible retained build. Source foreground work
+must be settled before surrender, not converted to a retained job.
+
 ### 2.1 The Plak home
 
 `PLAK_HOME` names the home and MUST be absolute; otherwise the home is

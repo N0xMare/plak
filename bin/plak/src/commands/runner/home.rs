@@ -209,6 +209,7 @@ impl RunnerHome {
 #[derive(Clone, Debug)]
 pub(crate) struct LocalRunnerHome {
     root: PathBuf,
+    retention: PathBuf,
 }
 
 impl LocalRunnerHome {
@@ -219,11 +220,20 @@ impl LocalRunnerHome {
                 .join("host")
                 .join("runner")
                 .join(format!("v{}", super::version().protocol)),
+            retention: paths
+                .home()
+                .join("builds")
+                .join(plakous::runner::daemon::triple_key(&super::version())),
         }
     }
 
     pub(crate) fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Cross-build endpoint discovery is separate from protocol-local native state.
+    pub(crate) fn retention_directory(&self) -> &Path {
+        &self.retention
     }
 
     /// The socket, named by the directory's protocol version alone: every

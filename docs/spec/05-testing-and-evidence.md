@@ -6295,6 +6295,38 @@ package group reports remaining days without failing. Publication dry runs
 and uploads separately require more than a third of each compiled review
 window remaining (chapter 06).
 
+### Job-retention endpoint evidence
+
+Review regressions preserve retention authority through same-instance native
+lease expiry and orphaning; reject stale/foreign tuples on snapshot/read/write/
+stop/ack; refuse unsettled foreground transfer; release idle retention only after
+terminal consumption; fence late snapshots while the original is unreachable;
+reject foreign destination intents; measure lifetime before first observation;
+and exclude forwarded namespaces from the middle worker's capacity. Version-two
+policy tests discover and speak the pinned v1 codec, refusing v0/v3 with a remedy.
+Pinned negative outcomes reject extra fields. UID injection and mode-0666 probes
+pin peer/path checks. Loss probes distinguish unchanged or temporarily absent
+sockets from inode replacement and native-lock-free absence. Ack targets are
+restricted per origin/control ID; a closed watch consumer terminates its pump.
+
+Frozen v1 JSON fixtures pin every verb, status and refusal independently of
+native protocol 8. Tests reject arbitrary native verbs, unsupported versions,
+changed original instances, oversized declared frames, public/symlink parents
+and replacement-inode unlinking. Source CAS tests prove persisted native-control
+refusal and own-tuple-only recovery. Real-child tests exercise direct three-build
+delegation after the middle endpoint stops, once-only accounting, stale
+controllers, number floors, terminal consumption and late-snapshot fencing.
+A consumed original can exit before the next upgrade. The lifetime test passes
+future instants only into the retention decision: it uses real I/O clocks and
+proves that expiry never stops a running child, while terminal-only retention
+expires from the original terminal time. These tests run serially.
+
+Durability cuts kill the actual original daemon, kill the receiving daemon
+while an original input answer is withheld, and lose the transfer reply after
+its CAS. Recovery preserves exact original receipts without repeated input;
+original death reports unknown while an independently observed surviving child
+is neither adopted nor killed. No paid provider or shell startup is involved.
+
 ### Protocol-7 operator console evidence
 
 Protocol-8 account-status probes distinguish named/default/sibling refresh

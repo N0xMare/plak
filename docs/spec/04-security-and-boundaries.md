@@ -782,6 +782,26 @@ requests; that exfiltration path is residual risk (section 9).
 
 ### 2.9 Runners
 
+Job retention is the second, narrowly versioned cross-build exception. Its
+parents are owned mode-0700 directories, its socket is owned mode 0600, and
+both peers verify the same effective UID. Symlink/public parents and foreign
+socket owners refuse; live or uncertain sockets are never unlinked as stale.
+The receiver derives host/instance scope from its authenticated native peer.
+The original authenticates only the same-UID retention peer and trusts that
+peer's Bind assertions; it does not authenticate a native connection there.
+The exact owner CAS is the authority, not a bearer grant or the Bind alone.
+The original persists its CAS floor and retention-only native ban before ack.
+A receiver persists only its own transfer intent and direct-original facts;
+lost acknowledgement may recover that tuple, never outbid a foreign witness.
+Native lease expiry cannot revoke retention-only authority. Old workers never
+open another build's native stores or adopt PIDs. Bare connection refusal or
+NotFound is transient, including on macOS, and preserves cached occupancy.
+Confirmed loss requires a different hello instance, a changed observed socket
+inode, or an absent socket with the original native process lock proven free.
+The endpoint's private hard link to that lock is only a process-liveness witness,
+not native-store data or a new authority. Known terminal facts remain precise.
+Immutable historical binaries are not pruned at host Ready or receipt ack.
+
 Operator terminals have separate principal-private, host-generation namespaces,
 with no line owner, agent job, promotion, accounting, history or line fence. Only
 the paired host asserts a principal; inspecting connections have no terminal

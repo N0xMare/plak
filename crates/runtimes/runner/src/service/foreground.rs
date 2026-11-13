@@ -28,7 +28,7 @@ struct Reports {
 }
 
 impl Authority {
-    fn gate(&self, host: &str, line: &str) -> Gate {
+    pub(super) fn gate(&self, host: &str, line: &str) -> Gate {
         let mut gates = lock(&self.gates);
         gates.retain(|_, gate| gate.strong_count() != 0);
         let gate = gates.entry((host.to_owned(), line.to_owned())).or_default();
@@ -46,6 +46,12 @@ impl Authority {
 
     pub(super) fn pending(&self) -> bool {
         !lock(&self.expiring).is_empty() || !lock(&self.reports).is_empty()
+    }
+
+    pub(super) fn has_reports(&self, host: &str, line: &str) -> bool {
+        lock(&self.reports)
+            .get(&(host.to_owned(), line.to_owned()))
+            .is_some_and(|reports| !reports.stopped.is_empty())
     }
 
     pub(super) fn acknowledge(&self, host: &str, instance: &str, receipt: &str) {
@@ -67,7 +73,7 @@ impl RunnerService {
         instance: &str,
         owner: Option<LineOwner>,
         verb: RunnerVerb,
-        payload: Value,
+        mut payload: Value,
         control: OperationContext,
     ) -> ServeFuture {
         let Some(owner) = owner else {
@@ -80,13 +86,10 @@ impl RunnerService {
         let instance = instance.to_owned();
         Box::pin(async move {
             let gate = service.inner.foreground.gate(&host, &owner.line);
-            let guard = if matches!(
-                verb,
-                RunnerVerb::ProcessStart | RunnerVerb::ProcessPromote | RunnerVerb::ForegroundStop
-            ) {
-                Some(gate.lock().await)
-            } else {
+            let guard = if matches!(verb, RunnerVerb::ProcessPoll | RunnerVerb::JobsSnapshot) {
                 None
+            } else {
+                Some(gate.lock().await)
             };
             if guard.is_some()
                 && (service
@@ -102,6 +105,20 @@ impl RunnerService {
                 return service
                     .stop_matching_foreground(&host, &instance, &owner.line, payload)
                     .await;
+            }
+            if verb == RunnerVerb::ProcessStart {
+                service.account_retained();
+                if let Some(value) = payload.get_mut("request").and_then(Value::as_object_mut) {
+                    let floor = service.retained_number_floor(&host, &owner.line);
+                    let requested = value
+                        .get("next_number")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1);
+                    value.insert(
+                        "next_number".into(),
+                        Value::from(requested.max(u64::from(floor))),
+                    );
+                }
             }
             service
                 .sessions(&host, &owner.line, verb, payload, control)
@@ -166,7 +183,7 @@ impl RunnerService {
         .unwrap_or(Err(ServeFailure::Unsupported))
     }
 
-    fn instance_authority(&self, host: &str, instance: &str) -> bool {
+    pub(super) fn instance_authority(&self, host: &str, instance: &str) -> bool {
         lock(&self.inner.leases)
             .get(&(host.to_owned(), instance.to_owned()))
             .is_some_and(|lease| {
@@ -177,7 +194,7 @@ impl RunnerService {
             })
     }
 
-    async fn stop_line_foreground(&self, host: &str, line: &str) -> Result<(), String> {
+    pub(super) async fn stop_line_foreground(&self, host: &str, line: &str) -> Result<(), String> {
         let sessions = lock(&self.inner.lines)
             .get(&(host.to_owned(), line.to_owned()))
             .map(|(sessions, _)| sessions.clone());
@@ -238,6 +255,12 @@ impl RunnerService {
     ) -> RunnerFrame {
         let gate = self.inner.foreground.gate(host, &transfer.to.line);
         let _guard = gate.lock().await;
+        if lock(&self.inner.tables).retention_only(host, &transfer.to.line) {
+            return RunnerFrame::TransferRefused {
+                control_id: transfer.control_id,
+                detail: "retention-only line: finish, consume or disown retained jobs; downgrade or reinstall cannot restore native authority".into(),
+            };
+        }
         if let Some(refusal) = lock(&self.inner.tables).transfer_refusal(
             host,
             instance,
@@ -246,6 +269,9 @@ impl RunnerService {
             &transfer.to,
         ) {
             return refusal;
+        }
+        if let Err(refusal) = self.delegate_line(host, instance, &transfer).await {
+            return *refusal;
         }
         let current = lock(&self.inner.tables).owner(host, &transfer.to.line);
         if current.is_some_and(|(owner, adopted)| owner != transfer.to || !adopted)

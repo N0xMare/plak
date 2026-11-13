@@ -123,6 +123,7 @@ mod triple_tests {
                     fence: 1,
                 },
                 holder: "same-instance".into(),
+                retention_only: false,
             };
             floors.record("same-host", &floor).unwrap();
             let socket = socket_path(&directory, version);
@@ -170,6 +171,29 @@ pub async fn serve_socket(
     socket: &Path,
     idle_grace: Duration,
 ) -> Result<(), DaemonError> {
+    serve_socket_inner(service, socket, idle_grace, None).await
+}
+
+/// Serve the exact native socket and an independent frozen retention endpoint.
+/// The build directory and its parents must already be owned and private.
+///
+/// # Errors
+/// Refuses unsafe paths, another live daemon, or endpoint I/O failures.
+pub async fn serve_socket_with_retention(
+    service: RunnerService,
+    socket: &Path,
+    build_directory: &Path,
+    idle_grace: Duration,
+) -> Result<(), DaemonError> {
+    serve_socket_inner(service, socket, idle_grace, Some(build_directory)).await
+}
+
+async fn serve_socket_inner(
+    service: RunnerService,
+    socket: &Path,
+    idle_grace: Duration,
+    retention_directory: Option<&Path>,
+) -> Result<(), DaemonError> {
     check_socket_path(socket)?;
     let directory = socket.parent().unwrap_or_else(|| Path::new("."));
     private_directory(directory)?;
@@ -185,13 +209,7 @@ pub async fn serve_socket(
     take_lock(&lock, socket).await?;
     // The lock file names its holder, so an operator or a harness can find
     // the daemon that serves a socket; the lock proves the name current.
-    {
-        use std::io::Write as _;
-        let mut holder = &lock;
-        holder.set_len(0)?;
-        write!(holder, "{}", std::process::id())?;
-        holder.sync_all()?;
-    }
+    record_lock_holder(&lock)?;
     if std::fs::symlink_metadata(socket).is_ok() {
         // A daemon that died left its socket behind.
         std::fs::remove_file(socket)?;
@@ -200,12 +218,36 @@ pub async fn serve_socket(
     set_mode(socket, 0o600)?;
     let endpoint = std::fs::symlink_metadata(socket)?;
     let owner = owner_uid(directory)?;
+    let retention = retention_endpoint(retention_directory, &service, socket).await?;
+    let mut retained = tokio::task::JoinSet::new();
     let mut connections = tokio::task::JoinSet::new();
     let mut idle_since: Option<Instant> = None;
     let mut reported_unknown = false;
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     let result = loop {
         tokio::select! {
+            accepted = async {
+                match &retention {
+                    Some(endpoint) => endpoint.listener.accept().await,
+                    None => std::future::pending().await,
+                }
+            }, if retention.is_some() && retained.len() < 64 => {
+                let (stream, _) = match accepted {
+                    Ok(accepted) => accepted,
+                    Err(error) if transient_accept(&error) => {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        continue;
+                    }
+                    Err(error) => break Err(DaemonError::Io(error)),
+                };
+                if stream.peer_cred().is_ok_and(|peer| peer.uid() == owner)
+                    && let Some(endpoint) = &retention {
+                    let service = service.clone();
+                    let origin = endpoint.origin.clone();
+                    retained.spawn(async move { crate::retention::serve(service,stream,origin).await });
+                }
+            }
+            _ = retained.join_next(), if !retained.is_empty() => {}
             accepted = listener.accept() => {
                 let stream = match accepted {
                     Ok((stream, _)) => stream,
@@ -225,13 +267,13 @@ pub async fn serve_socket(
             _ = connections.join_next(), if !connections.is_empty() => {}
             _ = tick.tick() => {
                 match same_endpoint(socket, &endpoint) {
-                    Ok(false) => break Ok(()),
+                    Ok(false) if !service.retention_keeps_alive(Instant::now()) => break Ok(()),
                     Err(error) if !reported_unknown => {
                         use std::io::Write as _;
                         let _ = writeln!(io::stderr(), "runner endpoint could not be inspected; keeping it alive: {error}");
                         reported_unknown = true;
                     }
-                    Ok(true) | Err(_) => {}
+                    Ok(_) | Err(_) => {}
                 }
                 if !service.is_idle() {
                     idle_since = None;
@@ -245,12 +287,22 @@ pub async fn serve_socket(
     // finds no socket of this one.
     connections.abort_all();
     while connections.join_next().await.is_some() {}
+    retained.abort_all();
+    while retained.join_next().await.is_some() {}
     service.shutdown().await;
     if matches!(same_endpoint(socket, &endpoint), Ok(true)) {
         let _ = std::fs::remove_file(socket);
     }
     drop(lock);
     result
+}
+
+fn record_lock_holder(lock: &std::fs::File) -> io::Result<()> {
+    use std::io::Write as _;
+    let mut holder = lock;
+    holder.set_len(0)?;
+    write!(holder, "{}", std::process::id())?;
+    holder.sync_all()
 }
 
 fn same_endpoint(socket: &Path, original: &std::fs::Metadata) -> io::Result<bool> {
@@ -266,6 +318,19 @@ fn same_endpoint(socket: &Path, original: &std::fs::Metadata) -> io::Result<bool
         }
         Err(error) => Err(error),
     }
+}
+
+async fn retention_endpoint(
+    directory: Option<&Path>,
+    service: &RunnerService,
+    socket: &Path,
+) -> Result<Option<crate::retention::Endpoint>, DaemonError> {
+    let Some(directory) = directory else {
+        return Ok(None);
+    };
+    let endpoint = crate::retention::Endpoint::bind(directory, service).await?;
+    crate::retention::link_native_lock(directory, &socket.with_extension("lock"))?;
+    Ok(Some(endpoint))
 }
 
 fn transient_accept(error: &io::Error) -> bool {

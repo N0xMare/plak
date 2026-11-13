@@ -179,16 +179,9 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
     let hosts = host_allowlist(home.clone());
     let floors = FileOwnerFloors::open(home.floors_path())
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    let runner_id = RunnerId::new(home.runner_id()?)
-        .map_err(|error| CliFailure::new(format!("runner id: {error}")))?;
     let service = RunnerService::with_options(
         environment,
-        RunnerIdentity {
-            runner_id,
-            version: version(),
-            boot_id: boot_id(),
-            binary_id: crate::build_identity::known_binary_id(),
-        },
+        paired_identity(&home)?,
         RunnerOptions {
             operator_workspace: Some(operator::workspace(
                 paths,
@@ -212,12 +205,30 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         },
     )
     .map_err(|error| CliFailure::new(format!("the runner did not start: {error}")))?;
-    match daemon::serve_socket(service, &socket, config.idle_exit()).await {
+    match daemon::serve_socket_with_retention(
+        service,
+        &socket,
+        &home.build_directory(),
+        config.idle_exit(),
+    )
+    .await
+    {
         Ok(()) => Ok(()),
         // One daemon per user and build is enough.
         Err(daemon::DaemonError::AlreadyServing(_)) => Ok(()),
         Err(error) => Err(CliFailure::new(error.to_string())),
     }
+}
+
+fn paired_identity(home: &RunnerHome) -> CliResult<RunnerIdentity> {
+    let runner_id = RunnerId::new(home.runner_id()?)
+        .map_err(|error| CliFailure::new(format!("runner id: {error}")))?;
+    Ok(RunnerIdentity {
+        runner_id,
+        version: version(),
+        boot_id: boot_id(),
+        binary_id: crate::build_identity::known_binary_id(),
+    })
 }
 
 fn host_allowlist(home: RunnerHome) -> Arc<dyn Fn(&str) -> bool + Send + Sync> {
@@ -317,7 +328,9 @@ async fn serve_local(paths: &PlakPaths) -> CliResult<()> {
     )
     .map_err(|error| CliFailure::new(format!("the home-local runner did not start: {error}")))?;
     let idle = home::RunnerToml::default().idle_exit();
-    match daemon::serve_socket(service, &socket, idle).await {
+    let retention = home.retention_directory();
+    home::private_below(paths.home(), retention)?;
+    match daemon::serve_socket_with_retention(service, &socket, retention, idle).await {
         Ok(()) => Ok(()),
         Err(daemon::DaemonError::AlreadyServing(_)) => {
             eprintln!("plak runner: the local socket lock is still held");

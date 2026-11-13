@@ -59,6 +59,7 @@ enum OpState {
 #[derive(Debug)]
 struct Op {
     digest: String,
+    verb: String,
     /// The request id and the host instance waiting for the key's answer:
     /// the last ones that sent it.
     request_id: String,
@@ -92,6 +93,7 @@ struct Owned {
     /// recorded, so the floor owner is accepted again only from that
     /// instance.
     holder: String,
+    retention_only: bool,
 }
 
 /// The owner and op tables of one runner instance, for every host.
@@ -110,16 +112,26 @@ impl Tables {
         let owners = floors
             .load()
             .into_iter()
-            .map(|(host, Floor { owner, holder })| {
-                (
-                    (host, owner.line.clone()),
-                    Owned {
+            .map(
+                |(
+                    host,
+                    Floor {
                         owner,
-                        adopted: false,
                         holder,
+                        retention_only,
                     },
-                )
-            })
+                )| {
+                    (
+                        (host, owner.line.clone()),
+                        Owned {
+                            owner,
+                            adopted: false,
+                            holder,
+                            retention_only,
+                        },
+                    )
+                },
+            )
             .collect();
         Self {
             owners,
@@ -144,18 +156,54 @@ impl Tables {
         from: Option<&LineOwner>,
         to: LineOwner,
     ) -> RunnerFrame {
+        if self.retention_only(host, &to.line) {
+            return RunnerFrame::TransferRefused {
+                control_id,
+                detail: "retention-only line: finish, consume or disown jobs through a compatible retention endpoint; native adoption is disabled".into(),
+            };
+        }
+        self.transfer_mode((host, instance), control_id, from, to, false)
+    }
+
+    pub(crate) fn transfer_retained(
+        &mut self,
+        host: &str,
+        instance: &str,
+        control_id: String,
+        from: &LineOwner,
+        to: LineOwner,
+    ) -> RunnerFrame {
+        if self.floors.is_none() || self.owner(host, &to.line).is_none() {
+            return RunnerFrame::TransferRefused {
+                control_id,
+                detail: "retention never creates a line".into(),
+            };
+        }
+        self.transfer_mode((host, instance), control_id, Some(from), to, true)
+    }
+
+    fn transfer_mode(
+        &mut self,
+        scope: (&str, &str),
+        control_id: String,
+        from: Option<&LineOwner>,
+        to: LineOwner,
+        retention_only: bool,
+    ) -> RunnerFrame {
+        let (host, instance) = scope;
         let line = (host.to_owned(), to.line.clone());
         let current = self.owners.get(&line).map(|owned| owned.owner.clone());
         if let Some(refusal) = self.transfer_refusal(host, instance, &control_id, from, &to) {
             return refusal;
         }
-        if current.as_ref() != Some(&to)
+        if (current.as_ref() != Some(&to) || self.retention_only(host, &to.line) != retention_only)
             && let Some(floors) = &self.floors
             && let Err(error) = floors.record(
                 host,
                 &Floor {
                     owner: to.clone(),
                     holder: instance.to_owned(),
+                    retention_only,
                 },
             )
         {
@@ -170,6 +218,7 @@ impl Tables {
                 owner: to,
                 adopted: true,
                 holder: instance.to_owned(),
+                retention_only,
             },
         );
         RunnerFrame::TransferAccepted {
@@ -223,7 +272,7 @@ impl Tables {
     /// line keeps its owner: it is not free to take.
     pub(crate) fn orphan(&mut self, host: &str, instance: &str) {
         for ((owner_host, _), owned) in &mut self.owners {
-            if owner_host == host && owned.holder == instance {
+            if owner_host == host && owned.holder == instance && !owned.retention_only {
                 owned.adopted = false;
             }
         }
@@ -232,7 +281,9 @@ impl Tables {
     pub(crate) fn held_lines(&self, host: &str, instance: &str) -> Vec<LineOwner> {
         self.owners
             .iter()
-            .filter(|((owned_host, _), owned)| owned_host == host && owned.holder == instance)
+            .filter(|((owned_host, _), owned)| {
+                owned_host == host && owned.holder == instance && !owned.retention_only
+            })
             .map(|(_, owned)| owned.owner.clone())
             .collect()
     }
@@ -240,7 +291,29 @@ impl Tables {
     pub(crate) fn held_by(&self, host: &str, instance: &str, owner: &LineOwner) -> bool {
         self.owners
             .get(&(host.to_owned(), owner.line.clone()))
-            .is_some_and(|owned| owned.adopted && owned.holder == instance && owned.owner == *owner)
+            .is_some_and(|owned| {
+                !owned.retention_only
+                    && owned.adopted
+                    && owned.holder == instance
+                    && owned.owner == *owner
+            })
+    }
+
+    pub(crate) fn retention_only(&self, host: &str, line: &str) -> bool {
+        self.owners
+            .get(&(host.to_owned(), line.to_owned()))
+            .is_some_and(|owned| owned.retention_only)
+    }
+
+    pub(crate) fn retained_by(&self, host: &str, instance: &str, owner: &LineOwner) -> bool {
+        self.owners
+            .get(&(host.to_owned(), owner.line.clone()))
+            .is_some_and(|owned| {
+                owned.retention_only
+                    && owned.adopted
+                    && owned.holder == instance
+                    && owned.owner == *owner
+            })
     }
 
     /// The accepted owner of `host`'s `line` and whether it holds it.
@@ -248,6 +321,17 @@ impl Tables {
         self.owners
             .get(&(host.to_owned(), line.to_owned()))
             .map(|owned| (owned.owner.clone(), owned.adopted))
+    }
+
+    pub(crate) fn retention_owners(&self, host: &str) -> Vec<LineOwner> {
+        let mut owners: Vec<_> = self
+            .owners
+            .iter()
+            .filter(|((held, _), _)| held == host)
+            .map(|(_, owned)| owned.owner.clone())
+            .collect();
+        owners.sort_by(|a, b| a.line.cmp(&b.line));
+        owners
     }
 
     /// Admits one request from `instance` of `host`, at most once per
@@ -265,8 +349,48 @@ impl Tables {
         request: &Request,
         now: Instant,
     ) -> Admission {
+        self.admit_mode(host, instance, request, now, false)
+    }
+
+    pub(crate) fn admit_retained(
+        &mut self,
+        host: &str,
+        instance: &str,
+        request: &Request,
+        now: Instant,
+    ) -> Admission {
+        self.admit_mode(host, instance, request, now, true)
+    }
+
+    pub(crate) fn recorded_control(&self, host: &str, request: &Request) -> bool {
+        match op_key(request) {
+            Keyed::Key(key) => self.ops.contains_key(&(host.to_owned(), key)),
+            _ => false,
+        }
+    }
+
+    fn admit_mode(
+        &mut self,
+        host: &str,
+        instance: &str,
+        request: &Request,
+        now: Instant,
+        retention: bool,
+    ) -> Admission {
         self.expire(now);
         let id = request.request_id.clone();
+        // A native reconnect must not recover even a previously answered key
+        // once this line crossed the retention-only boundary.
+        if request
+            .owner
+            .as_ref()
+            .is_some_and(|owner| self.retention_only(host, &owner.line) != retention)
+        {
+            return Admission::Answer(RunnerFrame::Refused {
+                request_id: Some(id),
+                refusal: Refusal::OwnerNotTransferred,
+            });
+        }
         let key = match op_key(request) {
             Keyed::Key(key) => Some(key),
             Keyed::Unkeyed => None,
@@ -283,6 +407,11 @@ impl Tables {
         if let Some(key) = &key
             && let Some(op) = self.ops.get_mut(&(host.to_owned(), key.clone()))
         {
+            // A retention control cannot inspect a start/workspace receipt by
+            // presenting its control id and digest under a job-only verb.
+            if retention && op.verb != request.operation.verb {
+                return Admission::Answer(RunnerFrame::NotSeen { request_id: id });
+            }
             if request.owner.is_some()
                 && op.instance != instance
                 && holder.as_deref() != Some(instance)
@@ -336,6 +465,7 @@ impl Tables {
             (host.to_owned(), key.clone()),
             Op {
                 digest: request.digest.clone(),
+                verb: request.operation.verb.clone(),
                 request_id: id.clone(),
                 instance: instance.to_owned(),
                 state,
@@ -462,15 +592,58 @@ impl Tables {
         }
     }
 
+    pub(crate) fn acknowledge_retained(
+        &mut self,
+        host: &str,
+        instance: &str,
+        line: &str,
+        request_id: &str,
+    ) {
+        let belongs =
+            self.key_for(host, instance, request_id)
+                .is_some_and(|key| match key {
+                    OpKey::Effect { line: accepted, .. }
+                    | OpKey::Control { line: accepted, .. } => accepted == line,
+                    OpKey::Tree { .. } => false,
+                });
+        let job_control = self
+            .key_for(host, instance, request_id)
+            .and_then(|key| self.ops.get(&(host.to_owned(), key)))
+            .is_some_and(|op| {
+                matches!(
+                    RunnerVerb::parse(&op.verb),
+                    Some(
+                        RunnerVerb::ProcessWrite
+                            | RunnerVerb::ProcessStop
+                            | RunnerVerb::JobsStop
+                            | RunnerVerb::JobsDisown
+                    )
+                )
+            });
+        if belongs && job_control {
+            self.acknowledge(host, instance, request_id);
+        }
+    }
+
     /// Whether a key still holds an answer or tombstone the host has not
     /// acknowledged, or is running.
     pub(crate) fn holds_unacknowledged(&mut self, now: Instant) -> bool {
         self.expire(now);
-        self.ops.values().any(|op| {
-            matches!(
-                op.state,
-                OpState::Running | OpState::Answered(_) | OpState::Tombstone
-            )
+        self.ops.iter().any(|((host, key), op)| {
+            if matches!(op.state, OpState::Running) {
+                return true;
+            }
+            let line = match key {
+                OpKey::Effect { line, .. } | OpKey::Control { line, .. } => Some(line),
+                OpKey::Tree { .. } => None,
+            };
+            // Once a line is job-only, native receipts cannot be recovered
+            // there. Its real jobs and unconsumed terminals own its lifetime;
+            // unreachable native answers must not keep an empty drainer alive.
+            if line.is_some_and(|line| self.retention_only(host, line)) {
+                return false;
+            }
+            matches!(op.state, OpState::Answered(_) | OpState::Tombstone)
         })
     }
 }

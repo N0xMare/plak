@@ -6,6 +6,26 @@ use super::{
 };
 
 impl JoinedProcessSessions {
+    pub(crate) fn job_terminal_times(&self) -> Vec<([u8; 16], Instant)> {
+        let state = lock(&self.inner.state);
+        state
+            .active
+            .iter()
+            .chain(&state.finished)
+            .filter_map(|(id, session)| {
+                if session.promoted.load(Ordering::Acquire) != PROMOTED {
+                    return None;
+                }
+                let shared = lock(&session.shared);
+                if !shared.status.is_terminal() {
+                    return None;
+                }
+                let terminal = session.started.checked_add(shared.elapsed?)?;
+                Some((id.0, terminal))
+            })
+            .collect()
+    }
+
     /// Installs a nonblocking host lifecycle observer before any promotion.
     /// Running snapshots reserve terminal capacity; terminal snapshots use it.
     /// `has_room` answers, without recording anything, whether `observer`

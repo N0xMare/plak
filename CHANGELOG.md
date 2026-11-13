@@ -3,7 +3,9 @@
 All notable changes to Plak and Plakous are recorded here. Every workspace
 package shares one version. `0.0.x` releases carry no API, wire or
 persisted-format compatibility promise; the session export document is the
-one cross-build carrier (a build imports its own and the previous version).
+cross-build session carrier (a build imports its own and the previous version).
+The separate runner job-retention endpoint also retains its previous speaker
+for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
@@ -93,6 +95,11 @@ one cross-build carrier (a build imports its own and the previous version).
 - Add a paused-host draft-verdict barrier for planned upgrade preparation,
   rejecting only unclaimed mailbox inputs and joining durable admission and
   verdict delivery without carrying a draft registry across generations.
+
+- Retain promoted runner jobs across planned build replacement through the
+  same-user frozen job-retention endpoint v1. Direct original-worker delegation
+  preserves controls, output and number floors without duplicate capacity or
+  effect replay; retention-only lines cannot regain native control on reinstall.
 
 - Runner protocol 8 adds typed `jobs.ack` for committed terminal consumption.
   Running or cleanup-unresolved jobs cannot be acknowledged away; retries of
