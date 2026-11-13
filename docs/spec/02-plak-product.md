@@ -5388,6 +5388,19 @@ does not inherit another connection's pending answers.
   not allowed, bounded and printable), at most 60 refusal lines a minute
   with a count of the rest; never a cookie, the key, or a frame.
 
+The hidden `plak session check-binding --all` command inspects retained runtime
+branch heads, including children, through read-only SQLite snapshots. It opens
+no runtime, tree, runner, credential source or diagnostics writer and acquires
+no custody or runtime lease. It verifies checkpoint/plan and presentation
+integrity, current executor binding identities and the native selected policy
+with frozen tool data. An uncheckable external executor is inconclusive, never
+a compatible verdict. This is binding compatibility, not a promise of credential,
+runner or future authenticated-catalog availability. Ordinary exact reopen still
+performs all live authority checks. Same-key host upgrade runs this candidate
+inspection before surrender and refuses incompatibility or an inconclusive
+inspection while the source remains running. Live WAL reader coordination may
+update SQLite shared memory; no durable database or WAL bytes are written.
+
 ### 4.6 `plak host`
 
 `plak host upgrade --expect-binary <id> [--wait <seconds>]` is an explicit

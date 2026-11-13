@@ -420,6 +420,32 @@ impl SqliteSessionStore {
         load_checkpoint(&snapshot, checkpoint)
     }
 
+    /// Lists retained branch-head checkpoints through one read-only snapshot.
+    /// No boot, lease, runtime actor, recovery or write is opened.
+    ///
+    /// # Errors
+    /// Returns schema, shape or read failures. An absent store is empty.
+    pub fn inspect_head_checkpoints(
+        path: impl AsRef<Path>,
+    ) -> Result<Vec<CheckpointId>, SessionStoreError> {
+        let Some(connection) = Self::open_inspection(path.as_ref())? else {
+            return Ok(Vec::new());
+        };
+        let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
+        admit_inspection_snapshot(&snapshot)?;
+        let mut statement = snapshot
+            .prepare("SELECT DISTINCT checkpoint_id FROM branches ORDER BY checkpoint_id")
+            .map_err(map_sqlite)?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(map_sqlite)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(map_sqlite)?;
+        ids.into_iter()
+            .map(|id| id.parse().map_err(|_| SessionStoreError::corrupt()))
+            .collect()
+    }
+
     /// Reads one exact branch without opening a writable runtime or changing its
     /// boot domain, lease, schema, or durable rows. `SQLite` may still update
     /// transient shared-memory reader coordination for a live WAL.

@@ -224,6 +224,18 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             panic!("created");
         };
         let locator = session.locator();
+        let database = directory.path().join("runtime.sqlite3");
+        let before = std::fs::read(&database)?;
+        let wal = directory.path().join("runtime.sqlite3-wal");
+        let before_wal = std::fs::read(&wal).ok();
+        let inspected =
+            plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database)?;
+        assert!(inspected.iter().any(|(candidate, _)| *candidate == locator));
+        for (_, presentation) in &inspected {
+            assert_eq!(crate::agent::check_frozen_binding(presentation)?, None);
+        }
+        assert_eq!(std::fs::read(&database)?, before);
+        assert_eq!(std::fs::read(&wal).ok(), before_wal);
         session.release().await?;
         let frozen = Arc::new(sessions.created_tool_presentation(locator).await?);
         let current_registry = coding_tool_registry_with_extensions(

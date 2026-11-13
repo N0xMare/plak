@@ -2,6 +2,7 @@
 
 mod attached;
 mod binding;
+pub(crate) mod check_binding;
 mod delete;
 pub(crate) mod import_export;
 pub(crate) mod import_placement;

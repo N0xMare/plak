@@ -508,6 +508,35 @@ impl FrozenToolRegistryDescriptor {
         })
     }
 
+    /// Checks current executable identities without constructing executors.
+    /// This host inspection seam grants no executable capability.
+    ///
+    /// # Errors
+    /// Returns the same missing/revised binding refusal as reconstruction.
+    #[doc(hidden)]
+    pub fn check_executor_identities(
+        &self,
+        mut current: impl FnMut(&ToolName, &ToolExecutorId) -> Option<ToolExecutorBindingIdentity>,
+    ) -> Result<(), ToolBindingError> {
+        self.validate()?;
+        for registration in &self.wire.registrations {
+            let id =
+                ToolExecutorId::new(registration.executor_id.clone()).map_err(invalid_runtime)?;
+            let expected =
+                ToolExecutorBindingIdentity::from_digest(registration.executor_binding_identity);
+            let found = current(&registration.identity.name, &id)
+                .ok_or_else(|| ToolBindingError::MissingBinding { id: id.clone() })?;
+            if found != expected {
+                return Err(ToolBindingError::BindingIdentityMismatch {
+                    id,
+                    expected,
+                    found,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Returns the canonical tool-interface identity without process-local
     /// executor bindings. This is the exact continuity witness used when a
     /// canonical rebind reconstructs the same tools for a new product branch.

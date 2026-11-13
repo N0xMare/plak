@@ -281,13 +281,13 @@ fn registration(
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner),
     );
+    let (executor_id, executor_binding) = topology_executor_identity(name)?
+        .ok_or_else(|| TreeRuntimeError::new("topology executor kind is invalid"))?;
     let registration = ToolRegistration::new(
         RegisteredToolId::new(format!("plak.topology.{name}.v1"))
             .map_err(|_| TreeRuntimeError::new("topology tool id is invalid"))?,
-        ToolExecutorId::new(format!("plak.topology.{name}.executor.v1"))
-            .map_err(|_| TreeRuntimeError::new("topology executor id is invalid"))?,
-        ToolExecutorBindingIdentity::new(1, &[ISSUER, name.as_bytes()])
-            .map_err(|_| TreeRuntimeError::new("topology binding identity is invalid"))?,
+        executor_id,
+        executor_binding,
         definition,
         Arc::new(TopologyTool {
             driver,
@@ -316,6 +316,33 @@ fn registration(
             registration
         },
     )
+}
+
+/// Current executable identity without constructing a tree driver or capability.
+///
+/// # Errors
+/// Returns an identity construction failure. Unknown names return `None`.
+pub fn topology_executor_identity(
+    name: &str,
+) -> TreeRuntimeResult<Option<(ToolExecutorId, ToolExecutorBindingIdentity)>> {
+    if !presentation_kinds()
+        .into_iter()
+        .chain([
+            TopologyKind::TaskOutput,
+            TopologyKind::TaskKill,
+            TopologyKind::JobsWait,
+            TopologyKind::JobsStop,
+        ])
+        .any(|kind| kind.name() == name)
+    {
+        return Ok(None);
+    }
+    Ok(Some((
+        ToolExecutorId::new(format!("plak.topology.{name}.executor.v1"))
+            .map_err(|_| TreeRuntimeError::new("topology executor id is invalid"))?,
+        ToolExecutorBindingIdentity::new(1, &[ISSUER, name.as_bytes()])
+            .map_err(|_| TreeRuntimeError::new("topology binding identity is invalid"))?,
+    )))
 }
 
 /// Grant-compiled Tact names plus occupancy tools, nested-eligible, bound to

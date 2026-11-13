@@ -7,6 +7,35 @@ use super::{
 use plakous_agent::internal::CheckpointRecoveryVerdict;
 use {plakous_store::SqliteSessionStore, std::path::Path};
 
+/// Reads every retained branch's frozen binding data, including children.
+/// No actor, ownership, runtime, credential or runner is opened. Each graph is
+/// decoded from immutable checkpoint objects through read-only SQLite.
+///
+/// # Errors
+/// Returns schema, integrity or read failures, including a concurrently pruned head.
+#[doc(hidden)]
+pub fn inspect_binding_presentations_sqlite(
+    path: impl AsRef<Path>,
+) -> Result<Vec<(SessionLocator, super::FrozenSessionPresentation)>, AgentSessionsError> {
+    let path = path.as_ref();
+    SqliteSessionStore::inspect_head_checkpoints(path)
+        .map_err(store_error)?
+        .into_iter()
+        .map(|id| {
+            let stored = SqliteSessionStore::inspect_checkpoint(path, id).map_err(store_error)?;
+            let checkpoint = stored.checkpoint();
+            let topology = checkpoint.manifest().topology();
+            let locator = SessionLocator::new(
+                topology.session_id,
+                topology.branch_id,
+                topology.checkpoint_id,
+            );
+            super::FrozenSessionPresentation::from_checkpoint(checkpoint)
+                .map(|presentation| (locator, presentation))
+        })
+        .collect()
+}
+
 /// What the pure resume predicates permit, before credentialed reconstruction.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

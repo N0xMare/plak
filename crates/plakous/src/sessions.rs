@@ -226,6 +226,16 @@ pub struct SessionInputWindow {
 }
 
 impl SessionRuntimeBinding {
+    /// Non-secret data-only construction facts for host qualification.
+    /// This hidden host-layer seam carries no embedder stability claim.
+    ///
+    /// # Errors
+    /// Returns tool identity or compiler inspection failures.
+    #[doc(hidden)]
+    pub fn inspection_facts(&self) -> Result<serde_json::Value, AgentSessionsError> {
+        plakous_agent::internal::facade_support::agent_builder_binding_facts(&self.builder)
+            .map_err(|error| runtime_error(&error))
+    }
     /// Shares the host's request slots across opens and runtime refreshes.
     #[doc(hidden)]
     #[must_use]

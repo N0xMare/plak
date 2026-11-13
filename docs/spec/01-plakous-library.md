@@ -2270,7 +2270,8 @@ to today's definition does not change an existing session's presentation.
 Fresh and explicitly rebound sessions receive current definitions. No digest
 is patched and no identity comparison is relaxed. This is reconstruction of
 frozen data, not retained implementation code or a compatibility layer.
-The hidden `FrozenSessionPresentation` facade seam and construction-data read
+The hidden `FrozenSessionPresentation` facade seam, read-only binding inspection
+and construction-data read
 exist for host-layer reconstruction only and carry no embedder stability claim.
 Non-tool provider behavior, model authority and workspace policy still undergo
 the ordinary strict exact-open checks.

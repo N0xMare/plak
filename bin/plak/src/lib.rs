@@ -501,6 +501,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let services = Services::from_env(Some(otel_extra_telemetry_sink), launch.as_deref());
     #[cfg(not(feature = "otel"))]
     let services = Services::from_env(None, launch.as_deref());
+    if matches!(&command, Command::SessionCheckBinding) {
+        return commands::session::check_binding::run(services.paths()?, &mut io::stdout().lock());
+    }
     if matches!(
         command,
         Command::HostUpgradeProbe { .. } | Command::HostUpgradeCapacity { .. }
@@ -676,6 +679,12 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             );
         }
         Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
+        Command::SessionCheckBinding => {
+            return commands::session::check_binding::run(
+                services.paths()?,
+                &mut io::stdout().lock(),
+            );
+        }
         // The runner bridge owns raw stdin and stdout, so it runs before the
         // process takes their locks.
         Command::Runner(command) => {
@@ -1430,6 +1439,7 @@ fn execute_command(
         | Command::HostConnect { .. }
         | Command::HostUpgrade { .. }
         | Command::WireSchema
+        | Command::SessionCheckBinding
         | Command::Help
         | Command::CommandHelp { .. }
         | Command::Version

@@ -6,7 +6,10 @@
 //! state one hosted session shares. Every name the rest of the host used
 //! from `crate::agent` is re-exported here.
 
+mod binding_inspection;
 pub mod build;
+#[doc(hidden)]
+pub use binding_inspection::check_frozen_binding;
 pub mod children;
 pub(crate) mod feed_projection;
 mod ledger;

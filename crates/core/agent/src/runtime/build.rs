@@ -161,6 +161,28 @@ impl fmt::Debug for AgentBuilder {
 }
 
 impl AgentBuilder {
+    pub(crate) fn binding_inspection_facts(&self) -> Result<serde_json::Value, AgentError> {
+        let registry = self.tools.registry_identity_digest().map_err(|error| {
+            AgentError::new(
+                AgentErrorKind::InvalidInput,
+                format!("tool registry inspection failed: {error}"),
+            )
+        })?;
+        let facts =
+            compiler_model_facts_from_model(self.model.as_ref(), &self.provider_configuration)
+                .map_err(|error| profile_construction_error(&error))?;
+        Ok(serde_json::json!({
+            "configuration": self.provider_configuration.as_ref(),
+            "model_facts": facts,
+            "registry_digest": registry,
+            "canonical_names": self.tools.definitions().iter().map(|definition| definition.name().as_str()).collect::<Vec<_>>(),
+            "projection_digest": self.tool_projection.as_ref().map(ToolProjectionMap::digest),
+            "profile": self.harness_plan.as_ref().map(ResolvedHarnessPlan::source_profile),
+            "context_sources": self.harness_plan.as_ref().map(|plan| plan.instructions().sources()),
+            "plan_digest": self.harness_plan.as_ref().map(ResolvedHarnessPlan::plan_digest),
+        }))
+    }
+
     pub(crate) fn seed_named_state(mut self, state: crate::manifest::NamedState) -> Self {
         self.initial_named_state = state;
         self

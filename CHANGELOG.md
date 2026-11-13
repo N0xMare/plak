@@ -24,6 +24,8 @@ one cross-build carrier (a build imports its own and the previous version).
 
 - Preserve each session's frozen tool presentation on exact reopen across
   release changes, while checking current executor compatibility separately.
+- Check retained bindings read-only before a same-key host upgrade surrenders
+  ownership, including branches belonging to children.
 
 - Fixed runner calls being queued on an already cancelled link; calls refused
   before dispatch remain provably not sent, without a replay journal claim.

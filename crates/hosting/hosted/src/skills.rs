@@ -316,12 +316,16 @@ fn skill_tool_registration(
             .map_err(|_| CliFailure::new("Skill tool id is invalid"))?,
         ToolExecutorId::new("plak.skills.skill.executor.v1")
             .map_err(|_| CliFailure::new("Skill executor id is invalid"))?,
-        ToolExecutorBindingIdentity::new(1, &[ISSUER, SKILL_TOOL_NAME.as_bytes()])
-            .map_err(|_| CliFailure::new("Skill binding identity is invalid"))?,
+        skill_executor_identity()?,
         definition,
         Arc::new(SkillTool { skills, reader }),
     )
     .nested_eligible())
+}
+
+pub(crate) fn skill_executor_identity() -> CliResult<ToolExecutorBindingIdentity> {
+    ToolExecutorBindingIdentity::new(1, &[ISSUER, SKILL_TOOL_NAME.as_bytes()])
+        .map_err(|_| CliFailure::new("Skill binding identity is invalid"))
 }
 
 struct SkillTool {

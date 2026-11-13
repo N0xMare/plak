@@ -182,6 +182,7 @@ fn publication_read_only_commands_leave_missing_home_untouched() {
         vec!["doctor"],
         vec!["key", "status"],
         vec!["config", "show"],
+        vec!["session", "check-binding", "--all"],
     ] {
         let root = tempfile::tempdir().unwrap();
         let out = publication_command(root.path(), &args).output().unwrap();

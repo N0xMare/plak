@@ -933,6 +933,11 @@ enum TreeAction {
 
 #[derive(Debug, Subcommand)]
 enum SessionAction {
+    #[command(hide = true)]
+    CheckBinding {
+        #[arg(long)]
+        all: bool,
+    },
     /// List sessions for the current workspace.
     List {
         #[arg(long)]
@@ -1019,6 +1024,10 @@ impl SessionAction {
     fn into_command(self) -> Result<Command, String> {
         match self {
             Self::List { include_archived } => Ok(Command::SessionList { include_archived }),
+            Self::CheckBinding { all: true } => Ok(Command::SessionCheckBinding),
+            Self::CheckBinding { all: false } => Ok(Command::CommandHelp {
+                command: "session".to_owned(),
+            }),
             Self::Rename {
                 id: Some(id),
                 title,

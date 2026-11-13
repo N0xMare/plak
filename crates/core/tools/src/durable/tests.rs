@@ -16,6 +16,29 @@ use crate::{
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+#[test]
+fn offline_executor_identity_check_uses_exact_bindings_without_invocation() -> TestResult {
+    let (registry, calls) = registry_in_order(&[0, 1, 2])?;
+    let descriptor = FrozenToolRegistryDescriptor::capture(&registry)?;
+    descriptor.check_executor_identities(|name, id| {
+        registry
+            .identity(name)
+            .filter(|identity| identity.executor_id() == id)
+            .map(RegisteredToolIdentity::executor_binding_identity)
+    })?;
+    assert!(matches!(
+        descriptor.check_executor_identities(|_, _| None),
+        Err(ToolBindingError::MissingBinding { .. })
+    ));
+    let incompatible = ToolExecutorBindingIdentity::new(2, &[b"incompatible"])?;
+    assert!(matches!(
+        descriptor.check_executor_identities(|_, _| Some(incompatible)),
+        Err(ToolBindingError::BindingIdentityMismatch { .. })
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
 struct CountingExecutor {
     calls: Arc<AtomicUsize>,
 }

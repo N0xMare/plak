@@ -952,6 +952,17 @@ fn preflight_capacities(
 
 fn preflight_same_key(services: &Services, request: &Request) -> CliResult<()> {
     let paths = services.paths()?;
+    let mut command =
+        process::command(&request.destination, paths.home(), &request.destination_key);
+    command.args(["session", "check-binding", "--all"]);
+    let bindings: crate::commands::session::check_binding::Report = serde_json::from_slice(
+        &process::run(command, PROBE_BOUND)?.stdout,
+    ).map_err(|_| CliFailure::new("host_upgrade_binding_preflight_invalid: destination did not answer its read-only binding inspection"))?;
+    if !bindings.compatible {
+        return Err(CliFailure::new(
+            "host_upgrade_binding_preflight_refused: retained bindings are incompatible or could not be checked; source remains running",
+        ));
+    }
     for record in
         crate::store::ProductStore::inspect_upgrade_roots(paths).map_err(CliFailure::new)?
     {

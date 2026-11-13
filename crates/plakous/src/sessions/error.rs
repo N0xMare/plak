@@ -155,6 +155,11 @@ pub struct AgentSessionsError {
 }
 
 impl AgentSessionsError {
+    pub(super) fn with_binding_change(mut self, change: BindingChange) -> Self {
+        self.binding_change = Some(Box::new(change));
+        self
+    }
+
     pub(super) fn new(kind: AgentSessionsErrorKind, message: impl Into<String>) -> Self {
         Self {
             kind,

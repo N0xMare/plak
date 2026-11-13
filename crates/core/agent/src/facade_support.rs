@@ -41,6 +41,16 @@ pub fn agent_builder_has_job_host(builder: &AgentBuilder) -> bool {
     builder.has_job_host()
 }
 
+/// Data-only construction facts for host qualification; no admission authority.
+///
+/// # Errors
+/// Returns serialization or tool-identity failures.
+pub fn agent_builder_binding_facts(
+    builder: &AgentBuilder,
+) -> Result<serde_json::Value, AgentError> {
+    builder.binding_inspection_facts()
+}
+
 use crate::internal::{Agent, AgentBuilder, AgentError, SessionStoreCapacity, SessionStoreError};
 pub use crate::internal::{
     AgentCompactSessionOutcome, AgentCompactSessionRequest, AgentCompactionReason,
@@ -130,10 +140,19 @@ pub fn checkpoint_job_config(
 pub fn checkpoint_instruction_sources(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<Vec<crate::ResolvedContextSourceFact>, AgentError> {
+    checkpoint_harness_plan(checkpoint).map(|plan| plan.instructions().sources().to_vec())
+}
+
+/// Rehydrates construction data for host inspection, without runtime authority.
+///
+/// # Errors
+/// Returns an incompatible-session error for unreadable or unsupported plans.
+pub fn checkpoint_harness_plan(
+    checkpoint: &RuntimeCheckpoint,
+) -> Result<crate::ResolvedHarnessPlan, AgentError> {
     checkpoint
         .manifest()
         .rehydrate_harness_plan()
-        .map(|plan| plan.instructions().sources().to_vec())
         .map_err(|error| {
             AgentError::new(
                 crate::AgentErrorKind::IncompatibleSession,

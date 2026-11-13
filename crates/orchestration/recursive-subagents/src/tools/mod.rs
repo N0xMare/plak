@@ -63,8 +63,8 @@ pub use controller::{ChildController, ChildServices};
 pub use driver::{HeldEffects, HostShutdown, TreeDriver};
 pub use mail::{MailDeliveryAck, MailDeliveryFailure, MailDeliveryRequest};
 pub use registrations::{
-    TopologyHostPorts, invoke_granted_topology_tool_on, topology_tool_registrations,
-    topology_tool_registrations_in, topology_tool_registrations_on,
+    TopologyHostPorts, invoke_granted_topology_tool_on, topology_executor_identity,
+    topology_tool_registrations, topology_tool_registrations_in, topology_tool_registrations_on,
 };
 pub use spawn::{SpawnBindError, SpawnBound, SpawnStart};
 
