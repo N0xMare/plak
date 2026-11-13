@@ -46,6 +46,7 @@ mod actor_tests;
 #[cfg(test)]
 mod admission_budget_tests;
 mod authority;
+mod binding_inspection;
 mod checkpoint_cache;
 mod codec;
 mod error;
@@ -110,6 +111,21 @@ pub const BUNDLED_SQLITE_REQUIRED_COMPILE_OPTIONS: [&str; 4] = [
 ];
 const BACKGROUND_VACUUM_PAGES: u32 = 1024;
 const CHECKPOINT_CACHE_BYTES: usize = 64 * 1024 * 1024;
+
+/// Read-only binding metadata, with inactive payloads deliberately unopened.
+#[doc(hidden)]
+pub struct BindingCheckpointInspection {
+    /// Exact branch selector.
+    pub session: SessionRef,
+    /// Recorded checkpoint identity.
+    pub checkpoint: CheckpointId,
+    /// Runtime archival state.
+    pub archived: bool,
+    /// Current line-head status.
+    pub line_head: bool,
+    /// Inactive rows have no payload; active read failures remain per-row facts.
+    pub stored: Option<Result<StoredCheckpoint, SessionStoreError>>,
+}
 
 /// Bounded `SQLite` actor and retained-state options.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -418,32 +434,6 @@ impl SqliteSessionStore {
         let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
         admit_inspection_snapshot(&snapshot)?;
         load_checkpoint(&snapshot, checkpoint)
-    }
-
-    /// Lists retained branch-head checkpoints through one read-only snapshot.
-    /// No boot, lease, runtime actor, recovery or write is opened.
-    ///
-    /// # Errors
-    /// Returns schema, shape or read failures. An absent store is empty.
-    pub fn inspect_head_checkpoints(
-        path: impl AsRef<Path>,
-    ) -> Result<Vec<CheckpointId>, SessionStoreError> {
-        let Some(connection) = Self::open_inspection(path.as_ref())? else {
-            return Ok(Vec::new());
-        };
-        let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
-        admit_inspection_snapshot(&snapshot)?;
-        let mut statement = snapshot
-            .prepare("SELECT DISTINCT checkpoint_id FROM branches ORDER BY checkpoint_id")
-            .map_err(map_sqlite)?;
-        let ids = statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(map_sqlite)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(map_sqlite)?;
-        ids.into_iter()
-            .map(|id| id.parse().map_err(|_| SessionStoreError::corrupt()))
-            .collect()
     }
 
     /// Reads one exact branch without opening a writable runtime or changing its

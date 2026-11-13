@@ -252,14 +252,16 @@ impl ToolExecutor for TopologyTool {
                     )
                     .await;
             }
-            self.dispatch_cancellable_preempt(
-                invocation.correlation().caller_lineage(),
-                invocation.call_id().to_string(),
-                invocation.arguments().value().as_ref(),
-                context.cancellation().cancelled(),
-                Some(context.preempt().clone()),
-            )
-            .await
+            let outcome = self
+                .dispatch_cancellable_preempt(
+                    invocation.correlation().caller_lineage(),
+                    invocation.call_id().to_string(),
+                    invocation.arguments().value().as_ref(),
+                    context.cancellation().cancelled(),
+                    Some(context.preempt().clone()),
+                )
+                .await?;
+            parent_recovery::present_refusal(outcome, invocation.definition())
         })
     }
 }

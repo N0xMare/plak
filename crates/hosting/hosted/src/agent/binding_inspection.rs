@@ -7,9 +7,7 @@ use plakous::agent::BindingChange;
 use plakous::model::{ReasoningEffortDisposition, SelectedProviderConfiguration, ToolName};
 use plakous::sessions::FrozenSessionPresentation;
 use plakous::subscriptions::NativeProvider;
-use plakous::tools::{
-    PlanStateIdentity, ToolBindingError, ToolExecutorBindingIdentity, ToolExecutorId,
-};
+use plakous::tools::{PlanStateIdentity, ToolExecutorBindingIdentity, ToolExecutorId};
 
 /// Checks frozen data against this release's executable and native selection
 /// metadata. No credential, model, runner, workspace or sidecar is opened.
@@ -45,28 +43,63 @@ pub fn check_frozen_binding(
         composition == CompositionSelection::NativePtc,
         &crate::tools::ProductToolExtensions::empty(),
     )?;
-    let check = frozen.check_executor_identities(|name, id| {
-        registry
-            .identity(name)
-            .filter(|identity| identity.executor_id() == id)
-            .map(plakous::tools::RegisteredToolIdentity::executor_binding_identity)
-            .or_else(|| extension_identity(name, id))
-    });
-    if let Err(error) = check {
-        return match error {
-            ToolBindingError::BindingIdentityMismatch { id, .. } => {
-                Ok(Some(BindingChange::ToolBinding {
-                    tool: id.to_string(),
-                }))
-            }
-            ToolBindingError::MissingBinding { id } => Err(CliFailure::new(format!(
-                "binding inspection cannot establish current executor authority: {id}"
-            ))),
-            _ => Err(CliFailure::new(format!(
-                "frozen binding inspection failed: {error}"
-            ))),
-        };
+    if let Some(change) = check_executors(frozen, &registry)? {
+        return Ok(Some(change));
     }
+    check_native_selection(frozen, composition)
+}
+
+fn check_executors(
+    frozen: &FrozenSessionPresentation,
+    registry: &plakous::tools::FrozenToolRegistry,
+) -> CliResult<Option<BindingChange>> {
+    for (name, id, recorded) in frozen.executor_requirements().map_err(CliFailure::from)? {
+        if id.as_str().starts_with("plakous.mcp.") {
+            continue;
+        }
+        let found = registry
+            .identity(&name)
+            .filter(|identity| *identity.executor_id() == id)
+            .map(plakous::tools::RegisteredToolIdentity::executor_binding_identity)
+            .or_else(|| extension_identity(&name, &id));
+        let alternatives =
+            plakous::tools::web::current_executor_bindings(name.as_str(), id.as_str())
+                .map_err(|_| CliFailure::new("optional executable metadata is invalid"))?;
+        let found = found
+            .or_else(|| {
+                alternatives
+                    .iter()
+                    .copied()
+                    .find(|binding| binding.accepts(&id, recorded))
+            })
+            .or_else(|| alternatives.first().copied());
+        match found {
+            Some(binding) if binding.accepts(&id, recorded) => {}
+            Some(_) => {
+                return Ok(Some(BindingChange::ToolBinding {
+                    tool: id.to_string(),
+                }));
+            }
+            None if registry.identity(&name).is_some() => {
+                return Ok(Some(BindingChange::ToolBinding {
+                    tool: id.to_string(),
+                }));
+            }
+            None => {
+                return Err(CliFailure::new(format!(
+                    "binding inspection cannot establish current executor authority: {id}"
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn check_native_selection(
+    frozen: &FrozenSessionPresentation,
+    composition: CompositionSelection,
+) -> CliResult<Option<BindingChange>> {
+    let configuration = frozen.configuration();
     let route = configuration.selected().route();
     let model = route.requested_model();
     for provider in [
@@ -108,12 +141,14 @@ pub fn check_frozen_binding(
 }
 
 fn stored_plan_identity(frozen: &FrozenSessionPresentation) -> CliResult<PlanStateIdentity> {
-    let plan = frozen
-        .executor_id(
-            &ToolName::new("update_plan")
-                .map_err(|_| CliFailure::new("invalid inspection tool"))?,
-        )
-        .ok_or_else(|| CliFailure::new("stored plan-state executor is absent"))?;
+    let Some(plan) = frozen.executor_id(
+        &ToolName::new("update_plan").map_err(|_| CliFailure::new("invalid inspection tool"))?,
+    ) else {
+        // An unselected plan tool has no stored requirement to compare. This
+        // label only builds unused metadata, never a source binding verdict.
+        return PlanStateIdentity::new("binding-inspection", 1)
+            .map_err(|_| CliFailure::new("invalid inspection plan identity"));
+    };
     let (authority, revision) = plan
         .as_str()
         .strip_prefix("plakous.standard.update-plan.v1.")

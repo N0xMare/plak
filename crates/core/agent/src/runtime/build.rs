@@ -175,6 +175,10 @@ impl AgentBuilder {
             "configuration": self.provider_configuration.as_ref(),
             "model_facts": facts,
             "registry_digest": registry,
+            "registry": self.tools.definitions().iter().filter_map(|definition| self.tools.identity(definition.name())).map(|identity| serde_json::json!({
+                "name":identity.name(), "definition":identity.definition_digest(), "schema":identity.schema_digest(),
+                "executor":identity.executor_id().as_str(), "binding":identity.executor_binding_identity().digest(), "nesting":identity.nested_eligibility(),
+            })).collect::<Vec<_>>(),
             "canonical_names": self.tools.definitions().iter().map(|definition| definition.name().as_str()).collect::<Vec<_>>(),
             "projection_digest": self.tool_projection.as_ref().map(ToolProjectionMap::digest),
             "profile": self.harness_plan.as_ref().map(ResolvedHarnessPlan::source_profile),

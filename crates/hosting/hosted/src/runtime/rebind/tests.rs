@@ -17,6 +17,8 @@ use crate::binding::CompositionSelection as ProductComposition;
 use crate::binding::TargetSelection;
 use crate::interrupt::{InterruptWatch, InterruptWatchState};
 use crate::runtime::startup::api_runtime_for_record;
+mod frozen_compaction;
+mod frozen_successors;
 use crate::runtime::test_support::*;
 
 #[test]

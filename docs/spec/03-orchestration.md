@@ -648,6 +648,14 @@ compile current definitions. Executors are current code with separately checked
 binding identities: a revision cut refuses incompatible old inputs rather than
 silently upgrading their schemas. Keeping frozen data does not retain old code
 or weaken the exact provider, registry, projection or harness-plan identities.
+Manual and hosted compaction preserve that presentation too, including a leaf's
+nested catalog, while fresh binding successors keep inherited skills and their
+pending epoch. Recovery refusal remedies follow the session's presented
+`send_agent_message` schema: only a presentation with `acknowledge_recovery`
+offers that field. An older presentation asks for operator Resume/recover or an
+explicit rebind to current definitions instead. This changes neither the held
+turn's admission guard nor the recorded operation's identity.
+
 
 ### 3.1 The spawn graph is the capability grant
 

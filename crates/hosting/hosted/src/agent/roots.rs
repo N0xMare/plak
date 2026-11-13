@@ -921,8 +921,16 @@ impl ProductStateRoots {
         self.reopen_sidecars.as_ref().unwrap_or(&self.sidecars)
     }
 
-    pub(super) fn without_frozen_presentation(mut self) -> Self {
+    pub(crate) fn without_frozen_presentation(mut self) -> Self {
         self.frozen_presentation = None;
+        self
+    }
+
+    pub(crate) fn with_frozen_presentation(
+        mut self,
+        frozen: Arc<plakous::sessions::FrozenSessionPresentation>,
+    ) -> Self {
+        self.frozen_presentation = Some(frozen);
         self
     }
 

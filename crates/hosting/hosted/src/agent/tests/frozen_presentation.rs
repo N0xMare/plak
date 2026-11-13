@@ -21,6 +21,87 @@ struct NeverInvoked;
 
 const PLAN_AUTHORITY: &str = "00000000-0000-4000-8000-000000000011";
 
+#[tokio::test]
+#[ignore = "explicit production-size read-only inspection measurement"]
+async fn binding_inspection_timing_for_two_hundred_checkpoint_heads()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let database = directory.path().join("runtime.sqlite3");
+    let workspace = Arc::new(stamped_workspace_policy(
+        directory.path(),
+        Path::new(""),
+        None,
+    )?);
+    let sessions = AgentSessions::new(SessionBackend::sqlite(&database)?)?;
+    let extensions = crate::tools::ProductToolExtensions::empty();
+    let registry = coding_tool_registry_with_extensions(
+        PLAN_AUTHORITY,
+        CompositionSelection::Direct,
+        false,
+        &extensions,
+    )?;
+    let selected = selected_coding_provider_configuration(
+        NativeProvider::Claude,
+        ModelId::new("claude-opus-5-5")?,
+        ReasoningEffort::High,
+        None,
+        CompositionSelection::Direct,
+    )?;
+    for ordinal in 0..200 {
+        let node = node_session(
+            plakous::tools::JobConfig::default(),
+            standard_claude_model(&selected)?,
+            &registry,
+            &extensions,
+            &[],
+            SessionToolFence::Full,
+            None,
+        )?;
+        let history = plakous::sessions::PortableSessionHistory::new(
+            Vec::new(),
+            "00".repeat(32),
+            ModelId::new("claude-opus-5-5")?,
+        )
+        .with_named_state(std::collections::BTreeMap::from([(
+            "retained_data".into(),
+            serde_json::json!(format!("{ordinal}:{}", "x".repeat(128 * 1024))),
+        )]))?;
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(
+                CreateSessionRequest::new(
+                    SessionOperationId::new(format!("inspection-size:{ordinal}"))?,
+                    builder(node, registry.clone(), workspace.clone(), true),
+                )
+                .with_history(history),
+            )
+            .await?
+        else {
+            panic!("create inspection fixture")
+        };
+        session.release().await?;
+    }
+    let started = std::time::Instant::now();
+    let heads = plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database, &[])?;
+    let mut output = Vec::new();
+    for head in heads {
+        assert_eq!(
+            crate::agent::check_frozen_binding(&head.presentation.unwrap()?)?,
+            None
+        );
+        output.push(serde_json::json!({"session":head.locator.session_id().to_string(), "branch":head.locator.branch_id().to_string(),
+            "checkpoint":head.locator.checkpoint_id().to_string(), "archived":false,"superseded":false,
+            "binding_change":null,"unavailable":null,"unaffected":[]}));
+    }
+    eprintln!(
+        "binding inspection: {} heads, {} database bytes, {} report bytes, {:?}",
+        output.len(),
+        std::fs::metadata(database)?.len(),
+        serde_json::to_vec(&output)?.len(),
+        started.elapsed()
+    );
+    Ok(())
+}
+
 impl ToolExecutor for NeverInvoked {
     fn execute(
         self: Arc<Self>,
@@ -35,6 +116,15 @@ pub(crate) fn previous_send_extensions(
     extensions: &crate::tools::ProductToolExtensions,
     composition: CompositionSelection,
     incompatible: bool,
+) -> Result<crate::tools::ProductToolExtensions, Box<dyn std::error::Error>> {
+    previous_extensions(extensions, composition, incompatible, false)
+}
+
+fn previous_extensions(
+    extensions: &crate::tools::ProductToolExtensions,
+    composition: CompositionSelection,
+    incompatible: bool,
+    unknown: bool,
 ) -> Result<crate::tools::ProductToolExtensions, Box<dyn std::error::Error>> {
     let registry =
         coding_tool_registry_with_extensions(PLAN_AUTHORITY, composition, false, extensions)?;
@@ -66,7 +156,11 @@ pub(crate) fn previous_send_extensions(
         let identity = registry.identity(definition.name()).unwrap();
         let replacement = ToolRegistration::new(
             identity.tool_id().clone(),
-            identity.executor_id().clone(),
+            if unknown {
+                plakous::tools::ToolExecutorId::new("fixture.unknown.send.executor")?
+            } else {
+                identity.executor_id().clone()
+            },
             if incompatible {
                 ToolExecutorBindingIdentity::new(2, &[b"incompatible"])?
             } else {
@@ -142,6 +236,42 @@ fn builder(
         builder = builder.harness_plan(plan);
     }
     SessionRuntimeBinding::new(builder)
+}
+
+pub(crate) fn frozen_native_fixture_runtime(
+    extensions: &crate::tools::ProductToolExtensions,
+    workspace: &Path,
+    authority: &str,
+) -> Result<SessionRuntimeBinding, Box<dyn std::error::Error>> {
+    let registry = coding_tool_registry_with_extensions(
+        authority,
+        CompositionSelection::Direct,
+        false,
+        extensions,
+    )?;
+    let selected = selected_coding_provider_configuration(
+        NativeProvider::Claude,
+        ModelId::new("claude-opus-5-5")?,
+        ReasoningEffort::High,
+        None,
+        CompositionSelection::Direct,
+    )?;
+    let extras = extensions.names().cloned().collect::<Vec<_>>();
+    let node = node_session(
+        plakous::tools::JobConfig::default(),
+        standard_claude_model(&selected)?,
+        &registry,
+        extensions,
+        &extras,
+        SessionToolFence::Full,
+        None,
+    )?;
+    Ok(builder(
+        node,
+        registry,
+        Arc::new(stamped_workspace_policy(workspace, Path::new(""), None)?),
+        true,
+    ))
 }
 
 #[tokio::test]
@@ -231,10 +361,15 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
         let wal = directory.path().join("runtime.sqlite3-wal");
         let before_wal = std::fs::read(&wal).ok();
         let inspected =
-            plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database)?;
-        assert!(inspected.iter().any(|(candidate, _)| *candidate == locator));
-        for (_, presentation) in &inspected {
-            assert_eq!(crate::agent::check_frozen_binding(presentation)?, None);
+            plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database, &[])?;
+        assert!(inspected.iter().any(|head| head.locator == locator));
+        for head in inspected {
+            if head.locator != locator {
+                continue;
+            }
+            if let Some(presentation) = head.presentation {
+                assert_eq!(crate::agent::check_frozen_binding(&presentation?)?, None);
+            }
         }
         assert_eq!(std::fs::read(&database)?, before);
         assert_eq!(std::fs::read(&wal).ok(), before_wal);
@@ -299,6 +434,47 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             false,
             &restored,
         )?;
+        let changed_selected = selected_coding_provider_configuration(
+            NativeProvider::Claude,
+            ModelId::new("claude-opus-5-5")?,
+            ReasoningEffort::Low,
+            None,
+            CompositionSelection::Direct,
+        )?;
+        let changed = standard_claude_model(&changed_selected)?;
+        let refusal = frozen
+            .restore_configuration(changed.configuration())
+            .expect_err("frozen tools must not mask a changed reasoning selection");
+        assert_eq!(
+            refusal.binding_change(),
+            Some(&plakous::agent::BindingChange::ProviderConfiguration)
+        );
+        let changed_node = node_session(
+            plakous::tools::JobConfig::default(),
+            changed,
+            &registry,
+            &current,
+            &extras,
+            SessionToolFence::Full,
+            None,
+        )?;
+        let refusal = sessions
+            .open(OpenSessionRequest::new(
+                SessionOperationId::new(format!("changed-effort:{child}"))?,
+                locator,
+                builder(
+                    changed_node,
+                    registry.clone(),
+                    Arc::clone(&workspace),
+                    false,
+                ),
+            ))
+            .await
+            .expect_err("an exact reopen must still reject changed non-tool configuration");
+        assert_eq!(
+            refusal.binding_change(),
+            Some(&plakous::agent::BindingChange::ProviderConfiguration)
+        );
         let node = node_session(
             plakous::tools::JobConfig::default(),
             resolved,
@@ -372,6 +548,61 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             frozen.restore_registry(&live),
             Err(plakous::tools::ToolBindingError::BindingIdentityMismatch { .. })
         ));
+        let changed_node = node_session(
+            plakous::tools::JobConfig::default(),
+            standard_claude_model(&selected)?,
+            &live,
+            &incompatible,
+            &extras,
+            SessionToolFence::Full,
+            None,
+        )?;
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(CreateSessionRequest::new(
+                SessionOperationId::new(format!("revised-executor:{child}"))?,
+                builder(changed_node, live, Arc::clone(&workspace), true),
+            ))
+            .await?
+        else {
+            panic!("create revised executor fixture")
+        };
+        let locator = session.release().await?;
+        assert!(matches!(
+            crate::agent::check_frozen_binding(
+                &sessions.created_tool_presentation(locator).await?
+            )?,
+            Some(plakous::agent::BindingChange::ToolBinding { .. })
+        ));
+        let unknown = previous_extensions(&current, CompositionSelection::Direct, false, true)?;
+        let registry = coding_tool_registry_with_extensions(
+            PLAN_AUTHORITY,
+            CompositionSelection::Direct,
+            false,
+            &unknown,
+        )?;
+        let node = node_session(
+            plakous::tools::JobConfig::default(),
+            standard_claude_model(&selected)?,
+            &registry,
+            &unknown,
+            &extras,
+            SessionToolFence::Full,
+            None,
+        )?;
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(CreateSessionRequest::new(
+                SessionOperationId::new(format!("unknown-executor:{child}"))?,
+                builder(node, registry, Arc::clone(&workspace), true),
+            ))
+            .await?
+        else {
+            panic!("create unknown executor fixture")
+        };
+        let locator = session.release().await?;
+        assert!(
+            crate::agent::check_frozen_binding(&sessions.created_tool_presentation(locator).await?)
+                .is_err()
+        );
     }
     Ok(())
 }

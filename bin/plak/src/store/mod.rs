@@ -24,6 +24,14 @@ use sessions::{
     SessionWorkflowKind, StoreBaseline, digest_parts,
 };
 
+pub(crate) struct BindingRecordDisposition {
+    pub(crate) tree: String,
+    pub(crate) root: bool,
+    pub(crate) locator: Option<SessionLocator>,
+    pub(crate) archived: bool,
+    pub(crate) superseded: bool,
+}
+
 pub(crate) const SCHEMA_VERSION: i64 = 37;
 const MAX_LIST_SESSIONS_SQL: i64 = 500;
 const MAX_LIST_PROMPTS_SQL: i64 = 500;
@@ -1533,6 +1541,7 @@ const SCHEMA: Schema = Schema {
 pub mod acknowledgements;
 #[cfg(feature = "test-support")]
 pub(crate) mod benchmark;
+mod binding_inspection;
 /// What a host's session directory reads.
 pub mod directory;
 /// Who holds a session another process has open.

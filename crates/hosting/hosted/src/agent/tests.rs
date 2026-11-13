@@ -18,7 +18,11 @@ use super::*;
 ))]
 mod binding_contracts;
 pub(super) mod frozen_presentation;
+mod native_fixture;
 mod previous_release;
+#[cfg(target_os = "linux")]
+mod production_predecessor;
+pub(crate) use native_fixture::native_fixture_spec;
 mod remote_skills;
 
 #[test]

@@ -18,6 +18,29 @@ pub struct FrozenSessionPresentation {
 }
 
 impl FrozenSessionPresentation {
+    /// The session's presented canonical definition, including nested tools.
+    #[must_use]
+    pub fn definition(&self, name: &ToolName) -> Option<&plakous_model::ToolDefinition> {
+        self.registry.definition(name)
+    }
+    /// Data-only requirements; no executable authority is reconstructed.
+    ///
+    /// # Errors
+    /// Returns unreadable stored metadata.
+    pub fn executor_requirements(
+        &self,
+    ) -> Result<
+        Vec<(
+            ToolName,
+            plakous_tools::ToolExecutorId,
+            plakous_tools::ToolExecutorBindingIdentity,
+        )>,
+        AgentSessionsError,
+    > {
+        self.registry
+            .executor_requirements()
+            .map_err(|_| invalid("stored executable requirements are unreadable"))
+    }
     /// The checkpoint's complete configuration; this is data, not fresh authority.
     #[must_use]
     pub fn configuration(&self) -> &CompiledProviderConfiguration {
@@ -148,8 +171,17 @@ impl FrozenSessionPresentation {
             live.effective().family_policy().clone(),
         )
         .map_err(|_| invalid("frozen effective tool configuration is invalid"))?;
-        CompiledProviderConfiguration::new(selected, effective)
-            .map_err(|_| invalid("frozen tool configuration cannot be reconstructed"))
+        let restored = CompiledProviderConfiguration::new(selected, effective)
+            .map_err(|_| invalid("frozen tool configuration cannot be reconstructed"))?;
+        if restored.selected_identity() != self.configuration.selected_identity()
+            || restored.effective_identity() != self.configuration.effective_identity()
+        {
+            return Err(
+                invalid("frozen presentation cannot hide changed provider configuration")
+                    .with_binding_change(plakous_agent::BindingChange::ProviderConfiguration),
+            );
+        }
+        Ok(restored)
     }
 }
 

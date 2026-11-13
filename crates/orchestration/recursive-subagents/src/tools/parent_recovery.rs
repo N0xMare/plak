@@ -2,6 +2,37 @@
 
 use super::*;
 
+#[cfg(test)]
+mod presentation_tests;
+
+pub(super) fn present_refusal(
+    outcome: ToolOutcome,
+    definition: &ToolDefinition,
+) -> Result<ToolOutcome, ToolRuntimeError> {
+    if definition.name().as_str() != "send_agent_message" {
+        return Ok(outcome);
+    }
+    let presented_acknowledgement = match definition.input() {
+        ToolInputContract::Structured(schema) => {
+            serde_json::from_slice::<Value>(schema.document().canonical_bytes())
+                .is_ok_and(|document| !document["properties"]["acknowledge_recovery"].is_null())
+        }
+        _ => false,
+    };
+    if outcome.is_success() || presented_acknowledgement {
+        return Ok(outcome);
+    }
+    let Ok(mut refusal) = serde_json::from_str::<Value>(&outcome.joined_text()) else {
+        return Ok(outcome);
+    };
+    let message = refusal["message"].as_str().unwrap_or_default();
+    if !message.contains("acknowledge_recovery") {
+        return Ok(outcome);
+    }
+    refusal["message"] = Value::String("recipient has an unresolved lost turn; a tool may have changed this workspace. Ask the operator to Resume/recover the child, or rebind this session to the current tool definitions before acknowledging recovery. No fresh attempt was admitted.".into());
+    ToolOutcome::failure_text(refusal.to_string())
+}
+
 pub(super) enum FollowupRecovery {
     Skipped,
     Settled,

@@ -579,10 +579,34 @@ impl ProductMailDeliverer {
             .ok()
             .flatten();
         if let Some(attempt) = attempt {
-            message.push_str(&format!(
-                "; its parent may send purpose=followup with acknowledge_recovery={attempt} \
-                 for a fresh attempt without replaying uncertain work; a tool may have changed this workspace"
-            ));
+            let acknowledgement =
+                self.parent
+                    .state_roots()
+                    .frozen_presentation()
+                    .is_none_or(|frozen| {
+                        plakous::model::ToolName::new("send_agent_message")
+                            .ok()
+                            .and_then(|name| frozen.definition(&name))
+                            .is_some_and(|definition| match definition.input() {
+                                plakous::model::ToolInputContract::Structured(schema) => {
+                                    serde_json::from_slice::<serde_json::Value>(
+                                        schema.document().canonical_bytes(),
+                                    )
+                                    .is_ok_and(|document| {
+                                        !document["properties"]["acknowledge_recovery"].is_null()
+                                    })
+                                }
+                                _ => false,
+                            })
+                    });
+            if acknowledgement {
+                message.push_str(&format!(
+                    "; its parent may send purpose=followup with acknowledge_recovery={attempt} \
+                     for a fresh attempt without replaying uncertain work; a tool may have changed this workspace"
+                ));
+            } else {
+                message.push_str("; a tool may have changed this workspace. Ask the operator to Resume/recover the child, or rebind this session to the current tool definitions before acknowledging recovery");
+            }
         }
         message
     }

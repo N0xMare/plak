@@ -12,31 +12,50 @@ symbol that is nameable, a command that parses, and a route that renders are all
 accessibility facts. None of them is a support or correctness promise.
 
 Release-binding contracts are offline and data-only. The hosted route matrix
-pins canonical selected/effective configurations and their IDs, model-binding
-facts, registry/projection digests and compiled plan digests for native routes,
-direct APIs and all three OpenRouter wire families, with root/leaf, Direct,
-native Code Mode and JS/Python compositions. Its explicit synthetic workspace,
-platform and fixed model authority are compilation inputs, not patched digests;
-canonical schema documents remain readable and failures name changed field paths.
-Fixture-clock OpenRouter evidence uses the normal discovery parsers without
-network or standard integration authority. The Anthropic binding fixture supplies
-a fixed construction clock; ordinary constructors retain the system clock. Repinning requires review, not an
-automatic update during ordinary tests.
+pins canonical selected/effective configurations and IDs, model-binding facts,
+per-tool tables (name, definition/schema digests, executor id/binding and
+nesting), registry/projection and plan digests across native routes, direct APIs
+and the three OpenRouter wire families, with root/leaf, Direct, native Code Mode
+and JS/Python compositions. Diffs name field paths and cap detail per route.
+Synthetic workspace/platform and fixed model authority are compilation inputs,
+not patched digests. Fixture-clock constructors retain normal discovery parsers;
+ordinary constructors retain their production clocks. Repinning needs review.
 
-An independently predecessor-authored SQLite fixture pins native root/leaf
-selected/effective and plan identities. The Linux candidate actually opens its
-exact locators, while other platforms first pass pure binding inspection and
-then retain the execution-environment refusal. The manifest records source,
-schema, epoch and SHA-256; the committed generator recipe runs only predecessor
-code in a detached checkout with isolated build artifacts. No private state,
-credentials or inference enters either fixture. A live-lease inspection test
-also requires unchanged durable database and WAL bytes. An explicit recompiling
-rebind must take current definitions on the same session identity, while exact
-open of those definitions against old history must still refuse. The real-host
-same-key daemon-job upgrade checks the read-only verdict before surrender;
-plan-state authority labels are opaque data reconstructed through the current
-registration compiler, not assumed to use one product naming prefix. These
-checks do not qualify credential, runner or remote-catalog availability.
+The release executor contract separately pins each id, semantic binding and
+accepted input-schema digest set. With an unchanged binding, every previously
+accepted schema must remain a structural subset of a current schema; narrowing
+requires an explicit executable revision cut. Both fetch image-result variants
+are enrolled. Host-specific shell file observations are never golden inputs:
+replacement/revalidation tests and old inode-bearing descriptor reconstruction
+preserve recorded identities without invoking tools. Non-tool provider changes,
+revised executors and unknown executors must remain distinct refusals.
+
+A predecessor-authored SQLite fixture pins seventeen native/API root and child
+bindings, including native Code Mode and JS/Python through production builders
+with non-dispatching authority doubles. The Linux candidate opens the exact
+locators; other platforms check all frozen data and require the Linux execution
+binding cut on Direct cases rather than attempting Linux composition runtimes.
+The manifest pins source, schema, epoch, SHA-256, and never-invoked process
+bindings. The committed recipe uses a detached predecessor checkout and isolated
+artifacts. Its explicit immutable dummy-sidecar prefix has fixed synthetic path
+and bytes, not old executable code; conflicting artifacts refuse. No private
+state or inference enters the fixtures. Compact-admission checks reach unpaid
+measurement; a separate production host test covers native/API compact builds
+and restored source presentations. Recovery remedies are tested for both schema
+shapes, and native/API production successors preserve inherited skills and epochs.
+
+Read-only inspection tests preserve durable database and WAL bytes, report
+archival/succession before decoding inactive checkpoint bodies, and use one
+runtime snapshot for list/load. An ignored, explicit 200-head measurement with
+128 KiB of distinct retained state per head records store size, output size and
+elapsed inspection time. Differential preflight
+contracts separate new live regressions from pre-existing failures, inactive
+rows and external availability. A real-binary same-key upgrade with an explicit
+`test-hooks`-only `PLAK_TEST_BINDING_CUT_IMAGE` metadata revision cut must print
+the refused rows and leave its source serving. Production builds ignore that
+hook. The daemon-job upgrade still checks the ordinary exact-reopen probes and
+preserves processes. These contracts do not qualify credentials, runner or
+future remote-catalog availability.
 
 Settled host-upgrade regressions use isolated real-binary homes and a
 test-hooks-only `PLAK_TEST_STATE_KEY` override to make producer and destination

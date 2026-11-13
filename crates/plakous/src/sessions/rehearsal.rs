@@ -14,26 +14,54 @@ use {plakous_store::SqliteSessionStore, std::path::Path};
 /// # Errors
 /// Returns schema, integrity or read failures, including a concurrently pruned head.
 #[doc(hidden)]
+pub struct BindingHeadInspection {
+    /// Exact retained head.
+    pub locator: SessionLocator,
+    /// Runtime archival state.
+    pub archived: bool,
+    /// Whether this is the current agent-line head.
+    pub line_head: bool,
+    /// Decoded binding data or a per-head integrity/codec refusal.
+    pub presentation: Option<Result<super::FrozenSessionPresentation, AgentSessionsError>>,
+}
+
+/// Inspects all retained binding heads in one SQLite read snapshot.
+///
+/// # Errors
+/// Returns database admission, integrity or read failures.
+#[doc(hidden)]
 pub fn inspect_binding_presentations_sqlite(
     path: impl AsRef<Path>,
-) -> Result<Vec<(SessionLocator, super::FrozenSessionPresentation)>, AgentSessionsError> {
+    excluded: &[SessionLocator],
+) -> Result<Vec<BindingHeadInspection>, AgentSessionsError> {
     let path = path.as_ref();
-    SqliteSessionStore::inspect_head_checkpoints(path)
-        .map_err(store_error)?
-        .into_iter()
-        .map(|id| {
-            let stored = SqliteSessionStore::inspect_checkpoint(path, id).map_err(store_error)?;
-            let checkpoint = stored.checkpoint();
-            let topology = checkpoint.manifest().topology();
-            let locator = SessionLocator::new(
-                topology.session_id,
-                topology.branch_id,
-                topology.checkpoint_id,
-            );
-            super::FrozenSessionPresentation::from_checkpoint(checkpoint)
-                .map(|presentation| (locator, presentation))
-        })
-        .collect()
+    let excluded = excluded
+        .iter()
+        .map(|locator| locator.session_ref())
+        .collect();
+    Ok(
+        SqliteSessionStore::inspect_binding_checkpoints(path, &excluded)
+            .map_err(store_error)?
+            .into_iter()
+            .map(|head| {
+                let locator = SessionLocator::new(
+                    head.session.session_id(),
+                    head.session.branch_id(),
+                    head.checkpoint,
+                );
+                BindingHeadInspection {
+                    locator,
+                    archived: head.archived,
+                    line_head: head.line_head,
+                    presentation: head.stored.map(|stored| {
+                        stored.map_err(store_error).and_then(|stored| {
+                            super::FrozenSessionPresentation::from_checkpoint(stored.checkpoint())
+                        })
+                    }),
+                }
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// What the pure resume predicates permit, before credentialed reconstruction.

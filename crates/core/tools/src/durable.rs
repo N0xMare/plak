@@ -295,7 +295,9 @@ fn canonical_executor_authority(
     const PRODUCT_PLAN_PREFIX: &str = "plakous.standard.update-plan.v1.plak.session.";
     const PRODUCT_PLAN_SUFFIX: &str = ".r1";
     const NORMALIZED_PRODUCT_PLAN_ID: &str = "plakous.standard.update-plan.v1.product-session.r1";
-    if registration.executor_id == crate::capabilities::PROCESS_SESSION_EXECUTOR_ID {
+    if registration.executor_id == crate::capabilities::PROCESS_SESSION_EXECUTOR_ID
+        && registration.executor_binding_identity.domain() == DigestDomain::ToolDefinition
+    {
         let identity = ToolExecutorBindingIdentity::new(
             registration.executor_binding_identity.version(),
             &[b"process-session-semantic-contract"],

@@ -45,6 +45,29 @@ def main():
             )
             with (test_root / "tests.rs").open("a") as output:
                 output.write("\nmod previous_release_generator;\n")
+                output.write("\nmod production_predecessor;\n")
+            shutil.copyfile(
+                root / "crates/hosting/hosted/src/agent/tests/production_predecessor.rs",
+                test_root / "tests/production_predecessor.rs",
+            )
+            subscriptions = checkout / "crates/plakous/src/subscriptions"
+            shutil.copyfile(
+                root / "crates/plakous/src/subscriptions/test_support.rs",
+                subscriptions / "test_support.rs",
+            )
+            with subscriptions.with_suffix(".rs").open("a") as output:
+                output.write(
+                    '\n#[cfg(feature = "test-clock")]\n#[doc(hidden)]\npub mod test_support;\n'
+                )
+            platform_tests = checkout / "crates/hosting/hosted/src/platform"
+            shutil.copyfile(
+                root / "crates/hosting/hosted/src/platform/tests/previous_fixture.rs",
+                platform_tests / "tests/previous_fixture.rs",
+            )
+            with (platform_tests / "tests.rs").open("a") as output:
+                output.write(
+                    '\n#[path = "tests/previous_fixture.rs"]\nmod previous_fixture;\npub(crate) use previous_fixture::{previous_fixture_runtime, fixture_artifact, StableFixtureWorkers};\n'
+                )
             environment = dict(
                 os.environ,
                 CARGO_TARGET_DIR=str(target),

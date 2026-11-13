@@ -19,8 +19,8 @@ use plakous_model::{
 };
 use plakous_tools::{
     CodingPresentation, MenuEntry, PassthroughPack, PromptPin, RegisteredToolId, ToolContext,
-    ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation,
-    ToolOutcome, ToolPack, ToolRegistration, ToolRuntimeError, ToolRuntimeErrorKind, object_schema,
+    ToolExecutor, ToolExecutorId, ToolFuture, ToolInvocation, ToolOutcome, ToolPack,
+    ToolRegistration, ToolRuntimeError, ToolRuntimeErrorKind, object_schema,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -28,8 +28,7 @@ use url::Url;
 
 use crate::text::PLAKOUS_WEB_FETCH_URL_DESCRIPTION;
 use crate::{
-    ISSUER, MAX_URL_BYTES, SEMANTIC_VERSION, WEB_PROMPT_PINS, invalid, registration_error,
-    require_text,
+    MAX_URL_BYTES, SEMANTIC_VERSION, WEB_PROMPT_PINS, invalid, registration_error, require_text,
 };
 
 use crate::fetch_limits::{
@@ -116,15 +115,8 @@ impl FetchUrlPack {
                 .map_err(registration_error("fetch_url id is invalid"))?,
             ToolExecutorId::new("plakous.web.fetch_url.executor.v1")
                 .map_err(registration_error("fetch_url executor id is invalid"))?,
-            ToolExecutorBindingIdentity::new(
-                2,
-                &[
-                    ISSUER,
-                    TOOL_NAME.as_bytes(),
-                    &[u8::from(self.image_results)],
-                ],
-            )
-            .map_err(registration_error("fetch_url binding identity is invalid"))?,
+            crate::binding::fetch(self.image_results)
+                .map_err(registration_error("fetch_url binding identity is invalid"))?,
             definition,
             Arc::new(FetchUrlTool {
                 fetcher: Arc::clone(&self.fetcher),

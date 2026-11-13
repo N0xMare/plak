@@ -58,6 +58,13 @@ pub(crate) fn upgrade_import_refused() -> bool {
     std::env::var("PLAK_TEST_HOST_UPGRADE_IMPORT_REFUSAL").as_deref() == Ok("1")
 }
 
+/// Model a candidate's incompatible executable revision, never a stored verdict.
+pub(crate) fn binding_executor_cut() -> bool {
+    std::env::var_os("PLAK_TEST_BINDING_CUT_IMAGE").is_some_and(|image| {
+        std::env::current_exe().is_ok_and(|current| current == Path::new(&image))
+    })
+}
+
 pub(crate) fn upgrade_crash_cut(name: &str) {
     if std::env::var("PLAK_TEST_HOST_UPGRADE_CUT").is_ok_and(|cut| cut == name) {
         std::process::exit(86);

@@ -178,6 +178,7 @@ fn native_facts(
     )?;
     Ok(
         json!({"configuration":node.configuration, "registry_digest":registry.registry_identity_digest()?,
+        "registry":registry.definitions().iter().filter_map(|definition|registry.identity(definition.name())).map(|identity|json!({"name":identity.name(),"definition":identity.definition_digest(),"schema":identity.schema_digest(),"executor":identity.executor_id().as_str(),"binding":identity.executor_binding_identity().digest(),"nesting":identity.nested_eligibility()})).collect::<Vec<_>>(),
         "canonical_names":registry.definitions().iter().map(|definition|definition.name().as_str()).collect::<Vec<_>>(),
         "projection_digest":projection.digest(), "profile":profile, "context_sources":[]}),
     )
@@ -295,7 +296,22 @@ async fn canonical_route_bindings_and_plans_match_the_reviewed_matrix() -> TestR
     }
     let expected: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
     let mut changes = Vec::new();
-    diff(&expected, &actual, "$", &mut changes);
+    let routes = expected
+        .as_object()
+        .unwrap()
+        .keys()
+        .chain(actual.as_object().unwrap().keys())
+        .collect::<BTreeSet<_>>();
+    for route in routes {
+        let mut row = Vec::new();
+        diff(
+            &expected[route],
+            &actual[route],
+            &format!("$.{route}"),
+            &mut row,
+        );
+        changes.extend(row);
+    }
     assert!(
         changes.is_empty(),
         "binding contract changed; review the field-level diff and prove predecessor exact reopen before repinning:\n{}",

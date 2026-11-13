@@ -7,6 +7,45 @@ use std::time::Duration;
 use tempfile::tempdir;
 
 #[test]
+fn binding_liveness_inspection_reports_archival_and_same_node_successors_without_mutation() {
+    let root = tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    let mut store = ProductStore::open(&paths).unwrap();
+    let mut source = SessionRecord::new(root.path().join("workspace"));
+    source.bind_plakous_locator(locator(2, 3)).unwrap();
+    store.commit(&mut source).unwrap();
+    let mut successor = SessionRecord::new(source.workspace_root.clone());
+    successor.node = source.node.clone();
+    successor.source_product_session_id = Some(source.id.clone());
+    successor.source_workflow_operation_id = Some("binding-inspection:successor".into());
+    successor
+        .bind_plakous_locator(other_runtime_locator(4))
+        .unwrap();
+    store.commit(&mut successor).unwrap();
+    let mut archived = SessionRecord::new(source.workspace_root.clone());
+    archived.archived = true;
+    archived
+        .bind_plakous_locator(other_runtime_locator(5))
+        .unwrap();
+    store.commit(&mut archived).unwrap();
+    let database = paths.product_database();
+    let before = std::fs::read(&database).unwrap();
+    let wal = PathBuf::from(format!("{}-wal", database.display()));
+    let before_wal = std::fs::read(&wal).ok();
+    let rows = ProductStore::inspect_binding_dispositions(&paths).unwrap();
+    let find = |locator| {
+        rows.iter()
+            .find(|row| row.locator == Some(locator))
+            .unwrap()
+    };
+    assert!(find(source.plakous_locator.unwrap()).superseded);
+    assert!(!find(successor.plakous_locator.unwrap()).superseded);
+    assert!(find(archived.plakous_locator.unwrap()).archived);
+    assert_eq!(std::fs::read(&database).unwrap(), before);
+    assert_eq!(std::fs::read(&wal).ok(), before_wal);
+}
+
+#[test]
 fn doctor_reports_foreign_key_violation_but_open_admits_schema() {
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("home"));

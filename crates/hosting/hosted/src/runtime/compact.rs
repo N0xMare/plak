@@ -33,7 +33,7 @@ use plakous::sessions::{
 };
 use plakous_host_protocol::notice_remedy::NoticeRemedy;
 use plakous_host_protocol::status::HostPhase;
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 mod scheduled;
 mod views;
@@ -278,20 +278,7 @@ async fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
     let (opened, events, log, reason) = (run.opened, run.events, run.log, run.reason);
     let (operation, call_id, compact_started_at) = (&run.operation, &run.call_id, run.started_at);
     stderr_buf.clear();
-    // A compaction keeps the session's tools: its skills follow what the
-    // session froze, never the live setting (spec 02 §6.1.1).
-    let sessions = config.state_roots.runtime_sessions()?;
-    let frozen = crate::skills::frozen_skills(&sessions, source)
-        .await
-        .map_err(|error| {
-            CliFailure::new(format!(
-                "the session's frozen skills could not be read: {error}"
-            ))
-        })?;
-    config.state_roots.set_frozen_skills(Some(frozen));
-    let runtime = host_runtime_binding(config, stderr_buf, RuntimeRole::Compact).await;
-    config.state_roots.set_frozen_skills(None);
-    let runtime = runtime?;
+    let runtime = frozen_compact_runtime(config, stderr_buf, source).await?;
     let operation_id = SessionOperationId::new(operation)
         .map_err(|_| CliFailure::new("compact operation identity is invalid"))?;
     let facade_reason = match reason {
@@ -381,6 +368,36 @@ async fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
         HostBoundary::RuntimeReturned,
     );
     Ok((outcome, occupancy_before))
+}
+
+pub(super) async fn frozen_compact_runtime<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut HostConfig<P>,
+    stderr_buf: &mut Vec<u8>,
+    source: plakous::sessions::SessionLocator,
+) -> CliResult<plakous::sessions::SessionRuntimeBinding> {
+    // A compaction keeps the session's tools: its skills follow what the
+    // session froze, never the live setting (spec 02 §6.1.1).
+    let sessions = config.state_roots.runtime_sessions()?;
+    let frozen = crate::skills::frozen_skills(&sessions, source)
+        .await
+        .map_err(|error| {
+            CliFailure::new(format!(
+                "the session's frozen skills could not be read: {error}"
+            ))
+        })?;
+    let presentation = sessions
+        .created_tool_presentation(source)
+        .await
+        .map_err(CliFailure::from)?;
+    let prior_roots = config.state_roots.clone();
+    config.state_roots.set_frozen_skills(Some(frozen));
+    config.state_roots = config
+        .state_roots
+        .clone()
+        .with_frozen_presentation(Arc::new(presentation));
+    let runtime = host_runtime_binding(config, stderr_buf, RuntimeRole::Compact).await;
+    config.state_roots = prior_roots;
+    runtime
 }
 
 /// Classifies the canonical answer to the pass's dispatch, binding the

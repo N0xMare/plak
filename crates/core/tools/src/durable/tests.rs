@@ -56,6 +56,15 @@ fn frozen_process_contract_accepts_shell_replacement_without_rewriting_identity(
         FrozenToolRegistryDescriptor::capture(&make(current)?)?.canonical_authority_identity()?
     );
     let revised = ToolExecutorBindingIdentity::new(2, &[b"incompatible-shell-contract"])?;
+    let wrong_domain = ToolExecutorBindingIdentity::from_digest(Digest::sha256(
+        DigestDomain::ExecutionEnvironment,
+        1,
+        &[b"not-an-executor-contract"],
+    )?);
+    assert!(!current.accepts(
+        &ToolExecutorId::new(crate::capabilities::PROCESS_SESSION_EXECUTOR_ID)?,
+        wrong_domain
+    ));
     assert!(matches!(
         descriptor.resolve(&ToolExecutorBindings::capture(&make(revised)?)),
         Err(ToolBindingError::BindingIdentityMismatch { .. })

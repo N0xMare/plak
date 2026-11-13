@@ -79,6 +79,10 @@ async fn generate_previous_release_bindings() -> Result<(), Box<dyn std::error::
                 false,
                 &extensions,
             )?;
+            let process_bindings = registry.definitions().iter().filter_map(|definition| registry.identity(definition.name()))
+                .filter(|identity| identity.executor_id().as_str() == "plakous.process-session-executor.v3")
+                .map(|identity| serde_json::json!({"executor":identity.executor_id().as_str(),"binding":identity.executor_binding_identity().digest()}))
+                .collect::<Vec<_>>();
             let selected = selected_coding_provider_configuration(
                 provider,
                 ModelId::new(model)?,
@@ -164,8 +168,113 @@ async fn generate_previous_release_bindings() -> Result<(), Box<dyn std::error::
             };
             let locator = session.release().await?;
             cases.push(serde_json::json!({"provider":name,"model":model,"family":family,"child":child,
-                "authority":authority,"locator":locator.to_string(),"selected":selected_id,"effective":effective_id,"plan":plan_id}));
+                "authority":authority,"locator":locator.to_string(),"selected":selected_id,"effective":effective_id,"plan":plan_id,"process_bindings":process_bindings}));
         }
+    }
+    for composition in [
+        CompositionSelection::Direct,
+        CompositionSelection::NativePtc,
+        CompositionSelection::JsPtc,
+        CompositionSelection::PyPtc,
+    ] {
+        for child in [false, true] {
+            let authority = format!(
+                "previous-openai-{}-{}",
+                composition.as_str(),
+                if child { "leaf" } else { "root" }
+            );
+            let mut tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
+                "previous-api-tree",
+                "root",
+                "owner",
+                PathBuf::from("/"),
+                "selected-tuple",
+                WriterMode::SingleLease,
+            )
+            .unwrap();
+            let caller = if child {
+                tree.spawn_agent(
+                    "root",
+                    &SpawnAgentRequest::test_named(
+                        "orchestrate",
+                        Tier::ReadOnly,
+                        "supervisor",
+                        "Review the synthetic fixture.",
+                    ),
+                    None,
+                )
+                .unwrap()
+                .agent_id
+            } else {
+                "root".into()
+            };
+            let extensions = crate::topology_extensions::topology_tool_extensions(
+                Arc::new(Mutex::new(tree)),
+                caller,
+            )?;
+            let registry = coding_tool_registry_with_extensions(
+                &authority,
+                composition,
+                composition == CompositionSelection::NativePtc,
+                &extensions,
+            )?;
+            let process_bindings = registry.definitions().iter().filter_map(|definition| registry.identity(definition.name()))
+            .filter(|identity| identity.executor_id().as_str() == "plakous.process-session-executor.v3")
+            .map(|identity| serde_json::json!({"executor":identity.executor_id().as_str(),"binding":identity.executor_binding_identity().digest()})).collect::<Vec<_>>();
+            let runtime = crate::platform::tests::previous_fixture_runtime(
+                &extensions,
+                Path::new("/"),
+                &authority,
+                false,
+                child,
+                composition,
+            )
+            .await?;
+            let target = runtime.target_binding();
+            let CreateSessionOutcome::Created { session, .. } = sessions
+                .create(CreateSessionRequest::new(
+                    SessionOperationId::new(format!("fixture:{authority}"))?,
+                    runtime,
+                ))
+                .await?
+            else {
+                panic!("API fixture create")
+            };
+            let plan_id = *session.agent().harness_plan().plan_digest();
+            let locator = session.release().await?;
+            cases.push(serde_json::json!({"provider":"openai", "platform":true,"composition":composition.as_str(),"model":target.model().as_str(),"family":"responses-family", "child":child,
+            "authority":authority,"locator":locator.to_string(),"selected":target.selected_provider_configuration(),
+            "effective":target.effective_provider_configuration(),"plan":plan_id,"process_bindings":process_bindings}));
+        }
+    }
+    for composition in [
+        CompositionSelection::NativePtc,
+        CompositionSelection::JsPtc,
+        CompositionSelection::PyPtc,
+    ] {
+        let authority = format!("previous-native-{}", composition.as_str());
+        let roots = ProductStateRoots::with_doubles(output.join(&authority), output.join("state"));
+        let runtime = Box::pin(production_predecessor::production_predecessor_runtime(
+            roots,
+            &authority,
+            composition,
+            false,
+        ))
+        .await?;
+        let target = runtime.target_binding();
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(CreateSessionRequest::new(
+                SessionOperationId::new(format!("fixture:{authority}"))?,
+                runtime,
+            ))
+            .await?
+        else {
+            panic!("native production fixture create")
+        };
+        let plan = *session.agent().harness_plan().plan_digest();
+        let locator = session.release().await?;
+        cases.push(serde_json::json!({"production_native":true,"composition":composition.as_str(),"authority":authority,
+            "locator":locator.to_string(),"selected":target.selected_provider_configuration(),"effective":target.effective_provider_configuration(),"plan":plan}));
     }
     std::fs::write(
         output.join("manifest.json"),

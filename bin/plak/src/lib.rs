@@ -157,6 +157,9 @@ pub mod telemetry_store;
 mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]
 mod test_hooks {
+    pub(crate) const fn binding_executor_cut() -> bool {
+        false
+    }
     pub(crate) fn upgrade_state_key() -> Option<String> {
         None
     }
@@ -679,12 +682,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             );
         }
         Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
-        Command::SessionCheckBinding => {
-            return commands::session::check_binding::run(
-                services.paths()?,
-                &mut io::stdout().lock(),
-            );
-        }
         // The runner bridge owns raw stdin and stdout, so it runs before the
         // process takes their locks.
         Command::Runner(command) => {

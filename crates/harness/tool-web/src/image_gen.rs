@@ -21,16 +21,16 @@ use plakous_model::{
 use plakous_tools::{
     CodingPresentation, ExecutionBackendErrorKind, MAX_STANDARD_IMAGE_BYTES, MenuEntry,
     PassthroughPack, PromptPin, RegisteredToolId, RetrievalErrorKind, ToolContext, ToolExecutor,
-    ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation, ToolOutcome, ToolPack,
-    ToolRegistration, ToolRuntimeError, ToolRuntimeErrorKind, WorkspaceExpectedFileState,
-    WorkspaceMutation, WorkspaceMutationTransaction, WorkspaceReadSliceRequest,
-    WorkspaceReplacement, object_schema, operation_context,
+    ToolExecutorId, ToolFuture, ToolInvocation, ToolOutcome, ToolPack, ToolRegistration,
+    ToolRuntimeError, ToolRuntimeErrorKind, WorkspaceExpectedFileState, WorkspaceMutation,
+    WorkspaceMutationTransaction, WorkspaceReadSliceRequest, WorkspaceReplacement, object_schema,
+    operation_context,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::text::PLAKOUS_WEB_IMAGE_GEN_DESCRIPTION;
-use crate::{ISSUER, SEMANTIC_VERSION, WEB_PROMPT_PINS, invalid, registration_error, require_text};
+use crate::{SEMANTIC_VERSION, WEB_PROMPT_PINS, invalid, registration_error, require_text};
 
 use crate::{MAX_IMAGE_EDIT_INPUT_BYTES, MAX_IMAGE_EDIT_INPUTS, MAX_IMAGE_PROMPT_BYTES};
 
@@ -70,7 +70,7 @@ impl ImageGenPack {
                 .map_err(registration_error("image_gen id is invalid"))?,
             ToolExecutorId::new("plakous.web.image_gen.executor.v1")
                 .map_err(registration_error("image_gen executor id is invalid"))?,
-            ToolExecutorBindingIdentity::new(1, &[ISSUER, TOOL_NAME.as_bytes()])
+            crate::binding::image()
                 .map_err(registration_error("image_gen binding identity is invalid"))?,
             definition,
             Arc::new(ImageGenTool {

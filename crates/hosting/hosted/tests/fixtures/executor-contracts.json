@@ -1245,6 +1245,32 @@
     "binding_identity": "9eb809e101fe285b4bfb6843b2714516fc92e18bc0adf9f70f50f517831c5384",
     "executor_id": "plakous.web.fetch_url.executor.v1"
   },
+  "plakous.web.fetch_url.executor.v1/ab08bd8c99047082de791636dfcba5df5572c464a9cf704ee803d9502d2dba03": {
+    "accepted": {
+      "3f92b559845df2004255b7904eb5a6299c6d9c9f2a70777887fec3d20426e00f": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "max_bytes": {
+            "maximum": 8388608,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "url": {
+            "maxLength": 2048,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      }
+    },
+    "binding_identity": "ab08bd8c99047082de791636dfcba5df5572c464a9cf704ee803d9502d2dba03",
+    "executor_id": "plakous.web.fetch_url.executor.v1"
+  },
   "plakous.web.image_gen.executor.v1/277ba7144e8167c70455ced270f69d2182b044baf507b40e9365da27887bf553": {
     "accepted": {
       "e018c2710284c4b4919eb6250f40d3e05ff81e1e4368011db709532f96d0a7da": {

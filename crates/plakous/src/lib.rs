@@ -1313,6 +1313,8 @@ pub mod tools {
             feature = "xai"
         ))]
         pub use plakous_tool_web::ImageGenPack;
+        #[doc(hidden)]
+        pub use plakous_tool_web::current_executor_bindings;
         pub use plakous_tool_web::{
             DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT_SECONDS, FetchUrlLimits,
             MAX_FETCH_MAX_BYTES, MAX_FETCH_REDIRECTS, MAX_FETCH_TIMEOUT_SECONDS,

@@ -153,7 +153,7 @@ impl fmt::Debug for ToolInvocation {
             .field("attempt_id", &self.attempt_id)
             .field("call_id", &self.call_id)
             .field("identity", &self.identity)
-            .field("definition", &self.definition)
+            .field("definition", &"<frozen>")
             .field("correlation", &"<redacted>")
             .field("arguments", &self.arguments)
             .field("exposure", &self.exposure)

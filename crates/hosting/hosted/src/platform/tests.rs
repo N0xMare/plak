@@ -18,7 +18,12 @@ use plakous::agent::ReasoningEffort;
 mod binding_matrix;
 #[path = "tests/default_bindings.rs"]
 mod default_bindings;
+#[path = "tests/previous_fixture.rs"]
+mod previous_fixture;
 pub(crate) use binding_matrix::binding_matrix_facts;
+#[cfg(target_os = "linux")]
+pub(crate) use previous_fixture::{StableFixtureWorkers, fixture_artifact};
+pub(crate) use previous_fixture::{configured_fixture_runtime, previous_fixture_runtime};
 
 struct Credentials(&'static str);
 impl OpenAiCredentials for Credentials {

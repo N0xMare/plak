@@ -45,6 +45,10 @@ type Writers = BTreeMap<(u64, u64), Weak<Mutex<Writer>>>;
 static WRITERS: LazyLock<Mutex<Writers>> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 impl SqliteTreeStore {
+    /// Content-free node binding locators, without loading tree images or custody.
+    pub fn inspect_node_locators(database: &Path) -> Result<Vec<(String, String)>, OpenError> {
+        SubagentsDatabase::inspect_node_locators(database)
+    }
     /// Reads one existing tree's exact persisted rows without a writer or
     /// in-memory reopen transition.
     pub fn inspect(database: &Path, tree_id: &str) -> Result<TreeInspection, OpenError> {

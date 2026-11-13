@@ -917,13 +917,15 @@ template load, command parse, `plak models` and `plak doctor`. A selection the
 table refuses is refused on every path, never substituted; a seed whose model
 is not yet chosen leaves `plakous-default` unresolved until it is.
 
-A change to what an API route presents (its pack, base instruction, tool mode
-or composition decision) carries no versioned profile id. Like any other
-binding-identity change, it rides a runtime format epoch bump: sessions from
-before the change stay under the previous state key (§2.5) and reach the new
-build only through export and import. A store reopened across such a change
-without that cutover fails closed at harness revalidation; a session is never
-re-presented under a pack it was not created with.
+Model-facing tool definitions are frozen construction data: exact reopen keeps
+the session's presented pack while fresh and explicitly rebound sessions get
+current definitions (chapter 01 §5). This does not freeze old executor code;
+current executors must accept that presentation's inputs. Other changes to an
+API route's binding, such as its base instruction, tool mode or composition
+decision, carry no versioned profile id and still require a runtime format epoch
+cut: sessions stay under the previous state key (§2.5) and reach the new build
+through export and import. Without that cutover, exact revalidation refuses;
+frozen tool data never masks a changed non-tool binding.
 
 API sessions run at the model's real limits, not a fixed envelope: the admitted
 input is the row's working (or, under `[api] full_window`, full) window and each
@@ -5389,17 +5391,28 @@ does not inherit another connection's pending answers.
   with a count of the rest; never a cookie, the key, or a frame.
 
 The hidden `plak session check-binding --all` command inspects retained runtime
-branch heads, including children, through read-only SQLite snapshots. It opens
-no runtime, tree, runner, credential source or diagnostics writer and acquires
-no custody or runtime lease. It verifies checkpoint/plan and presentation
-integrity, current executor binding identities and the native selected policy
-with frozen tool data. An uncheckable external executor is inconclusive, never
-a compatible verdict. This is binding compatibility, not a promise of credential,
-runner or future authenticated-catalog availability. Ordinary exact reopen still
-performs all live authority checks. Same-key host upgrade runs this candidate
-inspection before surrender and refuses incompatibility or an inconclusive
-inspection while the source remains running. Live WAL reader coordination may
-update SQLite shared memory; no durable database or WAL bytes are written.
+branch heads, including children, through one read-only SQLite snapshot for
+listing and loading. It opens no runtime, runner, credential source or
+diagnostics writer and acquires no custody or runtime lease. Product archival
+and succession metadata, and archived trees' node locators, are read separately
+without reopening a tree. Archived and superseded rows are reported but their
+checkpoint bodies do not gate upgrade. Active rows verify checkpoint/plan and
+presentation integrity, current release-owned executor bindings (including both
+fetch image-result variants and optional web/image packs), and native selected
+policy with frozen tool data. MCP contracts are reported as externally owned
+and unaffected, not as a release incompatibility.
+
+Same-key host upgrade runs both source and destination inspections before
+surrender. It refuses only a live row that the source found compatible and the
+destination no longer does, printing the offending rows while the source keeps
+running. A source without the command is explicitly reported as baseline
+unavailable; no source verdict is invented. In that first-upgrade case only
+real live binding refusals gate surrender, not external availability or an
+unknown executor alone. The existing exact-reopen probes still run. Inspection
+is binding compatibility, not a promise of credential, runner or future
+catalog availability; ordinary reopen retains every live authority check.
+Live WAL reader coordination may update SQLite shared memory; no durable
+database or WAL bytes are written.
 
 ### 4.6 `plak host`
 

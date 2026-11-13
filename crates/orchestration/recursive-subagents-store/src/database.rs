@@ -194,13 +194,43 @@ impl SubagentsDatabase {
         database: &Path,
         tree_id: &str,
     ) -> Result<TreeInspection, OpenError> {
+        Self::inspect_rows(database, TreeInspection::StoreAbsent, |tx| {
+            load_agent_tree(tx, tree_id)
+                .map(|tree| {
+                    tree.map_or(TreeInspection::TreeAbsent, |tree| {
+                        TreeInspection::Tree(Box::new(tree))
+                    })
+                })
+                .map_err(OpenError::unavailable)
+        })
+    }
+
+    pub(crate) fn inspect_node_locators(
+        database: &Path,
+    ) -> Result<Vec<(String, String)>, OpenError> {
+        Self::inspect_rows(database, Vec::new(), |tx| {
+            let mut rows = tx.prepare("SELECT tree_id,session_locator FROM agent_nodes WHERE session_locator IS NOT NULL ORDER BY tree_id,agent_id").map_err(|_| OpenError::unavailable("could not inspect node bindings"))?;
+            rows.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|_| OpenError::unavailable("could not inspect node bindings"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| OpenError::unavailable("could not inspect node bindings"))
+        })
+    }
+
+    fn inspect_rows<T>(
+        database: &Path,
+        absent: T,
+        read: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, OpenError>,
+    ) -> Result<T, OpenError> {
         let parent = database
             .parent()
             .ok_or_else(|| OpenError::unavailable("tree store path has no parent"))?;
         let parent = match std::fs::canonicalize(parent) {
             Ok(parent) => parent,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(TreeInspection::StoreAbsent);
+                return Ok(absent);
             }
             Err(_) => {
                 return Err(OpenError::unavailable(
@@ -216,7 +246,7 @@ impl SubagentsDatabase {
         let metadata = match path.symlink_metadata() {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(TreeInspection::StoreAbsent);
+                return Ok(absent);
             }
             Err(_) => {
                 return Err(OpenError::unavailable(
@@ -254,13 +284,7 @@ impl SubagentsDatabase {
         SCHEMA.validate(&tx).map_err(|error| {
             OpenError::unavailable(format!("{error}; tree inspection has no authority"))
         })?;
-        load_agent_tree(&tx, tree_id)
-            .map(|tree| {
-                tree.map_or(TreeInspection::TreeAbsent, |tree| {
-                    TreeInspection::Tree(Box::new(tree))
-                })
-            })
-            .map_err(OpenError::unavailable)
+        read(&tx)
     }
 
     /// Opens `database`, creating and versioning it when it is new and

@@ -250,7 +250,9 @@ impl ToolExecutorBindingIdentity {
     #[doc(hidden)]
     pub fn accepts(self, id: &ToolExecutorId, recorded: Self) -> bool {
         if id.as_str() == crate::capabilities::PROCESS_SESSION_EXECUTOR_ID {
-            self.0.version() == recorded.0.version()
+            self.0.algorithm() == recorded.0.algorithm()
+                && self.0.domain() == recorded.0.domain()
+                && self.0.version() == recorded.0.version()
         } else {
             self == recorded
         }

@@ -22,6 +22,14 @@ one cross-build carrier (a build imports its own and the previous version).
 - Fixed a busy root's graceful host handoff being lost after an accepted
   send-now steer; restarting the host continues the handed-off turn once.
 
+- Keep process executor contracts stable across shell-file replacement, while
+  revalidating shell file kind and permissions at use. Preserve recorded IDs.
+- Preserve frozen tool presentations during manual compaction and inherited
+  skills and pending epochs during fresh binding workflows. Recovery remedies
+  respect the session's presented schema.
+- Refuse host upgrades only on live binding regressions, showing actionable
+  rows; report inactive branches and externally owned MCP contracts separately.
+
 - Preserve each session's frozen tool presentation on exact reopen across
   release changes, while checking current executor compatibility separately.
 - Check retained bindings read-only before a same-key host upgrade surrenders

@@ -56,9 +56,22 @@ pub(crate) fn command(executable: &Path, home: &Path, key: &str) -> Command {
     command
 }
 
-pub(crate) fn run(mut command: Command, timeout: Duration) -> CliResult<Output> {
+pub(crate) fn run(command: Command, timeout: Duration) -> CliResult<Output> {
+    let output = run_output(command, timeout, 1024 * 1024)?;
+    if !output.status.success() {
+        return Err(CliFailure::new(format!(
+            "host_upgrade_destination_refused: {}\n{}",
+            crate::cli_output::safe_terminal_block(&String::from_utf8_lossy(&output.stderr)),
+            crate::cli_output::safe_terminal_block(&String::from_utf8_lossy(&output.stdout)),
+        )));
+    }
+    Ok(output)
+}
+
+/// Bounded raw output: a read-only inspector may return its structured refusal
+/// on stdout with a nonzero status. The caller must examine both.
+pub(crate) fn run_output(mut command: Command, timeout: Duration, limit: u64) -> CliResult<Output> {
     use std::os::unix::process::CommandExt as _;
-    const LIMIT: u64 = 1024 * 1024;
     let mut child = command
         .process_group(0)
         .stdin(Stdio::null())
@@ -76,7 +89,7 @@ pub(crate) fn run(mut command: Command, timeout: Duration) -> CliResult<Output> 
     let read = |pipe: Box<dyn std::io::Read + Send>| {
         std::thread::spawn(move || {
             let mut bytes = Vec::new();
-            let _ = pipe.take(LIMIT + 1).read_to_end(&mut bytes);
+            let _ = pipe.take(limit + 1).read_to_end(&mut bytes);
             bytes
         })
     };
@@ -108,7 +121,7 @@ pub(crate) fn run(mut command: Command, timeout: Duration) -> CliResult<Output> 
     let stdout = stdout.join().unwrap_or_default();
     let stderr = stderr.join().unwrap_or_default();
     let status = result?;
-    if stdout.len() as u64 > LIMIT || stderr.len() as u64 > LIMIT {
+    if stdout.len() as u64 > limit || stderr.len() as u64 > limit {
         return Err(CliFailure::new(
             "host upgrade destination exceeded its output bound",
         ));
@@ -118,11 +131,5 @@ pub(crate) fn run(mut command: Command, timeout: Duration) -> CliResult<Output> 
         stdout,
         stderr,
     };
-    if !output.status.success() {
-        return Err(CliFailure::new(format!(
-            "host_upgrade_destination_refused: {}",
-            crate::cli_output::safe_terminal_block(&String::from_utf8_lossy(&output.stderr))
-        )));
-    }
     Ok(output)
 }

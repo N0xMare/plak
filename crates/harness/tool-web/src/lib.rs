@@ -19,6 +19,7 @@
     reason = "doc comments name exact provider tool identifiers"
 )]
 
+mod binding;
 #[cfg(feature = "fetch")]
 mod fetch;
 mod fetch_limits;
@@ -30,6 +31,8 @@ mod search;
 mod text;
 mod web_fetch;
 mod x_search;
+#[doc(hidden)]
+pub use binding::current_executor_bindings;
 
 #[cfg(feature = "fetch")]
 pub use fetch::FetchUrlPack;
@@ -317,7 +320,7 @@ impl WebToolPack {
                 .map_err(registration_error("web tool id is invalid"))?,
             ToolExecutorId::new(format!("plakous.web.{name}.executor.v1"))
                 .map_err(registration_error("web executor id is invalid"))?,
-            ToolExecutorBindingIdentity::new(1, &[ISSUER, name.as_bytes(), shape.name.as_bytes()])
+            binding::retrieval(tool, shape.name)
                 .map_err(registration_error("web binding identity is invalid"))?,
             definition,
             Arc::new(RetrievalTool {

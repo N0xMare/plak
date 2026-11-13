@@ -2003,6 +2003,14 @@ SQLite SHM is temporary coordination, not persistent session authority. Ordinary
 unsupported-runtime inspection preserves database and WAL bytes while allowing
 temporary SHM updates during read-only database access. Another build's state
 directory is never opened at all (chapter 02 section 2.5).
+The same-key binding preflight uses those read-only snapshots, never runtime,
+runner or credential authority. It reports release-owned executable compatibility
+and inactive lineage separately; an MCP contract remains externally owned and
+unaffected rather than being upgraded or guessed from its name. Differential
+upgrade refusal is described in chapter 02 §4.5. Shell filesystem observations
+are revalidated at process invocation, not frozen as machine-specific executor
+identity inputs (chapter 01 §5); existing exact route/auth checks do not change.
+
 
 Events, transcripts, product logs, telemetry, and rendered UI are observations.
 They are bounded, may be lost, delayed, or duplicated, and **never become

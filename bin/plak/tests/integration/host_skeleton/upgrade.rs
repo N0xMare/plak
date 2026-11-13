@@ -567,12 +567,14 @@ fn host_upgrade_same_key_uses_planned_handoff_and_preserves_daemon_jobs() {
         .args(["session", "check-binding", "--all"])
         .output()
         .unwrap();
-    assert!(
-        bindings.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&bindings.stdout),
-        String::from_utf8_lossy(&bindings.stderr)
-    );
+    let bindings: serde_json::Value = serde_json::from_slice(&bindings.stdout).unwrap();
+    for row in bindings["sessions"].as_array().unwrap() {
+        assert!(row["binding_change"].is_null(), "{row}");
+        if let Some(unavailable) = row["unavailable"].as_str() {
+            // The scripted executor is not a release-owned production tool.
+            assert!(unavailable.contains("offline."), "{row}");
+        }
+    }
     let replaced = image_command(&fixture, &image)
         .args(["host", "upgrade", "--expect-binary", id])
         .output()
@@ -615,6 +617,57 @@ fn replacement_image(fixture: &Fixture) -> PathBuf {
             .success()
     );
     image
+}
+
+#[test]
+fn host_upgrade_binding_regression_refuses_before_surrender_and_prints_live_rows() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let Some(fixture) = fixture() else { return };
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let database = paths.runtime_database();
+    std::fs::create_dir_all(database.parent().unwrap()).unwrap();
+    std::fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+            "../../crates/hosting/hosted/tests/fixtures/previous-release/previous-runtime.sqlite3",
+        ),
+        &database,
+    )
+    .unwrap();
+    std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let image = replacement_image(&fixture);
+    let cut = image.to_str().unwrap().to_owned();
+    let mut host = start_env(&fixture, &[], &[("PLAK_TEST_BINDING_CUT_IMAGE", cut)]);
+    let mut client = Client::connect(&host);
+    let baseline = output(&fixture, &["session", "check-binding", "--all"], false);
+    assert!(baseline.status.success(), "{baseline:?}");
+    let baseline: serde_json::Value = serde_json::from_slice(&baseline.stdout).unwrap();
+    assert_eq!(baseline["compatible"], true);
+    assert_eq!(baseline["sessions"].as_array().unwrap().len(), 17);
+    let runtime_session = baseline["sessions"][0]["session"].as_str().unwrap();
+    let probe = image_command(&fixture, &image)
+        .args(["version", "--host-upgrade-probe"])
+        .output()
+        .unwrap();
+    let probe: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+    let refused = image_command(&fixture, &image)
+        .args([
+            "host",
+            "upgrade",
+            "--expect-binary",
+            probe["binary_id"].as_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    let report = String::from_utf8_lossy(&refused.stderr);
+    assert!(report.contains("binding_preflight_refused"), "{report}");
+    assert!(
+        report.contains("offending rows") && report.contains(runtime_session),
+        "{report}"
+    );
+    assert_eq!(client.request(1, Op::Ping), Outcome::Ok(Answer::Pong));
+    assert!(!fixture.home().join("host/upgrades").exists());
+    stop(&mut host);
 }
 
 #[test]

@@ -59,6 +59,13 @@ fn collect(registry: &FrozenToolRegistry, contracts: &mut Contracts) -> TestResu
             .identity(definition.name())
             .ok_or("missing executor")?;
         let id = identity.executor_id().as_str();
+        if id.starts_with("plakous.web.") {
+            assert!(
+                current_executor_bindings(definition.name().as_str(), id)?
+                    .contains(&identity.executor_binding_identity()),
+                "read-only preflight metadata must match the actual optional pack: {id}"
+            );
+        }
         if id == "plakous.process-session-executor.v3" {
             assert_eq!(
                 identity.executor_binding_identity(),
@@ -117,14 +124,16 @@ fn current() -> TestResult<Contracts> {
         }
         collect(&builder.freeze(), &mut contracts)?;
     }
-    let mut builder = ToolRegistryBuilder::default();
-    for registration in fetch_url::registrations(FetchUrlLimits::default(), true)?
-        .into_iter()
-        .chain(ImageGenPack::new(Arc::new(NoNetwork)).registrations()?)
-    {
-        builder.register(registration)?;
+    for images in [false, true] {
+        let mut builder = ToolRegistryBuilder::default();
+        for registration in fetch_url::registrations(FetchUrlLimits::default(), images)?
+            .into_iter()
+            .chain(ImageGenPack::new(Arc::new(NoNetwork)).registrations()?)
+        {
+            builder.register(registration)?;
+        }
+        collect(&builder.freeze(), &mut contracts)?;
     }
-    collect(&builder.freeze(), &mut contracts)?;
     Ok(contracts)
 }
 
