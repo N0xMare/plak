@@ -64,7 +64,9 @@ mod test_open_observations {
 }
 #[cfg(not(feature = "test-support"))]
 mod test_draft_gate {
-    use super::*;
+    use super::{
+        BTreeMap, HostService, IntentSender, ProtocolExtension, RequestRefusal, SessionIntent, drafts,
+    };
     pub(super) fn defer<P: ProtocolExtension>(
         _service: &HostService<P>,
         _sender: &IntentSender<P>,

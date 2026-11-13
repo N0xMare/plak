@@ -155,7 +155,9 @@ pub(crate) async fn hold_readoption() {
 }
 
 #[cfg(not(feature = "test-support"))]
-pub(crate) async fn hold_readoption() {}
+pub(crate) fn hold_readoption() -> std::future::Ready<()> {
+    std::future::ready(())
+}
 
 #[cfg(feature = "test-support")]
 pub(crate) fn readoption_waiting() {
