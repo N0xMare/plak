@@ -32,6 +32,12 @@ fn host_step_drain_in_turn_paid_fold_at_bound_rolls_back_without_a_second_summar
         attachment,
         "continue the protected turn through a scheduled fold",
     );
+    // This test observes the fold out of band. Keep the control connection,
+    // but do not leave unread transcript output filling its socket meanwhile.
+    assert_eq!(
+        client.request(9, Op::Detach { attachment }),
+        Outcome::Ok(Answer::Detached)
+    );
     let summaries = fixture.root.join("evidence.summary.jsonl");
     let deadline = Instant::now() + WAIT;
     while !read_evidence(&summaries).is_ok_and(|rows| !rows.is_empty()) {
