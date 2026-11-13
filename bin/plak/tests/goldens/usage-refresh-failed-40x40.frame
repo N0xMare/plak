@@ -66,10 +66,10 @@ p6 Rgb(255, 112, 112)/Rgb(20, 22, 27)
 28 colors  0-0:p0, 1-1:p3, 2-12:p5, 13-38:p3, 39-39:p0
 29 symbols │······································│
 29 colors  0-0:p0, 1-38:p3, 39-39:p0
-30 symbols │·Session·usage·(since·start·or·last···│
-30 colors  0-0:p0, 1-1:p3, 2-36:p1, 37-38:p3, 39-39:p0
-31 symbols │·resume):·····························│
-31 colors  0-0:p0, 1-1:p3, 2-9:p1, 10-38:p3, 39-39:p0
+30 symbols │·Session·usage·(since·opened;·resets··│
+30 colors  0-0:p0, 1-1:p3, 2-37:p1, 38-38:p3, 39-39:p0
+31 symbols │·on·host·restart):····················│
+31 colors  0-0:p0, 1-1:p3, 2-18:p1, 19-38:p3, 39-39:p0
 32 symbols │···Input·tokens:···0·(0·cached)·······│
 32 colors  0-0:p0, 1-1:p3, 2-31:p1, 32-38:p3, 39-39:p0
 33 symbols │···Output·tokens:··0·(0·reasoning)····│

@@ -61,10 +61,10 @@ p5 Rgb(150, 156, 168)/Rgb(20, 22, 27)
 26 colors  0-0:p0, 1-1:p3, 2-12:p5, 13-38:p3, 39-39:p0
 27 symbols │······································│
 27 colors  0-0:p0, 1-38:p3, 39-39:p0
-28 symbols │·Session·usage·(since·start·or·last···│
-28 colors  0-0:p0, 1-1:p3, 2-36:p1, 37-38:p3, 39-39:p0
-29 symbols │·resume):·····························│
-29 colors  0-0:p0, 1-1:p3, 2-9:p1, 10-38:p3, 39-39:p0
+28 symbols │·Session·usage·(since·opened;·resets··│
+28 colors  0-0:p0, 1-1:p3, 2-37:p1, 38-38:p3, 39-39:p0
+29 symbols │·on·host·restart):····················│
+29 colors  0-0:p0, 1-1:p3, 2-18:p1, 19-38:p3, 39-39:p0
 30 symbols │···Input·tokens:···0·(0·cached)·······│
 30 colors  0-0:p0, 1-1:p3, 2-31:p1, 32-38:p3, 39-39:p0
 31 symbols │···Output·tokens:··0·(0·reasoning)····│

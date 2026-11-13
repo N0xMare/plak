@@ -721,7 +721,7 @@ fn render_meter(out: &mut String, meter: &UsageMeterView, indent: &str, label_wi
 }
 
 fn render_session_ledger(out: &mut String, session: &SessionLedgerView) {
-    let _ = writeln!(out, "Session usage (since start or last resume):");
+    let _ = writeln!(out, "Session usage (since opened; resets on host restart):");
     let _ = writeln!(
         out,
         "  Input tokens:   {} ({} cached)",

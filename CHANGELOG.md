@@ -9,6 +9,10 @@ for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
+- Clarify that session usage is process-local since runtime open, not a lifetime
+  total. Reopening after a host restart starts empty; reconnecting a client to
+  the same runtime does not reset it. Durable per-turn usage is unchanged.
+
 - Reload durable runner owner floors and retention-only roles after acquiring
   the native daemon lock, so replacement startup cannot revive stale authority.
 

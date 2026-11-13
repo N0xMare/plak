@@ -710,7 +710,11 @@ transcript keep a scrollbar. Usage rows wrap complete words, including reset tim
 - **Usage** — subscription plan limits and the turn's usage. While this tab
   is open during a turn, allowances refresh about every 60 seconds; closing
   it stops those reads. A refresh keeps the figures already shown. The loading
-  note appears only when the tab has no allowance observation yet.
+  note appears only when the tab has no allowance observation yet. The session
+  total is since this host runtime opened, not a lifetime total: a host restart
+  or a new runtime open resets it; detaching and reconnecting a client to the
+  same running runtime does not. Stored per-turn usage is not erased by this
+  reset.
 - **Context** — the 100-cell breakdown of what is occupying the window.
 - **Session** — the Plak version, the running build's id (with
   `new build installed · /reload` when a newer one is installed), session id

@@ -10376,8 +10376,9 @@ from the fact's usage, after that transaction commits. That one emitter covers
 live terminals and every recovery closure (a turn finished from its recorded
 decision, an abandonment, whose usage is the exact ledger sum, chapter 01
 §5.5), so no product suppression of a recovered terminal is needed and nothing
-is counted twice. `plak usage` totals read only `turns` rows; per-attempt
-`model_attempts` rows are diagnostics and never summed into usage.
+is counted twice. Projected `turns` usage comes only from terminal facts;
+per-attempt `model_attempts` rows are diagnostics and never summed into those
+totals.
 Only terminals on the product session's own branch segment emit usage.
 Inherited source terminals rebuild a fork or rebind successor's views without
 telemetry or OTel usage emissions, ledger updates, `TurnUsage` observations or
@@ -10718,7 +10719,18 @@ prefixes or suffixes, are never displayed. The plan is never spliced into the
 block header, which is the vertical's own name.
 
 The session ledger reports input and cached input, output and reasoning, model
-calls, host-measured turn wall time, and cost. It does not list per-child
+calls, host-measured turn wall time, and cost. Its label is
+`Session usage (since opened; resets on host restart):`. This is a
+process-local observation, not a persisted or lifetime total: a root ledger
+starts empty each time its hosted runtime opens, including exact reopen after
+a host restart. A client detach/reconnect to that same running runtime does
+not reset it. Only newly projected terminal usage, including recovery closures
+applied in this runtime, contributes; already-applied terminals are not replayed
+to restore a prior total. Child node ledgers likewise count turns projected in
+the current process, not a stored lifetime. Durable per-turn terminal usage and
+the telemetry `turns` rows (§7.1) are not erased by reopening; telemetry remains
+disposable and subject to retention. The displayed session total is not a query
+over those historical rows. It does not list per-child
 attempts; those stay on the Agents list. Wall time is deliberately
 labelled as host-measured, because it includes local tool execution and any
 approval wait rather than being a provider-reported API duration.

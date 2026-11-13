@@ -878,7 +878,7 @@ pub(crate) fn limits_layout(
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Session usage (since start or last resume):".to_owned(),
+        "Session usage (since opened; resets on host restart):".to_owned(),
         strong,
     )));
     for line in session_ledger_lines(limits) {
