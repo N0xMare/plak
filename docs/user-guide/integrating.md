@@ -127,8 +127,8 @@ your surrounding job. See the CLI reference for output and continuation rules.
 
 ## Service setup
 
-[Host service setup](host-service.md) includes the Linux systemd user-unit
-example. `plak host install` writes that unit and prints the commands to enable
-it, configure lingering and inspect logs; it does not start or enable it.
-The installer currently refuses macOS: it does not yet write a launchd plist.
-On macOS, run `plak host` directly; do not assume Linux service commands apply.
+[Host service setup](host-service.md) covers Linux systemd user units and
+macOS per-user LaunchAgents. `plak host install` writes the service file and
+prints platform-specific start, log and removal commands; it never enables
+or starts the service. On Linux the printed steps also cover optional lingering.
+On macOS follow the printed `launchctl` steps, not the Linux systemd commands.

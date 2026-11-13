@@ -37,8 +37,8 @@ creates no session.
 
 `plak host` serves the home's sessions in the foreground. Host/web serving is
 part of the default build; `--web` adds the web endpoint and `--ui` its validated
-static build. Run the host under its user unit or a multiplexer. Stop/restart
-it through that unit, or send SIGTERM for planned handoff. Only one host may
+static build. Run the host under its user service or a multiplexer. Stop/restart
+it through that service, or send SIGTERM for planned handoff. Only one host may
 serve a home, even across different state keys; use an explicit stop or
 coordinated upgrade rather than silently replacing an older running build.
 
@@ -50,8 +50,9 @@ An absent or incompatible host refuses; there is no embedded fallback and no
 automatic replay after a broken connection.
 
 The explicit local `--auto-start` option may start an absent unmanaged host.
-It refuses a remote-shell start and an installed `plak-host.service`, naming
-the unit-start command instead. The detached host uses the public home as cwd,
+It refuses a remote-shell start and an installed user service (Linux
+`plak-host.service` or macOS `com.plak.host.plist`), naming the service-start
+command instead. The detached host uses the public home as cwd,
 has no implicit startup workspace, and writes a private bounded
 `host/auto-start.log`. It exits after five minutes without connections or kept
 work; ordinary foreground and unit hosts persist. Auto-start uses a curated
@@ -66,9 +67,10 @@ otherwise runs embedded, and never auto-starts a host. Its hosted transport
 stays direct. `run` and `agent` also remain in-process.
 
 `plak host install --web unix:<absolute-socket> --ui <absolute-directory>
-[--dry-run]` writes a Linux systemd user unit and reloads the user manager;
-it never enables or starts the service. Installation on macOS is not supported
-in this build. Follow the printed commands; see [service setup](host-service.md#install).
+[--dry-run]` writes a Linux systemd user unit or a macOS per-user LaunchAgent.
+Linux installation reloads the user manager; macOS installation never invokes
+`launchctl`. Neither enables or starts the service. Follow the printed
+commands; see [service setup](host-service.md#install).
 
 `plak host upgrade --expect-binary <id> [--wait <seconds>]` runs from the
 destination build. The wait defaults to 0 and accepts at most 3600 seconds.

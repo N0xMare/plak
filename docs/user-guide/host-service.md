@@ -3,7 +3,7 @@
 This setup uses a Linux systemd **user** service or a macOS per-user
 LaunchAgent, never a system-wide service. Use the default installed
 release product, which includes host/web serving, together with
-its matching sidecars. The unit always runs the stable `~/.local/bin/plak`
+its matching sidecars. The service always runs the stable `~/.local/bin/plak`
 link, so keep that installation current. Install the web UI build separately;
 its directory must contain `index.html` and `csp.json` as described in
 [the web endpoint spec](../spec/02-plak-product.md#45-the-web-endpoint).
