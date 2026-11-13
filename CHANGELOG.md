@@ -20,6 +20,9 @@ one cross-build carrier (a build imports its own and the previous version).
   Add coverage for the unavailable-compaction queue remedy. No runtime, wire
   or persisted-format change.
 
+- Classify missing merge-plan and process executors as release binding changes,
+  using the reviewed executor inventory rather than a separate prefix list.
+
 - Fix continuation command collisions between distinct sessions at equal feed
   positions, and namespace child loss continuations by their tree. Reopen keeps
   recorded decision identities, including older pending and consumed decisions.

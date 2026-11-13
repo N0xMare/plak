@@ -553,6 +553,8 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     ("plak", "src/capabilities/grok.rs"): ("include_str",) * 4,
     # Git and jj redirect shims are static text rendered into the copy.
     ("plakous-workspace", "src/git_redirect_fence.rs"): ("include_str",) * 3,
+    # Pinned executor metadata is shared by inspection and contract qualification.
+    ("plakous-hosted", "src/agent/binding_inspection.rs"): ("include_str",),
 }
 EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
@@ -765,6 +767,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/capabilities/claude.rs"): {"include_str"},
     ("plak", "src/capabilities/grok.rs"): {"include_str"},
     ("plakous-workspace", "src/git_redirect_fence.rs"): {"include_str"},
+    ("plakous-hosted", "src/agent/binding_inspection.rs"): {"include_str"},
     ("plak", "src/commands/application.rs"): {"select"},
     # The web endpoint: logins, connections and refusals (no secret or frame),
     # and the accept loop and one connection's socket, session and pings.

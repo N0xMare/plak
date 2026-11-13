@@ -248,7 +248,7 @@ fn schema_digest(schema: &Value) -> TestResult<String> {
 #[test]
 fn release_executor_accepted_inputs_match_the_reviewed_contracts() -> TestResult {
     let current = current()?;
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/executor-contracts.json");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tools/executor-contracts.json");
     if std::env::var("PLAK_UPDATE_EXECUTOR_CONTRACTS").is_ok_and(|value| value == "1") {
         let mut updated = if path.exists() {
             serde_json::from_slice::<Contracts>(&std::fs::read(&path)?)?

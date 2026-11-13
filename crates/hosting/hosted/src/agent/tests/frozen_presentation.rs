@@ -578,93 +578,112 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             )?,
             Some(plakous::agent::BindingChange::ToolBinding { .. })
         ));
-        let unknown = previous_extensions(
-            &current,
-            CompositionSelection::Direct,
-            false,
-            Some("fixture.unknown.send.executor"),
-        )?;
-        let registry = coding_tool_registry_with_extensions(
-            PLAN_AUTHORITY,
-            CompositionSelection::Direct,
-            false,
-            &unknown,
-        )?;
-        let node = node_session(
-            plakous::tools::JobConfig::default(),
-            standard_claude_model(&selected)?,
-            &registry,
-            &unknown,
-            &extras,
-            SessionToolFence::Full,
-            None,
-        )?;
-        let CreateSessionOutcome::Created { session, .. } = sessions
-            .create(CreateSessionRequest::new(
-                SessionOperationId::new(format!("unknown-executor:{child}"))?,
-                builder(node, registry, Arc::clone(&workspace), true),
-            ))
-            .await?
-        else {
-            panic!("create unknown executor fixture")
-        };
-        let locator = session.release().await?;
-        assert!(
-            crate::agent::check_frozen_binding(&sessions.created_tool_presentation(locator).await?)
-                .is_err()
-        );
-        let missing_release = previous_extensions(
-            &current,
-            CompositionSelection::Direct,
-            false,
-            Some("plakous.standard.removed-executor.v1"),
-        )?;
-        let registry = coding_tool_registry_with_extensions(
-            PLAN_AUTHORITY,
-            CompositionSelection::Direct,
-            false,
-            &missing_release,
-        )?;
-        let node = node_session(
-            plakous::tools::JobConfig::default(),
-            standard_claude_model(&selected)?,
-            &registry,
-            &missing_release,
-            &extras,
-            SessionToolFence::Full,
-            None,
-        )?;
-        let CreateSessionOutcome::Created { session, .. } = sessions
-            .create(CreateSessionRequest::new(
-                SessionOperationId::new(format!("missing-release:{child}"))?,
-                builder(node, registry, Arc::clone(&workspace), true),
-            ))
-            .await?
-        else {
-            panic!("create missing release executor fixture")
-        };
-        let locator = session.release().await?;
-        assert!(matches!(
-            crate::agent::check_frozen_binding(
-                &sessions.created_tool_presentation(locator).await?
-            )?,
-            Some(plakous::agent::BindingChange::ToolBinding { .. })
-        ));
-        sessions.archive(locator).await?;
-        let inspected =
-            plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database)?;
-        let archived = inspected
-            .into_iter()
-            .find(|head| head.locator == locator)
-            .unwrap();
-        assert!(archived.archived);
-        assert!(
-            matches!(
-                crate::agent::check_frozen_binding(&archived.presentation.unwrap()?)?,
+        for external_executor in [
+            "fixture.unknown.send.executor",
+            "external-executor",
+            "external.executor",
+        ] {
+            let unknown = previous_extensions(
+                &current,
+                CompositionSelection::Direct,
+                false,
+                Some(external_executor),
+            )?;
+            let registry = coding_tool_registry_with_extensions(
+                PLAN_AUTHORITY,
+                CompositionSelection::Direct,
+                false,
+                &unknown,
+            )?;
+            let node = node_session(
+                plakous::tools::JobConfig::default(),
+                standard_claude_model(&selected)?,
+                &registry,
+                &unknown,
+                &extras,
+                SessionToolFence::Full,
+                None,
+            )?;
+            let CreateSessionOutcome::Created { session, .. } = sessions
+                .create(CreateSessionRequest::new(
+                    SessionOperationId::new(format!(
+                        "unknown-executor:{child}:{external_executor}"
+                    ))?,
+                    builder(node, registry, Arc::clone(&workspace), true),
+                ))
+                .await?
+            else {
+                panic!("create unknown executor fixture")
+            };
+            let locator = session.release().await?;
+            let unavailable = crate::agent::check_frozen_binding(
+                &sessions.created_tool_presentation(locator).await?,
+            )
+            .unwrap_err();
+            assert!(
+                unavailable
+                    .message()
+                    .contains("cannot establish current executor authority")
+            );
+        }
+        for removed_executor in [
+            "plakous.standard.removed-executor.v1",
+            "plakous.merge-plan.removed-executor.v1",
+            "plakous.process.removed-executor.v1",
+        ] {
+            let missing_release = previous_extensions(
+                &current,
+                CompositionSelection::Direct,
+                false,
+                Some(removed_executor),
+            )?;
+            let registry = coding_tool_registry_with_extensions(
+                PLAN_AUTHORITY,
+                CompositionSelection::Direct,
+                false,
+                &missing_release,
+            )?;
+            let node = node_session(
+                plakous::tools::JobConfig::default(),
+                standard_claude_model(&selected)?,
+                &registry,
+                &missing_release,
+                &extras,
+                SessionToolFence::Full,
+                None,
+            )?;
+            let CreateSessionOutcome::Created { session, .. } = sessions
+                .create(CreateSessionRequest::new(
+                    SessionOperationId::new(format!("missing-release:{child}:{removed_executor}"))?,
+                    builder(node, registry, Arc::clone(&workspace), true),
+                ))
+                .await?
+            else {
+                panic!("create missing release executor fixture")
+            };
+            let locator = session.release().await?;
+            assert!(matches!(
+                crate::agent::check_frozen_binding(
+                    &sessions.created_tool_presentation(locator).await?
+                )?,
                 Some(plakous::agent::BindingChange::ToolBinding { .. })
-            ),
-            "archived heads retain their actual non-gating verdict"
-        );
+            ));
+            sessions.archive(locator).await?;
+            let inspected =
+                plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(&database)?;
+            let archived = inspected
+                .into_iter()
+                .find(|head| head.locator == locator)
+                .unwrap();
+            assert!(archived.archived);
+            assert!(
+                matches!(
+                    crate::agent::check_frozen_binding(&archived.presentation.unwrap()?)?,
+                    Some(plakous::agent::BindingChange::ToolBinding { .. })
+                ),
+                "archived heads retain their actual non-gating verdict"
+            );
+        }
     }
     Ok(())
 }

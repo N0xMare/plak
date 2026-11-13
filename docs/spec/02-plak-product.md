@@ -5435,8 +5435,12 @@ fetch image-result variants and optional web/image packs), and native selected
 policy with frozen tool data. MCP contracts are reported as externally owned
 and unaffected, not as a release incompatibility. A missing release-owned
 executor (standard/process, topology, optional web, skills or composition
-markers) is a `ToolBinding` change; an unknown external executor is unavailable,
-not an invented binding refusal.
+markers, merge-plan and process execution) is a `ToolBinding` change; an unknown
+external executor is unavailable, not an invented binding refusal. Release-owned
+namespaces are derived from the same pinned executor contracts that qualify
+registrations, shipped as metadata even when an optional runtime is omitted;
+inspection does not maintain a separate prefix inventory. IDs with fewer than
+two dots use their exact pinned ID rather than a namespace prefix.
 
 Same-key host upgrade runs both source and destination inspections before
 surrender. It refuses only a live row that the source found compatible and the

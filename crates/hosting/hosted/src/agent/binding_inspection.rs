@@ -8,6 +8,23 @@ use plakous::model::{ReasoningEffortDisposition, SelectedProviderConfiguration, 
 use plakous::sessions::FrozenSessionPresentation;
 use plakous::subscriptions::NativeProvider;
 use plakous::tools::{PlanStateIdentity, ToolExecutorBindingIdentity, ToolExecutorId};
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::LazyLock;
+
+#[derive(serde::Deserialize)]
+struct ExecutorContract {
+    executor_id: String,
+}
+
+static RELEASE_EXECUTOR_NAMESPACES: LazyLock<Result<BTreeSet<String>, serde_json::Error>> =
+    LazyLock::new(|| {
+        let contracts: BTreeMap<String, ExecutorContract> =
+            serde_json::from_str(include_str!("../tools/executor-contracts.json"))?;
+        Ok(contracts
+            .values()
+            .map(|contract| executor_namespace(&contract.executor_id).to_owned())
+            .collect())
+    });
 
 /// Checks frozen data against this release's executable and native selection
 /// metadata. No credential, model, runner, workspace or sidecar is opened.
@@ -80,7 +97,7 @@ fn check_executors(
                     tool: id.to_string(),
                 }));
             }
-            None if registry.identity(&name).is_some() || release_owned_executor(&id) => {
+            None if registry.identity(&name).is_some() || release_owned_executor(&id)? => {
                 return Ok(Some(BindingChange::ToolBinding {
                     tool: id.to_string(),
                 }));
@@ -95,20 +112,17 @@ fn check_executors(
     Ok(None)
 }
 
-fn release_owned_executor(id: &ToolExecutorId) -> bool {
-    [
-        "plakous.standard.",
-        "plakous.process-",
-        "plak.topology.",
-        "plakous.web.",
-        "plak.skills.",
-        "plakous.product-javascript-composition.",
-        "plakous.python-ptc.",
-        "plakous.python-sdk.",
-        "plakous.codex-code-mode.",
-    ]
-    .iter()
-    .any(|prefix| id.as_str().starts_with(prefix))
+fn release_owned_executor(id: &ToolExecutorId) -> CliResult<bool> {
+    let namespaces = RELEASE_EXECUTOR_NAMESPACES.as_ref().map_err(|error| {
+        CliFailure::new(format!("release executor metadata is invalid: {error}"))
+    })?;
+    Ok(namespaces.contains(executor_namespace(id.as_str())))
+}
+
+fn executor_namespace(id: &str) -> &str {
+    id.match_indices('.')
+        .nth(1)
+        .map_or(id, |(end, _)| &id[..=end])
 }
 
 fn check_native_selection(
