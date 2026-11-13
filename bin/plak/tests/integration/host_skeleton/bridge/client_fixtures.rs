@@ -14,15 +14,19 @@ fn providers(fixture: &Fixture) -> usize {
 }
 
 fn ready(path: &std::path::Path) {
+    ready_value(path, b"reserved\n");
+}
+
+fn ready_value(path: &std::path::Path, expected: &[u8]) {
     let until = Instant::now() + WAIT;
-    while !std::fs::read(path).is_ok_and(|value| value == b"reserved\n") {
+    while !std::fs::read(path).is_ok_and(|value| value == expected) {
         assert!(
             Instant::now() < until,
             "fixture never reserved the original draft"
         );
         std::thread::yield_now();
     }
-    assert_eq!(std::fs::read(path).unwrap(), b"reserved\n");
+    assert_eq!(std::fs::read(path).unwrap(), expected);
 }
 
 fn draft(attachment: u64, client_id: ClientDraftId, text: &str) -> Op<PlakExtension> {
@@ -160,6 +164,15 @@ fn finished(client: &mut Client) {
 
 #[test]
 fn client_producer_cancelled_pending_gate_frees_id_without_admitting_original() {
+    cancelled_pending_gate(false);
+}
+
+#[test]
+fn client_producer_cancelled_native_pending_gate_frees_the_original_id() {
+    cancelled_pending_gate(true);
+}
+
+fn cancelled_pending_gate(first: bool) {
     let Some(fixture) = fixture() else { return };
     fixture.write_script(&json!({"version":1,"repeat_last_step":true,"steps":[{"output":{"text":"fixture answer"}}]}));
     let id = ClientDraftId::new();
@@ -169,7 +182,14 @@ fn client_producer_cancelled_pending_gate_frees_id_without_admitting_original() 
         &fixture,
         &[],
         &[
-            ("PLAK_TEST_DRAFT_PENDING_ID", id.to_string()),
+            (
+                "PLAK_TEST_DRAFT_PENDING_ID",
+                if first {
+                    "first".into()
+                } else {
+                    id.to_string()
+                },
+            ),
             (
                 "PLAK_TEST_DRAFT_PENDING_READY",
                 reached.display().to_string(),
@@ -192,7 +212,11 @@ fn client_producer_cancelled_pending_gate_frees_id_without_admitting_original() 
         client.request(3, draft(attachment, id, "never admitted")),
         Outcome::Ok(Answer::Accepted { duplicate: false })
     );
-    ready(&reached);
+    if first {
+        ready_value(&reached, format!("reserved {id}\n").as_bytes());
+    } else {
+        ready(&reached);
+    }
     assert_eq!(providers(&fixture), 0);
     publish(&release, "cancel\n");
     let until = Instant::now() + WAIT;
@@ -232,4 +256,5 @@ fn client_producer_cancelled_pending_gate_frees_id_without_admitting_original() 
     assert_eq!(providers(&fixture), 1);
 }
 
+mod native;
 mod recovery;

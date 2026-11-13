@@ -7,23 +7,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 struct Gate {
-    id: ClientDraftId,
+    id: Option<ClientDraftId>,
     claimed: AtomicBool,
-    wait: Arc<dyn Fn() -> bool + Send + Sync>,
+    wait: Arc<dyn Fn(ClientDraftId) -> bool + Send + Sync>,
 }
 
 static GATE: OnceLock<Gate> = OnceLock::new();
 
-/// Install one explicit fixture hold for the first real reservation of `id`.
+/// Hold the first real reservation of `id`, or any ID when `id` is `None`.
 /// `wait` runs outside the host loop and all service locks. True releases the
 /// unchanged intent; false drops the pending reservation without admission.
+/// Its argument is the original reserved ID, never a fixture replacement.
 /// This port is absent unless the repository's test-support feature is enabled.
 ///
 /// # Errors
 /// A fixture already installed a gate in this process.
 pub fn install(
-    id: ClientDraftId,
-    wait: Arc<dyn Fn() -> bool + Send + Sync>,
+    id: Option<ClientDraftId>,
+    wait: Arc<dyn Fn(ClientDraftId) -> bool + Send + Sync>,
 ) -> Result<(), &'static str> {
     GATE.set(Gate {
         id,
@@ -43,8 +44,11 @@ pub(super) fn defer<P: ProtocolExtension>(
     let Some(gate) = GATE.get() else {
         return Ok(false);
     };
-    if client.and_then(|id| id.parse::<ClientDraftId>().ok()) != Some(gate.id)
-        || !pending.contains_key(&gate.id)
+    let Some(id) = client.and_then(|id| id.parse::<ClientDraftId>().ok()) else {
+        return Ok(false);
+    };
+    if gate.id.is_some_and(|selected| selected != id)
+        || !pending.contains_key(&id)
         || !matches!(
             intent,
             SessionIntent::Prompt(_)
@@ -63,8 +67,8 @@ pub(super) fn defer<P: ProtocolExtension>(
     std::thread::Builder::new()
         .name("fixture-draft-hold".into())
         .spawn(move || {
-            if !(gate.wait)() || sender.send_correlated(intent, client).is_err() {
-                service.refuse_wire_draft(gate.id);
+            if !(gate.wait)(id) || sender.send_correlated(intent, client).is_err() {
+                service.refuse_wire_draft(id);
             }
         })
         .map_err(|_| RequestRefusal::Disconnected)?;

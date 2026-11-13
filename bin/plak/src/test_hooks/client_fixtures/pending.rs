@@ -30,11 +30,10 @@ pub(crate) fn install_pending_gate() -> Result<(), String> {
     let [Some(id), Some(ready), Some(release)] = values else {
         return Err("draft gate requires ID, READY and RELEASE".into());
     };
-    let id = id
-        .to_str()
-        .ok_or("invalid draft gate ID")?
-        .parse()
-        .map_err(|_| "invalid draft gate ID")?;
+    let id = match id.to_str().ok_or("invalid draft gate ID")? {
+        "first" => None,
+        value => Some(value.parse().map_err(|_| "invalid draft gate ID")?),
+    };
     let (ready, release) = (PathBuf::from(ready), PathBuf::from(release));
     if !ready.is_absolute()
         || !release.is_absolute()
@@ -46,14 +45,18 @@ pub(crate) fn install_pending_gate() -> Result<(), String> {
     }
     plakous_hosted::host_service::test_draft_gate::install(
         id,
-        Arc::new(move || {
+        Arc::new(move |reserved_id| {
             use std::io::Write;
+            let marker = match id {
+                Some(_) => "reserved\n".to_owned(),
+                None => format!("reserved {reserved_id}\n"),
+            };
             let written = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&ready)
                 .and_then(|mut file| {
-                    file.write_all(b"reserved\n")?;
+                    file.write_all(marker.as_bytes())?;
                     file.sync_all()
                 });
             if written.is_err() {

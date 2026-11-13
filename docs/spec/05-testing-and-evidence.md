@@ -2454,11 +2454,19 @@ Public oracles retain the JSONL once-only and derived-not-durable row checks
 for both variants and compare physical dispatch counts across open/resync.
 
 With the offline selector, all three of `PLAK_TEST_DRAFT_PENDING_ID` (one
-client draft UUID), `PLAK_TEST_DRAFT_PENDING_READY` and
+client draft UUID or the exact selector `first`), `PLAK_TEST_DRAFT_PENDING_READY` and
 `PLAK_TEST_DRAFT_PENDING_RELEASE` (distinct new absolute file paths) install
-a one-use reservation hold. Only the first actual reservation of that UUID
-can enter it. The ready file contains only `reserved` plus newline; no draft
-content is logged. The already-authorized original sender and unchanged intent
+a one-use reservation hold. A UUID selects only its first actual reservation;
+`first` selects the first actual eligible root draft reservation, preserving
+the native sender's original UUID even when minted after host startup. Reads,
+session creation and attachment do not consume the selector. Fixed-ID mode's
+ready file remains exactly `reserved` plus newline. First-reservation mode
+writes `reserved <original-uuid>` plus newline, providing a content-free reached
+barrier and identity witness, not a replacement ID or an admission verdict.
+Neither mode can hold a second reservation. No draft content is logged.
+The test-support `test_draft_gate::install` accepts an optional selected ID
+(`None` selects first) and passes the original reserved ID to its wait callback.
+The already-authorized original sender and unchanged intent
 wait outside the host loop and service locks. Directory reads, attachment,
 reconnect, conflicting-content refusals and real same-ID `draft_pending`
 checks remain live even after the original connection disappears. A release
@@ -2467,6 +2475,12 @@ intent once; any other content, a terminating signal or the 120-second safety
 deadline drops the reservation without admission. Failed mailbox delivery uses
 the same reservation-release path. Durable admission alone enables a later
 real `accepted { duplicate:true }`; this seam creates no synthetic verdict.
+Native-first-write evidence mints the UUID after host startup, observes that
+same UUID at the barrier, drops the original connection, obtains repeated real
+pending and conflicting-content refusals after reconnect, then releases the
+original for one durable admission and provider dispatch. A later independently
+minted draft bypasses the spent gate. Cancellation laws also run in both modes
+and require no original history/dispatch before an explicit replacement.
 The product reads none of these controls in default or maintainer builds;
 the hosted hold port is compiled only with `test-support`, already excluded
 from both production resolutions. Binary-marker/CLI contracts prove exclusion.

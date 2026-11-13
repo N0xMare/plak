@@ -13,6 +13,12 @@ one cross-build carrier (a build imports its own and the previous version).
   A proven foreign-submission collision gets one durable replacement decision;
   the other session's submission and accepted work remain untouched.
 
+- Extend the test-hooks-only pending-draft producer to capture the first native
+  sender's original UUID without choosing it at host startup. A content-free
+  barrier reports that UUID; real pending checks, release, durable duplicate
+  proof and cancellation retain their existing authority. Default and
+  maintainer builds are unchanged; no persisted or wire format changes.
+
 - Fixed a busy root's graceful host handoff being lost after an accepted
   send-now steer; restarting the host continues the handed-off turn once.
 
