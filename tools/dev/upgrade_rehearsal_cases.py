@@ -11,6 +11,57 @@ import signal
 import subprocess
 import uuid
 
+# Increment-4 live/parked-tree cases register (name, dormant, body) here later.
+INCREMENT4_CASES = ()
+
+
+def history_content(rows):
+    # Presentation-entry keys are checkpoint-derived, not canonical message IDs.
+    return [{key: value for key, value in row.items() if key != "entry_id"} for row in rows]
+
+
+def operator_summary(report):
+    lines = ["# Cross-key rehearsal", ""]
+    for name in ["A", "B"]:
+        image = report["images"][name]
+        lines.append(f"{name}: `{image['revision']}` / binary `{image['binary_id']}`.")
+    lines += [
+        "",
+        "BOOTSTRAP uses the actual main and candidate codecs. DORMANT uses the candidate image with a simulated old key; it does not qualify old-codec compatibility.",
+        "",
+        "| Case | Result | Operator outcome / remedy |",
+        "| --- | --- | --- |",
+    ]
+    for row in report["cases"]:
+        detail = (
+            row.get("error")
+            or row.get("operator_remedy")
+            or row.get("outcome")
+            or "history, named state, paused queue and identity checks passed"
+        )
+        detail = detail.replace("\n", " ").replace("|", "\\|")
+        lines.append(f"| {row['case']} | {row['status']} | {detail} |")
+        if row.get("mappings"):
+            mappings = row["mappings"]
+            if isinstance(mappings, list):
+                mappings = {item["source"]: item["successor"] for item in mappings}
+            for source, destination in mappings.items():
+                lines.append(f"| | | `{source}` → `{destination}` |")
+    lines += [
+        "",
+        "Bootstrap settles into NEW session/tree/native-line identities. Canonical export history and named state are checked exactly; presentation-entry IDs are not canonical identity. Text queues stay paused. Completed children are only source facts: read their old history with A; B cannot resume them. Save terminal output before bootstrap: an exit notice can carry in history, but the job ledger does not.",
+        "",
+        report["increment4"],
+        "",
+    ]
+    failed = any(row["status"] != "passed" for row in report["cases"])
+    lines.append(
+        "NOT QUALIFIED: at least one case failed; do not enable dormant ownership moves."
+        if failed
+        else "Selected cases passed. This is scratch evidence, not production enablement or coverage of omitted cases."
+    )
+    return "\n".join(lines) + "\n"
+
 
 class Case:
     def __init__(self, support, root, name, images, dormant, child_mode="completed"):
@@ -68,6 +119,20 @@ class Case:
         spec.loader.exec_module(module)
         self.client_type = module.Client
         self.script("idle")
+        probes = {}
+        for role, expected in [
+            ("source", support.SOURCE_KEY),
+            ("destination", support.DESTINATION_KEY),
+        ]:
+            probe = json.loads(self.command(role, ["version", "--host-upgrade-probe"]).stdout)
+            support.require(
+                probe["state_key"] == expected,
+                f"{role}: unexpected state key; retain the requested revision and test-hooks build",
+            )
+            probes[role] = probe
+        if not dormant:
+            support.check_probe_shape(probes["source"], probes["destination"])
+            print("PROBE: destination JSON fits the source's strict probe shape", flush=True)
 
     def command(self, role, arguments, *, check=True, extra=None, timeout=120):
         env = dict(self.env)
@@ -366,15 +431,31 @@ class Case:
         )
         return {
             "exit": result.returncode,
-            "rows": [json.loads(line) for line in result.stdout.splitlines()]
+            "rows": history_content([json.loads(line) for line in result.stdout.splitlines()])
             if result.returncode == 0
             else [],
             "remedy": result.stderr,
         }
 
-    def history(self, role, session):
+    def event_log(self, role, session):
         result = self.command(role, ["session", "log", session, "--json", "--tail", "10000"])
-        return [json.loads(line) for line in result.stdout.splitlines()]
+        return history_content([json.loads(line) for line in result.stdout.splitlines()])
+
+    def attach_verify(self, session):
+        with self.client("destination") as client:
+            rows = client.request(1, {"op": "list_sessions", "include_archived": False})["rows"]
+            node = next(row["node"] for row in rows if row["session"] == session)
+            attached = client.request(2, {"op": "attach", "node": node})
+            self.s.require(attached.get("answer") == "attached", "destination session did not open")
+            client.request(3, {"op": "detach", "attachment": attached["attachment"]})
+        self.s.wait_for(
+            lambda: self.rows(
+                "destination",
+                "SELECT locator FROM sessions WHERE id=? AND locator IS NOT NULL",
+                parameters=(session,),
+            ),
+            "carried canonical head materialized",
+        )
 
     def interrupt_child(self, session):
         child = self.rows(
@@ -449,7 +530,7 @@ def carry(case, *, cut=None, jobs=True):
         sessions.append(job_session)
     case.script("idle")
     before = case.exports("source", ordinary)
-    histories = {session: case.history("source", session) for session in sessions}
+    histories = {session: case.event_log("source", session) for session in sessions}
     original = case.snapshot("source")
     child = next(row["agent_id"] for row in original["nodes"] if row["parent_agent_id"])
     child_before = case.child_history("source", child_root, child)
@@ -486,13 +567,10 @@ def carry(case, *, cut=None, jobs=True):
     )
     mappings = {row["source"]: row["successor"] for row in authority["mappings"]}
     case.s.require(set(mappings) == set(sessions), "move silently omitted a source session")
+    for target in mappings.values():
+        case.attach_verify(target)
     after = case.exports("destination", [mappings[session] for session in ordinary])
     for source, target in mappings.items():
-        if case.dormant:
-            case.s.require(
-                case.history("destination", target) == histories[source],
-                f"canonical history changed: {source}",
-            )
         if source in before:
             for field in ["history", "named_state", "queue"]:
                 case.s.require(
@@ -589,17 +667,38 @@ def carry(case, *, cut=None, jobs=True):
         )
         report.update(
             child="bound child identity/history preserved",
-            jobs="terminal IDs/evidence preserved",
+            jobs="terminal IDs/evidence preserved"
+            if jobs
+            else "not present; repro-job tests retained terminals",
             keys="simulated old key; both images use candidate codecs",
         )
+        if case.child_mode == "completed":
+            wake_after_move(case, child_root, child)
+            report["wake"] = "next child result woke the moved idle root once"
     else:
         case.s.require(
             all(source != target for source, target in mappings.items()),
             "bootstrap unexpectedly claimed dormant preserved IDs",
         )
         document = after[mappings[child_root]]
+        retained_export = (
+            Path(case.env["PLAK_HOME"]) / "host/upgrades" / authority["id"] / f"{child_root}.json"
+        )
+        source_facts = json.loads(retained_export.read_text())
         report.update(
             child={
+                "source_tree": next(
+                    row["node_tree_id"] for row in original["products"] if row["id"] == child_root
+                ),
+                "successor_tree": next(
+                    row["node_tree_id"]
+                    for row in case.snapshot("destination")["products"]
+                    if row["id"] == mappings[child_root]
+                ),
+                "inert_facts": source_facts["pending_work"],
+                "original_child_count": source_facts["source_subagents"],
+                "old_child_history_read_only": case.child_history("source", child_root, child)
+                == child_before,
                 "source_subagents": document.get("source_subagents"),
                 "source_resolved_count": document.get("source_resolved_count"),
                 "destination_log": case.child_history("destination", mappings[child_root], child),
@@ -616,36 +715,114 @@ def bootstrap_observation(case, kind):
     )
     if case.host is None:
         case.start()
+    before = case.snapshot("source")
+    history_before = case.event_log("source", session)
     result = case.upgrade()
     receipts = case.receipts()
     if result.returncode:
+        if kind == "active-child":
+            expected = "host_upgrade_blocked" in result.stderr and "live_child" in result.stderr
+        elif kind == "active-job":
+            expected = "host_upgrade_process_retention_unavailable" in result.stderr
+        else:
+            expected = "host_upgrade_blocked" in result.stderr and "daemon_jobs" in result.stderr
+        case.s.require(
+            expected, f"unexpected bootstrap refusal, not a qualified blocker: {result.stderr}"
+        )
         case.s.require(
             not any(row["phase"] in {"committed", "acknowledged"} for row in receipts),
             "refusal surrendered a source",
         )
+        with case.client() as client:
+            client.request(1, {"op": "ping"})
+            reopened = client.request(
+                2,
+                {
+                    "op": "new_session",
+                    "runner": {"name": "local", "runner_id": "local"},
+                    "workspace": str(case.workspace),
+                    "request_id": str(uuid.uuid4()),
+                },
+            )
+            case.s.require(
+                reopened.get("answer") == "created",
+                "source admission remained closed after refusal",
+            )
         return {
             "session": session,
             "outcome": "refused before surrender",
             "operator_remedy": result.stderr,
             "exit": result.returncode,
+            "source_admission": "reopened; a new dormant session was accepted without inference",
         }
+    case.s.require(kind == "terminal-job", f"bootstrap unexpectedly carried {kind}")
     authority = receipts[-1]
+    mapping = next(row for row in authority["mappings"] if row["source"] == session)
+    case.attach_verify(mapping["successor"])
+    refused = case.command(
+        "source", ["run", "--session", session, "--", "must not execute"], check=False
+    )
+    case.s.require(
+        refused.returncode != 0
+        and any(code in refused.stderr for code in ["source_fenced", "session_archived"]),
+        "old job session did not refuse after bootstrap",
+    )
+    source_export = json.loads(
+        (
+            Path(case.env["PLAK_HOME"]) / "host/upgrades" / authority["id"] / f"{session}.json"
+        ).read_text()
+    )
+    target_export = case.exports("destination", [mapping["successor"]])[mapping["successor"]]
+    case.s.require(
+        source_export["history"] == target_export["history"],
+        "settled terminal-job conversation changed",
+    )
+    case.s.require(
+        "retained-rehearsal-output" in json.dumps(target_export["history"]),
+        "bootstrap carried the job without delivering its fixture output",
+    )
+    after = case.snapshot("destination")
+    case.s.write_json(
+        case.root / f"{case.name}-invariants.json",
+        {
+            "before": before,
+            "after": after,
+            "history_before": history_before,
+            "history_after": case.event_log("destination", mapping["successor"]),
+            "source_document": source_export,
+            "target_document": target_export,
+        },
+    )
     return {
         "session": session,
         "outcome": "carried",
         "mappings": authority["mappings"],
         "operator_output": result.stdout + result.stderr,
+        "old_source": "refused",
+        "terminal_rows_before": len(before["terminals"]),
+        "terminal_rows_after": len(after["terminals"]),
+        "job_state_in_document": sorted(
+            key for key in source_export if "job" in key or "process" in key
+        ),
+        "retained_job_warning": "S3a carries conversation into a new line, not a job ledger; read/save terminal output using the old build before bootstrap",
+        "terminal_notice_in_history": "retained-rehearsal-output"
+        in json.dumps(source_export["history"]),
     }
 
 
 def reproduce_terminal_job(case):
     session = case.create("job")
+    before = case.snapshot("source")
+    locator = case.rows("source", "SELECT locator FROM sessions WHERE id=?", parameters=(session,))[
+        0
+    ]["locator"]
     result = case.upgrade()
     case.s.write_json(
         case.root / "repro-terminal-job.json",
         {
             "session": session,
             "process_finished": (case.path / "job-done").read_text(),
+            "root_turns": case.rows("source", "SELECT root_turn_count FROM session_views"),
             "heads": case.rows(
                 "source",
                 "SELECT b.session_id,b.branch_id,c.kind FROM branches b JOIN checkpoints c ON c.checkpoint_id=b.checkpoint_id",
@@ -657,11 +834,78 @@ def reproduce_terminal_job(case):
         },
     )
     case.s.require(result.returncode == 0, f"terminal-job move refused: {result.stderr}")
-    return {"session": session, "outcome": "terminal job moved"}
+    authority = case.receipts()[-1]
+    case.s.require(
+        authority["phase"] == "acknowledged"
+        and all(row["source"] == row["successor"] for row in authority["mappings"]),
+        "terminal job did not preserve its product session",
+    )
+    case.attach_verify(session)
+    after = case.snapshot("destination")
+    for field in ["products", "branches", "nodes"]:
+        case.s.require(before[field] == after[field], f"terminal-job {field} changed")
+    native = {
+        row["operation"].lower(): row["digest"].lower()
+        for row in case.rows(
+            "destination",
+            "SELECT hex(operation) AS operation,hex(digest) AS digest FROM runtime_moves",
+            "runtime",
+        )
+    }
+    heads = []
+    for group in authority["groups"]:
+        case.s.require(
+            native.get(bytes(group["operation"]).hex()) == group["target_digest"],
+            "native target does not attest the source job reconstruction",
+        )
+        capsule = json.loads(
+            (
+                Path(case.env["PLAK_HOME"])
+                / "host/upgrades"
+                / authority["id"]
+                / f"{group['id']}.json"
+            ).read_text()
+        )
+        heads.extend(
+            head
+            for item in capsule["sessions"]
+            for head in item["heads"]
+            if head["source"] == locator
+        )
+    case.s.require(len(heads) == 1, "retained job source head changed before capture")
+    jobs = heads[0]["jobs"]
+    case.s.require(
+        len(jobs["rows"]) == 1 and jobs["next_number"] == 2 and jobs["rows"][0]["number"] == 1,
+        "retained job identity/number floor changed",
+    )
+    case.s.require(
+        jobs["rows"][0]["terminal"]["tail"] == "retained-rehearsal-output",
+        "complete retained fixture output changed",
+    )
+    refused = case.command(
+        "source", ["run", "--session", session, "--", "must not execute"], check=False
+    )
+    case.s.require(
+        refused.returncode != 0 and "source_fenced" in refused.stderr,
+        "old terminal-job owner was not fenced",
+    )
+    case.s.write_json(
+        case.root / "retained-job-invariants.json",
+        {"before": before, "after": after, "jobs": jobs, "groups": authority["groups"]},
+    )
+    return {
+        "session": session,
+        "outcome": "terminal job identity, full fixture output and number floor moved",
+        "jobs": jobs,
+    }
 
 
 def reproduce_finished_child(case):
     session = case.create("child")
+    before = case.snapshot("source")
+    history = case.exports("source", [session])[session]["history"]
+    child = next(row["agent_id"] for row in before["nodes"] if row["parent_agent_id"])
+    child_history = case.child_history("source", session, child)
     case.start()
     result = case.upgrade()
     case.s.write_json(
@@ -685,12 +929,119 @@ def reproduce_finished_child(case):
         },
     )
     case.s.require(result.returncode == 0, f"finished-child move refused: {result.stderr}")
-    return {"session": session, "outcome": "finished child moved"}
+    case.s.require(case.snapshot("destination") == before, "finished child IDs or bindings changed")
+    case.s.require(
+        case.exports("destination", [session])[session]["history"] == history,
+        "parent history changed",
+    )
+    case.s.require(
+        case.child_history("destination", session, child) == child_history, "child history changed"
+    )
+    wake_after_move(case, session, child)
+    return {
+        "session": session,
+        "outcome": "finished child moved; its next result woke the moved idle root once",
+    }
+
+
+def wake_after_move(case, session, child):
+    before = case.rows(
+        "destination",
+        "SELECT root_turn_count FROM session_views WHERE session_id=?",
+        parameters=(session,),
+    )[0]["root_turn_count"]
+    gate = case.path / "after-move-child-release"
+    case.s.write_json(
+        case.path / "child.json",
+        {
+            "version": 1,
+            "repeat_last_step": True,
+            "steps": [
+                {
+                    "stream": [{"gate": {"file": str(gate)}}],
+                    "output": {
+                        "tool": {
+                            "name": "submit_result",
+                            "arguments": {
+                                "turn_token": 2,
+                                "output_json": '{"summary":"after move"}',
+                            },
+                        }
+                    },
+                    "finish": "tool_calls",
+                }
+            ],
+        },
+    )
+    with case.client("destination") as client:
+        node = next(
+            row["node"]
+            for row in client.request(1, {"op": "list_sessions", "include_archived": False})["rows"]
+            if row["session"] == session
+        )
+        attachment = client.request(2, {"op": "attach", "node": node})["attachment"]
+        client.request(
+            3,
+            {
+                "op": "intent",
+                "attachment": attachment,
+                "client_id": str(uuid.uuid4()),
+                "blobs": [],
+                "intent": {
+                    "kind": "mail_topology_node",
+                    "body": {
+                        "agent_id": child,
+                        "message": "follow up after the move",
+                        "urgent": False,
+                    },
+                },
+            },
+        )
+        client.request(4, {"op": "detach", "attachment": attachment})
+    case.s.wait_for(
+        lambda: case.rows(
+            "destination",
+            "SELECT * FROM agent_nodes WHERE agent_id=? AND active_turn<>0",
+            "subagents",
+            (child,),
+        ),
+        "moved child admitted follow-up",
+    )
+    current = case.rows(
+        "destination",
+        "SELECT root_turn_count FROM session_views WHERE session_id=?",
+        parameters=(session,),
+    )[0]["root_turn_count"]
+    case.s.require(
+        current == before and case.idle(session, before, "destination"),
+        "root woke before the child result",
+    )
+    gate.touch()
+    case.s.wait_for(
+        lambda: case.idle(session, before + 1, "destination"),
+        "moved child result woke the moved root",
+    )
+    turns = case.rows(
+        "destination",
+        "SELECT root_turn_count FROM session_views WHERE session_id=?",
+        parameters=(session,),
+    )[0]["root_turn_count"]
+    case.s.require(turns == before + 1, "moved child result caused duplicate root turns")
 
 
 def rehearse(args, root, support):
     images = json.loads((root / "builds.json").read_text())
     images["checkout"] = root / "owned/checkout-B"
+    for name in ["A", "B"]:
+        binary = Path(images[name]["binary"])
+        support.require(
+            binary.is_relative_to(root / "owned/images") and not binary.is_symlink(),
+            "image escaped the scratch snapshot directory",
+        )
+        support.require(
+            support.hashlib.sha256(binary.read_bytes()).hexdigest() == images[name]["sha256"],
+            f"{name}: binary changed since build",
+        )
     report = {
         "images": {key: value for key, value in images.items() if key != "checkout"},
         "cases": [],
@@ -708,10 +1059,12 @@ def rehearse(args, root, support):
         definitions += [
             ("repro-job", True, reproduce_terminal_job),
             ("repro-child", True, reproduce_finished_child),
+            ("d-mixed", True, carry),
         ]
-        definitions.append(("d-carry", True, carry))
+        definitions.extend(INCREMENT4_CASES)
+        definitions.append(("d-carry", True, lambda case: carry(case, jobs=False)))
         definitions += [
-            (f"d-cut-{index}", True, lambda case, cut=cut: carry(case, cut=cut))
+            (f"d-cut-{index}", True, lambda case, cut=cut: carry(case, cut=cut, jobs=False))
             for index, cut in enumerate(support.CUTS)
         ]
     failed = False
@@ -725,7 +1078,14 @@ def rehearse(args, root, support):
         case = None
         entry = {"case": name, "arm": "dormant" if dormant else "bootstrap"}
         try:
-            case = Case(support, root, name, images, dormant)
+            case = Case(
+                support,
+                root,
+                name,
+                images,
+                dormant,
+                "interrupted" if name.startswith("d-") and name != "d-mixed" else "completed",
+            )
             entry.update(body(case), status="passed")
         except Exception as error:
             entry.update(status="failed", error=f"{type(error).__name__}: {error}")
@@ -741,6 +1101,7 @@ def rehearse(args, root, support):
             )
         report["cases"].append(entry)
         support.write_json(root / "report.json", report)
+        (root / "operator-summary.md").write_text(operator_summary(report))
         print(json.dumps(entry), flush=True)
     support.require(report["cases"], "selection ran zero rehearsal cases")
     support.require(not failed, "one or more rehearsal cases failed; see report.json")

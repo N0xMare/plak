@@ -19,6 +19,15 @@ images, both built with `plak/maintainer,plak/test-hooks`, are:
 | A | `9e9785efe0c6549ee8d1c143b81db00472031dab` | `816c1472acbd` |
 | B | `56b9c53d8af0f6aa3d8418aa883725aeaff43682` | `6fb516cc6cd8` |
 
+`--destination "$PLAK_REHEARSAL_DESTINATION"` selects a later candidate. Use a
+fresh scratch root (or explicitly clean the previous one) when changing either
+revision; the driver refuses to silently replace an existing checkout. Each
+bootstrap case checks B's read-only `version --host-upgrade-probe` response
+against A's strict field/type shape before starting a host. Unknown top-level
+capability fields, such as an added `live_move_protocol`, fail this check.
+Actual source admission and the bootstrap remain the authoritative real-binary
+compatibility proof, not the shape check alone.
+
 The dormant cases use the real B image twice: source with the existing
 test-hooks-only `PLAK_TEST_STATE_KEY=r27.e37.p37.t10`, destination at its
 natural `r28.e38.p38.t11`. This simulates two keys, **not** compatibility with
@@ -83,3 +92,37 @@ refusal into a passing qualification. Each case stops only its owned scratch
 processes and removes its runtime state, retaining the diagnostic JSON and
 host logs. `cleanup --root "$PLAK_REHEARSAL_ROOT"` removes retained build
 artifacts after investigation.
+
+## Bootstrap operator comparison
+
+```sh
+python3 tools/dev/upgrade_rehearsal.py run \
+  --root "$PLAK_REHEARSAL_ROOT" --arm bootstrap
+```
+
+`operator-summary.md` gives the mappings and actual refusal remedies. On the
+fixed images above, all four bootstrap observations pass:
+
+- Idle roots and the parent of a finished child carry to **new successor IDs**.
+  Complete canonical export history, named state and paused text queues remain
+  equal after the successors actually open. Presentation-entry IDs are not
+  canonical identity and are not compared across reconstructed checkpoints.
+- The old source refuses execution. Its child history remains readable with A;
+  B has no executable copy of that child or source tree. Keep the old snapshot
+  and state for historical inspection.
+- An active child refuses as `host_upgrade_blocked` / `live_child`, with the
+  instruction to let it finish or close it first.
+- A live process refuses as `host_upgrade_process_retention_unavailable`, with
+  the instruction to settle and drain it using the old build, then retry.
+- A terminal process can settle and carry if its exit notice has joined
+  canonical history. Otherwise it refuses as `host_upgrade_blocked` /
+  `daemon_jobs`, with the instruction to resume and prompt the old session to
+  deliver its notices before retrying. Both outcomes were observed; process
+  exit alone does not guarantee settled export. There is **no job-ledger
+  transfer** to the new line. Read/save needed output before the bootstrap.
+
+The capable-source `d-carry` and `d-cut-0` through `d-cut-3` cases use an
+interrupted, canonically quiescent real bound leaf, matching the existing
+dormant durability fixture. Their cuts are source prepare, source commit,
+destination tree seed and native publication. They do not substitute for the
+two failing cases above or for future live/parked-tree qualification.

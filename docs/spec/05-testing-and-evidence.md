@@ -471,6 +471,58 @@ An ordinary idle native driver open, unlike lease-only reconciliation, records
 execution-open even without a new checkpoint and permanently prevents guarded
 Published abandonment.
 
+The opt-in Linux `tools/dev/upgrade_rehearsal.py` driver builds two exact
+maintainer images with `test-hooks`, including matching sidecars, without
+installing or moving any operator link. Its explicit `build`, `run`, `all`
+and `cleanup` subcommands require a dedicated owner-only `--root`; nothing
+runs by default. `all` removes owned build artifacts on completion or refusal
+unless `--keep-builds` was explicit. Every case removes its runtime homes and
+owned processes, retaining only synthetic evidence and logs. Runtime HOME,
+PLAK_HOME, XDG directories and TMPDIR are below the scratch root, with an
+empty Git configuration and no inherited provider credentials. Empty local
+project boundaries prevent discovery of an operator ancestor. A root lock
+prevents concurrent rehearsals from sharing mutable fixtures.
+
+The driver labels **BOOTSTRAP** separately from **DORMANT**. Bootstrap runs
+literal source and destination revisions through the settled successor path.
+`--source` and `--destination` select the exact revisions. Before starting a
+host, a cheap check compares the destination's `version --host-upgrade-probe`
+JSON with the source's strict field/type shape, including nested runner
+identity. This catches an unknown capability field before the actual source
+performs its authoritative upgrade admission; it is not a parser substitute.
+It checks exact canonical export history, named state and paused text queues,
+opens the successors, verifies old-source refusal, and reports which tree,
+child and job state is not restored. Active-child and live-job refusals retain
+their actual operator remedies. Terminal exit notices may be joined into
+history during bootstrap; that is not transfer of a retained job ledger.
+An unconsumed terminal notice can instead refuse settled export with its
+prompt-to-deliver remedy. Refusal observations also prove source admission
+reopens without surrender by accepting a new dormant session without inference.
+Dormant uses the candidate binary as a capable source under the existing
+`PLAK_TEST_STATE_KEY` override, then at its natural destination key. Both keys
+therefore use candidate codecs: this is ownership-move evidence, not old-codec
+compatibility. `PLAK_TEST_HOST_UPGRADE_DORMANT=1` enables only the private
+test capability; ordinary builds do not read these hooks.
+
+The dormant bound-child cases preserve product, tree, child, native session,
+branch and line identities, frozen product tool definitions and child history.
+Canonical root histories compare as complete export values. Child history
+inspection ignores only checkpoint-derived presentation-entry keys, retaining
+content, order, multiplicity and tool-call/result counts. Prepared, Committed,
+tree-seed and Published process cuts exercise abort or forward recovery through
+the ordinary CLI. Separate minimal terminal-job and result-submitting-child
+cases remain strict: a refusal is a failed case, never a successful
+qualification. If admitted, the former checks the retained job number floor,
+full small-fixture output and published group digest; the latter checks that a
+follow-up result wakes the moved idle root once. `report.json` and
+`operator-summary.md` distinguish passed selections from omitted coverage and
+mark any failure **NOT QUALIFIED**. The empty `INCREMENT4_CASES` registration
+point is reserved for later live/parked-tree cases; neither they nor a remote
+paired-runner outage are claimed by the current driver. Reproduction commands
+and fixed-image observations are in
+`tools/dev/fixtures/upgrade-rehearsal-repros.md`. This scratch-only rehearsal is
+not a gate tier and never authorizes production enablement.
+
 Export-v13/v12 fixtures round-trip neutral content (including inline image bytes,
 opaque replay, native compaction bindings and turn counts), retain only the v12
 reader and refuse v11, and reject malformed or oversized input. Closed-kind

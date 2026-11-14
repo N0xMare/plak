@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -61,6 +62,40 @@ def wait_for(predicate, description, seconds=60):
     raise Refused(f"deadline: {description}")
 
 
+def check_probe_shape(source, destination, path="probe"):
+    """Check the strict source probe's JSON shape before starting any host.
+
+    This is a cheap structural guard, not a substitute for the actual source's
+    capability admission during the bootstrap. config_error is Option<String>;
+    the remaining fields (including VersionTriple) are required and strict.
+    """
+    if isinstance(source, dict):
+        require(isinstance(destination, dict), f"{path}: expected an object")
+        unknown = destination.keys() - source.keys()
+        require(not unknown, f"{path}: source rejects unknown fields {sorted(unknown)}")
+        missing = source.keys() - destination.keys()
+        if path == "probe":
+            missing -= {"config_error"}
+        require(not missing, f"{path}: missing source fields {sorted(missing)}")
+        for key, value in destination.items():
+            check_probe_shape(source[key], value, f"{path}.{key}")
+    elif path == "probe.config_error":
+        require(
+            destination is None or isinstance(destination, str), f"{path}: expected null/string"
+        )
+    elif type(source) is int:
+        require(
+            type(destination) is int and 0 <= destination <= 0xFFFF_FFFF, f"{path}: expected u32"
+        )
+    elif isinstance(source, list):
+        require(isinstance(destination, list), f"{path}: expected an array")
+        require(bool(source), f"{path}: cannot infer an empty source probe array")
+        for index, value in enumerate(destination):
+            check_probe_shape(source[0], value, f"{path}[{index}]")
+    else:
+        require(type(destination) is type(source), f"{path}: expected {type(source).__name__}")
+
+
 def prepare_root(path):
     path = path.absolute()
     require(path == path.resolve(), "scratch root must not traverse symlinks")
@@ -83,6 +118,7 @@ def prepare_root(path):
     owned = path / "owned"
     marker = path / "rehearsal-owner.json"
     if owned.exists():
+        require(not owned.is_symlink(), "owned scratch directory must not be a symlink")
         require(
             marker.is_file()
             and json.loads(marker.read_text()) == {"root": str(path), "uid": os.getuid()},
@@ -210,8 +246,11 @@ def owned_processes(case):
             if not inside:
                 executable = (entry / "cmdline").read_bytes().split(b"\0", 1)[0]
                 if Path(os.fsdecode(executable)).name == "plak":
-                    expected = os.fsencode(f"PLAK_HOME={case / 'home'}")
-                    inside = expected in (entry / "environ").read_bytes().split(b"\0")
+                    for value in (entry / "environ").read_bytes().split(b"\0"):
+                        if value.startswith(b"PLAK_HOME="):
+                            home = Path(os.fsdecode(value.split(b"=", 1)[1])).resolve()
+                            inside = home == case or case in home.parents
+                            break
             if inside:
                 found[int(entry.name)] = fields[19]
         except (OSError, ValueError, IndexError):
@@ -243,14 +282,38 @@ def read_rows(path, query, parameters=()):
         return [dict(row) for row in db.execute(query, parameters)]
 
 
+def execute(args, root):
+    try:
+        if args.command in {"build", "all"}:
+            build(args, root)
+        if args.command in {"run", "all"}:
+            from upgrade_rehearsal_cases import rehearse
+
+            rehearse(args, root, sys.modules[__name__])
+    finally:
+        if args.command == "cleanup" or (args.command == "all" and not args.keep_builds):
+            require(
+                not owned_processes(root / "owned"),
+                "owned processes remain; refusing artifact removal",
+            )
+            shutil.rmtree(root / "owned")
+            require(not (root / "owned").exists(), "build artifacts survived cleanup")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["build", "run", "all", "cleanup"])
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--repository", type=Path, default=Path(__file__).resolve().parents[2])
-    parser.add_argument("--source", default="main")
-    parser.add_argument("--destination", default="HEAD")
+    parser.add_argument("--source", default="9e9785efe0c6549ee8d1c143b81db00472031dab")
+    parser.add_argument("--destination", default="56b9c53d8af0f6aa3d8418aa883725aeaff43682")
     parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument(
+        "--keep-builds",
+        action="store_true",
+        help="retain scratch build artifacts after all (runtime state is still removed)",
+    )
     parser.add_argument("--arm", choices=["all", "bootstrap", "dormant"], default="all")
     parser.add_argument(
         "--case", action="append", help="select a named case (repeatable); zero matches refuse"
@@ -259,19 +322,12 @@ def main():
     require(sys.platform == "linux", "this real-binary rehearsal requires scratch Linux")
     require(args.jobs > 0, "--jobs must be positive")
     root = prepare_root(args.root)
-    if args.command in {"build", "all"}:
-        build(args, root)
-    if args.command in {"run", "all"}:
-        from upgrade_rehearsal_cases import rehearse
-
-        rehearse(args, root, sys.modules[__name__])
-    if args.command == "cleanup":
-        require(
-            not owned_processes(root / "owned"),
-            "stop rehearsal processes before removing build artifacts",
-        )
-        shutil.rmtree(root / "owned")
-    return 0
+    with (root / "rehearsal.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise Refused("another rehearsal owns this root") from error
+        return execute(args, root)
 
 
 if __name__ == "__main__":
