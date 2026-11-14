@@ -6564,7 +6564,11 @@ the normal recovery-required path before Ready. The driver's placement parking
   cursor, at most `retention::PAGE_SIZE` per page, with output tails bounded to
   4 KiB. A continuation names the last returned number. Only original-worker
   terminal proofs count; running or unknown outcomes, including lost-worker
-  cached unknowns, never do. Owner mismatch, reload failure, interruption,
+  cached unknowns, never do. Delegated rows require a fresh read from the exact
+  retained original through the existing retention read; an unreachable original
+  refuses even if the relay cached a terminal. The client bounds complete
+  collection to 4096 rows and refuses rather than returning a partial set.
+  Owner mismatch, reload failure, interruption,
   malformed pages or incomplete collection refuse as unknown. Inspection and
   qualification cannot use this read. It neither adopts nor transfers owners,
   acquires leases, dispatches effects, acknowledges jobs nor consumes output.

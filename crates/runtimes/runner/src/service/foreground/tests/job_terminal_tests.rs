@@ -1,5 +1,5 @@
 use super::*;
-use plakous_runner_protocol::retention::PAGE_SIZE;
+use plakous_runner_protocol::retention::{Job, PAGE_SIZE};
 use plakous_tools::{JobStatus, JoinedProcessOutputCursor};
 
 async fn populate(sessions: &RunnerSessions, count: u32) -> plakous_tools::JoinedProcessSessionId {
@@ -52,6 +52,57 @@ async fn populate(sessions: &RunnerSessions, count: u32) -> plakous_tools::Joine
     first.unwrap()
 }
 
+async fn all_terminals(service: &RunnerService, owner: &LineOwner) -> Vec<Job> {
+    let mut collected = Vec::new();
+    let mut after = 0;
+    loop {
+        let RunnerFrame::JobTerminals {
+            owner: actual,
+            jobs,
+            next,
+            ..
+        } = service
+            .job_terminals("home", "before", "page".into(), owner, after)
+            .await
+        else {
+            panic!("terminal page")
+        };
+        assert_eq!(&actual, owner);
+        assert!(jobs.iter().all(|job| job.terminal));
+        collected.extend(jobs);
+        let Some(next) = next else {
+            break;
+        };
+        after = next;
+    }
+    collected
+}
+
+async fn add_live_job(sessions: &RunnerSessions, number: u32) {
+    let id = sessions
+        .start(
+            JoinedProcessStartRequest::new(
+                JoinedProcessCommand::literal("/bin/cat", Vec::<String>::new()).unwrap(),
+                ".",
+                Vec::new(),
+                true,
+                JoinedProcessTerminalMode::Pipes,
+            )
+            .unwrap(),
+            OperationContext::new(plakous_model::CancellationToken::new()).with_class(
+                OperationClass::EffectCall {
+                    call_id: format!("00000000-0000-0000-0000-{number:012x}")
+                        .parse()
+                        .unwrap(),
+                    attempt_id: "00000000-0000-0000-0001-000000000001".parse().unwrap(),
+                },
+            ),
+        )
+        .await
+        .unwrap();
+    sessions.promote(id).await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn job_terminals_pages_are_complete_original_and_leave_jobs_and_output_unconsumed() {
     let root = tempfile::tempdir().unwrap();
@@ -76,7 +127,9 @@ async fn job_terminals_pages_are_complete_original_and_leave_jobs_and_output_unc
     let sessions = RunnerSessions::new(&backend, &environment, owner);
     let count = u32::try_from(PAGE_SIZE + 1).unwrap();
     let first = populate(&sessions, count).await;
+    add_live_job(&sessions, count + 1).await;
     let before = sessions.jobs().await.unwrap();
+    assert!(before.iter().any(|job| job.status == JobStatus::Running));
     let native = LineOwner {
         line: owner.line().to_string(),
         generation: 1,
@@ -88,33 +141,18 @@ async fn job_terminals_pages_are_complete_original_and_leave_jobs_and_output_unc
         ..native.clone()
     };
     assert!(matches!(
-        service.job_terminals("home", "wrong".into(), &wrong, 0),
+        service
+            .job_terminals("home", "before", "wrong".into(), &wrong, 0)
+            .await,
         RunnerFrame::Refused { .. }
     ));
     assert!(matches!(
-        service.job_terminals("other", "other".into(), &native, 0),
+        service
+            .job_terminals("other", "before", "other".into(), &native, 0)
+            .await,
         RunnerFrame::Refused { .. }
     ));
-    let mut collected = Vec::new();
-    let mut after = 0;
-    loop {
-        let RunnerFrame::JobTerminals {
-            owner: actual,
-            jobs,
-            next,
-            ..
-        } = service.job_terminals("home", "page".into(), &native, after)
-        else {
-            panic!("terminal page")
-        };
-        assert_eq!(actual, native);
-        assert!(jobs.iter().all(|job| job.terminal));
-        collected.extend(jobs);
-        let Some(next) = next else {
-            break;
-        };
-        after = next;
-    }
+    let collected = all_terminals(&service, &native).await;
     assert_eq!(
         collected.iter().map(|job| job.number).collect::<Vec<_>>(),
         (1..=count).collect::<Vec<_>>()
@@ -149,4 +187,8 @@ async fn job_terminals_pages_are_complete_original_and_leave_jobs_and_output_unc
             .0,
         native
     );
+    sessions
+        .stop_jobs(plakous_tools::JobStopReason::User, Duration::ZERO)
+        .await
+        .unwrap();
 }

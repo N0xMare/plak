@@ -11,7 +11,7 @@ mod port;
 #[cfg(test)]
 mod tests;
 
-fn scope(host: &str, instance: &str) -> Result<wire::Bind, String> {
+pub(super) fn scope(host: &str, instance: &str) -> Result<wire::Bind, String> {
     Ok(wire::Bind {
         version: wire::VERSION,
         host_id: retention::id(host).map_err(|_| "invalid host identity")?,
@@ -258,7 +258,7 @@ impl RunnerService {
         self.account_retained();
     }
 
-    async fn refresh_retained(
+    pub(super) async fn refresh_retained(
         &self,
         scope: &wire::Bind,
         origin: &wire::Origin,

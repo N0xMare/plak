@@ -21,6 +21,56 @@ async fn retained() -> (
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn job_terminals_refresh_original_workers_and_refuse_unreachable_cached_proof() {
+    let (_root, first, next, _links, port, process) = retained().await;
+    port.write_stdin(
+        process,
+        b"original-output",
+        JoinedProcessInputDisposition::Close,
+        control(61),
+    )
+    .await
+    .unwrap();
+    assert_eq!(finish(&port, process).await, b"original-output");
+    assert_eq!(port.jobs().await.unwrap().len(), 1);
+    let entry = next
+        .service
+        .retention_context()
+        .unwrap()
+        .registry
+        .entries("home", None)
+        .into_iter()
+        .find(|entry| !entry.inventory.jobs.is_empty())
+        .unwrap();
+    let owner = retention::native_owner(&entry.to);
+    let RunnerFrame::JobTerminals {
+        jobs, next: None, ..
+    } = next
+        .service
+        .job_terminals("home", "same", "fresh".into(), &owner, 0)
+        .await
+    else {
+        panic!("fresh original terminal")
+    };
+    assert_eq!(jobs.len(), 1);
+    assert!(jobs[0].terminal);
+    assert_eq!(jobs[0].output, "original-output");
+    assert_eq!(port.jobs().await.unwrap().len(), 1);
+    assert_eq!(finish(&port, process).await, b"original-output");
+
+    // A known terminal in the relay is not evidence that its original remains readable.
+    first.serving.abort();
+    tokio::task::yield_now().await;
+    let answer = tokio::time::timeout(
+        Duration::from_secs(5),
+        next.service
+            .job_terminals("home", "same", "unavailable".into(), &owner, 0),
+    )
+    .await;
+    assert!(matches!(answer, Ok(RunnerFrame::Refused { .. }) | Err(_)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_c47_same_instance_native_lease_expiry_keeps_retention_authority() {
     let (_root, first, _next, link, port, process) = retained().await;
     link[0].sever();

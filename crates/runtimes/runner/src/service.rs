@@ -806,7 +806,17 @@ impl RunnerService {
                 owner,
                 after,
             } => {
-                let _ = sender.send(self.job_terminals(host, request_id, &owner, after));
+                let service = self.clone();
+                let host = host.to_owned();
+                let instance = instance.to_owned();
+                let sender = sender.clone();
+                tokio::spawn(async move {
+                    let _ = sender.send(
+                        service
+                            .job_terminals(&host, &instance, request_id, &owner, after)
+                            .await,
+                    );
+                });
             }
             HostFrame::Ping { nonce } => {
                 let _ = sender.send(RunnerFrame::Pong { nonce });

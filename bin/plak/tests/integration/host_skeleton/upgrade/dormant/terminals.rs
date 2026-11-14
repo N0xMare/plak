@@ -39,6 +39,7 @@ fn host_move_dormant_retains_an_unconsumed_terminal_job_and_its_output() {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    assert_unobserved_job(&fixture, &session);
     let result = output_env(
         &fixture,
         &["host", "upgrade", "--expect-binary", &destination],
@@ -72,6 +73,35 @@ fn host_move_dormant_retains_an_unconsumed_terminal_job_and_its_output() {
         "retained-terminal-output"
     );
     stop(&mut host);
+}
+
+fn assert_unobserved_job(fixture: &Fixture, session: &str) {
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let locator = plak::store::sessions::load_session(&paths, session)
+        .unwrap()
+        .plakous_locator
+        .unwrap();
+    let source = plakous::sessions::SessionBackend::inspect_move_source_unsettled_sqlite(
+        paths.runtime_database(),
+        &[locator.session_id()],
+    )
+    .unwrap();
+    let jobs = source
+        .sessions
+        .iter()
+        .flat_map(|session| &session.checkpoints)
+        .flat_map(|checkpoint| checkpoint.manifest().jobs().rows())
+        .collect::<Vec<_>>();
+    assert_eq!(jobs.len(), 1);
+    assert!(
+        jobs[0].terminal.is_none(),
+        "fixture must reach the original unobserved-terminal refusal"
+    );
+    assert!(source.lines.iter().all(|line| line.terminals.is_empty()));
+    assert!(
+        source.settled().is_err(),
+        "a completed process alone is not durable native terminal evidence"
+    );
 }
 
 fn suppress_wake(fixture: &Fixture, host: &mut Host, session: &str, node: &NodeAddress) {
