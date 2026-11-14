@@ -166,8 +166,9 @@ def build(args, root):
                     commit,
                 ]
             )
+        target = owned / "targets" / commit
         environment = os.environ.copy()
-        environment.update(CARGO_TARGET_DIR=str(owned / "target"), CARGO_BUILD_JOBS=str(args.jobs))
+        environment.update(CARGO_TARGET_DIR=str(target), CARGO_BUILD_JOBS=str(args.jobs))
         command = [
             "bash",
             "tools/build/build-plak.sh",
@@ -184,7 +185,7 @@ def build(args, root):
         snapshot = owned / "images" / name
         snapshot.mkdir(parents=True, exist_ok=True)
         for image in IMAGES:
-            shutil.copy2(owned / "target" / "maintainer" / image, snapshot / image)
+            shutil.copy2(target / "maintainer" / image, snapshot / image)
         digest = hashlib.sha256((snapshot / "plak").read_bytes()).hexdigest()
         manifest[name] = {
             "revision": commit,

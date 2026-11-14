@@ -473,8 +473,9 @@ Published abandonment.
 
 The opt-in Linux `tools/dev/upgrade_rehearsal.py` driver builds two exact
 maintainer images with `test-hooks`, including matching sidecars, without
-installing or moving any operator link. Its explicit `build`, `run`, `all`
-and `cleanup` subcommands require a dedicated owner-only `--root`; nothing
+installing or moving any operator link. Cargo target directories are keyed by
+the exact source commit, never shared between revisions. Its explicit
+`build`, `run`, `all` and `cleanup` subcommands require a dedicated owner-only `--root`; nothing
 runs by default. `all` removes owned build artifacts on completion or refusal
 unless `--keep-builds` was explicit. Every case removes its runtime homes and
 owned processes, retaining only synthetic evidence and logs. Runtime HOME,
@@ -513,8 +514,13 @@ tree-seed and Published process cuts exercise abort or forward recovery through
 the ordinary CLI. Separate minimal terminal-job and result-submitting-child
 cases remain strict: a refusal is a failed case, never a successful
 qualification. If admitted, the former checks the retained job number floor,
-full small-fixture output and published group digest; the latter checks that a
-follow-up result wakes the moved idle root once. `report.json` and
+full small-fixture output and published group digest. It also reads the frozen
+retention-v1 `Lines` inventory twice after publication, verifying that the same
+original-worker job remains unconsumed with unchanged output and number floor.
+Those observations never bind native ownership or send consumption/control
+verbs. The latter case invokes the granted topology tool with explicit
+`purpose=followup` to retask the completed child, then checks that its result
+wakes the moved idle root once. `report.json` and
 `operator-summary.md` distinguish passed selections from omitted coverage and
 mark any failure **NOT QUALIFIED**. The empty `INCREMENT4_CASES` registration
 point is reserved for later live/parked-tree cases; neither they nor a remote

@@ -4,15 +4,97 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import shutil
 import signal
+import socket
+import struct
 import subprocess
 import uuid
 
 # Increment-4 live/parked-tree cases register (name, dormant, body) here later.
 INCREMENT4_CASES = ()
+
+
+def terminal_inventory(home, line, support):
+    """Observe frozen retention-v1 Lines only: never bind native ownership or ack jobs."""
+    observations = {}
+    host_id = (home / "host-id").read_text().strip()
+    for path in sorted((home / "builds").glob("*/retention-v1.sock")):
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
+            stream.settimeout(10)
+            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                stream.connect(f"/proc/self/fd/{directory}/{path.name}")
+            finally:
+                os.close(directory)
+            reader = stream.makefile("rb")
+            with reader:
+
+                def receive():
+                    prefix = reader.read(4)
+                    support.require(len(prefix) == 4, "retention probe closed before length")
+                    length = struct.unpack(">I", prefix)[0]
+                    support.require(0 < length <= 1024 * 1024, "retention probe frame bound")
+                    body = reader.read(length)
+                    support.require(len(body) == length, "retention probe truncated frame")
+                    return json.loads(body)
+
+                def send(value):
+                    body = json.dumps(value).encode()
+                    stream.sendall(struct.pack(">I", len(body)) + body)
+
+                origin = receive()["origin"]
+                send({"version": 1, "host_id": host_id, "host_instance": str(uuid.uuid4())})
+                support.require(receive() == {"answer": "ok"}, "retention probe bind refused")
+                after = 0
+                for page in range(64):
+                    request_id = f"rehearsal-lines-{page}"
+                    send(
+                        {
+                            "id": request_id,
+                            "instance": origin["instance"],
+                            "mutation": None,
+                            "request": {"verb": "lines", "after": after},
+                        }
+                    )
+                    reply = receive()
+                    support.require(reply["id"] == request_id, "retention probe correlation")
+                    answer = reply["answer"]
+                    support.require(
+                        answer["answer"] == "lines", f"retention probe refused: {answer}"
+                    )
+                    for row in answer["lines"]:
+                        if row["owner"]["line"] != line:
+                            continue
+                        for job in row["jobs"]:
+                            support.require(
+                                job["number"] == 1
+                                and job["terminal"]
+                                and job["status"] == {"status": "exited", "code": 0}
+                                and job["output"] == "retained-rehearsal-output"
+                                and row["next_number"] == 2,
+                                "original-worker unconsumed terminal/output/number floor changed",
+                            )
+                            identity = (row["origin"]["instance"], job["session"])
+                            observations[identity] = {
+                                "origin": row["origin"],
+                                "session": job["session"],
+                                "number": job["number"],
+                                "output": job["output"],
+                                "next_number": row["next_number"],
+                            }
+                    next_page = answer["next"]
+                    if next_page is None:
+                        break
+                    support.require(next_page > after, "retention probe cursor did not advance")
+                    after = next_page
+                else:
+                    raise support.Refused("retention probe page bound")
+    support.require(len(observations) == 1, "the unconsumed terminal job disappeared or duplicated")
+    return list(observations.values())
 
 
 def history_content(rows):
@@ -813,9 +895,10 @@ def bootstrap_observation(case, kind):
 def reproduce_terminal_job(case):
     session = case.create("job")
     before = case.snapshot("source")
-    locator = case.rows("source", "SELECT locator FROM sessions WHERE id=?", parameters=(session,))[
-        0
-    ]["locator"]
+    line = before["branches"][0]["line_id"]
+    native_head = case.rows(
+        "source", "SELECT session_id,branch_id,checkpoint_id FROM branches", "runtime"
+    )[0]
     result = case.upgrade()
     case.s.write_json(
         case.root / "repro-terminal-job.json",
@@ -867,12 +950,25 @@ def reproduce_terminal_job(case):
             ).read_text()
         )
         heads.extend(
-            head
-            for item in capsule["sessions"]
-            for head in item["heads"]
-            if head["source"] == locator
+            head for item in capsule["sessions"] for head in item["heads"] if head["line"] == line
         )
-    case.s.require(len(heads) == 1, "retained job source head changed before capture")
+    case.s.require(len(heads) == 1, "retained job line was dropped or duplicated")
+    case.s.write_json(
+        case.root / "retained-job-source-head.json",
+        {"native": native_head, "source": heads[0]["source"]},
+    )
+    captured = heads[0]["source"].split("/")
+    case.s.require(
+        len(captured) == 3
+        and captured[:2] == [native_head["session_id"], native_head["branch_id"]]
+        and case.rows(
+            "source",
+            "SELECT checkpoint_id FROM checkpoints WHERE checkpoint_id=? AND session_id=? AND branch_id=?",
+            "runtime",
+            (captured[2], *captured[:2]),
+        ),
+        "retained job capture did not reference a committed head on the original native branch",
+    )
     jobs = heads[0]["jobs"]
     case.s.require(
         len(jobs["rows"]) == 1 and jobs["next_number"] == 2 and jobs["rows"][0]["number"] == 1,
@@ -882,21 +978,35 @@ def reproduce_terminal_job(case):
         jobs["rows"][0]["terminal"]["tail"] == "retained-rehearsal-output",
         "complete retained fixture output changed",
     )
+    unconsumed = terminal_inventory(Path(case.env["PLAK_HOME"]), line, case.s)
     refused = case.command(
         "source", ["run", "--session", session, "--", "must not execute"], check=False
     )
     case.s.require(
-        refused.returncode != 0 and "source_fenced" in refused.stderr,
-        "old terminal-job owner was not fenced",
+        refused.returncode != 0
+        and any(code in refused.stderr for code in ["source_fenced", "session_archived"]),
+        f"old terminal-job owner was not fenced: {refused.stderr}",
+    )
+    case.s.require(
+        terminal_inventory(Path(case.env["PLAK_HOME"]), line, case.s) == unconsumed,
+        "read-only verification or the refused source consumed the moved job",
     )
     case.s.write_json(
         case.root / "retained-job-invariants.json",
-        {"before": before, "after": after, "jobs": jobs, "groups": authority["groups"]},
+        {
+            "before": before,
+            "after": after,
+            "jobs": jobs,
+            "unconsumed_after_readonly_checks": unconsumed,
+            "groups": authority["groups"],
+        },
     )
     return {
         "session": session,
         "outcome": "terminal job identity, full fixture output and number floor moved",
         "jobs": jobs,
+        "unconsumed": unconsumed,
+        "old_source_refusal": refused.stderr,
     }
 
 
@@ -985,14 +1095,20 @@ def wake_after_move(case, session, child):
             {
                 "op": "intent",
                 "attachment": attachment,
-                "client_id": str(uuid.uuid4()),
                 "blobs": [],
                 "intent": {
-                    "kind": "mail_topology_node",
+                    "kind": "invoke_tool",
                     "body": {
-                        "agent_id": child,
-                        "message": "follow up after the move",
-                        "urgent": False,
+                        "correlation_id": None,
+                        "name": "send_agent_message",
+                        "arguments": json.dumps(
+                            {
+                                "agent_id": child,
+                                "message": "follow up after the move",
+                                "purpose": "followup",
+                            }
+                        ),
+                        "agent_id": None,
                     },
                 },
             },

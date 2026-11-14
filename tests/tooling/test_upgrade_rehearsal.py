@@ -1,16 +1,18 @@
 """Isolation boundaries and strict observations of the opt-in binary rehearsal."""
 
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,6 +30,56 @@ CASES = load("upgrade_rehearsal_cases_test", "tools/dev/upgrade_rehearsal_cases.
 
 
 class UpgradeRehearsalTests(unittest.TestCase):
+    def test_terminal_inventory_uses_only_readonly_lines_and_refuses_lost_or_consumed_jobs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            (home / "host-id").write_text("scratch-host")
+            endpoint = home / "builds/fixture/retention-v1.sock"
+            endpoint.parent.mkdir(parents=True)
+            endpoint.touch()
+            job = {
+                "number": 1,
+                "session": "original-job",
+                "terminal": True,
+                "status": {"status": "exited", "code": 0},
+                "output": "retained-rehearsal-output",
+            }
+            for jobs, floor, accepted in [([job], 2, True), ([], 2, False), ([job], 1, False)]:
+                row = {
+                    "origin": {"instance": "original-worker"},
+                    "owner": {"line": "scratch-line"},
+                    "next_number": floor,
+                    "jobs": jobs,
+                }
+                replies = [
+                    {"origin": {"instance": "original-worker"}},
+                    {"answer": "ok"},
+                    {
+                        "id": "rehearsal-lines-0",
+                        "answer": {"answer": "lines", "lines": [row], "next": None},
+                    },
+                ]
+                payload = b""
+                for reply in replies:
+                    body = json.dumps(reply).encode()
+                    payload += struct.pack(">I", len(body)) + body
+                connection = MagicMock()
+                connection.__enter__.return_value = connection
+                connection.makefile.return_value = io.BytesIO(payload)
+                with patch.object(CASES.socket, "socket", return_value=connection):
+                    if accepted:
+                        result = CASES.terminal_inventory(home, "scratch-line", DRIVER)
+                        self.assertEqual(result[0]["session"], "original-job")
+                        self.assertEqual(result[0]["output"], job["output"])
+                    else:
+                        with self.assertRaises(DRIVER.Refused):
+                            CASES.terminal_inventory(home, "scratch-line", DRIVER)
+                sent = [json.loads(call.args[0][4:]) for call in connection.sendall.call_args_list]
+                self.assertEqual(len(sent), 2)
+                self.assertEqual(sent[0]["version"], 1)
+                self.assertEqual(sent[1]["request"], {"verb": "lines", "after": 0})
+                self.assertIsNone(sent[1]["mutation"])
+
     def test_runtime_environment_does_not_forward_credentials_or_state_overrides(self):
         with tempfile.TemporaryDirectory() as temporary:
             case = Path(temporary).resolve()

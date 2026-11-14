@@ -93,6 +93,25 @@ processes and removes its runtime state, retaining the diagnostic JSON and
 host logs. `cleanup --root "$PLAK_REHEARSAL_ROOT"` removes retained build
 artifacts after investigation.
 
+On a corrected candidate, `repro-job` additionally inspects the original
+worker through the frozen retention-v1 `Lines` endpoint, twice after the
+move. The same job must remain listed with exact fixture output, number 1
+and next-number floor 2. These are read-only inventory calls, not native
+bindings, output consumption or acknowledgements. A missing/consumed job,
+changed output or regressed floor fails the case.
+
+The corrected qualification image at
+`545469fbc459aa4fe091a39386f4a2a8abeaa289` (binary `2ad6fda96f5d`, native
+runner protocol 9) passes both minimal cases and the complete eight-case
+dormant arm. The finished-child follow-up uses the granted topology tool
+with `purpose=followup`: ordinary coordinate mail is not a new attempt.
+The job source head is checked against a committed checkpoint on its
+original native branch, rather than requiring a pre-drain checkpoint cursor
+to stay fixed. The checks still require unchanged session/branch/line
+identities, full fixture output and the unconsumed job's number floor.
+Builds use separate Cargo target directories per exact revision, so
+revisiting the source cannot reuse incompatible candidate artifacts.
+
 ## Bootstrap operator comparison
 
 ```sh
@@ -126,3 +145,12 @@ interrupted, canonically quiescent real bound leaf, matching the existing
 dormant durability fixture. Their cuts are source prepare, source commit,
 destination tree seed and native publication. They do not substitute for the
 two failing cases above or for future live/parked-tree qualification.
+
+The later bootstrap candidate
+`d6fab92455ab7b8082b49df585ef6e06ac726c29` (binary `eabc21b8fc9c`) also
+passes all four bootstrap observations from A `9e9785efe` / `816c1472acbd`.
+Its destination probe passes the source's strict shape check, and the real
+source completes the settled upgrade and opens successors. In this run the
+terminal job's settled exit output joined history; active children and live
+jobs retained the refusal remedies above. This is literal old-codec bootstrap
+evidence, distinct from the simulated-key dormant qualification.
