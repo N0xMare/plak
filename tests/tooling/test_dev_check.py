@@ -1256,6 +1256,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(self.profiles(platform_calls), ['offline', 'serial', 'durability'])
         durability = self.lanes(platform_calls)[-1]
         self.assertIn('--test-threads=16', durability['args'])
+        self.assertNotIn('-E', durability['args'])
+        self.assertFalse(any(arg.startswith('--partition') for arg in durability['args']))
         self.log.unlink()
         result, calls, _ = self.run_gate('--steps', 'tests-durability')
         self.assertEqual(result.returncode, 0, result.stderr)

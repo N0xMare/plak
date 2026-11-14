@@ -4460,7 +4460,12 @@ per-group cut manifests. Per-cut assertions and twin-pilot signatures are
 unchanged. A file lock shares each family/child twin pilot once per nextest
 run, under that run's isolated temporary directory, keyed to the exact test
 and product executables and fixture inputs. No pilot survives across runs or
-checkouts. The strict sweep selects these families by prefix and refuses an
+checkouts. All sixteen tests of a family must run in the same nextest
+invocation on one host: splitting a family across invocations, partitions,
+lanes or hosts loses the shared-pilot and complete-union evidence. This is a
+coverage requirement, not an isolation requirement; the cases run concurrently.
+The strict sweep selects these families by prefix, runs the complete selection
+with `--test-threads <jobs>`, and refuses an
 incomplete or empty group listing rather than succeeding with zero cuts.
 In wire replay, the `stopped` barrier likewise waits for that durable stop
 notice before sending bye, in both pilots and cuts (a killed host ends the
