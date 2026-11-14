@@ -46,6 +46,7 @@ async fn feed_cut(
     let operation = SessionWorkflowId::new([121; 32])?;
     let install = source
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation,
             leases: vec![created.lease().clone()],
         })

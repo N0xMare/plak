@@ -11,6 +11,7 @@ async fn check_guards(
     let operation = SessionWorkflowId::new([91; 32])?;
     let install = source
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation,
             leases: vec![source_lease.clone()],
         })

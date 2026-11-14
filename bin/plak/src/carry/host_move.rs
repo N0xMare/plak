@@ -23,7 +23,7 @@ mod validation;
 pub(crate) use admission::GroupProbe;
 pub(crate) use admission::{probe, read_if_move};
 pub(crate) use context::Compaction;
-pub(crate) use jobs::{Jobs, Terminal};
+pub(crate) use jobs::{JobCut, Jobs, Terminal};
 pub(crate) use presentation::Presentation;
 
 // Open only when the complete source/recovery/publication chain is qualified.
@@ -42,6 +42,7 @@ pub(crate) fn install_protocol() -> Option<u32> {
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Capsule {
+    pub(crate) job_cut: JobCut,
     pub(crate) format: String,
     pub(crate) version: u32,
     pub(crate) kind: String,
@@ -220,12 +221,17 @@ impl Fork {
 }
 
 impl Head {
-    pub(crate) fn into_request(self, operation: MoveOperation) -> Result<MoveHeadRequest, String> {
+    pub(crate) fn into_request(
+        self,
+        operation: MoveOperation,
+        job_cut: JobCut,
+    ) -> Result<MoveHeadRequest, String> {
         let source: plakous::sessions::SessionLocator = self
             .source
             .parse()
             .map_err(|_| "invalid move source locator")?;
         Ok(MoveHeadRequest {
+            job_cut: job_cut.native(),
             operation,
             source,
             source_revision: self.revision,
@@ -315,6 +321,7 @@ impl Capsule {
                 initial |= source.branch_id().to_string() == session.initial_branch;
                 head.history.validate_size().map_err(|e| e.to_string())?;
                 head.presentation.validate()?;
+                self.job_cut.validate(&head.jobs)?;
             }
             if !initial {
                 return Err("move runtime initial branch is missing".into());

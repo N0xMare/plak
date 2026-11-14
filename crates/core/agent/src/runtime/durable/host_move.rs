@@ -17,7 +17,7 @@ impl DurableSessionRuntime {
     /// Retrying an installed move recovers its staged batch rather than recompiling it.
     ///
     /// # Errors
-    /// Refuses invalid/overflowing floors, live jobs, or incompatible destination inputs.
+    /// Refuses invalid/overflowing floors, jobs outside the cut, or incompatible inputs.
     #[doc(hidden)]
     pub async fn reconstruct_move_head(
         &self,
@@ -31,9 +31,9 @@ impl DurableSessionRuntime {
             || seed.generation == 0
             || seed.generation == u64::MAX
             || builder.line_carry.is_some()
+            || !seed.job_cut.permits(&seed.jobs)
             || seed.jobs.rows().iter().any(|row| {
-                row.terminal.is_none()
-                    || row.owner.line != seed.line
+                row.owner.line != seed.line
                     || row.owner.generation != seed.generation
                     || row.owner.session_id != seed.source.session_id()
                     || row.owner.branch_id != seed.source.branch_id()
@@ -133,6 +133,6 @@ fn reconstruct(
 fn invalid() -> AgentError {
     AgentError::new(
         AgentErrorKind::InvalidInput,
-        "dormant move cannot reconstruct these identities, floors, compaction facts or live job rows",
+        "move cannot reconstruct these identities, floors, compaction facts or job cut",
     )
 }

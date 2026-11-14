@@ -68,6 +68,7 @@ async fn authority_contract(
     let lease = seed(source, durability).await?;
     let operation = SessionWorkflowId::new([41; 32])?;
     let prepare = PrepareMove {
+        job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
         operation,
         leases: vec![lease.clone()],
     };
@@ -76,7 +77,7 @@ async fn authority_contract(
         source
             .prepare_move(PrepareMove {
                 operation: SessionWorkflowId::new([46; 32])?,
-                leases: vec![lease.clone()]
+                ..prepare.clone()
             })
             .await
             .err(),
@@ -132,6 +133,7 @@ async fn authority_contract(
     assert!(
         source
             .prepare_move(PrepareMove {
+                job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
                 operation,
                 leases: vec![lease.clone()]
             })
@@ -141,6 +143,7 @@ async fn authority_contract(
     let operation = SessionWorkflowId::new([43; 32])?;
     let install = source
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation,
             leases: vec![lease.clone()],
         })
@@ -296,6 +299,7 @@ async fn host_move_rejects_missing_holds_conflicts_and_overflow() -> TestResult 
     assert!(
         source
             .prepare_move(PrepareMove {
+                job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
                 operation,
                 leases: vec![]
             })
@@ -304,6 +308,7 @@ async fn host_move_rejects_missing_holds_conflicts_and_overflow() -> TestResult 
     );
     let install = source
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation,
             leases: vec![lease],
         })
@@ -346,6 +351,7 @@ async fn host_move_sqlite_preparation_and_staging_stay_inert_after_restart() -> 
     let operation = SessionWorkflowId::new([71; 32])?;
     let install = source
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation,
             leases: vec![lease.clone()],
         })
@@ -540,6 +546,7 @@ async fn superseded_members(
     let whole = SessionWorkflowId::new([91; 32])?;
     let install = source
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation: whole,
             leases: vec![first.clone(), second],
         })
@@ -561,6 +568,7 @@ async fn superseded_members(
     let newer = SessionWorkflowId::new([92; 32])?;
     let frozen = target
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation: newer,
             leases: vec![lease],
         })
@@ -619,6 +627,7 @@ async fn installed_session_deletion(
     let operation = SessionWorkflowId::new([81; 32])?;
     let install = source
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation,
             leases: vec![lease.clone()],
         })

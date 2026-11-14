@@ -255,3 +255,66 @@ fn fidelity_source() -> (tempfile::TempDir, ProductAgentTree, String) {
     let _ = source.take_effects();
     (directory, source, child)
 }
+
+#[test]
+fn live_cut_tree_keeps_handoff_attempt_and_command_identity_without_dispatch() {
+    let (_directory, mut source) = tree();
+    let child = source
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    let locator = plakous::sessions::SessionLocator::new(
+        uuid::Uuid::from_u128(1).try_into().unwrap(),
+        uuid::Uuid::from_u128(2).try_into().unwrap(),
+        uuid::Uuid::from_u128(3).try_into().unwrap(),
+    );
+    let next = plakous::sessions::SessionLocator::new(
+        locator.session_id(),
+        locator.branch_id(),
+        uuid::Uuid::from_u128(4).try_into().unwrap(),
+    );
+    source
+        .bind_session_locator(&child, locator.to_string())
+        .unwrap();
+    source.set_active_turn(&child, true).unwrap();
+    let turn = "00000000-0000-0000-0000-000000000001";
+    source.bind_attempt_turn(&child, turn).unwrap();
+    let command_id = format!("start:{child}");
+    let mut command = AgentCommand::intent(
+        command_id.clone(),
+        &child,
+        source.node(&child).unwrap().attempt_id.clone(),
+        AgentCommandKind::Start,
+        "assignment",
+        vec![],
+    );
+    command.fact = Some(CommandFact::Accepted);
+    command.accepted_seq = Some(0);
+    command.turn_id = Some(turn.into());
+    source.record_command(command).unwrap();
+    let _ = source.take_effects();
+    assert!(DormantTree::capture(&source).is_err());
+    assert_eq!(source.record_handoff().unwrap(), vec![child.clone()]);
+    assert!(
+        DormantTree::capture(&source).is_err(),
+        "recording handoff alone does not join the turn"
+    );
+    source.release_attempt_turn(&child).unwrap();
+    let _ = source.take_effects();
+    let attempt = source.attempt(&child).unwrap().clone();
+    let continuation = source.loss_continuation(&child).unwrap();
+    let cut = DormantTree::capture(&source).unwrap();
+    let decoded: DormantTree = serde_json::from_str(&serde_json::to_string(&cut).unwrap()).unwrap();
+    let mut target = decoded
+        .reconstruct(&BTreeMap::from([(locator.to_string(), next.to_string())]))
+        .unwrap()
+        .0;
+    target.clear_feed_views();
+    assert_eq!(target.attempt(&child), Some(&attempt));
+    assert_eq!(target.loss_continuation(&child), Some(continuation));
+    assert_eq!(
+        target.commands.get(&command_id),
+        source.commands.get(&command_id)
+    );
+    assert!(target.take_effects().is_empty());
+}

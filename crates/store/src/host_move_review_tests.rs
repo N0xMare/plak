@@ -74,6 +74,7 @@ async fn continued_recovery(
     // member. Only the current head's session is owned by this move.
     let install = store
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation,
             leases: vec![head.clone()],
         })
@@ -161,6 +162,7 @@ async fn host_move_commit_clears_all_line_leases_and_host_claims_including_prede
     let operation = SessionWorkflowId::new([113; 32])?;
     let install = store
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation,
             leases: vec![head.clone()],
         })
@@ -277,7 +279,11 @@ async fn hidden_receipts(
     } = receipt_fixture(source, durability).await?;
     let operation = SessionWorkflowId::new([116; 32])?;
     let install = source
-        .prepare_move(PrepareMove { operation, leases })
+        .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
+            operation,
+            leases,
+        })
         .await?;
     target.stage_move(operation, install.clone()).await?;
     for store in [source, target] {

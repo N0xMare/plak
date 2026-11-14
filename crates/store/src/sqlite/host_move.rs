@@ -139,7 +139,7 @@ pub(super) fn prepare(
             })
         })
         .collect::<Result<Vec<_>, SessionStoreError>>()?;
-    let install = MoveInstall::new(snapshot, lines)?;
+    let install = MoveInstall::with_job_cut(snapshot, lines, request.job_cut)?;
     if let Some((digest, phase)) = receipt(&tx, request.operation)? {
         return if digest == install.digest().bytes() && phase == MoveState::Prepared {
             Ok(install)
@@ -148,10 +148,11 @@ pub(super) fn prepare(
         };
     }
     tx.execute(
-        "INSERT INTO runtime_moves VALUES(?1,?2,0)",
+        "INSERT INTO runtime_moves VALUES(?1,?2,0,?3)",
         params![
             workflow_id_bytes(request.operation),
-            install.digest().bytes().as_slice()
+            install.digest().bytes().as_slice(),
+            install.job_cut() as i64
         ],
     )
     .map_err(map_sqlite)?;
@@ -190,6 +191,14 @@ pub(super) fn recover_backend(
 
 fn recover(c: &Connection, operation: SessionWorkflowId) -> Result<MoveInstall, SessionStoreError> {
     let (digest, phase) = receipt(c, operation)?.ok_or(SessionStoreError::NotFound)?;
+    let job_cut = host_move::MoveJobCut::decode(
+        c.query_row(
+            "SELECT job_cut FROM runtime_moves WHERE operation=?1",
+            [workflow_id_bytes(operation)],
+            |row| row.get(0),
+        )
+        .map_err(map_sqlite)?,
+    )?;
     if phase == MoveState::Published {
         guards::check_session_headers(c, operation)?;
         guards::check_published_heads(c, operation)?;
@@ -262,7 +271,7 @@ fn recover(c: &Connection, operation: SessionWorkflowId) -> Result<MoveInstall, 
             })
         })
         .collect::<Result<Vec<_>, SessionStoreError>>()?;
-    let install = MoveInstall::new(sessions, lines)?;
+    let install = MoveInstall::with_job_cut(sessions, lines, job_cut)?;
     if digest != install.digest().bytes() {
         return Err(SessionStoreError::IdentityConflict);
     }
@@ -318,10 +327,11 @@ pub(super) fn stage(
         b.limits.max_sessions().get(),
     )?;
     tx.execute(
-        "INSERT INTO runtime_moves VALUES(?1,?2,2)",
+        "INSERT INTO runtime_moves VALUES(?1,?2,2,?3)",
         params![
             workflow_id_bytes(operation),
-            install.digest().bytes().as_slice()
+            install.digest().bytes().as_slice(),
+            install.job_cut() as i64
         ],
     )
     .map_err(map_sqlite)?;

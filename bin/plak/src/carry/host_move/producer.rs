@@ -41,7 +41,13 @@ impl SourceCut {
                     .contexts
                     .remove(&(branch.session.session_id(), branch.session.branch_id()))
                     .ok_or("source move head has no exact configuration context")?;
-                let (head, current) = capture_head(session, branch, snapshot.lines(), context)?;
+                let (head, current) = capture_head(
+                    session,
+                    branch,
+                    snapshot.lines(),
+                    context,
+                    snapshot.job_cut(),
+                )?;
                 dependencies
                     .entry(session.session.session_id())
                     .or_default()
@@ -93,6 +99,7 @@ impl SourceCut {
             return Err("source move context exceeds its native inventory".into());
         }
         let capsule = Capsule {
+            job_cut: super::JobCut::from_native(snapshot.job_cut()),
             format: super::super::document::FORMAT.into(),
             version: super::super::VERSION,
             kind: "host_upgrade".into(),
@@ -135,6 +142,7 @@ fn capture_head(
     branch: &plakous::sessions::host_move::MoveBranch,
     lines: &[plakous::sessions::host_move::MoveLine],
     context: HeadContext,
+    job_cut: plakous::sessions::host_move::MoveJobCut,
 ) -> Result<(Head, plakous::model::SessionId), String> {
     let checkpoint = session
         .checkpoints
@@ -146,7 +154,8 @@ fn capture_head(
         .iter()
         .find(|line| line.line.line() == topology.line)
         .ok_or("source move line is missing")?;
-    let facts = MoveHeadFacts::capture(checkpoint, &line.terminals).map_err(|e| e.to_string())?;
+    let facts =
+        MoveHeadFacts::capture(checkpoint, &line.terminals, job_cut).map_err(|e| e.to_string())?;
     let source = SessionLocator::new(topology.session_id, topology.branch_id, checkpoint.id());
     let named_state = facts.history.named_state().map_err(|e| e.to_string())?;
     let history =

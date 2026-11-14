@@ -60,6 +60,9 @@ for one version bump, without native protocol compatibility.
   including retained child input and immutable fork/checkpoint provenance.
   These complete the unshipped context-4/runtime-38/product-38/tree-11 cut.
 
+- Qualify joined ownership-move cuts for retained promoted-job metadata while
+  keeping dormant cuts terminal-only and live cross-key execution disabled.
+
 - Reload durable runner owner floors and retention-only roles after acquiring
   the native daemon lock, so replacement startup cannot revive stale authority.
 

@@ -733,7 +733,8 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-prompts": "b5355c6de6d0cc0d848eb5626b2bc7fb264d02ab34faa036453f8e3c2fa0f17d",
     "plakous-openrouter": "fc202257b7a1b3d0586e9d0df778bd1d578c8a6d06d6818e3d5feecc5961246c",
     "plakous-responses": "f565ee25c2e3227c43b269500077732e3fe06c06776e0e3610db0f508249a5ad",
-    "plakous-store": "a92864257781a568f2cf348df47fb3ccb56c9223c407b7c59ea349c6067696c4",
+    # SQLite's captured terminal envelope uses the existing JSON dependency.
+    "plakous-store": "cbc4d8ff12865a57658988fc9481dee586817a279dcfb27096b5c74a4e3027fb",
     "plakous-tools": "dd219e7c406cb5934bcca262aaa764fecfa593e9a134409a72825467f92c5d3f",
     "plakous-xai": "4b452bb53d65262dff9cc74e58ac83bb0f89ab6ad2201299eb5a7ed1238b0158",
     "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",

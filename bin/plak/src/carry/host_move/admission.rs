@@ -144,6 +144,7 @@ pub(super) fn compile(
                 executor: &executor,
                 tree_store: tree_store.clone(),
                 operation,
+                job_cut: capsule.job_cut,
                 mode,
             }
             .head(&compiler, head, record)?;
@@ -164,8 +165,12 @@ pub(super) fn compile(
         .map(super::Line::decode)
         .collect::<Result<_, _>>()
         .map_err(CliFailure::new)?;
-    let install = plakous::sessions::host_move::MoveInstall::new(rebuilt_sessions, lines)
-        .map_err(|e| CliFailure::new(e.to_string()))?;
+    let install = plakous::sessions::host_move::MoveInstall::with_job_cut(
+        rebuilt_sessions,
+        lines,
+        capsule.job_cut.native(),
+    )
+    .map_err(|e| CliFailure::new(e.to_string()))?;
     Ok((
         GroupProbe {
             install_protocol: super::install_protocol(),
@@ -187,6 +192,7 @@ struct HeadCompiler<'a> {
     executor: &'a tokio::runtime::Runtime,
     tree_store: Arc<MemoryTreeStore>,
     operation: plakous::sessions::host_move::MoveOperation,
+    job_cut: super::JobCut,
     mode: CompileMode,
 }
 
@@ -205,6 +211,7 @@ impl HeadCompiler<'_> {
             executor,
             tree_store,
             operation,
+            job_cut,
             mode,
         } = self;
         head.context
@@ -270,7 +277,9 @@ impl HeadCompiler<'_> {
             } else if let Some(warning) = capacity.warning() {
                 eprintln!("{}", crate::cli_output::safe_terminal_block(&warning));
             }
-            let request = head.into_request(*operation).map_err(CliFailure::new)?;
+            let request = head
+                .into_request(*operation, *job_cut)
+                .map_err(CliFailure::new)?;
             let rebuilt = compiler
                 .reconstruct_move_head(runtime, request)
                 .await

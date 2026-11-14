@@ -13,6 +13,7 @@ fn request(runtime: &SessionRuntimeBinding) -> TestResult<MoveHeadRequest> {
         CheckpointId::try_from(Uuid::from_u128(3))?,
     );
     Ok(MoveHeadRequest {
+        job_cut: host_move::MoveJobCut::Settled,
         operation: MoveOperation::new([13; 32])?,
         source,
         source_revision: 7,
@@ -31,6 +32,115 @@ fn request(runtime: &SessionRuntimeBinding) -> TestResult<MoveHeadRequest> {
         compaction: None,
         interpreter: None,
     })
+}
+
+#[tokio::test]
+async fn live_cut_reconstruction_requires_explicit_retained_job_policy() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let runtime = runtime_binding_for(workspace.clone(), descriptor()?, b"account-alpha")?;
+    let mut seed = request(&runtime)?;
+    let job = host_move::MoveJob {
+        number: 1,
+        command: "retained process".into(),
+        started_at: timestamp()?,
+        owner: plakous_tools::JobOwner {
+            line: seed.line,
+            generation: seed.generation,
+            session_id: seed.source.session_id(),
+            branch_id: seed.source.branch_id(),
+            fence: 9,
+        },
+        session_id: host_move::MoveProcessId::new([7; 16])?,
+        owner_generation: host_move::MoveProcessGeneration::new(2)?,
+        terminal: None,
+    };
+    seed.jobs = host_move::MoveJobs::new(2, vec![job.clone()])?;
+    let compiler = AgentSessions::move_preflight_compiler(RuntimeDurability::Disabled)?;
+    assert!(compiler.reconstruct_move_head(runtime, seed).await.is_err());
+    let (runtime, model) = runtime_binding_with_model_and_durability(
+        workspace.clone(),
+        descriptor()?,
+        b"account-alpha",
+        LocalDurabilityDisposition::Ephemeral,
+    )?;
+    let mut seed = request(&runtime)?;
+    seed.job_cut = host_move::MoveJobCut::Retained;
+    seed.jobs = host_move::MoveJobs::new(2, vec![job.clone()])?;
+    let rebuilt = compiler.reconstruct_move_head(runtime, seed).await?;
+    assert_eq!(model.captured_plans().len(), 0);
+    assert_eq!(rebuilt.checkpoint.manifest().jobs().rows(), &[job]);
+    assert!(
+        host_move::MoveHeadFacts::capture(&rebuilt.checkpoint, &[], host_move::MoveJobCut::Settled)
+            .is_err()
+    );
+    let facts = host_move::MoveHeadFacts::capture(
+        &rebuilt.checkpoint,
+        &[],
+        host_move::MoveJobCut::Retained,
+    )?;
+    assert!(facts.jobs.rows()[0].terminal.is_none());
+    compiler.runtime.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn live_cut_job_owner_fence_cannot_exceed_the_batch_floor() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    for fence in [10, 11] {
+        let runtime = runtime_binding_for(workspace.clone(), descriptor()?, b"account-alpha")?;
+        let mut seed = request(&runtime)?;
+        seed.jobs = host_move::MoveJobs::new(
+            2,
+            vec![host_move::MoveJob {
+                number: 1,
+                command: "finished process".into(),
+                started_at: timestamp()?,
+                owner: plakous_tools::JobOwner {
+                    line: seed.line,
+                    generation: seed.generation,
+                    session_id: seed.source.session_id(),
+                    branch_id: seed.source.branch_id(),
+                    fence: 10,
+                },
+                session_id: host_move::MoveProcessId::new([7; 16])?,
+                owner_generation: host_move::MoveProcessGeneration::new(2)?,
+                terminal: Some(host_move::MoveJobTerminal {
+                    status: host_move::MoveJobStatus::Exited,
+                    exit_code: Some(0),
+                    stopper: None,
+                    elapsed: Duration::ZERO,
+                    tail: String::new(),
+                }),
+            }],
+        )?;
+        let source = seed.source;
+        let compiler = AgentSessions::move_preflight_compiler(RuntimeDurability::Disabled)?;
+        let mut rebuilt = compiler.reconstruct_move_head(runtime, seed).await?;
+        let manifest = rebuilt.checkpoint.manifest();
+        let mut jobs = manifest.jobs().rows().to_vec();
+        jobs[0].owner.fence = fence;
+        rebuilt.checkpoint = RuntimeCheckpoint::new(RuntimeManifest::new(
+            manifest.provenance().clone(),
+            manifest.topology(),
+            RuntimeLifecycle::Quiescent,
+            manifest.harness_plan_component().clone(),
+            manifest.provider_configuration().clone(),
+            manifest.canonical().clone(),
+            manifest.binding().clone(),
+            manifest.tools().clone(),
+            RuntimeOperationLedger::new(Vec::new(), Vec::new())?,
+            None,
+            None,
+            host_move::MoveJobs::new(2, jobs)?,
+            manifest.named_state().clone(),
+            manifest.durability(),
+        )?)?;
+        assert_eq!(single_install(source, rebuilt).is_ok(), fence == 10);
+        compiler.runtime.shutdown().await?;
+    }
+    Ok(())
 }
 
 #[tokio::test]

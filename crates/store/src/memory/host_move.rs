@@ -189,7 +189,7 @@ impl MemorySessionStore {
                 })
             })
             .collect::<Result<Vec<_>, SessionStoreError>>()?;
-        let install = MoveInstall::new(snapshot, lines)?;
+        let install = MoveInstall::with_job_cut(snapshot, lines, request.job_cut)?;
         if let Some(old) = state.moves.get(&request.operation) {
             return if old.install.digest() == install.digest() && old.state == MoveState::Prepared {
                 Ok(old.install.clone())

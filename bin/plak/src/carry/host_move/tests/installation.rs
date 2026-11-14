@@ -149,7 +149,7 @@ pub(super) async fn reconstructed(
             let rebuilt = compiler
                 .reconstruct_move_head(
                     runtime,
-                    head.into_request(MoveOperation::new(copy.operation)?)?,
+                    head.into_request(MoveOperation::new(copy.operation)?, copy.job_cut)?,
                 )
                 .await?;
             branches.push(rebuilt.branch);

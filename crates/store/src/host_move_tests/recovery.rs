@@ -1,6 +1,8 @@
 //! A move receipt describes its captured terminal set, not later observations.
 use super::*;
-use plakous_agent::internal::host_move::{ProcessSessionId, ProcessSessionOwnerGeneration};
+use plakous_agent::internal::host_move::{
+    MoveJobCut, ProcessSessionId, ProcessSessionOwnerGeneration,
+};
 use plakous_agent::internal::{
     JobTerminal, JobTerminalStatus, LineId, LineJobTerminal, RecordLineJobTerminals,
 };
@@ -51,6 +53,7 @@ async fn publish_then_observe(
         .prepare_move(PrepareMove {
             operation,
             leases: vec![lease],
+            job_cut: MoveJobCut::Settled,
         })
         .await?;
     target.stage_move(operation, install.clone()).await?;

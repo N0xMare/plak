@@ -5,7 +5,8 @@ and children, API roots and children across four compositions, and three
 production native compositions. Construction never dispatches a model or tool.
 It uses the existing release-binding fixture producer, not rewritten native rows.
 The current seed includes the complete ownership-move schema, including the
-execution-open guard; it is regenerated when that unshipped native shape changes.
+execution-open guard, explicit job cut and immutable captured terminal set. It is
+regenerated when that unshipped native shape changes.
 
 The manifest pins its checksum, format identities and cases. This seed tests
 current-key binding inspection and refusal before host surrender; it is not
@@ -28,7 +29,7 @@ does not close/checkpoint WAL. Only then does it replace the database and
 checksum manifest here. No native rows are edited.
 
 The current seed's `source_commit` pin is
-`d9e78a8b3f2012951a926c3a21181f28117da777`; each regeneration records the current
+`004fba973f13482ce21cdbd3bb3174fee6fc6c6f`; each regeneration records the current
 `git rev-parse HEAD` in the manifest. Rerun after **any runtime-schema change**,
 including unshipped shape changes within the same schema number, and after a
 runtime codec/epoch or presentation/executor change that affects these cases.

@@ -118,6 +118,7 @@ async fn rebind(store: &dyn SessionStore, durability: RuntimeDurability) -> Test
     assert_eq!(
         store
             .prepare_move(PrepareMove {
+                job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
                 operation,
                 leases: vec![predecessor.clone(), current.clone()],
             })
@@ -127,6 +128,7 @@ async fn rebind(store: &dyn SessionStore, durability: RuntimeDurability) -> Test
     );
     let install = store
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation,
             leases: vec![current.clone()],
         })
@@ -154,6 +156,7 @@ async fn rebind(store: &dyn SessionStore, durability: RuntimeDurability) -> Test
     let next = SessionWorkflowId::new([119; 32])?;
     let install = store
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation: next,
             leases: vec![current.clone()],
         })

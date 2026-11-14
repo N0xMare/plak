@@ -228,6 +228,50 @@ fn dormant_product_document_preserves_identity_bindings_and_owed_input() -> Test
 }
 
 #[test]
+fn live_cut_product_keeps_handoff_decisions_but_refuses_unjoined_turns_and_processes() -> TestResult
+{
+    use crate::sessions::projector::{OpenTurn, ProcessTrack};
+    let seed = claimed_cut()?;
+    let original = seed.clone().into_parts();
+    let document = serde_json::to_string(&seed.document()?)?;
+    let decoded: DormantSessionDocument = serde_json::from_str(&document)?;
+    let (record, views, intents) = decoded.into_cut()?.reconstruct(locator(5)?)?.into_parts();
+    assert_eq!(record.id, original.0.id);
+    assert_eq!(record.node, original.0.node);
+    assert_eq!(record.pending_queue, original.0.pending_queue);
+    assert_eq!(intents.root_continuations, original.2.root_continuations);
+    assert_eq!(
+        intents.root_continuations[0].value.cause,
+        RootContinuationCause::Handoff
+    );
+    assert_eq!(views.state.deliveries, original.1.state.deliveries);
+    for process in [false, true] {
+        let (record, mut views, intents) = cut()?;
+        if process {
+            views.state.processes.insert(
+                19,
+                ProcessTrack {
+                    dispatched_at_ms: Some(1),
+                    reported: false,
+                },
+            );
+        } else {
+            views.state.open_turns.insert(
+                "not-terminal".into(),
+                OpenTurn {
+                    command_id: "admitted".into(),
+                    host_wake: false,
+                    round_anchor: None,
+                    cancel_requested: false,
+                },
+            );
+        }
+        assert!(DormantSession::prepare(record, views, intents, FeedSeq::new(20)).is_err());
+    }
+    Ok(())
+}
+
+#[test]
 fn dormant_product_memory_seed_is_once_only_and_survives_projection_cache_loss() -> TestResult {
     use crate::session_store::{MemoryStore, SessionRecordStore};
     let seed = claimed_cut()?.with_plan_authority("retained_fork_namespace".into())?;

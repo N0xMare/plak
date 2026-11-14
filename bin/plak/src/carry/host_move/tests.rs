@@ -220,7 +220,7 @@ async fn move_capsule_fidelity_preserves_all_native_semantic_families() -> TestR
         .into_iter()
         .next()
         .ok_or("head")?
-        .into_request(MoveOperation::new(capsule.operation)?)?;
+        .into_request(MoveOperation::new(capsule.operation)?, capsule.job_cut)?;
     let source = request.source;
     let fork = request.source_fork;
     assert!(
@@ -258,7 +258,7 @@ async fn move_capsule_fidelity_preserves_all_native_semantic_families() -> TestR
     assert_eq!(manifest.canonical().history().segments().to_vec(), history);
     assert_eq!(manifest.jobs(), &jobs);
     assert_native_fidelity(
-        MoveHeadFacts::capture(&rebuilt.checkpoint, &[])?,
+        MoveHeadFacts::capture(&rebuilt.checkpoint, &[], capsule.job_cut.native())?,
         &expected,
         named,
         compaction,
@@ -269,7 +269,7 @@ async fn move_capsule_fidelity_preserves_all_native_semantic_families() -> TestR
         .remove(0)
         .heads
         .remove(0)
-        .into_request(MoveOperation::new(capsule.operation)?)?;
+        .into_request(MoveOperation::new(capsule.operation)?, capsule.job_cut)?;
     head.source = SessionLocator::new(
         source.session_id(),
         source.branch_id(),
@@ -430,14 +430,14 @@ async fn move_capsule_fresh_head_preserves_ids_but_not_the_checkpoint_or_fence()
     let head = compiler
         .reconstruct_move_head(
             runtime,
-            head.into_request(MoveOperation::new(capsule.operation)?)?,
+            head.into_request(MoveOperation::new(capsule.operation)?, capsule.job_cut)?,
         )
         .await?;
     assert_eq!(head.branch.session.session_id(), source.session_id());
     assert_eq!(head.branch.session.branch_id(), source.branch_id());
     assert_ne!(head.checkpoint.id(), source.checkpoint_id());
     assert!(head.branch.fence_floor > source_fence);
-    let facts = MoveHeadFacts::capture(&head.checkpoint, &[])?;
+    let facts = MoveHeadFacts::capture(&head.checkpoint, &[], capsule.job_cut.native())?;
     assert_eq!(facts.jobs.rows(), []);
     assert_eq!(
         std::fs::read(root.0.path().join("target-evidence.jsonl"))?,

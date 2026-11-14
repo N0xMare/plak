@@ -401,7 +401,14 @@ old-batch disposition after partial supersession, and normal archive/delete of
 an installed session. SQLite closes/reopens both prepared and
 staged stores as well as retired/abandoned stores; historical inspection must stay
 available without enabling execution. `host_move_tests::` and
-`host_move_review_tests::` own these contracts. Continued-line cases prepare only
+`host_move_review_tests::` own these contracts. Retained-job cut cases pin
+terminal-only default refusal, allocation identity without invented terminal
+facts, cut-bound fingerprints and memory/SQLite stage/recovery/prepare behavior,
+including SQLite restart. `live_cut_` cases pin closed v13 job encodings,
+terminal-allocation conflicts, target compilation without dispatch, and joined
+product/tree handoff attempts, command IDs and accepted input without carrying
+open turns, unreported processes or effect journals. These qualify construction
+seams only; they do not enable the public live ownership-move capability. Continued-line cases prepare only
 the current head, recover the exact batch and exercise commit and abort in both
 stores. Regressions reject a second preparation, hide create/fork recovery on
 source and destination, reject insufficient fence floors and post-publication

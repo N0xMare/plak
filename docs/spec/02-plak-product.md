@@ -5678,7 +5678,15 @@ still rechecks the same guards immediately. Retained ordinary
 portable-session backups can be copied and imported under new identities;
 `host_upgrade` capsules cannot be used as ordinary imports. Outgoing committed
 copies are excluded from cross-key uniqueness checks; Aborted receipts are inert.
-No public switch enables this capability in a normal build.
+No public switch enables this capability in a normal build. The joined-cut
+construction contract distinguishes terminal-only `settled` jobs from `retained`
+promoted allocations in v13. Retained rows carry allocation identity and optional
+terminal evidence, not a PID, output cursor or permission to replay a call. This
+contract alone does not admit live cross-key moves: fresh original-worker
+retention reconciliation and a complete joined source handoff remain required.
+Existing product/tree semantic cuts preserve the original handoff decisions,
+attempts and accepted command IDs; open turns, unreported process calls and
+unjoined effect journals still refuse construction.
 
 Cross-key upgrade is the **settled-root** operation of §2.5.1. Without
 `--wait`, blockers are returned before stopping admissions, as a list with

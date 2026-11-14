@@ -16,6 +16,28 @@ use crate::{RuntimeCheckpoint, RuntimeCheckpointKind};
 use plakous_model::{CheckpointId, Digest, DigestDomain, LineId};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Host-selected job metadata cut; retained rows grant no process authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MoveJobCut {
+    Settled = 0,
+    Retained = 1,
+}
+
+impl MoveJobCut {
+    pub fn decode(value: i64) -> Result<Self, SessionStoreError> {
+        match value {
+            0 => Ok(Self::Settled),
+            1 => Ok(Self::Retained),
+            _ => Err(SessionStoreError::corrupt()),
+        }
+    }
+
+    #[must_use]
+    pub fn permits(self, jobs: &crate::manifest::JobLedger) -> bool {
+        self == Self::Retained || jobs.rows().iter().all(|row| row.terminal.is_some())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MoveDisposition {
     Commit,
@@ -71,6 +93,7 @@ impl MoveSource {
 /// Target-owned compilation inputs, not a source checkpoint or execution grant.
 #[derive(Clone, Debug)]
 pub struct MoveHeadSeed {
+    pub job_cut: MoveJobCut,
     pub operation: SessionWorkflowId,
     pub source: SessionRef,
     pub source_checkpoint: CheckpointId,
@@ -119,6 +142,7 @@ pub struct ReconstructedMoveHead {
 /// No source lease, runtime object address or serialized checkpoint is accepted.
 #[derive(Clone, Debug)]
 pub struct MoveInstall {
+    job_cut: MoveJobCut,
     sessions: Vec<MoveSession>,
     lines: Vec<MoveLine>,
     digest: Digest,
@@ -126,8 +150,16 @@ pub struct MoveInstall {
 
 impl MoveInstall {
     pub fn new(
+        sessions: Vec<MoveSession>,
+        lines: Vec<MoveLine>,
+    ) -> Result<Self, SessionStoreError> {
+        Self::with_job_cut(sessions, lines, MoveJobCut::Settled)
+    }
+
+    pub fn with_job_cut(
         mut sessions: Vec<MoveSession>,
         mut lines: Vec<MoveLine>,
+        job_cut: MoveJobCut,
     ) -> Result<Self, SessionStoreError> {
         if sessions.is_empty() || sessions.len() > 1024 || lines.is_empty() || lines.len() > 16384 {
             return Err(SessionStoreError::IdentityConflict);
@@ -138,6 +170,7 @@ impl MoveInstall {
         let mut checkpoints = BTreeMap::new();
         let mut session_ids = BTreeSet::new();
         let mut bytes = Vec::new();
+        fingerprint_part(&mut bytes, &[job_cut as u8]);
         fingerprint_part(&mut bytes, &(sessions.len() as u64).to_be_bytes());
         fingerprint_part(&mut bytes, &(lines.len() as u64).to_be_bytes());
         for session in &mut sessions {
@@ -176,7 +209,7 @@ impl MoveInstall {
                     || topology.lease_fence > branch.fence_floor
                     || branch.fence_floor == u64::MAX
                     || checkpoint.kind() != RuntimeCheckpointKind::Quiescent
-                    || !jobs_settled(checkpoint, &lines)?
+                    || !jobs_match_cut(checkpoint, &lines, job_cut, branch.fence_floor)?
                     || branches
                         .insert(branch.session, (topology.line, topology.line_generation))
                         .is_some()
@@ -208,6 +241,7 @@ impl MoveInstall {
         let digest = Digest::sha256(DigestDomain::Blob, 1, &[b"host-move/semantic/v1", &bytes])
             .map_err(|_| SessionStoreError::corrupt())?;
         Ok(Self {
+            job_cut,
             sessions,
             lines,
             digest,
@@ -225,25 +259,38 @@ impl MoveInstall {
     pub const fn digest(&self) -> Digest {
         self.digest
     }
+
+    #[must_use]
+    pub const fn job_cut(&self) -> MoveJobCut {
+        self.job_cut
+    }
 }
 
-fn jobs_settled(
+fn jobs_match_cut(
     checkpoint: &RuntimeCheckpoint,
     lines: &[MoveLine],
+    job_cut: MoveJobCut,
+    fence_floor: u64,
 ) -> Result<bool, SessionStoreError> {
     let line = checkpoint.manifest().topology().line;
     let index = lines
         .binary_search_by_key(&line, |entry| entry.line.line())
         .map_err(|_| SessionStoreError::IdentityConflict)?;
     let terminals = &lines[index].terminals;
-    Ok(checkpoint
+    let jobs = checkpoint
         .manifest()
         .jobs()
         .with_line_terminals(terminals)
-        .map_err(|_| SessionStoreError::IdentityConflict)?
-        .rows()
-        .iter()
-        .all(|row| row.terminal.is_some()))
+        .map_err(|_| SessionStoreError::IdentityConflict)?;
+    let topology = checkpoint.manifest().topology();
+    Ok(job_cut.permits(&jobs)
+        && jobs.rows().iter().all(|row| {
+            row.owner.line == topology.line
+                && row.owner.generation == topology.line_generation
+                && row.owner.session_id == topology.session_id
+                && row.owner.branch_id == topology.branch_id
+                && row.owner.fence <= fence_floor
+        }))
 }
 
 fn fingerprint_part(bytes: &mut Vec<u8>, value: &[u8]) {
@@ -318,6 +365,7 @@ impl MoveLine {
 
 #[derive(Clone, Debug)]
 pub struct PrepareMove {
+    pub job_cut: MoveJobCut,
     pub operation: SessionWorkflowId,
     pub leases: Vec<BranchLease>,
 }

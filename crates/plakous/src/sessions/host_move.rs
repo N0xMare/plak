@@ -4,8 +4,9 @@ pub use plakous_agent::internal::SessionWorkflowId as MoveOperation;
 use plakous_agent::internal::host_move::PrepareMove;
 pub use plakous_agent::internal::host_move::{
     ImportedCompactionFacts, ImportedCompactionSelection, MoveBranch, MoveDisposition, MoveInstall,
-    MoveInterpreter, MoveLine, MoveSession, MoveSource, ProcessSessionId as MoveProcessId,
-    ProcessSessionOwnerGeneration as MoveProcessGeneration, ReconstructedMoveHead,
+    MoveInterpreter, MoveJobCut, MoveLine, MoveSession, MoveSource,
+    ProcessSessionId as MoveProcessId, ProcessSessionOwnerGeneration as MoveProcessGeneration,
+    ReconstructedMoveHead,
 };
 pub use plakous_agent::internal::{
     ForkLineage as MoveFork, JobLedger as MoveJobs, JobRow as MoveJob,
@@ -22,6 +23,7 @@ pub use plakous_tools::NestedToolEligibility as MoveToolNesting;
 /// Unsupported target-owned semantic compilation request; contains no source grant.
 #[doc(hidden)]
 pub struct MoveHeadRequest {
+    pub job_cut: MoveJobCut,
     pub operation: MoveOperation,
     pub source: super::SessionLocator,
     pub source_revision: u64,
@@ -63,11 +65,15 @@ impl MoveHeadFacts {
     /// Projects the old-key producer's checkpoint into the approved semantic families.
     ///
     /// # Errors
-    /// Refuses incomplete source presentation, nonterminal jobs or malformed named state.
+    /// Refuses incomplete presentation, jobs outside the cut or malformed named state.
     pub fn capture(
         checkpoint: &plakous_agent::internal::RuntimeCheckpoint,
         terminals: &[MoveLineTerminal],
+        job_cut: MoveJobCut,
     ) -> Result<Self, AgentSessionsError> {
+        if checkpoint.kind() != plakous_agent::internal::RuntimeCheckpointKind::Quiescent {
+            return Err(invalid_source("source still has unresolved runtime work"));
+        }
         let binding = MoveBinding::from_checkpoint(checkpoint);
         let manifest = checkpoint.manifest();
         let values = manifest
@@ -90,8 +96,8 @@ impl MoveHeadFacts {
             .jobs()
             .with_line_terminals(terminals)
             .map_err(|_| invalid_source("invalid source job evidence"))?;
-        if jobs.rows().iter().any(|job| job.terminal.is_none()) {
-            return Err(invalid_source("source still owns nonterminal jobs"));
+        if !job_cut.permits(&jobs) {
+            return Err(invalid_source("source jobs exceed the selected cut"));
         }
         let compaction = manifest
             .canonical()
@@ -214,11 +220,11 @@ impl AgentSessions {
             .await
             .map_err(store_error)
     }
-    /// Rebuilds a dormant head under exact target replay scope and fresh authority.
+    /// Rebuilds a joined head under exact target replay scope and fresh authority.
     /// No driver, store mutation, lease, provider dispatch or tool dispatch is created.
     ///
     /// # Errors
-    /// Refuses binding/replay drift, invalid facts, overflowing floors or live jobs.
+    /// Refuses binding/replay drift, invalid facts, overflowing floors or jobs outside the cut.
     #[doc(hidden)]
     pub async fn reconstruct_move_head(
         &self,
@@ -268,6 +274,7 @@ impl AgentSessions {
             .reconstruct_move_head(
                 runtime.builder,
                 plakous_agent::internal::host_move::MoveHeadSeed {
+                    job_cut: request.job_cut,
                     operation: request.operation,
                     source: request.source.session_ref(),
                     source_checkpoint: request.source.checkpoint_id(),
@@ -313,8 +320,25 @@ impl AgentSessions {
         operation: MoveOperation,
         holds: &[&BranchHold],
     ) -> Result<MoveInstall, AgentSessionsError> {
+        self.prepare_move_cut(operation, holds, MoveJobCut::Settled)
+            .await
+    }
+
+    /// Freezes a joined source cut whose promoted jobs remain in their workers.
+    /// The host must reconcile exact retained-job authority before execution.
+    ///
+    /// # Errors
+    /// Refuses incomplete holds, unresolved runtime work or incompatible identities.
+    #[doc(hidden)]
+    pub async fn prepare_move_cut(
+        &self,
+        operation: MoveOperation,
+        holds: &[&BranchHold],
+        job_cut: MoveJobCut,
+    ) -> Result<MoveInstall, AgentSessionsError> {
         self.backend
             .prepare_move(PrepareMove {
+                job_cut,
                 operation,
                 leases: holds.iter().map(|h| h.inner.move_lease()).collect(),
             })

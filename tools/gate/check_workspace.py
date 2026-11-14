@@ -1634,6 +1634,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     ("plak", "src/carry/host_move/jobs.rs"): {
         'sessions': {
+            'MoveJobCut',
             'MoveJobStatus',
             'MoveJobTerminal',
             'MoveJob',

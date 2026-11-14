@@ -607,6 +607,7 @@ dependencies = [
  "plakous-agent",
  "rusqlite",
  "rustix",
+ "serde_json",
  "sysctl",
  "tokio",
  "tracing",

@@ -11,6 +11,7 @@ async fn move_preflight_checks_capacity_and_identity_without_creating_or_changin
     let operation = SessionWorkflowId::new([141; 32])?;
     let install = source
         .prepare_move(PrepareMove {
+            job_cut: plakous_agent::internal::host_move::MoveJobCut::Settled,
             operation,
             leases: vec![lease],
         })

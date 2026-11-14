@@ -271,7 +271,8 @@ CREATE INDEX pruned_checkpoints_branch ON pruned_checkpoints(session_id,branch_i
 CREATE INDEX lines_head ON lines(head_session,head_branch);
 CREATE TABLE runtime_moves (
  operation BLOB PRIMARY KEY CHECK(length(operation)=32), digest BLOB NOT NULL CHECK(length(digest)=32),
- phase INTEGER NOT NULL CHECK(phase BETWEEN 0 AND 5)) WITHOUT ROWID;
+ phase INTEGER NOT NULL CHECK(phase BETWEEN 0 AND 5),
+ job_cut INTEGER NOT NULL CHECK(job_cut IN (0,1))) WITHOUT ROWID;
 CREATE TABLE runtime_move_lines (
  line_id TEXT PRIMARY KEY, operation BLOB NOT NULL CHECK(length(operation)=32),
  FOREIGN KEY(line_id) REFERENCES lines(line_id) ON DELETE CASCADE,

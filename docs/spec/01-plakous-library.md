@@ -1791,6 +1791,16 @@ current branch-head checkpoints, not historical checkpoint graphs; it takes no
 execution lease or retirement. Eligibility joins checkpoint job rows with their
 exact durable line-terminal evidence (process identity and allocation generation
 as well as job number), never with a process list's apparent idleness.
+The unsupported host seam selects an explicit job cut: `Settled` requires exact
+terminal evidence for every row; `Retained` preserves promoted allocation IDs,
+owner generations, metadata and number floors without inventing a terminal.
+Both require quiescent checkpoints, exact source-head job ownership and checked
+floors. The cut enters the batch fingerprint and schema-28 operation record so
+prepare/stage/recover cannot silently change it. Target compilation takes the
+same cut and creates no driver or process handle. Retained rows are not proof
+that a process is alive, permission to restart it, or permission to execute an
+installed group; the host must obtain fresh original-worker retention authority
+and whole-group Ready separately. The default dormant path remains `Settled`.
 A Published but never-executed target batch can recover its original install
 fingerprint after lease-only reconciliation: its journal retains the original
 branch floors, feed cut and exact captured line-terminal set separately from
