@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 
 use super::*;
 
+mod bootstrap;
+
 const DESTINATION: &str = "r999.e999.p999.t999";
 
 mod dormant;

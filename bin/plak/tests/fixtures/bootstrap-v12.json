@@ -1,0 +1,919 @@
+{
+  "exports": [
+    {
+      "case": {
+        "authority": "previous-claude-root",
+        "child": false,
+        "locator": "01ace522-c7fd-8e23-a5ea-67109f9e6b91/98650aa3-4088-87f6-aa50-e956c9b8bd6a/0fcab5c3-d927-89fc-b044-a07b552c1f71",
+        "model": "claude-opus-5-5",
+        "provider": "claude"
+      },
+      "document": {
+        "binding": {
+          "account": "claude",
+          "composition": "direct",
+          "effort": "high",
+          "model": "claude-opus-5-5",
+          "target_selection": "native"
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "4c77553ac7ddb7a515d3695fa3853e10fc057fd71ab61ce6dbf9dc447bd98f74",
+          "replay_model": "claude-opus-5-5"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "ac98539b-513e-4c1b-920c-d390cc8d6c5e",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-claude-root",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "ac98539b-513e-4c1b-920c-d390cc8d6c5e"
+    },
+    {
+      "case": {
+        "authority": "previous-claude-leaf",
+        "child": true,
+        "locator": "045c6acc-91b3-81ad-9e1a-095b82a9bbb2/79f58e00-278e-8afb-8210-7d21724b67af/dfb9d020-fc82-8326-8721-ca0f46d54606",
+        "model": "claude-opus-5-5",
+        "provider": "claude"
+      },
+      "document": {
+        "binding": {
+          "account": "claude",
+          "composition": "direct",
+          "effort": "high",
+          "model": "claude-opus-5-5",
+          "target_selection": "native"
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "4c77553ac7ddb7a515d3695fa3853e10fc057fd71ab61ce6dbf9dc447bd98f74",
+          "replay_model": "claude-opus-5-5"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "fccaef89-5a62-40bd-9108-bb825a13c2b5",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-claude-leaf",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "fccaef89-5a62-40bd-9108-bb825a13c2b5"
+    },
+    {
+      "case": {
+        "authority": "previous-codex-root",
+        "child": false,
+        "locator": "e5ecaae8-9c12-87ab-8903-6bd5f89775b2/5949df00-7faa-8b3d-a406-2d6f8acb5b8a/08d93d66-8c6c-84c3-8b3e-4e9b201319df",
+        "model": "gpt-5.6-sol",
+        "provider": "codex"
+      },
+      "document": {
+        "binding": {
+          "account": "codex",
+          "composition": "direct",
+          "effort": "high",
+          "model": "gpt-5.6-sol",
+          "target_selection": "native"
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "4c77553ac7ddb7a515d3695fa3853e10fc057fd71ab61ce6dbf9dc447bd98f74",
+          "replay_model": "gpt-5.6-sol"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "b6eb2733-b741-4e9f-bcdc-e655778a28f3",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-codex-root",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "b6eb2733-b741-4e9f-bcdc-e655778a28f3"
+    },
+    {
+      "case": {
+        "authority": "previous-codex-leaf",
+        "child": true,
+        "locator": "b421655e-543b-89a5-92b8-8d17cb525fb4/fdbad589-7184-8e3d-94b4-9dbe6a108b98/bc9d6ecd-a44f-857f-8d1d-e6fd69c9d0ae",
+        "model": "gpt-5.6-sol",
+        "provider": "codex"
+      },
+      "document": {
+        "binding": {
+          "account": "codex",
+          "composition": "direct",
+          "effort": "high",
+          "model": "gpt-5.6-sol",
+          "target_selection": "native"
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "4c77553ac7ddb7a515d3695fa3853e10fc057fd71ab61ce6dbf9dc447bd98f74",
+          "replay_model": "gpt-5.6-sol"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "65adff7d-70b8-4009-857f-cf74c57ff15f",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-codex-leaf",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "65adff7d-70b8-4009-857f-cf74c57ff15f"
+    },
+    {
+      "case": {
+        "authority": "previous-grok-root",
+        "child": false,
+        "locator": "ef807a32-541f-8ec4-b911-21ae200e7813/b8add4ec-14f0-8c8e-80b5-860c89062023/769090c2-fa2e-87a6-859c-d11af14f7f4f",
+        "model": "grok-4.6",
+        "provider": "grok"
+      },
+      "document": {
+        "binding": {
+          "account": "grok",
+          "composition": "direct",
+          "effort": "high",
+          "model": "grok-4.6",
+          "target_selection": "native"
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "4c77553ac7ddb7a515d3695fa3853e10fc057fd71ab61ce6dbf9dc447bd98f74",
+          "replay_model": "grok-4.6"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "b23a571b-91e2-42c3-8ffe-ebfdccca2ce7",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-grok-root",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "b23a571b-91e2-42c3-8ffe-ebfdccca2ce7"
+    },
+    {
+      "case": {
+        "authority": "previous-grok-leaf",
+        "child": true,
+        "locator": "d74cb53b-f7ec-8ab3-95a8-9fd070db8520/7508f68b-c8cf-8f5a-9d5a-6a71ee305928/08c5b6d1-ddf2-8c5a-a6ea-689d5984fcb8",
+        "model": "grok-4.6",
+        "provider": "grok"
+      },
+      "document": {
+        "binding": {
+          "account": "grok",
+          "composition": "direct",
+          "effort": "high",
+          "model": "grok-4.6",
+          "target_selection": "native"
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "4c77553ac7ddb7a515d3695fa3853e10fc057fd71ab61ce6dbf9dc447bd98f74",
+          "replay_model": "grok-4.6"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "006b4fc3-5712-4f46-bf57-c3eddf700f9e",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-grok-leaf",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "006b4fc3-5712-4f46-bf57-c3eddf700f9e"
+    },
+    {
+      "case": {
+        "authority": "previous-openai-direct-root",
+        "child": false,
+        "composition": "direct",
+        "locator": "5a93bc1f-3d52-8f12-a7de-114ac2b027f1/deee0a4f-670e-83c0-9515-2c0a3c2bc5e1/98bdf4cc-6d49-8467-9cb6-6d24d39b0a59",
+        "model": "gpt-5.6-luna",
+        "platform": true,
+        "provider": "openai"
+      },
+      "document": {
+        "binding": {
+          "account": "openai",
+          "composition": "direct",
+          "effort": "high",
+          "model": "gpt-5.6-luna",
+          "target_selection": {
+            "platform": {
+              "provider": "open_ai"
+            }
+          }
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "48933c07fad9a68c8365104c32f051dd6e71c68506e45e13ae42e7d2de00e41c",
+          "replay_model": "gpt-5.6-luna"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "c8c0cbdb-770b-403b-814e-8eae983a51fc",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-openai-direct-root",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "c8c0cbdb-770b-403b-814e-8eae983a51fc"
+    },
+    {
+      "case": {
+        "authority": "previous-openai-direct-leaf",
+        "child": true,
+        "composition": "direct",
+        "locator": "b95f3d86-0bfa-8911-902a-61fbee098a67/112b604d-cdcb-8df7-b115-61e4ed56e1b4/69a6c4ed-fd49-8e9d-993d-a84597740ed5",
+        "model": "gpt-5.6-luna",
+        "platform": true,
+        "provider": "openai"
+      },
+      "document": {
+        "binding": {
+          "account": "openai",
+          "composition": "direct",
+          "effort": "high",
+          "model": "gpt-5.6-luna",
+          "target_selection": {
+            "platform": {
+              "provider": "open_ai"
+            }
+          }
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "48933c07fad9a68c8365104c32f051dd6e71c68506e45e13ae42e7d2de00e41c",
+          "replay_model": "gpt-5.6-luna"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "b04935d9-fe58-4242-8184-5c6f2a3191ef",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-openai-direct-leaf",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "b04935d9-fe58-4242-8184-5c6f2a3191ef"
+    },
+    {
+      "case": {
+        "authority": "previous-openai-native-ptc-root",
+        "child": false,
+        "composition": "native-ptc",
+        "locator": "10cd4e1d-775e-837a-b3f7-5b879f426cd8/0453ce2b-fc63-868f-abe0-56d6c907c603/45158eb2-7366-8b6b-84f7-085e28ebead1",
+        "model": "gpt-5.6-sol",
+        "platform": true,
+        "provider": "openai"
+      },
+      "document": {
+        "binding": {
+          "account": "openai",
+          "composition": "native-ptc",
+          "effort": "high",
+          "model": "gpt-5.6-sol",
+          "target_selection": {
+            "platform": {
+              "provider": "open_ai"
+            }
+          }
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "48933c07fad9a68c8365104c32f051dd6e71c68506e45e13ae42e7d2de00e41c",
+          "replay_model": "gpt-5.6-sol"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "bf13aac6-c110-41ab-88e1-3ff14b785480",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-openai-native-ptc-root",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "bf13aac6-c110-41ab-88e1-3ff14b785480"
+    },
+    {
+      "case": {
+        "authority": "previous-openai-native-ptc-leaf",
+        "child": true,
+        "composition": "native-ptc",
+        "locator": "f9941436-410a-82dc-a4ad-3698d47ab33e/1228bec9-220d-84ea-ae4b-422cef77fd68/e4b31e08-1947-802c-bafc-fe24f4d4993a",
+        "model": "gpt-5.6-sol",
+        "platform": true,
+        "provider": "openai"
+      },
+      "document": {
+        "binding": {
+          "account": "openai",
+          "composition": "native-ptc",
+          "effort": "high",
+          "model": "gpt-5.6-sol",
+          "target_selection": {
+            "platform": {
+              "provider": "open_ai"
+            }
+          }
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "48933c07fad9a68c8365104c32f051dd6e71c68506e45e13ae42e7d2de00e41c",
+          "replay_model": "gpt-5.6-sol"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "a88e1f7a-437b-4c3d-9232-9448aba9ab2d",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-openai-native-ptc-leaf",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "a88e1f7a-437b-4c3d-9232-9448aba9ab2d"
+    },
+    {
+      "case": {
+        "authority": "previous-openai-js-ptc-root",
+        "child": false,
+        "composition": "js-ptc",
+        "locator": "f984090f-0f5f-8205-a1fe-41171fb52cc5/69351362-a85a-8ee4-9eab-0d2ca15f0099/76fe9836-b0df-8968-9fd9-f60144a0c8c7",
+        "model": "gpt-5.6-luna",
+        "platform": true,
+        "provider": "openai"
+      },
+      "document": {
+        "binding": {
+          "account": "openai",
+          "composition": "js-ptc",
+          "effort": "high",
+          "model": "gpt-5.6-luna",
+          "target_selection": {
+            "platform": {
+              "provider": "open_ai"
+            }
+          }
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "48933c07fad9a68c8365104c32f051dd6e71c68506e45e13ae42e7d2de00e41c",
+          "replay_model": "gpt-5.6-luna"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "d0ce9cc4-1aa2-4b14-a195-f883ddc65b5f",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-openai-js-ptc-root",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "d0ce9cc4-1aa2-4b14-a195-f883ddc65b5f"
+    },
+    {
+      "case": {
+        "authority": "previous-openai-js-ptc-leaf",
+        "child": true,
+        "composition": "js-ptc",
+        "locator": "14a66aa6-de1f-82ff-a328-043f50c93274/7ea84d74-97c5-8931-a807-61312f7f1034/57ba0708-c3d9-8559-b58d-0d95bf918491",
+        "model": "gpt-5.6-luna",
+        "platform": true,
+        "provider": "openai"
+      },
+      "document": {
+        "binding": {
+          "account": "openai",
+          "composition": "js-ptc",
+          "effort": "high",
+          "model": "gpt-5.6-luna",
+          "target_selection": {
+            "platform": {
+              "provider": "open_ai"
+            }
+          }
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "48933c07fad9a68c8365104c32f051dd6e71c68506e45e13ae42e7d2de00e41c",
+          "replay_model": "gpt-5.6-luna"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "37be02f5-dbf2-4e6c-b173-d9a0fc831fac",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-openai-js-ptc-leaf",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "37be02f5-dbf2-4e6c-b173-d9a0fc831fac"
+    },
+    {
+      "case": {
+        "authority": "previous-openai-py-ptc-root",
+        "child": false,
+        "composition": "py-ptc",
+        "locator": "a5cd5d26-582b-85c3-a03f-0cafb8257f85/9bd7f86d-d1a9-8fb2-8324-ae3d4d3e428b/6434a372-b1d2-8e43-a5a5-12b6bc689804",
+        "model": "gpt-5.6-luna",
+        "platform": true,
+        "provider": "openai"
+      },
+      "document": {
+        "binding": {
+          "account": "openai",
+          "composition": "py-ptc",
+          "effort": "high",
+          "model": "gpt-5.6-luna",
+          "target_selection": {
+            "platform": {
+              "provider": "open_ai"
+            }
+          }
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "48933c07fad9a68c8365104c32f051dd6e71c68506e45e13ae42e7d2de00e41c",
+          "replay_model": "gpt-5.6-luna"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "953b600a-0032-460f-871c-e2599e7da9e5",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-openai-py-ptc-root",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "953b600a-0032-460f-871c-e2599e7da9e5"
+    },
+    {
+      "case": {
+        "authority": "previous-openai-py-ptc-leaf",
+        "child": true,
+        "composition": "py-ptc",
+        "locator": "6529b57a-9089-8f9a-b915-7671c5db49ee/d53d0e8a-241f-87a0-aaf3-68d5e5bb5354/f8795b79-2b08-81a4-8b8a-76bfa4119e96",
+        "model": "gpt-5.6-luna",
+        "platform": true,
+        "provider": "openai"
+      },
+      "document": {
+        "binding": {
+          "account": "openai",
+          "composition": "py-ptc",
+          "effort": "high",
+          "model": "gpt-5.6-luna",
+          "target_selection": {
+            "platform": {
+              "provider": "open_ai"
+            }
+          }
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "48933c07fad9a68c8365104c32f051dd6e71c68506e45e13ae42e7d2de00e41c",
+          "replay_model": "gpt-5.6-luna"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "c68d3388-7ba4-43a4-bba2-e17f57b1294a",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-openai-py-ptc-leaf",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "c68d3388-7ba4-43a4-bba2-e17f57b1294a"
+    },
+    {
+      "case": {
+        "authority": "previous-native-native-ptc",
+        "composition": "native-ptc",
+        "locator": "da09b1d4-9635-815c-82c2-17083d84145d/53ef9219-b931-802e-b2f0-4138c8bf3a45/4ea3bbc7-4ab8-8576-a4c2-e818276440a3",
+        "production_native": true
+      },
+      "document": {
+        "binding": {
+          "account": "codex",
+          "composition": "native-ptc",
+          "effort": "high",
+          "model": "gpt-5.6-sol",
+          "target_selection": "native"
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "4c77553ac7ddb7a515d3695fa3853e10fc057fd71ab61ce6dbf9dc447bd98f74",
+          "replay_model": "gpt-5.6-sol"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "caa2721a-cbdd-4fe5-83df-928d9ebc3a6d",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-native-native-ptc",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "caa2721a-cbdd-4fe5-83df-928d9ebc3a6d"
+    },
+    {
+      "case": {
+        "authority": "previous-native-js-ptc",
+        "composition": "js-ptc",
+        "locator": "5e9fa61c-5bb6-8e48-9344-4b50eb914f49/cdbe6dd6-3284-8a65-ab8a-863f13ab79ad/6e795ee6-fd24-8e1a-936d-edea13606d3a",
+        "production_native": true
+      },
+      "document": {
+        "binding": {
+          "account": "claude",
+          "composition": "js-ptc",
+          "effort": "high",
+          "model": "claude-opus-5-5",
+          "target_selection": "native"
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "4c77553ac7ddb7a515d3695fa3853e10fc057fd71ab61ce6dbf9dc447bd98f74",
+          "replay_model": "claude-opus-5-5"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "302dc887-fd90-436f-8608-9029b4ef5ec6",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-native-js-ptc",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "302dc887-fd90-436f-8608-9029b4ef5ec6"
+    },
+    {
+      "case": {
+        "authority": "previous-native-py-ptc",
+        "composition": "py-ptc",
+        "locator": "1bfdf514-e161-8c58-9d1e-609f90c85b0b/2266e540-8c46-8e8c-9ed3-84c94440853a/96f34e2a-e188-87d1-b5dd-acc8625ce9e3",
+        "production_native": true
+      },
+      "document": {
+        "binding": {
+          "account": "claude",
+          "composition": "py-ptc",
+          "effort": "high",
+          "model": "claude-opus-5-5",
+          "target_selection": "native"
+        },
+        "format": "plak-session-export",
+        "history": {
+          "groups": [],
+          "replay_account": "4c77553ac7ddb7a515d3695fa3853e10fc057fd71ab61ce6dbf9dc447bd98f74",
+          "replay_model": "claude-opus-5-5"
+        },
+        "named_state": {},
+        "pending_work": [],
+        "profile": {
+          "root_template": null,
+          "working_set": []
+        },
+        "prompt_history": [],
+        "queue": [],
+        "runner": {
+          "name": "local",
+          "runner_id": "local"
+        },
+        "source": {
+          "producer": {
+            "binary_id": "61a75ed2d8fc",
+            "status": "verified"
+          },
+          "session_id": "0e63f359-a63c-455a-8ad5-944427d106ff",
+          "state_key": "r27.e37.p37.t10"
+        },
+        "source_resolved_count": 0,
+        "source_subagents": 0,
+        "title": "previous-native-py-ptc",
+        "transcript": [],
+        "version": 12,
+        "workspace_root": "/"
+      },
+      "source": "0e63f359-a63c-455a-8ad5-944427d106ff"
+    }
+  ],
+  "native_fixture": "a40a209ff426e167583b41debbf7eb8fe63aa564",
+  "native_sha256": "fc807cc4a7c4756583eee6b102feb86ab544b49844645344bc74fe980689d900",
+  "producer": "9e9785efe0c6549ee8d1c143b81db00472031dab"
+}

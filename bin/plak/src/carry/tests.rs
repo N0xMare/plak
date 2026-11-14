@@ -6,6 +6,8 @@ use crate::store::sessions::{QueueDrainState, SessionRecord};
 use plakous_hosted::sessions::{MAX_TRANSCRIPT_LINES, ThinkingRow, ToolItem, TranscriptRow};
 use std::fs;
 
+mod bootstrap;
+
 #[test]
 fn named_api_v12_import_refuses_even_with_a_default_key_present() {
     let root = tempfile::tempdir().unwrap();
