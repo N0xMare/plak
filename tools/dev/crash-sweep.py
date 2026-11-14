@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 
 TERMINAL_SHAPES = {
@@ -23,10 +24,10 @@ TERMINAL_SHAPES = {
     "runner_wake_live_foreground": "host_skeleton::runner::foreground::runner_wake_live_foreground",
     "runner_lease_lapse_reports_foreground": "host_skeleton::runner::foreground::runner_lease_lapse_reports_foreground",
     "runner_new_owner_foreground": "host_skeleton::runner::a_foreground_host_cut_stops_at_transfer_and_records_unknown_once",
-    "review_tui_host_restart_switch": "host_skeleton::crash::tui::review_tui_host_restart_switch",
-    "tui_host_restart": "host_skeleton::crash::tui::tui_host_restart",
-    "wire_host_restart": "host_skeleton::crash::wire::cuts::wire_host_restart",
-    "wire_host_restart_switch": "host_skeleton::crash::wire::cuts::wire_host_restart_switch",
+    "review_tui_host_restart_switch": "host_skeleton::crash::tui::review_tui_host_restart_switch::",
+    "tui_host_restart": "host_skeleton::crash::tui::tui_host_restart::",
+    "wire_host_restart": "host_skeleton::crash::wire::cuts::wire_host_restart::",
+    "wire_host_restart_switch": "host_skeleton::crash::wire::cuts::wire_host_restart_switch::",
 }
 
 
@@ -110,9 +111,38 @@ def main() -> int:
         if result:
             return result
     for name in terminal_shapes:
+        selector = TERMINAL_SHAPES[name]
+        family = selector.endswith("::")
+        if family:
+            listed = subprocess.run(
+                [*command, selector, "--", "--list"],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            expected = {
+                f"{selector}{kind}_{group}" for kind in ["root", "child"] for group in range(8)
+            }
+            found = {
+                line.removesuffix(": test")
+                for line in listed.stdout.splitlines()
+                if line.endswith(": test")
+            }
+            if listed.returncode or found != expected:
+                print(
+                    f"{name}: expected all 16 restart groups, found {sorted(found)}",
+                    file=sys.stderr,
+                )
+                return listed.returncode or 1
         for _ in range(args.repeat):
             result = subprocess.call(
-                [*command, TERMINAL_SHAPES[name], "--", "--exact", "--nocapture"],
+                [
+                    *command,
+                    selector,
+                    "--",
+                    *(["--test-threads", str(args.jobs)] if family else ["--exact"]),
+                    "--nocapture",
+                ],
                 env=env,
             )
             if result:

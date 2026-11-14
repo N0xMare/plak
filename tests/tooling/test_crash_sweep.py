@@ -33,15 +33,27 @@ SPEC.loader.exec_module(SWEEP)
 
 
 class CrashSweepTests(unittest.TestCase):
-    def run_sweep(self, scratch, results, args=None):
+    def run_sweep(self, scratch, results, args=None, listed_groups=16):
         if args is None:
             args = ["--strict", "--jobs", "8", "--shapes", "code_mode_cell_final"]
+
+        def run(command, **kwargs):
+            if command[-1] != "--list":
+                return subprocess.CompletedProcess(command, 0, stdout=str(scratch) + "\n")
+            selector = command[command.index("--") - 1]
+            rows = [
+                f"{selector}{kind}_{group}: test"
+                for kind in ["root", "child"]
+                for group in range(8)
+            ]
+            return subprocess.CompletedProcess(command, 0, stdout="\n".join(rows[:listed_groups]))
+
         with (
             patch("sys.argv", ["crash-sweep.py", *args]),
             patch.object(
                 SWEEP.subprocess,
                 "run",
-                return_value=subprocess.CompletedProcess([], 0, stdout=str(scratch) + "\n"),
+                side_effect=run,
             ),
             patch.object(SWEEP.subprocess, "check_output", side_effect=test_env_output),
             patch.object(SWEEP.subprocess, "call", side_effect=results) as calls,
@@ -107,7 +119,7 @@ class CrashSweepTests(unittest.TestCase):
                 self.assertNotIn("PLAK_CRASH_SWEEP_SHAPES", call.kwargs["env"])
                 self.assertEqual(call.kwargs["env"]["PLAK_CRASH_SWEEP_STRICT"], "1")
             self.assertEqual(
-                [call.args[0][-4] for call in calls[2:]],
+                [call.args[0][call.args[0].index("--") - 1] for call in calls[2:]],
                 list(SWEEP.TERMINAL_SHAPES.values()),
             )
 
@@ -121,8 +133,41 @@ class CrashSweepTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(len(calls), 3)
             for call in calls[1:]:
-                self.assertIn("host_skeleton::crash::tui::tui_host_restart", call.args[0])
+                self.assertIn("host_skeleton::crash::tui::tui_host_restart::", call.args[0])
                 self.assertNotIn("crash_sweep::full_sweep", call.args[0])
+
+    def test_strict_restart_families_select_all_groups_instead_of_zero_exact_matches(self):
+        shapes = [
+            "tui_host_restart",
+            "review_tui_host_restart_switch",
+            "wire_host_restart",
+            "wire_host_restart_switch",
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            code, calls = self.run_sweep(
+                Path(directory), [0] * 5, ["--strict", "--jobs", "2", "--shapes", ",".join(shapes)]
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(len(calls), 5)
+            for shape, call in zip(shapes, calls[1:], strict=True):
+                selector = call.args[0][call.args[0].index("--") - 1]
+                self.assertTrue(selector.endswith(f"::{shape}::"))
+                self.assertNotIn("--exact", call.args[0])
+                self.assertEqual(call.args[0][call.args[0].index("--test-threads") + 1], "2")
+
+    def test_strict_restart_family_refuses_empty_or_incomplete_test_listings(self):
+        for count in [0, 15]:
+            with self.subTest(groups=count), tempfile.TemporaryDirectory() as directory:
+                code, calls = self.run_sweep(
+                    Path(directory),
+                    [0],
+                    ["--strict", "--shapes", "wire_host_restart"],
+                    listed_groups=count,
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(
+                    len(calls), 1, "no incomplete family may be reported as a successful sweep"
+                )
 
     def test_terminal_shape_failure_is_not_reported_as_a_success(self):
         with tempfile.TemporaryDirectory() as directory:

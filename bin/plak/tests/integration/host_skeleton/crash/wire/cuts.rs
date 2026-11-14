@@ -1,6 +1,6 @@
 //! Every indexed host-store cut of the real-client-derived wire journeys.
 
-use std::fmt::Write as _;
+use super::super::restart_matrix::{self, Pilot};
 
 use super::*;
 
@@ -257,45 +257,36 @@ fn cut_case(
         "child_dispatches_before_restart": before.1, "invariants": true})
 }
 
-fn matrix(switching: bool) {
-    let evidence = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/crash-sweep")
-        .join(format!(
-            "wire-client-{}-{}.jsonl",
-            if switching { "switch" } else { "stop" },
-            std::process::id()
-        ));
-    std::fs::create_dir_all(evidence.parent().unwrap()).unwrap();
-    let mut table = String::new();
-    for child in [false, true] {
-        let (commits, expected) = pilot(child, switching);
-        assert_eq!(
-            expected,
-            pilot(child, switching).1,
-            "twin complete indexed signatures"
-        );
-        for (_, store, ordinal) in commits {
-            eprintln!("wire cut switching={switching} child={child} {store}:{ordinal}");
-            let row = cut_case(child, switching, &store, ordinal, &expected);
-            writeln!(table, "{row}").unwrap();
-            std::fs::write(&evidence, &table).unwrap();
-        }
-    }
-    eprintln!(
-        "wire client matrix: {} cuts; {}",
-        table.lines().count(),
-        evidence.display()
+fn matrix(switching: bool, child: bool, group: usize) {
+    let shape = if switching {
+        "wire_host_restart_switch"
+    } else {
+        "wire_host_restart"
+    };
+    restart_matrix::run_group(
+        shape,
+        child,
+        group,
+        || {
+            let (commits, expected) = pilot(child, switching);
+            assert_eq!(
+                expected,
+                pilot(child, switching).1,
+                "twin complete indexed signatures"
+            );
+            Pilot { commits, expected }
+        },
+        |store, ordinal, expected| cut_case(child, switching, store, ordinal, expected),
     );
 }
 
-#[test]
-fn wire_host_restart() {
-    matrix(false);
+mod wire_host_restart {
+    use super::*;
+    restart_matrix::matrix_tests!(|child, group| matrix(false, child, group));
 }
-
-#[test]
-fn wire_host_restart_switch() {
-    matrix(true);
+mod wire_host_restart_switch {
+    use super::*;
+    restart_matrix::matrix_tests!(|child, group| matrix(true, child, group));
 }
 
 /// A signature with each store's consecutive unlabelled commits merged: how

@@ -2916,7 +2916,7 @@ agent` relaunch.
 The `tui_host_restart` shape uses the ordinary offline TUI PTY fixture
 against a test-hooks `plak host`. Its specialized driver is registered in
 the strict crash-sweep entry point and the durability lane (excluded from
-offline by its exact test name). It cuts every indexed host commit of
+offline by its test-family name). It cuts every indexed host commit of
 creation, terminal attach, a turn and `stop_session`, once with a
 root alone and once with a real child running. Twin pilots must have the
 same indexed labels per store, and every cut must reach that pilot label.
@@ -2929,7 +2929,7 @@ records each per-store cut and dispatch count under
 authority handoff or host commit to cut: the deterministic PTY case checks
 that the host process and resident session survive it.
 
-The exact durability test `review_tui_host_restart_switch` adds the TUI's
+The durability family `review_tui_host_restart_switch` adds the TUI's
 own `/new`, `/resume <original>` and `/stop` after the root's answer or while
 a real child runs. Twin pilots pin every indexed per-store label. Both terminal shapes
 wait for the stop notice to appear in the read-only durable transcript before
@@ -4446,6 +4446,18 @@ Recovery reconnects without replaying input and checks durable stop, custody,
 no handoff/continuation and no extra root or child provider dispatch. These
 matrices are in the durability lane with the reviewed longer timeout; the
 original terminal matrices remain separate evidence.
+
+Each of these four restart families exposes eight root groups and eight child
+groups as independent durability tests (`root_0` through `root_7`, and
+`child_0` through `child_7`). They partition the complete sorted live pilot
+inventory, not a pinned subset: each test asserts the partition has no missing
+or duplicate cuts, and the final completed group checks the union of actual
+per-group cut manifests. Per-cut assertions and twin-pilot signatures are
+unchanged. A file lock shares each family/child twin pilot once per nextest
+run, under that run's isolated temporary directory, keyed to the exact test
+and product executables and fixture inputs. No pilot survives across runs or
+checkouts. The strict sweep selects these families by prefix and refuses an
+incomplete or empty group listing rather than succeeding with zero cuts.
 In wire replay, the `stopped` barrier likewise waits for that durable stop
 notice before sending bye, in both pilots and cuts (a killed host ends the
 cut's wait). This pins the final notice-intent commit rather than racing the

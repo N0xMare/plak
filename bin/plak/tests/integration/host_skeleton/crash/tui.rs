@@ -2,8 +2,8 @@
 //! the resident session again on the restarted host, without replaying input.
 
 use super::client_control::*;
+use super::restart_matrix::{self, Pilot};
 use super::*;
-use std::fmt::Write as _;
 
 mod recording;
 
@@ -115,100 +115,96 @@ pub(super) fn review_pilot(child: bool) -> (Vec<Commit>, Signature) {
     (commits, signature(&trace))
 }
 
-#[test]
-fn review_tui_host_restart_switch() {
+fn review_tui_host_restart_switch_cut(
+    child: bool,
+    store: &str,
+    ordinal: u64,
+    expected: &Signature,
+) -> serde_json::Value {
+    let fixture = fixture().unwrap();
+    script(&fixture, child);
+    let trace = fixture.root.join("cut.jsonl");
+    if let Some(mut host) = try_start(&fixture, &[], &cut_env(&trace, store, ordinal)) {
+        if let Some(session) = create(&host, &fixture) {
+            review_drive_switch(&fixture, &session, true, child);
+        }
+        let status = host.child.take().unwrap().wait().unwrap();
+        assert!(
+            !status.success(),
+            "cut {store}:{ordinal} did not kill the host"
+        );
+    }
+    let actual = signature(&trace);
+    let label = expected
+        .iter()
+        .find(|(seen_store, seen_ordinal, _)| *seen_store == store && *seen_ordinal == ordinal)
+        .cloned();
+    assert_eq!(
+        actual
+            .iter()
+            .find(|(seen_store, seen_ordinal, _)| *seen_store == store && *seen_ordinal == ordinal)
+            .cloned(),
+        label,
+        "cut {store}:{ordinal} must hit its pilot label"
+    );
+    let before = dispatches(&fixture);
+    let children_before = child_dispatches(&fixture);
+    let mut restarted = start(&fixture);
+    let session = create(&restarted, &fixture).unwrap();
+    let rows = review_rows(&restarted);
+    assert!(
+        rows.len() <= 2 && rows.iter().filter(|row| row.session == session).count() == 1,
+        "cut {store}:{ordinal}: {rows:?}"
+    );
+    let mut terminal = super::super::super::offline_tui::attach_to_host(&fixture.root, &session);
+    terminal.wait_ready();
+    let (interrupts, decisions) = root_record(&fixture, &session);
+    assert!(!interrupts.contains(&RootInterruptCause::Handoff));
+    assert_eq!(
+        decisions, 0,
+        "cut {store}:{ordinal}: a continuation was decided"
+    );
+    assert_eq!(
+        dispatches(&fixture),
+        before,
+        "cut {store}:{ordinal} replayed a turn"
+    );
+    assert_eq!(
+        child_dispatches(&fixture),
+        children_before,
+        "cut {store}:{ordinal} replayed a child"
+    );
+    terminal.send(b"/stop\r");
+    terminal.wait_where("the durable session stop", |frame| {
+        frame.contains("session work stopped")
+            || frame.contains("stopped: the session's work ended")
+    });
+    terminal.quit();
+    stop(&mut restarted);
+    json!({"shape": "review_tui_host_restart_switch", "child": child, "store": store, "cut": ordinal, "label": label.map(|label| label.2), "sessions_after_restart": rows.len(), "dispatches_before_restart": before, "child_dispatches_before_restart": children_before, "invariants": true})
+}
+
+fn review_tui_host_restart_switch_group(child: bool, group: usize) {
     let Some(probe) = fixture() else { return };
     drop(probe);
-    let evidence = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/crash-sweep")
-        .join(format!(
-            "review-tui-host-restart-switch-{}.jsonl",
-            std::process::id()
-        ));
-    std::fs::create_dir_all(evidence.parent().unwrap()).unwrap();
-    let mut table = String::new();
-    for child in [false, true] {
-        let (commits, expected) = review_pilot(child);
-        assert_eq!(expected, review_pilot(child).1, "twin pilots");
-        for (_, store, ordinal) in commits {
-            let fixture = fixture().unwrap();
-            script(&fixture, child);
-            let trace = fixture.root.join("cut.jsonl");
-            if let Some(mut host) = try_start(&fixture, &[], &cut_env(&trace, &store, ordinal)) {
-                if let Some(session) = create(&host, &fixture) {
-                    review_drive_switch(&fixture, &session, true, child);
-                }
-                let status = host.child.take().unwrap().wait().unwrap();
-                assert!(
-                    !status.success(),
-                    "cut {store}:{ordinal} did not kill the host"
-                );
-            }
-            let actual = signature(&trace);
-            let label = expected
-                .iter()
-                .find(|(seen_store, seen_ordinal, _)| {
-                    *seen_store == store && *seen_ordinal == ordinal
-                })
-                .cloned();
-            assert_eq!(
-                actual
-                    .iter()
-                    .find(|(seen_store, seen_ordinal, _)| *seen_store == store
-                        && *seen_ordinal == ordinal)
-                    .cloned(),
-                label,
-                "cut {store}:{ordinal} must hit its pilot label"
-            );
-            let before = dispatches(&fixture);
-            let children_before = child_dispatches(&fixture);
-            let mut restarted = start(&fixture);
-            let session = create(&restarted, &fixture).unwrap();
-            let rows = review_rows(&restarted);
-            assert!(
-                rows.len() <= 2 && rows.iter().filter(|row| row.session == session).count() == 1,
-                "cut {store}:{ordinal}: {rows:?}"
-            );
-            let mut terminal =
-                super::super::super::offline_tui::attach_to_host(&fixture.root, &session);
-            terminal.wait_ready();
-            let (interrupts, decisions) = root_record(&fixture, &session);
-            assert!(!interrupts.contains(&RootInterruptCause::Handoff));
-            assert_eq!(
-                decisions, 0,
-                "cut {store}:{ordinal}: a continuation was decided"
-            );
-            assert_eq!(
-                dispatches(&fixture),
-                before,
-                "cut {store}:{ordinal} replayed a turn"
-            );
-            assert_eq!(
-                child_dispatches(&fixture),
-                children_before,
-                "cut {store}:{ordinal} replayed a child"
-            );
-            terminal.send(b"/stop\r");
-            terminal.wait_where("the durable session stop", |frame| {
-                frame.contains("session work stopped")
-                    || frame.contains("stopped: the session's work ended")
-            });
-            terminal.quit();
-            stop(&mut restarted);
-            writeln!(
-                table,
-                "{}",
-                json!({"shape": "review_tui_host_restart_switch", "child": child, "store": store, "cut": ordinal, "label": label.map(|label| label.2), "sessions_after_restart": rows.len(), "dispatches_before_restart": before, "child_dispatches_before_restart": children_before, "invariants": true})
-            )
-            .unwrap();
-            std::fs::write(&evidence, &table).unwrap();
-        }
-    }
-    eprintln!(
-        "review_tui_host_restart_switch: {} cuts; {}",
-        table.lines().count(),
-        evidence.display()
+    restart_matrix::run_group(
+        "review_tui_host_restart_switch",
+        child,
+        group,
+        || {
+            let (commits, expected) = review_pilot(child);
+            assert_eq!(expected, review_pilot(child).1, "twin pilots");
+            Pilot { commits, expected }
+        },
+        |store, ordinal, expected| {
+            review_tui_host_restart_switch_cut(child, store, ordinal, expected)
+        },
     );
+}
+
+mod review_tui_host_restart_switch {
+    use super::*;
+    restart_matrix::matrix_tests!(review_tui_host_restart_switch_group);
 }
 
 /// Drives a live TUI until it answers and durably stops its work, or the
@@ -381,93 +377,95 @@ pub(super) fn pilot(child: bool) -> (Vec<Commit>, Signature) {
     (commits, signature(&trace))
 }
 
-#[test]
-fn tui_host_restart() {
+fn tui_host_restart_cut(
+    child: bool,
+    store: &str,
+    ordinal: u64,
+    expected: &Signature,
+) -> serde_json::Value {
+    let fixture = fixture().unwrap();
+    script(&fixture, child);
+    let trace = fixture.root.join("cut.jsonl");
+    if let Some(mut host) = try_start(&fixture, &[], &cut_env(&trace, store, ordinal)) {
+        if let Some(session) = create(&host, &fixture) {
+            drive(&fixture, &session, true, child);
+        }
+        let status = host.child.take().unwrap().wait().unwrap();
+        assert!(
+            !status.success(),
+            "cut {store}:{ordinal} did not kill the host"
+        );
+    }
+    assert!(
+        indexed_commits(&trace)
+            .iter()
+            .any(|(_, seen_store, seen_ordinal)| *seen_store == store && *seen_ordinal == ordinal),
+        "cut {store}:{ordinal} was not reached"
+    );
+    let actual = signature(&trace);
+    assert_eq!(
+        actual
+            .iter()
+            .find(|(seen_store, seen_ordinal, _)| *seen_store == store && *seen_ordinal == ordinal),
+        expected
+            .iter()
+            .find(|(seen_store, seen_ordinal, _)| *seen_store == store && *seen_ordinal == ordinal),
+        "cut {store}:{ordinal} must hit its pilot label"
+    );
+    let before = dispatches(&fixture);
+    let children_before = child_dispatches(&fixture);
+    let mut restarted = start(&fixture);
+    let session = create(&restarted, &fixture).unwrap();
+    let mut terminal = super::super::super::offline_tui::attach_to_host(&fixture.root, &session);
+    terminal.wait_ready();
+    let (interrupts, decisions) = root_record(&fixture, &session);
+    assert!(
+        !interrupts.contains(&RootInterruptCause::Handoff),
+        "a client never hands a session off"
+    );
+    assert_eq!(decisions, 0, "no handoff continuation was decided");
+    // Owner loss is held, never automatically replayed by a face.
+    assert_eq!(
+        dispatches(&fixture),
+        before,
+        "cut {store}:{ordinal} replayed a turn on re-attach"
+    );
+    assert_eq!(
+        child_dispatches(&fixture),
+        children_before,
+        "cut {store}:{ordinal} replayed a child on re-attach"
+    );
+    terminal.send(b"/stop\r");
+    terminal.wait_where("the durable session stop", |frame| {
+        frame.contains("session work stopped")
+            || frame.contains("stopped: the session's work ended")
+    });
+    terminal.quit();
+    stop(&mut restarted);
+    json!({"shape": "tui_host_restart", "child": child, "store": store, "cut": ordinal, "dispatches_before_restart": before, "child_dispatches_before_restart": children_before, "invariants": true})
+}
+
+fn tui_host_restart_group(child: bool, group: usize) {
     let Some(probe) = fixture() else { return };
     drop(probe);
-    let evidence = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/crash-sweep")
-        .join(format!("tui-host-restart-{}.jsonl", std::process::id()));
-    std::fs::create_dir_all(evidence.parent().unwrap()).unwrap();
-    let mut table = String::new();
-    for child in [false, true] {
-        let (commits, expected) = pilot(child);
-        assert_eq!(
-            expected,
-            pilot(child).1,
-            "twin pilots must have identical per-store indexed commits"
-        );
-        for (_, store, ordinal) in commits {
-            let fixture = fixture().unwrap();
-            script(&fixture, child);
-            let trace = fixture.root.join("cut.jsonl");
-            if let Some(mut host) = try_start(&fixture, &[], &cut_env(&trace, &store, ordinal)) {
-                if let Some(session) = create(&host, &fixture) {
-                    drive(&fixture, &session, true, child);
-                }
-                let status = host.child.take().unwrap().wait().unwrap();
-                assert!(
-                    !status.success(),
-                    "cut {store}:{ordinal} did not kill the host"
-                );
-            }
-            assert!(
-                indexed_commits(&trace)
-                    .iter()
-                    .any(|(_, seen_store, seen_ordinal)| *seen_store == store
-                        && *seen_ordinal == ordinal),
-                "cut {store}:{ordinal} was not reached"
-            );
-            let actual = signature(&trace);
+    restart_matrix::run_group(
+        "tui_host_restart",
+        child,
+        group,
+        || {
+            let (commits, expected) = pilot(child);
             assert_eq!(
-                actual
-                    .iter()
-                    .find(|(seen_store, seen_ordinal, _)| *seen_store == store
-                        && *seen_ordinal == ordinal),
-                expected
-                    .iter()
-                    .find(|(seen_store, seen_ordinal, _)| *seen_store == store
-                        && *seen_ordinal == ordinal),
-                "cut {store}:{ordinal} must hit its pilot label"
+                expected,
+                pilot(child).1,
+                "twin pilots must have identical per-store indexed commits"
             );
-            let before = dispatches(&fixture);
-            let children_before = child_dispatches(&fixture);
-            let mut restarted = start(&fixture);
-            let session = create(&restarted, &fixture).unwrap();
-            let mut terminal =
-                super::super::super::offline_tui::attach_to_host(&fixture.root, &session);
-            terminal.wait_ready();
-            let (interrupts, decisions) = root_record(&fixture, &session);
-            assert!(
-                !interrupts.contains(&RootInterruptCause::Handoff),
-                "a client never hands a session off"
-            );
-            assert_eq!(decisions, 0, "no handoff continuation was decided");
-            // Owner loss is held, never automatically replayed by a face.
-            assert_eq!(
-                dispatches(&fixture),
-                before,
-                "cut {store}:{ordinal} replayed a turn on re-attach"
-            );
-            assert_eq!(
-                child_dispatches(&fixture),
-                children_before,
-                "cut {store}:{ordinal} replayed a child on re-attach"
-            );
-            terminal.send(b"/stop\r");
-            terminal.wait_where("the durable session stop", |frame| {
-                frame.contains("session work stopped")
-                    || frame.contains("stopped: the session's work ended")
-            });
-            terminal.quit();
-            stop(&mut restarted);
-            writeln!(table, "{}", json!({"shape": "tui_host_restart", "child": child, "store": store, "cut": ordinal, "dispatches_before_restart": before, "child_dispatches_before_restart": children_before, "invariants": true})).unwrap();
-            std::fs::write(&evidence, &table).unwrap();
-        }
-    }
-    eprintln!(
-        "tui_host_restart: {} cuts; {}",
-        table.lines().count(),
-        evidence.display()
+            Pilot { commits, expected }
+        },
+        |store, ordinal, expected| tui_host_restart_cut(child, store, ordinal, expected),
     );
+}
+
+mod tui_host_restart {
+    use super::*;
+    restart_matrix::matrix_tests!(tui_host_restart_group);
 }
