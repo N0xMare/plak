@@ -612,9 +612,12 @@ any JobTerminal result observed by the driver is excluded even during a live
 cell, without consuming the nested result's completion notice. They are enabled only
 by the process pack's earned completion-notice flag and the host's current
 `Agent::set_notice_delivery_available` guarantee. Hosted roots set that
-transient guarantee from `prompt_host_facts().host_wakes` before admission;
-turning notices off or suppressing child wakes also disables repeat holds
-for already-running jobs. Notice clears at the next
+transient guarantee from `prompt_host_facts().host_wakes` and current wake
+suppression before admission, then re-evaluate it after canonical acceptance
+using the after-ack projector's refreshed suppression. A user prompt or eligible
+loss continuation can therefore restore notices within its admitted turn,
+not only on a later turn. Turning notices off or suppressing child wakes also
+disables repeat holds for already-running jobs. Notice clears at the next
 safe boundary, new dispatch or turn startup;
 in-flight dispatch latches survive that reset until they finish. Steer and
 Background take precedence over Notice. The host owns information delivery

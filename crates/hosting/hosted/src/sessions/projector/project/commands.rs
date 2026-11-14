@@ -68,6 +68,8 @@ impl Applier<'_> {
                 // A loss continuation resumes the interrupted work, including
                 // its permission to wake for children. Ordinary host wakes and
                 // transient retries must not clear an operator's suppression.
+                // Later intents still join after this fact; only a pause
+                // between the decision and this acceptance vetoes the rearm.
                 let resumes_loss = self.intents.root_continuations.iter().any(|intent| {
                     intent.anchor < self.seq()
                         && matches!(
@@ -80,6 +82,11 @@ impl Applier<'_> {
                                 command_id: resumed, ..
                             } if resumed == command_id
                         )
+                        && !self.intents.wake_suppressions.iter().any(|suppression| {
+                            suppression.anchor < self.seq()
+                                && (suppression.anchor, suppression.ordinal)
+                                    > (intent.anchor, intent.ordinal)
+                        })
                 });
                 if !host_wake || resumes_loss {
                     let anchor = self.seq();

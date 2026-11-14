@@ -9,6 +9,8 @@ use crate::runtime::test_kit::TestExtension;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
+mod admission;
+
 #[test]
 fn child_mail_preempts_a_waiting_process_in_a_root_turn() {
     let root = tempfile::tempdir().unwrap();

@@ -27,6 +27,10 @@ for one version bump, without native protocol compatibility.
   matrices into 64 grouped tests with run-local shared pilots; each family's
   sixteen groups must run within one invocation to check their union.
 
+- Keep an operator pause entered after a loss-continuation decision in force
+  when the continuation is admitted. Pin in-turn notices after continuation
+  and user-prompt admission, without a duplicate idle wake.
+
 - Clarify that session usage is process-local since runtime open, not a lifetime
   total. Reopening after a host restart starts empty; reconnecting a client to
   the same runtime does not reset it. Durable per-turn usage is unchanged.
