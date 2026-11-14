@@ -1536,6 +1536,12 @@ def main() -> int:
         help="build and lint four distinct feature-off product resolutions",
     )
     parser.add_argument("--target", help="Cargo build target for product variants")
+    parser.add_argument(
+        "--library-packages",
+        nargs="*",
+        default=None,
+        help="worker-only library compile scope; closure validation remains workspace-wide",
+    )
     args = parser.parse_args()
 
     if args.product_builds:
@@ -1627,8 +1633,10 @@ def main() -> int:
         CARGO_OUTPUTS = None
     # --build already cargo-checks every closure witness.
     if not args.build:
-        errors.extend(check_facade_profiles(manifests))
-        errors.extend(check_hosted_profiles(manifests))
+        if args.library_packages is None or FACADE in args.library_packages:
+            errors.extend(check_facade_profiles(manifests))
+        if args.library_packages is None or "plakous-hosted" in args.library_packages:
+            errors.extend(check_hosted_profiles(manifests))
     if errors:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)

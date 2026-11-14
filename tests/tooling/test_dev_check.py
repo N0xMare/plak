@@ -245,7 +245,10 @@ failure = json.loads(os.environ.get('GATE_PYTHON_FAILURES', '{}')).get(
 if failure:
     raise SystemExit(failure)
 if sys.argv[1].endswith('changed_packages.py'):
-    print(os.environ.get('GATE_CHANGED', ''), end='')
+    if '--dependents' in sys.argv:
+        print(os.environ.get('GATE_DEPENDENTS', '\n'.join(sys.argv[3:])), end='')
+    else:
+        print(os.environ.get('GATE_CHANGED', ''), end='')
 if sys.argv[1].endswith('check_workspace.py') and '--wasm-libraries' in sys.argv:
     print('plakous-model')
 ''',
@@ -1014,7 +1017,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, _ = self.run_gate('--fast')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            [c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['fmt', 'fetch', *CLIPPIES]
+            [c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['fmt', 'fetch']
         )
         self.assertEqual(self.lanes(calls), [])
 
@@ -1117,7 +1120,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertNotIn('clippy:packages', result.stdout)
         self.assertFalse(any(call['args'][0] == 'clippy' for call in calls))
 
-    def test_full_adds_only_the_ignored_soak_to_every_group(self):
+    def test_full_adds_the_ignored_soak_and_standalone_docs_to_every_group(self):
         full, full_calls, full_scripts = self.run_gate('--full')
         self.log.unlink()
         steps, step_calls, step_scripts = self.run_gate('--steps', ','.join(reversed(GROUPS)))
@@ -1140,11 +1143,63 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             ]
 
         self.assertEqual(
-            stable([call for call in full_calls if call not in soaks]), stable(step_calls)
+            stable(
+                [
+                    call
+                    for call in full_calls
+                    if call not in soaks and not (call['args'][0] == 'doc' and '-p' in call['args'])
+                ]
+            ),
+            stable(step_calls),
         )
         self.assertEqual(full_scripts, step_scripts)
         headings = [line for line in full.stdout.splitlines() if line.startswith('== group:')]
         self.assertEqual(headings, [f'== group: {group} ==' for group in GROUPS])
+
+    def test_batch_mac_keeps_full_platform_clippy_but_no_wall_clock_lanes(self):
+        result, calls, scripts = self.run_gate('--batch-mac')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.profiles(calls), ['offline'])
+        self.assertEqual(sum(call['args'][0] == 'clippy' for call in calls), len(CLIPPIES))
+        self.assertFalse(
+            any(
+                Path(script[0]).name in ('check_workspace.py', 'check_features.py')
+                and '--wasm-libraries' not in script
+                for script in scripts
+            )
+        )
+
+    def test_shared_and_platform_static_partition_without_weakening_full(self):
+        result, calls, scripts = self.run_gate('--static-scope', 'shared', '--steps', 'static')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(call['args'][0] == 'clippy' for call in calls))
+        self.assertTrue(any(Path(script[0]).name == 'check_workspace.py' for script in scripts))
+        self.log.unlink()
+        result, calls, scripts = self.run_gate('--static-scope', 'platform', '--steps', 'static')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sum(call['args'][0] == 'clippy' for call in calls), len(CLIPPIES))
+        self.assertFalse([script for script in scripts if script[0].endswith('.py')])
+        result, _, _ = self.run_gate('--static-scope', 'shared', '--full')
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_worker_scope_lints_reverse_dependencies_and_keeps_global_checkers(self):
+        self.env['GATE_DEPENDENTS'] = 'plak\nplakous-hosted\n'
+        result, calls, scripts = self.run_gate('--fast', 'plakous-hosted')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lint = [call['args'] for call in calls if call['args'][0] == 'clippy']
+        self.assertEqual(len(lint), 1)
+        self.assertIn('--all-features', lint[0])
+        self.assertIn('--all-targets', lint[0])
+        self.assertNotIn('--workspace', lint[0])
+        self.assertEqual(
+            [lint[0][i + 1] for i, arg in enumerate(lint[0]) if arg == '-p'],
+            ['plak', 'plakous-hosted'],
+        )
+        self.assertIn(['tools/gate/check_workspace.py'], scripts)
+        self.assertIn(
+            ['tools/gate/check_features.py', '--library-packages', 'plak', 'plakous-hosted'],
+            scripts,
+        )
 
     def test_steps_serial_only_runs_the_serial_lane_and_worker_prerequisite(self):
         result, calls, _ = self.run_gate('--steps', 'tests-serial')

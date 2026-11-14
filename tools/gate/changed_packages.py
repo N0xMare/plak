@@ -2,7 +2,8 @@
 """Map the working-tree diff against HEAD to the workspace packages it touches.
 
 `tools/gate/dev-check.sh --fast` selects these packages and their reverse
-dependencies for its parallel test lane; static checks cover the workspace.
+dependencies for its parallel test lane and worker clippy. Structural checks
+still cover the workspace.
 A file belongs to the package whose
 directory is its longest prefix. A change to a workspace-wide Cargo input
 (the root manifest, the lockfile, toolchain, lint or nextest config) touches
@@ -13,6 +14,7 @@ files outside any package, such as docs and Python tooling, touch none.
 Usage:
   changed_packages.py            # one package name per line, or `--workspace`
   changed_packages.py PATH...    # map the given repository-relative paths
+  changed_packages.py --dependents PACKAGE...  # conservative workspace rdeps
 """
 
 from __future__ import annotations
@@ -69,6 +71,24 @@ def changed_paths(root: Path = REPO_ROOT, base: str | None = None) -> list[str]:
     return vcs_listing.changed_paths(root, base)
 
 
+def reverse_dependencies(names: list[str], packages: list[dict]) -> list[str]:
+    """Include all dependency kinds and targets, even inactive optional edges."""
+    known = {package["name"] for package in packages}
+    missing = set(names) - known
+    if missing:
+        raise ValueError(f"unknown workspace packages: {', '.join(sorted(missing))}")
+    selected = set(names)
+    while True:
+        expanded = selected | {
+            package["name"]
+            for package in packages
+            if any(dependency["name"] in selected for dependency in package["dependencies"])
+        }
+        if expanded == selected:
+            return sorted(selected)
+        selected = expanded
+
+
 def touched_packages(paths: list[str], dirs: dict[str, str]) -> list[str]:
     """Package names touched by `paths`, or `[WORKSPACE]` for a workspace input."""
     touched: set[str] = set()
@@ -86,6 +106,18 @@ def touched_packages(paths: list[str], dirs: dict[str, str]) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    if argv[:1] == ["--dependents"]:
+        metadata = subprocess.check_output(
+            ["cargo", "metadata", "--no-deps", "--locked", "--format-version", "1"],
+            cwd=REPO_ROOT,
+            text=True,
+        )
+        try:
+            names = reverse_dependencies(argv[1:], json.loads(metadata)["packages"])
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
+        print("\n".join(names))
+        return 0
     paths = argv or changed_paths()
     for name in touched_packages(paths, package_dirs()):
         print(name)

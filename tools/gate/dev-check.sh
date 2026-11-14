@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Developer gate: check (default), fast iteration, platform, full.
 # Usage: tools/gate/dev-check.sh [--qual-container] [--fast [PACKAGE...] |
-#                            --platform | --full | --soak | --steps GROUP[,GROUP...]]
+#                            --platform | --batch-mac | --full | --soak | --steps GROUP[,GROUP...]]
+# Optional prefix: --static-scope full|shared|platform (explicit steps only).
 # --steps selects exactly the named groups, in canonical order.
 # --qual-container is passed only by tools/musl/musl-check.sh (spec 06 section 7.5).
 set -euo pipefail
@@ -14,15 +15,22 @@ check_groups=static,builds,tests-parallel,tests-serial,contracts,tooling
 platform_groups=static,builds,tests-parallel,tests-serial,tests-durability
 
 tier=check
+static_scope=full
 selection=$check_groups
 packages=()
 # The musl qualification image lacks the wasm target; only that container may
 # skip the wasm check, and a run that skips records no evidence.
 qual_container=false
 if [[ "${1:-}" == --qual-container ]]; then qual_container=true; shift; fi
+if [[ "${1:-}" == --static-scope ]]; then
+  [[ $# -ge 2 ]] || { echo '--static-scope requires full, shared or platform' >&2; exit 2; }
+  static_scope=$2; shift 2
+fi
+case "$static_scope" in full|shared|platform) ;; *) echo "unknown static scope: $static_scope" >&2; exit 2 ;; esac
 case "${1:-}" in
   --fast) tier=fast; selection=static,tests-parallel; shift; packages=("$@"); set -- ;;
-  --platform) tier=platform; selection=$platform_groups; shift ;;
+  --platform) tier=platform; static_scope=platform; selection=$platform_groups; shift ;;
+  --batch-mac) tier=batch-mac; static_scope=platform; selection=static,builds,tests-parallel; shift ;;
   --full) tier=full; selection="$(IFS=,; echo "${all_groups[*]}")"; shift ;;
   --soak) tier=soak; selection=tests-serial,tests-durability; shift ;;
   --steps)
@@ -30,6 +38,9 @@ case "${1:-}" in
     if [[ $# -gt 0 ]]; then shift; fi ;;
   -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
 esac
+if [[ "$tier" == full && "$static_scope" != full ]]; then
+  echo "full requires every static check" >&2; exit 2
+fi
 if [[ $# -gt 0 ]]; then echo "unknown argument: $1" >&2; exit 2; fi
 if [[ -z "$selection" || "$selection" == ,* || "$selection" == *, || "$selection" == *,,* ]]; then
   echo "expected non-empty comma-separated step groups" >&2; exit 2
@@ -66,10 +77,12 @@ unset PLAK_HOME
 # (the release resolution) can compile a closure no workspace build sees.
 supported_packages=(plakous plakous-agent plakous-model plakous-tools plak)
 
-# Fast narrows only the parallel lane, to the touched packages and their
+# Fast narrows lint roots and the parallel lane to touched packages and their
 # reverse dependencies. Test compilation stays workspace all-features:
 # -p compilation would resolve a different feature graph.
 scope=''
+worker_clippy=()
+worker_features=()
 if [[ "$tier" == fast ]]; then
   if [[ ${#packages[@]} -eq 0 ]]; then
     package_file="$(mktemp "$TMPDIR/plak-packages.XXXXXX")"
@@ -85,6 +98,22 @@ if [[ "$tier" == fast ]]; then
     for name in "${packages[@]}"; do scope+="${scope:+ | }rdeps(=$name)"; done
   fi
   echo "fast: ${packages[*]:-no Rust package touched}"
+  if [[ "${packages[*]:-}" != --workspace ]]; then
+    worker_clippy=(--packages)
+    worker_features=(--library-packages)
+    if [[ ${#packages[@]} -gt 0 ]]; then
+      package_file="$(mktemp "$TMPDIR/plak-rdeps.XXXXXX")"
+      if ! python3 tools/gate/changed_packages.py --dependents "${packages[@]}" >"$package_file"; then
+        rm -f "$package_file"; exit 2
+      fi
+      while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        worker_clippy+=("$name")
+        worker_features+=("$name")
+      done <"$package_file"
+      rm -f "$package_file"
+    fi
+  fi
 fi
 
 # Bash 3.2 nounset rejects quoted empty arrays; guard their expansions.
@@ -489,13 +518,15 @@ run_group() {
       cargo fmt --all --check || failed_steps="fmt"
       # Ruff covers the maintainer Python trees. vendor/ and Harbor task
       # fixtures are excluded in the root tool config, not here.
-      echo "== ruff =="
-      ruff check tools tests/tooling tests/live eval \
-        || failed_steps="${failed_steps:+$failed_steps }ruff"
-      ruff format --check tools tests/tooling tests/live eval \
-        || failed_steps="${failed_steps:+$failed_steps }ruff-format"
+      if [[ "$static_scope" != platform ]]; then
+        echo "== ruff =="
+        ruff check tools tests/tooling tests/live eval \
+          || failed_steps="${failed_steps:+$failed_steps }ruff"
+        ruff format --check tools tests/tooling tests/live eval \
+          || failed_steps="${failed_steps:+$failed_steps }ruff-format"
+      fi
       structure_log='' structure_status=''
-      if [[ "$tier" == platform ]]; then
+      if [[ "$static_scope" == platform ]]; then
         echo "skip structure checkers: platform-independent (check/full on Linux)"
       else
         echo "== dependencies: fetch locked (offline first) =="
@@ -513,7 +544,7 @@ run_group() {
           echo "== structure: workspace =="
           python3 tools/gate/check_workspace.py || failed="${failed:+$failed }workspace"
           echo "== structure: features (static) =="
-          CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py \
+          CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py ${worker_features[@]+"${worker_features[@]}"} \
             || failed="${failed:+$failed }features"
           echo "== structure: evidence allowlist =="
           python3 tools/release/gate_evidence.py audit || failed="${failed:+$failed }evidence"
@@ -524,7 +555,7 @@ run_group() {
       # Workspace, then each supported package alone (tools/gate/clippy.sh).
       clippy_status="$(mktemp "$TMPDIR/plak-clippy.XXXXXX")"
       clippy_failed=''
-      if ! tools/gate/clippy.sh --status-file "$clippy_status"; then
+      if [[ "$static_scope" != shared ]] && ! tools/gate/clippy.sh --status-file "$clippy_status" ${worker_clippy[@]+"${worker_clippy[@]}"}; then
         s="$(cat "$clippy_status")"
         clippy_failed="${s:-clippy}"
       fi
@@ -564,10 +595,12 @@ run_group() {
     rustdoc)
       echo "== rustdoc =="
       RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked ${target_args[@]+"${target_args[@]}"}
-      for package in "${supported_packages[@]}"; do
-        echo "== rustdoc: $package alone =="
-        RUSTDOCFLAGS="-D warnings" cargo doc -p "$package" --no-deps --locked ${target_args[@]+"${target_args[@]}"}
-      done ;;
+      if [[ "$tier" == full ]]; then
+        for package in "${supported_packages[@]}"; do
+          echo "== rustdoc: $package alone =="
+          RUSTDOCFLAGS="-D warnings" cargo doc -p "$package" --no-deps --locked ${target_args[@]+"${target_args[@]}"}
+        done
+      fi ;;
     tests-parallel)
       echo "-- nextest: parallel lane (profile offline) --"
       if [[ -n "$scope" ]]; then

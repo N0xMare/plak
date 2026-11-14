@@ -27,6 +27,30 @@ DIRS = {
 
 
 class TouchedPackagesTests(unittest.TestCase):
+    def test_reverse_scope_includes_optional_target_and_dev_edges_and_cycles(self):
+        def package(name, *dependencies):
+            return {
+                "name": name,
+                "dependencies": [{"name": dependency} for dependency in dependencies],
+            }
+
+        packages = [
+            package("core"),
+            package("leaf", "external"),
+            package("host", "core", "harness"),
+            package("product", "host"),
+            package("harness", "host"),
+        ]
+        packages[2]['dependencies'][0].update(optional=True, target='cfg(windows)', kind='dev')
+        packages[4]['dependencies'][0]['kind'] = 'build'
+        self.assertEqual(
+            CHANGED.reverse_dependencies(["core"], packages), ["core", "harness", "host", "product"]
+        )
+        self.assertEqual(CHANGED.reverse_dependencies(["leaf"], packages), ["leaf"])
+        self.assertEqual(CHANGED.reverse_dependencies([], packages), [])
+        with self.assertRaisesRegex(ValueError, "unknown workspace packages: typo"):
+            CHANGED.reverse_dependencies(["typo"], packages)
+
     def test_ignored_proptest_regressions_are_package_inputs(self):
         with (
             tempfile.TemporaryDirectory() as temporary,

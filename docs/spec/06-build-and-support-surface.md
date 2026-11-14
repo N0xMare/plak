@@ -493,9 +493,12 @@ The gate's `builds` group therefore also builds each
 supported package alone, `cargo build -p <package>` with its own default
 features, rustc warnings denied (chapter 05 §1); for `plak` that is the release
 build's resolution. The `static` group runs clippy on the same per-package
-resolutions with all targets. The `rustdoc` group documents each supported
-package alone with default features as well as the all-features workspace;
-both resolutions deny rustdoc warnings. The feature checker scans UUID generation
+resolutions with all targets in batch and full gates. Worker `just fast`
+lints only the touched packages and their conservative reverse dependencies,
+with all features and targets; workspace Cargo inputs retain full linting.
+The `rustdoc` group documents the all-features workspace. The full/RC tier
+also documents each supported package alone with default features; both
+resolutions deny rustdoc warnings (review decision 12, §8). The feature checker scans UUID generation
 constructors in package source, tests, benches, examples and build scripts
 (including inline test modules, excluding comments and literals), and requires
 the matching `v1` through `v8` feature in that package's UUID dependency
@@ -960,10 +963,10 @@ It sets `CARGO_BUILD_TARGET=x86_64-unknown-linux-musl` and forwards the tier to
 default/maintainer feature builds and the parallel, serial and durability
 offline nextest lanes. It is genuine
 musl build-and-test evidence on a GNU host, not Alpine container qualification.
-Apple Silicon installs run `just platform` natively. Platform-independent
-checks run once per integration batch
-(`just steps static,rustdoc,contracts,tooling,package`) and in `just full`
-(chapter 05 §1).
+Apple Silicon batch evidence is `just batch-mac`; a production install adds
+`just install-checks` on that exact tree (§8). `just platform` remains the
+complete native platform tier. Platform-independent checks run once per
+integration batch, and `just full` retains every check (chapter 05 §1).
 
 Before publication, run the full offline musl
 qualification on a Linux x86_64 Docker host:
@@ -2160,14 +2163,42 @@ lanes, contracts and tooling, but no durability lane; no landing, install or
 publication rule requires it. Worker branches iterate and finish with
 `just fast <packages>` plus the groups their change needs. Main advances one
 integration batch at a time. Before a batch lands, its tip tree passes the
-integration batch gate: `just musl native` on Linux x86_64, the
-target-independent groups once
-(`just steps static,rustdoc,contracts,tooling,package`), `just platform` on
-Apple Silicon macOS, and the crash sweep (`just dev crash-sweep --strict` over
-the whole matrix when recovery, persistence, store, or host-loop code changed;
-otherwise `just dev crash-sweep --shapes <list>` for the affected shapes).
-Commits inside a batch are not gated individually. An install requires that
-batch gate on the tree being installed.
+integration batch gate:
+
+- Linux x86_64 musl runs the full platform coverage: default, standalone
+  supported-package, maintainer and portability builds, cfg-specific workspace
+  and supported-package-alone clippy, and all three routine test lanes.
+- Shared formatting/ruff, workspace/feature structure and evidence audits run
+  once, alongside workspace rustdoc, public compile contracts, tooling and the
+  dependency audit. Platform static also rechecks Rust formatting with clippy. `--static-scope shared --steps static,...` selects the
+  shared checks; `--static-scope platform --steps static,...` selects fmt and
+  cfg-specific clippy without repeating the shared checkers. These scopes
+  cannot narrow `just full`.
+- Apple Silicon macOS runs `just batch-mac`: fmt, cfg-specific workspace and
+  supported-package-alone clippy, all builds and the parallel lane. It does
+  not repeat the shared structure checks or run serial/durability per batch.
+- The crash sweep remains `just dev crash-sweep --strict` over the whole
+  matrix when recovery, persistence, store or host-loop code changed; otherwise
+  use `just dev crash-sweep --shapes <list>` for the affected shapes. Host locks
+  still exclude worker compiles from wall-clock lanes and the sweep.
+
+Review decision 12 moves per-package-alone rustdoc to the full/RC tier and
+makes the batch package dry run conditional: run `package` when any manifest,
+`Cargo.lock`, publish tooling, README or license input changed. A source-only
+batch may defer package verification; standalone package build and lint
+coverage above still runs. Every production install and RC runs `package`,
+regardless of changed paths.
+
+Commits inside a batch are not gated individually. A production install
+requires the batch gate **and** macOS serial and durability lanes plus package
+verification on the exact tree being installed (`just install-checks`). A
+prior tree's install supplement is not evidence for a changed tree. Batch-only
+Mac evidence is not permission to install. A dedicated detached Mac gate
+checkout with its own stable target directory keeps installation checkout
+switches from invalidating gate artifacts; it refuses dirty or shared
+worktrees and concurrent use. Independent gate runners keep separate checkout,
+target and scratch roots; this change adds no overlap between tooling or
+wall-clock lanes and compiler-heavy groups.
 A release candidate or publication runs `just full` on both supported
 platforms, `just musl native` and `just musl container`, the full strict crash
 sweep, and the publish dry run.

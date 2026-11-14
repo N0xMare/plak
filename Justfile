@@ -12,11 +12,19 @@ mod tui 'tools/tui/tui.just'
 mod dev 'tools/dev/dev.just'
 mod harbor 'eval/harbor.just'
 
-# fmt, structure checkers, clippy, then the parallel lane over the packages the
+# Global fmt/structure, affected-package clippy, then the parallel lane over packages the
 # working-tree diff touches (or the named ones) and their dependents.
 [doc("static checks, then the parallel lane for the diff's packages and dependents")]
 fast *PACKAGES:
     tools/gate/dev-check.sh --fast {{PACKAGES}}
+
+[doc("macOS integration batch: fmt, platform clippy, builds and parallel tests")]
+batch-mac:
+    tools/gate/dev-check.sh --batch-mac
+
+[doc("exact-tree macOS install supplement: serial, durability and package verification")]
+install-checks:
+    tools/gate/dev-check.sh --steps tests-serial,tests-durability,package
 
 # Linux workspace gate: fmt/clippy, structure checks, default/maintainer builds,
 # parallel and serial lanes, public contracts and tooling. No durability lane.

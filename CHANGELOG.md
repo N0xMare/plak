@@ -9,6 +9,13 @@ for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
+- Shorten integration and worker gates without weakening release qualification:
+  share platform-independent checks, narrow worker lint roots, keep macOS batch
+  checks to fmt/clippy, builds and parallel tests, and require exact-tree Mac
+  serial/durability plus package verification before production installation.
+  Batch packaging is conditional on packaging inputs; standalone rustdoc stays
+  in full/RC. Keep full checks on both release platforms.
+
 - Clarify that session usage is process-local since runtime open, not a lifetime
   total. Reopening after a host restart starts empty; reconnecting a client to
   the same runtime does not reset it. Durable per-turn usage is unchanged.

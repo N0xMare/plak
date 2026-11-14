@@ -47,6 +47,8 @@ offline image `plak-qual-base:6fc79538`, which is not published (spec 06).
 
 ```text
 just fast [PKG...]        # static checks, then the parallel lane for the diff's packages and dependents
+just batch-mac            # Mac batch: fmt/clippy, builds and parallel tests
+just install-checks       # exact-tree Mac install supplement: serial, durability, package
 just steps GROUPS         # exactly those comma-separated groups, in canonical order
 just check                # Linux workspace gate (no durability): fmt, clippy, structure, builds, parallel+serial, contracts, tooling
 just platform             # per install: fmt, clippy, builds, parallel, serial, durability
@@ -97,13 +99,18 @@ names and retrying offline once, online only for missing cache inputs, then
 packages and verifies the cohort strictly offline; compiled review time is informational
 here, while publication dry runs and uploads require more than a third of each
 review window remaining). Check runs all but variants, rustdoc, durability and package; platform runs
-static without the platform-independent structure checkers (fmt, ruff and
+static without ruff or the platform-independent structure checkers (fmt and
 clippy still run), builds and the
 three lanes; full runs every group, and a full pass on a clean tree records that
 tree as the evidence `just publish` requires. Later commits that change only
 `CHANGELOG.md`, `tests/live/STATUS.md`, `docs/spec/**` (not spec 07) or
 `docs/user-guide/**` keep that evidence; a `README.md` change also needs
 `just steps package` on the new tree (spec 06 §6.5).
+`just fast` keeps fmt/ruff and structural checks global, narrows clippy to the
+touched packages and conservative reverse dependencies, and compiles only
+affected facade/hosted feature profiles; batch/full retain full clippy and
+all feature profiles. Supported-package-alone rustdoc is full/RC only.
+The integration batch and exact-tree install supplement are spec 06 §8.
 `just fast` maps the working-tree diff against HEAD to packages (a root Cargo
 input means all of them), runs static and the parallel lane over `rdeps(...)`
 of those packages; it is worker evidence, not a substitute for the integration
