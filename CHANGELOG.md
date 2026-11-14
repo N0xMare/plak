@@ -17,6 +17,10 @@ for one version bump, without native protocol compatibility.
   receipts; standalone rustdoc stays in full/RC. Keep full checks on both release
   platforms. Explicit static scopes are restricted to step-group invocations.
 
+- Keep restart-matrix pilots local to their actual test run: only nextest
+  workers share its run ID; Cargo test and crash-sweep use a fresh process
+  identity even when a parent supplied an old nextest run ID.
+
 - Clarify that session usage is process-local since runtime open, not a lifetime
   total. Reopening after a host restart starts empty; reconnecting a client to
   the same runtime does not reset it. Durable per-turn usage is unchanged.

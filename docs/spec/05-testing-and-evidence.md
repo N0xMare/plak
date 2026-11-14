@@ -4459,8 +4459,10 @@ or duplicate cuts, and the final completed group checks the union of actual
 per-group cut manifests. Per-cut assertions and twin-pilot signatures are
 unchanged. A file lock shares each family/child twin pilot once per nextest
 run, under that run's isolated temporary directory, keyed to the exact test
-and product executables and fixture inputs. No pilot survives across runs or
-checkouts. All sixteen tests of a family must run in the same nextest
+and product executables and fixture inputs. `NEXTEST_RUN_ID` is shared only
+when `NEXTEST=1`; Cargo test and crash-sweep invocations use a process ID and
+start-time identity even if an earlier run ID was inherited. No pilot survives
+across runs or checkouts. All sixteen tests of a family must run in the same nextest
 invocation on one host: splitting a family across invocations, partitions,
 lanes or hosts loses the shared-pilot and complete-union evidence. This is a
 coverage requirement, not an isolation requirement; the cases run concurrently.

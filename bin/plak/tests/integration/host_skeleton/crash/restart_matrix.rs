@@ -46,16 +46,44 @@ fn publish(path: &Path, bytes: &[u8]) {
     std::fs::rename(temporary, path).unwrap();
 }
 
+fn run_identity(nextest: Option<&str>, run: Option<&str>, process: u32, started: u128) -> String {
+    match (nextest, run) {
+        (Some("1"), Some(run)) => run.to_owned(),
+        _ => format!("process-{process}-{started}"),
+    }
+}
+
+#[test]
+fn inherited_nextest_run_id_does_not_share_cargo_test_pilots() {
+    for marker in [None, Some("0"), Some("true")] {
+        let first = run_identity(marker, Some("inherited"), 10, 100);
+        assert_eq!(first, "process-10-100");
+        assert_ne!(first, run_identity(marker, Some("inherited"), 11, 100));
+        assert_ne!(first, run_identity(marker, Some("inherited"), 10, 101));
+    }
+}
+
+#[test]
+fn nextest_siblings_share_only_the_current_run() {
+    let first = run_identity(Some("1"), Some("current-run"), 10, 100);
+    assert_eq!(first, run_identity(Some("1"), Some("current-run"), 11, 101));
+    assert_ne!(first, run_identity(Some("1"), Some("another-run"), 10, 100));
+    assert_eq!(run_identity(Some("1"), None, 10, 100), "process-10-100");
+}
+
 fn cache_root() -> PathBuf {
     static RUN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let run = RUN.get_or_init(|| {
-        std::env::var("NEXTEST_RUN_ID").unwrap_or_else(|_| {
-            let started = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            format!("process-{}-{started}", std::process::id())
-        })
+        let started = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        run_identity(
+            std::env::var("NEXTEST").ok().as_deref(),
+            std::env::var("NEXTEST_RUN_ID").ok().as_deref(),
+            std::process::id(),
+            started,
+        )
     });
     let root = std::env::temp_dir().join("restart-matrices").join(run);
     std::fs::create_dir_all(&root).unwrap();
