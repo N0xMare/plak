@@ -441,6 +441,16 @@ execution-open bit stays clear. Cuts before native abandonment and after its
 commit require an Abandoning receipt, the corresponding native phase, and two
 restarts plus repeated operator requests converging on the same permanent
 Abandoned reservation without opening a driver.
+Real remote-witness cases alter the runner's durable floor and require its
+normal OwnerFloors endpoint to expose the changed tuple. Foreign-branch, lower
+and higher witnesses withhold both trees in a connected group across two host
+starts, with no native branch-fence advance or partial visibility. A daemon
+outage after publication must leave only its group withheld while an unrelated
+local group becomes Ready; reconnection completes the same receipt. Direct
+source line-head and lease probes refuse after the global Committed decision.
+An ordinary idle native driver open, unlike lease-only reconciliation, records
+execution-open even without a new checkpoint and permanently prevents guarded
+Published abandonment.
 
 Export-v13/v12 fixtures round-trip neutral content (including inline image bytes,
 opaque replay, native compaction bindings and turn counts), retain only the v12

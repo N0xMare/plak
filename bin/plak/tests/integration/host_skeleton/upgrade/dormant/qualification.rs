@@ -27,6 +27,97 @@ fn host_move_published_abandon_after_lease_only_reconciliation_opens_no_driver()
     stop(&mut target);
 }
 
+#[test]
+fn host_move_published_abandon_refuses_after_an_ordinary_idle_driver_open_without_a_new_head() {
+    let Some(fixture) = fixture() else { return };
+    let _cleanup = HomeHost(fixture.home());
+    let (mut target, source) = published_with_failure(&fixture, None, "reconcile-pause");
+    let (head, _) = identity(&fixture, DESTINATION, &source);
+    open_idle(&fixture, head);
+    assert_eq!(identity(&fixture, DESTINATION, &source).0, head);
+    let opened: i64 = target_native(&fixture)
+        .query_row(
+            "SELECT count(*) FROM imported_sessions WHERE execution_open=1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(opened, 1);
+    let receipt = receipts(&fixture).remove(0);
+    let group_id = receipt["groups"][0]["id"].as_str().unwrap();
+    for _ in 0..2 {
+        let result = output_env(
+            &fixture,
+            &["host", "upgrade", "--abandon", group_id],
+            true,
+            &[(ENABLED, "1")],
+        );
+        assert!(
+            !result.status.success(),
+            "an ordinary idle open authorized abandonment"
+        );
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("host_upgrade_group_abandon"),
+            "{result:?}"
+        );
+        let receipt = receipts(&fixture).remove(0);
+        assert_eq!(receipt["groups"][0]["phase"], "abandoning");
+        assert!(receipt["groups"][0]["abandon_error"].is_string());
+        assert_eq!(receipt["mappings"][0]["abandoned"], false);
+        assert_eq!(native_phase(&fixture), NATIVE_PUBLISHED);
+        assert_eq!(identity(&fixture, DESTINATION, &source).0, head);
+    }
+    assert!(!fixture.root.join("evidence.jsonl").exists() || crash::dispatches(&fixture) == 0);
+    stop(&mut target);
+}
+
+fn open_idle(fixture: &Fixture, head: plakous::sessions::SessionLocator) {
+    use plakous::sessions::{
+        AgentSessions, OpenSessionOutcome, OpenSessionRequest, SessionBackend, SessionOperationId,
+    };
+    use plakous_offline_crash_harness::{BoundaryController, scripted_runtime_binding};
+    let mut plan: plakous_offline_crash_harness::script::ScriptPlan =
+        serde_json::from_slice(&std::fs::read(fixture.script()).unwrap()).unwrap();
+    plan.profile_effort = Some(plakous::model::ReasoningEffort::Medium);
+    let controller = BoundaryController::quiet_from_evidence_path(
+        plakous_offline_crash_harness::protocol::CrashBoundary::None,
+        fixture.root.join("idle-open-evidence.jsonl"),
+    )
+    .unwrap();
+    let binding =
+        scripted_runtime_binding(&fixture.workspace(), controller, std::sync::Arc::new(plan))
+            .unwrap();
+    let sessions = AgentSessions::new(
+        SessionBackend::sqlite(
+            fixture
+                .home()
+                .join("state")
+                .join(DESTINATION)
+                .join("runtime.sqlite3"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    executor
+        .block_on(async {
+            let result = sessions
+                .open(OpenSessionRequest::new(
+                    SessionOperationId::new("qualification:ordinary-idle-open").unwrap(),
+                    head,
+                    binding,
+                ))
+                .await
+                .unwrap();
+            let OpenSessionOutcome::Opened { session, .. } = result else {
+                panic!("ordinary idle open did not attach: {result:?}")
+            };
+            assert_eq!(session.locator(), head);
+            assert_eq!(session.release().await.unwrap(), head);
+        })
+        .unwrap();
+}
+
 fn abandon_cut(cut: &str, expected_native: i64) {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
@@ -69,6 +160,10 @@ fn abandon_cut(cut: &str, expected_native: i64) {
 }
 
 fn published(fixture: &Fixture, cut: Option<&str>) -> (Host, String) {
+    published_with_failure(fixture, cut, "transfer-witness")
+}
+
+fn published_with_failure(fixture: &Fixture, cut: Option<&str>, failure: &str) -> (Host, String) {
     let source = seed(fixture, 91);
     let mut host = start_env(
         fixture,
@@ -90,7 +185,7 @@ fn published(fixture: &Fixture, cut: Option<&str>) -> (Host, String) {
     let mut environment = vec![
         (ENABLED, "1".into()),
         ("PLAK_TEST_STATE_KEY", DESTINATION.into()),
-        ("PLAK_TEST_HOST_UPGRADE_FAILURE", "transfer-witness".into()),
+        ("PLAK_TEST_HOST_UPGRADE_FAILURE", failure.into()),
     ];
     if let Some(cut) = cut {
         environment.push(("PLAK_TEST_HOST_UPGRADE_CUT", cut.into()));
@@ -102,7 +197,7 @@ fn published(fixture: &Fixture, cut: Option<&str>) -> (Host, String) {
         let receipt = receipts(fixture).remove(0);
         let group = &receipt["groups"][0];
         assert_eq!(group["phase"], "published");
-        if !group["transfers"].as_object().unwrap().is_empty() {
+        if failure == "reconcile-pause" || !group["transfers"].as_object().unwrap().is_empty() {
             break;
         }
         assert!(

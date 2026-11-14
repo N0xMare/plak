@@ -7,6 +7,7 @@ const ENABLED: &str = "PLAK_TEST_HOST_UPGRADE_DORMANT";
 
 mod children;
 mod qualification;
+mod remote_guards;
 mod review;
 
 #[test]
