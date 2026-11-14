@@ -124,7 +124,7 @@ fn abandon_twice(services: &crate::shell::services::Services, receipt: &mut Rece
     Ok(())
 }
 
-async fn reconstructed(
+pub(super) async fn reconstructed(
     root: &PathFixture,
     capsule: &Capsule,
 ) -> TestResult<plakous::sessions::host_move::MoveInstall> {

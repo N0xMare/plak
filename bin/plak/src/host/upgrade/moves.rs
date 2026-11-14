@@ -18,6 +18,13 @@ pub(super) struct Frozen {
         plakous_recursive_subagents::tree::CustodyHold,
     )>,
     committing: bool,
+    decision_pending: bool,
+}
+
+impl Frozen {
+    pub(super) fn decision_pending(&self) -> bool {
+        self.decision_pending
+    }
 }
 
 impl Drop for Frozen {
@@ -103,6 +110,7 @@ pub(super) fn prepare(
             holds: Vec::new(),
             trees: Vec::new(),
             committing: false,
+            decision_pending: false,
         }),
         step_drain: None,
         executable: authority.destination.clone(),
@@ -169,6 +177,7 @@ fn commit_source(services: &Services, authority: &mut Receipt, ready: &mut Ready
             "host upgrade decision requires startup reconciliation: {}",
             failure.message()
         );
+        guard.decision_pending = true;
         return Ok(());
     }
     crate::carry::upgrade::crash_cut("move-after-commit");
@@ -388,7 +397,19 @@ fn prepare_group(
         .map_err(|error| CliFailure::new(error.to_string()))?
         .map_err(|error| CliFailure::new(error.to_string()))?;
     crate::carry::upgrade::crash_cut("move-after-source-prepare");
-    let capsule = inventory.capsule(services, index, &native, runtime)?;
+    let mut capsule = inventory.capsule(services, index, &native, runtime)?;
+    if crate::test_hooks::upgrade_move_failure("reservation-lines") {
+        let _ = capsule.lines.pop();
+    }
+    if crate::test_hooks::upgrade_move_failure("reservation-runners")
+        && let Some(head) = capsule
+            .sessions
+            .iter_mut()
+            .flat_map(|session| &mut session.heads)
+            .next()
+    {
+        head.context.runner = "unreserved-runner".into();
+    }
     verify_reservation(&receipt.groups[index], &capsule)?;
     let directory = receipt.path(paths).with_file_name("");
     let bytes = serde_json::to_vec(&capsule).map_err(|error| CliFailure::new(error.to_string()))?;

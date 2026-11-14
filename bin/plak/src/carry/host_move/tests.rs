@@ -240,6 +240,7 @@ async fn move_capsule_fidelity_preserves_all_native_semantic_families() -> TestR
     let compiler = AgentSessions::move_preflight_compiler(capsule.sessions[0].durability.decode())?;
     let runtime = || text_binding(&root, "target-evidence.jsonl");
     let rebuilt = compiler.reconstruct_move_head(runtime()?, request).await?;
+    assert_imported_compaction_display(&root, &capsule).await?;
     assert_product_fidelity(
         &capsule,
         SessionLocator::new(
@@ -284,6 +285,49 @@ async fn move_capsule_fidelity_preserves_all_native_semantic_families() -> TestR
 }
 
 struct PathFixture(tempfile::TempDir);
+
+async fn assert_imported_compaction_display(root: &PathFixture, capsule: &Capsule) -> TestResult {
+    use plakous::sessions::{
+        SESSION_HISTORY_VISIBILITY_REVISION, SessionHistoryCompaction,
+        SessionHistoryCompactionPass, SessionHistoryDirection, SessionHistoryPageOutcome,
+        SessionHistoryPageRequest, SessionHistoryVisibility,
+    };
+    let native = installation::reconstructed(root, capsule).await?;
+    let branch = &native.sessions()[0].branches[0];
+    let locator = SessionLocator::new(
+        branch.session.session_id(),
+        branch.session.branch_id(),
+        branch.checkpoint,
+    );
+    let target = AgentSessions::new(SessionBackend::memory()?)?;
+    let operation = MoveOperation::new(capsule.operation)?;
+    let digest = native.digest();
+    target.stage_move(operation, native).await?;
+    target
+        .finish_move(operation, digest, MoveDisposition::Publish)
+        .await?;
+    let page = target
+        .history_page(SessionHistoryPageRequest::new(
+            locator,
+            locator.checkpoint_id(),
+            SessionHistoryVisibility::Metadata,
+            SESSION_HISTORY_VISIBILITY_REVISION,
+            SessionHistoryDirection::Forward,
+            32,
+            65_536,
+            None,
+        ))
+        .await?;
+    let SessionHistoryPageOutcome::Page { items, .. } = page else {
+        return Err("imported compaction history required a fresh snapshot".into());
+    };
+    assert!(items.iter().any(|item| item.compaction()
+        == Some(SessionHistoryCompaction::Recorded {
+            replaced_segments: 5,
+            pass: SessionHistoryCompactionPass::Native,
+        })));
+    Ok(())
+}
 
 fn text_binding(
     root: &PathFixture,

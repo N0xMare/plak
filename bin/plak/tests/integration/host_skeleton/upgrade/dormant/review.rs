@@ -68,6 +68,64 @@ fn host_move_uncertain_decision_restarts_without_resuming_source_admissions() {
     decision_failure("commit-after-save", "acknowledged");
 }
 
+#[test]
+fn host_move_post_prepare_membership_divergence_refuses_and_withdraws_while_prepared() {
+    for failure in ["reservation-lines", "reservation-runners"] {
+        let Some(fixture) = fixture() else { return };
+        let _cleanup = HomeHost(fixture.home());
+        let source = seed(&fixture, 84);
+        let mut host = start_env(
+            &fixture,
+            &[],
+            &[
+                (ENABLED, "1".into()),
+                ("PLAK_TEST_HOST_UPGRADE_FAILURE", failure.into()),
+            ],
+        );
+        runner::wait_local_runner_ready(&host);
+        let result = output_env(
+            &fixture,
+            &["host", "upgrade", "--expect-binary", &binary(&fixture)],
+            true,
+            &[(ENABLED, "1")],
+        );
+        assert!(!result.status.success());
+        assert!(
+            String::from_utf8_lossy(&result.stderr)
+                .contains("prepared group differs from its durable reservation"),
+            "{result:?}"
+        );
+        let receipt = receipts(&fixture).remove(0);
+        assert_eq!(receipt["phase"], "aborted");
+        assert_eq!(receipt["source_archival_pending"], false);
+        assert_eq!(receipt["groups"][0]["source_retired"], false);
+        let capsule = fixture
+            .home()
+            .join("host/upgrades")
+            .join(receipt["id"].as_str().unwrap())
+            .join(format!(
+                "{}.json",
+                receipt["groups"][0]["id"].as_str().unwrap()
+            ));
+        assert!(
+            !capsule.exists(),
+            "reservation mismatch reached group export"
+        );
+        assert_eq!(
+            export(&fixture, &source, false, "withdrawn-membership.json")["queue"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(matches!(
+            Client::connect(&host).request(1, new_session(&fixture.workspace())),
+            Outcome::Ok(Answer::Created { .. })
+        ));
+        stop(&mut host);
+    }
+}
+
 fn decision_failure(failure: &str, phase: &str) {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
@@ -87,6 +145,14 @@ fn decision_failure(failure: &str, phase: &str) {
         true,
         &[(ENABLED, "1")],
     );
+    if failure == "commit-before-save" {
+        assert!(!result.status.success());
+        assert!(
+            String::from_utf8_lossy(&result.stderr)
+                .contains("decision pending startup reconciliation; check `plak status`"),
+            "{result:?}"
+        );
+    }
     let deadline = Instant::now() + WAIT;
     while receipts(&fixture)[0]["phase"] != phase && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));

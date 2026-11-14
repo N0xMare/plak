@@ -5638,11 +5638,18 @@ not. Source native retirement completes through the exact retained producer,
 with retryable acknowledgements, before any target group is installed.
 Every source-key startup withdraws the native preparations of Aborted group
 receipts, even when no source archive was attempted. A recovered preparation
-digest is recorded before withdrawal so repeated cleanup stays exact. An
+digest is recorded before withdrawal so repeated cleanup stays exact. A foreign-key
+startup may mark a native-prepared attempt Aborted without opening the source
+store: its lines remain frozen until the source key runs again and withdraws
+them. That own-key startup is the rollback path; marking the receipt Aborted
+alone does not restore native source availability. An
 uncertain Committed publication stops the paused source and lets startup resolve
 the durable decision; it never replies with a precommit refusal or reopens
 admissions. A retirement failure after a known durable decision is deferred to
 the retained producer, not treated as rollback.
+The requesting command reports "decision pending startup reconciliation; check
+`plak status`" when publication is uncertain, even if startup later withdraws
+an unpublished attempt and the command exits unsuccessfully.
 Target stages stay invisible until every product/tree seed commits. Publication
 alone is insufficient: receipt-aware execution, metadata mutation and ordinary
 runner readoption remain blocked for the entire group until a fresh exact-owner

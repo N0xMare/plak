@@ -44,6 +44,13 @@ fn dormant_tree_child_allocation_mismatch_or_an_unrelated_unresolved_kind_refuse
             .contains("disagrees")
     );
     source.operations.insert(marker_id.clone(), saved);
+    let locator = source.nodes.get_mut(&child).unwrap().session_locator.take();
+    assert!(
+        DormantTree::capture(&source)
+            .unwrap_err()
+            .contains("no bound node")
+    );
+    source.nodes.get_mut(&child).unwrap().session_locator = locator;
     source.operations.get_mut(&marker_id).unwrap().tool_name = "another_unresolved_kind".into();
     assert!(DormantTree::capture(&source).is_err());
 }

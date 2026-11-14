@@ -420,7 +420,11 @@ a foreign startup aborting with an unverifiable producer, repeated native
 withdrawal, and both outcomes of uncertain decision publication. A committed
 retirement failure must retry forward. Direct native phase and line-head checks
 pin retirement before its receipt acknowledgement. Before-stage receipt checks
-pin the target digest before native staging. Exact-transfer mismatch and final
+pin the target digest before native staging. Post-prepare line and runner
+divergence must refuse before writing a group capsule, withdraw native
+preparation and restore source admissions. Uncertain-publication cases also
+require the requester to receive the startup-reconciliation remedy.
+Exact-transfer mismatch and final
 owner-sweep fault hooks withhold Published groups; explicit CLI abandonment
 disposes them without opening a driver. These are test-only response-boundary
 faults, not substitutes for the separate remote-runner outage rehearsal.

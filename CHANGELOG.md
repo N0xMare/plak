@@ -35,6 +35,9 @@ for one version bump, without native protocol compatibility.
   when the continuation is admitted. Pin in-turn notices after continuation
   and user-prompt admission, without a duplicate idle wake.
 
+- Report uncertain host-upgrade decisions to the requester with a startup
+  reconciliation remedy, including attempts later withdrawn without surrender.
+
 - Clarify that session usage is process-local since runtime open, not a lifetime
   total. Reopening after a host restart starts empty; reconnecting a client to
   the same runtime does not reset it. Durable per-turn usage is unchanged.

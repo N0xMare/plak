@@ -764,9 +764,22 @@ fn handle(
         Ok((ready, receipt)) => {
             caller.ready();
             crate::carry::upgrade::crash_cut("before-answer");
+            let decision_pending = ready
+                .move_guard
+                .as_ref()
+                .is_some_and(moves::Frozen::decision_pending);
             *pending
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ready);
+            if decision_pending {
+                write(
+                    &mut stream,
+                    &Answer::Progress {
+                        detail: "decision pending startup reconciliation; check `plak status`"
+                            .into(),
+                    },
+                )?;
+            }
             write(&mut stream, &Answer::Ready { receipt })
         }
         Err(failure) => write(
