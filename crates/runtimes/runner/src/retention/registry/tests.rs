@@ -3,6 +3,8 @@ use super::*;
 use plakous_runner_protocol::retention::{Id, Job, Status};
 use std::os::unix::fs::DirBuilderExt as _;
 
+mod observations;
+
 fn id(value: &str) -> Id {
     Id::try_from(value.to_owned()).unwrap()
 }
@@ -79,6 +81,67 @@ fn retention_review_intent_cannot_leapfrog_a_different_destination_tuple() {
 }
 
 #[test]
+fn retention_retry_retargets_only_the_previous_unconfirmed_own_intent() {
+    let (_root, registry, scope, line, to) = fixture();
+    let mut pending = line.clone();
+    pending.origin.instance = id("unanswered-original");
+    registry
+        .intent(&scope, pending.owner.clone(), to.clone(), pending.clone())
+        .unwrap();
+    let mut restarted = scope.clone();
+    restarted.host_instance = id("restarted-receiver");
+    let desired = Owner {
+        fence: 3,
+        ..to.clone()
+    };
+    let foreign = Owner {
+        branch: id("foreign"),
+        ..to.clone()
+    };
+    assert!(
+        registry
+            .retry_intent(
+                &restarted,
+                &foreign,
+                pending.owner.clone(),
+                desired.clone(),
+                pending.clone()
+            )
+            .is_err()
+    );
+    assert!(
+        registry
+            .retry_intent(&restarted, &to, foreign, desired.clone(), pending.clone())
+            .is_err()
+    );
+    assert!(
+        registry
+            .retry_intent(&restarted, &to, line.owner.clone(), desired.clone(), line)
+            .is_err(),
+        "confirmed transfers cannot use their old source"
+    );
+    registry
+        .retry_intent(
+            &restarted,
+            &to,
+            pending.owner.clone(),
+            desired.clone(),
+            pending.clone(),
+        )
+        .unwrap();
+    let reopened = Registry::open(registry.path.parent().unwrap()).unwrap();
+    let saved = reopened
+        .entries("home", None)
+        .into_iter()
+        .find(|entry| entry.inventory.origin == pending.origin)
+        .unwrap();
+    assert_eq!(saved.to, desired);
+    assert_eq!(saved.from, pending.owner);
+    assert_eq!(saved.holder, "restarted-receiver");
+    assert!(!saved.confirmed);
+}
+
+#[test]
 fn retention_review_late_snapshots_cannot_revive_consumed_or_lost_unreachable_jobs() {
     let (_root, registry, scope, line, to) = fixture();
     assert!(!registry.builds.join(line.origin.build.as_str()).exists());
@@ -126,6 +189,28 @@ fn retention_review_occupancy_respects_forwarding_filter_and_terminal_proof() {
     registry
         .update(&scope, &line.origin, &to, line.jobs, 2)
         .unwrap();
+    assert_eq!(registry.occupancy(|_, _| true).values().sum::<usize>(), 0);
+}
+
+#[test]
+fn retention_observed_occupancy_deduplicates_and_cannot_revive_consumed_terminals() {
+    let (_root, registry, scope, mut line, to) = fixture();
+    registry.remember(&scope, [line.clone()]).unwrap();
+    assert_eq!(registry.occupancy(|_, _| true).values().sum::<usize>(), 1);
+    assert_eq!(registry.occupancy(|_, _| false).values().sum::<usize>(), 0);
+    let allocation = line.jobs[0].session.clone();
+    line.jobs[0].terminal = true;
+    line.jobs[0].status = Status::Exited { code: Some(0) };
+    registry
+        .update(&scope, &line.origin, &to, line.jobs.clone(), 2)
+        .unwrap();
+    assert_eq!(registry.occupancy(|_, _| true).values().sum::<usize>(), 0);
+    registry
+        .acknowledged(&scope, &line.origin, &to, &[allocation])
+        .unwrap();
+    line.jobs[0].terminal = false;
+    line.jobs[0].status = Status::Running {};
+    registry.remember(&scope, [line]).unwrap();
     assert_eq!(registry.occupancy(|_, _| true).values().sum::<usize>(), 0);
 }
 

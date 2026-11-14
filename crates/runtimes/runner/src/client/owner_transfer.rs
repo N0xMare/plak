@@ -17,6 +17,56 @@ pub enum ExactOwnerTransfer {
 }
 
 impl RunnerClient {
+    /// Forgets only ephemeral witnesses for these exact lines of this host instance.
+    ///
+    /// # Errors
+    /// Refuses non-normal binds, invalid line sets, lost reads or malformed replies.
+    #[doc(hidden)]
+    pub async fn forget_owner_witnesses(&self, lines: &[String]) -> Result<(), RunnerFailure> {
+        if self.inner.qualification || self.inner.bind.inspect || !valid_floor_query(lines) {
+            return Err(RunnerFailure::NotSent(
+                "witness release requires a normal bind and 1..=256 unique line IDs".into(),
+            ));
+        }
+        let (waiter, answer) = tokio::sync::oneshot::channel();
+        let request_id = {
+            let mut state = lock(&self.inner.state);
+            let id = state
+                .witness_releases
+                .iter()
+                .find(|(id, held)| held.as_slice() == lines && !state.questions.contains_key(*id))
+                .map_or_else(
+                    || self.inner.next_id("forget-witnesses"),
+                    |(id, _)| id.clone(),
+                );
+            state.witness_releases.insert(id.clone(), lines.to_vec());
+            state.questions.insert(id.clone(), waiter);
+            id
+        };
+        let _question = FloorQuestion {
+            inner: &self.inner,
+            id: &request_id,
+        };
+        if !self
+            .inner
+            .send(plakous_runner_protocol::HostFrame::ForgetOwnerWitnesses {
+                request_id: request_id.clone(),
+                lines: lines.to_vec(),
+            })
+        {
+            return Err(RunnerFailure::ReadInterrupted(
+                "witness release was not sent".into(),
+            ));
+        }
+        match tokio::time::timeout(self.inner.windows.read, answer).await {
+            Ok(Ok(Ok(super::InspectionAnswer::OwnerWitnessesForgotten))) => Ok(()),
+            Ok(Ok(Err(error))) => Err(error),
+            _ => Err(RunnerFailure::ReadInterrupted(
+                "witness release was lost or malformed".into(),
+            )),
+        }
+    }
+
     /// Reads durable floors of explicitly named lines without taking authority.
     ///
     /// # Errors
@@ -57,9 +107,15 @@ impl RunnerClient {
         match reply {
             Some(Ok(super::InspectionAnswer::OwnerFloors(floors)))
                 if floors.len() == lines.len()
+                    && floors
+                        .iter()
+                        .map(|floor| floor.retained.len())
+                        .sum::<usize>()
+                        <= plakous_runner_protocol::OWNER_FLOOR_QUERY_LIMIT
                     && floors.iter().zip(lines).all(|(floor, line)| {
                         &floor.line == line
                             && floor.owner.as_ref().is_none_or(|owner| &owner.line == line)
+                            && floor.retained.iter().all(|owner| &owner.line == line)
                     }) =>
             {
                 Ok(floors)
@@ -115,6 +171,26 @@ pub(crate) fn valid_floor_query(lines: &[String]) -> bool {
 }
 
 impl Inner {
+    pub(super) fn witnesses_forgotten(&self, request_id: &str) {
+        let mut state = lock(&self.state);
+        state.witness_releases.remove(request_id);
+        if let Some(waiter) = state.questions.remove(request_id) {
+            let _ = waiter.send(Ok(super::InspectionAnswer::OwnerWitnessesForgotten));
+        }
+    }
+
+    pub(super) fn retry_witness_releases(&self) {
+        let state = lock(&self.state);
+        if let Some(sender) = &state.sender {
+            for (request_id, lines) in &state.witness_releases {
+                let _ = sender.send(plakous_runner_protocol::HostFrame::ForgetOwnerWitnesses {
+                    request_id: request_id.clone(),
+                    lines: lines.clone(),
+                });
+            }
+        }
+    }
+
     /// Sends `owner`'s transfer before its first call, unless it is the
     /// owner last transferred for its line. A transfer from an owner the
     /// runner no longer accepts is answered with the one it does; a newer

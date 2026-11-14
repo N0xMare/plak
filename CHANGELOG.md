@@ -45,6 +45,11 @@ for one version bump, without native protocol compatibility.
 - Report uncertain host-upgrade decisions to the requester with a startup
   reconciliation remedy, including attempts later withdrawn without surrender.
 
+- Reconcile retained promoted-job allocations before publishing whole-group
+  ownership readiness. Fresh original-worker witnesses fence cross-build
+  transfers; disconnected originals keep dependent groups withheld and their
+  jobs charged. Live ownership moves remain privately qualified, not enabled.
+
 - Clarify that session usage is process-local since runtime open, not a lifetime
   total. Reopening after a host restart starts empty; reconnecting a client to
   the same runtime does not reset it. Durable per-turn usage is unchanged.

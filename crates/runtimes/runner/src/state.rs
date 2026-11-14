@@ -141,6 +141,7 @@ impl Tables {
             .iter()
             .map(|line| plakous_runner_protocol::OwnerFloor {
                 line: line.clone(),
+                retained: Vec::new(),
                 owner: durable.as_ref().map_or_else(
                     || self.owner(host, line).map(|(owner, _)| owner),
                     |floors| floors.get(line).cloned(),

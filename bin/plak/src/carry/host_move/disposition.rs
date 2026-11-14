@@ -43,6 +43,13 @@ pub(crate) fn abandon(services: &Services, receipt: &mut Receipt, index: usize) 
         return Err(failure("Ready or foreign groups cannot be abandoned"));
     }
     if receipt.groups[index].phase == GroupPhase::Abandoned {
+        let executor = plakous::application::ApplicationExecutor::new().map_err(failure)?;
+        if let Err(error) = executor
+            .block_on(super::reconciliation::release_disposed(services, receipt))
+            .map_err(failure)?
+        {
+            eprintln!("host upgrade disposed-group witness release deferred: {error:?}");
+        }
         return Ok(());
     }
     receipt.groups[index].phase = GroupPhase::Abandoning;
@@ -94,7 +101,14 @@ pub(crate) fn abandon(services: &Services, receipt: &mut Receipt, index: usize) 
     {
         receipt.phase = Phase::Acknowledged;
     }
-    receipt.save(services.paths()?)
+    receipt.save(services.paths()?)?;
+    if let Err(error) = executor
+        .block_on(super::reconciliation::release_disposed(services, receipt))
+        .map_err(failure)?
+    {
+        eprintln!("host upgrade disposed-group witness release deferred: {error:?}");
+    }
+    Ok(())
 }
 
 async fn dispose_native(

@@ -6,6 +6,28 @@ use plakous_runner_protocol::{LineOwner, Refusal};
 const TAIL_BYTES: usize = 4096;
 
 impl RunnerService {
+    pub(super) fn receive_job_terminals(
+        &self,
+        host: &str,
+        instance: &str,
+        request_id: String,
+        owner: LineOwner,
+        after: u32,
+        sender: &tokio::sync::mpsc::UnboundedSender<RunnerFrame>,
+    ) {
+        let service = self.clone();
+        let host = host.to_owned();
+        let instance = instance.to_owned();
+        let sender = sender.clone();
+        tokio::spawn(async move {
+            let _ = sender.send(
+                service
+                    .job_terminals(&host, &instance, request_id, &owner, after)
+                    .await,
+            );
+        });
+    }
+
     pub(super) async fn job_terminals(
         &self,
         host: &str,

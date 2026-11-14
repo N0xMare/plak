@@ -61,6 +61,7 @@ fn connected(journal: &Arc<ClosingJournal>) -> (RunnerClient, mpsc::UnboundedRec
                 pending: HashMap::new(),
                 transfers: HashMap::new(),
                 questions: HashMap::new(),
+                witness_releases: HashMap::new(),
                 refusal: None,
                 streams: HashMap::new(),
                 operator_streams: HashMap::new(),
@@ -125,6 +126,7 @@ async fn dropped_owner_floor_query_releases_only_its_reply_slot_and_never_claims
     client.inner.receive(RunnerFrame::OwnerFloors {
         request_id: live,
         floors: vec![plakous_runner_protocol::OwnerFloor {
+            retained: Vec::new(),
             line: "other".into(),
             owner: None,
         }],
@@ -142,6 +144,63 @@ async fn dropped_owner_floor_query_releases_only_its_reply_slot_and_never_claims
 #[test]
 fn disconnected_link_rejects_dispatch_before_claiming_or_queuing() {
     assert_not_sent(true);
+}
+
+#[tokio::test]
+async fn lost_witness_release_reply_retries_only_cleanup_until_acknowledged() {
+    let root = tempfile::tempdir().unwrap();
+    let journal = Arc::new(ClosingJournal {
+        files: FileCallJournal::open(root.path()).unwrap(),
+        closer: CancellationToken::new(),
+        claims: AtomicU64::new(0),
+    });
+    let (client, mut frames) = connected(&journal);
+    let releasing = client.clone();
+    let release =
+        tokio::spawn(async move { releasing.forget_owner_witnesses(&["disposed".into()]).await });
+    let HostFrame::ForgetOwnerWitnesses { request_id, lines } = frames.recv().await.unwrap() else {
+        panic!("witness release")
+    };
+    assert_eq!(lines, ["disposed"]);
+    release.abort();
+    assert!(release.await.unwrap_err().is_cancelled());
+    let reading = client.clone();
+    let independent =
+        tokio::spawn(async move { reading.owner_floors(&["independent".into()]).await });
+    let HostFrame::OwnerFloors {
+        request_id: live, ..
+    } = frames.recv().await.unwrap()
+    else {
+        panic!("independent floor read")
+    };
+    client.inner.retry_witness_releases();
+    let HostFrame::ForgetOwnerWitnesses {
+        request_id: retry,
+        lines,
+    } = frames.recv().await.unwrap()
+    else {
+        panic!("cleanup retry")
+    };
+    assert_eq!(retry, request_id);
+    assert_eq!(lines, ["disposed"]);
+    assert!(lock(&client.inner.state).questions.contains_key(&live));
+    client
+        .inner
+        .receive(RunnerFrame::OwnerWitnessesForgotten { request_id });
+    client.inner.retry_witness_releases();
+    assert!(frames.try_recv().is_err());
+    assert!(lock(&client.inner.state).witness_releases.is_empty());
+    client.inner.receive(RunnerFrame::OwnerFloors {
+        request_id: live,
+        floors: vec![plakous_runner_protocol::OwnerFloor {
+            line: "independent".into(),
+            owner: None,
+            retained: vec![],
+        }],
+    });
+    assert_eq!(independent.await.unwrap().unwrap()[0].line, "independent");
+    assert_eq!(journal.pending().unwrap(), []);
+    assert_eq!(journal.claims.load(Ordering::Relaxed), 0);
 }
 
 #[test]

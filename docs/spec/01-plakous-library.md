@@ -6604,7 +6604,7 @@ the normal recovery-required path before Ready. The driver's placement parking
 - **Bounded ownership witnesses.** Only a normally bound host may send
   `OwnerFloors { request_id, lines }`: 1–256 distinct, nonempty line IDs, each
   at most 128 printable non-whitespace ASCII bytes. The reply has one
-  `{ line, owner }` row per requested ID in request order; an unseen line has
+  `{ line, owner, retained }` row per requested ID in request order; an unseen native line has
   `owner = null`. The authenticated bound host supplies the namespace, never
   a request field. This reads recorded floors even when no process-session
   environment exists, without expiring leases, allocating environments,
@@ -6612,7 +6612,42 @@ the normal recovery-required path before Ready. The driver's placement parking
   historical floors. Each durable query calls the same floor backend reload
   used after native custody acquisition; read failure refuses the query, never
   returns a stale cache. Unlike activation, the read does not rebuild live
-  owner/adoption or operation tables. Inspection and qualification refuse it. The unsupported
+  owner/adoption or operation tables. Inspection and qualification refuse it.
+  The `retained` list contains fresh owner tuples of original workers with jobs
+  on that line, obtained through retention-v1 read-only `lines`, never a cached
+  receiver inventory. At most 256 retained witnesses are returned across the
+  response. Only explicitly requested lines enter the receiver's ephemeral
+  read-to-CAS cache. It is scoped to the bound host instance, with at most 256
+  cached lines and 16 MiB per host, and 256 origins per line. The next transfer
+  consumes that line's observations. Overflow names the host/line bound and
+  refuses without evicting an independent pending
+  observation. This cache is not authority: its only use is to persist required
+  occupancy and the exact own intent if an original disappears between the
+  fresh read and CAS. Observed nonterminal allocations count once against the
+  receiver's job bound even before adoption, never charging unrelated discovered
+  lines. Terminal, consumption, positive-loss and durable-intent observations
+  prune the cache; durable fences prevent stale occupancy resurrection.
+  `ForgetOwnerWitnesses { request_id, lines }` (native protocol 9) releases only
+  ephemeral observations for the bound host instance and those exact 1..=256
+  unique bounded line IDs. `OwnerWitnessesForgotten` acknowledges unknown or
+  already-cleared lines idempotently. Inspection and qualification refuse it.
+  It never changes durable intents, owner floors, jobs or another host's cache.
+  Reconnect/new-instance binding clears the old host-instance observations;
+  late replies cannot repopulate a retired connection's cache. Disposed groups
+  send this release without disconnecting independent groups; failed sends log
+  and retry only that idempotent release on the existing native client
+  reconciliation tick, until acknowledgement or connection replacement. This
+  does not defer Ready or completion acknowledgement.
+  The observation never grants control. An unreachable original still cannot accept that CAS or
+  pass the final fresh sweep. A fresh native peer with no original witness
+  cannot take a higher owner for carried nonterminal jobs.
+  Missing or uncertain originals refuse the read without marking them
+  lost, releasing occupancy or taking authority. A new native peer may have no
+  floor while those originals still hold the imported source tuple. Every native
+  and original witness must be the exact imported source or the coordinator's
+  saved own intent before any higher lease is proposed, then the exact intended
+  owner in the final whole-group sweep. This finalizes unshipped protocol 9;
+  retention-v1 encodings are unchanged. The unsupported
   host-layer exact-transfer client sends the existing `TransferOwner` CAS once
   and returns a mismatching witness, never retrying from it or trusting a
   cached acceptance. Ordinary transfer/reopen retry semantics are unchanged.
@@ -6624,6 +6659,17 @@ the normal recovery-required path before Ready. The driver's placement parking
   must match a carried source branch and its floor; it is not relabeled as the
   current head or silently raised. An unrepresented or ahead-of-source witness
   refuses before surrender.
+  Replacement retries retain exact own intended tuples rather than forgetting
+  an older CAS that may finish late. The coordinator and receiver each keep at
+  most 64 prior own intents per line/original; overflow withholds rather than
+  evicting a possibly dispatched tuple. The receiver also retains its initial
+  source and last positively accepted original owner. A fresh witness must be
+  that proven owner or an exact own pending intention, never an arbitrary
+  intermediate fence. The replacement intent is synced before its CAS;
+  positive acceptance advances the proven owner and prunes receiver history.
+  Confirmed transfers cannot revive their old source. This changes only the
+  unshipped group journal and this build's private native-9 delegation records,
+  not the retention-v1 endpoint. Foreign-witness retries remain forbidden.
 - **Read-only qualification.** Instead of binding, a paired host may answer
   Hello with `Qualify { host_id, version }`. All three version components
   must match, and the runner's allowlist must admit the home. This mode is

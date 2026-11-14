@@ -5725,6 +5725,12 @@ An offline original retains its cached
 occupancy and withholds dependent groups, not unrelated Ready groups. Existing
 continuation decisions, queue/mail IDs and one-time admission rules then resume
 through the ordinary startup scan, never by replaying source requests.
+Ready and Abandoned groups release their instance-scoped ephemeral runner
+witnesses. Failed sends are logged and the native client retries only that
+idempotent release on its existing reconciliation tick, until acknowledged or
+the connection ends. Neither group Ready nor completion acknowledgement waits
+for cleanup; durable ownership/job obligations are unchanged. A host crash
+clears its obsolete instance's observations at the runner bind boundary.
 Existing product/tree semantic cuts preserve the original handoff decisions,
 attempts and accepted command IDs; open turns, unreported process calls and
 unjoined effect journals still refuse construction.

@@ -80,17 +80,21 @@ async fn reconcile(
                     .find(|line| line.id == floor.line)
                     .ok_or_else(|| failure("unexpected runner line"))?;
                 let source = line.source_owner.as_ref().map(source_owner);
-                if !allowed(
-                    floor.owner.as_ref(),
-                    source.as_ref(),
-                    receipt.groups[index].transfers.get(&line.id),
-                ) {
-                    return Err(failure(format!("foreign witness for line {}", line.id)));
+                if floor.owner.is_none()
+                    && floor.retained.is_empty()
+                    && capsule.needs_runner(&line.id).map_err(failure)?
+                {
+                    return Err(failure(
+                        "no original worker proves the carried nonterminal allocations",
+                    ));
                 }
-                witnessed.insert(line.id.clone(), floor.owner);
+                let intended = receipt.groups[index].transfers.get(&line.id);
+                let from = witness_from(floor, source.as_ref(), intended, capsule.job_cut)?;
+                witnessed.insert(line.id.clone(), from);
             }
         }
     }
+    crate::carry::upgrade::crash_cut("move-after-owner-witnesses");
     for line in &capsule.lines {
         let operation =
             SessionOperationId::new(format!("plak:move-ready:{}:{}", capsule.group, line.id))
@@ -108,6 +112,7 @@ async fn reconcile(
         }
         held.push(acquired);
     }
+    crate::carry::upgrade::crash_cut("move-after-lease-only-heads");
     for head in held.iter() {
         let line = head.line().to_string();
         let to = WireOwner {
@@ -120,13 +125,26 @@ async fn reconcile(
             .get(&line)
             .ok_or_else(|| failure("missing fresh witness"))?
             .clone();
+        let mut previous = receipt.groups[index]
+            .transfers
+            .get(&line)
+            .map_or_else(Vec::new, |intent| intent.previous.clone());
+        if let Some(intent) = receipt.groups[index].transfers.get(&line)
+            && intent.to != to
+            && !previous.contains(&intent.to)
+        {
+            previous.push(intent.to.clone());
+        }
+        if previous.len() > 64 {
+            return Err(failure("own owner-intent history exceeds its bound"));
+        }
         receipt.groups[index]
             .transfers
-            .insert(line, OwnerTransfer { from, to });
+            .insert(line, OwnerTransfer { from, to, previous });
     }
     receipt.save(services.paths()?)?;
     crate::carry::upgrade::crash_cut("move-before-transfer");
-    transfer_and_sweep(services, receipt, index, &grouped).await?;
+    transfer_and_sweep(services, receipt, index, &grouped, capsule, held).await?;
     finish_ready(services, receipt, index, held).await
 }
 
@@ -135,6 +153,8 @@ async fn transfer_and_sweep(
     receipt: &Receipt,
     index: usize,
     grouped: &BTreeMap<String, Vec<String>>,
+    capsule: &Capsule,
+    heads: &[LeaseOnlyHead],
 ) -> CliResult<()> {
     for (runner, lines) in grouped {
         let client = if runner == "local" {
@@ -167,6 +187,7 @@ async fn transfer_and_sweep(
             crate::carry::upgrade::crash_cut("move-after-transfer");
         }
     }
+    crate::carry::upgrade::crash_cut("move-after-all-transfers");
     // No runner's final witness is sampled until every exact transfer joined.
     for (runner, lines) in grouped {
         let client = if runner == "local" {
@@ -187,25 +208,28 @@ async fn transfer_and_sweep(
                         floor.line
                     )));
                 }
+                if floor
+                    .retained
+                    .iter()
+                    .any(|owner| owner != &receipt.groups[index].transfers[&floor.line].to)
+                {
+                    return Err(failure("an original worker changed owner before Ready"));
+                }
             }
         }
-        for status in client.lines().await.map_err(failure)? {
-            if !lines.contains(&status.line) {
-                continue;
-            }
-            let (_, jobs) =
-                plakous::tools::runner::decode_jobs_snapshot(status.jobs).map_err(failure)?;
-            if status.foreground
-                || jobs.iter().any(|job| {
-                    matches!(
-                        job.status,
-                        plakous::tools::JobStatus::Running
-                            | plakous::tools::JobStatus::OutcomeUnknown
-                    )
-                })
-            {
-                return Err(failure("a dormant group has live or unknown runner work"));
-            }
+        let statuses = client.lines().await.map_err(failure)?;
+        let inventory = capsule
+            .verify_runner_work(lines, &statuses)
+            .map_err(failure)?;
+        for head in heads
+            .iter()
+            .filter(|head| lines.contains(&head.line().to_string()))
+        {
+            crate::carry::upgrade::crash_cut("move-before-job-terminals");
+            head.record_job_terminals(&inventory[&head.line().to_string()])
+                .await
+                .map_err(failure)?;
+            crate::carry::upgrade::crash_cut("move-after-job-terminals");
         }
     }
     Ok(())
@@ -237,6 +261,35 @@ async fn finish_ready(
     }
     receipt.save(services.paths()?)?;
     crate::carry::upgrade::crash_cut("move-after-ready");
+    if let Err(error) = release_disposed(services, receipt).await {
+        eprintln!("host upgrade witness release deferred; group remains Ready: {error:?}");
+    }
+    Ok(())
+}
+
+/// Disposition stays durable while the native client retries harmless cleanup.
+pub(crate) async fn release_disposed(services: &Services, receipt: &mut Receipt) -> CliResult<()> {
+    for group in receipt
+        .groups
+        .iter()
+        .filter(|group| matches!(group.phase, GroupPhase::Ready | GroupPhase::Abandoned))
+    {
+        for runner in &group.runners {
+            let client = if runner == "local" {
+                services.local_runner_client()
+            } else {
+                services.runners().client(runner)
+            }
+            .ok_or_else(|| failure("runner disconnected before witness release"))?;
+            let lines = group.lines.iter().cloned().collect::<Vec<_>>();
+            for batch in lines.chunks(256) {
+                client
+                    .forget_owner_witnesses(batch)
+                    .await
+                    .map_err(failure)?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -247,8 +300,34 @@ fn allowed(
 ) -> bool {
     witness == source
         || intended.is_some_and(|intended| {
-            witness == Some(&intended.to) || witness.is_some() && witness == intended.from.as_ref()
+            witness == Some(&intended.to)
+                || witness.is_some() && witness == intended.from.as_ref()
+                || witness.is_some_and(|witness| intended.previous.contains(witness))
         })
+}
+
+fn witness_from(
+    floor: plakous::runner::protocol::OwnerFloor,
+    source: Option<&WireOwner>,
+    intended: Option<&OwnerTransfer>,
+    cut: super::JobCut,
+) -> CliResult<Option<WireOwner>> {
+    let native_allowed = allowed(floor.owner.as_ref(), source, intended)
+        || floor.owner.is_none() && matches!(cut, super::JobCut::Retained);
+    if !native_allowed
+        || floor
+            .retained
+            .iter()
+            .any(|owner| !allowed(Some(owner), source, intended))
+    {
+        return Err(failure(format!("foreign witness for line {}", floor.line)));
+    }
+    // A new native peer has no floor yet. Its CAS must still name the
+    // imported source or our saved intent at every original.
+    Ok(floor
+        .owner
+        .or_else(|| intended.map(|intent| intent.to.clone()))
+        .or_else(|| source.cloned()))
 }
 
 fn tool_owner(owner: &WireOwner) -> CliResult<plakous::tools::LineOwner> {

@@ -801,6 +801,12 @@ inode, or an absent socket with the original native process lock proven free.
 The endpoint's private hard link to that lock is only a process-liveness witness,
 not native-store data or a new authority. Known terminal facts remain precise.
 Immutable historical binaries are not pruned at host Ready or receipt ack.
+Ownership-move floor reads join native floors with bounded, fresh original-worker
+witnesses; neither an empty new native table nor a cached receiver snapshot is
+proof of free authority. The coordinator admits only the imported source tuple
+or its own durable intent and sweeps every required runner again before Ready.
+An unavailable witness withholds its connected group without weakening the CAS,
+replaying effects, declaring a terminal or removing retained job occupancy.
 
 Operator terminals have separate principal-private, host-generation namespaces,
 with no line owner, agent job, promotion, accounting, history or line fence. Only

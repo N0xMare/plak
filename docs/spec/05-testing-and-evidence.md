@@ -926,6 +926,14 @@ guarded surrender. Real-process cases use the upgrade durability lane; pure
 binding and inspection-codec checks remain offline. Live execution stays disabled
 until destination retention/readiness and the remaining crash cuts qualify.
 
+Live ownership-move readiness qualifies promoted allocation identity, concurrent
+terminal observations, unknown/missing/duplicate allocation refusal, original
+worker witness freshness, pending receiver-intent recovery and disconnected
+occupancy. The real bound-child source cut and a promoted process through group
+Ready run in upgrade durability. Runner endpoint/process tests run in serial;
+pure inventory/receipt and codec tests remain offline. Public live cross-key
+capability remains disabled pending the remaining end-to-end crash cuts.
+
 ## 1. Gate layers
 
 The authoritative gate is `tools/gate/dev-check.sh`, in four tiers plus an

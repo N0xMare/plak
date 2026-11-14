@@ -12,6 +12,60 @@ fn move_group_receipt_lock_excludes_a_second_disposition_writer() {
     assert!(second.try_lock().is_ok());
 }
 
+#[test]
+fn move_group_prior_intents_are_exact_bounded_and_never_future_or_foreign() {
+    let record = SessionRecord::new(std::path::PathBuf::from("/workspace"));
+    let mut receipt = grouped(&record);
+    receipt.phase = Phase::Committed;
+    let group = &mut receipt.groups[0];
+    group.phase = GroupPhase::Published;
+    group.target_digest = Some("3".repeat(64));
+    let line = group.lines.iter().next().unwrap().clone();
+    let to = plakous::runner::protocol::LineOwner {
+        line: line.clone(),
+        generation: 2,
+        branch: uuid::Uuid::new_v4().to_string(),
+        fence: 10,
+    };
+    let prior = plakous::runner::protocol::LineOwner {
+        fence: 8,
+        ..to.clone()
+    };
+    group.transfers.insert(
+        line.clone(),
+        OwnerTransfer {
+            from: None,
+            to: to.clone(),
+            previous: vec![prior.clone()],
+        },
+    );
+    receipt.validate().unwrap();
+    for invalid in [
+        vec![plakous::runner::protocol::LineOwner {
+            generation: 1,
+            ..prior.clone()
+        }],
+        vec![plakous::runner::protocol::LineOwner {
+            branch: uuid::Uuid::new_v4().to_string(),
+            ..prior.clone()
+        }],
+        vec![plakous::runner::protocol::LineOwner {
+            line: uuid::Uuid::new_v4().to_string(),
+            ..prior.clone()
+        }],
+        vec![plakous::runner::protocol::LineOwner {
+            fence: 0,
+            ..prior.clone()
+        }],
+        vec![to],
+        vec![prior.clone(), prior.clone()],
+        vec![prior; 65],
+    ] {
+        receipt.groups[0].transfers.get_mut(&line).unwrap().previous = invalid;
+        assert!(receipt.validate().is_err());
+    }
+}
+
 fn grouped(record: &SessionRecord) -> Receipt {
     let mut receipt = super::super::tests::receipt(record, true);
     receipt.groups.push(Group {

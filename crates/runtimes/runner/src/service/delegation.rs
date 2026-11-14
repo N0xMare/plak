@@ -48,7 +48,7 @@ impl RunnerService {
         let to = retention::owner(&transfer.to).map_err(|_| refuse("invalid owner".into()))?;
         let observed = context
             .registry
-            .discover(&scope, &context.origin)
+            .transfer_inventory(&scope, &context.origin, &transfer.to.line)
             .await
             .map_err(|error| refuse(format!("retained job inventory unavailable: {error}")))?;
         let existing = context.registry.entries(host, Some(&transfer.to.line));
@@ -96,17 +96,35 @@ impl RunnerService {
                     && entry.inventory.origin == inventory.origin
             });
             let from = saved.map_or_else(|| inventory.owner.clone(), |entry| entry.from.clone());
-            if saved.is_none() && transfer.from.as_ref() != Some(&retention::native_owner(&from)) {
+            let retry = existing.iter().find(|entry| {
+                entry.inventory.origin == inventory.origin
+                    && transfer
+                        .from
+                        .as_ref()
+                        .is_some_and(|from| entry.permits_native_from(from))
+                    && entry.permits_observed(&from)
+                    && transfer
+                        .to
+                        .is_newer_than(&retention::native_owner(&entry.to))
+            });
+            if saved.is_none()
+                && retry.is_none()
+                && transfer.from.as_ref() != Some(&retention::native_owner(&from))
+            {
                 return Err(Box::new(RunnerFrame::StaleOwner {
                     request_id: None,
                     control_id: Some(transfer.control_id.clone()),
                     current: retention::native_owner(&from),
                 }));
             }
-            let intent = context
-                .registry
-                .intent(&scope, from, to.clone(), inventory)
-                .map_err(|error| refuse(format!("retention intent was not recorded: {error}")))?;
+            let intent = if let Some(previous) = retry {
+                context
+                    .registry
+                    .retry_intent(&scope, &previous.to, from, to.clone(), inventory)
+            } else {
+                context.registry.intent(&scope, from, to.clone(), inventory)
+            }
+            .map_err(|error| refuse(format!("retention intent was not recorded: {error}")))?;
             intents.push(intent);
         }
         // All occupancy is durable before the first original worker changes
@@ -194,11 +212,27 @@ impl RunnerService {
 
     pub(super) fn account_retained(&self) {
         if let Some(context) = self.retention_context() {
+            let mut previous = lock(&self.inner.retained_accounted);
             let tables = lock(&self.inner.tables);
-            for (origin, count) in context
+            let current = context
                 .registry
-                .occupancy(|host, line| !tables.retention_only(host, line))
+                .occupancy(|host, line| !tables.retention_only(host, line));
+            for origin in previous
+                .iter()
+                .filter(|origin| !current.contains_key(*origin))
             {
+                plakous_tools::internal::account_external_jobs(
+                    &self.inner.capacity,
+                    origin.clone(),
+                    0,
+                );
+            }
+            *previous = current
+                .iter()
+                .filter(|(_, count)| **count > 0)
+                .map(|(origin, _)| origin.clone())
+                .collect();
+            for (origin, count) in current {
                 plakous_tools::internal::account_external_jobs(&self.inner.capacity, origin, count);
             }
         }

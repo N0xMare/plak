@@ -350,6 +350,9 @@ pub struct OwnerFloor {
     pub line: String,
     /// The durable accepted owner, not a new lease or adoption.
     pub owner: Option<LineOwner>,
+    /// Fresh owners of original workers with retained jobs on this line.
+    /// These are witnesses only; the receiver has not adopted them.
+    pub retained: Vec<LineOwner>,
 }
 
 /// Maximum number of explicitly named lines in one owner-floor read.
@@ -417,6 +420,13 @@ pub enum HostFrame {
         owner: LineOwner,
         /// Exclusive job-number cursor, initially zero.
         after: u32,
+    },
+    /// Releases only ephemeral read witnesses of the bound host instance.
+    ForgetOwnerWitnesses {
+        /// Names the answer; repetition is harmless.
+        request_id: String,
+        /// Exact line IDs, with the same bound as [`HostFrame::OwnerFloors`].
+        lines: Vec<String>,
     },
     /// Liveness.
     Ping {
@@ -532,6 +542,11 @@ pub enum RunnerFrame {
         jobs: Vec<crate::retention::Job>,
         /// Last returned job number when more rows remain.
         next: Option<u32>,
+    },
+    /// Ephemeral witnesses were forgotten; durable ownership and jobs are unchanged.
+    OwnerWitnessesForgotten {
+        /// The question.
+        request_id: String,
     },
     /// The frame was refused without running anything.
     Refused {

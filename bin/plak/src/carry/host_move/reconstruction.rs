@@ -6,8 +6,73 @@ use plakous::sessions::host_move::{
     MoveLine, MoveLineOrigin, MoveLineRecord, MoveSessionHeader, MoveSessionRef,
     MoveSessionRevision,
 };
+use std::collections::BTreeMap;
 
 impl Capsule {
+    pub(super) fn verify_runner_work(
+        &self,
+        lines: &[String],
+        statuses: &[plakous::runner::protocol::LineStatus],
+    ) -> Result<BTreeMap<String, Vec<plakous::tools::JobView>>, String> {
+        let mut inventory = BTreeMap::new();
+        for line in lines {
+            let mut jobs = Vec::new();
+            let mut found = false;
+            for status in statuses.iter().filter(|status| &status.line == line) {
+                if found || status.foreground || status.host_id != self.source_host {
+                    return Err("runner line is duplicated, foreign or has foreground work".into());
+                }
+                found = true;
+                jobs = plakous::tools::runner::decode_jobs_snapshot(status.jobs.clone())
+                    .map_err(|error| error.to_string())?
+                    .1;
+            }
+            self.verify_jobs(line, &jobs)?;
+            inventory.insert(line.clone(), jobs);
+        }
+        Ok(inventory)
+    }
+
+    pub(super) fn verify_jobs(
+        &self,
+        line: &str,
+        observed: &[plakous::tools::JobView],
+    ) -> Result<(), String> {
+        self.current_jobs(line)?
+            .verify_inventory(observed, self.job_cut)
+    }
+
+    pub(super) fn needs_runner(&self, line: &str) -> Result<bool, String> {
+        Ok(self.current_jobs(line)?.needs_runner())
+    }
+
+    fn current_jobs(&self, line: &str) -> Result<&super::Jobs, String> {
+        let current = self
+            .lines
+            .iter()
+            .find(|current| current.id == line)
+            .ok_or("runner reports an uncarried line")?;
+        // Historical branches may still contain rows already consumed by a
+        // continued head. Only the current ledger owes live observations.
+        let cuts = self
+            .sessions
+            .iter()
+            .flat_map(|session| &session.heads)
+            .filter(|head| {
+                head.line == line
+                    && head.source.parse::<SessionLocator>().is_ok_and(|source| {
+                        source.session_id().to_string() == current.session
+                            && source.branch_id().to_string() == current.branch
+                    })
+            })
+            .map(|head| &head.jobs)
+            .collect::<Vec<_>>();
+        if cuts.len() != 1 {
+            return Err("move line has no unique current job ledger".into());
+        }
+        Ok(cuts[0])
+    }
+
     pub(super) fn current_context(&self, line: &Line) -> Result<&HeadContext, String> {
         self.sessions
             .iter()

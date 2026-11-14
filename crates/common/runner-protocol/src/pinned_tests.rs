@@ -84,6 +84,7 @@ const fn host_variant(frame: &HostFrame) -> &'static str {
         HostFrame::Lines { .. } => "lines",
         HostFrame::OwnerFloors { .. } => "owner_floors",
         HostFrame::JobTerminals { .. } => "job_terminals",
+        HostFrame::ForgetOwnerWitnesses { .. } => "forget_owner_witnesses",
         HostFrame::Ping { .. } => "ping",
         HostFrame::Stream(_) => "stream",
     }
@@ -105,6 +106,7 @@ const fn runner_variant(frame: &RunnerFrame) -> &'static str {
         RunnerFrame::Lines { .. } => "lines",
         RunnerFrame::OwnerFloors { .. } => "owner_floors",
         RunnerFrame::JobTerminals { .. } => "job_terminals",
+        RunnerFrame::OwnerWitnessesForgotten { .. } => "owner_witnesses_forgotten",
         RunnerFrame::Refused { .. } => "refused",
         RunnerFrame::Pong { .. } => "pong",
         RunnerFrame::Stream(_) => "stream",
@@ -228,6 +230,10 @@ fn host_frames() -> Vec<HostFrame> {
             owner: owner(),
             after: 0,
         },
+        HostFrame::ForgetOwnerWitnesses {
+            request_id: "request".into(),
+            lines: vec!["line".into(), "unknown".into()],
+        },
         HostFrame::Ping { nonce: 9 },
     ];
     frames.extend(classes().into_iter().map(request).map(HostFrame::Request));
@@ -235,21 +241,25 @@ fn host_frames() -> Vec<HostFrame> {
     frames
 }
 
+fn runner_hello() -> RunnerFrame {
+    RunnerFrame::Hello(Hello {
+        version: version(),
+        binary_id: Some("binary".into()),
+        runner_id: "runner".into(),
+        instance: "instance".into(),
+        boot_id: "boot".into(),
+        machine_id: Some("machine".into()),
+        descriptor: json!({"descriptor": true}),
+        capabilities: vec!["capability".into()],
+        path: Some("/bin".into()),
+        home: Some("/home".into()),
+        job_bound: 10,
+    })
+}
+
 fn runner_frames() -> Vec<RunnerFrame> {
     let mut frames = vec![
-        RunnerFrame::Hello(Hello {
-            version: version(),
-            binary_id: Some("binary".into()),
-            runner_id: "runner".into(),
-            instance: "instance".into(),
-            boot_id: "boot".into(),
-            machine_id: Some("machine".into()),
-            descriptor: json!({"descriptor": true}),
-            capabilities: vec!["capability".into()],
-            path: Some("/bin".into()),
-            home: Some("/home".into()),
-            job_bound: 10,
-        }),
+        runner_hello(),
         RunnerFrame::Result {
             request_id: "request".into(),
             payload: json!({"result": true}),
@@ -313,10 +323,12 @@ fn runner_frames() -> Vec<RunnerFrame> {
             floors: vec![
                 crate::OwnerFloor {
                     line: "line".into(),
+                    retained: vec![owner()],
                     owner: Some(owner()),
                 },
                 crate::OwnerFloor {
                     line: "unknown".into(),
+                    retained: Vec::new(),
                     owner: None,
                 },
             ],
@@ -326,6 +338,9 @@ fn runner_frames() -> Vec<RunnerFrame> {
             owner: owner(),
             jobs: vec![],
             next: None,
+        },
+        RunnerFrame::OwnerWitnessesForgotten {
+            request_id: "request".into(),
         },
         RunnerFrame::Pong { nonce: 11 },
     ];
@@ -347,8 +362,8 @@ fn encoded() -> String {
         names.dedup();
         names.len()
     };
-    assert_eq!(named(hosts.iter().map(host_variant).collect()), 12);
-    assert_eq!(named(runners.iter().map(runner_variant).collect()), 17);
+    assert_eq!(named(hosts.iter().map(host_variant).collect()), 13);
+    assert_eq!(named(runners.iter().map(runner_variant).collect()), 18);
     assert_eq!(named(classes().iter().map(class_variant).collect()), 6);
     assert_eq!(named(events().iter().map(event_variant).collect()), 3);
     assert_eq!(named(refusals().iter().map(refusal_variant).collect()), 7);

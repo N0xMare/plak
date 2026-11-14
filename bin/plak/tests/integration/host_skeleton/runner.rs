@@ -475,18 +475,27 @@ pub(super) fn start_job(fixture: &Fixture, busy: bool) -> (Host, String, NodeAdd
     start_job_env(fixture, busy, &[])
 }
 
-fn start_job_env(
+pub(super) fn start_job_env(
     fixture: &Fixture,
     busy: bool,
     env: &[(&str, String)],
 ) -> (Host, String, NodeAddress) {
+    start_job_at(fixture, busy, env, &fixture.workspace())
+}
+
+pub(super) fn start_job_at(
+    fixture: &Fixture,
+    busy: bool,
+    env: &[(&str, String)],
+    workspace: &std::path::Path,
+) -> (Host, String, NodeAddress) {
     fixture.write_script(&job_script(fixture, busy));
     let host = start_env(fixture, &[], env);
+    wait_local_runner_ready(&host);
     let mut client = Client::connect(&host);
-    let Outcome::Ok(Answer::Created { session, node, .. }) =
-        client.request(1, new_session(&fixture.workspace()))
-    else {
-        panic!("not created")
+    let created = client.request(1, new_session(workspace));
+    let Outcome::Ok(Answer::Created { session, node, .. }) = created else {
+        panic!("not created: {created:?}")
     };
     let attachment = client.attach(2, &node);
     client.prompt(

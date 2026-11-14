@@ -352,29 +352,21 @@ fn observe_owners(
         let statuses = runtime
             .block_on(client.lines())
             .map_err(|error| failure(format!("source runner work inspection failed: {error:?}")))?;
-        for status in statuses {
-            if !lines.contains(&status.line) {
-                continue;
-            }
-            let (_, jobs) =
-                plakous::tools::runner::decode_jobs_snapshot(status.jobs).map_err(failure)?;
-            if status.foreground
-                || jobs.iter().any(|job| {
-                    job.status == plakous::tools::JobStatus::OutcomeUnknown
-                        || matches!(capsule.job_cut, super::JobCut::Settled)
-                            && job.status == plakous::tools::JobStatus::Running
-                })
-            {
-                return Err(failure(
-                    "runner work is still live or its outcome is unknown; settle it with the source build before moving this group",
-                ));
-            }
-        }
+        capsule
+            .verify_runner_work(&lines, &statuses)
+            .map_err(failure)?;
         for batch in lines.chunks(256) {
             for floor in runtime
                 .block_on(client.owner_floors(batch))
                 .map_err(|error| failure(format!("source runner witness read failed: {error:?}")))?
             {
+                if floor
+                    .retained
+                    .iter()
+                    .any(|owner| floor.owner.as_ref() != Some(owner))
+                {
+                    return Err(failure("source runner and original-worker owners disagree"));
+                }
                 let Some(owner) = floor.owner else { continue };
                 let head = capsule
                     .sessions

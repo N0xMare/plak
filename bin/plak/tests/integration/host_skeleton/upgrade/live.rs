@@ -4,6 +4,8 @@ use plak::store::session_records::SessionRecordStore as _;
 
 const ENABLED: &str = "PLAK_TEST_HOST_UPGRADE_LIVE";
 
+mod retained;
+
 fn busy_child(fixture: &Fixture) -> (Host, String, PathBuf) {
     let child_script = fixture.root.join("live-child-script.json");
     let release = fixture.root.join("live-child-release");

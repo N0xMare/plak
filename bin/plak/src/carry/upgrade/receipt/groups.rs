@@ -8,6 +8,21 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) struct OwnerTransfer {
     pub(crate) from: Option<plakous::runner::protocol::LineOwner>,
     pub(crate) to: plakous::runner::protocol::LineOwner,
+    pub(crate) previous: Vec<plakous::runner::protocol::LineOwner>,
+}
+
+impl OwnerTransfer {
+    fn valid_history(&self, line: &str) -> bool {
+        self.previous.len() <= 64
+            && self.previous.iter().enumerate().all(|(index, owner)| {
+                owner.line == line
+                    && owner.generation == self.to.generation
+                    && owner.branch == self.to.branch
+                    && owner.fence != 0
+                    && self.to.is_newer_than(owner)
+                    && !self.previous[..index].contains(owner)
+            })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -113,6 +128,7 @@ impl Receipt {
                             || !transfer.to.is_at_least(from)
                     })
                     || matches!(group.phase, GroupPhase::Pending | GroupPhase::Staged)
+                    || !transfer.valid_history(line)
                 {
                     return Err(invalid());
                 }

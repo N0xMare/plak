@@ -2,7 +2,7 @@
 //! environment, with the owner and op tables, the per-line process sessions
 //! and the services of this instance.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -70,6 +70,7 @@ struct Inner {
     owner_lease: Duration,
     lease_clock: Option<Arc<RunnerLeaseClock>>,
     capacity: JoinedProcessHostCapacity,
+    retained_accounted: Mutex<BTreeSet<String>>,
     tables: Mutex<Tables>,
     /// Which hosts may bind; `None` admits every host.
     hosts_allowed: Option<Arc<HostAllowlist>>,
@@ -334,6 +335,7 @@ impl RunnerService {
                 owner_lease: limits.owner_lease,
                 lease_clock: options.lease_clock,
                 capacity: job_capacity(usize::try_from(limits.job_bound).unwrap_or(usize::MAX)),
+                retained_accounted: Mutex::default(),
                 tables: Mutex::new(tables),
                 hosts_allowed: options.hosts,
                 probe_paths: options.probe_paths,
@@ -541,6 +543,12 @@ impl RunnerService {
         // A late reconnect cannot revive authority before the idle tick runs.
         self.expire_leases(self.lease_now());
         let connection = self.inner.next_connection.fetch_add(1, Ordering::Relaxed);
+        if let Some(context) = self.retention_context() {
+            context
+                .registry
+                .observation_connected(host, instance, connection);
+            self.account_retained();
+        }
         let previous = lock(&self.inner.hosts).insert(
             (host.to_owned(), instance.to_owned()),
             Connection {
@@ -566,6 +574,12 @@ impl RunnerService {
     /// The connection is over: answers no longer go to it, its services end,
     /// and its instance's owner lease starts running out with its last one.
     fn leave(&self, host: &str, instance: &str, connection: u64) {
+        if let Some(context) = self.retention_context() {
+            context
+                .registry
+                .observation_disconnected(host, instance, connection);
+            self.account_retained();
+        }
         {
             let mut hosts = lock(&self.inner.hosts);
             let key = (host.to_owned(), instance.to_owned());
@@ -799,24 +813,19 @@ impl RunnerService {
                 });
             }
             HostFrame::OwnerFloors { request_id, lines } => {
-                let _ = sender.send(self.owner_floors(host, request_id, &lines));
+                self.receive_owner_floors(host, instance, connection, request_id, lines, sender);
+            }
+            HostFrame::ForgetOwnerWitnesses { request_id, lines } => {
+                let _ = sender.send(
+                    self.forget_owner_witnesses(host, instance, connection, request_id, &lines),
+                );
             }
             HostFrame::JobTerminals {
                 request_id,
                 owner,
                 after,
             } => {
-                let service = self.clone();
-                let host = host.to_owned();
-                let instance = instance.to_owned();
-                let sender = sender.clone();
-                tokio::spawn(async move {
-                    let _ = sender.send(
-                        service
-                            .job_terminals(&host, &instance, request_id, &owner, after)
-                            .await,
-                    );
-                });
+                self.receive_job_terminals(host, instance, request_id, owner, after, sender);
             }
             HostFrame::Ping { nonce } => {
                 let _ = sender.send(RunnerFrame::Pong { nonce });

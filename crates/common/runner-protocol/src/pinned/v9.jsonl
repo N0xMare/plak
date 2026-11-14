@@ -7,6 +7,7 @@
 {"kind":"lines","request_id":"request"}
 {"kind":"owner_floors","lines":["line","unknown"],"request_id":"request"}
 {"after":0,"kind":"job_terminals","owner":{"branch":"branch","fence":3,"generation":2,"line":"line"},"request_id":"request"}
+{"kind":"forget_owner_witnesses","lines":["line","unknown"],"request_id":"request"}
 {"kind":"ping","nonce":9}
 {"age_ms":2,"class":{"class":"operator_control","namespace":{"principal":"principal","state_key":"state"}},"deadline_ms":1,"digest":"digest","kind":"request","operation":{"payload":{"payload":true},"verb":"verb"},"owner":null,"replay":true,"request_id":"request"}
 {"age_ms":2,"class":{"attempt_id":"attempt","call_id":"call","class":"effect_call"},"deadline_ms":1,"digest":"digest","kind":"request","operation":{"payload":{"payload":true},"verb":"verb"},"owner":{"branch":"branch","fence":3,"generation":2,"line":"line"},"replay":true,"request_id":"request"}
@@ -29,8 +30,9 @@
 {"control_id":"control","detail":"detail","kind":"transfer_refused"}
 {"kind":"expired","request_id":"request"}
 {"kind":"lines","lines":[{"adopted":true,"foreground":false,"host_id":"host","jobs":{"jobs":[]},"line":"line","owner":{"branch":"branch","fence":3,"generation":2,"line":"line"}}],"request_id":"request"}
-{"floors":[{"line":"line","owner":{"branch":"branch","fence":3,"generation":2,"line":"line"}},{"line":"unknown","owner":null}],"kind":"owner_floors","request_id":"request"}
+{"floors":[{"line":"line","owner":{"branch":"branch","fence":3,"generation":2,"line":"line"},"retained":[{"branch":"branch","fence":3,"generation":2,"line":"line"}]},{"line":"unknown","owner":null,"retained":[]}],"kind":"owner_floors","request_id":"request"}
 {"jobs":[],"kind":"job_terminals","next":null,"owner":{"branch":"branch","fence":3,"generation":2,"line":"line"},"request_id":"request"}
+{"kind":"owner_witnesses_forgotten","request_id":"request"}
 {"kind":"pong","nonce":11}
 {"kind":"refused","refusal":{"refusal":"unbound"},"request_id":"request"}
 {"kind":"refused","refusal":{"refusal":"version_mismatch","runner":{"flavor":"flavor","protocol":9,"source_revision":"revision"}},"request_id":"request"}

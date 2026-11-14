@@ -7,6 +7,7 @@ use plakous::sessions::host_move::{
 use plakous::tools::{JobOwner, JobStopReason};
 use serde::{Deserialize, Serialize};
 
+mod inspection;
 #[cfg(test)]
 mod tests;
 

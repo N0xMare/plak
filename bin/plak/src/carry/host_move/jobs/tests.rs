@@ -6,6 +6,61 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 const RETAINED: &str = r#"{"next_number":2,"rows":[{"number":1,"command":"retained process","started_seconds":1,"started_nanos":0,"owner":{"line":"00000000-0000-0000-0000-000000000001","generation":1,"session":"00000000-0000-0000-0000-000000000002","branch":"00000000-0000-0000-0000-000000000003","fence":4},"session":[5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5],"owner_generation":3,"terminal":null}]}"#;
 
 #[test]
+fn live_job_join_requires_exact_allocations_and_accepts_a_concurrent_terminal() -> TestResult {
+    use plakous::tools::{JobStatus, JobView};
+    let cut: Jobs = serde_json::from_str(RETAINED)?;
+    let running = JobView {
+        number: 1,
+        command: "retained process".into(),
+        started_at: Timestamp::new(1, 0)?,
+        owner: "observational attribution".into(),
+        elapsed: std::time::Duration::ZERO,
+        status: JobStatus::Running,
+        output: String::new(),
+        session_id: [5; 16],
+        owner_generation: 3,
+    };
+    cut.verify_inventory(std::slice::from_ref(&running), JobCut::Retained)?;
+    assert!(cut.verify_inventory(&[], JobCut::Retained).is_err());
+    assert!(
+        cut.verify_inventory(std::slice::from_ref(&running), JobCut::Settled)
+            .is_err()
+    );
+    assert!(
+        cut.verify_inventory(&[running.clone(), running.clone()], JobCut::Retained)
+            .is_err()
+    );
+    for changed in [
+        JobView {
+            session_id: [6; 16],
+            ..running.clone()
+        },
+        JobView {
+            owner_generation: 4,
+            ..running.clone()
+        },
+        JobView {
+            number: 2,
+            ..running.clone()
+        },
+        JobView {
+            status: JobStatus::OutcomeUnknown,
+            ..running.clone()
+        },
+    ] {
+        assert!(cut.verify_inventory(&[changed], JobCut::Retained).is_err());
+    }
+    cut.verify_inventory(
+        &[JobView {
+            status: JobStatus::Exited(Some(0)),
+            ..running
+        }],
+        JobCut::Retained,
+    )?;
+    Ok(())
+}
+
+#[test]
 fn live_cut_job_metadata_pin_roundtrips_without_claiming_liveness_or_exit() -> TestResult {
     let wire: Jobs = serde_json::from_str(RETAINED)?;
     assert!(JobCut::Settled.validate(&wire).is_err());
