@@ -293,7 +293,8 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.assertIn(
             "durability_ledger_retirement_closed_cells", profile["overrides"][0]["filter"]
         )
-        self.assertEqual(profile["overrides"][1]["threads-required"], 4)
+        self.assertEqual(profile["overrides"][1]["threads-required"], "num-test-threads")
+        self.assertEqual(profile["overrides"][1]["priority"], -50)
         self.assertEqual(profile["overrides"][2]["threads-required"], 2)
         self.assertIn("::(root|child)_[0-7]$/)", profile["overrides"][3]["filter"])
         self.assertEqual(profile["overrides"][3]["threads-required"], 2)

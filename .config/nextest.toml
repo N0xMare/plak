@@ -650,7 +650,9 @@ default-filter = '''
   | test(durability::)
 '''
 
-# The crash sweep inside this lane uses min(16, available_parallelism) internal workers.
+# This is the reviewed 16-slot reference layout. The gate renders a copy for
+# min(16, available_parallelism), floor 1, scaling integer reservations upward.
+# Internally parallel campaigns use the same Rust available_parallelism API.
 [profile.durability]
 test-threads = 16
 slow-timeout = { period = "240s", terminate-after = 2 }
@@ -774,14 +776,16 @@ filter = 'test(=crash_sweep::durability_ledger_retirement_closed_cells)'
 threads-required = "num-test-threads"
 priority = 100
 
-# These campaigns launch their own concurrent cut workers.
+# These campaigns launch one worker per available slot. Run them only after
+# shared work, and reserve the whole pool so priority is also a phase barrier.
 [[profile.durability.overrides]]
 filter = '''
 test(=crash_sweep::durability_subset)
 | test(=crash_sweep::durability_twin_pilots)
 | test(image_residency_crash_cuts_recover_without_redispatch)
 '''
-threads-required = 8
+threads-required = "num-test-threads"
+priority = -50
 
 [[profile.durability.overrides]]
 filter = 'test(/^crash_sweep::durability_ledger_retirement_/)'

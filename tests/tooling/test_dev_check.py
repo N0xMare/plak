@@ -251,6 +251,8 @@ if sys.argv[1].endswith('changed_packages.py'):
         print(os.environ.get('GATE_CHANGED', ''), end='')
 if sys.argv[1].endswith('check_workspace.py') and '--wasm-libraries' in sys.argv:
     print('plakous-model')
+if sys.argv[1].endswith('nextest_layout.py'):
+    print(max(1, min(16, int(os.environ.get('GATE_AVAILABLE_PARALLELISM', '16')))))
 ''',
         )
         self.executable(
@@ -1266,12 +1268,14 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['test'])
 
     def test_wall_clock_lanes_pin_their_width_against_environment_overrides(self):
+        self.env['GATE_AVAILABLE_PARALLELISM'] = '10'
         self.env['NEXTEST_TEST_THREADS'] = '999'
         result, calls, _ = self.run_gate('--steps', 'tests-serial,tests-durability')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.profiles(calls), ['serial', 'durability'])
         self.assertIn('--test-threads=1', self.lanes(calls)[0]['args'])
-        self.assertIn('--test-threads=16', self.lanes(calls)[1]['args'])
+        self.assertIn('--test-threads=10', self.lanes(calls)[1]['args'])
+        self.assertIn('--config-file', self.lanes(calls)[1]['args'])
 
     def test_package_group_delegates_prefetch_and_offline_verification_in_a_git_tree(self):
         self.commit_fixture()

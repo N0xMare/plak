@@ -2207,10 +2207,13 @@ soaks after its routine serial and durability tests. `just soak` selects that lo
 platform and explicit serial groups keep the small retirement fixtures and
 exclude the soak (spec 05 §2.3).
 The groups remain sequential: the serial wall-clock-budget profile runs one
-test at a time, followed by the durability profile's 16-slot weighted pool.
-Internally parallel crash campaigns reserve eight slots, ledger campaigns
-four, and the signature-sensitive closed-cell campaign the whole pool.
-Restart/recovery and TUI approval cases reserve four slots; independent restart
+test at a time, followed by the durability profile's host-scaled weighted pool:
+`N = max(1, min(16, available_parallelism))`, using Rust's host/affinity/quota
+count. Internally parallel crash campaigns reserve the whole pool at late
+priority -50; priority plus full reservation keeps them separate from shared
+work. Ledger campaigns reserve `ceil(N/4)`, and the signature-sensitive
+closed-cell campaign the whole pool at early priority.
+Restart/recovery and TUI approval cases reserve `ceil(N/4)` slots; independent restart
 groups run concurrently at early priority. No crash cuts are omitted. Gate commands pin
 the reviewed thread counts against environment overrides. Ignored full-tier
 soaks retain explicit one-thread execution (chapter 05 §2.3).

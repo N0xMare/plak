@@ -624,11 +624,14 @@ run_group() {
       fi
       return "$serial_status" ;;
     tests-durability)
-      echo "-- nextest: durability lane (profile durability, weighted crash matrices, 16 slots) --"
+      echo "-- nextest: durability lane (profile durability, host-scaled weighted crash matrices) --"
       prepare_tests
       local durability_status=0
       if [[ "$tier" != soak ]]; then
-        run_lane durability --test-threads=16 || durability_status=$?
+        local durability_config="$TMPDIR/nextest-durability.toml" durability_threads
+        durability_threads=$(python3 tools/gate/nextest_layout.py .config/nextest.toml "$durability_config") || return
+        echo "-- durability pool: $durability_threads slots --"
+        run_lane durability --config-file "$durability_config" --test-threads="$durability_threads" || durability_status=$?
       fi
       if [[ "$tier" == full || "$tier" == soak ]]; then
         echo "-- nextest: full indexed retirement soak (ignored evidence, one thread) --"

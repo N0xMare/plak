@@ -251,7 +251,8 @@ class NextestLaneTests(unittest.TestCase):
                 "priority": 100,
             },
         )
-        self.assertEqual(heavy["threads-required"], 8)
+        self.assertEqual(heavy["threads-required"], "num-test-threads")
+        self.assertEqual(heavy["priority"], -50)
         self.assertEqual(ledger["threads-required"], 4)
         self.assertIn("durability_subset", heavy["filter"])
         self.assertIn("durability_twin_pilots", heavy["filter"])
