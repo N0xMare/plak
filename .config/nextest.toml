@@ -772,7 +772,7 @@ default-filter = '''
 [[profile.durability.overrides]]
 filter = 'test(=crash_sweep::durability_ledger_retirement_closed_cells)'
 threads-required = "num-test-threads"
-priority = 200
+priority = 110
 
 # These campaigns launch their own concurrent cut workers.
 [[profile.durability.overrides]]

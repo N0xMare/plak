@@ -248,7 +248,7 @@ class NextestLaneTests(unittest.TestCase):
             {
                 "filter": "test(=crash_sweep::durability_ledger_retirement_closed_cells)",
                 "threads-required": "num-test-threads",
-                "priority": 200,
+                "priority": 110,
             },
         )
         self.assertEqual(heavy["threads-required"], 8)
@@ -257,6 +257,9 @@ class NextestLaneTests(unittest.TestCase):
         self.assertIn("durability_twin_pilots", heavy["filter"])
         self.assertIn("image_residency_crash_cuts", heavy["filter"])
         self.assertEqual(first["priority"], 100)
+        for override in overrides:
+            self.assertLessEqual(-128, override.get("priority", 0))
+            self.assertLessEqual(override.get("priority", 0), 127)
         for matrix in ("tui_host_restart", "review_tui_host_restart_switch", "wire_host_restart"):
             self.assertIn(f"test({matrix})", first["filter"])
 

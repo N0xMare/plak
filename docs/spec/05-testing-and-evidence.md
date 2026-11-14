@@ -2170,7 +2170,7 @@ The three internally parallel campaigns (`durability_subset`,
 `durability_twin_pilots`, image residency) reserve eight slots; ledger-retirement
 campaigns reserve four. The closed-cell ledger twin-pilot campaign reserves
 the whole pool because competing load has changed its per-store signatures.
-It runs first at priority 200, avoiding a full-pool reservation waiting behind
+It runs first at priority 110, avoiding a full-pool reservation waiting behind
 long shared tests. Its isolation rule precedes the general ledger weight. Other independent cuts
 use one slot. Host-restart matrices and their split cut cases, the redial test
 and the busy-root absence test have priority 100 so long paths start early.
