@@ -498,7 +498,7 @@ lints only the touched packages and their conservative reverse dependencies,
 with all features and targets; workspace Cargo inputs retain full linting.
 The `rustdoc` group documents the all-features workspace. The full/RC tier
 also documents each supported package alone with default features; both
-resolutions deny rustdoc warnings (review decision 12, §8). The feature checker scans UUID generation
+resolutions deny rustdoc warnings (§8). The feature checker scans UUID generation
 constructors in package source, tests, benches, examples and build scripts
 (including inline test modules, excluding comments and literals), and requires
 the matching `v1` through `v8` feature in that package's UUID dependency
@@ -935,7 +935,7 @@ Cargo defaults to the host target; the supported Linux musl build requires
 `--target x86_64-unknown-linux-musl` and a musl C compiler/linker as described
 in the getting-started guide. A GNU host build is not musl qualification.
 
-For per-install native musl evidence on a Linux x86_64 host:
+For complete native musl platform evidence on a Linux x86_64 host:
 
 ```sh
 rustup target add x86_64-unknown-linux-musl
@@ -2173,7 +2173,7 @@ integration batch gate:
   dependency audit. Platform static also rechecks Rust formatting with clippy. `--static-scope shared --steps static,...` selects the
   shared checks; `--static-scope platform --steps static,...` selects fmt and
   cfg-specific clippy without repeating the shared checkers. These scopes
-  cannot narrow `just full`.
+  are accepted only with explicit `--steps`, never a named tier.
 - Apple Silicon macOS runs `just batch-mac`: fmt, cfg-specific workspace and
   supported-package-alone clippy, all builds and the parallel lane. It does
   not repeat the shared structure checks or run serial/durability per batch.
@@ -2182,12 +2182,12 @@ integration batch gate:
   use `just dev crash-sweep --shapes <list>` for the affected shapes. Host locks
   still exclude worker compiles from wall-clock lanes and the sweep.
 
-Review decision 12 moves per-package-alone rustdoc to the full/RC tier and
-makes the batch package dry run conditional: run `package` when any manifest,
-`Cargo.lock`, publish tooling, README or license input changed. A source-only
-batch may defer package verification; standalone package build and lint
-coverage above still runs. Every production install and RC runs `package`,
-regardless of changed paths.
+Per-package-alone rustdoc runs at the full/RC tier. Every integration batch,
+production install and RC runs `package`, regardless of changed paths. Archive
+verification is the standalone compilation witness for published-internal
+crates; source, build-script, compiler and Cargo configuration changes can
+affect it too. Only a matching cohort verification receipt (§6.5) may avoid
+repeating the archive verification; a path-based trigger cannot skip this group.
 
 Commits inside a batch are not gated individually. A production install
 requires the batch gate **and** macOS serial and durability lanes plus package

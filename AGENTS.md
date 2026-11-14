@@ -51,7 +51,7 @@ just batch-mac            # Mac batch: fmt/clippy, builds and parallel tests
 just install-checks       # exact-tree Mac install supplement: serial, durability, package
 just steps GROUPS         # exactly those comma-separated groups, in canonical order
 just check                # Linux workspace gate (no durability): fmt, clippy, structure, builds, parallel+serial, contracts, tooling
-just platform             # per install: fmt, clippy, builds, parallel, serial, durability
+just platform             # complete platform tier: fmt, clippy, builds and all three lanes
 just full                 # every group: check, plus variants, rustdoc, durability and the publish dry run
 just fmt                  # cargo fmt, then ruff format on the checked Python paths
 just clippy               # workspace clippy, then each supported package alone

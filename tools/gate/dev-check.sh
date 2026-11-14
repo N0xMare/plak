@@ -16,6 +16,7 @@ platform_groups=static,builds,tests-parallel,tests-serial,tests-durability
 
 tier=check
 static_scope=full
+explicit_static_scope=false
 selection=$check_groups
 packages=()
 # The musl qualification image lacks the wasm target; only that container may
@@ -24,9 +25,13 @@ qual_container=false
 if [[ "${1:-}" == --qual-container ]]; then qual_container=true; shift; fi
 if [[ "${1:-}" == --static-scope ]]; then
   [[ $# -ge 2 ]] || { echo '--static-scope requires full, shared or platform' >&2; exit 2; }
+  explicit_static_scope=true
   static_scope=$2; shift 2
 fi
 case "$static_scope" in full|shared|platform) ;; *) echo "unknown static scope: $static_scope" >&2; exit 2 ;; esac
+if [[ "$explicit_static_scope" == true && "${1:-}" != --steps ]]; then
+  echo '--static-scope requires --steps' >&2; exit 2
+fi
 case "${1:-}" in
   --fast) tier=fast; selection=static,tests-parallel; shift; packages=("$@"); set -- ;;
   --platform) tier=platform; static_scope=platform; selection=$platform_groups; shift ;;
@@ -38,9 +43,6 @@ case "${1:-}" in
     if [[ $# -gt 0 ]]; then shift; fi ;;
   -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
 esac
-if [[ "$tier" == full && "$static_scope" != full ]]; then
-  echo "full requires every static check" >&2; exit 2
-fi
 if [[ $# -gt 0 ]]; then echo "unknown argument: $1" >&2; exit 2; fi
 if [[ -z "$selection" || "$selection" == ,* || "$selection" == *, || "$selection" == *,,* ]]; then
   echo "expected non-empty comma-separated step groups" >&2; exit 2

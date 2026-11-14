@@ -1179,8 +1179,19 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(sum(call['args'][0] == 'clippy' for call in calls), len(CLIPPIES))
         self.assertFalse([script for script in scripts if script[0].endswith('.py')])
-        result, _, _ = self.run_gate('--static-scope', 'shared', '--full')
-        self.assertNotEqual(result.returncode, 0)
+        for scope in ('full', 'shared', 'platform'):
+            for tier in (
+                (),
+                ('--full',),
+                ('--platform',),
+                ('--batch-mac',),
+                ('--fast',),
+                ('--soak',),
+            ):
+                with self.subTest(scope=scope, tier=tier):
+                    result, calls, scripts = self.run_gate('--static-scope', scope, *tier)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn('--static-scope requires --steps', result.stderr)
 
     def test_worker_scope_lints_reverse_dependencies_and_keeps_global_checkers(self):
         self.env['GATE_DEPENDENTS'] = 'plak\nplakous-hosted\n'

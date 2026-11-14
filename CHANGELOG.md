@@ -13,8 +13,9 @@ for one version bump, without native protocol compatibility.
   share platform-independent checks, narrow worker lint roots, keep macOS batch
   checks to fmt/clippy, builds and parallel tests, and require exact-tree Mac
   serial/durability plus package verification before production installation.
-  Batch packaging is conditional on packaging inputs; standalone rustdoc stays
-  in full/RC. Keep full checks on both release platforms.
+  Package verification runs every batch, reusing only matching cohort verification
+  receipts; standalone rustdoc stays in full/RC. Keep full checks on both release
+  platforms. Explicit static scopes are restricted to step-group invocations.
 
 - Clarify that session usage is process-local since runtime open, not a lifetime
   total. Reopening after a host restart starts empty; reconnecting a client to
