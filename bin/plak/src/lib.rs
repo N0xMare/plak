@@ -534,7 +534,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let services = Services::from_env(Some(otel_extra_telemetry_sink), launch.as_deref());
     #[cfg(not(feature = "otel"))]
     let services = Services::from_env(None, launch.as_deref());
-    if matches!(&command, Command::SessionCheckBinding) {
+    if let Command::SessionCheckBinding { inspection } = &command {
+        if let Some(path) = inspection {
+            return host::inspect_binding(path, &mut io::stdout().lock());
+        }
         return commands::session::check_binding::run(services.paths()?, &mut io::stdout().lock());
     }
     if let Command::HostUpgradeFinishSource { receipt } = command {
@@ -1474,7 +1477,7 @@ fn execute_command(
         | Command::HostConnect { .. }
         | Command::HostUpgrade { .. }
         | Command::WireSchema
-        | Command::SessionCheckBinding
+        | Command::SessionCheckBinding { .. }
         | Command::Help
         | Command::CommandHelp { .. }
         | Command::Version

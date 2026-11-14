@@ -5684,6 +5684,47 @@ promoted allocations in v13. Retained rows carry allocation identity and optiona
 terminal evidence, not a PID, output cursor or permission to replay a call. This
 contract alone does not admit live cross-key moves: fresh original-worker
 retention reconciliation and a complete joined source handoff remain required.
+The private live-source qualification path first inspects membership while actors
+run, without constructing a capsule. Destination-image inspection checks every
+selected active head's frozen binding/configuration from a bounded source-owned
+semantic inspection report, outside v13. Missing heads, known binding cuts and new availability regressions refuse
+before the drain. An unrelated pre-existing external availability unknown cannot
+hide a definite binding cut. Active child runner placements join the service preflight.
+It then closes external admissions, resolves reserved drafts, and uses the same
+host-wide step boundaries as same-key draining: paid workflows and effects must
+join; a model generation may reach its natural boundary or planned interruption.
+Durable root/child handoff recording must succeed before guarded source export.
+A failed handoff write is reported after lease/task cleanup; it cannot authorize
+source surrender or an invented continuation. Final group membership and the
+exact joined v13 capsule are rebuilt/re-probed under tree and branch guards;
+failed final compilation remains a clean Prepared rollback. After rollback
+releases its guards and admission pause, the ordinary continuation scan reopens
+handed-off residents unattended, using the original root/child continuation IDs.
+An absent private live capability is omitted from the closed destination probe,
+preserving the previous settled probe shape and its bootstrap upgrade path.
+The source adapter selects the explicit retained-job cut without treating
+metadata as liveness.
+Public live capability remains disabled. The private live move path replaces
+the changed-triple process refusal with the joined cut and retention proof;
+ordinary settled and same-key qualification keep that refusal unchanged.
+Destination readiness joins every carried promoted allocation by job number,
+allocation ID and allocation generation through continued-line ownership.
+Only the current head's unconsumed ledger owes live observations; historical
+rows already consumed by that head do not resurrect jobs.
+Missing nonterminal allocations, duplicate numbers, foreign allocations,
+unknown outcomes or contradictory terminal evidence withhold the group. A real
+terminal arriving during transfer is accepted without inventing another job or
+changing the runtime's imported number floor. Only the original worker owns its
+handles, output, controls and deadlines; semantic seeds are not counted again
+against job capacity. All transfers finish before a fresh sweep of native and
+original owners and runner work; Ready is saved for the whole dependency group
+only after that sweep and lease renewal. Exact terminal observations are
+recorded under the held lease before Ready, without consuming or acknowledging
+the original job; the next ordinary commit folds that first evidence.
+An offline original retains its cached
+occupancy and withholds dependent groups, not unrelated Ready groups. Existing
+continuation decisions, queue/mail IDs and one-time admission rules then resume
+through the ordinary startup scan, never by replaying source requests.
 Existing product/tree semantic cuts preserve the original handoff decisions,
 attempts and accepted command IDs; open turns, unreported process calls and
 unjoined effect journals still refuse construction.

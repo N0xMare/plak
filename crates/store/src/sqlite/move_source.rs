@@ -1,7 +1,7 @@
 //! The source executable reads only its own native key before taking any move authority.
 use super::*;
 use plakous_agent::internal::host_move::{
-    MoveBranch, MoveInstall, MoveLine, MoveSession, MoveSource,
+    MoveBranch, MoveInstall, MoveJobCut, MoveLine, MoveSession, MoveSource,
 };
 
 impl SqliteSessionStore {
@@ -50,7 +50,21 @@ impl SqliteSessionStore {
         path: impl AsRef<Path>,
         sessions: &[SessionId],
     ) -> Result<MoveInstall, SessionStoreError> {
-        Self::inspect_move_source_unsettled(path, sessions)?.settled()
+        Self::inspect_move_source_cut(path, sessions, MoveJobCut::Settled)
+    }
+
+    /// Read-only joined source snapshot with an explicit promoted-job policy.
+    ///
+    /// # Errors
+    /// Refuses working heads, incomplete inventories or jobs outside the selected cut.
+    #[doc(hidden)]
+    pub fn inspect_move_source_cut(
+        path: impl AsRef<Path>,
+        sessions: &[SessionId],
+        job_cut: MoveJobCut,
+    ) -> Result<MoveInstall, SessionStoreError> {
+        let source = Self::inspect_move_source_unsettled(path, sessions)?;
+        MoveInstall::with_job_cut(source.sessions, source.lines, job_cut)
     }
 
     /// Reads source heads before terminal proof sampling, granting no installation authority.

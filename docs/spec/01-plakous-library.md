@@ -1801,6 +1801,15 @@ same cut and creates no driver or process handle. Retained rows are not proof
 that a process is alive, permission to restart it, or permission to execute an
 installed group; the host must obtain fresh original-worker retention authority
 and whole-group Ready separately. The default dormant path remains `Settled`.
+The host's live source adapter performs inspection-based binding/configuration
+qualification for every selected active head before draining. The source emits
+bounded semantic tool presentation and configuration inspection data, not native
+checkpoint bytes; destination-image inspection opens no foreign native store,
+runtime, custody, workspace effect or credential. This ephemeral inspection is
+neither a session carrier nor a new purpose for export v13. After the joined
+drain, the producer rebuilds the exact quiescent capsule under guards and the
+destination fully recompiles/re-probes that cut before the commit decision.
+Changed membership or a failed final probe rolls back Prepared ownership.
 A Published but never-executed target batch can recover its original install
 fingerprint after lease-only reconciliation: its journal retains the original
 branch floors, feed cut and exact captured line-terminal set separately from

@@ -95,6 +95,19 @@ impl SessionBackend {
         SqliteSessionStore::inspect_move_source_unsettled(path, sessions).map_err(store_error)
     }
 
+    /// Reads a joined source cut without taking runtime ownership.
+    ///
+    /// # Errors
+    /// Refuses unresolved work, incomplete inventories and jobs outside the selected cut.
+    #[doc(hidden)]
+    pub fn inspect_move_source_cut_sqlite(
+        path: impl AsRef<Path>,
+        sessions: &[plakous_model::SessionId],
+        job_cut: super::host_move::MoveJobCut,
+    ) -> Result<super::host_move::MoveInstall, AgentSessionsError> {
+        SqliteSessionStore::inspect_move_source_cut(path, sessions, job_cut).map_err(store_error)
+    }
+
     /// Read-only own-key admission of a reconstructed group before source surrender.
     /// This host seam does not open a writer, driver or execution lease.
     ///

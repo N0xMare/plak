@@ -4,7 +4,7 @@ use super::*;
 use plak::store::session_records::{SessionRecordStore as _, SqliteSessionStore};
 use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
 
-mod observations;
+pub(super) mod observations;
 mod paid_fold;
 mod process;
 mod protocol;
@@ -14,7 +14,7 @@ fn store(fixture: &Fixture) -> SqliteSessionStore {
     SqliteSessionStore::new(plak::home::paths::PlakPaths::explicit(fixture.home()))
 }
 
-fn dispatches(fixture: &Fixture) -> usize {
+pub(super) fn dispatches(fixture: &Fixture) -> usize {
     read_evidence(fixture.root.join("evidence.jsonl"))
         .unwrap()
         .iter()
@@ -50,12 +50,17 @@ fn settled(fixture: &Fixture, session: &str) {
 }
 
 fn busy(fixture: &Fixture) -> (Host, Client, String, NodeAddress, PathBuf) {
+    busy_with(fixture, &[])
+}
+
+pub(super) fn busy_with(
+    fixture: &Fixture,
+    environment: &[(&str, String)],
+) -> (Host, Client, String, NodeAddress, PathBuf) {
     let release = fixture.root.join("provider-release");
-    let host = start_env(
-        fixture,
-        &[],
-        &[("PLAK_TEST_PROVIDER_RELEASE", release.display().to_string())],
-    );
+    let mut environment = environment.to_vec();
+    environment.push(("PLAK_TEST_PROVIDER_RELEASE", release.display().to_string()));
+    let host = start_env(fixture, &[], &environment);
     let mut client = Client::connect(&host);
     let Outcome::Ok(Answer::Created { session, node, .. }) =
         client.request(1, new_session(&fixture.workspace()))

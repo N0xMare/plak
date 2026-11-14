@@ -31,8 +31,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         // The handoff record is durable before any lease is released.
         // The tree's runtime is kept until the release ends, which gives
         // its custody up explicitly (spec 03 §14).
+        let handoff_failure = if handoff {
+            self.record_planned_handoff().await.err()
+        } else {
+            None
+        };
         let handed_off_tree = if handoff {
-            self.record_planned_handoff().await;
             crate::topology_runtime::lookup(&super::durable_tree_id(
                 &self.role.config.topology_rows(),
                 &self.role.config.session,
@@ -176,7 +180,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             (Some(stop), Some(release)) => Some(release.with_cleanup_failure(stop)),
             (Some(stop), None) => Some(CliFailure::new(stop)),
             (None, release) => release,
-        };
+        }
+        .or(handoff_failure);
         let Some(locator) = locator else {
             return CliFailure::shutdown(release_failure, None);
         };

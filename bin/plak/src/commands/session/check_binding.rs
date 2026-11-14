@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 mod dispositions;
+#[cfg(feature = "web")]
+pub(crate) mod inspection;
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct Report {
@@ -62,15 +64,7 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
             ),
             Some(Ok(frozen)) => match plakous_hosted::agent::check_frozen_binding(&frozen) {
                 Ok(change) => (
-                    change
-                        .or_else(|| {
-                            crate::test_hooks::binding_executor_cut().then(|| {
-                                plakous::agent::BindingChange::ToolBinding {
-                                    tool: "fixture.revised-executor".into(),
-                                }
-                            })
-                        })
-                        .map(|change| change.to_string()),
+                    qualified_change(change).map(|change| change.to_string()),
                     None,
                 ),
                 Err(error) => (None, Some(error.message().to_owned())),
@@ -96,8 +90,23 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
     })
 }
 
+fn qualified_change(
+    change: Option<plakous::agent::BindingChange>,
+) -> Option<plakous::agent::BindingChange> {
+    change.or_else(|| {
+        crate::test_hooks::binding_executor_cut().then(|| {
+            plakous::agent::BindingChange::ToolBinding {
+                tool: "fixture.revised-executor".into(),
+            }
+        })
+    })
+}
+
 pub(crate) fn run(paths: &PlakPaths, output: &mut dyn Write) -> CliResult<ProcessOutcome> {
-    let report = inspect(paths)?;
+    write_report(inspect(paths)?, output)
+}
+
+fn write_report(report: Report, output: &mut dyn Write) -> CliResult<ProcessOutcome> {
     serde_json::to_writer(&mut *output, &report).map_err(|_| CliFailure::new("stdout failed"))?;
     writeln!(output).map_err(|_| CliFailure::new("stdout failed"))?;
     if report.compatible {

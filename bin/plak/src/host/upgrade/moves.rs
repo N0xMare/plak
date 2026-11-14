@@ -1,13 +1,15 @@
 //! The receipt decision owns every connected group's irreversible source surrender.
 use super::{
     CliFailure, CliResult, Leases, Phase, Ready, Receipt, Request, Services, check_cancel,
-    new_receipt, preparation, process, receipt, step_drain,
+    new_receipt, preparation, process, receipt,
 };
 use crate::carry::host_move::{Capsule, GroupProbe, source::Inventory};
 use plakous::sessions::host_move::MoveOperation;
 use plakous::sessions::{BranchHold, SessionLocator, SessionOperationId};
 use plakous_hosted::host_service::wire::SessionHost;
 use std::sync::{Arc, atomic::AtomicBool};
+
+mod source;
 
 pub(super) struct Frozen {
     services: Services,
@@ -71,37 +73,15 @@ pub(super) fn prepare(
     let paths = services.paths()?;
     let operation =
         plakous::model::sha256_bytes(&[b"host-move/request/v1", uuid::Uuid::new_v4().as_bytes()]);
-    let inventory = Inventory::read(services, operation)?;
-    let _bound_connections = inventory
-        .as_ref()
-        .map(|inventory| retain_connections(services, inventory, runtime))
-        .transpose()?;
-    if let Some(inventory) = &inventory {
-        preflight(services, &request, inventory, cancelled, runtime, progress)?;
-    }
-    let standalone = crate::carry::upgrade::admission(paths, true)?;
-    let pause = host.pause_admissions_for_upgrade(Arc::clone(cancelled))?;
-    let budget = step_drain::Budget::new(request.drain)?;
-    host.resolve_paused_drafts(&pause, budget.barrier_deadline, cancelled)?;
-    if !host
-        .hand_off_paused(
-            &pause,
-            super::super::HANDOFF_DEADLINE.saturating_sub(super::super::STOP_MARGIN),
-        )?
-        .is_empty()
-    {
-        return Err(CliFailure::new(
-            "host_upgrade_drain_failed: no connected group surrendered",
-        ));
-    }
-    let final_inventory = Inventory::read(services, operation)?;
-    if inventory.as_ref().map(|inventory| &inventory.groups)
-        != final_inventory.as_ref().map(|inventory| &inventory.groups)
-    {
-        return Err(CliFailure::new(
-            "host_upgrade_inventory_changed: source membership changed during preflight; retry without surrender",
-        ));
-    }
+    let source::Prepared {
+        connections: _bound_connections,
+        inventory: final_inventory,
+        pause,
+        standalone,
+        drain,
+    } = source::prepare(
+        host, services, &request, cancelled, runtime, progress, operation,
+    )?;
     let mut authority = new_receipt(services, request, arguments)?;
     authority.save(paths)?;
     let mut ready = Ready {
@@ -114,7 +94,7 @@ pub(super) fn prepare(
             committing: false,
             decision_pending: false,
         }),
-        step_drain: None,
+        step_drain: drain,
         executable: authority.destination.clone(),
         key: authority.destination_key.clone(),
         binary: authority.destination_binary.clone(),
@@ -132,7 +112,7 @@ pub(super) fn prepare(
                 .as_mut()
                 .ok_or_else(|| CliFailure::new("source guard missing"))?,
         )?;
-        let guarded = Inventory::read(services, operation)?
+        let guarded = Inventory::read_cut(services, operation, inventory.job_cut())?
             .ok_or_else(|| CliFailure::new("source inventory disappeared under its guards"))?;
         if guarded.groups != inventory.groups {
             return Err(CliFailure::new(
@@ -269,6 +249,14 @@ fn retain_connections(
         .into_iter()
         .filter(|runner| runner != "local")
         .collect::<Vec<_>>();
+    retain_runners(services, runners, runtime)
+}
+
+fn retain_runners(
+    services: &Services,
+    runners: Vec<String>,
+    runtime: &tokio::runtime::Handle,
+) -> CliResult<Vec<plakous::runner::RunnerConnectionHold>> {
     let holds = runners
         .iter()
         .map(|id| {
@@ -376,9 +364,11 @@ fn prepare_group(
     }
     frozen.proofs.extend(initial.proofs);
     let native = executor
-        .block_on(
-            sessions.prepare_move(operation, &frozen.holds[start..].iter().collect::<Vec<_>>()),
-        )
+        .block_on(sessions.prepare_move_cut(
+            operation,
+            &frozen.holds[start..].iter().collect::<Vec<_>>(),
+            initial.native.job_cut(),
+        ))
         .map_err(|error| CliFailure::new(error.to_string()))?
         .map_err(|error| CliFailure::new(error.to_string()))?;
     crate::carry::upgrade::crash_cut("move-after-source-prepare");

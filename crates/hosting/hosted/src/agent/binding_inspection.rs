@@ -39,6 +39,28 @@ pub fn check_frozen_binding(
     let configuration = frozen.configuration().ok_or_else(|| {
         CliFailure::new("binding inspection needs a recorded native configuration")
     })?;
+    check_binding_data(configuration, frozen)
+}
+
+/// Checks semantic inspection data without opening source-native state or execution authority.
+///
+/// # Errors
+/// Refuses malformed data or unavailable external executors; binding cuts are the result.
+#[doc(hidden)]
+pub fn check_binding_data(
+    configuration: &plakous::model::CompiledProviderConfiguration,
+    frozen: &FrozenSessionPresentation,
+) -> CliResult<Option<BindingChange>> {
+    let restored = frozen
+        .restore_configuration(configuration)
+        .map_err(CliFailure::from)?;
+    if restored.selected_identity() != configuration.selected_identity()
+        || restored.effective_identity() != configuration.effective_identity()
+    {
+        return Err(CliFailure::new(
+            "inconsistent binding inspection configuration",
+        ));
+    }
     let composition = [
         CompositionSelection::NativePtc,
         CompositionSelection::JsPtc,
@@ -65,7 +87,7 @@ pub fn check_frozen_binding(
     if let Some(change) = check_executors(frozen, &registry)? {
         return Ok(Some(change));
     }
-    check_native_selection(frozen, composition)
+    check_native_selection(configuration, composition)
 }
 
 fn check_executors(
@@ -128,12 +150,9 @@ fn executor_namespace(id: &str) -> &str {
 }
 
 fn check_native_selection(
-    frozen: &FrozenSessionPresentation,
+    configuration: &plakous::model::CompiledProviderConfiguration,
     composition: CompositionSelection,
 ) -> CliResult<Option<BindingChange>> {
-    let configuration = frozen.configuration().ok_or_else(|| {
-        CliFailure::new("native selection inspection needs a recorded configuration")
-    })?;
     let route = configuration.selected().route();
     let model = route.requested_model();
     for provider in [

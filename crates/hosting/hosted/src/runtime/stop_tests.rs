@@ -1080,6 +1080,7 @@ fn crash_busy(root: &std::path::Path, at: &str) -> (Lost, String, String) {
     );
     (
         Lost {
+            release_error: None,
             store,
             state_roots,
             id,

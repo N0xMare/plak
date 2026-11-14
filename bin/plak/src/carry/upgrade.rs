@@ -170,6 +170,8 @@ pub(crate) fn state_key_valid(value: &str) -> bool {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DestinationProbe {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) live_move_protocol: Option<u32>,
     pub(crate) protocol: u32,
     pub(crate) receipt_version: u32,
     pub(crate) binary_id: String,
@@ -198,6 +200,7 @@ pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationPro
         runner_version.source_revision = revision;
     }
     Ok(DestinationProbe {
+        live_move_protocol: crate::host::live_move_protocol(),
         protocol: PROTOCOL,
         receipt_version: receipt::VERSION,
         binary_id: crate::build_identity::binary_id().to_owned(),
@@ -229,6 +232,16 @@ pub(crate) fn require_capacity(capacity: &super::CarryCapacityProbe) -> CliResul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_upgrade_probe_preserves_the_closed_pre_live_shape_byte_for_byte() {
+        let bytes = include_bytes!("upgrade/pinned/settled-probe-v3.json");
+        let probe: DestinationProbe = serde_json::from_slice(bytes).unwrap();
+        assert_eq!(probe.live_move_protocol, None);
+        let mut encoded = serde_json::to_vec(&probe).unwrap();
+        encoded.push(b'\n');
+        assert_eq!(encoded, bytes);
+    }
 
     #[test]
     fn host_upgrade_refuses_unknown_or_smaller_capacity_instead_of_carrying_a_warning() {

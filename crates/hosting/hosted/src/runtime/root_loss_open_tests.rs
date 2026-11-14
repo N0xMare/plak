@@ -25,6 +25,7 @@ type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
 pub(super) struct Lost {
+    pub(super) release_error: Option<crate::CliFailure>,
     pub(super) store: Arc<dyn SessionRecordStore>,
     pub(super) state_roots: crate::agent::ProductStateRoots,
     pub(super) id: String,
@@ -122,9 +123,10 @@ pub(super) fn release_a_running_root_turn(
             actions.request_abandon_and_release();
         }
     }
-    let _ = host.join().unwrap();
+    let release_error = host.join().unwrap().err();
     seen.extend(events.try_iter());
     Lost {
+        release_error,
         store,
         state_roots,
         id,
@@ -430,6 +432,7 @@ fn a_fenced_root_turn_records_no_loss_and_holds_nothing() {
         ])),
     );
     let lost = Lost {
+        release_error: None,
         store: Arc::clone(&config.store),
         state_roots: config.state_roots.clone(),
         id: config.session.id.clone(),

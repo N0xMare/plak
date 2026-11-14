@@ -17,7 +17,7 @@ fn host_step_drain_notice_yields_pending_mail_wait_under_finite_and_idle_budgets
     }
 }
 
-pub(super) fn tool_row(client: &mut Client, name: &str, finished: bool) {
+pub(crate) fn tool_row(client: &mut Client, name: &str, finished: bool) {
     loop {
         let HostFrame::Event { observation, .. } = client.next() else {
             continue;

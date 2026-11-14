@@ -1,4 +1,4 @@
-//! Destination-owned semantic compilation, before any drain or native-store write.
+//! Destination-owned quiescent-cut compilation before source surrender or native writes.
 use super::{Capsule, Custody};
 use crate::shell::services::Services;
 use crate::{CliFailure, CliResult};

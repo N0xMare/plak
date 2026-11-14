@@ -4126,7 +4126,8 @@ child held after a loss keeps its hold), and, when its quit reached a running
 root turn, a product-store root interrupt with cause `handoff` anchored on
 that turn, once its views applied the turn's admission (so the turn's own
 submission is older than the interrupt; when they had not, nothing is written
-and the release logs `session.handoff_unrecorded`). The projection first puts
+and the release logs `session.handoff_unrecorded` and reports failure after
+lease/task cleanup). The projection first puts
 the handoff's fold position past the acceptance of the turn it interrupts, so
 that turn never reads as one admitted after the handoff. The hub's join retires
 children by depth, deepest first, siblings concurrently, under its one

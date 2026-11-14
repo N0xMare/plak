@@ -271,7 +271,8 @@ authority; no destination opens the source key's databases (chapter 02 §4.6).
 Their introduction changes no state-key component or export encoding.
 The unshipped version-1 receipt also journals connected-group membership,
 source retirement acknowledgements, destination install digests and exact
-owner-transfer intents. Its global Committed decision precedes native retirement;
+owner-transfer intents and bounded exact own-intent histories for delayed CAS
+recovery. Its global Committed decision precedes native retirement;
 only whole-group Ready releases the destination admission/readoption gate.
 Receipts remain operational authority, not a second session-data carrier.
 
@@ -304,6 +305,14 @@ restore native control of that line: native adoption refuses until its retained
 jobs are finished and consumed or explicitly disowned through a compatible
 retention endpoint. Unrelated native lines remain usable. This exception grants
 no cross-build native-store reader and changes no runtime schema or state key.
+
+Live-move preflight also exchanges ephemeral binding inspection v1. The source
+build writes per-head semantic presentations and compiled provider configurations;
+the destination checks those bytes without opening a foreign native store. Its
+closed encoding, including `CompiledProviderConfiguration`, is pinned from the
+source writer. Unknown versions or shapes refuse rather than falling back. This
+is qualification data only, not another session carrier, journal, authority or
+operational purpose for export v13.
 
 ## How to read the rest of these docs
 

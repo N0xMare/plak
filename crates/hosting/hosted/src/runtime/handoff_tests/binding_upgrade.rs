@@ -14,6 +14,7 @@ fn same_key_restart_with_changed_binding_neither_carries_nor_consumes_handoff() 
         } else {
             let (config, evidence) = scripted_host_with(root.path(), script(serde_json::json!([])));
             let mut lost = Lost {
+                release_error: None,
                 store: Arc::clone(&config.store),
                 state_roots: config.state_roots.clone(),
                 id: config.session.id.clone(),

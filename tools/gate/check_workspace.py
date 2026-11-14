@@ -1678,7 +1678,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         'tools': {'LineOwner', 'runner::decode_jobs_snapshot'},
     },
     ("plak", "src/carry/host_move/source.rs"): {
-        'sessions': {'host_move', 'MoveDisposition', 'MoveInstall', 'MoveOperation'},
+        'sessions': {'host_move', 'MoveDisposition', 'MoveInstall', 'MoveJobCut', 'MoveOperation'},
         'tools': {'runner::decode_jobs_snapshot'},
     },
     ("plak", "src/carry/host_move/source/terminals.rs"): {
@@ -1709,6 +1709,13 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         'sessions': {'host_move', 'MoveOperation'},
         'runner': {'RunnerConnectionHold'},
     },
+    ("plak", "src/host/upgrade/moves/source.rs"): {
+        'sessions': {'host_move', 'MoveJobCut'},
+        'runner': {'RunnerConnectionHold'},
+    },
+    ("plak", "src/carry/host_move/source/selection.rs"): {
+        'sessions': {'host_move', 'MoveJobCut'},
+    },
     ("plak", "src/carry/host_move/reconstruction.rs"): {
         'sessions': {
             'MoveLineRecord',
@@ -1723,6 +1730,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plak", "src/carry/host_move/validation.rs"): {'tools': {'RunnerId'}},
     # Frozen construction data and pure metadata checks, not runtime authority.
     ("plak", "src/commands/session/check_binding.rs"): {"sessions": {"rehearsal"}},
+    ("plak", "src/commands/session/check_binding/inspection.rs"): {"sessions": {"rehearsal"}},
     ("plakous-hosted", "src/agent/binding_inspection.rs"): {
         "sessions": {"FrozenSessionPresentation"},
         "tools": {"RegisteredToolIdentity", "ToolBindingError"},

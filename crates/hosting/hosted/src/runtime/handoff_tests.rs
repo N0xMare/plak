@@ -157,7 +157,7 @@ impl StoreFaults for RefuseRootLoss {
     }
 }
 
-/// A handoff whose write fails still releases, without the record: its
+/// A handoff whose write fails reports failure after releasing, without the record: its
 /// cancel settled the turn, so the next open holds nothing and nothing
 /// continues by itself without a durable handoff row. (A turn the release
 /// left unsettled is held: `a_handoff_whose_turn_never_settles_holds_as_a_loss`.)
@@ -172,6 +172,12 @@ fn a_handoff_the_host_could_not_record_continues_nothing() {
             config.store = Arc::new(FaultStore::new(Arc::clone(&config.store), RefuseRootLoss));
             config
         },
+    );
+    assert!(
+        lost.release_error
+            .as_ref()
+            .is_some_and(|error| error.message().contains("injected root loss refusal")),
+        "failed durable handoff must reach the caller after cleanup"
     );
     assert_eq!(
         lost.store

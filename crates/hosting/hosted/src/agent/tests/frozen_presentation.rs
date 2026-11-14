@@ -367,7 +367,18 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
                 continue;
             }
             if let Some(presentation) = head.presentation {
-                assert_eq!(crate::agent::check_frozen_binding(&presentation?)?, None);
+                let presentation = presentation?;
+                assert_eq!(crate::agent::check_frozen_binding(&presentation)?, None);
+                let semantic = plakous::sessions::FrozenSessionPresentation::from_semantic(
+                    presentation.semantic()?,
+                )?;
+                assert_eq!(
+                    crate::agent::check_binding_data(
+                        presentation.configuration().unwrap(),
+                        &semantic
+                    )?,
+                    None
+                );
             }
         }
         assert_eq!(std::fs::read(&database)?, before);

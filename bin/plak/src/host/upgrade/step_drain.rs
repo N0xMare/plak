@@ -1,4 +1,4 @@
-//! Same-key step freeze; cross-key live carry is not yet admitted.
+//! Joined step boundaries shared by same-key handoff and guarded cross-key cuts.
 
 use crate::command::HostDrain;
 use crate::shell::services::Services;

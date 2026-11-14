@@ -2,45 +2,52 @@
 //! lets go, each node with work in flight is interrupted with cause
 //! `handoff`, so the next host continues it once by itself. Only the
 //! releasing host writes it, inside its own release and before any lease is
-//! released. A write that fails leaves the release as it was: the next open
-//! then reads an ordinary loss and holds, and nothing continues by itself
-//! without a durable handoff row.
+//! released. A failed write is reported after release cleanup: an upgrade
+//! cannot surrender it, and an ordinary later open holds the loss rather
+//! than inventing automatic continuation without a durable handoff row.
 
-use super::{RootActor, SessionEvent, durable_tree_id, log_ev};
+use super::{CliFailure, CliResult, RootActor, SessionEvent, durable_tree_id, log_ev};
 use crate::runtime::root_loss::{
     RootInterruptWrite, handed_off_root_turn, loss_scan, record_root_handoff,
 };
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
-    pub(super) async fn record_planned_handoff(&mut self) {
+    pub(super) async fn record_planned_handoff(&mut self) -> CliResult<()> {
+        let mut failure = None;
         let rows = self.role.config.topology_rows();
         let tree_id = durable_tree_id(&rows, &self.role.config.session);
         if let Some(runtime) = crate::topology_runtime::lookup(&tree_id) {
             // A handoff covers the turn it interrupts: its fold position has
             // to be past that turn's acceptance, or the turn reads as one
             // admitted after the handoff and the child is held instead.
-            if let Err(error) = crate::agent::project_running_children(&runtime).await {
-                self.log_unrecorded_handoff("projection", &error);
+            let recorded = async {
+                crate::agent::project_running_children(&runtime).await?;
+                runtime
+                    .mutate_then_emit(false, |tree| {
+                        tree.record_handoff().map_err(|error| error.message)
+                    })
+                    .await
+                    .map(|_| ())
             }
-            let recorded = runtime
-                .mutate_then_emit(false, |tree| {
-                    tree.record_handoff().map_err(|error| error.message)
-                })
-                .await;
+            .await;
             if let Err(error) = recorded {
                 self.log_unrecorded_handoff("tree", &error);
+                failure = Some(CliFailure::new(error));
             }
         }
         // A quit that reached a running root turn: that turn is handed over.
         if self.role.handoff_root_due && self.role.config.session.store_revision != 0 {
             crate::test_support_runner::cut(crate::test_support_runner::HostCut::BeforeRootHandoff);
-            self.record_root_handoff().await;
+            if let Err(error) = self.record_root_handoff().await {
+                failure = failure.or(Some(error));
+            }
         }
         #[cfg(test)]
         hooks::recorded();
+        failure.map_or(Ok(()), Err)
     }
 
-    async fn record_root_handoff(&self) {
+    async fn record_root_handoff(&self) -> CliResult<()> {
         let store = self.role.config.store.as_ref();
         let session = &self.role.config.session;
         let recorded = match loss_scan(store, session) {
@@ -61,7 +68,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         };
         if let Err(error) = recorded {
             self.log_unrecorded_handoff("root", &error);
+            return Err(CliFailure::new(error));
         }
+        Ok(())
     }
 
     fn log_unrecorded_handoff(&self, node: &str, error: &str) {

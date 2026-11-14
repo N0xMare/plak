@@ -21,6 +21,14 @@ mod sessions;
 mod socket;
 mod starter;
 mod upgrade;
+pub(crate) use crate::carry::host_move::live_protocol as live_move_protocol;
+
+pub(crate) fn inspect_binding(
+    path: &std::path::Path,
+    output: &mut dyn std::io::Write,
+) -> CliResult<ProcessOutcome> {
+    crate::commands::session::check_binding::inspection::run(path, output)
+}
 use crate::terminal_registry as terminals;
 
 #[cfg(test)]
@@ -194,6 +202,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         &host,
         &services,
         Arc::clone(&host_arguments),
+        Arc::clone(&scanning),
     );
     let pending = upgrades.pending();
     runtime.block_on(bound.serve(

@@ -201,7 +201,9 @@ pub(crate) enum Command {
     SessionList {
         include_archived: bool,
     },
-    SessionCheckBinding,
+    SessionCheckBinding {
+        inspection: Option<PathBuf>,
+    },
     SessionRename {
         id: String,
         title: Option<String>,
@@ -515,7 +517,7 @@ impl Command {
             Self::Runner(_) => "runner",
             Self::Usage { .. } => "usage",
             Self::SessionList { .. }
-            | Self::SessionCheckBinding
+            | Self::SessionCheckBinding { .. }
             | Self::SessionRename { .. }
             | Self::SessionUnarchive { .. }
             | Self::SessionArchive { .. }
@@ -610,7 +612,7 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
             )
             | Command::ConfigShow
             | Command::SessionShow { .. }
-            | Command::SessionCheckBinding
+            | Command::SessionCheckBinding { .. }
             | Command::SessionLog { .. }
     )
 }

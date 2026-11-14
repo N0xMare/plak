@@ -948,6 +948,8 @@ enum SessionAction {
     CheckBinding {
         #[arg(long)]
         all: bool,
+        #[arg(long, hide = true, requires = "all")]
+        inspection: Option<std::path::PathBuf>,
     },
     /// List sessions for the current workspace.
     List {
@@ -1035,8 +1037,11 @@ impl SessionAction {
     fn into_command(self) -> Result<Command, String> {
         match self {
             Self::List { include_archived } => Ok(Command::SessionList { include_archived }),
-            Self::CheckBinding { all: true } => Ok(Command::SessionCheckBinding),
-            Self::CheckBinding { all: false } => Ok(Command::CommandHelp {
+            Self::CheckBinding {
+                all: true,
+                inspection,
+            } => Ok(Command::SessionCheckBinding { inspection }),
+            Self::CheckBinding { all: false, .. } => Ok(Command::CommandHelp {
                 command: "session".to_owned(),
             }),
             Self::Rename {

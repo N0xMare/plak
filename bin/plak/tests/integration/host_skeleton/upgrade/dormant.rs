@@ -395,7 +395,11 @@ fn ready_cannot_abandon(fixture: &Fixture, id: &str) {
     assert_eq!(receipts(fixture)[0]["phase"], "acknowledged");
 }
 
-fn identity(fixture: &Fixture, key: &str, id: &str) -> (plakous::sessions::SessionLocator, String) {
+pub(super) fn identity(
+    fixture: &Fixture,
+    key: &str,
+    id: &str,
+) -> (plakous::sessions::SessionLocator, String) {
     let state = fixture.home().join("state").join(key);
     let product = rusqlite::Connection::open_with_flags(
         state.join("product.sqlite3"),

@@ -919,6 +919,13 @@ arbitrary page partitions in either build. Wall-clock performance claims still
 require the release procedure, not a debug gate.
 
 
+Source live-move qualification covers selected-head inspection while actors run,
+missing-branch refusal, semantic binding checks without a foreign native reader,
+durable handoff-write refusal after release, and a joined busy-root cut before
+guarded surrender. Real-process cases use the upgrade durability lane; pure
+binding and inspection-codec checks remain offline. Live execution stays disabled
+until destination retention/readiness and the remaining crash cuts qualify.
+
 ## 1. Gate layers
 
 The authoritative gate is `tools/gate/dev-check.sh`, in four tiers plus an

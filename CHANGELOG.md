@@ -60,6 +60,10 @@ for one version bump, without native protocol compatibility.
   including retained child input and immutable fork/checkpoint provenance.
   These complete the unshipped context-4/runtime-38/product-38/tree-11 cut.
 
+- Prepare guarded live ownership moves through read-only destination binding
+  inspection, joined step drains and durable planned handoffs. Failed handoff
+  recording now reports failure after cleanup rather than silently surrendering.
+
 - Qualify joined ownership-move cuts for retained promoted-job metadata while
   keeping dormant cuts terminal-only and live cross-key execution disabled.
 

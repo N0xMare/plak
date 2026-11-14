@@ -29,8 +29,15 @@ pub(crate) use presentation::Presentation;
 // Open only when the complete source/recovery/publication chain is qualified.
 pub(crate) const INSTALL_PROTOCOL: Option<u32> = None;
 
+pub(crate) fn live_protocol() -> Option<u32> {
+    crate::test_hooks::host_start_environment()
+        .iter()
+        .any(|(name, value)| *name == "PLAK_TEST_HOST_UPGRADE_LIVE" && value == "1")
+        .then_some(1)
+}
+
 pub(crate) fn install_protocol() -> Option<u32> {
-    INSTALL_PROTOCOL.or_else(|| {
+    INSTALL_PROTOCOL.or_else(live_protocol).or_else(|| {
         crate::test_hooks::host_start_environment()
             .iter()
             .any(|(name, value)| *name == "PLAK_TEST_HOST_UPGRADE_DORMANT" && value == "1")

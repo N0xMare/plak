@@ -111,6 +111,11 @@ pub(super) struct Ready {
 pub(super) type Pending = Arc<Mutex<Option<Ready>>>;
 pub(super) type Worker = Arc<Mutex<Option<std::thread::JoinHandle<()>>>>;
 
+pub(super) struct RequestControl {
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    scanning: Arc<std::sync::atomic::AtomicUsize>,
+}
+
 pub(super) struct Coordinator {
     pending: Pending,
     worker: Worker,
@@ -125,6 +130,7 @@ impl Coordinator {
         host: &Arc<SessionHost<PlakExtension>>,
         services: &Services,
         arguments: Arc<Vec<String>>,
+        scanning: Arc<std::sync::atomic::AtomicUsize>,
     ) -> Self {
         let pending: Pending = Arc::default();
         let worker: Worker = Arc::default();
@@ -135,7 +141,10 @@ impl Coordinator {
             services.clone(),
             Arc::clone(&pending),
             Arc::clone(&worker),
-            Arc::clone(&cancelled),
+            Arc::new(RequestControl {
+                cancelled: Arc::clone(&cancelled),
+                scanning,
+            }),
             arguments,
         ));
         Self {
@@ -639,7 +648,7 @@ pub(super) async fn serve(
     services: Services,
     pending: Pending,
     worker: Worker,
-    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    control: Arc<RequestControl>,
     arguments: Arc<Vec<String>>,
 ) {
     loop {
@@ -661,13 +670,13 @@ pub(super) async fn serve(
         let host = Arc::clone(&host);
         let services = services.clone();
         let pending = Arc::clone(&pending);
-        let cancel = Arc::clone(&cancelled);
+        let control = Arc::clone(&control);
         let arguments = Arc::clone(&arguments);
         let runtime = tokio::runtime::Handle::current();
         let (finished, completion) = tokio::sync::oneshot::channel();
         let handle = std::thread::spawn(move || {
             let _ = handle(
-                stream, &host, &services, &pending, &cancel, &arguments, &runtime,
+                stream, &host, &services, &pending, &control, &arguments, &runtime,
             );
             let _ = finished.send(());
         });
@@ -690,7 +699,7 @@ fn handle(
     host: &Arc<SessionHost<PlakExtension>>,
     services: &Services,
     pending: &Pending,
-    cancelled: &Arc<std::sync::atomic::AtomicBool>,
+    control: &RequestControl,
     arguments: &[String],
     runtime: &tokio::runtime::Handle,
 ) -> CliResult<()> {
@@ -723,7 +732,7 @@ fn handle(
         };
         return write(&mut stream, &answer);
     }
-    let caller = requester::Caller::watch(&stream, Arc::clone(cancelled))?;
+    let caller = requester::Caller::watch(&stream, Arc::clone(&control.cancelled))?;
     stream
         .set_write_timeout(Some(Duration::from_secs(1)))
         .map_err(io_failure)?;
@@ -782,13 +791,55 @@ fn handle(
             }
             write(&mut stream, &Answer::Ready { receipt })
         }
-        Err(failure) => write(
-            &mut stream,
-            &Answer::Refused {
-                detail: failure.message().to_owned(),
-            },
-        ),
+        Err(failure) => {
+            resume_rollback(host, services, runtime, control);
+            write(
+                &mut stream,
+                &Answer::Refused {
+                    detail: failure.message().to_owned(),
+                },
+            )
+        }
     }
+}
+
+fn resume_rollback(
+    host: &Arc<SessionHost<PlakExtension>>,
+    services: &Services,
+    runtime: &tokio::runtime::Handle,
+    control: &RequestControl,
+) {
+    use plakous_hosted::host_service::wire::SlotView;
+    let owed = host
+        .slots()
+        .into_iter()
+        .filter_map(|slot| {
+            let id = match slot.peek() {
+                SlotView::Dormant(id) | SlotView::Opening(id) | SlotView::Releasing(id) => id,
+                SlotView::Resident(session) => session.session_id(),
+            };
+            match super::sessions::continuation_owed(services, &id) {
+                Ok(true) => Some(id),
+                Ok(false) => None,
+                Err(failure) => {
+                    eprintln!(
+                        "plak host: cannot check rollback continuation {id}: {}",
+                        failure.message()
+                    );
+                    None
+                }
+            }
+        })
+        .collect();
+    let cancelled = Arc::clone(&control.cancelled);
+    super::scan(
+        host,
+        owed,
+        move || cancelled.load(std::sync::atomic::Ordering::Acquire),
+        services,
+        runtime,
+        Arc::clone(&control.scanning),
+    );
 }
 
 fn prepare(
@@ -811,8 +862,13 @@ fn prepare(
         ));
     }
     let destination_version = qualify_destination(services, &request, arguments)?;
-    process_safety::check(services, &destination_version, runtime)?;
     let cross_key = request.source_key != request.destination_key;
+    if cross_key && crate::carry::host_move::live_protocol().is_some() {
+        return moves::prepare(
+            host, services, request, cancelled, arguments, runtime, progress,
+        );
+    }
+    process_safety::check(services, &destination_version, runtime)?;
     if cross_key && crate::carry::host_move::install_protocol().is_some() {
         return moves::prepare(
             host, services, request, cancelled, arguments, runtime, progress,
@@ -952,6 +1008,14 @@ fn qualify_destination(
                 .unwrap_or("identity, import version or host capability does not match")
         )));
     }
+    if request.source_key != request.destination_key
+        && let Some(protocol) = crate::carry::host_move::live_protocol()
+        && probe.live_move_protocol != Some(protocol)
+    {
+        return Err(CliFailure::new(
+            "host_upgrade_destination_unsupported: joined live-move capability is unavailable; source remains running",
+        ));
+    }
     if request.source_key == request.destination_key {
         if probe.runner_protocol != crate::commands::runner::version().protocol {
             return Err(CliFailure::new(
@@ -1051,17 +1115,30 @@ fn probe_placements(paths: &PlakPaths) -> CliResult<Vec<crate::carry::upgrade::P
     let mut seen = std::collections::BTreeSet::new();
     let records =
         crate::store::ProductStore::inspect_upgrade_roots(paths).map_err(CliFailure::new)?;
-    Ok(records
-        .into_iter()
+    for record in records
+        .iter()
         .filter(|record| !record.archived && !withheld.contains(&record.id))
-        .filter_map(|record| {
-            let runner = record.runner?;
-            seen.insert((runner.runner_id.clone(), record.workspace_root.clone()))
-                .then_some(crate::carry::upgrade::PlacementProbe {
-                    id: runner.runner_id,
-                    workspace: record.workspace_root,
-                })
-        })
+    {
+        if let Some(runner) = &record.runner {
+            seen.insert((runner.runner_id.clone(), record.workspace_root.clone()));
+        }
+        if let Some((tree, _)) =
+            plakous_recursive_subagents_store::SqliteTreeStore::inspect_move_tree(
+                &paths.subagents_database(),
+                &record.node.tree_id,
+            )
+            .map_err(|error| CliFailure::new(error.message()))?
+        {
+            for node in tree.rows().nodes().values().filter(|node| node.active_turn) {
+                if let Some(runner) = &node.placement.runner_id {
+                    seen.insert((runner.clone(), node.path.clone()));
+                }
+            }
+        }
+    }
+    Ok(seen
+        .into_iter()
+        .map(|(id, workspace)| crate::carry::upgrade::PlacementProbe { id, workspace })
         .collect())
 }
 
