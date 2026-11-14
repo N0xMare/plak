@@ -10,6 +10,10 @@ mod process;
 mod protocol;
 mod stop;
 
+pub(super) fn live_paid_fold_refusal() {
+    paid_fold::in_turn_refusal(true);
+}
+
 fn store(fixture: &Fixture) -> SqliteSessionStore {
     SqliteSessionStore::new(plak::home::paths::PlakPaths::explicit(fixture.home()))
 }

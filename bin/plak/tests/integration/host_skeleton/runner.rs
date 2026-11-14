@@ -289,7 +289,7 @@ fn obsolete_hello(fixture: &Fixture) -> plakous::runner::protocol::Hello {
     old.hello().clone()
 }
 
-fn local_daemon_lines(fixture: &Fixture) -> Vec<plakous::runner::protocol::LineStatus> {
+pub(super) fn local_daemon_lines(fixture: &Fixture) -> Vec<plakous::runner::protocol::LineStatus> {
     use plakous::runner::protocol::{Bind, PROTOCOL_VERSION, VersionTriple};
     use plakous::runner::{ClientWindows, RunnerClient};
     tokio::runtime::Builder::new_current_thread()
@@ -456,7 +456,7 @@ fn stopped(pid: i32) {
     }
 }
 
-fn cut_exit(child: &mut Child) -> std::process::ExitStatus {
+pub(super) fn cut_exit(child: &mut Child) -> std::process::ExitStatus {
     let deadline = std::time::Instant::now() + WAIT;
     loop {
         if let Some(status) = child.try_wait().unwrap() {
@@ -1032,7 +1032,7 @@ fn hold_child_script(fixture: &Fixture) {
     })).unwrap()).unwrap();
 }
 
-fn start_child_job_variant(
+pub(super) fn start_child_job_variant(
     fixture: &Fixture,
     busy: bool,
     env: &[(&str, String)],

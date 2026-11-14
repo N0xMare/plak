@@ -1296,7 +1296,8 @@ pub fn scripted_caller_topology_tools(
     // Move compilation supplies the semantic source tree after the scripted
     // factory was created. Its captured runtime can still be an empty target;
     // inspect the supplied rows instead, without registering or saving them.
-    let runtime = if state_roots.frozen_presentation().is_some() {
+    // A normal reopen also has a frozen presentation, but needs the live writer.
+    let runtime = if state_roots.is_move_compilation() {
         let rows = state_roots
             .tree_store()?
             .load(&tree_id)

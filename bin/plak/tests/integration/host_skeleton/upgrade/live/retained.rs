@@ -134,6 +134,10 @@ fn host_move_live_promoted_job_keeps_its_allocation_through_group_ready() {
 
 #[test]
 fn host_move_live_offline_runner_withholds_only_its_dependency_group() {
+    offline_runner(false);
+}
+
+pub(super) fn offline_runner(restart: bool) {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     let (daemon, path, id) = runner::remote_fixture(&fixture);
@@ -190,6 +194,27 @@ fn host_move_live_offline_runner_withholds_only_its_dependency_group() {
         &[(ENABLED, "1"), ("PATH", &path)],
     );
     assert!(!refused.status.success());
+    if restart {
+        for _ in 0..2 {
+            kill(&mut target);
+            target = start_env(
+                &fixture,
+                &[],
+                &[
+                    (ENABLED, "1".into()),
+                    ("PATH", path.clone()),
+                    ("PLAK_TEST_STATE_KEY", DESTINATION.into()),
+                ],
+            );
+            wait_group(&fixture, &local, "ready");
+            let authority = receipts(&fixture).remove(0);
+            assert_eq!(authority["phase"], "committed");
+            assert_ne!(group(&authority, &remote)["phase"], "ready");
+            assert_eq!(runner::job(&fixture).0, pid);
+            assert!(runner::alive(pid));
+            assert_eq!(drain::dispatches(&fixture), 2);
+        }
+    }
     std::fs::write(ssh, original).unwrap();
     daemon.start();
     wait_group(&fixture, &remote, "ready");
@@ -212,7 +237,7 @@ fn group<'a>(receipt: &'a serde_json::Value, session: &str) -> &'a serde_json::V
         .unwrap()
 }
 
-fn wait_group(fixture: &Fixture, session: &str, phase: &str) {
+pub(super) fn wait_group(fixture: &Fixture, session: &str, phase: &str) {
     let deadline = Instant::now() + WAIT;
     loop {
         let authority = receipts(fixture).remove(0);

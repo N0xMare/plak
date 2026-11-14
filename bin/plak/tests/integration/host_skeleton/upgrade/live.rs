@@ -4,9 +4,18 @@ use plak::store::session_records::SessionRecordStore as _;
 
 const ENABLED: &str = "PLAK_TEST_HOST_UPGRADE_LIVE";
 
+mod qualification;
 mod retained;
+mod review;
 
 fn busy_child(fixture: &Fixture) -> (Host, String, PathBuf) {
+    busy_child_with(
+        fixture,
+        &[("PLAK_TEST_HOST_UPGRADE_CUT", "move-after-commit".into())],
+    )
+}
+
+fn busy_child_with(fixture: &Fixture, environment: &[(&str, String)]) -> (Host, String, PathBuf) {
     let child_script = fixture.root.join("live-child-script.json");
     let release = fixture.root.join("live-child-release");
     write_private(
@@ -21,14 +30,9 @@ fn busy_child(fixture: &Fixture) -> (Host, String, PathBuf) {
     script["steps"][1]["output"]["tool"]["name"] = json!("wait");
     script["steps"][1]["output"]["tool"]["arguments"] = json!({"timeout_ms":300_000});
     fixture.write_script(&script);
-    let host = start_env(
-        fixture,
-        &[],
-        &[
-            (ENABLED, "1".into()),
-            ("PLAK_TEST_HOST_UPGRADE_CUT", "move-after-commit".into()),
-        ],
-    );
+    let mut environment = environment.to_vec();
+    environment.push((ENABLED, "1".into()));
+    let host = start_env(fixture, &[], &environment);
     let mut client = Client::connect(&host);
     let Outcome::Ok(Answer::Created { session, node, .. }) =
         client.request(1, new_session(&fixture.workspace()))
@@ -187,6 +191,9 @@ fn tree_cut_diagnostic(paths: &plak::home::paths::PlakPaths, id: &str) -> String
 fn host_move_live_busy_root_reaches_a_joined_cut_before_guarded_surrender() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
+    fixture.write_script(
+        &json!({"version":1,"repeat_last_step":true,"steps":[{"output":{"text":ANSWER}}]}),
+    );
     let (mut host, _client, session, _node, release) =
         drain::busy_with(&fixture, &[(ENABLED, "1".into())]);
     runner::wait_local_runner_ready(&host);
@@ -231,11 +238,9 @@ fn host_move_live_busy_root_reaches_a_joined_cut_before_guarded_surrender() {
         after.branch_id(),
         before.plakous_locator.unwrap().branch_id()
     );
-    assert_eq!(
-        drain::dispatches(&fixture),
-        1,
-        "moving metadata dispatched another model call"
-    );
+    std::fs::write(release, "only the destination may finish its continuation").unwrap();
+    review::root_continued(&fixture, &session, DESTINATION);
+    assert_eq!(drain::dispatches(&fixture), 2);
     stop(&mut host);
 }
 

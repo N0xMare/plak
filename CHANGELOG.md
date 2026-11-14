@@ -42,6 +42,9 @@ for one version bump, without native protocol compatibility.
 - Recover ownership-move batches from their immutable captured terminal set,
   even when lease-only reconciliation records more job terminals before Ready.
 
+- Qualify live ownership-move process cuts around drain, original-job
+  reconciliation and group readiness, without enabling public live cutover.
+
 - Report uncertain host-upgrade decisions to the requester with a startup
   reconciliation remedy, including attempts later withdrawn without surrender.
 

@@ -217,6 +217,7 @@ pub struct ProductStateRoots {
     /// new session.
     created_semantic_evidence: Option<Arc<[u8]>>,
     frozen_presentation: Option<Arc<plakous::sessions::FrozenSessionPresentation>>,
+    move_compilation: bool,
     sidecars: Arc<dyn plakous::tools::SidecarLocator>,
     reopen_sidecars: Option<Arc<dyn plakous::tools::SidecarLocator>>,
     telemetry_factory: Arc<dyn TelemetrySinkFactory>,
@@ -324,6 +325,7 @@ impl ProductStateRoots {
             named_secrets: Arc::new(crate::mcp_binding::NoNamedSecrets),
             created_semantic_evidence: None,
             frozen_presentation: None,
+            move_compilation: false,
             sidecars,
             reopen_sidecars: None,
             telemetry_factory: telemetry,
@@ -945,6 +947,7 @@ impl ProductStateRoots {
         trees: Arc<dyn TreeStore>,
     ) -> Self {
         self.frozen_presentation = Some(frozen);
+        self.move_compilation = true;
         self.tree_store = Arc::new(Mutex::new(Some(trees)));
         self.telemetry_factory = Arc::new(quiet_telemetry::NoTelemetry);
         self.telemetry = Arc::new(Mutex::new(None));
@@ -954,6 +957,7 @@ impl ProductStateRoots {
 
     pub(super) fn without_reopen_artifact(mut self) -> Self {
         self.frozen_presentation = None;
+        self.move_compilation = false;
         self.reopen_sidecars = None;
         self.created_semantic_evidence = None;
         self.frozen_skills = None;
@@ -976,6 +980,7 @@ impl ProductStateRoots {
         sessions: &AgentSessions,
         locator: plakous::sessions::SessionLocator,
     ) -> Result<Self, plakous::sessions::AgentSessionsError> {
+        self.move_compilation = false;
         self.job_config = sessions.created_job_config(locator).await?;
         self.frozen_presentation =
             Some(Arc::new(sessions.created_tool_presentation(locator).await?));
@@ -1082,6 +1087,7 @@ impl ProductStateRoots {
             named_secrets: Arc::new(crate::mcp_binding::NoNamedSecrets),
             created_semantic_evidence: None,
             frozen_presentation: None,
+            move_compilation: false,
             sidecars: Arc::new(doubles::NoSidecars),
             reopen_sidecars: None,
             telemetry_factory: Arc::new(doubles::NoTelemetry),

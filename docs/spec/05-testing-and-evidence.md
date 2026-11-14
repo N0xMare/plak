@@ -934,6 +934,32 @@ Ready run in upgrade durability. Runner endpoint/process tests run in serial;
 pure inventory/receipt and codec tests remain offline. Public live cross-key
 capability remains disabled pending the remaining end-to-end crash cuts.
 
+`host_skeleton::upgrade::live::qualification::` cuts actual host processes
+after pre-drain inspection, joined step gates and durable handoff, then after
+fresh owner witnesses, persisted transfer intent, individual/all transfers,
+terminal recording and whole-group Ready. Before surrender, the source remains
+openable under its original IDs with no destination runtime or move receipt.
+After surrender, repeated destination restarts preserve the promoted allocation
+and its PID without another start, or retain exactly one concurrent terminal.
+The running-child case also pins the original attempt, line and continuation
+command identities. An offline dependency remains withheld across repeated
+destination restarts while the independent group stays Ready. These cases are
+already partitioned into durability by the owning upgrade module, not offline;
+they do not enable the public capability or substitute synthetic keys for a
+real native-version transition rehearsal.
+
+Live review contracts pin the default settled probe's pre-live bytes, a
+source-written seventeen-head inspection-v1 fixture including compiled provider
+configuration serde, and job-owner fences not exceeding their recorded floor.
+Unattended root/child rollback and destination handoffs admit each original
+continuation once; live paid-compaction refusal joins its one existing summary
+without cancellation or redispatch. Observation-cache tests cover more than 256
+discovered lines with only a few requested, exact bound-instance release,
+independent groups/hosts, reconnect fencing and restored job-bound headroom.
+The real child-result cases distinguish detached move compilation from ordinary
+frozen-presentation reopen: submitted results must commit through the live tree
+writer, while passive finished-child compilation leaves custody and grants alone.
+
 ## 1. Gate layers
 
 The authoritative gate is `tools/gate/dev-check.sh`, in four tiers plus an

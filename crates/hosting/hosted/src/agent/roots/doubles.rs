@@ -5,6 +5,12 @@ use super::{RosterSource, TreeStoreFactory};
 use crate::CliResult;
 use crate::agent_tree::{MemoryTreeStore, TreeStore};
 
+impl super::ProductStateRoots {
+    pub(crate) const fn is_move_compilation(&self) -> bool {
+        self.move_compilation
+    }
+}
+
 /// The conformance-tested in-memory tree store, opened once per factory.
 pub struct MemoryTreeStoreFactory;
 

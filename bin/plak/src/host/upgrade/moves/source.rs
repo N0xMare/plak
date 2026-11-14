@@ -35,6 +35,7 @@ pub(super) fn prepare(
         if live {
             connections = super::retain_runners(services, selection.runners(), runtime)?;
             bindings::preflight_selected(paths, &request.destination, &selection.sessions())?;
+            crate::carry::upgrade::crash_cut("move-after-live-inspection");
         } else if let Some(inventory) = Inventory::read(services, operation)? {
             connections = super::retain_connections(services, &inventory, runtime)?;
             preflight(services, request, &inventory, cancelled, runtime, progress)?;
@@ -47,6 +48,9 @@ pub(super) fn prepare(
     let drain = live
         .then(|| step_drain::prepare(host, services, &pause, budget, cancelled, runtime, progress))
         .transpose()?;
+    if live {
+        crate::carry::upgrade::crash_cut("move-after-live-gates");
+    }
     if !host
         .hand_off_paused(
             &pause,
@@ -57,6 +61,9 @@ pub(super) fn prepare(
         return Err(CliFailure::new(
             "host_upgrade_drain_failed: no connected group surrendered",
         ));
+    }
+    if live {
+        crate::carry::upgrade::crash_cut("move-after-live-handoff");
     }
     let job_cut = if live {
         MoveJobCut::Retained
