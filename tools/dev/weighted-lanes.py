@@ -5,8 +5,9 @@ A trial layout, not a gate. It writes a copy of `.config/nextest.toml` that adds
 `weighted-serial` and `weighted-durability` profiles with the `serial` and
 `durability` membership, thread counts above one and per-test weights, and runs
 them through nextest's `--config-file`. The copy is generated on every run, so
-it always holds the current lanes. The normal lanes and their one-thread
-profiles are not changed.
+it always holds the current lanes. Ordinary durability is already weighted;
+this trial varies widths without changing the gate profiles or dropping their
+full-pool isolation rules.
 
 The durability weights scale with `--durability-threads`: half of it for the
 three campaigns that run their cuts on their own workers, a quarter (rounded up)
@@ -45,8 +46,9 @@ HEAVY = (
 LEDGER = "test(/^crash_sweep::durability_ledger_retirement_/)"
 # The four host-restart matrices, the redial test and the busy-root test.
 FIRST = (
-    "test(/::(tui_host_restart|review_tui_host_restart_switch"
-    "|wire_host_restart|wire_host_restart_switch)$/)"
+    "test(tui_host_restart)"
+    " | test(review_tui_host_restart_switch)"
+    " | test(wire_host_restart)"
     " | test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)"
     " | test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss)"
 )
@@ -70,7 +72,10 @@ def profile_text(name: str, base: dict, threads: int, overrides: list[dict]) -> 
     for key, value in base.items():
         if key not in {"test-threads", "junit", "overrides"}:
             lines.append(f"{key} = {toml_value(value)}")
-    for override in overrides + base.get("overrides", []):
+    inherited = base.get("overrides", [])
+    isolated = [rule for rule in inherited if rule.get("threads-required") == "num-test-threads"]
+    shared = [rule for rule in inherited if rule.get("threads-required") != "num-test-threads"]
+    for override in isolated + overrides + shared:
         lines += ["", f"[[profile.{name}.overrides]]"]
         lines += [f"{key} = {toml_value(value)}" for key, value in override.items()]
     lines += ["", f"[profile.{name}.junit]", 'path = "junit.xml"', ""]

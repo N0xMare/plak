@@ -847,7 +847,7 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these 
 | `rustdoc` | Workspace all-features documentation with warnings denied; full/RC also checks each supported package alone in its default resolution (chapter 06 §8) |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
 | `tests-serial` | nextest profile `serial`: wall-clock budgets, one test thread |
-| `tests-durability` | nextest profile `durability`: crash matrices and the sqlite SIGKILL campaign, one test thread |
+| `tests-durability` | nextest profile `durability`: crash matrices and the sqlite SIGKILL campaign, 16 weighted slots |
 | `contracts` | Positive/negative public compile contracts |
 | `tooling` | Python tooling self-tests, including the user-guide stdlib socket client and hello/directory/attach transcript against an isolated, offline-scripted real host. Prepares the shared all-feature workspace test artifacts, including the host binary, and requires exact wire-version refusal |
 | `package` | Publish dry run, `tools/release/publish.sh --gate`: prefetch archive verification inputs offline first, online only for missing cache inputs, then package and verify every publishable crate strictly offline from the staged published tree (chapter 06 §6.5); skipped outside a git work tree |
@@ -1066,7 +1066,7 @@ exports all four for the test process.
 | Default feature builds | `cargo build --locked --workspace --lib --bins` and `cargo build --locked -p plak --features maintainer --bins`, each with `-D warnings` on the rustflags Cargo passes | Check, platform and full tiers, after clippy: default-feature libraries and binaries compile and link, as does the maintainer installer's Plak feature set, without test hooks or all-features unification hiding missing dependencies. Rustc warnings in those closures are errors; clippy remains the `--all-features` lint |
 | Portable wasm libraries | `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each name from `check_workspace.py --wasm-libraries`, with `-D warnings` | The portable set compiles as a library for `wasm32-unknown-unknown` (chapter 06 §7.5). Currently that set is `plakous-model`, `plakous-runner-protocol`, `plakous-tools` and `plakous-agent`, whose default features are portable, and the list adds the default library of `plakous-store`, whose `sqlite` feature keeps it off the fenced set. This is not a supported product target, and the check proves compilation, not run-time behavior. The musl qualification container skips the check while its preloaded image lacks the rustc target; the summary names the skip and the run records no gate evidence |
 | Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked`, then `cargo doc -p <package> --no-deps --locked` for each supported package in its own default resolution | Rustdoc builds every package's documentation with its own lints denied (a default resolution can expose a link the all-features run hides): broken intra-doc links, links from public documentation into private items, and bare URLs are errors. Runs after clippy and before the tests |
-| Offline tests | `cargo nextest run --locked --workspace --all-features --profile offline`, then `--profile serial` and `--profile durability` with `--test-threads=1` | The whole workspace's deterministic behavior, with no network and no credentials |
+| Offline tests | `cargo nextest run --locked --workspace --all-features --profile offline`, then `--profile serial --test-threads=1` and `--profile durability --test-threads=16` | The whole workspace's deterministic behavior, with no network and no credentials |
 | Public compile contracts | `python3 tools/gate/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
 | Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plak`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. The same checker fences `PORTABLE_CRATES` (chapter 06 §7.5): each listed crate's normal closure, at default features and at `--all-features`, must not carry a reviewed native-only crate (including `libc`) or Tokio feature, resolved for `wasm32-unknown-unknown` rather than the host, and a failure names the crate, the dependency and the path that pulls it in |
 | Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of seven profiles (facade none, `full`, `composition`, `claude` and `openai`; hosted none and all-features), warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plak` and present under `test-hooks` |
@@ -1896,14 +1896,17 @@ no gate reads it.
 
 `just dev weighted-lanes [--serial-threads N] [--durability-threads N] [LANE...]`
 (`tools/dev/weighted-lanes.py`) trials a multi-thread layout for the two
-wall-clock lanes without changing them. On every run it writes
+wall-clock lanes without changing their gate settings. The ordinary durability
+lane is already weighted; the trial varies pool sizes and serial concurrency.
+On every run it writes
 `<target>/nextest-weighted.toml`: `.config/nextest.toml` plus `weighted-serial`
 and `weighted-durability` profiles with the `serial` and `durability`
 membership and settings, 4 and 16 threads by default. In `weighted-durability`
 the three campaigns that run cuts on their own workers (`durability_subset`,
 `durability_twin_pilots`, image residency) require half the threads, the
 ledger-retirement campaigns a quarter rounded up, and the four host-restart
-matrices, the redial test and the busy-root test start first. It refuses a
+matrices, the redial test and the busy-root test start first. Full-pool isolation
+from the ordinary profile is retained ahead of these trial weights. It refuses a
 weight filter that matches no test, builds the workers as the gate does, runs
 the lanes through `--config-file` in a scratch directory of its own (the
 per-checkout one plus `-w`), so it leaves a gate's files in the same checkout
@@ -2158,11 +2161,28 @@ machine: it stops other tests from running alongside, but each reservation is
 then measured against whatever the machine was doing, and reservations
 interleave with each other. So the gate runs these members in their own lane.
 
-**The durability lane** is the `durability` profile, with the same one thread
-and 240-second slow timeout. Its members are crash matrices and the sqlite
+**The durability lane** is the `durability` profile: a 16-slot weighted pool
+with the same 240-second slow timeout. Its members are crash matrices and the sqlite
 SIGKILL commit campaign. They are slow because they relaunch a process and
 fsync through a crash cut, and they depend on OS signal and fsync behavior, so
 they run per platform (`just platform` and `just full`), not in `just check`.
+The three internally parallel campaigns (`durability_subset`,
+`durability_twin_pilots`, image residency) reserve eight slots; ledger-retirement
+campaigns reserve four. The closed-cell ledger twin-pilot campaign reserves
+the whole pool because competing load has changed its per-store signatures.
+It runs first at priority 200, avoiding a full-pool reservation waiting behind
+long shared tests. Its isolation rule precedes the general ledger weight. Other independent cuts
+use one slot. Host-restart matrices and their split cut cases, the redial test
+and the busy-root absence test have priority 100 so long paths start early.
+Weights are scheduling reservations, not fewer cuts, extra retries or relaxed
+assertions. The existing extended watchdogs for host-restart matrices remain.
+
+Serial and durability remain sequential groups. Serial tests measure real
+deadlines, cancellation and PTY responsiveness; a separate durability process
+would bypass its slot reservations and add internally parallel crash workers
+to those measurements. The weighted durability evidence is not evidence for
+overlapping the two pools. Serial therefore retains one thread, and ignored
+full-tier retirement soaks in both profiles still run alone.
 
 | Kind | Predicates |
 | --- | --- |
@@ -2189,13 +2209,14 @@ partition the suite and a run of all three executes every test once. A new
 serial test goes into the `serial` or `durability` filter and into the `offline`
 exclusion. `tests/tooling/test_nextest_lanes.py` proves that the exclusion lists
 exactly the two lanes' predicates in order, that the lanes are disjoint, that
-both lane profiles are single-threaded with the 240-second timeout, that no
+the serial profile has one slot and durability has sixteen with the 240-second
+timeout, that the weighted campaigns retain their reservations, that no
 profile carries `retries`, and that every predicate resolves to a definition
 under `crates/`, `bin/` or `tests/` -- an `fn <name>` for a bare name, a
 `mod <name>` for a `<module>::` predicate, or the named source module's
 `fn <name>` for a qualified `<module>::<name>` predicate. The gate passes
-`--test-threads=1` on the command line as well, because `NEXTEST_TEST_THREADS`
-in the environment would otherwise override the profile.
+the reviewed thread counts on the command line as well, because
+`NEXTEST_TEST_THREADS` in the environment would otherwise override the profile.
 
 The lane makes
 `completed_terminal_outcome_remains_authoritative_when_exit_was_requested` quiet,
@@ -5437,7 +5458,7 @@ the environmental assumption, never to weaken the assertion.
 | Inherited git config | Fixture git read the host's global config; a global `commit.gpgsign` spawned `gpg` per fixture commit, which failed with ENOMEM under gate load | Test entry points export an empty `GIT_CONFIG_GLOBAL` under `TMPDIR` and `GIT_CONFIG_NOSYSTEM=1` (§1); fixtures set their own identity |
 | Fixed-port OAuth loopback | Login tests bound the pinned callback ports, which collide across parallel runs and with a live login | Tests bind an ephemeral port through the managers' loopback seam; the pinned ports are refused in tests (§2.3). The `native-auth-serial` group still serializes the shared process-local fixtures |
 | CLI contract interference | Process-level binary contracts collide when run in parallel | The `cli-contract-serial` group |
-| Child-start deadline under load | Crash matrices relaunch the current test binary and wait for durable cut markers; CPU and SQLite contention can exceed a bounded start deadline | The durability lane (§2.3) runs these alone with `--test-threads=1`, under a 240-second slow timeout. `just check` does not run them. Child reply and exit watchdogs are 30-second hang bounds, not timing assertions. Outcome assertions are unchanged |
+| Child-start deadline under load | Crash matrices relaunch the current test binary and wait for durable cut markers; CPU and SQLite contention can exceed a bounded start deadline | The durability lane (§2.3) uses a 16-slot weighted pool, reserving capacity for internally parallel campaigns and isolating the signature-sensitive closed-cell campaign. It stays separate from the serial budget lane, under the existing 240-second slow timeout and explicit matrix watchdogs. `just check` does not run it. Child reply and exit watchdogs are hang bounds, not timing assertions. Outcome assertions are unchanged |
 | Wall-clock budgets read as contention | Interactive PTY budgets, the 250 ms yield floor, lease and cancellation windows are measurements on an idle machine | The same serial budget lane, assertions unchanged |
 | Scripted response windows | A sleeping model can finish before the test's submission, mail claim or crash cut under load | Offline scripts use explicit registry gates for in-process streams and file-sentinel gates for process cuts. Gates preserve cancellation; park predicates register tree notifications before inspecting state |
 | Probe peer teardown | A successful TLS 1.3 probe drops its connection before the peer flushes session tickets, so a fixture can drop its listener before the next probe | The byte-count peer disables tickets and gates receipt of the client's Finished until probe teardown; both HTTP ALPNs still require exactly zero plaintext bytes on two fresh connections |

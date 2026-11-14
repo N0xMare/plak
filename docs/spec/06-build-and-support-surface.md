@@ -2206,6 +2206,13 @@ The full tier also runs the ignored 5,000-call and full indexed retirement
 soaks after its routine serial and durability tests. `just soak` selects that long evidence alone; ordinary check,
 platform and explicit serial groups keep the small retirement fixtures and
 exclude the soak (spec 05 §2.3).
+The groups remain sequential: the serial wall-clock-budget profile runs one
+test at a time, followed by the durability profile's 16-slot weighted pool.
+Internally parallel crash campaigns reserve eight slots, ledger campaigns
+four, and the signature-sensitive closed-cell campaign the whole pool. Long
+host-restart cases start first; no crash cuts are omitted. Gate commands pin
+the reviewed thread counts against environment overrides. Ignored full-tier
+soaks retain explicit one-thread execution (chapter 05 §2.3).
 
 This does not weaken release requirements, nor claim that an unprotected branch
 is suitable for public collaboration. The desired remote settings are:

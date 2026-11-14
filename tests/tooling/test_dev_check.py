@@ -1224,6 +1224,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, _ = self.run_gate('--soak')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.profiles(calls), ['serial', 'durability'])
+        for lane in self.lanes(calls):
+            self.assertIn('--test-threads=1', lane['args'])
         self.assertEqual(
             self.lanes(calls)[0]['args'][-4:],
             ['--run-ignored', 'only', '-E', 'test(ledger_retirement_5000_)'],
@@ -1244,7 +1246,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertFalse(any(c['args'][0] != 'nextest' for c in calls))
 
-    def test_check_omits_durability_and_platform_runs_it_serially(self):
+    def test_check_omits_durability_and_platform_uses_its_weighted_pool(self):
         check, check_calls, _ = self.run_gate()
         self.assertEqual(check.returncode, 0, check.stderr)
         self.assertEqual(self.profiles(check_calls), ['offline', 'serial'])
@@ -1253,13 +1255,21 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(platform.returncode, 0, platform.stderr)
         self.assertEqual(self.profiles(platform_calls), ['offline', 'serial', 'durability'])
         durability = self.lanes(platform_calls)[-1]
-        self.assertIn('--test-threads=1', durability['args'])
+        self.assertIn('--test-threads=16', durability['args'])
         self.log.unlink()
         result, calls, _ = self.run_gate('--steps', 'tests-durability')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.profiles(calls), ['durability'])
-        self.assertIn('--test-threads=1', self.lanes(calls)[0]['args'])
+        self.assertIn('--test-threads=16', self.lanes(calls)[0]['args'])
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['test'])
+
+    def test_wall_clock_lanes_pin_their_width_against_environment_overrides(self):
+        self.env['NEXTEST_TEST_THREADS'] = '999'
+        result, calls, _ = self.run_gate('--steps', 'tests-serial,tests-durability')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.profiles(calls), ['serial', 'durability'])
+        self.assertIn('--test-threads=1', self.lanes(calls)[0]['args'])
+        self.assertIn('--test-threads=16', self.lanes(calls)[1]['args'])
 
     def test_package_group_delegates_prefetch_and_offline_verification_in_a_git_tree(self):
         self.commit_fixture()

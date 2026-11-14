@@ -16,7 +16,7 @@ cli-contract-serial = { max-threads = 1 }
 # lane profiles inherit its settings and overrides and partition the suite:
 #   offline     parallel lane: everything not in `serial` or `durability`
 #   serial      tests whose subject is a wall-clock budget, one at a time
-#   durability  crash matrices and the sqlite SIGKILL campaign, one at a time
+#   durability  crash matrices and the sqlite SIGKILL campaign, weighted pool
 # A test added to `serial` or `durability` must also be added to the
 # exclusion in `offline`; tests/tooling/test_nextest_lanes.py checks that the
 # three sets partition the suite and that every predicate names a real test.
@@ -652,7 +652,7 @@ default-filter = '''
 
 # The crash sweep inside this lane uses min(16, available_parallelism) internal workers.
 [profile.durability]
-test-threads = 1
+test-threads = 16
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
   test(host_skeleton::root_wake::)
@@ -765,6 +765,39 @@ default-filter = '''
   | test(mcp_on_a_runner_runs_there_and_restarts_after_the_runner_does)
   | test(mcp_on_a_runner_ends_with_its_host)
 '''
+
+# Reserve the whole pool for the closed-cell twin-pilot campaign: its
+# per-store commit signature has previously diverged under competing load.
+# This precedes the general ledger rule because the first weight wins.
+[[profile.durability.overrides]]
+filter = 'test(=crash_sweep::durability_ledger_retirement_closed_cells)'
+threads-required = "num-test-threads"
+priority = 200
+
+# These campaigns launch their own concurrent cut workers.
+[[profile.durability.overrides]]
+filter = '''
+test(=crash_sweep::durability_subset)
+| test(=crash_sweep::durability_twin_pilots)
+| test(image_residency_crash_cuts_recover_without_redispatch)
+'''
+threads-required = 8
+
+[[profile.durability.overrides]]
+filter = 'test(/^crash_sweep::durability_ledger_retirement_/)'
+threads-required = 4
+
+# Start the longest real-process matrices and fixed absence windows first.
+# Prefixes also cover independent cut cases split out of these matrices.
+[[profile.durability.overrides]]
+filter = '''
+test(tui_host_restart)
+| test(review_tui_host_restart_switch)
+| test(wire_host_restart)
+| test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)
+| test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss)
+'''
+priority = 100
 
 [[profile.default.overrides]]
 filter = 'test(tui_host_restart)'

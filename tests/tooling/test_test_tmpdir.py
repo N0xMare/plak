@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 import unittest.mock
 
@@ -279,6 +280,21 @@ class TestTmpdirSelectorTests(unittest.TestCase):
                 source = (ROOT / path).read_text()
                 self.assertIn("--unset-names", source)
                 self.assertNotIn("PLAK_TEST_SESSION_LEASE_SECONDS", source)
+
+    def test_weighted_trials_preserve_full_pool_isolation_before_scaled_weights(self):
+        spec = importlib.util.spec_from_file_location(
+            "weighted_lanes", ROOT / "tools/dev/weighted-lanes.py"
+        )
+        lanes = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lanes)
+        profile = tomllib.loads(lanes.weighted_config(4, 8))["profile"]["weighted-durability"]
+        self.assertEqual(profile["test-threads"], 8)
+        self.assertEqual(profile["overrides"][0]["threads-required"], "num-test-threads")
+        self.assertIn(
+            "durability_ledger_retirement_closed_cells", profile["overrides"][0]["filter"]
+        )
+        self.assertEqual(profile["overrides"][1]["threads-required"], 4)
+        self.assertEqual(profile["overrides"][2]["threads-required"], 2)
 
     def test_weighted_lanes_build_without_overrides_or_provider_keys(self):
         spec = importlib.util.spec_from_file_location(

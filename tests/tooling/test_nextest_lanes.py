@@ -222,10 +222,11 @@ class NextestLaneTests(unittest.TestCase):
             body = profiles()[name]["default-filter"]
             self.assertEqual(PREDICATE.sub("", body).replace("|", "").split(), [], name)
 
-    def test_lane_profiles_are_single_threaded_with_the_budget_timeout(self) -> None:
+    def test_lane_profiles_keep_reviewed_thread_counts_and_budget_timeout(self) -> None:
+        self.assertEqual(profiles()["serial"]["test-threads"], 1)
+        self.assertEqual(profiles()["durability"]["test-threads"], 16)
         for name in ("serial", "durability"):
             profile = profiles()[name]
-            self.assertEqual(profile["test-threads"], 1, name)
             self.assertEqual(profile["slow-timeout"], {"period": "240s", "terminate-after": 2})
 
         def no_retry_setting(value):
@@ -238,6 +239,26 @@ class NextestLaneTests(unittest.TestCase):
                     no_retry_setting(nested)
 
         no_retry_setting(tomllib.loads(CONFIG.read_text()))
+
+    def test_durability_weights_protect_internal_workers_and_pilot_isolation(self) -> None:
+        overrides = profiles()["durability"]["overrides"]
+        isolated, heavy, ledger, first = overrides
+        self.assertEqual(
+            isolated,
+            {
+                "filter": "test(=crash_sweep::durability_ledger_retirement_closed_cells)",
+                "threads-required": "num-test-threads",
+                "priority": 200,
+            },
+        )
+        self.assertEqual(heavy["threads-required"], 8)
+        self.assertEqual(ledger["threads-required"], 4)
+        self.assertIn("durability_subset", heavy["filter"])
+        self.assertIn("durability_twin_pilots", heavy["filter"])
+        self.assertIn("image_residency_crash_cuts", heavy["filter"])
+        self.assertEqual(first["priority"], 100)
+        for matrix in ("tui_host_restart", "review_tui_host_restart_switch", "wire_host_restart"):
+            self.assertIn(f"test({matrix})", first["filter"])
 
     def test_every_lane_predicate_names_a_test_or_module_in_the_tree(self) -> None:
         names = predicates("serial") + predicates("durability")

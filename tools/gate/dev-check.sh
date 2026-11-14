@@ -466,8 +466,8 @@ run_build_denying_warnings() {
 }
 
 # One nextest lane: a profile from .config/nextest.toml plus extra arguments.
-# Serial lanes pass --test-threads=1 explicitly so NEXTEST_TEST_THREADS in the
-# environment cannot widen them.
+# Wall-clock lanes pass their reviewed thread counts explicitly so
+# NEXTEST_TEST_THREADS cannot change their scheduling. Ignored soaks stay alone.
 run_lane() {
   local profile=$1
   shift
@@ -624,11 +624,11 @@ run_group() {
       fi
       return "$serial_status" ;;
     tests-durability)
-      echo "-- nextest: durability lane (profile durability, crash matrices, one thread) --"
+      echo "-- nextest: durability lane (profile durability, weighted crash matrices, 16 slots) --"
       prepare_tests
       local durability_status=0
       if [[ "$tier" != soak ]]; then
-        run_lane durability --test-threads=1 || durability_status=$?
+        run_lane durability --test-threads=16 || durability_status=$?
       fi
       if [[ "$tier" == full || "$tier" == soak ]]; then
         echo "-- nextest: full indexed retirement soak (ignored evidence, one thread) --"
