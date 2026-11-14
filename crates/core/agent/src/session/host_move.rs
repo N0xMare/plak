@@ -55,6 +55,19 @@ pub struct MoveLine {
     pub terminals: Vec<crate::manifest::LineJobTerminal>,
 }
 
+/// Source-only inspection data. This is not an installation or retirement grant.
+#[derive(Clone, Debug)]
+pub struct MoveSource {
+    pub sessions: Vec<MoveSession>,
+    pub lines: Vec<MoveLine>,
+}
+
+impl MoveSource {
+    pub fn settled(self) -> Result<MoveInstall, SessionStoreError> {
+        MoveInstall::new(self.sessions, self.lines)
+    }
+}
+
 /// Target-owned compilation inputs, not a source checkpoint or execution grant.
 #[derive(Clone, Debug)]
 pub struct MoveHeadSeed {

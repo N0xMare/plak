@@ -39,6 +39,7 @@ type ForegroundReporter =
     Arc<dyn Fn(&str, &plakous_runner_protocol::StoppedForeground) + Send + Sync>;
 
 mod foreground;
+mod job_terminals;
 pub(crate) mod owner_transfer;
 pub use owner_transfer::ExactOwnerTransfer;
 mod probe;
@@ -175,6 +176,11 @@ struct Inner {
 enum InspectionAnswer {
     Lines(Vec<LineStatus>),
     OwnerFloors(Vec<plakous_runner_protocol::OwnerFloor>),
+    JobTerminals {
+        owner: LineOwner,
+        jobs: Vec<plakous_runner_protocol::retention::Job>,
+        next: Option<u32>,
+    },
 }
 
 struct State {
@@ -559,9 +565,9 @@ impl RunnerClient {
         if let Ok(Ok(lines)) = tokio::time::timeout(self.inner.windows.read, answer).await {
             return match lines? {
                 InspectionAnswer::Lines(lines) => Ok(lines),
-                InspectionAnswer::OwnerFloors(_) => Err(RunnerFailure::ReadInterrupted(
-                    "invalid line inspection answer".into(),
-                )),
+                InspectionAnswer::OwnerFloors(_) | InspectionAnswer::JobTerminals { .. } => Err(
+                    RunnerFailure::ReadInterrupted("invalid line inspection answer".into()),
+                ),
             };
         }
         let mut state = lock(&self.inner.state);
@@ -817,6 +823,31 @@ impl Inner {
         }
     }
 
+    fn answer_inspection(&self, id: &str, answer: InspectionAnswer) {
+        if let Some(waiter) = lock(&self.state).questions.remove(id) {
+            let _ = waiter.send(Ok(answer));
+        }
+    }
+
+    fn receive_stream(&self, frame: StreamFrame) {
+        if self.operator_frame(&frame) {
+            return;
+        }
+        // Receive outside the state lock: an abort can send a close frame.
+        let stream = frame.stream;
+        let Some(mut ends) = lock(&self.state).streams.remove(&stream) else {
+            return;
+        };
+        if ends.receive(frame) {
+            let mut state = lock(&self.state);
+            if state.sender.is_some() {
+                state.streams.insert(stream, ends);
+            } else {
+                ends.close();
+            }
+        }
+    }
+
     fn receive(&self, frame: RunnerFrame) {
         let control = match &frame {
             RunnerFrame::TransferAccepted { control_id, .. }
@@ -859,35 +890,27 @@ impl Inner {
                 return;
             }
             RunnerFrame::Lines { request_id, lines } => {
-                if let Some(waiter) = lock(&self.state).questions.remove(&request_id) {
-                    let _ = waiter.send(Ok(InspectionAnswer::Lines(lines)));
-                }
+                self.answer_inspection(&request_id, InspectionAnswer::Lines(lines));
                 return;
             }
             RunnerFrame::OwnerFloors { request_id, floors } => {
-                if let Some(waiter) = lock(&self.state).questions.remove(&request_id) {
-                    let _ = waiter.send(Ok(InspectionAnswer::OwnerFloors(floors)));
-                }
+                self.answer_inspection(&request_id, InspectionAnswer::OwnerFloors(floors));
+                return;
+            }
+            RunnerFrame::JobTerminals {
+                request_id,
+                owner,
+                jobs,
+                next,
+            } => {
+                self.answer_inspection(
+                    &request_id,
+                    InspectionAnswer::JobTerminals { owner, jobs, next },
+                );
                 return;
             }
             RunnerFrame::Stream(frame) => {
-                if self.operator_frame(&frame) {
-                    return;
-                }
-                // Taken out of the state while it runs: an abort sends a
-                // close, and sending takes the state's lock.
-                let stream = frame.stream;
-                let Some(mut ends) = lock(&self.state).streams.remove(&stream) else {
-                    return;
-                };
-                if ends.receive(frame) {
-                    let mut state = lock(&self.state);
-                    if state.sender.is_some() {
-                        state.streams.insert(stream, ends);
-                    } else {
-                        ends.close();
-                    }
-                }
+                self.receive_stream(frame);
                 return;
             }
             other => {

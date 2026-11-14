@@ -1,6 +1,8 @@
 //! The source executable reads only its own native key before taking any move authority.
 use super::*;
-use plakous_agent::internal::host_move::{MoveBranch, MoveInstall, MoveLine, MoveSession};
+use plakous_agent::internal::host_move::{
+    MoveBranch, MoveInstall, MoveLine, MoveSession, MoveSource,
+};
 
 impl SqliteSessionStore {
     /// Read-only complete-session dependencies; no driver, hold or retirement is created.
@@ -48,6 +50,18 @@ impl SqliteSessionStore {
         path: impl AsRef<Path>,
         sessions: &[SessionId],
     ) -> Result<MoveInstall, SessionStoreError> {
+        Self::inspect_move_source_unsettled(path, sessions)?.settled()
+    }
+
+    /// Reads source heads before terminal proof sampling, granting no installation authority.
+    ///
+    /// # Errors
+    /// Refuses unknown, hidden or corrupt source inventories.
+    #[doc(hidden)]
+    pub fn inspect_move_source_unsettled(
+        path: impl AsRef<Path>,
+        sessions: &[SessionId],
+    ) -> Result<MoveSource, SessionStoreError> {
         validate_inventory(sessions)?;
         let connection =
             Self::open_inspection(path.as_ref())?.ok_or(SessionStoreError::NotFound)?;
@@ -97,7 +111,10 @@ impl SqliteSessionStore {
                 })
             })
             .collect::<Result<_, SessionStoreError>>()?;
-        MoveInstall::new(members, lines)
+        Ok(MoveSource {
+            sessions: members,
+            lines,
+        })
     }
 }
 

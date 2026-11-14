@@ -39,6 +39,7 @@ use crate::streams::{
 
 mod delegation;
 mod foreground;
+mod job_terminals;
 #[cfg(test)]
 mod native_job_ack_tests;
 mod operator;
@@ -799,6 +800,13 @@ impl RunnerService {
             }
             HostFrame::OwnerFloors { request_id, lines } => {
                 let _ = sender.send(self.owner_floors(host, request_id, &lines));
+            }
+            HostFrame::JobTerminals {
+                request_id,
+                owner,
+                after,
+            } => {
+                let _ = sender.send(self.job_terminals(host, request_id, &owner, after));
             }
             HostFrame::Ping { nonce } => {
                 let _ = sender.send(RunnerFrame::Pong { nonce });

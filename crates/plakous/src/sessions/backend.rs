@@ -83,6 +83,18 @@ impl SessionBackend {
         SqliteSessionStore::inspect_move_source(path, sessions).map_err(store_error)
     }
 
+    /// Reads source-only head data before exact terminal proof sampling; grants no authority.
+    ///
+    /// # Errors
+    /// Refuses hidden, unknown or corrupt source data.
+    #[doc(hidden)]
+    pub fn inspect_move_source_unsettled_sqlite(
+        path: impl AsRef<Path>,
+        sessions: &[plakous_model::SessionId],
+    ) -> Result<super::host_move::MoveSource, AgentSessionsError> {
+        SqliteSessionStore::inspect_move_source_unsettled(path, sessions).map_err(store_error)
+    }
+
     /// Read-only own-key admission of a reconstructed group before source surrender.
     /// This host seam does not open a writer, driver or execution lease.
     ///

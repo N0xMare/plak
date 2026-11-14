@@ -79,7 +79,11 @@ fn host_move_dormant_preserves_a_finished_child_without_reviving_its_grant() {
     stop(&mut host);
 }
 
-fn create_and_prompt(fixture: &Fixture, host: &mut Host, prompt: &str) -> (String, NodeAddress) {
+pub(super) fn create_and_prompt(
+    fixture: &Fixture,
+    host: &mut Host,
+    prompt: &str,
+) -> (String, NodeAddress) {
     let mut client = Client::connect(host);
     let Outcome::Ok(Answer::Created { session, node, .. }) =
         client.request(1, new_session(&fixture.workspace()))
@@ -95,7 +99,7 @@ fn create_and_prompt(fixture: &Fixture, host: &mut Host, prompt: &str) -> (Strin
     (session, node)
 }
 
-fn wait_idle(fixture: &Fixture, session: &str, turns: i64) {
+pub(super) fn wait_idle(fixture: &Fixture, session: &str, turns: i64) {
     let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
     let records = plak::store::session_records::SqliteSessionStore::new(paths.clone());
     let deadline = Instant::now() + WAIT;

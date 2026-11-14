@@ -6,10 +6,11 @@ use plakous_host_protocol::intent::SessionIntent;
 const ENABLED: &str = "PLAK_TEST_HOST_UPGRADE_DORMANT";
 
 mod children;
+mod finished;
 mod qualification;
 mod remote_guards;
 mod review;
-mod finished;
+mod terminals;
 
 #[test]
 fn host_move_dormant_round_trip_preserves_ids_and_withholds_until_group_ready() {

@@ -76,7 +76,8 @@ async fn production_move_builder_compiles_a_finished_child_without_open_or_grant
     .map_err(|error| error.message)?;
     tree.record_turn_completed(&child)
         .map_err(|error| error.message)?;
-    store.save_in_custody(&tree).map_err(|error| error.detail)?;
+    let saved = store.save_in_custody(&tree).map_err(|error| error.detail)?;
+    tree.acknowledge_revision(saved);
     let status = tree.node(&child).map_err(|error| error.message)?.status;
     let grants = serde_json::to_value(tree.grants())?;
     let revision = tree.revision;

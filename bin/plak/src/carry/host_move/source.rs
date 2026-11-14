@@ -11,6 +11,14 @@ use plakous_hosted::sessions::host_move::{MoveGroup, MoveGroups};
 use plakous_recursive_subagents::tree::host_move::DormantTree;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod terminals;
+pub(crate) use terminals::Proof;
+
+pub(crate) struct Snapshot {
+    pub(crate) native: MoveInstall,
+    pub(crate) proofs: Vec<Proof>,
+}
+
 pub(crate) struct Inventory {
     pub(crate) groups: Vec<MoveGroup>,
     operation: [u8; 32],
@@ -109,8 +117,26 @@ impl Inventory {
         ])
     }
 
-    pub(crate) fn snapshot(&self, paths: &PlakPaths, index: usize) -> CliResult<MoveInstall> {
-        SessionBackend::inspect_move_source_sqlite(
+    pub(crate) fn snapshot(
+        &self,
+        services: &Services,
+        index: usize,
+        runtime: &tokio::runtime::Handle,
+    ) -> CliResult<Snapshot> {
+        let mut source = self.unsettled(services.paths()?, index)?;
+        let proofs = self.sample_terminals(services, &mut source, runtime)?;
+        Ok(Snapshot {
+            native: source.settled().map_err(failure)?,
+            proofs,
+        })
+    }
+
+    fn unsettled(
+        &self,
+        paths: &PlakPaths,
+        index: usize,
+    ) -> CliResult<plakous::sessions::host_move::MoveSource> {
+        SessionBackend::inspect_move_source_unsettled_sqlite(
             paths.runtime_database(),
             &self.groups[index]
                 .sessions()
@@ -119,6 +145,18 @@ impl Inventory {
                 .collect::<Vec<_>>(),
         )
         .map_err(failure)
+    }
+
+    pub(crate) fn runner_ids(&self, paths: &PlakPaths) -> CliResult<BTreeSet<String>> {
+        let mut runners = BTreeSet::new();
+        for index in 0..self.groups.len() {
+            for session in self.unsettled(paths, index)?.sessions {
+                for branch in session.branches {
+                    runners.insert(self.runner_for(paths, branch.session)?);
+                }
+            }
+        }
+        Ok(runners)
     }
 
     pub(crate) fn capsule(

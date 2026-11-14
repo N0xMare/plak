@@ -13,6 +13,8 @@ use plakous_tools::{
 };
 use std::time::Duration;
 
+mod job_terminal_tests;
+
 #[tokio::test]
 async fn exact_move_cas_returns_foreign_witness_without_leapfrogging_or_using_cached_acceptance() {
     let root = tempfile::tempdir().unwrap();

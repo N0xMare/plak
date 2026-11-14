@@ -6,6 +6,8 @@ use super::*;
 use crate::FileCallJournal;
 use std::io;
 
+mod job_terminal_tests;
+
 struct ClosingJournal {
     files: FileCallJournal,
     closer: CancellationToken,

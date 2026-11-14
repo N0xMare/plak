@@ -6363,8 +6363,8 @@ needs no stream because that instance can spawn no terminals. All terminal state
 is process-local; product schema and state key are unchanged (chapter 02 §2.2). `RunnerConnectionRevision::is_current` is a read-only connection
 fence for that registry, not permission to skip namespace table reconciliation.
 
-**Runner protocol v9.** This version adds the bounded `OwnerFloors` request/reply
-above protocol 8, whose `jobs.ack` consumes committed terminal job receipts on
+**Runner protocol v9.** This version adds bounded `OwnerFloors` and
+`JobTerminals` request/reply reads above protocol 8, whose `jobs.ack` consumes committed terminal job receipts on
 the native logical job port. Its bounded, duplicate-free nonzero number list
 refuses atomically if any named job is running; absent numbers are idempotent
 no-ops. Consumption occurs only after the host commits its terminal observation,
@@ -6557,6 +6557,27 @@ the normal recovery-required path before Ready. The driver's placement parking
   to have had no effect, and takes no new call on it. A call sent on an
   earlier connection, or replayed on this one, may have run there: it is
   `OutcomeUnknown` and its journal claim stays.
+- **Original-worker terminal proofs.** A normally bound host may send
+  `JobTerminals { request_id, owner, after }` for one exact accepted line owner.
+  The reply is `JobTerminals { request_id, owner, jobs, next }`: retention-v1
+  `Job` rows, ordered by strictly increasing job number after the exclusive
+  cursor, at most `retention::PAGE_SIZE` per page, with output tails bounded to
+  4 KiB. A continuation names the last returned number. Only original-worker
+  terminal proofs count; running or unknown outcomes, including lost-worker
+  cached unknowns, never do. Owner mismatch, reload failure, interruption,
+  malformed pages or incomplete collection refuse as unknown. Inspection and
+  qualification cannot use this read. It neither adopts nor transfers owners,
+  acquires leases, dispatches effects, acknowledges jobs nor consumes output.
+  `Lines` and ordinary job snapshots expose presentation status without the
+  original-worker terminal bit; `OwnerFloors` proves custody but not outcome.
+  The separate retention endpoint requires retained-owner authority, which a
+  source must not take merely to preflight a native move.
+  Source inspection may collect unconsumed job metadata without creating an
+  installation grant. Exact terminal samples complete ordinary settled-batch
+  validation, are persisted under the move's branch holds without consumption,
+  and are sampled again before native prepare and before surrender. A changed
+  or missing sampled row refuses before the irreversible decision. Terminal
+  output remains readable through the existing job verbs after transfer.
 - **Bounded ownership witnesses.** Only a normally bound host may send
   `OwnerFloors { request_id, lines }`: 1–256 distinct, nonempty line IDs, each
   at most 128 printable non-whitespace ASCII bytes. The reply has one
@@ -6637,7 +6658,7 @@ the normal recovery-required path before Ready. The driver's placement parking
   environment's own schema (the runner seam of §8.5); the protocol frames,
   keys and orders them without interpreting them, except that a result which
   opens a stream names it in its `stream` field. Control frames are `Cancel`,
-  `Preempt`, `Ack`, `TransferOwner`, `Lines`, `OwnerFloors` and `Ping`. `Preempt { request_id, value }`
+  `Preempt`, `Ack`, `TransferOwner`, `Lines`, `OwnerFloors`, `JobTerminals` and `Ping`. `Preempt { request_id, value }`
   sets the running request's yield signal on the runner, as the host's own
   signal changes; a waiting `process.poll` returns as soon as a yield is
   set.

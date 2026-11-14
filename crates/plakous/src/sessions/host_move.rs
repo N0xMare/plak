@@ -4,7 +4,7 @@ pub use plakous_agent::internal::SessionWorkflowId as MoveOperation;
 use plakous_agent::internal::host_move::PrepareMove;
 pub use plakous_agent::internal::host_move::{
     ImportedCompactionFacts, ImportedCompactionSelection, MoveBranch, MoveDisposition, MoveInstall,
-    MoveInterpreter, MoveLine, MoveSession, ProcessSessionId as MoveProcessId,
+    MoveInterpreter, MoveLine, MoveSession, MoveSource, ProcessSessionId as MoveProcessId,
     ProcessSessionOwnerGeneration as MoveProcessGeneration, ReconstructedMoveHead,
 };
 pub use plakous_agent::internal::{
@@ -148,6 +148,35 @@ impl MoveBinding {
 }
 
 impl AgentSessions {
+    /// Persists exact original-worker terminal proofs under the move's existing branch hold.
+    /// This records observation, not consumption, and never opens an execution driver.
+    ///
+    /// # Errors
+    /// Refuses a mismatched hold, stale head, invalid terminal or backend failure.
+    #[doc(hidden)]
+    pub async fn record_move_terminals(
+        &self,
+        hold: &BranchHold,
+        line: &MoveLine,
+        head: plakous_model::CheckpointId,
+    ) -> Result<(), AgentSessionsError> {
+        let lease = hold.inner.move_lease();
+        if lease.session() != line.line.head() {
+            return Err(invalid_source("terminal proof hold is not its line's head"));
+        }
+        self.backend
+            .record_line_job_terminals(plakous_agent::internal::RecordLineJobTerminals::new(
+                lease,
+                line.line.line(),
+                line.line.generation(),
+                head,
+                line.terminals.clone(),
+            ))
+            .await
+            .map_err(store_error)?;
+        Ok(())
+    }
+
     /// A host-only, memory-backed compiler with no persistent store or execution driver.
     /// The requested durability must still match the freshly compiled configuration.
     ///

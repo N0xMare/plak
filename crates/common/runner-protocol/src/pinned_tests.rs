@@ -83,6 +83,7 @@ const fn host_variant(frame: &HostFrame) -> &'static str {
         HostFrame::TransferOwner(_) => "transfer_owner",
         HostFrame::Lines { .. } => "lines",
         HostFrame::OwnerFloors { .. } => "owner_floors",
+        HostFrame::JobTerminals { .. } => "job_terminals",
         HostFrame::Ping { .. } => "ping",
         HostFrame::Stream(_) => "stream",
     }
@@ -103,6 +104,7 @@ const fn runner_variant(frame: &RunnerFrame) -> &'static str {
         RunnerFrame::Expired { .. } => "expired",
         RunnerFrame::Lines { .. } => "lines",
         RunnerFrame::OwnerFloors { .. } => "owner_floors",
+        RunnerFrame::JobTerminals { .. } => "job_terminals",
         RunnerFrame::Refused { .. } => "refused",
         RunnerFrame::Pong { .. } => "pong",
         RunnerFrame::Stream(_) => "stream",
@@ -221,6 +223,11 @@ fn host_frames() -> Vec<HostFrame> {
             request_id: "request".into(),
             lines: vec!["line".into(), "unknown".into()],
         },
+        HostFrame::JobTerminals {
+            request_id: "request".into(),
+            owner: owner(),
+            after: 0,
+        },
         HostFrame::Ping { nonce: 9 },
     ];
     frames.extend(classes().into_iter().map(request).map(HostFrame::Request));
@@ -314,6 +321,12 @@ fn runner_frames() -> Vec<RunnerFrame> {
                 },
             ],
         },
+        RunnerFrame::JobTerminals {
+            request_id: "request".into(),
+            owner: owner(),
+            jobs: vec![],
+            next: None,
+        },
         RunnerFrame::Pong { nonce: 11 },
     ];
     frames.extend(refusals().into_iter().map(|refusal| RunnerFrame::Refused {
@@ -334,8 +347,8 @@ fn encoded() -> String {
         names.dedup();
         names.len()
     };
-    assert_eq!(named(hosts.iter().map(host_variant).collect()), 11);
-    assert_eq!(named(runners.iter().map(runner_variant).collect()), 16);
+    assert_eq!(named(hosts.iter().map(host_variant).collect()), 12);
+    assert_eq!(named(runners.iter().map(runner_variant).collect()), 17);
     assert_eq!(named(classes().iter().map(class_variant).collect()), 6);
     assert_eq!(named(events().iter().map(event_variant).collect()), 3);
     assert_eq!(named(refusals().iter().map(refusal_variant).collect()), 7);

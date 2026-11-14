@@ -448,7 +448,13 @@ commit require an Abandoning receipt, the corresponding native phase, and two
 restarts plus repeated operator requests converging on the same permanent
 Abandoned reservation without opening a driver.
 Real remote-witness cases alter the runner's durable floor and require its
-normal OwnerFloors endpoint to expose the changed tuple. Foreign-branch, lower
+normal OwnerFloors endpoint to expose the changed tuple.
+Terminal-proof cases separately pin complete multi-page original-worker reads,
+owner mismatch and interrupted/partial-page refusal, with no journal claims or
+acknowledgements. Normal process-output reads still work after proof sampling.
+A real promoted shell job exits while its agent notice remains unconsumed; the
+move carries its exact allocation, number floor and output tail, not a process
+list's inference of idleness. Foreign-branch, lower
 and higher witnesses withhold both trees in a connected group across two host
 starts, with no native branch-fence advance or partial visibility. A daemon
 outage after publication must leave only its group withheld while an unrelated

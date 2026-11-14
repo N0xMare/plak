@@ -1680,6 +1680,27 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         'sessions': {'host_move', 'MoveDisposition', 'MoveInstall', 'MoveOperation'},
         'tools': {'runner::decode_jobs_snapshot'},
     },
+    ("plak", "src/carry/host_move/source/terminals.rs"): {
+        'runner': {
+            'protocol',
+            'retention',
+            'LineOwner',
+            'RunnerClient',
+            'Job',
+            'Status',
+            'StopReason',
+        },
+        'sessions': {
+            'host_move',
+            'MoveSource',
+            'MoveLineTerminal',
+            'MoveJobStatus',
+            'MoveJobTerminal',
+            'MoveProcessGeneration',
+            'MoveProcessId',
+        },
+        'tools': {'runner::hex', 'runner::unhex', 'JobStopReason'},
+    },
     ("plak", "src/carry/upgrade/receipt/groups.rs"): {
         'runner': {'protocol', 'LineOwner'},
     },

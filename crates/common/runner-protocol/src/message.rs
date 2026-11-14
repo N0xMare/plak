@@ -408,6 +408,16 @@ pub enum HostFrame {
         /// Unique, nonempty line IDs, at most [`OWNER_FLOOR_QUERY_LIMIT`].
         lines: Vec<String>,
     },
+    /// Reads terminal evidence for one exact accepted owner, without consumption.
+    /// Neither inspection nor qualification admits this request.
+    JobTerminals {
+        /// Names the answer.
+        request_id: String,
+        /// Exact line and accepted owner witness.
+        owner: LineOwner,
+        /// Exclusive job-number cursor, initially zero.
+        after: u32,
+    },
     /// Liveness.
     Ping {
         /// Echoed in [`RunnerFrame::Pong`].
@@ -511,6 +521,17 @@ pub enum RunnerFrame {
         request_id: String,
         /// Exactly one witness for each requested line, without side effects.
         floors: Vec<OwnerFloor>,
+    },
+    /// One bounded page of original-worker terminal evidence.
+    JobTerminals {
+        /// The question.
+        request_id: String,
+        /// The unchanged accepted witness.
+        owner: LineOwner,
+        /// At most [`crate::retention::PAGE_SIZE`] terminal rows.
+        jobs: Vec<crate::retention::Job>,
+        /// Last returned job number when more rows remain.
+        next: Option<u32>,
     },
     /// The frame was refused without running anything.
     Refused {

@@ -13,6 +13,7 @@ pub(super) struct Frozen {
     services: Services,
     id: uuid::Uuid,
     holds: Vec<BranchHold>,
+    proofs: Vec<crate::carry::host_move::source::Proof>,
     trees: Vec<(
         Arc<plakous_recursive_subagents_store::SqliteTreeStore>,
         plakous_recursive_subagents::tree::CustodyHold,
@@ -108,6 +109,7 @@ pub(super) fn prepare(
             services: services.clone(),
             id: authority.id,
             holds: Vec::new(),
+            proofs: Vec::new(),
             trees: Vec::new(),
             committing: false,
             decision_pending: false,
@@ -156,16 +158,24 @@ pub(super) fn prepare(
     crate::carry::upgrade::crash_cut("move-after-source-archive");
     check_cancel(cancelled)?;
     process::verify_image(&authority.destination, &authority.destination_binary)?;
-    commit_source(services, &mut authority, &mut ready)?;
+    commit_source(services, &mut authority, &mut ready, runtime)?;
     Ok((ready, Some(authority.id)))
 }
 
-fn commit_source(services: &Services, authority: &mut Receipt, ready: &mut Ready) -> CliResult<()> {
+fn commit_source(
+    services: &Services,
+    authority: &mut Receipt,
+    ready: &mut Ready,
+    runtime: &tokio::runtime::Handle,
+) -> CliResult<()> {
     let paths = services.paths()?;
     let guard = ready
         .move_guard
         .as_mut()
         .ok_or_else(|| CliFailure::new("source move guard missing"))?;
+    for proof in &guard.proofs {
+        proof.recheck(services, runtime)?;
+    }
     ready.pause.commit()?;
     guard.committing = true;
     authority.phase = Phase::Committed;
@@ -254,20 +264,11 @@ fn retain_connections(
     inventory: &Inventory,
     runtime: &tokio::runtime::Handle,
 ) -> CliResult<Vec<plakous::runner::RunnerConnectionHold>> {
-    let mut runners = std::collections::BTreeSet::new();
-    for index in 0..inventory.groups.len() {
-        let native = inventory.snapshot(services.paths()?, index)?;
-        let capsule = inventory.semantic_capsule(services, index, &native, runtime)?;
-        runners.extend(
-            capsule
-                .sessions
-                .into_iter()
-                .flat_map(|session| session.heads)
-                .map(|head| head.context.runner)
-                .filter(|runner| runner != "local"),
-        );
-    }
-    let runners = runners.into_iter().collect::<Vec<_>>();
+    let runners = inventory
+        .runner_ids(services.paths()?)?
+        .into_iter()
+        .filter(|runner| runner != "local")
+        .collect::<Vec<_>>();
     let holds = runners
         .iter()
         .map(|id| {
@@ -307,8 +308,8 @@ fn preflight(
     let directory = tempfile::tempdir_in(services.paths()?.home()).map_err(super::io_failure)?;
     for index in 0..inventory.groups.len() {
         check_cancel(cancelled)?;
-        let native = inventory.snapshot(services.paths()?, index)?;
-        let capsule = inventory.capsule(services, index, &native, runtime)?;
+        let snapshot = inventory.snapshot(services, index, runtime)?;
+        let capsule = inventory.capsule(services, index, &snapshot.native, runtime)?;
         let trees = inventory.groups[index].trees().iter().collect::<Vec<_>>();
         for members in trees.chunks(32) {
             progress(&format!(
@@ -354,8 +355,8 @@ fn prepare_group(
     ready: &mut Ready,
 ) -> CliResult<()> {
     let paths = services.paths()?;
-    let initial = inventory.snapshot(paths, index)?;
-    let capsule = inventory.capsule(services, index, &initial, runtime)?;
+    let initial = inventory.snapshot(services, index, runtime)?;
+    let capsule = inventory.capsule(services, index, &initial.native, runtime)?;
     reserve(receipt, &capsule)?;
     receipt.save(paths)?;
     crate::carry::upgrade::crash_cut("move-after-cleanup-intent");
@@ -367,29 +368,13 @@ fn prepare_group(
     let executor = plakous::application::ApplicationExecutor::new()
         .map_err(|error| CliFailure::new(error.to_string()))?;
     let sessions = services.state_roots()?.runtime_sessions()?;
-    for session in initial.sessions() {
-        for branch in &session.branches {
-            let locator = SessionLocator::new(
-                branch.session.session_id(),
-                branch.session.branch_id(),
-                branch.checkpoint,
-            );
-            let operation = SessionOperationId::new(format!(
-                "plak:move-freeze:{}:{}",
-                capsule.group,
-                branch.session.branch_id()
-            ))
-            .map_err(|error| CliFailure::new(error.to_string()))?;
-            frozen.holds.push(
-                executor
-                    .block_on(sessions.hold_branch(&operation, locator))
-                    .map_err(|error| CliFailure::new(error.to_string()))?
-                    .map_err(|error| CliFailure::new(error.to_string()))?,
-            );
-        }
-    }
+    freeze_branches(services, &initial, &capsule.group, frozen, runtime)?;
     let operation = MoveOperation::new(capsule.operation)
         .map_err(|error| CliFailure::new(error.to_string()))?;
+    for proof in &initial.proofs {
+        proof.recheck(services, runtime)?;
+    }
+    frozen.proofs.extend(initial.proofs);
     let native = executor
         .block_on(
             sessions.prepare_move(operation, &frozen.holds[start..].iter().collect::<Vec<_>>()),
@@ -435,6 +420,56 @@ fn prepare_group(
     };
     probe(services, &request, &capsule, &directory)?;
     crate::carry::upgrade::crash_cut("move-after-group-export");
+    Ok(())
+}
+
+fn freeze_branches(
+    services: &Services,
+    initial: &crate::carry::host_move::source::Snapshot,
+    group: &str,
+    frozen: &mut Frozen,
+    runtime: &tokio::runtime::Handle,
+) -> CliResult<()> {
+    for proof in &initial.proofs {
+        proof.recheck(services, runtime)?;
+    }
+    let executor = plakous::application::ApplicationExecutor::new()
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    let sessions = services.state_roots()?.runtime_sessions()?;
+    for session in initial.native.sessions() {
+        for branch in &session.branches {
+            let locator = SessionLocator::new(
+                branch.session.session_id(),
+                branch.session.branch_id(),
+                branch.checkpoint,
+            );
+            let operation = SessionOperationId::new(format!(
+                "plak:move-freeze:{group}:{}",
+                branch.session.branch_id()
+            ))
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+            let hold = executor
+                .block_on(sessions.hold_branch(&operation, locator))
+                .map_err(|error| CliFailure::new(error.to_string()))?
+                .map_err(|error| CliFailure::new(error.to_string()))?;
+            frozen.holds.push(hold);
+            if let Some(line) = initial
+                .native
+                .lines()
+                .iter()
+                .find(|line| line.line.head() == branch.session)
+            {
+                let hold = frozen
+                    .holds
+                    .last()
+                    .ok_or_else(|| CliFailure::new("source hold missing"))?;
+                executor
+                    .block_on(sessions.record_move_terminals(hold, line, branch.checkpoint))
+                    .map_err(|error| CliFailure::new(error.to_string()))?
+                    .map_err(|error| CliFailure::new(error.to_string()))?;
+            }
+        }
+    }
     Ok(())
 }
 

@@ -945,6 +945,10 @@ new environments, effects, leases, transfers or adoption. Neither inspection
 mode admits it. A host ownership move uses exact-CAS transfer and treats any
 owner other than its imported source tuple or its own recorded intended tuple
 as an integrity failure, not permission to raise a fence over that witness.
+The protocol-9 `JobTerminals` read likewise requires a normally bound host and
+one exact accepted owner. It exposes bounded original-worker terminal proof
+and retained output only; it grants no effects, adoption, leases or consumption.
+Unknown, incomplete or owner-mismatched reads cannot settle a source job.
 
 Runner placement uses pin-backed stable machine identity and effective canonical
 roots even while a runner is offline. Same-machine pin/root admission and local

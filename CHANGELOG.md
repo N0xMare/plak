@@ -35,6 +35,10 @@ for one version bump, without native protocol compatibility.
   when the continuation is admitted. Pin in-turn notices after continuation
   and user-prompt admission, without a duplicate idle wake.
 
+- Carry retained, unconsumed terminal jobs using exact original-worker proofs,
+  without acknowledging their output. Recheck those proofs under source holds
+  before native preparation and surrender.
+
 - Recover ownership-move batches from their immutable captured terminal set,
   even when lease-only reconciliation records more job terminals before Ready.
 
