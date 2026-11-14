@@ -88,7 +88,7 @@ def weighted_config(serial_threads: int, durability_threads: int) -> str:
     durability = [
         {"filter": HEAVY, "threads-required": max(1, durability_threads // 2)},
         {"filter": LEDGER, "threads-required": math.ceil(durability_threads / 4)},
-        {"filter": FIRST, "priority": 100},
+        {"filter": FIRST, "priority": 90},
     ]
     return "\n".join(
         [

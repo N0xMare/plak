@@ -772,7 +772,7 @@ default-filter = '''
 [[profile.durability.overrides]]
 filter = 'test(=crash_sweep::durability_ledger_retirement_closed_cells)'
 threads-required = "num-test-threads"
-priority = 110
+priority = 100
 
 # These campaigns launch their own concurrent cut workers.
 [[profile.durability.overrides]]
@@ -797,7 +797,7 @@ test(tui_host_restart)
 | test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)
 | test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss)
 '''
-priority = 100
+priority = 90
 
 [[profile.default.overrides]]
 filter = 'test(tui_host_restart)'
