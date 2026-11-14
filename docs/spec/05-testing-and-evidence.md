@@ -2172,8 +2172,12 @@ campaigns reserve four. The closed-cell ledger twin-pilot campaign reserves
 the whole pool because competing load has changed its per-store signatures.
 It runs first at priority 100, avoiding a full-pool reservation waiting behind
 long shared tests. Its isolation rule precedes the general ledger weight.
-Other independent cuts use one slot. The 64 host-restart cut groups, the redial test
-and the busy-root absence test have priority 90 so long paths start early.
+Other independent cuts use one slot. The 64 host-restart cut groups, the redial
+test and the busy-root absence test have priority 90 so long paths start early.
+They reserve four slots each, limiting simultaneous real-process restart work
+to four cases without serializing the independent cuts. The TUI approval-resume
+cases also reserve four slots: sixteen competing PTY fixtures have exhausted
+unchanged child-recovery and terminal-quit bounds under load.
 Weights are scheduling reservations, not fewer cuts, extra retries or relaxed
 assertions. The existing extended watchdogs for host-restart matrices remain.
 

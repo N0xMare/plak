@@ -796,6 +796,13 @@ test(/::(tui_host_restart|review_tui_host_restart_switch|wire_host_restart|wire_
 | test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss)
 '''
 priority = 90
+threads-required = 4
+
+# Several simultaneous PTY fixtures can spend their unchanged stop/quit
+# watchdogs waiting for CPU and child recovery rather than making progress.
+[[profile.durability.overrides]]
+filter = 'package(=plakous-offline-crash-harness) & test(approval_resume::tui_)'
+threads-required = 4
 
 [[profile.default.overrides]]
 filter = 'test(tui_host_restart)'

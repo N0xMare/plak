@@ -242,7 +242,7 @@ class NextestLaneTests(unittest.TestCase):
 
     def test_durability_weights_protect_internal_workers_and_pilot_isolation(self) -> None:
         overrides = profiles()["durability"]["overrides"]
-        isolated, heavy, ledger, first = overrides
+        isolated, heavy, ledger, first, approval = overrides
         self.assertEqual(
             isolated,
             {
@@ -257,6 +257,9 @@ class NextestLaneTests(unittest.TestCase):
         self.assertIn("durability_twin_pilots", heavy["filter"])
         self.assertIn("image_residency_crash_cuts", heavy["filter"])
         self.assertEqual(first["priority"], 90)
+        self.assertEqual(first["threads-required"], 4)
+        self.assertEqual(approval["threads-required"], 4)
+        self.assertIn("approval_resume::tui_", approval["filter"])
         for override in overrides:
             self.assertLessEqual(-100, override.get("priority", 0))
             self.assertLessEqual(override.get("priority", 0), 100)
