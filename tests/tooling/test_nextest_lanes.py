@@ -260,8 +260,22 @@ class NextestLaneTests(unittest.TestCase):
         for override in overrides:
             self.assertLessEqual(-100, override.get("priority", 0))
             self.assertLessEqual(override.get("priority", 0), 100)
-        for matrix in ("tui_host_restart", "review_tui_host_restart_switch", "wire_host_restart"):
-            self.assertIn(f"test({matrix})", first["filter"])
+        pattern = (
+            r"::(tui_host_restart|review_tui_host_restart_switch|wire_host_restart"
+            r"|wire_host_restart_switch)::(root|child)_[0-7]$"
+        )
+        self.assertIn(f"test(/{pattern}/)", first["filter"])
+        for family in (
+            "tui_host_restart",
+            "review_tui_host_restart_switch",
+            "wire_host_restart",
+            "wire_host_restart_switch",
+        ):
+            for role in ("root", "child"):
+                for group in range(8):
+                    self.assertRegex(f"prefix::{family}::{role}_{group}", pattern)
+            self.assertNotRegex(f"prefix::{family}", pattern)
+            self.assertNotRegex(f"prefix::{family}::root_8", pattern)
 
     def test_every_lane_predicate_names_a_test_or_module_in_the_tree(self) -> None:
         names = predicates("serial") + predicates("durability")

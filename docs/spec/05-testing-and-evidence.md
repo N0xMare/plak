@@ -2171,8 +2171,8 @@ The three internally parallel campaigns (`durability_subset`,
 campaigns reserve four. The closed-cell ledger twin-pilot campaign reserves
 the whole pool because competing load has changed its per-store signatures.
 It runs first at priority 100, avoiding a full-pool reservation waiting behind
-long shared tests. Its isolation rule precedes the general ledger weight. Other independent cuts
-use one slot. Host-restart matrices and their split cut cases, the redial test
+long shared tests. Its isolation rule precedes the general ledger weight.
+Other independent cuts use one slot. The 64 host-restart cut groups, the redial test
 and the busy-root absence test have priority 90 so long paths start early.
 Weights are scheduling reservations, not fewer cuts, extra retries or relaxed
 assertions. The existing extended watchdogs for host-restart matrices remain.

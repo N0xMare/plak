@@ -44,11 +44,10 @@ HEAVY = (
     " | test(/::image_residency_crash_cuts_recover_without_redispatch$/)"
 )
 LEDGER = "test(/^crash_sweep::durability_ledger_retirement_/)"
-# The four host-restart matrices, the redial test and the busy-root test.
+# Every independent restart cut group, the redial test and the busy-root test.
 FIRST = (
-    "test(tui_host_restart)"
-    " | test(review_tui_host_restart_switch)"
-    " | test(wire_host_restart)"
+    "test(/::(tui_host_restart|review_tui_host_restart_switch|wire_host_restart"
+    "|wire_host_restart_switch)::(root|child)_[0-7]$/)"
     " | test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)"
     " | test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss)"
 )

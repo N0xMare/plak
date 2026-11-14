@@ -787,13 +787,11 @@ threads-required = 8
 filter = 'test(/^crash_sweep::durability_ledger_retirement_/)'
 threads-required = 4
 
-# Start the longest real-process matrices and fixed absence windows first.
-# Prefixes also cover independent cut cases split out of these matrices.
+# Start independent restart cuts and fixed absence windows early; pilot
+# parity checks are not restart cuts and keep the ordinary priority.
 [[profile.durability.overrides]]
 filter = '''
-test(tui_host_restart)
-| test(review_tui_host_restart_switch)
-| test(wire_host_restart)
+test(/::(tui_host_restart|review_tui_host_restart_switch|wire_host_restart|wire_host_restart_switch)::(root|child)_[0-7]$/)
 | test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)
 | test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss)
 '''

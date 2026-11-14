@@ -295,6 +295,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         )
         self.assertEqual(profile["overrides"][1]["threads-required"], 4)
         self.assertEqual(profile["overrides"][2]["threads-required"], 2)
+        self.assertIn("::(root|child)_[0-7]$/)", profile["overrides"][3]["filter"])
 
     def test_weighted_lanes_build_without_overrides_or_provider_keys(self):
         spec = importlib.util.spec_from_file_location(
