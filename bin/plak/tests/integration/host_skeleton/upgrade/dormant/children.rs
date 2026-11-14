@@ -3,6 +3,15 @@ use super::*;
 
 #[test]
 fn host_move_dormant_real_bound_child_preserves_the_allocation_and_native_identity() {
+    child_round_trip(None);
+}
+
+#[test]
+fn host_move_dormant_real_tree_seed_crash_recovers_without_replaying_parent_or_child() {
+    child_round_trip(Some("move-after-tree-seed"));
+}
+
+fn child_round_trip(cut: Option<&str>) {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     let child_script = fixture.root.join("child.json");
@@ -12,7 +21,11 @@ fn host_move_dormant_real_bound_child_preserves_the_allocation_and_native_identi
     script["product_child_script"] = json!(child_script);
     script["steps"].as_array_mut().unwrap().remove(1);
     fixture.write_script(&script);
-    let mut host = start_env(&fixture, &[], &[(ENABLED, "1".into())]);
+    let mut environment = vec![(ENABLED, "1".into())];
+    if let Some(cut) = cut {
+        environment.push(("PLAK_TEST_HOST_UPGRADE_CUT", cut.into()));
+    }
+    let mut host = start_env(&fixture, &[], &environment);
     let mut client = Client::connect(&host);
     let Outcome::Ok(Answer::Created { session, node, .. }) =
         client.request(1, new_session(&fixture.workspace()))
@@ -64,11 +77,16 @@ fn host_move_dormant_real_bound_child_preserves_the_allocation_and_native_identi
         true,
         &[(ENABLED, "1")],
     );
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    if let Some(cut) = cut {
+        assert!(!result.status.success());
+        recover_committed_cut(&fixture, &mut host, &binary(&fixture), cut);
+    } else {
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
     assert_eq!(successor(&fixture, &session), session);
     assert_child_context(&fixture, &child, &source);
     assert_eq!(
@@ -76,19 +94,33 @@ fn host_move_dormant_real_bound_child_preserves_the_allocation_and_native_identi
         dispatched,
         "moving a dormant tree must not replay its parent"
     );
+    assert_child_identity(&fixture, &node.tree_id, &child, old);
+    if cut.is_some() {
+        assert_eq!(host.child.take().unwrap().wait().unwrap().code(), Some(86));
+    } else {
+        stop(&mut host);
+    }
+}
+
+fn assert_child_identity(
+    fixture: &Fixture,
+    tree_id: &str,
+    child: &str,
+    old: plakous::sessions::SessionLocator,
+) {
     let (target, _) = plakous_recursive_subagents_store::SqliteTreeStore::inspect_move_tree(
         &fixture
             .home()
             .join("state")
             .join(DESTINATION)
             .join("subagents.sqlite3"),
-        &node.tree_id,
+        tree_id,
     )
     .unwrap()
     .unwrap();
     let target = target.rows();
     let next = target
-        .node(&child)
+        .node(child)
         .unwrap()
         .session_locator
         .as_ref()
@@ -101,7 +133,6 @@ fn host_move_dormant_real_bound_child_preserves_the_allocation_and_native_identi
         &target.operations()[&format!("child_session:{child}")].canonical_request,
         next
     );
-    stop(&mut host);
 }
 
 fn assert_child_context(

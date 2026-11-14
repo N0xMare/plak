@@ -430,6 +430,13 @@ agreement, the child's own frozen account/target, rebuilt child head, unchanged
 public IDs and no repeated parent dispatch. Unit cuts reject mismatched markers
 and unrelated unanchored operations. Source tree projection consumes the actual
 final close facts to the native cut; it never advances a cursor by assertion.
+The same bound-child tree is cut after its real semantic seed and recovered
+without parent or child redispatch. Published CLI abandonment is also exercised
+after lease-only reconciliation: transfer intents exist while the durable
+execution-open bit stays clear. Cuts before native abandonment and after its
+commit require an Abandoning receipt, the corresponding native phase, and two
+restarts plus repeated operator requests converging on the same permanent
+Abandoned reservation without opening a driver.
 
 Export-v13/v12 fixtures round-trip neutral content (including inline image bytes,
 opaque replay, native compaction bindings and turn counts), retain only the v12

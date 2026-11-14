@@ -6,6 +6,7 @@ use plakous_host_protocol::intent::SessionIntent;
 const ENABLED: &str = "PLAK_TEST_HOST_UPGRADE_DORMANT";
 
 mod children;
+mod qualification;
 mod review;
 
 #[test]
