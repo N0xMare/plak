@@ -626,6 +626,11 @@ Each pass snapshots same-runtime ancestry once with a narrow metadata read and
 loads only ancestor submissions. It never hydrates ancestor records, transcripts
 or unrelated intents. Own intents are read after each feed page.
 
+Runtime schema 28's move journal records exact batch membership and the
+immutable terminal set in `runtime_move_members`. Later lease-only terminal
+observations remain in `line_job_terminals`; they cannot alter recovery of the
+batch fingerprint or mark output consumed (chapter 01 §5.2).
+
 Product schema 38 additionally holds `session_move_seeds`: the immutable semantic
 ownership-move base (intent, keyed by product session), including its view seed,
 original projection floor and acknowledged agent-attention occurrences. Views

@@ -207,7 +207,7 @@ directly. Older native state remains untouched for its matching build.
 
 | Store | Owner | Current version |
 | --- | --- | --- |
-| Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **28** (adds operation-bound runtime retirement and invisible semantic-install batches, with exact operation/session membership and imported-row inventories) |
+| Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **28** (adds operation-bound runtime retirement and invisible semantic-install batches, with exact operation/session membership, immutable captured terminal sets in `runtime_move_members`, and imported-row inventories) |
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **38** (context codec **4** adds semantic imported-compaction selections and recorded strategy/count facts, with destination-native identities and no carried admission/cache grants) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **38** (adds immutable semantic move seeds and permanent identity claims; terminal state is process-local) |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **11** (adds immutable semantic move bases and imported custody floors) |

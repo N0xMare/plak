@@ -158,8 +158,8 @@ pub(super) fn prepare(
     for session in install.sessions() {
         record_session(&tx, request.operation, session)?;
     }
-    for line in host_move::line_ids(&install) {
-        tx.execute("INSERT INTO runtime_move_lines VALUES(?1,?2) ON CONFLICT(line_id) DO UPDATE SET operation=excluded.operation", params![id(line), workflow_id_bytes(request.operation)]).map_err(map_sqlite)?;
+    for line in install.lines() {
+        tx.execute("INSERT INTO runtime_move_lines VALUES(?1,?2) ON CONFLICT(line_id) DO UPDATE SET operation=excluded.operation", params![id(line.line.line()), workflow_id_bytes(request.operation)]).map_err(map_sqlite)?;
         record_member(&tx, request.operation, line)?;
     }
     bump(&tx)?;
@@ -258,7 +258,7 @@ fn recover(c: &Connection, operation: SessionWorkflowId) -> Result<MoveInstall, 
         .map(|line| {
             Ok(MoveLine {
                 line: lines::load_line_unchecked(c, line)?,
-                terminals: lines::line_job_terminals(c, line)?,
+                terminals: captured_terminals(c, operation, line)?,
             })
         })
         .collect::<Result<Vec<_>, SessionStoreError>>()?;
@@ -368,7 +368,7 @@ fn stage_line(
         params![id(line.line()), workflow_id_bytes(operation)],
     )
     .map_err(map_sqlite)?;
-    record_member(tx, operation, line.line())?;
+    record_member(tx, operation, imported)?;
     for terminal in &imported.terminals {
         tx.execute(
             "INSERT INTO line_job_terminals VALUES(?1,?2,?3,?4)",
@@ -514,14 +514,47 @@ fn record_session(
 fn record_member(
     c: &Connection,
     operation: SessionWorkflowId,
-    line: LineId,
+    line: &MoveLine,
 ) -> Result<(), SessionStoreError> {
+    let terminals = line
+        .terminals
+        .iter()
+        .map(|terminal| terminal.encode().map_err(|_| SessionStoreError::corrupt()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let terminals = serde_json::to_vec(&terminals).map_err(|_| SessionStoreError::corrupt())?;
     c.execute(
-        "INSERT INTO runtime_move_members VALUES(?1,?2)",
-        params![workflow_id_bytes(operation), id(line)],
+        "INSERT INTO runtime_move_members VALUES(?1,?2,?3)",
+        params![
+            workflow_id_bytes(operation),
+            id(line.line.line()),
+            terminals
+        ],
     )
     .map_err(map_sqlite)?;
     Ok(())
+}
+
+fn captured_terminals(
+    c: &Connection,
+    operation: SessionWorkflowId,
+    line: LineId,
+) -> Result<Vec<plakous_agent::internal::LineJobTerminal>, SessionStoreError> {
+    let bytes: Vec<u8> = c
+        .query_row(
+            "SELECT terminals FROM runtime_move_members WHERE operation=?1 AND line_id=?2",
+            params![workflow_id_bytes(operation), id(line)],
+            |row| row.get(0),
+        )
+        .map_err(map_sqlite)?;
+    let terminals: Vec<Vec<u8>> =
+        serde_json::from_slice(&bytes).map_err(|_| SessionStoreError::corrupt())?;
+    terminals
+        .iter()
+        .map(|bytes| {
+            plakous_agent::internal::LineJobTerminal::decode(bytes)
+                .map_err(|_| SessionStoreError::corrupt())
+        })
+        .collect()
 }
 
 fn session_checkpoints(

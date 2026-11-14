@@ -28,7 +28,7 @@ does not close/checkpoint WAL. Only then does it replace the database and
 checksum manifest here. No native rows are edited.
 
 The current seed's `source_commit` pin is
-`5c11515872e04d09f53316231ea4abc93300f8e5`; each regeneration records the current
+`d9e78a8b3f2012951a926c3a21181f28117da777`; each regeneration records the current
 `git rev-parse HEAD` in the manifest. Rerun after **any runtime-schema change**,
 including unshipped shape changes within the same schema number, and after a
 runtime codec/epoch or presentation/executor change that affects these cases.

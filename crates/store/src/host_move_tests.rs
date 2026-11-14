@@ -12,6 +12,7 @@ mod guards;
 mod jobs;
 #[cfg(all(unix, feature = "sqlite"))]
 mod preflight;
+mod recovery;
 
 async fn seed(store: &dyn SessionStore, durability: RuntimeDurability) -> TestResult<BranchLease> {
     seed_at(store, durability, 0).await

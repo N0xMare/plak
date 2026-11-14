@@ -278,6 +278,7 @@ CREATE TABLE runtime_move_lines (
  FOREIGN KEY(operation) REFERENCES runtime_moves(operation)) WITHOUT ROWID;
 CREATE TABLE runtime_move_members (
  operation BLOB NOT NULL CHECK(length(operation)=32), line_id TEXT NOT NULL,
+ terminals BLOB NOT NULL,
  PRIMARY KEY(operation,line_id), FOREIGN KEY(operation) REFERENCES runtime_moves(operation)) WITHOUT ROWID;
 CREATE TABLE runtime_move_sessions (
  operation BLOB NOT NULL CHECK(length(operation)=32), session_id TEXT NOT NULL,

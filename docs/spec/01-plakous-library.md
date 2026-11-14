@@ -1793,7 +1793,11 @@ exact durable line-terminal evidence (process identity and allocation generation
 as well as job number), never with a process list's apparent idleness.
 A Published but never-executed target batch can recover its original install
 fingerprint after lease-only reconciliation: its journal retains the original
-branch floors and feed cut separately from later lease counters and facts.
+branch floors, feed cut and exact captured line-terminal set separately from
+later lease counters and facts. Recovery never rebuilds that terminal set from
+the mutable line-terminal observations: recording a new terminal under a
+lease-only reconciliation hold must not change the original batch digest or
+imply that the agent consumed its output.
 A changed head, session header, membership or execution-open bit refuses that
 recovery instead of recompiling an already staged checkpoint.
 

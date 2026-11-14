@@ -35,6 +35,9 @@ for one version bump, without native protocol compatibility.
   when the continuation is admitted. Pin in-turn notices after continuation
   and user-prompt admission, without a duplicate idle wake.
 
+- Recover ownership-move batches from their immutable captured terminal set,
+  even when lease-only reconciliation records more job terminals before Ready.
+
 - Report uncertain host-upgrade decisions to the requester with a startup
   reconciliation remedy, including attempts later withdrawn without surrender.
 
