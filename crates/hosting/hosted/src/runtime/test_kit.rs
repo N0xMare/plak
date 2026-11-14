@@ -1293,6 +1293,26 @@ pub fn scripted_caller_topology_tools(
     let tree_id = runtime
         .read(|tree| tree.tree_id.clone())
         .map_err(|error| CliFailure::new(error.message))?;
+    // Move compilation supplies the semantic source tree after the scripted
+    // factory was created. Its captured runtime can still be an empty target;
+    // inspect the supplied rows instead, without registering or saving them.
+    let runtime = if state_roots.frozen_presentation().is_some() {
+        let rows = state_roots
+            .tree_store()?
+            .load(&tree_id)
+            .map_err(|error| CliFailure::new(error.detail))?
+            .ok_or_else(|| CliFailure::new("passive child compilation has no semantic tree"))?;
+        let tree = crate::agent_tree::ProductAgentTree::reopen(rows);
+        let vcs = tree.vcs_port();
+        Arc::new(crate::topology_runtime::ProductTopologyRuntime::new(
+            tree,
+            Arc::new(crate::agent_tree::MemoryTreeStore::new()),
+            vcs,
+            None,
+        ))
+    } else {
+        runtime
+    };
     let parent = crate::agent::SpawnParent::Api(crate::agent::ApiTopologyParent {
         root_profile: None,
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),

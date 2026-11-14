@@ -9,6 +9,7 @@ mod children;
 mod qualification;
 mod remote_guards;
 mod review;
+mod finished;
 
 #[test]
 fn host_move_dormant_round_trip_preserves_ids_and_withholds_until_group_ready() {

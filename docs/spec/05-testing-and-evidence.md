@@ -434,6 +434,12 @@ agreement, the child's own frozen account/target, rebuilt child head, unchanged
 public IDs and no repeated parent dispatch. Unit cuts reject mismatched markers
 and unrelated unanchored operations. Source tree projection consumes the actual
 final close facts to the native cut; it never advances a cursor by assertion.
+The separate finished-child case uses the real child session, a successful
+`submit_result`, an idle-parent result wake and a clean source restart. Its
+scripted compiler reads the supplied detached semantic tree rather than the
+empty destination tree captured when the fixture factory was created. A native
+production-builder pin compiles the same finished policy without registering a
+runtime, opening a driver, changing the stored node or adding a grant.
 The same bound-child tree is cut after its real semantic seed and recovered
 without parent or child redispatch. Published CLI abandonment is also exercised
 after lease-only reconciliation: transfer intents exist while the durable
