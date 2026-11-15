@@ -116,7 +116,7 @@ The three binaries are then under `target/x86_64-unknown-linux-musl/release/`.
 Use the corresponding compiler path if your musl toolchain has a different name.
 Rustc finds its own `rust-lld`; this links static PIE. Nix's `musl-gcc` wrapper
 is for C dependencies, not linking Rust static PIE (its specs inject a dynamic
-loader). For per-install build-and-test evidence, run `just musl native`;
+loader). For complete native musl platform evidence, run `just musl native`;
 `just musl container` (maintainer-only: it needs the unpublished pinned container
 image, spec 06 §6.1) remains the full pinned-container qualification.
 

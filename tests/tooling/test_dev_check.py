@@ -111,6 +111,7 @@ class DevCheckWorkerTests(unittest.TestCase):
             "test-env.sh",
             "clippy.sh",
             "dev-tools.pins",
+            "check_restart_families.py",
         ):
             destination = self.root / "tools/gate" / name
             shutil.copyfile(ROOT / "tools/gate" / name, destination)
@@ -199,6 +200,15 @@ if args == ['fetch', '--locked', '--offline'] and os.environ.get('GATE_COLD_CACH
     failure = 1
 if failure and args != ['nextest', '--version']:
     raise SystemExit(failure)
+if args[:2] == ['nextest', 'list']:
+    import runpy
+    families = runpy.run_path('tools/gate/check_restart_families.py')['FAMILIES']
+    tests = {f'{family}::{role}_{group}': dict(ignored=False, **{'filter-match': {'status': 'matches'}})
+             for family in families for role in ('root', 'child') for group in range(8)}
+    if os.environ.get('GATE_MISSING_RESTART_GROUP'):
+        tests.pop(next(iter(tests)))
+    print(json.dumps({'rust-suites': {'plak::integration': {
+        'package-name': 'plak', 'binary-name': 'integration', 'testcases': tests}}}))
 if args[0] == 'test':
     if os.environ.get('GATE_BUILD_FAIL'):
         raise SystemExit(1)
@@ -228,7 +238,7 @@ if args[0] == 'test':
         self.executable(
             'python3',
             r'''import json, os, sys
-if sys.argv[1] == '-' or sys.argv[1].endswith(('vcs_listing.py', 'test-processes.py')):
+if sys.argv[1] == '-' or sys.argv[1].endswith(('vcs_listing.py', 'test-processes.py', 'check_restart_families.py')):
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
@@ -374,7 +384,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             )
 
     def assert_nextest_home_is_isolated(self, calls):
-        lanes = self.lanes(calls)
+        lanes = [c for c in calls if c['args'][:2] in (['nextest', 'run'], ['nextest', 'list'])]
         self.assertGreaterEqual(len(lanes), 1)
         for lane in lanes:
             home = lane['plak_home']
@@ -385,7 +395,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             mode = lane['home_mode']
             self.assertEqual(mode, 0o700, home)
         for call in calls:
-            if call['args'][:2] == ['nextest', 'run']:
+            if call['args'][:2] in (['nextest', 'run'], ['nextest', 'list']):
                 continue
             self.assertIsNone(
                 call['plak_home'],
@@ -1122,7 +1132,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertNotIn('clippy:packages', result.stdout)
         self.assertFalse(any(call['args'][0] == 'clippy' for call in calls))
 
-    def test_full_adds_the_ignored_soak_and_standalone_docs_to_every_group(self):
+    def test_full_adds_only_the_ignored_soak_to_every_group(self):
         full, full_calls, full_scripts = self.run_gate('--full')
         self.log.unlink()
         steps, step_calls, step_scripts = self.run_gate('--steps', ','.join(reversed(GROUPS)))
@@ -1145,18 +1155,40 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             ]
 
         self.assertEqual(
-            stable(
-                [
-                    call
-                    for call in full_calls
-                    if call not in soaks and not (call['args'][0] == 'doc' and '-p' in call['args'])
-                ]
-            ),
+            stable([call for call in full_calls if call not in soaks]),
             stable(step_calls),
         )
         self.assertEqual(full_scripts, step_scripts)
         headings = [line for line in full.stdout.splitlines() if line.startswith('== group:')]
         self.assertEqual(headings, [f'== group: {group} ==' for group in GROUPS])
+
+    def test_explicit_rustdoc_keeps_every_supported_default_resolution(self):
+        result, calls, _ = self.run_gate('--steps', 'rustdoc')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        docs = [call for call in calls if call['args'][0] == 'doc']
+        self.assertEqual(len(docs), 1 + len(SUPPORTED))
+        self.assertEqual([doc['args'][2] for doc in docs[1:]], list(SUPPORTED))
+        self.assertTrue(all(doc['rustdocflags'] == '-D warnings' for doc in docs))
+
+    def test_durability_refuses_a_partial_restart_family_before_running(self):
+        self.env['GATE_MISSING_RESTART_GROUP'] = '1'
+        result, calls, _ = self.run_gate('--steps', 'tests-durability')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('expected all 16 restart groups', result.stderr)
+        self.assertEqual(self.lanes(calls), [])
+
+    def test_durability_prelists_the_actual_lane_selection(self):
+        result, calls, _ = self.run_gate('--steps', 'tests-durability')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        listing = next(call for call in calls if call['args'][:2] == ['nextest', 'list'])
+        run = self.lanes(calls)[0]
+        for flag in ('--profile', '--config-file', '--target'):
+            self.assertEqual(
+                listing['args'][listing['args'].index(flag) + 1],
+                run['args'][run['args'].index(flag) + 1],
+            )
+        self.assertNotIn('--ignore-default-filter', listing['args'])
+        self.assertIn('all four restart families contain all 16 groups', result.stdout)
 
     def test_batch_mac_keeps_full_platform_clippy_but_no_wall_clock_lanes(self):
         result, calls, scripts = self.run_gate('--batch-mac')

@@ -597,7 +597,7 @@ run_group() {
     rustdoc)
       echo "== rustdoc =="
       RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked ${target_args[@]+"${target_args[@]}"}
-      if [[ "$tier" == full ]]; then
+      if [[ "$tier" != fast ]]; then
         for package in "${supported_packages[@]}"; do
           echo "== rustdoc: $package alone =="
           RUSTDOCFLAGS="-D warnings" cargo doc -p "$package" --no-deps --locked ${target_args[@]+"${target_args[@]}"}
@@ -631,6 +631,10 @@ run_group() {
         local durability_config="$TMPDIR/nextest-durability.toml" durability_threads
         durability_threads=$(python3 tools/gate/nextest_layout.py .config/nextest.toml "$durability_config") || return
         echo "-- durability pool: $durability_threads slots --"
+        PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" \
+          cargo nextest list --locked --workspace --all-features --profile durability \
+          --config-file "$durability_config" ${target_args[@]+"${target_args[@]}"} --message-format json \
+          | python3 tools/gate/check_restart_families.py
         run_lane durability --config-file "$durability_config" --test-threads="$durability_threads" || durability_status=$?
       fi
       if [[ "$tier" == full || "$tier" == soak ]]; then

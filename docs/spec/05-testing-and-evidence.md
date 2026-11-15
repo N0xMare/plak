@@ -844,7 +844,7 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these 
 | `static` | fmt, then `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/` (root `pyproject.toml` is tool config only; `vendor/` and `eval/datasets` stay excluded), then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch, ruff and structure checkers not in platform), then workspace all-features clippy, then clippy on each supported package alone in its own default resolution with all its targets (`cargo clippy -p <package> --all-targets`); all deny warnings. Worker fast narrows only the lint roots and affected facade/hosted profile compiles, never the global fmt/ruff/structure/closure checks |
 | `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); Plak maintainer-feature build; then `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each portable crate and each portable default library (chapter 06 §7.5). All deny rustc warnings. The musl qualification container (`--qual-container`) skips only that wasm check when its preloaded image has no such rustc target; the final summary names the skip and the run records no gate evidence |
 | `variants` | Reduced Plak resolutions, each built (lib and bins) and clippy-linted with warnings denied (a linker warning that holds only Apple ld's compact-unwind size note for a large debug binary, which rustc forwards through the `linker_messages` lint outside `-D warnings`, is not a failure; any other linker line is), using the gate's target and rustflags, then smoke-checked (version, doctor build features, CLI/JSONL feature refusals): headless is default minus `tui` and `clipboard`; api is default minus `codex`, `grok` and `claude`; minimal is exactly `tui`, `openrouter` and `git-cli`; the admission fixture is default minus `tui`, `clipboard`, `images`, `python` and `mcp`. Helper builds (a full `test-hooks` fixture writer, the MCP fake server, a reduced `test-hooks`+`maintainer` reader) drive the feature-admission and JSONL contracts, the api and minimal route checks, the canonical Python/MCP store read/refusal and byte-preservation fixtures, and the image diagnostic. Those plak processes use a private `HOME` and `XDG_*` directories inside the fixture temporary directory and accept the codex compatibility notice on stdin, so the fixture never reads or writes the operator subscription store. Selected by full only, never check, fast or platform; it runs at the release-candidate tier, not in the integration batch gate |
-| `rustdoc` | Workspace all-features documentation with warnings denied; full/RC also checks each supported package alone in its default resolution (chapter 06 §8) |
+| `rustdoc` | Workspace all-features documentation, then each supported package alone in its default resolution, all with warnings denied; the same group in every integration batch, explicit step and full/RC run (chapter 06 §8), never selected by `--fast` |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
 | `tests-serial` | nextest profile `serial`: wall-clock budgets, one test thread |
 | `tests-durability` | nextest profile `durability`: crash matrices and the sqlite SIGKILL campaign, host-scaled weighted pool (at most 16 slots) |
@@ -985,7 +985,7 @@ warning that exists only in a default or maintainer closure, and is hidden from
 `--all-features` clippy, fails this group.
 
 Platform-independent structure checks, public contracts and Python tooling run
-once on Linux in check and full; rustdoc runs once on Linux in full. The
+once on Linux in check and full; rustdoc runs once per integration batch and in full. The
 integration batch gate runs those groups once and does not repeat them on
 Apple Silicon. The native musl lane defaults to
 `--platform`; `just musl container` runs the full tier in the pinned offline musl
@@ -1065,7 +1065,7 @@ exports all four for the test process.
 | Lints | `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` | Every target of every package, all features on, no warnings. The workspace lint table denies `missing_docs`, `unwrap_used`, `expect_used`, `dbg_macro`, `todo`, `unimplemented`, and broken intra-doc links, and forbids `unsafe_code` |
 | Default feature builds | `cargo build --locked --workspace --lib --bins` and `cargo build --locked -p plak --features maintainer --bins`, each with `-D warnings` on the rustflags Cargo passes | Check, platform and full tiers, after clippy: default-feature libraries and binaries compile and link, as does the maintainer installer's Plak feature set, without test hooks or all-features unification hiding missing dependencies. Rustc warnings in those closures are errors; clippy remains the `--all-features` lint |
 | Portable wasm libraries | `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each name from `check_workspace.py --wasm-libraries`, with `-D warnings` | The portable set compiles as a library for `wasm32-unknown-unknown` (chapter 06 §7.5). Currently that set is `plakous-model`, `plakous-runner-protocol`, `plakous-tools` and `plakous-agent`, whose default features are portable, and the list adds the default library of `plakous-store`, whose `sqlite` feature keeps it off the fenced set. This is not a supported product target, and the check proves compilation, not run-time behavior. The musl qualification container skips the check while its preloaded image lacks the rustc target; the summary names the skip and the run records no gate evidence |
-| Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked`, then `cargo doc -p <package> --no-deps --locked` for each supported package in its own default resolution | Rustdoc builds every package's documentation with its own lints denied (a default resolution can expose a link the all-features run hides): broken intra-doc links, links from public documentation into private items, and bare URLs are errors. Runs after clippy and before the tests |
+| Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked`, then `cargo doc -p <package> --no-deps --locked` for each supported package in its own default resolution | Whenever the rustdoc group is selected outside `--fast`, including every integration batch and `just steps rustdoc`, both resolutions run with warnings denied (a default resolution can expose a link the all-features run hides): broken intra-doc links, links from public documentation into private items, and bare URLs are errors. Runs after clippy and before the tests |
 | Offline tests | `just steps tests-parallel,tests-serial,tests-durability` (the gate supplies the host-scaled durability configuration) | The whole workspace's deterministic behavior, with no network and no credentials |
 | Public compile contracts | `python3 tools/gate/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
 | Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plak`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. The same checker fences `PORTABLE_CRATES` (chapter 06 §7.5): each listed crate's normal closure, at default features and at `--all-features`, must not carry a reviewed native-only crate (including `libc`) or Tokio feature, resolved for `wasm32-unknown-unknown` rather than the host, and a failure names the crate, the dependency and the path that pulls it in |
@@ -1191,7 +1191,10 @@ required after runtime module moves.
 
 `just fmt` is the formatter: `cargo fmt --all`, then `ruff format` over
 `tools/`, `tests/tooling`, `tests/live` and `eval/`. `just clippy` runs the static group's clippy
-invocations: the workspace, then each supported package alone. Rustdoc is `just steps rustdoc`.
+invocations: the workspace, then each supported package alone. Rustdoc is
+`just steps rustdoc`: the all-features workspace and each supported package
+alone in its default resolution, just as in every integration batch and full/RC
+run; `--fast` does not select rustdoc.
 The three nextest lanes are `just steps tests-parallel,tests-serial,tests-durability`.
 `cargo-nextest` is required by every tier: if it is absent the gate exits 2 rather than falling back to `cargo test`, because a plain
 workspace `cargo test` would skip the serial budget lane and the nextest test groups.
@@ -2194,6 +2197,36 @@ cases also reserve `ceil(N/4)` slots: sixteen competing PTY fixtures have exhaus
 unchanged child-recovery and terminal-quit bounds under load.
 Weights are scheduling reservations, not fewer cuts, extra retries or relaxed
 assertions. The existing extended watchdogs for host-restart matrices remain.
+
+Fixed absence/liveness observation windows retain their lengths under this
+layout. The reviewed cases exceed sixty seconds even before fixture setup:
+`a_busy_roots_child_job_survives_attach_after_host_loss` spends eight times
+five seconds observing a live held child, and
+`a_childs_daemon_job_survives_host_loss_and_handoff` spends four times five
+seconds. `runner_wake_live_foreground` observes a paused daemon's live job
+after 1.1 seconds. `a_transient_daemon_failure_keeps_the_redial_bound` also
+requires the host to stay alive through two ten-second failed-redial windows.
+The start-scan and busy-release `host_crash_cuts_` matrices
+also check no new continuation/dispatch after 300 ms per indexed cut.
+The Python and JavaScript `cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance`
+cases check no nested replay over 20 ms per delivery cut. Crash-sweep recovery
+helpers check no second child continuation, grandchild dispatch or fenced-child
+dispatch after 500 ms per cut (`shapes/child.rs`, `shapes/lineage.rs`,
+`shapes/recovery.rs`); their internally parallel campaigns already reserve the
+whole nextest pool, not a quiet internal worker.
+The accepted trade-off is to keep these windows on their existing reservations,
+not add a whole-pool phase exceeding a minute: descheduling can defer the
+forbidden event beyond the observation window and reduce detection sensitivity.
+This is not permission to shorten windows or retry failures. Lease-expiry
+sleeps (31 seconds in the actual-host matrix and 600 ms in runner link faults),
+delayed reconnection/readoption, lower-bound hold checks and polling sleeps
+are not absence windows and keep their existing scheduling.
+
+Before the routine durability invocation, the gate lists its actual rendered
+profile selection and refuses unless all four restart families contain all
+sixteen non-ignored root/child groups. This preserves the invocation-local
+union witness if a future lane filter changes; listing does not ignore the
+profile's default filter. The ignored soak invocation has no restart families.
 
 Serial and durability remain sequential groups. Serial tests measure real
 deadlines, cancellation and PTY responsiveness; a separate durability process
@@ -5486,8 +5519,8 @@ name and refuses a scenario pinning `gpt-5.3-codex-spark` or `gpt-5.4-mini`.
 
 ## 5. Known flaky classes
 
-Each of these has a named cause and a shipped fix. The fix is always to remove
-the environmental assumption, never to weaken the assertion.
+Each shipped fix removes the environmental assumption rather than weakening
+the assertion. Open investigations name their current containment explicitly.
 
 | Class | Cause | Fix in force |
 | --- | --- | --- |
@@ -5496,6 +5529,7 @@ the environmental assumption, never to weaken the assertion.
 | Fixed-port OAuth loopback | Login tests bound the pinned callback ports, which collide across parallel runs and with a live login | Tests bind an ephemeral port through the managers' loopback seam; the pinned ports are refused in tests (§2.3). The `native-auth-serial` group still serializes the shared process-local fixtures |
 | CLI contract interference | Process-level binary contracts collide when run in parallel | The `cli-contract-serial` group |
 | Child-start deadline under load | Crash matrices relaunch the current test binary and wait for durable cut markers; CPU and SQLite contention can exceed a bounded start deadline | The durability lane (§2.3) uses a host-scaled pool of at most sixteen slots, running internal-worker campaigns exclusively at late priority and isolating the signature-sensitive closed-cell campaign. It stays separate from the serial budget lane, under the existing 240-second slow timeout and explicit matrix watchdogs. `just check` does not run it. Child reply and exit watchdogs are hang bounds, not timing assertions. Outcome assertions are unchanged |
+| Open: closed-cell retirement twin signatures under load | `crash_sweep::durability_ledger_retirement_closed_cells` has produced different per-store commit signatures under competing load; twin-pilot determinism is itself the invariant, so isolation does not establish a root cause | Whole-pool reservation at priority 100 remains containment, not a correctness fix. Investigate both retained `commit-trace.jsonl` pilots under deliberate load, distinguishing harness face/quit timing from product publication ordering; stop and report product-ordering evidence rather than change isolation or the oracle |
 | Wall-clock budgets read as contention | Interactive PTY budgets, the 250 ms yield floor, lease and cancellation windows are measurements on an idle machine | The same serial budget lane, assertions unchanged |
 | Scripted response windows | A sleeping model can finish before the test's submission, mail claim or crash cut under load | Offline scripts use explicit registry gates for in-process streams and file-sentinel gates for process cuts. Gates preserve cancellation; park predicates register tree notifications before inspecting state |
 | Probe peer teardown | A successful TLS 1.3 probe drops its connection before the peer flushes session tickets, so a fixture can drop its listener before the next probe | The byte-count peer disables tickets and gates receipt of the client's Finished until probe teardown; both HTTP ALPNs still require exactly zero plaintext bytes on two fresh connections |

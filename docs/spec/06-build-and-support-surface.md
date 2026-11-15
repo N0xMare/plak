@@ -496,8 +496,9 @@ build's resolution. The `static` group runs clippy on the same per-package
 resolutions with all targets in batch and full gates. Worker `just fast`
 lints only the touched packages and their conservative reverse dependencies,
 with all features and targets; workspace Cargo inputs retain full linting.
-The `rustdoc` group documents the all-features workspace. The full/RC tier
-also documents each supported package alone with default features; both
+The `rustdoc` group documents the all-features workspace, then each supported
+package alone with default features whenever selected outside `--fast`,
+including every integration batch and explicit `just steps rustdoc`; both
 resolutions deny rustdoc warnings (§8). The feature checker scans UUID generation
 constructors in package source, tests, benches, examples and build scripts
 (including inline test modules, excluding comments and literals), and requires
@@ -2169,8 +2170,9 @@ integration batch gate:
   supported-package, maintainer and portability builds, cfg-specific workspace
   and supported-package-alone clippy, and all three routine test lanes.
 - Shared formatting/ruff, workspace/feature structure and evidence audits run
-  once, alongside workspace rustdoc, public compile contracts, tooling and the
-  dependency audit. Platform static also rechecks Rust formatting with clippy. `--static-scope shared --steps static,...` selects the
+  once, alongside workspace and supported-package-alone rustdoc, public compile
+  contracts, tooling and the dependency audit. Platform static also rechecks
+  Rust formatting with clippy. `--static-scope shared --steps static,...` selects the
   shared checks; `--static-scope platform --steps static,...` selects fmt and
   cfg-specific clippy without repeating the shared checkers. These scopes
   are accepted only with explicit `--steps`, never a named tier.
@@ -2182,7 +2184,9 @@ integration batch gate:
   use `just dev crash-sweep --shapes <list>` for the affected shapes. Host locks
   still exclude worker compiles from wall-clock lanes and the sweep.
 
-Per-package-alone rustdoc runs at the full/RC tier. Every integration batch,
+Per-package-alone rustdoc remains in every integration batch and full/RC run;
+`just steps rustdoc` selects the same complete group at every tier outside
+`--fast`. Every integration batch,
 production install and RC runs `package`, regardless of changed paths. Archive
 verification is the standalone compilation witness for published-internal
 crates; source, build-script, compiler and Cargo configuration changes can

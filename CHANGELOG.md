@@ -14,12 +14,18 @@ for one version bump, without native protocol compatibility.
   checks to fmt/clippy, builds and parallel tests, and require exact-tree Mac
   serial/durability plus package verification before production installation.
   Package verification runs every batch, reusing only matching cohort verification
-  receipts; standalone rustdoc stays in full/RC. Keep full checks on both release
-  platforms. Explicit static scopes are restricted to step-group invocations.
+  receipts; standalone supported-package rustdoc stays in every batch. Keep
+  full checks on both release platforms. Explicit static scopes are restricted
+  to step-group invocations.
 
 - Keep restart-matrix pilots local to their actual test run: only nextest
   workers share its run ID; Cargo test and crash-sweep use a fresh process
   identity even when a parent supplied an old nextest run ID.
+
+- Run durability in a host-scaled pool of `min(16, available_parallelism)`
+  slots, with whole-pool and `ceil(N/4)` reservations. Split the four restart
+  matrices into 64 grouped tests with run-local shared pilots; each family's
+  sixteen groups must run within one invocation to check their union.
 
 - Clarify that session usage is process-local since runtime open, not a lifetime
   total. Reopening after a host restart starts empty; reconnecting a client to

@@ -16,7 +16,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --status-file) status_file="${2:?--status-file needs a path}"; shift 2 ;;
     --packages) scoped=true; shift; selected=("$@"); set -- ;;
-    *) echo "usage: clippy.sh [--status-file PATH]" >&2; exit 2 ;;
+    *) echo "usage: clippy.sh [--status-file PATH] [--packages PACKAGE...]" >&2; exit 2 ;;
   esac
 done
 
