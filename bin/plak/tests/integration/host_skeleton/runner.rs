@@ -39,6 +39,12 @@ mod hold;
 mod pending_stop;
 mod recovery;
 
+fn write_cut_marker(path: &std::path::Path, contents: &[u8]) {
+    let mut marker = tempfile::NamedTempFile::new_in(path.parent().unwrap()).unwrap();
+    marker.write_all(contents).unwrap();
+    marker.persist(path).unwrap();
+}
+
 pub(super) fn remote_fixture(fixture: &Fixture) -> (ChildRunner, String, String) {
     pending_stop::remote(fixture)
 }

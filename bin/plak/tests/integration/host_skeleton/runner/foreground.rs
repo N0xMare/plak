@@ -23,6 +23,12 @@ impl Paused {
             self.0 = 0;
         }
     }
+
+    pub(super) fn kill(mut self, runner: &ChildRunner) {
+        assert_eq!(runner.pid(), Some(self.0));
+        runner.kill();
+        self.0 = 0;
+    }
 }
 
 impl Drop for Paused {
@@ -64,7 +70,7 @@ fn begin_env(fixture: &Fixture, mode: WakeMode, env: &[(&str, String)]) -> (Host
     if matches!(mode, WakeMode::Settled) {
         let cut = fixture.root.join("foreground-cut");
         std::fs::create_dir_all(&cut).unwrap();
-        std::fs::write(cut.join("lose-answer.verb"), b"process.start").unwrap();
+        write_cut_marker(&cut.join("lose-answer.verb"), b"process.start");
         script["runner_hold_cuts"] = json!(cut);
         // An unknown start ends the first turn before another model step.
         script["steps"].as_array_mut().unwrap().remove(1);

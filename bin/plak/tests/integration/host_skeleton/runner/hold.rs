@@ -172,8 +172,8 @@ fn runner_hold_live_key() {
 fn runner_hold_not_sent() {
     let fixture = strict_fixture();
     let remote = Remote::new(&fixture);
-    std::fs::write(remote.cuts.join("before-send.verb"), b"process.start").unwrap();
-    std::fs::write(remote.cuts.join("before-send.match"), b"local-job.marker").unwrap();
+    write_cut_marker(&remote.cuts.join("before-send.verb"), b"process.start");
+    write_cut_marker(&remote.cuts.join("before-send.match"), b"local-job.marker");
     let mut script = remote.script(&fixture);
     // NotSent must precede rebind, not wait out a client read window. Keep
     // that window beyond the generous liveness guard, even under parallel load.
@@ -339,11 +339,10 @@ fn runner_hold_identity() {
     let (mut host, _attached, session, _) = remote.start(&fixture);
     remote.entered("before-answer");
     wait_file(&fixture.root.join("local-job.marker"));
-    let mut asleep = Paused::new(remote.runner.pid().unwrap());
+    let asleep = Paused::new(remote.runner.pid().unwrap());
     let mut admin = Client::connect(&host);
     held(&mut admin, &session);
-    asleep.resume();
-    remote.runner.kill();
+    asleep.kill(&remote.runner);
     // Same saved runner, new instance: its old live key is genuinely unknown.
     remote.arm("before-ready");
     remote.release("before-answer");
@@ -372,13 +371,13 @@ fn runner_hold_identity() {
 fn replacement_refusal() {
     let fixture = strict_fixture();
     let remote = Remote::new(&fixture);
-    std::fs::write(remote.cuts.join("before-send.verb"), b"process.start").unwrap();
+    write_cut_marker(&remote.cuts.join("before-send.verb"), b"process.start");
     let mut script = remote.script(&fixture);
     script["runner_windows"]["read_ms"] = json!(30000);
     fixture.write_script(&script);
     let (mut host, _attached, session, _) = remote.start(&fixture);
     remote.entered("before-send");
-    let mut paused = Paused::new(remote.runner.pid().unwrap());
+    let paused = Paused::new(remote.runner.pid().unwrap());
     remote.release("before-send");
     until_within(
         "unsent identity call releases client gates before reconciliation",
@@ -387,13 +386,14 @@ fn replacement_refusal() {
     );
     let mut admin = Client::connect(&host);
     held(&mut admin, &session);
-    paused.resume();
-    remote.runner.kill();
-    std::fs::write(
-        remote.runner.home.join("runner/runner-id"),
-        uuid::Uuid::new_v4().to_string(),
-    )
-    .unwrap();
+    assert!(!fixture.root.join("local-job.marker").exists());
+    // Never let the original identity become Ready again. Publish its replacement
+    // while it is paused, before death lets a bridge auto-start a new daemon.
+    write_cut_marker(
+        &remote.runner.home.join("runner/runner-id"),
+        uuid::Uuid::new_v4().to_string().as_bytes(),
+    );
+    paused.kill(&remote.runner);
     remote.runner.start();
     idle(&mut admin, &session);
     assert_eq!(

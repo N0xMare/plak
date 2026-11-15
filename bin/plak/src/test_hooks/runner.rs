@@ -69,7 +69,7 @@ pub(crate) fn runner_ready_result(result: &Result<(), plakous::runner::Placement
             }) => "link_lost",
             Err(_) => "blocked",
         };
-        let _ = std::fs::write(directory.join("before-ready.result"), verdict);
+        let _ = link::write_marker(&directory.join("before-ready.result"), verdict.as_bytes());
     }
 }
 

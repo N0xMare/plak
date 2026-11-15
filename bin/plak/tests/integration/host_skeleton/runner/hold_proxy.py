@@ -6,6 +6,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -31,6 +32,19 @@ def packet(stream):
     return prefix + body, json.loads(body)
 
 
+def claim_marker(path, contents=""):
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent) as marker:
+        marker.write(contents)
+        marker.flush()
+        # A complete marker and the one-shot claim must become visible together.
+        # Linking, unlike replacement, preserves the exclusive-create winner.
+        try:
+            os.link(marker.name, path)
+        except FileExistsError:
+            return False
+    return True
+
+
 def main():
     directory = Path(sys.argv[1])
     child = subprocess.Popen(sys.argv[2:], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -40,11 +54,8 @@ def main():
     def cut(name):
         if not (directory / f"{name}.armed").is_file():
             return
-        try:
-            marker = (directory / f"{name}.entered").open("x")
-        except FileExistsError:
+        if not claim_marker(directory / f"{name}.entered"):
             return
-        marker.close()
         deadline = time.monotonic() + 30
         while not (directory / f"{name}.release").is_file():
             if time.monotonic() >= deadline:
@@ -86,13 +97,7 @@ def main():
                 and request["class"]["class"] == "effect_call"
                 and (directory / "before-answer.armed").is_file()
             ):
-                try:
-                    marker = (directory / "before-answer.entered").open("x")
-                except FileExistsError:
-                    pass
-                else:
-                    with marker:
-                        json.dump(request, marker)
+                if claim_marker(directory / "before-answer.entered", json.dumps(request)):
                     deadline = time.monotonic() + 30
                     while not (directory / "before-answer.release").is_file():
                         if time.monotonic() >= deadline:

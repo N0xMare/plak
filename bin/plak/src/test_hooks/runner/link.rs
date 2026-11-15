@@ -1,5 +1,6 @@
 //! Rendezvous outside RunnerClient locks, after the placement admission read.
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -67,7 +68,7 @@ impl RunnerLink for CutLink {
                 _ => None,
             };
             if let Some(marker) = marker {
-                let _ = std::fs::write(directory.join(marker), verb);
+                let _ = write_marker(&directory.join(marker), verb.as_bytes());
             }
             answer
         })
@@ -86,6 +87,17 @@ pub(super) fn claim(path: &Path) -> bool {
         .is_ok()
 }
 
+pub(super) fn write_marker(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("cut marker has no parent"))?;
+    let mut marker = tempfile::NamedTempFile::new_in(parent)?;
+    marker.write_all(contents)?;
+    // Readers use existence as readiness, so expose only the complete payload.
+    marker.persist(path).map_err(|error| error.error)?;
+    Ok(())
+}
+
 pub(super) async fn release(
     path: &Path,
     cancellation: Option<&plakous::model::CancellationToken>,
@@ -94,7 +106,7 @@ pub(super) async fn release(
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     while !path.is_file() {
         if client.is_some_and(|client| !client.is_connected()) {
-            let _ = std::fs::write(path.with_extension("link-lost"), b"lost");
+            let _ = write_marker(&path.with_extension("link-lost"), b"lost");
         }
         if cancellation.is_some_and(plakous::model::CancellationToken::is_cancelled) {
             return Err(RunnerFailure::NotSent("the cut's owner cancelled".into()));

@@ -96,11 +96,11 @@ impl Remote {
     }
 
     pub(super) fn arm(&self, name: &str) {
-        std::fs::write(self.cuts.join(format!("{name}.armed")), b"armed").unwrap();
+        write_cut_marker(&self.cuts.join(format!("{name}.armed")), b"armed");
     }
 
     pub(super) fn release(&self, name: &str) {
-        std::fs::write(self.cuts.join(format!("{name}.release")), b"release").unwrap();
+        write_cut_marker(&self.cuts.join(format!("{name}.release")), b"release");
     }
 
     pub(super) fn entered(&self, name: &str) {
