@@ -46,6 +46,10 @@ The product is one binary crate, `bin/plak`. It composes the crates above the
 facade and owns product policy and execution; its serialized extension
 vocabulary is shared through `plakd-wire-types`.
 
+Product catalog construction and attachment eligibility are host services,
+independent of terminal presentation. CLI inspection, hosted session options
+and terminal adapters consume the same product-owned catalog facts.
+
 | Position | Owns | Does not own |
 | --- | --- | --- |
 | Plakous L0 (`plakous-model`, `plakous-tools`, `plakous-agent`, `plakous`) | the loop, canonical history, checkpoints, tools and effects, profiles and resolved plans, providers and dialects, credentials, admission, revalidation, durable store and its change feed, recovery | UI, product configuration and defaults, queues, workflow, live-test procedure, topology |

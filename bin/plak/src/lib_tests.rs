@@ -13,17 +13,16 @@ use std::io::Cursor;
 use super::*;
 use crate::command::{RunEffort, run_effort_levels, run_effort_usage};
 use crate::commands::host_config::{
-    TuiAttachEligibility, build_host_config, deferred_attach_refusal_reason, tui_attach_eligibility,
+    AttachEligibility, attach_eligibility, build_host_config, deferred_attach_refusal_reason,
 };
 use crate::commands::session::seed_new_session_binding;
 use crate::commands::support::{join_host_worker_bounded, join_tui_host_worker};
+use crate::presentation::catalog_values_with_backend;
 use crate::presentation::credential_locations_text;
 #[cfg(feature = "tui")]
 use crate::tui_launch::supervisor::{
     apply_tui_handoff, apply_tui_handoff_after_host, handle_tui_handoff, restore_former_attachment,
 };
-#[cfg(feature = "tui")]
-use crate::tui_launch::tui_presentation_values_with_backend;
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::NativeLoginMode;
 use std::path::{Path, PathBuf};
@@ -1306,8 +1305,7 @@ fn native_sections_with_checked_api_rows<'a>(
 }
 
 #[test]
-#[cfg(feature = "tui")]
-fn tui_catalog_discovery_requires_current_compatibility_and_ready_credentials() {
+fn host_catalog_discovery_requires_current_compatibility_and_ready_credentials() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().to_path_buf());
     for (compatibility, credential, expected_state, expected_detail) in [
@@ -1338,7 +1336,7 @@ fn tui_catalog_discovery_requires_current_compatibility_and_ready_credentials() 
     ] {
         let mut backend = FakeBackend::new(compatibility, credential);
         backend.credential = credential;
-        let (providers, sections) = tui_presentation_values_with_backend(&paths, &mut backend);
+        let (providers, sections) = catalog_values_with_backend(&paths, &mut backend);
         let sections = native_sections_with_checked_api_rows(&providers, &sections);
         assert_eq!(
             sections,
@@ -1625,14 +1623,14 @@ fn ready_attach_catalog(
 fn deferred_native_model_without_effort_requirement_attaches_after_discovery() {
     let catalog = ready_attach_catalog("claude", "claude-sonnet-5", false);
     assert_eq!(
-        tui_attach_eligibility(
+        attach_eligibility(
             &product_config::ProductTargetSelection::Native,
             &catalog,
             Some("claude"),
             Some("claude-sonnet-5"),
             false,
         ),
-        TuiAttachEligibility::Ready
+        AttachEligibility::Ready
     );
 }
 
@@ -1640,38 +1638,38 @@ fn deferred_native_model_without_effort_requirement_attaches_after_discovery() {
 fn deferred_reasoning_model_with_explicit_effort_attaches_after_discovery() {
     let catalog = ready_attach_catalog("codex", "gpt-reasoning", true);
     assert_eq!(
-        tui_attach_eligibility(
+        attach_eligibility(
             &product_config::ProductTargetSelection::Native,
             &catalog,
             Some("codex"),
             Some("gpt-reasoning"),
             true,
         ),
-        TuiAttachEligibility::Ready
+        AttachEligibility::Ready
     );
     assert_eq!(
-        tui_attach_eligibility(
+        attach_eligibility(
             &product_config::ProductTargetSelection::Native,
             &catalog,
             Some("codex"),
             Some("gpt-reasoning"),
             false,
         ),
-        TuiAttachEligibility::EffortRequired
+        AttachEligibility::EffortRequired
     );
 }
 
 #[test]
 fn deferred_unknown_native_model_is_refused_even_with_explicit_effort() {
     let catalog = ready_attach_catalog("codex", "gpt-known", true);
-    let eligibility = tui_attach_eligibility(
+    let eligibility = attach_eligibility(
         &product_config::ProductTargetSelection::Native,
         &catalog,
         Some("codex"),
         Some("gpt-unknown"),
         true,
     );
-    assert_eq!(eligibility, TuiAttachEligibility::Unavailable);
+    assert_eq!(eligibility, AttachEligibility::Unavailable);
     assert!(matches!(
         deferred_attach_refusal_reason(eligibility, false, None),
         plakous_host_protocol::status::DetachedReason::ResolveFailed(_)
@@ -1689,7 +1687,7 @@ fn unusable_stored_login_names_the_credential_not_a_missing_model() {
             credential: CredentialState::ProfileChanged,
         }),
     );
-    let reason = deferred_attach_refusal_reason(TuiAttachEligibility::Unavailable, false, refusal);
+    let reason = deferred_attach_refusal_reason(AttachEligibility::Unavailable, false, refusal);
     assert!(matches!(
         reason,
         plakous_host_protocol::status::DetachedReason::CredentialUnusable(_)
@@ -1730,7 +1728,7 @@ fn unusable_stored_login_names_the_credential_not_a_missing_model() {
     );
     // Missing defaults still win: there is no selected account to name.
     assert_eq!(
-        deferred_attach_refusal_reason(TuiAttachEligibility::Unavailable, true, Some("x".into())),
+        deferred_attach_refusal_reason(AttachEligibility::Unavailable, true, Some("x".into())),
         plakous_host_protocol::status::DetachedReason::MissingDefaults
     );
 }
@@ -1744,14 +1742,14 @@ fn deferred_openrouter_target_attaches_without_catalog_membership_or_effort() {
         routing: product_config::ProductOpenRouterRoutingSelection::GatewayManaged,
     };
     assert_eq!(
-        tui_attach_eligibility(
+        attach_eligibility(
             &target,
             &plakous_host_protocol::views::ReadyCatalog::default(),
             Some("openrouter"),
             Some("vendor/dynamic-model"),
             false,
         ),
-        TuiAttachEligibility::Ready
+        AttachEligibility::Ready
     );
 }
 
@@ -2017,14 +2015,13 @@ fn tui_default_binding_fences_post_publication_durability_uncertainty() {
 }
 
 #[test]
-#[cfg(feature = "tui")]
-fn tui_catalog_failure_is_visible_without_partial_model_authority() {
+fn host_catalog_failure_is_visible_without_partial_model_authority() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().to_path_buf());
     let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
     backend.credential = CredentialState::Ready;
     backend.models_failure = Some(CliFailure::new("catalog unavailable"));
-    let (providers, sections) = tui_presentation_values_with_backend(&paths, &mut backend);
+    let (providers, sections) = catalog_values_with_backend(&paths, &mut backend);
     let sections = native_sections_with_checked_api_rows(&providers, &sections);
     assert_eq!(
         sections,
@@ -2048,8 +2045,7 @@ fn tui_catalog_failure_is_visible_without_partial_model_authority() {
 }
 
 #[test]
-#[cfg(feature = "tui")]
-fn tui_catalog_preserves_exact_facade_efforts_without_provider_or_model_inference() {
+fn host_catalog_preserves_exact_facade_efforts_without_provider_or_model_inference() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().to_path_buf());
     let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
@@ -2100,7 +2096,7 @@ fn tui_catalog_preserves_exact_facade_efforts_without_provider_or_model_inferenc
         },
     ];
 
-    let (providers, sections) = tui_presentation_values_with_backend(&paths, &mut backend);
+    let (providers, sections) = catalog_values_with_backend(&paths, &mut backend);
     let sections = native_sections_with_checked_api_rows(&providers, &sections);
 
     assert_eq!(
@@ -2139,8 +2135,7 @@ fn tui_catalog_preserves_exact_facade_efforts_without_provider_or_model_inferenc
 }
 
 #[test]
-#[cfg(feature = "tui")]
-fn tui_catalog_fails_closed_for_non_displayable_facade_effort() {
+fn host_catalog_fails_closed_for_non_displayable_facade_effort() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().to_path_buf());
     let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
@@ -2161,7 +2156,7 @@ fn tui_catalog_fails_closed_for_non_displayable_facade_effort() {
         });
     }
 
-    let (providers, sections) = tui_presentation_values_with_backend(&paths, &mut backend);
+    let (providers, sections) = catalog_values_with_backend(&paths, &mut backend);
     let sections = native_sections_with_checked_api_rows(&providers, &sections);
 
     assert_eq!(sections.len(), 3);
@@ -2172,8 +2167,7 @@ fn tui_catalog_fails_closed_for_non_displayable_facade_effort() {
 }
 
 #[test]
-#[cfg(feature = "tui")]
-fn tui_catalog_never_offers_models_without_an_exact_process_presentation_candidate() {
+fn host_catalog_never_offers_models_without_an_exact_process_presentation_candidate() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().to_path_buf());
     let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
@@ -2203,7 +2197,7 @@ fn tui_catalog_never_offers_models_without_an_exact_process_presentation_candida
         },
     ];
 
-    let (providers, sections) = tui_presentation_values_with_backend(&paths, &mut backend);
+    let (providers, sections) = catalog_values_with_backend(&paths, &mut backend);
     let sections = native_sections_with_checked_api_rows(&providers, &sections);
 
     assert_eq!(sections.len(), 3);
@@ -2214,8 +2208,7 @@ fn tui_catalog_never_offers_models_without_an_exact_process_presentation_candida
 }
 
 #[test]
-#[cfg(feature = "tui")]
-fn tui_catalog_hides_provider_hidden_rows_and_disables_unqualified_code_mode_rows() {
+fn host_catalog_hides_provider_hidden_rows_and_disables_unqualified_code_mode_rows() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
     let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
@@ -2256,7 +2249,7 @@ fn tui_catalog_hides_provider_hidden_rows_and_disables_unqualified_code_mode_row
         },
     ];
 
-    let (_, sections) = tui_presentation_values_with_backend(&paths, &mut backend);
+    let (_, sections) = catalog_values_with_backend(&paths, &mut backend);
     let codex = sections
         .iter()
         .find(|section| section.account == "codex")
@@ -3551,7 +3544,6 @@ fn models_reports_unusable_credential_before_compatibility_prompt() {
 }
 
 #[test]
-#[cfg(feature = "tui")]
 fn drifted_model_is_disabled_in_picker_and_explained_in_models() {
     let root = tempfile::tempdir().unwrap();
     let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
@@ -3570,7 +3562,7 @@ fn drifted_model_is_disabled_in_picker_and_explained_in_models() {
         service_tiers: Vec::new(),
         reported_context_length: None,
     }];
-    let (_, sections) = tui_presentation_values_with_backend(&paths, &mut backend);
+    let (_, sections) = catalog_values_with_backend(&paths, &mut backend);
     let entry = sections
         .iter()
         .find(|section| section.account == "codex")

@@ -22,20 +22,17 @@ const RELOAD_RELEASE_BOUND: Duration = plakous_host_protocol::limits::HOST_CANCE
 use plakous::agent::ReasoningEffort;
 
 use super::face::{RoundFace, RoundMailbox, exit_restored_tui, round_face};
-use super::{
-    resolved_workspace_path, supported_provider_rows, tui_presentation_bundle,
-    tui_presentation_values,
-};
+use super::{catalog_bundle, catalog_values, resolved_workspace_path, supported_provider_rows};
 use crate::commands::host_config::{
-    TuiAttachEligibility, TuiAttacher, build_host_config, deferred_attach_refusal_reason,
-    tui_attach_eligibility,
+    AttachEligibility, TuiAttacher, attach_eligibility, build_host_config,
+    deferred_attach_refusal_reason,
 };
 use crate::commands::support::{
     HOST_WORKER_JOIN_TIMEOUT, edit_config_file, join_host_worker_bounded, join_tui_host_worker,
 };
 use crate::shell::services::Services;
 use crate::{
-    CliFailure, CliResult, ProcessOutcome, TuiPresentationBundle, build_identity, carry, commands,
+    CliFailure, CliResult, HostCatalogBundle, ProcessOutcome, build_identity, carry, commands,
     home, local_time_zone, openrouter_product, product_agent, product_config, product_host,
     product_onboarding, product_paths, product_session_log, product_sessions, shell, store,
     surface_protocol, tui, tui_timing,
@@ -544,7 +541,7 @@ pub(super) fn run_tui_rounds(
         {
             (providers.clone(), sections.clone())
         } else {
-            let (providers, sections) = tui_presentation_values(&paths)?;
+            let (providers, sections) = catalog_values(&paths)?;
             state.tui_presentation_cache =
                 Some((Instant::now(), providers.clone(), sections.clone()));
             (providers, sections)
@@ -661,7 +658,7 @@ pub(super) fn run_tui_rounds(
         // Reasoning OAuth models require explicit effort before agent attach
         // (picker enforces; legacy configs without effort stay on shell).
         let attach_eligibility = if authoritative_catalog_admission {
-            tui_attach_eligibility(
+            attach_eligibility(
                 &state.record.target_selection,
                 &ready_catalog,
                 account.as_deref(),
@@ -671,13 +668,12 @@ pub(super) fn run_tui_rounds(
         } else if account.as_deref().zip(model_id.as_deref()).is_some() && effort_explicit {
             // Injected test/product attachers carry their own sealed target
             // authority and deliberately do not depend on live discovery.
-            TuiAttachEligibility::Ready
+            AttachEligibility::Ready
         } else {
-            TuiAttachEligibility::Unavailable
+            AttachEligibility::Unavailable
         };
-        let model_needs_explicit_effort =
-            attach_eligibility == TuiAttachEligibility::EffortRequired;
-        let can_attach = attach_eligibility == TuiAttachEligibility::Ready;
+        let model_needs_explicit_effort = attach_eligibility == AttachEligibility::EffortRequired;
+        let can_attach = attach_eligibility == AttachEligibility::Ready;
 
         let resume_publication = state
             .resume_pending
@@ -990,27 +986,26 @@ fn prepare_deferred_tui_host(
     // goes through build_host_config, which refuses
     // a persist miss.
     let presentation_started = Instant::now();
-    let presentation =
-        tui_presentation_bundle(&prep_paths).unwrap_or_else(|_| TuiPresentationBundle {
-            providers: supported_provider_rows(),
-            sections: plakous_host_protocol::views::ReadyCatalog::default(),
-            native_models: Vec::new(),
-        });
+    let presentation = catalog_bundle(&prep_paths).unwrap_or_else(|_| HostCatalogBundle {
+        providers: supported_provider_rows(),
+        sections: plakous_host_protocol::views::ReadyCatalog::default(),
+        native_models: Vec::new(),
+    });
     let presentation_ms =
         u64::try_from(presentation_started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    let TuiPresentationBundle {
+    let HostCatalogBundle {
         providers,
         sections,
         native_models,
     } = presentation;
-    let eligibility = tui_attach_eligibility(
+    let eligibility = attach_eligibility(
         &prep_record.target_selection,
         &sections,
         prep_account.as_deref(),
         prep_model.as_deref(),
         effort_explicit,
     );
-    let mode = if eligibility == TuiAttachEligibility::Ready {
+    let mode = if eligibility == AttachEligibility::Ready {
         let resolve_started = Instant::now();
         match build_host_config(
             &prep_paths,
@@ -1065,7 +1060,7 @@ fn prepare_deferred_tui_host(
             reason: deferred_attach_refusal_reason(
                 eligibility,
                 prep_needs_setup,
-                (eligibility == TuiAttachEligibility::Unavailable && !prep_needs_setup)
+                (eligibility == AttachEligibility::Unavailable && !prep_needs_setup)
                     .then(|| {
                         commands::host_config::native_credential_refusal(prep_account.as_deref())
                     })

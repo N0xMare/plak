@@ -22,7 +22,7 @@ struct Choices {
 }
 
 fn choices(paths: &PlakPaths) -> Choices {
-    let models = crate::presentation::tui_presentation_bundle(paths)
+    let models = crate::presentation::catalog_bundle(paths)
         .map(|bundle| bundle.sections)
         .unwrap_or_default();
     let profiles = match crate::product_config::ProductConfig::load(paths) {

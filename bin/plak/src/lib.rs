@@ -315,10 +315,10 @@ pub(crate) use crate::home::secrets as product_secrets;
 #[cfg(test)]
 pub(crate) use crate::presentation::CompatibilityState;
 pub(crate) use crate::presentation::CredentialState;
+#[cfg(feature = "tui")]
+use crate::presentation::HostCatalogBundle;
 #[cfg(test)]
 pub(crate) use crate::presentation::PresentationBackend;
-#[cfg(feature = "tui")]
-use crate::presentation::TuiPresentationBundle;
 #[cfg(any(feature = "tui", test))]
 use crate::store::sessions as product_sessions;
 pub(crate) use plakous_hosted::agent as product_agent;

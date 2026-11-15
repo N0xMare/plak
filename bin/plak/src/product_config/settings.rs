@@ -4,7 +4,7 @@
 //! renderer. Each entry is pure metadata — no closures, no function pointers —
 //! so the row list, the search index, the footer wording and the schema-default
 //! parity test all read the same source. Plak owns the config schema;
-//! `settings_registry_defaults_match_the_config_schema` in `crate::config`
+//! `settings_registry_defaults_match_the_config_schema` below
 //! pins every default here to it. Integer bounds come from that schema.
 
 use crate::capabilities::ROUTES;
@@ -349,4 +349,36 @@ pub fn index_of(key: &str) -> Option<usize> {
 #[must_use]
 pub fn meta(key: &str) -> Option<&'static SettingMeta> {
     ROWS.iter().find(|row| row.key == key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ROWS, SettingKind};
+    use crate::product_config::{ProductConfig, config_key};
+
+    #[test]
+    fn settings_registry_defaults_match_the_config_schema() {
+        let config = ProductConfig::default_product();
+        for row in ROWS {
+            if matches!(row.kind, SettingKind::Action) {
+                continue;
+            }
+            let key = config_key(row.key).expect("registered config key");
+            let value = config.field_value(key.field).expect("configured default");
+            match row.kind {
+                SettingKind::Bool { default } => assert_eq!(value.as_bool(), Some(default)),
+                SettingKind::Enum { default, .. } => assert_eq!(value.as_str(), Some(default)),
+                SettingKind::Int { default, min, max } => {
+                    assert_eq!(value.as_integer(), Some(i64::from(default)));
+                    assert!((min..=max).contains(&default));
+                    for bound in [min - 1, max + 1] {
+                        assert!(config.clone().set_key(row.key, &bound.to_string()).is_err());
+                    }
+                }
+                SettingKind::Action => unreachable!(),
+            }
+        }
+        let snapshot = crate::shell::settings::settings_view(&config);
+        assert_eq!(snapshot.product.compaction, config.compaction_enabled);
+    }
 }

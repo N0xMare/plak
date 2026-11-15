@@ -17,6 +17,8 @@ its current-key attach-or-embedded rule and never auto-starts a host. Do not
 rewire its direct hosted transport as part of the client split. Product wire
 DTOs belong in `plakd-wire-types`; handlers, credential resolution, settings
 metadata and runtime/store authority stay public and do not move into a client.
+Catalog construction, attachment eligibility and settings-default checks must
+not depend on terminal adapters or their tests.
 
 ## First reading
 

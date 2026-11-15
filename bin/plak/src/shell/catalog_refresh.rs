@@ -88,7 +88,7 @@ fn spawn(
             let _ = log.append_for(session_id, event);
         }
         if let Some(events) = events
-            && let Ok((providers, _)) = crate::presentation::tui_presentation_values(&paths)
+            && let Ok((providers, _)) = crate::presentation::catalog_values(&paths)
         {
             let _ = events.send(ContentEvent::ProviderSnapshot { providers });
         }

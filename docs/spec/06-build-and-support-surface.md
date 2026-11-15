@@ -314,6 +314,11 @@ published shape.
 
 ## 4. Product features
 
+Product catalog construction and attachment eligibility do not depend on the
+terminal feature. Their credential and model-admission tests, settings metadata
+default checks, and headless compaction-view rebuild tests run independently
+of terminal rendering tests.
+
 Compile-time capabilities are additive. A capability merits a feature when it
 adds at least five exclusive packages, a C/system build or 1 MB stripped; ships
 or spawns an executable; has a distinct trust, legal or network posture; or

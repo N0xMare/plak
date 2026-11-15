@@ -25,6 +25,10 @@ for one version bump, without native protocol compatibility.
   API with explicit selection; Mythos 5.2, GPT-6.1 Terra, GPT-6 Cyber and
   Rosalind stay `needs review`.
 
+- Separate host catalog and attachment vocabulary from terminal adapters, and
+  run catalog admission, settings defaults and compaction-view rebuild checks
+  independently of terminal rendering.
+
 - Fix child-result wakes remaining suppressed after a host restart continued
   the root's interrupted work. An admitted handoff or owner-loss continuation
   rearms waking durably; later operator stops and interrupts still suppress it.

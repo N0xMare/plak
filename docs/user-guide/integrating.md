@@ -3,6 +3,10 @@
 Choose the boundary that fits your application. There is one agent runtime,
 whether you embed it or drive the product out of process.
 
+The host supplies account and model catalog facts and settings metadata.
+Clients present those facts; a terminal interface is not needed to resolve or
+validate them.
+
 | Surface | Use it for |
 | --- | --- |
 | In-process `plakous` | A Rust application that owns construction, tools, credentials and persistence. Start with [Embedding](embedding.md). |

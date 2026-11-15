@@ -15,7 +15,7 @@ use super::support::{
 };
 use crate::home::paths as product_paths;
 use crate::presentation::HostLaunchNativeModelFact;
-use crate::presentation::tui_presentation_bundle;
+use crate::presentation::catalog_bundle;
 use crate::product_config;
 use crate::store::sessions as product_sessions;
 use plakous_hosted::agent as product_agent;
@@ -24,18 +24,18 @@ use plakous_hosted::runtime as product_host;
 pub(super) fn binding_presentation(
     paths: &product_paths::PlakPaths,
     account: &plakous_hosted::account::AccountRef,
-) -> crate::CliResult<crate::presentation::TuiPresentationBundle> {
+) -> crate::CliResult<crate::presentation::HostCatalogBundle> {
     if account.is_named() {
         if account.vertical().is_api() {
             crate::home::secrets::require_api_key(paths, account.as_str())?;
         }
-        return Ok(crate::presentation::TuiPresentationBundle {
+        return Ok(crate::presentation::HostCatalogBundle {
             providers: Vec::new(),
             sections: plakous_host_protocol::views::ReadyCatalog::default(),
             native_models: Vec::new(),
         });
     }
-    tui_presentation_bundle(paths)
+    catalog_bundle(paths)
 }
 
 pub fn attached_target_accepts_effort(
@@ -45,31 +45,31 @@ pub fn attached_target_accepts_effort(
     model: &str,
     effort_explicit: bool,
 ) -> bool {
-    tui_attach_eligibility(
+    attach_eligibility(
         target,
         ready_catalog,
         Some(account),
         Some(model),
         effort_explicit,
-    ) == TuiAttachEligibility::Ready
+    ) == AttachEligibility::Ready
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TuiAttachEligibility {
+pub enum AttachEligibility {
     Ready,
     EffortRequired,
     Unavailable,
 }
 
-pub fn tui_attach_eligibility(
+pub fn attach_eligibility(
     target: &product_config::ProductTargetSelection,
     ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
     account: Option<&str>,
     model: Option<&str>,
     effort_explicit: bool,
-) -> TuiAttachEligibility {
+) -> AttachEligibility {
     let Some((account, model)) = account.zip(model) else {
-        return TuiAttachEligibility::Unavailable;
+        return AttachEligibility::Unavailable;
     };
     // The repository gate's offline model carries its own sealed target
     // authority, so no Ready catalog lists it: it is eligible on an explicit
@@ -79,17 +79,17 @@ pub fn tui_attach_eligibility(
     #[cfg(feature = "test-hooks")]
     if crate::test_hooks::requested() {
         return if effort_explicit {
-            TuiAttachEligibility::Ready
+            AttachEligibility::Ready
         } else {
-            TuiAttachEligibility::Unavailable
+            AttachEligibility::Unavailable
         };
     }
     match target.route(account) {
         Ok(plakous_hosted::binding::AttachRoute::OpenRouter { .. }) => {
             if model.trim().is_empty() {
-                TuiAttachEligibility::Unavailable
+                AttachEligibility::Unavailable
             } else {
-                TuiAttachEligibility::Ready
+                AttachEligibility::Ready
             }
         }
         // A native target on a non-OAuth account still asks the Ready catalog:
@@ -103,13 +103,13 @@ pub fn tui_attach_eligibility(
                 account,
                 model,
             ) {
-                Some(true) if !effort_explicit => TuiAttachEligibility::EffortRequired,
-                Some(_) => TuiAttachEligibility::Ready,
-                None => TuiAttachEligibility::Unavailable,
+                Some(true) if !effort_explicit => AttachEligibility::EffortRequired,
+                Some(_) => AttachEligibility::Ready,
+                None => AttachEligibility::Unavailable,
             }
         }
         Err(plakous_hosted::binding::RouteRefusal::AccountMismatch) => {
-            TuiAttachEligibility::Unavailable
+            AttachEligibility::Unavailable
         }
     }
 }
@@ -118,18 +118,18 @@ pub fn tui_attach_eligibility(
 /// account whose stored login cannot run is named by `credential_refusal`,
 /// the CLI's words for it, rather than as a model missing from the catalog.
 pub fn deferred_attach_refusal_reason(
-    eligibility: TuiAttachEligibility,
+    eligibility: AttachEligibility,
     product_needs_setup: bool,
     credential_refusal: Option<HostFailure>,
 ) -> DetachedReason {
     use DetachedReason;
     match eligibility {
-        TuiAttachEligibility::Ready => {
+        AttachEligibility::Ready => {
             DetachedReason::Other(DiagnosticText::new("canonical attach was not attempted"))
         }
-        TuiAttachEligibility::EffortRequired => DetachedReason::EffortRequired,
-        TuiAttachEligibility::Unavailable if product_needs_setup => DetachedReason::MissingDefaults,
-        TuiAttachEligibility::Unavailable => credential_refusal.map_or_else(
+        AttachEligibility::EffortRequired => DetachedReason::EffortRequired,
+        AttachEligibility::Unavailable if product_needs_setup => DetachedReason::MissingDefaults,
+        AttachEligibility::Unavailable => credential_refusal.map_or_else(
             || {
                 DetachedReason::ResolveFailed(
                     "selected model is absent from the discovered Ready catalog".into(),
@@ -321,7 +321,7 @@ pub fn try_spawn_hosted_agent(
     ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
     resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<HostedAgentChannels, HostFailure> {
-    let native_models = tui_presentation_bundle(paths)
+    let native_models = catalog_bundle(paths)
         .map_err(|error| error.host_failure())?
         .native_models;
     let config = build_host_config(

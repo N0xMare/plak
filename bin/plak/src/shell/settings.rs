@@ -1273,7 +1273,7 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
     fn readiness_read(&self) -> plakous_hosted::runtime::ReadinessRead {
         let paths = self.paths.clone();
         Box::new(move || {
-            crate::presentation::tui_presentation_values(&paths)
+            crate::presentation::catalog_values(&paths)
                 .map(|(providers, sections)| {
                     (
                         providers,

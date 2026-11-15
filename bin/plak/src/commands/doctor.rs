@@ -122,7 +122,7 @@ pub(crate) fn run_doctor(
                     Some(effort) => format!("{}/{} · {effort}", template.account, template.model),
                     None => format!("{}/{}", template.account, template.model),
                 };
-                match presentation::tui_presentation_values(paths) {
+                match presentation::catalog_values(paths) {
                     Err(error) => product_doctor::RootTemplateStatus::Unknown {
                         detail: error.message().to_owned(),
                     },
@@ -308,7 +308,7 @@ fn doctor_spawn_templates(
     if spawnable.is_empty() {
         return product_doctor::SpawnTemplatesStatus::None;
     }
-    let sections = match presentation::tui_presentation_values(paths) {
+    let sections = match presentation::catalog_values(paths) {
         Ok((_, sections)) => sections,
         Err(error) => {
             return product_doctor::SpawnTemplatesStatus::Unknown {

@@ -5,7 +5,7 @@ use super::Duration;
 /// Wall-clock phases before the host loop opens the canonical session.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ReadyPathTiming {
-    /// `tui_presentation_bundle` (persisted catalogs, no live GET).
+    /// `catalog_bundle` (persisted catalogs, no live GET).
     pub presentation_ms: u64,
     /// `build_host_config` including Codex/Grok attach catalog HTTP.
     pub resolve_ms: u64,

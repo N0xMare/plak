@@ -1,4 +1,4 @@
-//! TUI provider/model presentation derived from offline native-subscription state,
+//! Host provider/model catalogs derived from offline native-subscription state,
 //! and the small CLI formatting helpers the command surfaces share.
 
 use std::env;
@@ -94,9 +94,9 @@ pub struct CliModelSummary {
     pub reported_context_length: Option<u64>,
 }
 
-/// TUI provider rows plus the Ready catalog and full-catalog native model facts.
+/// Provider rows plus the Ready catalog and full-catalog native model facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TuiPresentationBundle {
+pub struct HostCatalogBundle {
     /// Provider rows for the TUI auth picker.
     pub providers: Vec<plakous_host_protocol::views::ProviderDef>,
     /// The exact Ready catalog: one section per account for the hosted session.
@@ -214,10 +214,10 @@ impl PresentationBackend for NativePresentationBackend {
 
 /// Build TUI picker rows and full-catalog native model facts from the
 /// persisted catalog snapshot. Does not refresh live catalogs.
-pub fn tui_presentation_bundle(paths: &PlakPaths) -> CliResult<TuiPresentationBundle> {
+pub fn catalog_bundle(paths: &PlakPaths) -> CliResult<HostCatalogBundle> {
     let state_home = paths::application_state_home().map_err(CliFailure::new)?;
     let mut backend = NativePresentationBackend::new(state_home)?;
-    Ok(tui_presentation_bundle_with_backend_and_composition(
+    Ok(catalog_bundle_with_backend_and_composition(
         paths,
         &mut backend,
         ProductCompositionSelection::FollowCatalog,
@@ -226,18 +226,18 @@ pub fn tui_presentation_bundle(paths: &PlakPaths) -> CliResult<TuiPresentationBu
 
 /// Build provider and model sections for the TUI from the persisted catalog
 /// snapshot. Does not refresh live catalogs.
-pub fn tui_presentation_values(
+pub fn catalog_values(
     paths: &PlakPaths,
 ) -> CliResult<(
     Vec<plakous_host_protocol::views::ProviderDef>,
     Vec<plakous_host_protocol::views::ProviderSection>,
 )> {
-    let bundle = tui_presentation_bundle(paths)?;
+    let bundle = catalog_bundle(paths)?;
     Ok((bundle.providers, bundle.sections.accounts))
 }
 
 /// Build provider and model sections for one composition selection.
-pub fn tui_presentation_values_for_composition(
+pub fn catalog_values_for_composition(
     paths: &PlakPaths,
     composition: ProductCompositionSelection,
 ) -> CliResult<(
@@ -246,20 +246,19 @@ pub fn tui_presentation_values_for_composition(
 )> {
     let state_home = paths::application_state_home().map_err(CliFailure::new)?;
     let mut backend = NativePresentationBackend::new(state_home)?;
-    let bundle =
-        tui_presentation_bundle_with_backend_and_composition(paths, &mut backend, composition);
+    let bundle = catalog_bundle_with_backend_and_composition(paths, &mut backend, composition);
     Ok((bundle.providers, bundle.sections.accounts))
 }
 
 /// Build provider and model sections using an injected backend.
-pub fn tui_presentation_values_with_backend(
+pub fn catalog_values_with_backend(
     paths: &PlakPaths,
     backend: &mut impl PresentationBackend,
 ) -> (
     Vec<plakous_host_protocol::views::ProviderDef>,
     Vec<plakous_host_protocol::views::ProviderSection>,
 ) {
-    let bundle = tui_presentation_bundle_with_backend_and_composition(
+    let bundle = catalog_bundle_with_backend_and_composition(
         paths,
         backend,
         ProductCompositionSelection::FollowCatalog,
@@ -268,7 +267,7 @@ pub fn tui_presentation_values_with_backend(
 }
 
 /// Build provider and model sections using an injected backend and composition.
-pub fn tui_presentation_values_with_backend_and_composition(
+pub fn catalog_values_with_backend_and_composition(
     paths: &PlakPaths,
     backend: &mut impl PresentationBackend,
     composition: ProductCompositionSelection,
@@ -276,7 +275,7 @@ pub fn tui_presentation_values_with_backend_and_composition(
     Vec<plakous_host_protocol::views::ProviderDef>,
     Vec<plakous_host_protocol::views::ProviderSection>,
 ) {
-    let bundle = tui_presentation_bundle_with_backend_and_composition(paths, backend, composition);
+    let bundle = catalog_bundle_with_backend_and_composition(paths, backend, composition);
     (bundle.providers, bundle.sections.accounts)
 }
 
@@ -389,11 +388,11 @@ fn native_model_entry(
     clippy::too_many_lines,
     reason = "Presentation joins native and API model facts, credentials, compatibility, and composition choices into one ordered picker bundle."
 )]
-pub fn tui_presentation_bundle_with_backend_and_composition(
+pub fn catalog_bundle_with_backend_and_composition(
     paths: &PlakPaths,
     backend: &mut impl PresentationBackend,
     composition: ProductCompositionSelection,
-) -> TuiPresentationBundle {
+) -> HostCatalogBundle {
     let oauth = crate::capabilities::ROUTES
         .iter()
         .filter(|capability| capability.route.compiled)
@@ -619,7 +618,7 @@ pub fn tui_presentation_bundle_with_backend_and_composition(
             account_label,
         });
     }
-    TuiPresentationBundle {
+    HostCatalogBundle {
         providers,
         sections: plakous_host_protocol::views::ReadyCatalog::new(sections),
         native_models,
@@ -862,7 +861,7 @@ mod tests {
             }],
             live_refreshes: Arc::clone(&live_refreshes),
         };
-        let bundle = tui_presentation_bundle_with_backend_and_composition(
+        let bundle = catalog_bundle_with_backend_and_composition(
             &paths,
             &mut backend,
             ProductCompositionSelection::FollowCatalog,

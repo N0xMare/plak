@@ -23,6 +23,12 @@ table.
 would change safety, portability, or a claimed contract. Everything else is
 ordinary description of shipped behavior.
 
+Product catalog construction and attachment eligibility are host-owned, not
+terminal adapters. CLI inspection, hosted session options and terminal
+presentation use the same catalog facts. Their admission tests run without
+the terminal feature; compaction-view rebuild laws likewise have headless
+JSONL tests.
+
 ## 1. Product shape
 
 One installed package, `plak`, with a library target and a `plak` binary. The

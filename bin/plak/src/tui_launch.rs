@@ -14,13 +14,11 @@ use std::io::{self, IsTerminal as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-#[cfg(test)]
-use crate::PresentationBackend;
 use crate::commands::host_config::{NativeTuiAttacher, TuiAttacher};
 use crate::commands::session::seed_new_session_binding;
 use crate::shell::services::Services;
 use crate::{
-    CliFailure, CliFailureKind, CliResult, ProcessOutcome, TuiPresentationBundle, build_identity,
+    CliFailure, CliFailureKind, CliResult, HostCatalogBundle, ProcessOutcome, build_identity,
     carry, cli, commands, home, presentation, product_config, product_paths, product_sessions,
     signals, store, tui, tui_timing,
 };
@@ -357,28 +355,17 @@ fn prepare_tui_launch(
     ))
 }
 
-fn tui_presentation_values(
+fn catalog_values(
     paths: &product_paths::PlakPaths,
 ) -> CliResult<(
     Vec<plakous_host_protocol::views::ProviderDef>,
     Vec<plakous_host_protocol::views::ProviderSection>,
 )> {
-    presentation::tui_presentation_values(paths)
+    presentation::catalog_values(paths)
 }
 
-#[cfg(test)]
-pub(crate) fn tui_presentation_values_with_backend(
-    paths: &product_paths::PlakPaths,
-    backend: &mut impl PresentationBackend,
-) -> (
-    Vec<plakous_host_protocol::views::ProviderDef>,
-    Vec<plakous_host_protocol::views::ProviderSection>,
-) {
-    presentation::tui_presentation_values_with_backend(paths, backend)
-}
-
-fn tui_presentation_bundle(paths: &product_paths::PlakPaths) -> CliResult<TuiPresentationBundle> {
-    presentation::tui_presentation_bundle(paths)
+fn catalog_bundle(paths: &product_paths::PlakPaths) -> CliResult<HostCatalogBundle> {
+    presentation::catalog_bundle(paths)
 }
 
 /// Fallback rows used when the credential store cannot be read at all. Every

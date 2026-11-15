@@ -1,9 +1,7 @@
 //! One-shot attached actions and carry-capacity probes.
 
 use super::import_export::PreparedImport;
-use crate::commands::host_config::{
-    TuiAttachEligibility, build_host_config, tui_attach_eligibility,
-};
+use crate::commands::host_config::{AttachEligibility, attach_eligibility, build_host_config};
 use crate::commands::support::{HOST_WORKER_JOIN_TIMEOUT, join_host_worker_bounded};
 use crate::product_config;
 use crate::store::sessions as product_sessions;
@@ -341,7 +339,7 @@ fn build_attached_host_config(
 fn attached_presentation(
     paths: &crate::home::paths::PlakPaths,
     account: &str,
-) -> CliResult<crate::presentation::TuiPresentationBundle> {
+) -> CliResult<crate::presentation::HostCatalogBundle> {
     let selection: plakous_hosted::account::AccountRef = account.parse()?;
     crate::commands::host_config::binding_presentation(paths, &selection)
 }
@@ -360,8 +358,8 @@ fn validate_catalog_for_attach(
     if classify_rebind_fallback && !selection.is_named() {
         require_catalog_binding(target, catalog, native_models, account, model)?;
     }
-    if tui_attach_eligibility(target, catalog, Some(account), Some(model), effort_explicit)
-        == TuiAttachEligibility::EffortRequired
+    if attach_eligibility(target, catalog, Some(account), Some(model), effort_explicit)
+        == AttachEligibility::EffortRequired
     {
         return Err(CliFailure::new("session has no exact effort binding").into());
     }
