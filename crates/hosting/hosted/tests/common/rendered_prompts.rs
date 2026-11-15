@@ -1571,7 +1571,7 @@ pub(crate) mod suite {
         ),
         (
             "grok.py-sdk.root.single-agent",
-            "33171d4b313f65117e88d046d56e79bc722b3a437c51b801fe70bc67748bb086",
+            "e037a8fd94d7b60a8cebee6466bb0516337da5de1ddff794fa2200f207336bbd",
         ),
         (
             "claude.py-sdk.root.single-agent",
@@ -1667,51 +1667,51 @@ pub(crate) mod suite {
         ),
         (
             "grok.direct.root.single-agent",
-            "43382a1c3893564019266fe07937a97555f5124f51cdcfd384363af8cdc926ed",
+            "4b38b73a273d1711ae0b5fb53790c6163baf8303715c5e161b8333d510ef11f5",
         ),
         (
             "grok.direct.root",
-            "e03ac4106fc2eebd4d10650f7eb914b07908e57584ce204b274d1ff8234db757",
+            "53124e87959b44ec7584be52009a6fc2bc36f3f237c238370debb03b483d0f12",
         ),
         (
             "grok.direct.nested-parent",
-            "122cde14c9989e8d7e1e45d45caa5041d7e12830ec02d02ed6585074a38f13fa",
+            "b4b6a81b446434ce138475c17c40545f3d2a93c8fe5acbf4bdd60b9dee58b061",
         ),
         (
             "grok.direct.child",
-            "076d4e9c61c23f05483ce977bdb3d85f6904585e332a360e58b27e9cab8a802f",
+            "78f66202b516e9df258c933fe7b96689139fb1cd7f081b7d7cd7207d7af38076",
         ),
         (
             "grok.js-ptc.root.single-agent",
-            "3ab29275aa9da41fa57a7c24f926179613f09583bf6622e6bd87534ac439a3bc",
+            "a63812fc3e4322172827918782884ae220754884c1596b2f2c127e2a3050bca0",
         ),
         (
             "grok.js-ptc.root",
-            "918b846efb3856037580701d3e6f3e9350bea826ed07ee6f39d2a8f018c47153",
+            "b825c4ddce6e72cb9821af39b60aeac14548c6a80bb9a56254c58bc2de55891a",
         ),
         (
             "grok.js-ptc.nested-parent",
-            "750d8151f9fc41c4b996af6d2e56d662ad46e6218e5b4347e510aaa527c0d57a",
+            "8dafa2f842911cbf40550c099795ff465e34904ec1ad9465462cea35125ff2f0",
         ),
         (
             "grok.js-ptc.child",
-            "98d5ebc05f4b10fcff4fc8a477f745f0bcfca11a056dd8c4d2ccf693ed6ddf8f",
+            "7b92ac0efeffe68dc6397c7df62a7609f66c168bdde4f3167c508418aae9e232",
         ),
         (
             "grok.py-ptc.root.single-agent",
-            "1c058f8b58831888d110e2b75417b3224a4868d3fcca46e669c0ac7ab2dd1210",
+            "ab9ca4be39b4087ff31d8a5c92474b2d807e987156796168ad3e595ba95c15fe",
         ),
         (
             "grok.py-ptc.root",
-            "5886a1273473478d00baba67c4684f34a48ce6406267f39333940e416edfce2a",
+            "1008e03d2f85249c7331eedeb1b44fe43e62cb49911e7995a93bbc8c037106ef",
         ),
         (
             "grok.py-ptc.nested-parent",
-            "25f255e15eabf20e85f54775c6dfb7823e2ca762efed5c54b179a614aaf9d964",
+            "95ddfd81aeee2c955551a8e8da9d4cacfe7a3acd6779f7be6ce60781fe8c0f5e",
         ),
         (
             "grok.py-ptc.child",
-            "76c9adb6591fa77838de8cfcc87105a242e14a7c2f58905358fe42d9c807139b",
+            "a3c168bc09d473ceb78d1f2c13e1db5dd21edeed27100d3d19a99ba2a3d37cd2",
         ),
         (
             "claude.direct.root.single-agent",
