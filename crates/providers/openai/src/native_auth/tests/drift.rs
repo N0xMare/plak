@@ -67,6 +67,23 @@ async fn mixed_jwks_ignores_other_algorithms_on_login_and_refresh() -> TestResul
 }
 
 #[tokio::test]
+async fn reviewed_0169_catalog_extensions_do_not_change_enrollment() -> TestResult {
+    let mut extended = catalog_model_value("gpt-5.6-luna");
+    extended["web_search_provider"] = serde_json::json!("search_mcp");
+    extended["model_messages"] = serde_json::json!({
+        "apps": {"usage_instructions": "Unenrolled Apps wording"},
+        "plugins": {"usage_instructions": "Unenrolled plugin wording"}
+    });
+    let (_dir, resolver, catalog) =
+        resolver_for_catalog_values("account-extensions", vec![extended]).await?;
+    assert!(catalog.drifted_models().is_empty());
+    assert_eq!(catalog.entries().len(), 1);
+    assert!(resolver.resolve("gpt-5.6-luna").is_ok());
+    assert!(resolver.resolve("gpt-6.1-terra").is_err());
+    Ok(())
+}
+
+#[tokio::test]
 async fn catalog_drift_refuses_only_the_changed_enrolled_row() -> TestResult {
     for (field, value) in [
         ("minimal_client_version", serde_json::json!("0.170.0")),

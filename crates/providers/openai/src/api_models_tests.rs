@@ -72,6 +72,37 @@ fn live_fixture_classifies_profiles_text_and_non_coding_models() -> TestResult {
 }
 
 #[test]
+fn newly_documented_models_do_not_inherit_an_enrolled_coding_profile() -> TestResult {
+    let listed = parse_openai_models_page(
+        br#"{"data":[{"id":"gpt-6.1-terra"},{"id":"gpt-6-cyber"},{"id":"gpt-6-rosalind"}]}"#,
+    )?;
+    let models = openai_api_models(&listed)?;
+    for (id, reason_fragment) in [
+        ("gpt-6.1-terra", "coding/tool-mode profile"),
+        ("gpt-6-cyber", "access_programs.cyber"),
+        ("gpt-6-rosalind", "Rosalind Research"),
+    ] {
+        let model = find(&models, id);
+        let OpenAiApiModelStatus::NeedsReview(reason) = model.status() else {
+            panic!("{id} must remain unadmitted");
+        };
+        assert!(reason.contains(reason_fragment), "{reason}");
+        assert_eq!(model.profile(), None);
+        assert_eq!(crate::OpenAiPlatformModelFacts::from_model_id(id), None);
+    }
+    let terra = find(&models, "gpt-6.1-terra");
+    assert_eq!(terra.max_input_tokens(), 922_000);
+    assert_eq!(terra.max_tokens(), 128_000);
+    assert_eq!(terra.price_threshold_input_tokens(), Some(272_000));
+    assert_eq!(terra.efforts(), find(&live()?, "gpt-6-luna").efforts());
+    let cyber = find(&models, "gpt-6-cyber");
+    assert_eq!(cyber.max_input_tokens(), 922_000);
+    assert_eq!(cyber.max_tokens(), 128_000);
+    assert!(cyber.efforts().is_empty(), "the model page states no ladder");
+    Ok(())
+}
+
+#[test]
 fn luna_window_is_the_price_threshold_and_output_is_128k() -> TestResult {
     let models = live()?;
     let luna = find(&models, "gpt-6-luna");

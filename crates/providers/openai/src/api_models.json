@@ -1,10 +1,12 @@
 {
-  "revision": "openai.api-models.2026-10-09.v1",
-  "reviewed_at": "2026-10-09",
+  "revision": "openai.api-models.2026-11-15.v1",
+  "reviewed_at": "2026-11-15",
   "sources": [
-    "GET https://api.openai.com/v1/models (2026-10-09; ids only)",
-    "platform.openai.com model pages: context window, maximum input, max output, reasoning.effort, 272K price threshold, Responses",
-    "Codex catalog per-model context_window (gpt-daybreak-red-latest 372000; reviewed profiles 272000)"
+    "https://developers.openai.com/api/docs/changelog (reviewed 2026-11-15; no authenticated catalog capture)",
+    "https://developers.openai.com/api/reference/resources/models/methods/list (ids and ownership/availability metadata, not capability evidence)",
+    "https://developers.openai.com/api/docs/models/<exact model id> (maximum input/output, effort, Responses and tools)",
+    "https://developers.openai.com/api/docs/guides/daybreak (Cyber access and request selection)",
+    "https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/models-manager/models.json (context_window only, not API capabilities)"
   ],
   "models": [
     {
@@ -145,6 +147,41 @@
       ],
       "price_threshold_input_tokens": 272000,
       "codex_context_window": 272000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-6.1-terra",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": 500000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-6-cyber",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": null,
       "responses": true,
       "hosted_features": [
         "web_search",

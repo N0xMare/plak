@@ -11,6 +11,17 @@ composition, and protocol it named — nothing adjacent. The second is that
 symbol that is nameable, a command that parses, and a route that renders are all
 accessibility facts. None of them is a support or correctness promise.
 
+The OpenAI review of 2026-11-15 compares official Codex tags `rust-v0.166.0`
+and `rust-v0.169.0` and public API documentation. It establishes unchanged
+bundled catalog bytes and OAuth consent facts, not live 0.169.0 acceptance.
+The rotated Codex binding needs fresh catalog/refresh and HTTP/SSE qualification,
+including local tools, encrypted replay, Lite Code Mode and single-dispatch
+remote compaction. The renewed Platform review needs the existing inexpensive
+`api-openai` row's listing, stateless multi-turn/tool and compaction checks.
+Terra, Cyber and Rosalind remain `NeedsReview`; no paid check of those models
+is needed to establish their fail-closed classification. Owner-approved live
+runs and a maintainer's TUI review remain separate from offline evidence.
+
 Release-binding contracts are offline and data-only. The hosted route matrix
 pins canonical selected/effective configurations and IDs, model-binding facts,
 per-tool tables (name, definition/schema digests, executor id/binding and

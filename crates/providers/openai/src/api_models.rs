@@ -473,6 +473,21 @@ fn classify(listed: &OpenAiListedModel, reviewed: Option<&BundledRow>) -> OpenAi
         } else {
             OpenAiApiModelStatus::Usable
         }
+    } else if id == "gpt-6-cyber" {
+        OpenAiApiModelStatus::NeedsReview(
+            "requires approved Daybreak Red access and an unimplemented access_programs.cyber contract"
+                .to_owned(),
+        )
+    } else if id == "gpt-6.1-terra" {
+        OpenAiApiModelStatus::NeedsReview(
+            "visual reasoning and computer-use model; no reviewed coding/tool-mode profile"
+                .to_owned(),
+        )
+    } else if id == "gpt-6-rosalind" {
+        OpenAiApiModelStatus::NeedsReview(
+            "specialized life-sciences model; requires approved Rosalind Research access and a reviewed profile"
+                .to_owned(),
+        )
     } else if text_responses(id) {
         OpenAiApiModelStatus::NeedsReview(
             "this Responses model has no reviewed OpenAI platform profile".to_owned(),

@@ -4102,7 +4102,7 @@ The lookup inventory is:
 
 | Route | Lookup before binding | Existing cache/credential behavior |
 | --- | --- | --- |
-| Codex subscription | `GET /backend-api/codex/models?client_version=0.166.0` on `chatgpt.com` | Authenticated catalog evidence lasts 6 h; the existing credential refresh path is separate |
+| Codex subscription | `GET /backend-api/codex/models?client_version=0.169.0` on `chatgpt.com` | Authenticated catalog evidence lasts 6 h; the existing credential refresh path is separate |
 | Grok subscription | `GET /v1/models` on `cli-chat-proxy.grok.com` | Authenticated catalog evidence lasts the access-token window (6 h); renewal/refresh remains separate |
 | Claude subscription | Pinned enrolled catalog, no network model lookup | Credential/profile GETs are not model catalogs and do not enter this retry policy |
 | OpenRouter | `GET /api/v1/models`, then the exact model's `/api/v1/models/{author}/{slug}/endpoints` on `openrouter.ai` | Both discovery GETs use the policy; binding uses the successful exact evidence |
@@ -4231,18 +4231,21 @@ Platform credentials never cross origins or fall back to one another, and
 catalog, inference, receipts, cache, continuation, usage, and retry state stay
 profile-isolated.
 
-The Codex OAuth reference client is `0.166.0`; the authenticated catalog request
-sends `client_version=0.166.0`. Its catalog contract is the `rust-v0.166.0`
+The Codex OAuth reference client is `0.169.0`; the authenticated catalog request
+sends `client_version=0.169.0`. Its catalog contract is the `rust-v0.169.0`
 source revision's `codex-rs/models-manager/models.json` at commit
-`6ff1e1ca3b30fc8b914720681fcf5fe62e95f856`. The 2026-10-30 review found
-no changes to existing enrolled rows' tool modes, reasoning levels, windows,
-truncation, Responses Lite, parallel calls, service tiers or minimum versions.
-The catalog adds `gpt-6.1-terra`, which remains unenrolled. The reviewed file's
-SHA-256 is `1384625c0b6b3e67d3c60da29becea2b017f2c283fc1e2d05b8edafb4698eb10`.
-OAuth client, scopes, endpoints, callback and truthful Plak identity are
-unchanged. The native 0.166.0 capture confirms the reference-version header
-and Responses Lite request shape; the adapter does not borrow its originator.
-Plak retains its pinned reference version and truthful identity. The reference
+`d32063f96c2dff1dc96af839b3952abb6acfeda4`. The 2026-11-15 source review
+compared `rust-v0.166.0` (`6ff1e1ca3b30fc8b914720681fcf5fe62e95f856`)
+with that stable tag. The bundled catalog is byte-identical: SHA-256
+`1384625c0b6b3e67d3c60da29becea2b017f2c283fc1e2d05b8edafb4698eb10`.
+Existing enrolled rows' tool modes, reasoning levels, windows, truncation,
+Responses Lite, parallel calls, service tiers and minimum versions are unchanged;
+`gpt-6.1-terra` remains unenrolled. OAuth client, scopes, endpoints, callback,
+refresh request and truthful Plak identity are unchanged, so the consent profile
+and its original source provenance remain unchanged. The source comparison is
+not a native 0.169.0 capture or live qualification. The earlier native 0.166.0
+capture remains historical evidence only. Plak sends the new reference version
+while retaining `originator=plak` and its truthful user agent. The reference
 client also sends
 `x-codex-beta-features: remote_compaction_v2` on ordinary turns; Plak sends that
 header only on a remote-compaction request, because it claims a capability
@@ -4252,7 +4255,7 @@ dispatch. The backend keys prompt caching on this header, not the body field.
 A missing, non-string, or header-invalid key is refused. This Plak-owned affinity
 does not borrow client identity: `originator=plak` and the truthful Plak user
 agent remain unchanged. Its compiled compatibility
-profile was reviewed on 2026-10-30 and expires at 2027-01-28T00:00:00Z, 90 days
+profile was reviewed on 2026-11-15 and expires at 2027-02-13T00:00:00Z, 90 days
 after the review (§7.1); a re-review that changes no contract keeps every
 earlier acceptance current (§7.2).
 The hidden, non-default `test-clock` feature alone exposes the Codex manager
@@ -4286,6 +4289,17 @@ that message, omit top-level `tools`, set `parallel_tool_calls=false`, use
 Plak serializes the request body with sorted keys rather than the reference
 client's routing-first field order; field order carries no semantics.
 The reference client's opt-in incremental tool declarations are not adopted.
+The 0.169.0 source also adds optional `prompt_cache_options.ttl`, additional
+catalog Apps/plugin wording and a web-search-provider preference. These do not
+change the enrolled wire: Plak requests no TTL override, ignores unrelated
+catalog extensions, and retains its own tool descriptions. New upstream terminal
+codes (`inference_hook_denied`, `budget_reached`, access-program and audio
+refusals) remain terminal under Plak's conservative unknown-error policy;
+`content_policy_violation` already maps to Policy. Plak does not copy native
+compaction retries, fallback models, background installation or audio retention:
+paid compaction remains single-dispatch and uses the admitted Standard/Lite
+Responses grammar. This is a source review, not evidence that a private backend
+accepts the updated pin.
 Retry advice the reference client reads from a `response.failed` event's
 `error.headers` is not read; that failure keeps the ordinary jittered backoff.
 Tool calls and results retain their call identities on subsequent turns.
@@ -4297,7 +4311,9 @@ fixture: the fixture's client version is the pinned constant, every row the
 table marks `CodeModeOnly` is an enrolled API row, and every enrolled API row
 is either in the fixture or on an explicit reviewed API-only Direct list.
 Moving the reference-client pin rotates the Codex OAuth binding identity and
-requires a runtime format epoch bump. Cross-build session transfer uses export
+requires a runtime format epoch cut. This pin move belongs to the same unshipped
+epoch 38 / `r28.e38.p38.t11` cut as the pending runtime changes; it adds no
+second bump. Cross-build session transfer uses export
 and import (§5.4).
 
 On a sampling request, a Responses `response.incomplete` with reason
@@ -4398,7 +4414,7 @@ bounded authenticated `GET /v1/models` on `https://api.openai.com` (the same
 API key, `Authorization: Bearer`, at most 2048 rows and 4 MiB). The live
 payload publishes ids only. Windows, output bounds, efforts and hosted-feature
 flags come from the bundled reviewed table (`api_models.json`, revision
-`openai.api-models.2026-10-09.v1`), checked against the model pages and, where
+`openai.api-models.2026-11-15.v1`), checked against the model pages and, where
 a page states no price threshold, the Codex catalog's per-model
 `context_window`. The working window is the documented input price threshold
 (272,000 where the page states the 2x price step), else that Codex window when
@@ -4410,7 +4426,19 @@ else the full maximum input. The output bound is the documented maximum output
 `gpt-6-luna`, `gpt-6-sol`, `gpt-5.6-luna`, `gpt-5.6-sol` and `gpt-5.6-terra`,
 under the efforts the model page lists (`none` through `max` on those five;
 `gpt-6-astra` and `gpt-6.1-sol` start at `low`). Other text Responses ids are
-`NeedsReview`. Ids containing the reviewed non-coding markers (`tts`,
+`NeedsReview`. The 2026-11-15 review records `gpt-6.1-terra` with 922,000
+maximum input, 128,000 output, a 272,000 price threshold and `none` through
+`max`, but does not enroll a coding/tool-mode profile for this visual reasoning,
+computer-use and writing model. `gpt-6-cyber` records the same input/output and
+price threshold but no effort ladder: its model page states none. It remains
+`NeedsReview` because approved Daybreak Red access, project setup and an
+`access_programs.cyber` request contract are not implemented. The newly documented
+`gpt-6-rosalind` also remains `NeedsReview`: it is a specialized life-sciences
+model requiring Rosalind Research approval, not an enrolled coding profile.
+`gpt-6-astra` and `gpt-6.1-sol` remain outside the five reviewed coding profiles.
+The Models endpoint publishes identity and ownership/availability metadata, not
+capability evidence; no authenticated listing was captured for this review.
+Ids containing the reviewed non-coding markers (`tts`,
 `whisper`, `dall-e`, `dalle`, `embedding`, `moderation`, `realtime`, `sora`,
 `audio`, `transcri`, `image`) are `NotCodingModel`. Duplicate safe ids fail
 the listing; unsafe ids are skipped. The caller appends
@@ -4476,12 +4504,11 @@ ladder and output limit only. `anthropic_api_key_fingerprint` is the first 16 he
 domain-separated SHA-256 of the key, for keying a cache: not a credential, but
 a candidate key can be checked against it, so it stays in owner-only files.
 
-The OpenAI Platform manifest and xAI Platform binding were re-reviewed on
-2026-10-30 against their official model, Responses, tool-calling, reasoning and
-storage documentation. The review found no change to pinned facts on either
-surface; `gpt-6.1-sol` exists and is not admitted. They are documented public
-APIs, so their reviews are due again at 2027-01-28T00:00:00Z (90 days after the
-review) but
+The OpenAI Platform manifest was re-reviewed on 2026-11-15 against official
+model, Responses, tool-calling, reasoning and storage documentation, with no
+change to the five admitted profiles; its review is due at
+2027-02-13T00:00:00Z. The xAI Platform binding retains its 2026-10-30 review,
+due at 2027-01-28T00:00:00Z. Both are documented public APIs and
 never refuse on the calendar: construction, preparation and runtime
 revalidation ignore the review date, built-in facts carry no expiry, and a
 skewed clock before the review date refuses nothing. The review-due date drives
@@ -9345,7 +9372,7 @@ native Code Mode eligibility all read it through `NativeProvider::enrolls` and
 `NativeProvider::enrolled_tool_mode`, and the neutral tools and composition
 crates hold no model ids. Provider catalog admission alone cannot make a
 product session executable.
-The reviewed Codex 0.166.0 `CodeModeOnly` rows use Responses Lite and do not
+The reviewed Codex 0.169.0 `CodeModeOnly` rows use Responses Lite and do not
 advertise parallel tool calls. Their selected product configuration disables
 parallel calls for native, Direct, JavaScript and Python presentations so it
 can compile against the exact resolved descriptor. A future catalog row with
@@ -11202,7 +11229,7 @@ native item, or ciphertext mismatch refuses preparation as `ProtectedHistory`.
 Codex input metering substitutes each such compaction item's and each
 `reasoning` item's serialized bytes, when `encrypted_content` is a string, with
 `max(0, len(encrypted_content) * 3 / 4 − 650)` before `ceil(bytes / 4)`,
-matching the pinned Codex `rust-v0.166.0` `estimate_reasoning_length` rule for
+matching the pinned Codex `rust-v0.169.0` `estimate_reasoning_length` rule for
 both encrypted Reasoning and Compaction items. The enrolled measurement
 revision is `codex-complete-input-utf8-bytes-div4-encrypted-v6`.
 The family artifact stays
