@@ -474,6 +474,13 @@ class TestProcessGuardTests(unittest.TestCase):
                 self.assertEqual([call.args[0] for call in reap.call_args_list], [stale])
 
     def test_signals_allow_a_three_second_cleanup_and_forward_hup_and_quit(self):
+        # Detached launchers may ignore HUP/QUIT; this fixture tests forwarding,
+        # not preservation of those inherited ignored dispositions.
+        launcher = textwrap.dedent('''
+            import os, signal, sys
+            signal.signal(int(sys.argv[1]), signal.SIG_DFL)
+            os.execv(sys.executable, [sys.executable, *sys.argv[2:]])
+        ''')
         for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT):
             with self.subTest(signum=signum), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -490,7 +497,17 @@ class TestProcessGuardTests(unittest.TestCase):
                     while time.monotonic() < deadline: time.sleep(0.1)
                 """)
                 guarded = subprocess.Popen(
-                    [sys.executable, str(GUARD), "--", sys.executable, "-c", script],
+                    [
+                        sys.executable,
+                        "-c",
+                        launcher,
+                        str(int(signum)),
+                        str(GUARD),
+                        "--",
+                        sys.executable,
+                        "-c",
+                        script,
+                    ],
                     env=dict(os.environ, TMPDIR=str(root)),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
