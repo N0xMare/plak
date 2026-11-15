@@ -1575,7 +1575,7 @@ pub(crate) mod suite {
         ),
         (
             "claude.py-sdk.root.single-agent",
-            "8448b5ef14ce51cdcf5fc09cdd6f7620d3a853625bb07e6dcd1197503ea90cae",
+            "3b4dabe27aa98c34716818ea972cfd87402fdad35146a333212dcb3d81427242",
         ),
         (
             "openrouter-chat.py-sdk.root.single-agent",
@@ -1715,51 +1715,51 @@ pub(crate) mod suite {
         ),
         (
             "claude.direct.root.single-agent",
-            "1ad95b5bb20941efdc874ccbfde344220950cdc7b16948042c1124761962ee2c",
+            "4b8f90c0c88c9e44aecbf9007c18a848667f52af12c133de2a02a6b2be8ba517",
         ),
         (
             "claude.direct.root",
-            "ebd8a4c192aa8e483697342efff9bf5245387661f4814b1810f4e137c5a100f1",
+            "d900a07827f2e3883c116c289c185de2212c306a3d3d3d3f0de7222f7f2f72a6",
         ),
         (
             "claude.direct.nested-parent",
-            "ea492c746dc91cb95a38fb87975668f809e80f957b801b993e7cc563976567f4",
+            "452b4d52137b0583c50717abe59e816deaf7de4490bc364134b0d96699bd16d1",
         ),
         (
             "claude.direct.child",
-            "8576ab4d57e3925193beeadf7278f1fc50b7728f169e286677dbfd1641aa6e15",
+            "181300bf1b51a153e50dc9cb92b6af3ab5ca8a8336b9b4968dc25fd011c5332d",
         ),
         (
             "claude.js-ptc.root.single-agent",
-            "b702294da5f5e5d0a97811788cc58d0b97732f74c2d53a9d30be4f30999692b7",
+            "1be6032b7b134bb127d357fce4dc85013e0c0266c0e849d2408646b803749eab",
         ),
         (
             "claude.js-ptc.root",
-            "84b6a977fc13ba6cfba1e2a705e1474be6c6fe4383b061eb71390f3ca0181ce9",
+            "97e9825e2325469c048acf8ee7af1f655c2948cea2594d6f6e5d0494dd420cf3",
         ),
         (
             "claude.js-ptc.nested-parent",
-            "73d4882182890a62787b2879e7b683c36fb82e8e5b0c8c0448e1c0a539f112cd",
+            "0f0bb50dbfb139d95c61ca2d81205a6c0dee65a8c7a78766b90c20bb526d7a63",
         ),
         (
             "claude.js-ptc.child",
-            "b71413f8b0ad5c2dc4adb4f92b30f9260641003a8d33ada8b06f813af9dc0d34",
+            "9b20fd9bf5b502cb5325ae0b9800b7c3029f76f41280768a053315440333caca",
         ),
         (
             "claude.py-ptc.root.single-agent",
-            "1cff8e3851f5a5fad3a129917e36cab277c4ca4d1abd21bc6e122a336e90c74d",
+            "82854c58d5b434eb7ed89f455da28d62b47304b92201dc97fe683e2a42d5f43c",
         ),
         (
             "claude.py-ptc.root",
-            "5c62144b4b90fc0afc9a3c4796efe11ed26d6e7e447cc636eba36b7d78da735d",
+            "62e93c274e63f7837642b535be7cdf74e5f07a51d0c7f8883efe39ffbf9f4f8d",
         ),
         (
             "claude.py-ptc.nested-parent",
-            "294e425c5ff65f6f43770f6eb646958daf2931afa8371266054f7bdfa0a682b0",
+            "4a44927565d7e603ef4304e924d8afe0752fb3f7a50645ec7b4c5b0f775b91fe",
         ),
         (
             "claude.py-ptc.child",
-            "bb59b87b1ef9531aa8f13c4adada07dd8713acce09702dbb085535c8ecd3c842",
+            "ef8a6c9124a051d1e130e62617eec6ba87e02821b665b45c9db2a8907cc8dcfc",
         ),
         (
             "openrouter-chat.direct.root.single-agent",
