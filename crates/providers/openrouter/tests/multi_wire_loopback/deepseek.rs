@@ -4,6 +4,7 @@ use plakous_model::{
     ToolDefinition, ToolEffect, ToolExecutionDisposition, ToolInputContract, ToolOutputContract,
 };
 use serde_json::{Value, json};
+use std::fmt::Write as _;
 
 const DEEPSEEK: &str = "deepseek/deepseek-v4-flash-0731";
 
@@ -14,6 +15,7 @@ fn lookup() -> TestResult<ConfiguredTool> {
             "1.0.0",
             "Look up a value",
             ToolInputContract::structured(json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object", "properties": {"q": {"type": "string"}},
                 "required": ["q"], "additionalProperties": false
             }))?,
@@ -26,7 +28,7 @@ fn lookup() -> TestResult<ConfiguredTool> {
     ))
 }
 
-fn tool_stream(alias: &str) -> String {
+fn tool_stream(alias: &str) -> TestResult<String> {
     let mut stream = ": OPENROUTER PROCESSING\n\n".to_owned();
     for (delta, finish) in [
         (json!({"role": "assistant"}), Value::Null),
@@ -42,18 +44,26 @@ fn tool_stream(alias: &str) -> String {
         ),
         (json!({}), json!("tool_calls")),
     ] {
-        stream.push_str(&format!("data: {}\n\n", json!({
-            "id": "gen-deepseek", "object": "chat.completion.chunk", "created": 1_787_623_695,
-            "model": DEEPSEEK, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]
-        })));
+        write!(
+            stream,
+            "data: {}\n\n",
+            json!({
+                "id": "gen-deepseek", "object": "chat.completion.chunk", "created": 1_787_623_695,
+                "model": DEEPSEEK, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]
+            })
+        )?;
     }
-    stream.push_str(&format!("data: {}\n\ndata: [DONE]\n\n", json!({
-        "id": "gen-deepseek", "object": "chat.completion.chunk", "created": 1_787_623_695,
-        "model": DEEPSEEK, "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
-        "usage": {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20,
-                  "completion_tokens_details": {"reasoning_tokens": 3}}
-    })));
-    stream
+    write!(
+        stream,
+        "data: {}\n\ndata: [DONE]\n\n",
+        json!({
+            "id": "gen-deepseek", "object": "chat.completion.chunk", "created": 1_787_623_695,
+            "model": DEEPSEEK, "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20,
+                      "completion_tokens_details": {"reasoning_tokens": 3}}
+        })
+    )?;
+    Ok(stream)
 }
 
 fn tool_request(
@@ -85,7 +95,7 @@ async fn deepseek_streamed_tools_and_both_reasoning_aliases_round_trip_on_chat()
         replies.extend([
             (
                 "text/event-stream",
-                tool_stream(alias),
+                tool_stream(alias)?,
                 "x-request-id: req-deepseek-tool\r\n",
             ),
             (
@@ -148,12 +158,12 @@ async fn deepseek_streamed_tools_and_both_reasoning_aliases_round_trip_on_chat()
                 .count(),
             1
         );
-        assert_round_trip_requests(peer.await??)?;
+        assert_round_trip_requests(&peer.await??)?;
     }
     Ok(())
 }
 
-fn assert_round_trip_requests(requests: Vec<Vec<u8>>) -> TestResult {
+fn assert_round_trip_requests(requests: &[Vec<u8>]) -> TestResult {
     assert_eq!(requests.len(), 4);
     for request in &requests[2..] {
         assert!(String::from_utf8_lossy(request).starts_with("POST /api/v1/chat/completions "));
