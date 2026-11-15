@@ -120,10 +120,12 @@ fn compacting(fixture: Fixture, queued: bool) -> (Fixture, Host, Client, String,
         std::fs::write(gate, b"release").unwrap();
     }
     let deadline = Instant::now() + WAIT;
-    while summary_dispatches(&fixture) == 0 {
+    // The summary tag is fsynced before the same request's total-dispatch row.
+    // The logs are locked separately, so neither alone is the complete barrier.
+    while summary_dispatches(&fixture) == 0 || dispatches(&fixture) < 3 {
         assert!(
             Instant::now() < deadline,
-            "the paid summary never dispatched"
+            "the paid summary dispatch evidence never completed"
         );
         std::thread::sleep(Duration::from_millis(10));
     }
