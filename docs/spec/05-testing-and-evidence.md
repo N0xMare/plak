@@ -1769,13 +1769,9 @@ default build enables its own `test-clock` and that no `plak` build (default,
 `maintainer`, `test-hooks`, or `test-hooks` with `maintainer`) resolves either
 one; an offline test build that unifies the facade's dev-dependencies does.
 SuperGrok id-token expiry is checked against that clock, not the JWT
-library's wall clock. A facade test that hands its fixed-clock acceptance to
-the Grok or Claude manager assumes those subscriptions share their latest
-review date; re-dating one alone fails such a test at review time, never on a
-calendar date. Product commands inject a fixed clock (spec 02 §8.6) and API
-surfaces carry no calendar expiry.
-Facade fixtures that start real provider managers derive consent and their
-facade clock from that provider's own review, not another route's newer review:
+library's wall clock. Product commands inject a fixed clock (spec 02 §8.6)
+and API surfaces carry no calendar expiry. Facade fixtures that start real
+provider managers derive consent and their facade clock from that provider's own review, not another route's newer review:
 otherwise independently renewing OpenAI future-dates Claude or xAI consent
 against those managers' deterministic clocks.
 
