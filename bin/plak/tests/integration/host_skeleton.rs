@@ -234,11 +234,15 @@ impl Client {
                 .expect("host observation deadline expired")
         });
         self.stream.set_read_timeout(Some(timeout)).unwrap();
-        assert_ne!(
-            self.reader.read_line(&mut line).unwrap(),
-            0,
-            "the host closed"
-        );
+        let read = self.reader.read_line(&mut line).unwrap_or_else(|error| {
+            panic!(
+                "host client read failed: {error}; buffered bytes={}; reader {}; writer {}",
+                self.reader.buffer().len(),
+                socket_state(self.reader.get_ref()),
+                socket_state(&self.stream),
+            )
+        });
+        assert_ne!(read, 0, "the host closed");
         decode_line(line.trim_end()).unwrap_or_else(|error| panic!("{error}: {line}"))
     }
 
@@ -347,6 +351,17 @@ impl Client {
             }
         }
     }
+}
+
+fn socket_state(stream: &UnixStream) -> String {
+    use std::os::fd::AsRawFd as _;
+    format!(
+        "fd={} stat={:?} local={:?} peer={:?}",
+        stream.as_raw_fd(),
+        rustix::fs::fstat(stream).map(|stat| (stat.st_dev, stat.st_ino, stat.st_mode)),
+        stream.local_addr(),
+        stream.peer_addr(),
+    )
 }
 
 const ANSWER: &str = "the host answer";
