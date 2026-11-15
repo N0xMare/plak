@@ -9,6 +9,7 @@ use super::{RouteCapability, RouteKind};
 use crate::binding::ResolvedProtocol;
 use plakous::subscriptions::NativeProvider;
 
+/// Codex subscription route facts, independent of direct OpenAI API credentials.
 pub static CODEX: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "codex",

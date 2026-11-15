@@ -9,6 +9,7 @@ use super::{RouteCapability, RouteKind};
 use crate::binding::PlatformProvider;
 use crate::binding::ResolvedProtocol;
 
+/// Anthropic direct-API route facts, readable even when its runtime is omitted.
 pub static ANTHROPIC: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "anthropic",

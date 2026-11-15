@@ -51,16 +51,8 @@ pub mod activity;
 pub mod attachments;
 /// The session-binding vocabulary: composition, wire, target, and the
 /// `[root] agent` fact a session compares its bound tuple against.
-#[allow(
-    missing_docs,
-    reason = "binding variants and persisted binding fields await contracts"
-)]
 pub mod binding;
 /// The route identity and catalog capability registry.
-#[allow(
-    missing_docs,
-    reason = "capability admission errors and registry fields await contracts"
-)]
 pub mod capabilities;
 /// The provider-grounded context projection a turn reports against.
 pub mod context;

@@ -11,6 +11,7 @@ use plakous::subscriptions::NativeProvider;
 
 pub(crate) use compiled::tool_result_images;
 
+/// Grok subscription route facts, independent of direct xAI API credentials.
 pub static GROK: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "grok",

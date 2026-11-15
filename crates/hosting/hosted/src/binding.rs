@@ -17,14 +17,19 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProtocolSelection {
+    /// Resolve once under the versioned product rule, not at each request.
     #[default]
     Auto,
+    /// Explicit chat-completions wire semantics.
     Chat,
+    /// Explicit Responses wire semantics.
     Responses,
+    /// Explicit Messages wire semantics.
     Messages,
 }
 
 impl ProtocolSelection {
+    /// Stable lowercase operator and persisted token, without alias expansion.
     #[allow(dead_code, reason = "consumed by product target-selection wiring")]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -35,6 +40,10 @@ impl ProtocolSelection {
         }
     }
 
+    /// Parse the closed lowercase token set without trimming or fallback.
+    ///
+    /// # Errors
+    /// Refuses every token other than `auto`, `chat`, `responses` or `messages`.
     #[allow(dead_code, reason = "consumed by product target-selection wiring")]
     pub fn parse(value: &str) -> Result<Self, String> {
         match value {
@@ -51,8 +60,11 @@ impl ProtocolSelection {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResolvedProtocol {
+    /// Chat-completions request and stream contract.
     Chat,
+    /// Responses request and stream contract.
     Responses,
+    /// Messages request and stream contract.
     Messages,
 }
 
@@ -108,12 +120,17 @@ pub const WIRE_RESOLUTION_REVISION: &str = "plak-openrouter-wire-resolution-v1";
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WireBinding {
+    /// Original operator choice, retained even when automatic resolution ran.
     pub selection: ProtocolSelection,
+    /// One exact wire family used for reconstruction and execution.
     pub resolved: ResolvedProtocol,
+    /// Rule identity that must equal this build's supported resolution rule.
     pub resolution_revision: String,
 }
 
 impl WireBinding {
+    /// Freeze the current resolution rule: `Auto` resolves to chat, and explicit
+    /// choices retain their wire. No network discovery or credential lookup runs.
     #[allow(dead_code, reason = "consumed by product target-selection wiring")]
     pub fn resolve(selection: ProtocolSelection) -> Self {
         let resolved = match selection {
@@ -128,6 +145,10 @@ impl WireBinding {
         }
     }
 
+    /// Check that both the resolution rule and its result can be reconstructed.
+    ///
+    /// # Errors
+    /// Refuses an unsupported revision or a result contradicting the selection.
     pub fn validate(&self) -> Result<(), String> {
         if self.resolution_revision != WIRE_RESOLUTION_REVISION {
             return Err("wire binding has an unsupported resolution revision".to_owned());
@@ -143,6 +164,7 @@ impl WireBinding {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum OpenRouterRoutingSelection {
+    /// Let the gateway choose its backend; the host adds no endpoint fallback list.
     GatewayManaged,
 }
 
@@ -150,12 +172,16 @@ pub enum OpenRouterRoutingSelection {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlatformProvider {
+    /// OpenAI API-key account, independent of a ChatGPT subscription.
     OpenAi,
+    /// Anthropic API-key account, independent of a Claude subscription.
     Anthropic,
+    /// xAI API-key account, independent of a Grok subscription.
     Xai,
 }
 
 impl PlatformProvider {
+    /// Canonical default-account prefix for this exact API route.
     #[must_use]
     pub const fn account(self) -> &'static str {
         crate::capabilities::for_platform(self).account
@@ -168,12 +194,15 @@ impl PlatformProvider {
         crate::capabilities::for_platform(self).native_ptc_refusal
     }
 
+    /// Parse a default or named direct-API account; gateway, subscription and
+    /// invalid account identities return `None` rather than being coerced.
     #[must_use]
     pub fn for_account(account: &str) -> Option<Self> {
         crate::capabilities::for_account(account)
             .and_then(crate::capabilities::RouteCapability::platform_provider)
     }
 
+    /// The route's fixed wire family, independent of optional runtime features.
     #[must_use]
     pub const fn protocol(self) -> ResolvedProtocol {
         match crate::capabilities::for_platform(self).protocol {
@@ -186,28 +215,37 @@ impl PlatformProvider {
 /// Resolved API route used by a hosted root or child.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ApiTarget {
+    /// Gateway selection with an already resolved wire and exact account.
     OpenRouter {
+        /// Wire frozen at binding construction, not selected per request.
         wire: ResolvedProtocol,
+        /// Exact gateway credential scope, including a named suffix when present.
         account: crate::account::AccountRef,
     },
+    /// Direct API selection, with no gateway or subscription fallback.
     Platform {
+        /// Provider whose catalog and authentication contract govern the model.
         provider: PlatformProvider,
+        /// Exact credential scope that must agree with the provider.
         account: crate::account::AccountRef,
     },
 }
 
 impl ApiTarget {
+    /// Canonical account reference, preserving any named-account suffix.
     #[must_use]
     pub fn account(&self) -> &str {
         self.selection().as_str()
     }
 
+    /// Parsed exact account identity, without credential resolution.
     pub fn selection(&self) -> &crate::account::AccountRef {
         match self {
             Self::OpenRouter { account, .. } | Self::Platform { account, .. } => account,
         }
     }
 
+    /// Exact request/stream wire; direct routes use their fixed protocol.
     #[must_use]
     pub const fn protocol(&self) -> ResolvedProtocol {
         match self {
@@ -221,24 +259,36 @@ impl ApiTarget {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum TargetSelection {
+    /// Native subscription target using its ordinary service tier.
     #[default]
     Native,
     /// Native Codex subscription target using the exact `priority` service tier.
     NativePriority,
+    /// Gateway target whose selected wire and policy are reconstruction facts.
     OpenRouter {
+        /// Original and resolved protocol under a pinned rule revision.
         wire: WireBinding,
+        /// Gateway backend-routing policy, not a host fallback list.
         routing: OpenRouterRoutingSelection,
     },
+    /// Direct API target, separately billed and authenticated from subscriptions.
     Platform {
+        /// Provider identity, retained even when its runtime feature is omitted.
         provider: PlatformProvider,
     },
 }
 
 impl TargetSelection {
+    /// Whether construction uses API-key rather than subscription authority.
     pub const fn is_api(&self) -> bool {
         matches!(self, Self::Platform { .. } | Self::OpenRouter { .. })
     }
 
+    /// Resolve an API target only after validating the exact account's route.
+    /// Native targets return `None`; the account is never rewritten.
+    ///
+    /// # Errors
+    /// Returns an account-target mismatch when the selected route disagrees.
     pub fn api_target(
         &self,
         account: &crate::account::AccountRef,
@@ -257,6 +307,11 @@ impl TargetSelection {
         })
     }
 
+    /// Check route agreement without resolving credentials or build admission.
+    /// Priority native service is valid only for the Codex subscription route.
+    ///
+    /// # Errors
+    /// Returns an account-target mismatch; no alternate account is tried.
     pub fn validate_account(
         &self,
         account: &crate::account::AccountRef,
@@ -281,6 +336,10 @@ impl TargetSelection {
         }
     }
 
+    /// Validate reconstruction facts without changing the target or probing auth.
+    ///
+    /// # Errors
+    /// Refuses an unsupported or contradictory gateway wire binding.
     pub fn validate(&self) -> Result<(), String> {
         match self {
             Self::Native | Self::NativePriority | Self::Platform { .. } => Ok(()),
@@ -302,15 +361,22 @@ impl TargetSelection {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AttachRoute<'a> {
     /// An API key with a distinct billing and credential authority from OAuth.
-    Platform { provider: PlatformProvider },
+    Platform {
+        /// Exact direct API provider; subscription identity is not interchangeable.
+        provider: PlatformProvider,
+    },
     /// The `OpenRouter` gateway on the `openrouter` account.
     OpenRouter {
+        /// Saved wire choice whose revision is validated before construction.
         wire: &'a WireBinding,
+        /// Saved gateway routing policy, not a local endpoint fallback list.
         routing: &'a OpenRouterRoutingSelection,
     },
     /// A native OAuth subscription, optionally on the priority service tier.
     NativeOauth {
+        /// Native subscription identity selected by the exact account.
         provider: NativeProvider,
+        /// Whether this target explicitly requests the priority service tier.
         priority: bool,
     },
 }
@@ -493,6 +559,7 @@ impl TargetSelection {
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CompositionSelection {
+    /// Present canonical tools directly, without an evaluator wrapper.
     Direct,
     /// The versioned Plakous-recommended tool presentation for the bound
     /// provider/model, resolved once at attach and pinned for the session.
@@ -546,6 +613,7 @@ impl CompositionSelection {
         }
     }
 
+    /// Stable explicit operator/config token, not the resolved runtime profile.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -559,6 +627,9 @@ impl CompositionSelection {
     }
 
     /// Closed CLI and explicit operator tokens.
+    ///
+    /// # Errors
+    /// Refuses unknown tokens rather than interpreting aliases or choosing a default.
     pub fn parse(value: &str) -> Result<Self, String> {
         match value {
             "direct" => Ok(Self::Direct),
@@ -575,6 +646,9 @@ impl CompositionSelection {
     }
 
     /// Config and session persistence spell the same closed token set.
+    ///
+    /// # Errors
+    /// Returns the same unknown-token refusal as [`Self::parse`].
     pub fn parse_config(value: &str) -> Result<Self, String> {
         Self::parse(value)
     }

@@ -42,18 +42,27 @@ mod web_fetch;
 #[path = "build/web_fetch_unavailable.rs"]
 mod web_fetch;
 
+/// Omitted implementation class; persisted names remain valid vocabulary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapabilityKind {
+    /// Provider authentication and model runtime.
     Route,
+    /// Programmatic tool-composition worker.
     Evaluator,
+    /// Optional product input or presentation capability.
     Surface,
+    /// Optional canonical tool registration pack.
     ToolPack,
 }
 
+/// Typed build-time omission, not an authentication or model-admission failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CapabilityUnavailable {
+    /// Stable route, composition or tool identity that was refused.
     pub id: &'static str,
+    /// Implementation class that is absent.
     pub kind: CapabilityKind,
+    /// Public Cargo feature needed to include the implementation.
     pub feature: &'static str,
 }
 
@@ -68,14 +77,20 @@ impl std::fmt::Display for CapabilityUnavailable {
 }
 impl std::error::Error for CapabilityUnavailable {}
 
+/// One optional implementation's availability in this build, not runtime readiness.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BuildCapability {
+    /// Stable product vocabulary retained even when the implementation is absent.
     pub id: &'static str,
+    /// Implementation class controlled by the feature.
     pub kind: CapabilityKind,
+    /// Cargo feature that admits this implementation.
     pub feature: &'static str,
+    /// Whether the current build includes it; credentials may still be unavailable.
     pub compiled: bool,
 }
 
+/// Complete optional non-route capability table, including omitted implementations.
 pub const BUILD_CAPABILITIES: &[BuildCapability] = &[
     BuildCapability {
         id: "clipboard",
@@ -121,6 +136,11 @@ pub const BUILD_CAPABILITIES: &[BuildCapability] = &[
     },
 ];
 
+/// Check a known optional feature without changing persisted selections.
+/// Unrecognized strings are not rejected here; callers validate vocabulary first.
+///
+/// # Errors
+/// Returns the typed omission for a known route or capability absent in this build.
 pub fn require_feature(feature: &str) -> Result<(), CapabilityUnavailable> {
     if let Some(route) = super::for_account(feature) {
         super::require_route(route)?;
@@ -139,6 +159,9 @@ pub fn require_feature(feature: &str) -> Result<(), CapabilityUnavailable> {
 }
 
 /// Admits a composition's worker with the selected label in a refusal.
+///
+/// # Errors
+/// Refuses an omitted evaluator feature; never substitutes another composition.
 pub fn require_composition(
     composition: crate::binding::CompositionSelection,
 ) -> Result<(), CapabilityUnavailable> {
@@ -158,6 +181,7 @@ pub fn require_composition(
     Ok(())
 }
 
+/// Sorted, deduplicated feature names absent from this build, for diagnostics.
 pub fn omitted_features() -> Vec<&'static str> {
     let mut features: Vec<_> = BUILD_CAPABILITIES
         .iter()
@@ -174,6 +198,7 @@ pub fn omitted_features() -> Vec<&'static str> {
     features
 }
 
+/// Sorted, deduplicated included features; inclusion is not credential readiness.
 pub fn compiled_features() -> Vec<&'static str> {
     let mut features: Vec<_> = super::ROUTES
         .iter()

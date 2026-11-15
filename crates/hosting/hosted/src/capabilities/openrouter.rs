@@ -7,6 +7,7 @@ mod compiled;
 
 use super::{RouteCapability, RouteKind};
 
+/// Gateway route facts; the binding, not this table, selects its exact wire.
 pub static OPENROUTER: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "openrouter",

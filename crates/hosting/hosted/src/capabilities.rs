@@ -41,21 +41,31 @@ pub use openai::OPENAI;
 pub use openrouter::OPENROUTER;
 pub use xai::XAI;
 
+/// Credential and model-construction family, independent of build admission.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RouteKind {
+    /// Subscription OAuth and the provider's native model implementation.
     Native(NativeProvider),
+    /// Direct API-key authentication with reviewed provider model facts.
     Platform(PlatformProvider),
+    /// Gateway API-key authentication with separately selected wire semantics.
     OpenRouter,
 }
 
+/// Static route registry entry. Identities remain readable when their runtime
+/// feature is omitted; only `compiled` answers build availability.
 #[derive(Debug)]
 pub struct RouteCapability {
+    /// Whether this build includes the route's executable implementation.
     pub compiled: bool,
+    /// Public feature whose omission produces the capability refusal.
     pub feature: &'static str,
     pub(crate) review_deadline: fn() -> Option<u64>,
     pub(crate) hosted_retrieval: fn() -> Option<plakous::model::HostedRetrievalTable>,
+    /// Canonical default-account prefix; named accounts retain this route.
     pub account: &'static str,
     pub(crate) aliases: &'static [&'static str],
+    /// Authentication and model-construction family, never a fallback order.
     pub kind: RouteKind,
     /// OpenRouter resolves its wire from the explicit selection instead.
     pub(crate) protocol: Option<ResolvedProtocol>,
@@ -64,15 +74,19 @@ pub struct RouteCapability {
     /// Whether `native-ptc` belongs to the route's binding vocabulary at all;
     /// model enrollment is a separate admission check.
     pub(crate) native_protocol_vocabulary: bool,
+    /// Subscription-usage presentation label, absent on routes without one.
     pub usage_label: Option<&'static str>,
     pub(crate) subscription_label: Option<&'static str>,
 }
 
 impl RouteCapability {
+    /// Compiled review-window deadline as Unix seconds, absent when the route
+    /// supplies no review deadline. Reading it neither refreshes nor admits it.
     pub fn review_deadline(&self) -> Option<u64> {
         (self.review_deadline)()
     }
 
+    /// Native identity only for subscription routes, never an API alias.
     pub const fn native_provider(&self) -> Option<NativeProvider> {
         match self.kind {
             RouteKind::Native(provider) => Some(provider),
@@ -80,6 +94,7 @@ impl RouteCapability {
         }
     }
 
+    /// Direct API identity only; gateway and subscription routes return `None`.
     pub const fn platform_provider(&self) -> Option<PlatformProvider> {
         match self.kind {
             RouteKind::Platform(provider) => Some(provider),
@@ -115,6 +130,8 @@ const fn same_id(left: &str, right: &str) -> bool {
     true
 }
 
+/// Parse an exact default or named account and return its route, including
+/// omitted routes. Invalid identities return `None`; credentials are not read.
 pub fn for_account(account: &str) -> Option<&'static RouteCapability> {
     account
         .parse::<crate::account::AccountRef>()
@@ -122,6 +139,8 @@ pub fn for_account(account: &str) -> Option<&'static RouteCapability> {
         .map(|account| account.vertical().capability())
 }
 
+/// Find a known native identity without checking build availability. An
+/// unregistered identity returns `None`, never another provider's entry.
 pub const fn for_native(provider: NativeProvider) -> Option<&'static RouteCapability> {
     let mut index = 0;
     while index < ROUTES.len() {
@@ -136,7 +155,7 @@ pub const fn for_native(provider: NativeProvider) -> Option<&'static RouteCapabi
     None
 }
 
-pub const fn for_platform(provider: PlatformProvider) -> &'static RouteCapability {
+pub(crate) const fn for_platform(provider: PlatformProvider) -> &'static RouteCapability {
     let mut index = 0;
     while index < ROUTES.len() {
         let route = ROUTES[index];
@@ -152,6 +171,7 @@ pub const fn for_platform(provider: PlatformProvider) -> &'static RouteCapabilit
     unreachable!()
 }
 
+/// Compiled native routes in registry order; API routes are never included.
 pub fn native_providers() -> impl Iterator<Item = NativeProvider> {
     ROUTES
         .iter()
@@ -198,12 +218,37 @@ pub fn require_tools(
 /// An account selection that cannot be admitted by this build.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AccountAdmissionError {
-    UnknownAccount { account: String },
-    AccountTargetMismatch { account: String },
-    AccountUnavailable { account: String },
-    AccountBusy { account: String },
-    AccountSignedIn { account: String },
-    DefaultAccountNotRemovable { account: String },
+    /// The selection does not parse as a known exact account identity.
+    UnknownAccount {
+        /// Refused input, not a fallback credential reference.
+        account: String,
+    },
+    /// The account's route disagrees with the explicit target.
+    AccountTargetMismatch {
+        /// Exact account that failed target validation.
+        account: String,
+    },
+    /// The account has no available credential source.
+    AccountUnavailable {
+        /// Exact account whose credentials are unavailable.
+        account: String,
+    },
+    /// An account operation holds its exclusive lifecycle slot.
+    AccountBusy {
+        /// Exact account whose current operation must settle before retry.
+        account: String,
+    },
+    /// A destructive account action requires sign-out first.
+    AccountSignedIn {
+        /// Account whose signed-in state prevents the action.
+        account: String,
+    },
+    /// Default account identity cannot be deleted like a named account.
+    DefaultAccountNotRemovable {
+        /// Default account whose identity must remain readable.
+        account: String,
+    },
+    /// A recognized route or tool pack was omitted at build time.
     CapabilityUnavailable(CapabilityUnavailable),
 }
 
@@ -250,6 +295,10 @@ impl std::error::Error for AccountAdmissionError {
 }
 
 /// Refuses unknown or omitted accounts without choosing another route.
+///
+/// # Errors
+/// Returns an unknown-account refusal for invalid syntax or a capability
+/// refusal for an omitted route. Success does not prove credentials exist.
 pub fn require(account: &str) -> Result<(), AccountAdmissionError> {
     let selection: crate::account::AccountRef = account.parse()?;
     let route = selection.vertical().capability();
@@ -267,6 +316,10 @@ fn require_route(route: &RouteCapability) -> Result<(), CapabilityUnavailable> {
     })
 }
 
+/// Admit a native route by identity without resolving subscription credentials.
+///
+/// # Errors
+/// Returns a capability refusal for an omitted or unregistered identity.
 pub fn require_native(provider: NativeProvider) -> Result<(), CapabilityUnavailable> {
     if let Some(route) = for_native(provider) {
         return require_route(route);

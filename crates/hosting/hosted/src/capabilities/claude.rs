@@ -9,6 +9,7 @@ use super::{RouteCapability, RouteKind};
 use crate::binding::ResolvedProtocol;
 use plakous::subscriptions::NativeProvider;
 
+/// Claude subscription route facts; never interchangeable with an API-key route.
 pub static CLAUDE: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "claude",

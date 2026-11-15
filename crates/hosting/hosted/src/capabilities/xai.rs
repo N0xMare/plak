@@ -9,6 +9,7 @@ use super::{RouteCapability, RouteKind};
 use crate::binding::PlatformProvider;
 use crate::binding::ResolvedProtocol;
 
+/// xAI direct-API route facts, independent of Grok subscription credentials.
 pub static XAI: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "xai-api",

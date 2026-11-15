@@ -9,6 +9,7 @@ use super::{RouteCapability, RouteKind};
 use crate::binding::PlatformProvider;
 use crate::binding::ResolvedProtocol;
 
+/// OpenAI direct-API route facts, independent of a ChatGPT subscription.
 pub static OPENAI: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "openai",
