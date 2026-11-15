@@ -43,12 +43,12 @@ fn tool_stream(alias: &str) -> String {
         (json!({}), json!("tool_calls")),
     ] {
         stream.push_str(&format!("data: {}\n\n", json!({
-            "id": "gen-deepseek", "object": "chat.completion.chunk", "created": 1787623695,
+            "id": "gen-deepseek", "object": "chat.completion.chunk", "created": 1_787_623_695,
             "model": DEEPSEEK, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]
         })));
     }
     stream.push_str(&format!("data: {}\n\ndata: [DONE]\n\n", json!({
-        "id": "gen-deepseek", "object": "chat.completion.chunk", "created": 1787623695,
+        "id": "gen-deepseek", "object": "chat.completion.chunk", "created": 1_787_623_695,
         "model": DEEPSEEK, "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
         "usage": {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20,
                   "completion_tokens_details": {"reasoning_tokens": 3}}
@@ -62,12 +62,17 @@ fn tool_request(
     ordinal: u128,
 ) -> TestResult<ModelRequest> {
     let initial = request(configured, ordinal)?;
-    Ok(
-        ModelRequest::from_parts(initial.stable_prefix().clone(), input, initial.metadata())?
-            .tools(vec![lookup()?])
-            .tool_choice(ToolChoice::Auto)
-            .build()?,
+    Ok(ModelRequest::builder(
+        configured.configuration().selected_identity(),
+        configured.configuration().effective_identity(),
+        input,
+        initial.metadata(),
     )
+    .tools(vec![lookup()?])
+    .tool_choice(ToolChoice::Auto)
+    .limits(initial.limits().clone())
+    .resolved_harness_plan_identity(initial.resolved_harness_plan_identity().ok_or("plan")?)
+    .build()?)
 }
 
 #[tokio::test]
