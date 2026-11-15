@@ -1774,6 +1774,10 @@ the Grok or Claude manager assumes those subscriptions share their latest
 review date; re-dating one alone fails such a test at review time, never on a
 calendar date. Product commands inject a fixed clock (spec 02 §8.6) and API
 surfaces carry no calendar expiry.
+Facade fixtures that start real provider managers derive consent and their
+facade clock from that provider's own review, not another route's newer review:
+otherwise independently renewing OpenAI future-dates Claude or xAI consent
+against those managers' deterministic clocks.
 
 **A fixture process never outlives its test by more than its bound.** A test
 that dies leaves its spawned processes behind: its temporary directory goes,

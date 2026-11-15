@@ -550,12 +550,12 @@ async fn claude_foreign_profile_is_retired_by_logout_or_replaced_by_login()
         plakous_auth::SecretBytes::new(b"old-opaque-credential".to_vec()),
     )?)?;
     let notice = NativeSubscriptions::notice(NativeProvider::Claude).unwrap();
-    let now = test_now();
+    let now = provider_test_now(NativeProvider::Claude);
     store_acceptance(&paths, notice, now)?;
     let acceptance = load_acceptance_exact(&paths, notice, now)?;
     arm_login_recovery(&paths, NativeProvider::Claude, &acceptance.generation)?;
     let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
-        plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+        plakous_model::FixedClock::new(Timestamp::new(now, 0)?),
     ));
     assert_eq!(
         subscriptions.status(NativeProvider::Claude).await,
@@ -599,7 +599,7 @@ async fn xai_retired_payload_reads_as_profile_changed_and_local_logout_repairs_i
     let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
     paths.prepare()?;
     let notice = NativeSubscriptions::notice(provider).unwrap();
-    let now = test_now();
+    let now = provider_test_now(provider);
     store_acceptance(&paths, notice, now)?;
     let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
     let store = plakous_auth::PrivateCredentialStore::open_slot(
@@ -627,7 +627,7 @@ async fn xai_retired_payload_reads_as_profile_changed_and_local_logout_repairs_i
         plakous_auth::SecretBytes::new(retired),
     )?)?;
     let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
-        plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+        plakous_model::FixedClock::new(Timestamp::new(now, 0)?),
     ));
     // Offline status refuses the record exactly as refresh does; neither
     // reports it Ready, and neither contacts the provider.
@@ -983,13 +983,13 @@ async fn explicit_login_retires_armed_recovery_before_starting_a_fresh_attempt()
         let root = unique_test_root(&format!("logout-empty-recovery-{provider:?}"))?;
         let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
         let notice = NativeSubscriptions::notice(provider).unwrap();
-        let now = test_now();
+        let now = provider_test_now(provider);
         store_acceptance(&paths, notice, now)?;
         let acceptance = load_acceptance_exact(&paths, notice, now)?;
         arm_login_recovery(&paths, provider, &acceptance.generation)?;
 
         let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
-            plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+            plakous_model::FixedClock::new(Timestamp::new(now, 0)?),
         ));
         assert!(!paths.provider_record(provider).exists());
         assert_eq!(
@@ -2825,6 +2825,10 @@ async fn model_catalog_outer_deadline_reports_only_charged_dispatches() {
     ));
 }
 
+fn provider_test_now(provider: NativeProvider) -> u64 {
+    NativeSubscriptions::notice(provider).unwrap().reviewed_at() + 60
+}
+
 fn test_now() -> u64 {
     [
         NativeProvider::Codex,
@@ -2832,8 +2836,7 @@ fn test_now() -> u64 {
         NativeProvider::Claude,
     ]
     .into_iter()
-    .map(|provider| NativeSubscriptions::notice(provider).unwrap().reviewed_at())
+    .map(provider_test_now)
     .max()
     .expect("compiled profiles")
-        + 60
 }
