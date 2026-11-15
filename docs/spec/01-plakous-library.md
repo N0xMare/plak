@@ -4179,7 +4179,8 @@ origin, with the same key) is such a catalog. It attests that a model id
 exists and only the facts that endpoint actually publishes. OpenAI exposes
 identity and ownership/availability metadata, not input/output limits or effort
 levels; those remain bundled reviewed facts. Other providers may publish
-input windows, output limits, effort levels, thinking types and lifecycle. It never decides whether
+input windows, output limits, effort levels, thinking types and lifecycle.
+It never decides whether
 or how a model is driven: a crate-reviewed family rule maps the id to an
 existing capability profile, and pricing thresholds and hosted-feature support
 come only from the provider crate's bundled reviewed table. A listed id with no
@@ -4413,7 +4414,8 @@ full window (1,000,000) admits it.
 
 **OpenAI API-key model catalog.** `plakous::openai` lists model ids with one
 bounded authenticated `GET /v1/models` on `https://api.openai.com` (the same
-API key, `Authorization: Bearer`, at most 2048 rows and 4 MiB). The listing parser admits ids only, ignoring ownership, creation and shutdown
+API key, `Authorization: Bearer`, at most 2048 rows and 4 MiB). The listing
+parser admits ids only, ignoring ownership, creation and shutdown
 metadata. Windows, output bounds, efforts and hosted-feature
 flags come from the bundled reviewed table (`api_models.json`, revision
 `openai.api-models.2026-11-15.v1`), checked against the model pages and, where
@@ -4454,8 +4456,8 @@ row naming an effort or hosted feature the crate does not know fails the
 table rather than being dropped. The cache file is mode `0600` in a directory
 created `0700`, written via a unique temporary name.
 Rows read back from the cache pass the same id checks as a fetched page
-(safe token, no duplicates, row bound). The parsed live page carries ids only; ownership, creation or shutdown metadata
-cannot raise a reviewed limit; an id outside
+(safe token, no duplicates, row bound). The parsed live page carries ids only;
+ownership, creation or shutdown metadata cannot raise a reviewed limit; an id outside
 the table stays `NeedsReview` or `NotCodingModel`. The provider facts digest
 binds the id, profile, effort ladder and output limit only; price thresholds,
 windows and hosted-feature flags are not in it. The listing function has no

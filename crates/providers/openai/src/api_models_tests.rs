@@ -98,7 +98,10 @@ fn newly_documented_models_do_not_inherit_an_enrolled_coding_profile() -> TestRe
     let cyber = find(&models, "gpt-6-cyber");
     assert_eq!(cyber.max_input_tokens(), 922_000);
     assert_eq!(cyber.max_tokens(), 128_000);
-    assert!(cyber.efforts().is_empty(), "the model page states no ladder");
+    assert!(
+        cyber.efforts().is_empty(),
+        "the model page states no ladder"
+    );
     Ok(())
 }
 
