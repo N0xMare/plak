@@ -251,7 +251,12 @@ fn prepared_cut(cut: &str) {
     assert!(!result.status.success());
     let authority = receipts(&fixture);
     assert_eq!(authority[0]["phase"], "prepared");
-    assert!(host.child.as_mut().unwrap().try_wait().unwrap().is_some());
+    let deadline = Instant::now() + WAIT;
+    while host.child.as_mut().unwrap().try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "host did not exit at cut {cut}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(host.child.take().unwrap().wait().unwrap().code(), Some(86));
     let mut restored = start_env(&fixture, &[], &[(ENABLED, "1".into())]);
     assert_eq!(receipts(&fixture)[0]["phase"], "aborted");
     for id in ids {
@@ -266,7 +271,6 @@ fn prepared_cut(cut: &str) {
     );
     assert!(!fixture.root.join("evidence.jsonl").exists() || crash::dispatches(&fixture) == 0);
     stop(&mut restored);
-    assert_eq!(host.child.take().unwrap().wait().unwrap().code(), Some(86));
 }
 
 fn round_trip(cut: Option<&str>) {
