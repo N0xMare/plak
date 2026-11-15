@@ -4533,8 +4533,11 @@ cross-model/account-link allowances. Computer toolsets,
 advisor tools, fast mode, per-message effort and provider fallback are not
 enrolled by this coding profile. In particular, the release's
 `computer_toolset_20260801` and advisor-model restrictions do not authorize
-new tools. Fable 5.2 requires 30-day provider retention unless Anthropic
-expressly authorizes otherwise; this route makes no zero-retention claim.
+new tools. The refreshed table records documented web-fetch support for every
+bundled row and tool-search support for Sonnet 5. These are provider facts,
+not newly enabled hosted tools in the local client-tools execution profile.
+Fable 5.2 requires 30-day provider retention unless Anthropic expressly
+authorizes otherwise; this route makes no zero-retention claim.
 
 The OpenAI Platform manifest and the xAI Platform binding and model table were
 re-reviewed on 2026-11-15 against official release notes, model pages, Responses,

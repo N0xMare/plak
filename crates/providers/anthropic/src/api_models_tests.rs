@@ -140,10 +140,10 @@ fn effort_ladders_are_the_published_levels() -> TestResult {
 fn hosted_feature_flags_follow_the_reviewed_docs() -> TestResult {
     let models = live()?;
     let sonnet5 = find(&models, "claude-sonnet-5").hosted_features();
-    assert!(sonnet5.compaction && sonnet5.hosted_ptc && !sonnet5.tool_search);
+    assert!(sonnet5.compaction && sonnet5.hosted_ptc && sonnet5.tool_search);
     let haiku45 = find(&models, "claude-haiku-4-5-20251001").hosted_features();
     assert!(!haiku45.compaction && !haiku45.hosted_ptc && haiku45.code_execution);
-    assert!(!find(&models, "claude-opus-5-5").hosted_features().web_fetch);
+    assert!(models.iter().all(|model| model.hosted_features().web_fetch));
     Ok(())
 }
 
