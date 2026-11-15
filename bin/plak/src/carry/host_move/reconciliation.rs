@@ -269,28 +269,41 @@ async fn finish_ready(
 
 /// Disposition stays durable while the native client retries harmless cleanup.
 pub(crate) async fn release_disposed(services: &Services, receipt: &mut Receipt) -> CliResult<()> {
+    let mut failures = Vec::new();
     for group in receipt
         .groups
         .iter()
         .filter(|group| matches!(group.phase, GroupPhase::Ready | GroupPhase::Abandoned))
     {
         for runner in &group.runners {
-            let client = if runner == "local" {
+            let Some(client) = (if runner == "local" {
                 services.local_runner_client()
             } else {
                 services.runners().client(runner)
-            }
-            .ok_or_else(|| failure("runner disconnected before witness release"))?;
+            }) else {
+                let detail = format!(
+                    "group {} runner {runner}: disconnected before witness release",
+                    group.id
+                );
+                eprintln!("host upgrade witness release deferred: {detail}");
+                failures.push(detail);
+                continue;
+            };
             let lines = group.lines.iter().cloned().collect::<Vec<_>>();
             for batch in lines.chunks(256) {
-                client
-                    .forget_owner_witnesses(batch)
-                    .await
-                    .map_err(failure)?;
+                if let Err(error) = client.forget_owner_witnesses(batch).await {
+                    let detail = format!("group {} runner {runner}: {error:?}", group.id);
+                    eprintln!("host upgrade witness release deferred: {detail}");
+                    failures.push(detail);
+                }
             }
         }
     }
-    Ok(())
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failure(failures))
+    }
 }
 
 fn allowed(

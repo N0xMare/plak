@@ -91,6 +91,13 @@ fn owner(fence: u64) -> plakous_tools::LineOwner {
 }
 
 async fn client(worker: &Worker) -> (crate::RunnerClient, tokio::task::JoinHandle<()>) {
+    client_instance(worker, "destination").await
+}
+
+async fn client_instance(
+    worker: &Worker,
+    instance: &str,
+) -> (crate::RunnerClient, tokio::task::JoinHandle<()>) {
     let (host, runner) = tokio::io::duplex(64 * 1024);
     let service = worker.service.clone();
     let serving = tokio::spawn(async move { service.serve_connection(runner).await });
@@ -98,7 +105,7 @@ async fn client(worker: &Worker) -> (crate::RunnerClient, tokio::task::JoinHandl
         host,
         Bind {
             host_id: "home".into(),
-            host_instance: "destination".into(),
+            host_instance: instance.into(),
             version: worker.service.hello().version.clone(),
             inspect: false,
         },
@@ -107,6 +114,36 @@ async fn client(worker: &Worker) -> (crate::RunnerClient, tokio::task::JoinHandl
     .await
     .unwrap();
     (client, serving)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retention_live_move_two_live_home_instances_keep_independent_read_and_forget() {
+    let root = tempfile::tempdir().unwrap();
+    let first = Worker::new(root.path(), "first").await;
+    let (_old_link, old) = first.port(root.path(), "old-host", 1).await;
+    let process = old.start(command(), control(205)).await.unwrap();
+    old.promote(process).await.unwrap();
+    let receiver = Worker::new(root.path(), "second").await;
+    let (one, serving_one) = client_instance(&receiver, "one").await;
+    let lines = vec![owner(1).line().to_string()];
+    assert_eq!(one.owner_floors(&lines).await.unwrap()[0].retained.len(), 1);
+    let (two, serving_two) = client_instance(&receiver, "two").await;
+    assert_eq!(two.owner_floors(&lines).await.unwrap()[0].retained.len(), 1);
+    assert_eq!(one.owner_floors(&lines).await.unwrap()[0].retained.len(), 1);
+    one.forget_owner_witnesses(&lines).await.unwrap();
+    let registry = &receiver.service.retention_context().unwrap().registry;
+    assert_eq!(registry.occupancy(|_, _| true).values().sum::<usize>(), 1);
+    one.disconnect();
+    serving_one.await.unwrap();
+    assert_eq!(two.owner_floors(&lines).await.unwrap()[0].retained.len(), 1);
+    two.forget_owner_witnesses(&lines).await.unwrap();
+    assert_eq!(registry.occupancy(|_, _| true).values().sum::<usize>(), 0);
+    assert!(registry.all_entries().is_empty());
+    two.disconnect();
+    serving_two.await.unwrap();
+    old.stop_jobs(plakous_tools::JobStopReason::User, Duration::ZERO)
+        .await
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -317,6 +354,84 @@ async fn stage_pending(
                 .unwrap();
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retention_live_move_job_terminals_refuse_a_pending_delayed_cas_retry() {
+    let root = tempfile::tempdir().unwrap();
+    let first = Worker::new(root.path(), "first").await;
+    let (_old_link, old) = first.port(root.path(), "old-host", 1).await;
+    let process = old.start(command(), control(206)).await.unwrap();
+    old.promote(process).await.unwrap();
+    old.write_stdin(
+        process,
+        b"original-terminal",
+        JoinedProcessInputDisposition::Close,
+        control(207),
+    )
+    .await
+    .unwrap();
+    assert_eq!(finish(&old, process).await, b"original-terminal");
+    let receiver = Worker::new(root.path(), "second").await;
+    let (client, serving) = client(&receiver).await;
+    let context = receiver.service.retention_context().unwrap();
+    let scope = scope("home", "destination").unwrap();
+    stage_pending(
+        &first,
+        &context.registry,
+        &scope,
+        &context.origin,
+        false,
+        true,
+    )
+    .await;
+    let desired = LineOwner {
+        line: owner(3).line().to_string(),
+        generation: 1,
+        branch: owner(3).branch().to_string(),
+        fence: 3,
+    };
+    lock(&receiver.service.inner.tables).transfer(
+        "home",
+        "destination",
+        "pending-native".into(),
+        None,
+        desired.clone(),
+    );
+    let entry = context
+        .registry
+        .entries("home", Some(&desired.line))
+        .remove(0);
+    assert!(!entry.confirmed);
+    assert_eq!(entry.to.fence, 3);
+    assert!(entry.inventory.jobs[0].terminal);
+    assert_eq!(entry.inventory.jobs[0].output, "original-terminal");
+    assert_eq!(
+        lock(&receiver.service.inner.tables)
+            .owner("home", &desired.line)
+            .unwrap()
+            .0,
+        desired
+    );
+    assert!(
+        matches!(
+            tokio::time::timeout(Duration::from_secs(5), client.job_terminals(&desired)).await,
+            Ok(Err(_))
+        ),
+        "an unconfirmed own retry must not supply terminal authority"
+    );
+    assert_eq!(
+        first
+            .service
+            .retention_context()
+            .unwrap()
+            .registry
+            .all_entries()
+            .len(),
+        0
+    );
+    client.disconnect();
+    serving.await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -36,21 +36,24 @@ impl RunnerService {
         owner: &LineOwner,
         after: u32,
     ) -> RunnerFrame {
-        let result = self
-            .terminal_rows(host, instance, owner)
-            .await
-            .map(|mut jobs| {
-                jobs.retain(|job| job.number > after);
-                let more = jobs.len() > PAGE_SIZE;
-                jobs.truncate(PAGE_SIZE);
-                let next = more.then(|| jobs.last().map(|job| job.number)).flatten();
-                RunnerFrame::JobTerminals {
-                    request_id: request_id.clone(),
-                    owner: owner.clone(),
-                    jobs,
-                    next,
-                }
-            });
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(4),
+            self.terminal_rows(host, instance, owner),
+        )
+        .await
+        .unwrap_or_else(|_| Err(unavailable()))
+        .map(|mut jobs| {
+            jobs.retain(|job| job.number > after);
+            let more = jobs.len() > PAGE_SIZE;
+            jobs.truncate(PAGE_SIZE);
+            let next = more.then(|| jobs.last().map(|job| job.number)).flatten();
+            RunnerFrame::JobTerminals {
+                request_id: request_id.clone(),
+                owner: owner.clone(),
+                jobs,
+                next,
+            }
+        });
         result.unwrap_or_else(|refusal| refused(Some(request_id), refusal))
     }
 

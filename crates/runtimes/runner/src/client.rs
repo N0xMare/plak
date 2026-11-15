@@ -877,11 +877,8 @@ impl Inner {
             request_id: Some(id),
             refusal,
         } = &frame
-            && let Some(waiter) = lock(&self.state).questions.remove(id)
+            && self.refuse_inspection(id, refusal)
         {
-            let _ = waiter.send(Err(RunnerFailure::Unavailable(format!(
-                "the runner refused the inspection: {refusal:?}"
-            ))));
             return;
         }
         let (request_id, answer) = match frame {

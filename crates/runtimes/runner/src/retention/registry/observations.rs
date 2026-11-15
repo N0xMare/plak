@@ -21,10 +21,12 @@ impl Observations {
     }
 
     pub(super) fn connected(&mut self, host: &str, instance: &str, connection: u64) {
-        self.peers.retain(|(held, _), _| held != host);
-        self.lines.retain(|(held, _, _), _| held != host);
         self.peers
             .insert((host.into(), instance.into()), connection);
+        self.lines.retain(|(held, peer, _), _| {
+            held != host
+                || peer != instance && self.peers.contains_key(&(held.clone(), peer.clone()))
+        });
     }
 
     pub(super) fn disconnected(&mut self, host: &str, instance: &str, connection: u64) {
@@ -86,14 +88,15 @@ impl Observations {
         }
         next.prune(entries);
         let host = scope.host_id.as_str();
+        let instance = scope.host_instance.as_str();
         let own = next
             .lines
             .iter()
-            .filter(|((held, _, _), _)| held == host)
+            .filter(|((held, peer, _), _)| held == host && peer == instance)
             .collect::<Vec<_>>();
         if own.len() > plakous_runner_protocol::OWNER_FLOOR_QUERY_LIMIT {
             return Err(super::super::invalid(
-                "host read-witness line capacity exceeded (256); dispose observed groups before retrying",
+                "host-instance read-witness line capacity exceeded (256); dispose observed groups before retrying",
             ));
         }
         if own
@@ -114,7 +117,7 @@ impl Observations {
             > 16 * plakous_runner_protocol::retention::MAX_FRAME_BYTES
         {
             return Err(super::super::invalid(
-                "host read-witness byte capacity exceeded (16 MiB); dispose observed groups before retrying",
+                "host-instance read-witness byte capacity exceeded (16 MiB); dispose observed groups before retrying",
             ));
         }
         self.lines = next.lines;

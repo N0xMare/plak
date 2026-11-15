@@ -6601,6 +6601,9 @@ the normal recovery-required path before Ready. The driver's placement parking
   and are sampled again before native prepare and before surrender. A changed
   or missing sampled row refuses before the irreversible decision. Terminal
   output remains readable through the existing job verbs after transfer.
+  Delegated proofs use the same original-worker cache refresh as ordinary
+  retained listing. The complete proof read has a four-second bound; an
+  unreachable or stalled original returns a refusal, never cached proof.
 - **Bounded ownership witnesses.** Only a normally bound host may send
   `OwnerFloors { request_id, lines }`: 1–256 distinct, nonempty line IDs, each
   at most 128 printable non-whitespace ASCII bytes. The reply has one
@@ -6618,7 +6621,8 @@ the normal recovery-required path before Ready. The driver's placement parking
   receiver inventory. At most 256 retained witnesses are returned across the
   response. Only explicitly requested lines enter the receiver's ephemeral
   read-to-CAS cache. It is scoped to the bound host instance, with at most 256
-  cached lines and 16 MiB per host, and 256 origins per line. The next transfer
+  cached lines and 16 MiB per host instance, and 256 origins per line within that
+  instance. The next transfer
   consumes that line's observations. Overflow names the host/line bound and
   refuses without evicting an independent pending
   observation. This cache is not authority: its only use is to persist required
@@ -6632,11 +6636,14 @@ the normal recovery-required path before Ready. The driver's placement parking
   unique bounded line IDs. `OwnerWitnessesForgotten` acknowledges unknown or
   already-cleared lines idempotently. Inspection and qualification refuse it.
   It never changes durable intents, owner floors, jobs or another host's cache.
-  Reconnect/new-instance binding clears the old host-instance observations;
+  Rebinding the same host instance clears its previous connection's observations.
+  A new instance clears only observations of instances without a live connection;
+  another still-connected instance of the same home keeps its independent cache.
   late replies cannot repopulate a retired connection's cache. Disposed groups
   send this release without disconnecting independent groups; failed sends log
   and retry only that idempotent release on the existing native client
-  reconciliation tick, until acknowledgement or connection replacement. This
+  reconciliation tick, until acknowledgement, definitive refusal or connection
+  replacement. A malformed reply is not retried. This
   does not defer Ready or completion acknowledgement.
   The observation never grants control. An unreachable original still cannot accept that CAS or
   pass the final fresh sweep. A fresh native peer with no original witness

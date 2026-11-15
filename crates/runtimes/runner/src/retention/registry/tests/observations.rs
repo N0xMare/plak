@@ -69,20 +69,21 @@ fn retention_observations_forgetting_disposed_lines_preserves_independent_groups
 }
 
 #[test]
-fn retention_observations_reconnect_rejects_late_writes_and_clears_only_the_old_host_scope() {
+fn retention_observations_reconnect_rejects_late_writes_and_clears_only_the_same_instance() {
     let (_root, registry, scope, line, _) = fixture();
     registry.observation_connected("home", "receiver", 1);
     registry.remember(&scope, [discovered(&line, 1)]).unwrap();
     let mut other = scope.clone();
     other.host_id = id("other-host");
     registry.remember(&other, [discovered(&line, 2)]).unwrap();
-    registry.observation_connected("home", "replacement", 2);
+    registry.observation_connected("home", "receiver", 2);
     assert!(
         registry
             .remember_at(&scope, Some(1), [discovered(&line, 3)])
             .is_err()
     );
     registry.observation_disconnected("home", "receiver", 1);
+    assert_eq!(registry.observation_connection(&scope), Some(2));
     assert_eq!(lock(&registry.observed).lines.len(), 1);
     assert_eq!(
         registry
@@ -96,6 +97,42 @@ fn retention_observations_reconnect_rejects_late_writes_and_clears_only_the_old_
         1,
         "reconnect dropped a durable intent"
     );
+}
+
+#[test]
+fn retention_observations_two_live_instances_have_independent_line_capacity() {
+    let (_root, registry, first, line, _) = fixture();
+    let mut second = first.clone();
+    second.host_instance = id("second");
+    registry.observation_connected("home", "receiver", 1);
+    registry
+        .remember_at(
+            &first,
+            Some(1),
+            (0..256).map(|index| discovered(&line, index)),
+        )
+        .unwrap();
+    registry.observation_connected("home", "second", 2);
+    registry
+        .remember_at(
+            &second,
+            Some(2),
+            (256..512).map(|index| discovered(&line, index)),
+        )
+        .unwrap();
+    assert_eq!(lock(&registry.observed).lines.len(), 512);
+    assert!(
+        registry
+            .remember_at(&first, Some(1), [discovered(&line, 512)])
+            .is_err()
+    );
+    registry.forget_observations("home", "receiver", &["line-0".into()]);
+    registry
+        .remember_at(&first, Some(1), [discovered(&line, 512)])
+        .unwrap();
+    registry.observation_disconnected("home", "receiver", 1);
+    assert_eq!(lock(&registry.observed).lines.len(), 256);
+    assert_eq!(registry.observation_connection(&second), Some(2));
 }
 
 #[test]

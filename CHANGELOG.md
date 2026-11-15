@@ -35,6 +35,10 @@ for one version bump, without native protocol compatibility.
   when the continuation is admitted. Pin in-turn notices after continuation
   and user-prompt admission, without a duplicate idle wake.
 
+- Keep ownership-move witnesses independent across live instances of one home,
+  finish disposed-group cleanup independently, and qualify dormant prepare-time
+  terminal proofs against crashes, drift and foreign allocations.
+
 - Carry retained, unconsumed terminal jobs using exact original-worker proofs,
   without acknowledging their output. Recheck those proofs under source holds
   before native preparation and surrender.

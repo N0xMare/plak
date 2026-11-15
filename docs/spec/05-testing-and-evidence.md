@@ -460,8 +460,16 @@ Terminal-proof cases separately pin complete multi-page original-worker reads,
 owner mismatch and interrupted/partial-page refusal, with no journal claims or
 acknowledgements. Normal process-output reads still work after proof sampling.
 A real promoted shell job exits while its agent notice remains unconsumed; the
-move carries its exact allocation, number floor and output tail, not a process
-list's inference of idleness. Foreign-branch, lower
+move carries its exact allocation, number floor and output tail. Ordinary
+handoff can record this terminal, so that case is not prepare-time proof
+evidence. A separate real-binary case kills the source host while the promoted
+job runs, restarts it, and lets the original exit while its session stays
+dormant. Before upgrade no native terminal exists; the move hold must write
+the original tail and exactly one LineJobTerminalRecorded fact. Response faults
+drop the sampled proof before native preparation and before surrender; each
+refuses precommit and restores source admissions. Matching job numbers with
+foreign allocation IDs or owner generations also refuse. None infers terminal
+authority from process-list idleness. Foreign-branch, lower
 and higher witnesses withhold both trees in a connected group across two host
 starts, with no native branch-fence advance or partial visibility. A daemon
 outage after publication must leave only its group withheld while an unrelated

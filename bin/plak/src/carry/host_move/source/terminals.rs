@@ -25,14 +25,23 @@ impl Proof {
         &self,
         services: &Services,
         runtime: &tokio::runtime::Handle,
+        before_surrender: bool,
     ) -> CliResult<()> {
-        let current = runtime
+        let mut current = runtime
             .block_on(client(services, &self.runner)?.job_terminals(&self.owner))
             .map_err(|error| {
                 failure(format!(
                     "original runner terminal proof is unknown: {error:?}"
                 ))
             })?;
+        let fault = if before_surrender {
+            "terminal-proof-before-surrender"
+        } else {
+            "terminal-proof-before-prepare"
+        };
+        if crate::test_hooks::upgrade_move_failure(fault) {
+            current.clear();
+        }
         if self.jobs.iter().any(|job| !current.contains(job)) {
             return Err(failure(
                 "sampled original runner terminal changed or disappeared; no source surrendered",
@@ -100,13 +109,14 @@ impl Inventory {
                     "terminal witness is outside the exact carried source",
                 ));
             }
-            let all = runtime
+            let mut all = runtime
                 .block_on(client.job_terminals(&owner))
                 .map_err(|error| {
                     failure(format!(
                         "original runner terminal proof is unknown: {error:?}"
                     ))
                 })?;
+            sample_reply_faults(&mut all)?;
             let mut jobs = Vec::new();
             for row in required {
                 let job = all
@@ -169,6 +179,21 @@ impl Inventory {
         }
         Err(failure("terminal line has no represented runner placement"))
     }
+}
+
+fn sample_reply_faults(jobs: &mut [Job]) -> CliResult<()> {
+    for job in jobs {
+        if crate::test_hooks::upgrade_move_failure("terminal-proof-wrong-session") {
+            job.session = plakous::runner::protocol::retention::Id::try_from(
+                "ffffffffffffffffffffffffffffffff".to_owned(),
+            )
+            .map_err(failure)?;
+        }
+        if crate::test_hooks::upgrade_move_failure("terminal-proof-wrong-generation") {
+            job.owner_generation = if job.owner_generation == 1 { 2 } else { 1 };
+        }
+    }
+    Ok(())
 }
 
 fn evidence(job: &Job) -> CliResult<MoveLineTerminal> {

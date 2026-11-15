@@ -208,6 +208,44 @@ fn link_cancelled_during_journal_claim_is_unclaimed_without_queuing() {
     assert_not_sent(false);
 }
 
+#[tokio::test]
+async fn refused_witness_release_does_not_retry_even_after_its_waiter_was_dropped() {
+    for dropped in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let journal = Arc::new(ClosingJournal {
+            files: FileCallJournal::open(root.path()).unwrap(),
+            closer: CancellationToken::new(),
+            claims: AtomicU64::new(0),
+        });
+        let (client, mut frames) = connected(&journal);
+        let releasing = client.clone();
+        let mut release = Some(tokio::spawn(async move {
+            releasing.forget_owner_witnesses(&["disposed".into()]).await
+        }));
+        let HostFrame::ForgetOwnerWitnesses { request_id, .. } = frames.recv().await.unwrap()
+        else {
+            panic!("witness release")
+        };
+        if dropped {
+            let release = release.take().unwrap();
+            release.abort();
+            assert!(release.await.unwrap_err().is_cancelled());
+        }
+        client.inner.receive(RunnerFrame::Refused {
+            request_id: Some(request_id),
+            refusal: Refusal::OwnerNotTransferred,
+        });
+        if let Some(release) = release {
+            assert!(release.await.unwrap().is_err());
+        }
+        client.inner.retry_witness_releases();
+        assert!(frames.try_recv().is_err());
+        assert!(lock(&client.inner.state).witness_releases.is_empty());
+        assert!(lock(&client.inner.state).questions.is_empty());
+        assert_eq!(journal.claims.load(Ordering::Relaxed), 0);
+    }
+}
+
 fn assert_not_sent(disconnect_first: bool) {
     let root = tempfile::tempdir().unwrap();
     let journal = Arc::new(ClosingJournal {

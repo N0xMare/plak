@@ -1,5 +1,39 @@
 use super::*;
 
+#[tokio::test]
+async fn disposed_witness_cleanup_attempts_every_group_and_runner_after_missing_peers() {
+    let home = tempfile::tempdir().unwrap();
+    let services = Services::for_home(crate::home::paths::PlakPaths::explicit(
+        home.path().to_path_buf(),
+    ));
+    let group = |id: &str, phase: &str, runners: &[&str]| {
+        serde_json::json!({
+            "id":id,"operation":vec![1;32],"trees":[],"products":[],"sessions":[],
+            "lines":["line"],"runners":runners,"source_digest":null,"source_retired":true,
+            "target_digest":null,"phase":phase,"abandon_error":null,
+            "abandon_retry_after":null,"transfers":{}
+        })
+    };
+    let mut receipt: Receipt = serde_json::from_value(serde_json::json!({
+        "version":1,"id":uuid::Uuid::new_v4(),"sequence":1,"source_key":"source",
+        "source_instance":"instance","source_binary":"source","source_executable":"/source/plak",
+        "host_argv":["host"],"destination_key":"destination","destination_binary":"target",
+        "destination":"/target/plak","phase":"acknowledged","source_archival_pending":false,
+        "mappings":[],"groups":[group("first","ready", &["missing-a","missing-b"]),
+            group("second","abandoned", &["missing-c"]),
+            group("pending","published", &["not-disposed"])]
+    }))
+    .unwrap();
+    let error = release_disposed(&services, &mut receipt).await.unwrap_err();
+    for name in ["first", "second", "missing-a", "missing-b", "missing-c"] {
+        assert!(
+            error.message().contains(name),
+            "missing aggregate failure for {name}: {error:?}"
+        );
+    }
+    assert!(!error.message().contains("not-disposed"));
+}
+
 fn owner(generation: u64, fence: u64) -> WireOwner {
     WireOwner {
         line: "line".into(),

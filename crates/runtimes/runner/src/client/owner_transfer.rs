@@ -59,10 +59,22 @@ impl RunnerClient {
             ));
         }
         match tokio::time::timeout(self.inner.windows.read, answer).await {
-            Ok(Ok(Ok(super::InspectionAnswer::OwnerWitnessesForgotten))) => Ok(()),
-            Ok(Ok(Err(error))) => Err(error),
-            _ => Err(RunnerFailure::ReadInterrupted(
-                "witness release was lost or malformed".into(),
+            Ok(Ok(reply)) => match reply {
+                Ok(super::InspectionAnswer::OwnerWitnessesForgotten) => Ok(()),
+                Ok(
+                    super::InspectionAnswer::Lines(_)
+                    | super::InspectionAnswer::OwnerFloors(_)
+                    | super::InspectionAnswer::JobTerminals { .. },
+                ) => {
+                    lock(&self.inner.state).witness_releases.remove(&request_id);
+                    Err(RunnerFailure::ReadInterrupted(
+                        "witness release reply was malformed".into(),
+                    ))
+                }
+                Err(error) => Err(error),
+            },
+            Ok(Err(_)) | Err(_) => Err(RunnerFailure::ReadInterrupted(
+                "witness release reply was lost".into(),
             )),
         }
     }
@@ -171,6 +183,22 @@ pub(crate) fn valid_floor_query(lines: &[String]) -> bool {
 }
 
 impl Inner {
+    pub(super) fn refuse_inspection(
+        &self,
+        id: &str,
+        refusal: &plakous_runner_protocol::Refusal,
+    ) -> bool {
+        let mut state = lock(&self.state);
+        let release = state.witness_releases.remove(id).is_some();
+        if let Some(waiter) = state.questions.remove(id) {
+            let _ = waiter.send(Err(RunnerFailure::Unavailable(format!(
+                "the runner refused the inspection: {refusal:?}"
+            ))));
+            return true;
+        }
+        release
+    }
+
     pub(super) fn witnesses_forgotten(&self, request_id: &str) {
         let mut state = lock(&self.state);
         state.witness_releases.remove(request_id);

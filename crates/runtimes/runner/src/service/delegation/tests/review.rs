@@ -67,7 +67,7 @@ async fn job_terminals_refresh_original_workers_and_refuse_unreachable_cached_pr
             .job_terminals("home", "same", "unavailable".into(), &owner, 0),
     )
     .await;
-    assert!(matches!(answer, Ok(RunnerFrame::Refused { .. }) | Err(_)));
+    assert!(matches!(answer, Ok(RunnerFrame::Refused { .. })));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

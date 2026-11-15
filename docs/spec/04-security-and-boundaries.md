@@ -956,6 +956,13 @@ one exact accepted owner. It exposes bounded original-worker terminal proof
 and retained output only; it grants no effects, adoption, leases or consumption.
 Unknown, incomplete or owner-mismatched reads cannot settle a source job.
 
+Binding inspection v1 is an ephemeral source-owned semantic report, not an
+export carrier or an ownership, replay or admission authority. It travels in a
+private `NamedTempFile` under the private home/run directory and is bounded to
+32 MiB. Its decoder uses `deny_unknown_fields` and accepts version 1 only.
+The destination checks this report before drain; it never opens the source
+key's native stores or treats the report as permission to execute them.
+
 Runner placement uses pin-backed stable machine identity and effective canonical
 roots even while a runner is offline. Same-machine pin/root admission and local
 workspace admission share a home-local cross-process file lock through the local

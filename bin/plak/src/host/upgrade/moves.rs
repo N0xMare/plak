@@ -154,7 +154,7 @@ fn commit_source(
         .as_mut()
         .ok_or_else(|| CliFailure::new("source move guard missing"))?;
     for proof in &guard.proofs {
-        proof.recheck(services, runtime)?;
+        proof.recheck(services, runtime, true)?;
     }
     ready.pause.commit()?;
     guard.committing = true;
@@ -360,7 +360,7 @@ fn prepare_group(
     let operation = MoveOperation::new(capsule.operation)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     for proof in &initial.proofs {
-        proof.recheck(services, runtime)?;
+        proof.recheck(services, runtime, false)?;
     }
     frozen.proofs.extend(initial.proofs);
     let native = executor
@@ -421,7 +421,7 @@ fn freeze_branches(
     runtime: &tokio::runtime::Handle,
 ) -> CliResult<()> {
     for proof in &initial.proofs {
-        proof.recheck(services, runtime)?;
+        proof.recheck(services, runtime, false)?;
     }
     let executor = plakous::application::ApplicationExecutor::new()
         .map_err(|error| CliFailure::new(error.to_string()))?;
