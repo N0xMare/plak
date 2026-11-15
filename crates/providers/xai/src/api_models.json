@@ -1,11 +1,15 @@
 {
-  "revision": "xai.api-models.2026-10-09.v1",
-  "reviewed_at": "2026-10-09",
+  "revision": "xai.api-models.2026-11-15.v1",
+  "reviewed_at": "2026-11-15",
   "sources": [
-    "GET https://api.x.ai/v1/models (2026-10-09; context_length)",
-    "GET https://api.x.ai/v1/language-models (2026-10-09; reasoning_effort, long_context_threshold 200000)"
+    "https://docs.x.ai/developers/release-notes (2026-11-15; public model configuration, context and long-context threshold)",
+    "https://docs.x.ai/developers/models/grok-4.3 (2026-11-15; context and efforts)",
+    "https://docs.x.ai/developers/models/grok-4.5 (2026-11-15; context and efforts)",
+    "https://docs.x.ai/developers/models/grok-4.6 (2026-11-15; context and efforts)",
+    "https://docs.x.ai/developers/models/grok-4.7 (2026-11-15; context, efforts and capabilities)",
+    "https://docs.x.ai/developers/model-capabilities/text/reasoning (2026-11-15; encrypted reasoning replay)"
   ],
-  "output_rule": "xAI publishes no output limit. The output bound is the working window (the long-context price threshold when the list states one, otherwise the full context).",
+  "output_rule": "xAI publishes no text output limit. Plakous reserves min(128000, context_length / 2) tokens for output within the shared context; the input working window is capped at the long-context price threshold.",
   "models": [
     {
       "id": "grok-4.20-0309-non-reasoning",

@@ -47,6 +47,7 @@ use uuid::Uuid;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
+mod deepseek;
 #[path = "multi_wire_loopback/step_hold.rs"]
 mod step_hold;
 
@@ -1516,6 +1517,21 @@ async fn discovered_chat_model(
     client: Client,
     origin: String,
 ) -> TestResult<plakous_model::ConfiguredLanguageModel> {
+    discovered_chat_model_with(
+        client,
+        origin,
+        MODEL,
+        behavior("openrouter.chat.dynamic-v1", "openrouter-chat-retention-v1")?,
+    )
+    .await
+}
+
+async fn discovered_chat_model_with(
+    client: Client,
+    origin: String,
+    model: &str,
+    behavior: ProviderBehaviorConfiguration,
+) -> TestResult<plakous_model::ConfiguredLanguageModel> {
     let source = Arc::new(plakous_openrouter::static_openrouter_api_key_source(
         ApiKey::new("offline-loopback-key")?,
         "offline-account",
@@ -1530,7 +1546,7 @@ async fn discovered_chat_model(
     let evidence = route
         .discover_chat_model(
             &client,
-            MODEL,
+            model,
             OpenRouterChatDiscoveryConfig {
                 operation_timeout: Duration::from_secs(5),
                 maximum_body_bytes: 64 * 1_024,
@@ -1549,7 +1565,7 @@ async fn discovered_chat_model(
             route,
             evidence,
             chat_context,
-            behavior("openrouter.chat.dynamic-v1", "openrouter-chat-retention-v1")?,
+            behavior,
             client,
         )?,
     )

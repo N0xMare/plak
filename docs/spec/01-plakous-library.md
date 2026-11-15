@@ -4508,11 +4508,16 @@ ladder and output limit only. `anthropic_api_key_fingerprint` is the first 16 he
 domain-separated SHA-256 of the key, for keying a cache: not a credential, but
 a candidate key can be checked against it, so it stays in owner-only files.
 
-The OpenAI Platform manifest was re-reviewed on 2026-11-15 against official
-model, Responses, tool-calling, reasoning and storage documentation, with no
-change to the five admitted profiles; its review is due at
-2027-02-13T00:00:00Z. The xAI Platform binding retains its 2026-10-30 review,
-due at 2027-01-28T00:00:00Z. Both are documented public APIs and
+The OpenAI Platform manifest and the xAI Platform binding and model table were
+re-reviewed on 2026-11-15 against official release notes, model pages, Responses,
+function-calling, reasoning and storage documentation. The OpenAI review keeps
+its five admitted coding profiles; `gpt-6.1-sol` remains unenrolled. The xAI
+review retains its four coding enrollments and conservative capabilities;
+Grok 4.7 Fast remains subscription-only, not an API enrollment. Grok 4.7's
+default encrypted reasoning output is already preserved and replayed unchanged
+by the Responses host. Optional `safety_identifier` and moderation `guidelines`
+are not sent. Both documented public API reviews are due at
+2027-02-13T00:00:00Z, but the routes
 never refuse on the calendar: construction, preparation and runtime
 revalidation ignore the review date, built-in facts carry no expiry, and a
 skewed clock before the review date refuses nothing. The review-due date drives
@@ -4526,7 +4531,7 @@ authenticated `GET /v1/models` on `https://api.x.ai` (the same API key,
 `Authorization: Bearer`, at most 2048 rows and 4 MiB). A second page
 (`has_more` or a cursor), an unknown `lifecycle`, or an unparseable `created`
 or limit fails the listing. The bundled reviewed table (`api_models.json`,
-revision `xai.api-models.2026-10-09.v1`) carries `context_length`, the
+revision `xai.api-models.2026-11-15.v1`) carries `context_length`, the
 200,000-token long-context price threshold and the effort ladder; an effort
 name off the ladder fails the table. xAI publishes no output limit and input
 and output share `context_length`, so the output bound is reserved out of it:
@@ -4774,8 +4779,17 @@ final usage chunk that repeats `finish_reason`, `reasoning` and
 `reasoning_details`, tool calls, and the pre-commit JSON and mid-stream
 `error` shapes were last reviewed against the public
 [OpenRouter docs](https://openrouter.ai/docs/api_reference/streaming) on
-2026-10-30, with no change to pinned facts. The review is due again at
-2027-01-28T00:00:00Z, 90 days later. OpenRouter is a documented public API, so
+2026-11-15, with no change to pinned facts. The review is due again at
+2027-02-13T00:00:00Z, 90 days later. The review also covers the official
+[tool-calling](https://openrouter.ai/docs/guides/features/tool-calling),
+[reasoning](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens),
+[error](https://openrouter.ai/docs/api/reference/errors-and-debugging) and
+[attribution](https://openrouter.ai/docs/app-attribution) contracts. DeepSeek
+models use this same dynamic Chat route: indexed streamed function calls and
+correlated `role: tool` results, with `reasoning` or `reasoning_content` bound
+per response. The offline DeepSeek round trip is a synthetic protocol witness,
+not live qualification of a model or serving endpoint. OpenRouter is a
+documented public API, so
 the review-due date never refuses the route: an authority's validity is the
 discovery evidence's expiry alone, and the built-in dialect facts carry no
 expiry. The test-only `test-clock` feature permits a route clock shared by
@@ -5275,12 +5289,43 @@ limit (`InvalidTokenResponse`). Body transport failures preserve their network
 classification. These paths use the shared `AuthBodyError` directly, not a
 usage-only alias, and never retain response bodies in diagnostics.
 
-SuperGrok's `x-grok-client-version` is `1.0.70`, the value native Grok Build
-1.0.70 sends. Native Grok derives this proxy version-gate value from its CLI
-version, not a fixed protocol version. The 2026-10-30 offline native request
-capture confirms 1.0.70 and the existing proxy headers and Responses request
-shape. The wire change advances the xAI Responses adapter revision to v8;
-the OIDC client, scope, endpoint and consent pins are unchanged.
+SuperGrok's `x-grok-client-version` is `1.0.77`, the stable release confirmed on
+2026-11-15 by both official installer channel pointers (`https://x.ai/cli/stable`
+and its documented storage fallback), independently of npm's `latest` tag.
+The official npm Linux artifact identifies itself as `1.0.77 (50ca579fa996)`;
+its version-gate header is derived from that CLI version, not a fixed protocol
+version. The isolated native recorder confirms `/v1/models`, `/v1/responses`,
+`store: false`, `include: ["reasoning.encrypted_content"]`, named effort and the
+existing token-auth/response-authentication markers. Plakous keeps its truthful
+client identifier and interactive mode rather than copying the recorder's
+native `grok-shell` / headless identity. The wire pin advances the xAI Responses
+adapter revision to v10 in the same unshipped epoch-38 cut; it adds no state-key
+transition. Existing model enrollments remain. The public source mirror at
+`2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8` (`SOURCE_REV`
+`559751fdcec02d413e4c57c8832ab275e4f44980`) is not the released artifact's
+source commit and is not substituted for its provenance.
+
+The isolated native OAuth initiation retains the public client, PKCE S256 and
+nonce, but also requests `conversations:read`, `conversations:write`,
+`workspaces:read` and `workspaces:write` for cloud features. Plakous does not
+implement those features and retains its narrower six requested scopes, fixed
+redirect and truthful `referrer=plak`; the current official OIDC discovery
+still advertises all six and the pinned endpoints. An isolated expired-token
+refresh sends the same `client_id`, `grant_type=refresh_token` and
+`refresh_token` form to the token endpoint; no extra scopes are requested.
+No consent facts or `oauth_pins` change is made, and the subscription profile's existing
+2026-10-30 review / 2027-01-28 expiry is not renewed by this wire review.
+
+The release artifact is
+[`@xai-official/grok-linux-x64@1.0.77`](https://registry.npmjs.org/@xai-official/grok-linux-x64/1.0.77):
+archive SHA-256 `09025f571741742aac83edaeebab934288b0ad816acae05003a85f849b888e51`,
+decompressed executable SHA-256
+`b702950aa5827d855e493278ab6215a4e0f5bceb5bba6c6243a9f55cdd143b0a`.
+The [installer](https://x.ai/cli/install.sh) names its stable fallback as
+`https://storage.googleapis.com/grok-build-public-artifacts/cli/stable`.
+The official changelog locations returned HTTP 403 during this review; no
+release-note claim is inferred from them. The recorder used only synthetic
+local credentials and did not qualify a subscription account or paid traffic.
 
 Claude OAuth Messages inference uses the pinned Claude Code 2.1.314 gateway
 costume — HTTP attribution plus `system[0]`/`system[1]`, with native `cch` body

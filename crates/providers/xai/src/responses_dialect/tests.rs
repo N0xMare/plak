@@ -41,6 +41,7 @@ fn supergrok_rejects_product_composition_tool_presentations() {
 
 #[test]
 fn request_route_and_revision_facts_match_the_supergrok_golden() {
+    assert_eq!(SUPERGROK_REFERENCE_CLIENT_VERSION, "1.0.77");
     let facts = SUPERGROK_RESPONSES_DIALECT;
     assert_eq!(
         json!({

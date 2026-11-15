@@ -31,7 +31,7 @@ pub(crate) const SUPERGROK_MODELS_PATH: &str = "/v1/models";
 /// Exact SuperGrok Responses resource path.
 pub const SUPERGROK_RESPONSES_PATH: &str = "/v1/responses";
 /// Reviewed native reference version sent in subscription request headers.
-pub const SUPERGROK_REFERENCE_CLIENT_VERSION: &str = "1.0.70";
+pub const SUPERGROK_REFERENCE_CLIENT_VERSION: &str = "1.0.77";
 /// Stable request/adapter revision retained by admission and recovery facts.
 pub const XAI_RESPONSES_ADAPTER_REVISION: &str =
     supergrok_tool_image_adapter_revision(SUPERGROK_ALLOW_TOOL_RESULT_IMAGES);
@@ -47,9 +47,9 @@ pub(crate) const fn supergrok_request_policy(allow_tool_images: bool) -> Respons
 #[must_use]
 pub const fn supergrok_tool_image_adapter_revision(allowed: bool) -> &'static str {
     if allowed {
-        "plakous-xai-responses-adapter-v9-tool-images"
+        "plakous-xai-responses-adapter-v10-tool-images"
     } else {
-        "plakous-xai-responses-adapter-v9-text-tool-results"
+        "plakous-xai-responses-adapter-v10-text-tool-results"
     }
 }
 /// Exact reviewed route/model capability-table revision.

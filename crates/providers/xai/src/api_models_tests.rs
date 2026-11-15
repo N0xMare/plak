@@ -72,7 +72,7 @@ fn the_fixture_classifies_the_reviewed_family() {
     ));
     assert_eq!(
         bundled_table().unwrap().revision,
-        "xai.api-models.2026-10-09.v1"
+        "xai.api-models.2026-11-15.v1"
     );
 }
 
