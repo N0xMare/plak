@@ -16,6 +16,20 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 pub(super) mod production_fence;
 mod ready_fence;
 
+tokio::task_local! {
+    static STOP_OPEN_HOLD: (LineId, Arc<tokio::sync::Notify>, Arc<tokio::sync::Semaphore>);
+}
+
+pub(super) async fn hold_stop_open<F: Future>(line: LineId, opening: F) -> F::Output {
+    if let Ok((held_line, entered, release)) = STOP_OPEN_HOLD.try_with(Clone::clone)
+        && held_line == line
+    {
+        entered.notify_one();
+        let _permit = release.acquire().await.unwrap();
+    }
+    opening.await
+}
+
 async fn line_runner(
     workspace: &std::path::Path,
     line: LineId,
@@ -475,7 +489,6 @@ async fn a_delayed_stop_revalidates_a_later_accepted_submission_under_the_head()
 
 #[tokio::test]
 async fn a_stale_stop_attempt_preserves_a_new_pending_set_and_context() {
-    use std::future::Future as _;
     let mut harness = StopHarness::new(true).await;
     let second = stopped_runtime_named("review:create-second").await;
     assert_ne!(harness.fixture.line, second.line);
@@ -493,18 +506,23 @@ async fn a_stale_stop_attempt_preserves_a_new_pending_set_and_context() {
             generation: 1,
         },
     )])));
-    let mut attempt = Box::pin(retry_stops(
-        registry.clone(),
-        "review".into(),
-        retries.clone(),
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let mut attempt = Box::pin(STOP_OPEN_HOLD.scope(
+        (harness.fixture.line, entered.clone(), release.clone()),
+        retry_stops(registry.clone(), "review".into(), retries.clone()),
     ));
-    // Poll into the lease-open await while the branch still holds the line.
-    // Keeping this future local prevents it resuming before the replacement.
-    std::future::poll_fn(|context| {
-        assert!(attempt.as_mut().poll(context).is_pending());
-        std::task::Poll::Ready(())
+    // Capture the old retry, then hold its lease open across the replacement.
+    // A branch hold refuses an open; it does not guarantee a Pending poll.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::select! {
+            biased;
+            () = &mut attempt => panic!("stop attempt completed before the lease-open hold"),
+            () = entered.notified() => {}
+        }
     })
-    .await;
+    .await
+    .unwrap();
     complete_reconciliation(
         &second.services.with_runner_registry(registry.clone()),
         "review",
@@ -513,6 +531,7 @@ async fn a_stale_stop_attempt_preserves_a_new_pending_set_and_context() {
         &retries,
     );
     harness.release_holder().await;
+    release.add_permits(1);
     attempt.await;
     let state = retries.lock().unwrap();
     let retry = &state["review"];

@@ -113,7 +113,7 @@ async fn boundary_hold_before_dispatch_does_not_spend_the_foreground_tool_deadli
     let env = environment(directory.path())?;
     let tools = ProcessSessionTools::posix_sh()?;
     let request = CanonicalProcessStartRequest {
-        command: "printf started > started; read line".into(),
+        command: "read line".into(),
         workdir: ".".into(),
         login: false,
         tty: false,
@@ -126,27 +126,18 @@ async fn boundary_hold_before_dispatch_does_not_spend_the_foreground_tool_deadli
     // Host coordination may retain inputs, but no executor clock runs until dispatch.
     tokio::time::advance(Duration::from_secs(600)).await;
     let waiting = tools.start_canonical(&env, request, control);
-    tokio::pin!(waiting);
-    loop {
-        tokio::select! {
-            biased;
-            result = &mut waiting => panic!("foreground deadline expired before its own window: {:?}", result?.projection),
-            () = tokio::task::yield_now() => {
-                if directory.path().join("started").exists() { break; }
-            }
-        }
-    }
-    tokio::time::advance(Duration::from_millis(999)).await;
-    let pending = std::future::poll_fn(|context| {
-        std::task::Poll::Ready(waiting.as_mut().poll(context).is_pending())
-    })
-    .await;
+    // Process startup and the supervisor run on OS threads. A shell marker
+    // cannot prove the async caller has received the start and armed its timer.
+    tokio::time::resume();
+    let began = tokio::time::Instant::now();
+    let result = tokio::time::timeout(Duration::from_secs(30), waiting).await;
+    let elapsed = began.elapsed();
+    tokio::time::pause();
+    let result = result??;
     assert!(
-        pending,
+        elapsed >= Duration::from_secs(1),
         "time before dispatch spent the tool's foreground allowance"
     );
-    tokio::time::advance(Duration::from_millis(2)).await;
-    let result = without_advancing(waiting).await?;
     assert!(!result.joined);
     assert!(
         result.first_promotion,

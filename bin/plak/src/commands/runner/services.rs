@@ -393,7 +393,10 @@ async fn stop_only_followup(
         };
         let operation = SessionOperationId::new(format!("plak:host:stop-retry:{line}"))
             .map_err(|error| CliFailure::new(error.to_string()))?;
-        let head = match sessions.open_lease_only(&operation, line).await {
+        let opening = sessions.open_lease_only(&operation, line);
+        #[cfg(test)]
+        let opening = tests::hold_stop_open(line, opening);
+        let head = match opening.await {
             Ok(head) => head,
             Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => continue,
             Err(_) => {
