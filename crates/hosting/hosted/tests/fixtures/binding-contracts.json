@@ -38974,7 +38974,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -39876,7 +39876,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "8f866ce228cfc3f65d01e2444d26b62be7030bd81441c70c7bf42c1d53cff235",
+          "bytes": "fb5c1e50f8ecf591dcf562db324ed537b50d4ee2db33cdfb015117b14b169e32",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -39894,7 +39894,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "031ed1b7c11a097b98c39076a7e332c8b6081e3b692ddc53b61c312d41b8c1fa",
+          "bytes": "5a0daee42396ddc4d10ec6b6d4f0e018fb5e231b1a5d16fc8e0efc54d6841b1d",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -39924,7 +39924,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -40730,7 +40730,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "031ed1b7c11a097b98c39076a7e332c8b6081e3b692ddc53b61c312d41b8c1fa",
+          "bytes": "5a0daee42396ddc4d10ec6b6d4f0e018fb5e231b1a5d16fc8e0efc54d6841b1d",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -40740,7 +40740,7 @@
           "authority_class": "oauth-subscription",
           "credential_selection": "primary",
           "integration_profile": "xai.grok.compat.2026-07-31.r1",
-          "integration_revision": "plakous-xai-responses-adapter-v9-tool-images",
+          "integration_revision": "plakous-xai-responses-adapter-v10-tool-images",
           "protocol": "xai.responses.grok-subscription.2026-07",
           "requested_model": "grok-4.6",
           "route": "xai.grok_subscription"
@@ -40751,14 +40751,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "8f866ce228cfc3f65d01e2444d26b62be7030bd81441c70c7bf42c1d53cff235",
+      "bytes": "fb5c1e50f8ecf591dcf562db324ed537b50d4ee2db33cdfb015117b14b169e32",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "8f866ce228cfc3f65d01e2444d26b62be7030bd81441c70c7bf42c1d53cff235",
+        "bytes": "fb5c1e50f8ecf591dcf562db324ed537b50d4ee2db33cdfb015117b14b169e32",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -40777,14 +40777,14 @@
       "route": "xai.grok_subscription",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "031ed1b7c11a097b98c39076a7e332c8b6081e3b692ddc53b61c312d41b8c1fa",
+        "bytes": "5a0daee42396ddc4d10ec6b6d4f0e018fb5e231b1a5d16fc8e0efc54d6841b1d",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "1939268d3988308b3464692077132d774fdb965640ec9a9e32e5627604b55d3e",
+      "bytes": "15eda88403184db512a6cd3e3b1b04c971be6476432efea775e2c88f9f0ad51a",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -40810,7 +40810,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "293dfe8d7fa24d9c3ce1cce64a360e52d7c395561ca1a8af92a0a050aba6213e",
+      "bytes": "9b1b7af114ca899971f7b3b2a30c748d4f2d7e46534bc5eba557d1113b8d5611",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -41192,7 +41192,7 @@
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "031ed1b7c11a097b98c39076a7e332c8b6081e3b692ddc53b61c312d41b8c1fa",
+      "bytes": "5a0daee42396ddc4d10ec6b6d4f0e018fb5e231b1a5d16fc8e0efc54d6841b1d",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -41291,7 +41291,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -42546,7 +42546,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "2ab7f5c798a941d6266f574d51795dc6f6c69779c21fff728c7a7231fddebf96",
+          "bytes": "170a2b75c9bad03bd96de2d2808e06317f14e084bb81c5cacf27bae1e88bf2b9",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -42564,7 +42564,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "eea17043c6c02c3b3e05f51d3d671e6e896f79131e09b777b81da9f826f1dbcc",
+          "bytes": "585fc8261abc8155f8c3c326c36e8c101651020e069bee99dc2fec9a896362ed",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -42594,7 +42594,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -43753,7 +43753,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "eea17043c6c02c3b3e05f51d3d671e6e896f79131e09b777b81da9f826f1dbcc",
+          "bytes": "585fc8261abc8155f8c3c326c36e8c101651020e069bee99dc2fec9a896362ed",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -43763,7 +43763,7 @@
           "authority_class": "oauth-subscription",
           "credential_selection": "primary",
           "integration_profile": "xai.grok.compat.2026-07-31.r1",
-          "integration_revision": "plakous-xai-responses-adapter-v9-tool-images",
+          "integration_revision": "plakous-xai-responses-adapter-v10-tool-images",
           "protocol": "xai.responses.grok-subscription.2026-07",
           "requested_model": "grok-4.6",
           "route": "xai.grok_subscription"
@@ -43774,14 +43774,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "2ab7f5c798a941d6266f574d51795dc6f6c69779c21fff728c7a7231fddebf96",
+      "bytes": "170a2b75c9bad03bd96de2d2808e06317f14e084bb81c5cacf27bae1e88bf2b9",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "2ab7f5c798a941d6266f574d51795dc6f6c69779c21fff728c7a7231fddebf96",
+        "bytes": "170a2b75c9bad03bd96de2d2808e06317f14e084bb81c5cacf27bae1e88bf2b9",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -43800,14 +43800,14 @@
       "route": "xai.grok_subscription",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "eea17043c6c02c3b3e05f51d3d671e6e896f79131e09b777b81da9f826f1dbcc",
+        "bytes": "585fc8261abc8155f8c3c326c36e8c101651020e069bee99dc2fec9a896362ed",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "363cb7475d25c6eb120d0cd46c70d57648d7cd325dde8ee71b83699f6d2d0cac",
+      "bytes": "bd278aa14030dce571e5c80bf44dbe1e5ac2670a048548911cff2085c07d14ad",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -43833,7 +43833,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "d9f3736b857f5af98c1674c88a80de28dcb0b6abe1ed69402be6e1f51380455d",
+      "bytes": "77a0cb83dbc7f1d94975b15941af54fd10f5e2f8b74ebe54c67ce47022e4deed",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -44330,7 +44330,7 @@
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "eea17043c6c02c3b3e05f51d3d671e6e896f79131e09b777b81da9f826f1dbcc",
+      "bytes": "585fc8261abc8155f8c3c326c36e8c101651020e069bee99dc2fec9a896362ed",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -44426,7 +44426,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -44668,7 +44668,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "f1f04c9715f800ca2f5084d53b311d78fa57ad0e793aeb7a11004c02ca99187c",
+          "bytes": "e8f67425d867628145284129b3a108f5e36e079311a2803c9ccceb387864d2e2",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -44686,7 +44686,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "ac5b226250cf3746e889b0cbf65c04cc56b4e96d5760cc0fe5b2c2b57124ce7e",
+          "bytes": "72681875cbf7620a2aa75887cf949a1926e31e1b8bf208c1cecf5ba6bc05ca67",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -44716,7 +44716,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -44862,7 +44862,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "ac5b226250cf3746e889b0cbf65c04cc56b4e96d5760cc0fe5b2c2b57124ce7e",
+          "bytes": "72681875cbf7620a2aa75887cf949a1926e31e1b8bf208c1cecf5ba6bc05ca67",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -44872,7 +44872,7 @@
           "authority_class": "oauth-subscription",
           "credential_selection": "primary",
           "integration_profile": "xai.grok.compat.2026-07-31.r1",
-          "integration_revision": "plakous-xai-responses-adapter-v9-tool-images",
+          "integration_revision": "plakous-xai-responses-adapter-v10-tool-images",
           "protocol": "xai.responses.grok-subscription.2026-07",
           "requested_model": "grok-4.6",
           "route": "xai.grok_subscription"
@@ -44883,14 +44883,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "f1f04c9715f800ca2f5084d53b311d78fa57ad0e793aeb7a11004c02ca99187c",
+      "bytes": "e8f67425d867628145284129b3a108f5e36e079311a2803c9ccceb387864d2e2",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "f1f04c9715f800ca2f5084d53b311d78fa57ad0e793aeb7a11004c02ca99187c",
+        "bytes": "e8f67425d867628145284129b3a108f5e36e079311a2803c9ccceb387864d2e2",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -44909,14 +44909,14 @@
       "route": "xai.grok_subscription",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "ac5b226250cf3746e889b0cbf65c04cc56b4e96d5760cc0fe5b2c2b57124ce7e",
+        "bytes": "72681875cbf7620a2aa75887cf949a1926e31e1b8bf208c1cecf5ba6bc05ca67",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "cd1b2ec1863ab73541ea4d63a267895259040417454d95f91387205c668aa5df",
+      "bytes": "c0703c475e17af83fcef05d1f893069f116bef842b98f565eba9c9f192b2a650",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -44942,7 +44942,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "c7ff46d72054d5f954127fb8bf70e55982e58882e85a10a633066d1aed1070ee",
+      "bytes": "20435bb4ae79f48febf164f5cc1455753e4622ed91cb88bbbcf08d6e6d3db198",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -45370,7 +45370,7 @@
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "ac5b226250cf3746e889b0cbf65c04cc56b4e96d5760cc0fe5b2c2b57124ce7e",
+      "bytes": "72681875cbf7620a2aa75887cf949a1926e31e1b8bf208c1cecf5ba6bc05ca67",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -45471,7 +45471,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -45713,7 +45713,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "f1f04c9715f800ca2f5084d53b311d78fa57ad0e793aeb7a11004c02ca99187c",
+          "bytes": "e8f67425d867628145284129b3a108f5e36e079311a2803c9ccceb387864d2e2",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -45731,7 +45731,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "ac5b226250cf3746e889b0cbf65c04cc56b4e96d5760cc0fe5b2c2b57124ce7e",
+          "bytes": "72681875cbf7620a2aa75887cf949a1926e31e1b8bf208c1cecf5ba6bc05ca67",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -45761,7 +45761,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -45907,7 +45907,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "ac5b226250cf3746e889b0cbf65c04cc56b4e96d5760cc0fe5b2c2b57124ce7e",
+          "bytes": "72681875cbf7620a2aa75887cf949a1926e31e1b8bf208c1cecf5ba6bc05ca67",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -45917,7 +45917,7 @@
           "authority_class": "oauth-subscription",
           "credential_selection": "primary",
           "integration_profile": "xai.grok.compat.2026-07-31.r1",
-          "integration_revision": "plakous-xai-responses-adapter-v9-tool-images",
+          "integration_revision": "plakous-xai-responses-adapter-v10-tool-images",
           "protocol": "xai.responses.grok-subscription.2026-07",
           "requested_model": "grok-4.6",
           "route": "xai.grok_subscription"
@@ -45928,14 +45928,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "f1f04c9715f800ca2f5084d53b311d78fa57ad0e793aeb7a11004c02ca99187c",
+      "bytes": "e8f67425d867628145284129b3a108f5e36e079311a2803c9ccceb387864d2e2",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "f1f04c9715f800ca2f5084d53b311d78fa57ad0e793aeb7a11004c02ca99187c",
+        "bytes": "e8f67425d867628145284129b3a108f5e36e079311a2803c9ccceb387864d2e2",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -45954,14 +45954,14 @@
       "route": "xai.grok_subscription",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "ac5b226250cf3746e889b0cbf65c04cc56b4e96d5760cc0fe5b2c2b57124ce7e",
+        "bytes": "72681875cbf7620a2aa75887cf949a1926e31e1b8bf208c1cecf5ba6bc05ca67",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "14b3d19f369cf0447a60344b72f8e99689f8d82e047a6d6cf3fdce0d71eaa9c2",
+      "bytes": "b4808ce701d30a5a072cb49cf15ab9544f24f9a1f9236d44f9b99d2adbcd3095",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -45987,7 +45987,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "af963e74ce2a52b68009c756a4a95ff0c40fd026a8623ff09f37182889770427",
+      "bytes": "24179eef65b69ecb6146dd07d3993e144cf0b0b471ec63766d80df0b060a0405",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -46530,7 +46530,7 @@
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "ac5b226250cf3746e889b0cbf65c04cc56b4e96d5760cc0fe5b2c2b57124ce7e",
+      "bytes": "72681875cbf7620a2aa75887cf949a1926e31e1b8bf208c1cecf5ba6bc05ca67",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -46627,7 +46627,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -46867,7 +46867,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "0056183cf64d1cf0e18f00f474a86d6e8c1bfc5d6813786e420084d84c59ad36",
+          "bytes": "2170c1b42dc739600ef8c0ba300f690dd1680f5b2cfd99081823d0a9006faf9a",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -46885,7 +46885,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "baa932b3c734439b8eecc2a54184db3a9bc00e99183960f4bc96e867a3613de0",
+          "bytes": "ad7365814f51e9616a27f21662cd946b82f415d12158dbf1e1671cfd5b1b0a6f",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -46915,7 +46915,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -47059,7 +47059,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "baa932b3c734439b8eecc2a54184db3a9bc00e99183960f4bc96e867a3613de0",
+          "bytes": "ad7365814f51e9616a27f21662cd946b82f415d12158dbf1e1671cfd5b1b0a6f",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -47069,7 +47069,7 @@
           "authority_class": "oauth-subscription",
           "credential_selection": "primary",
           "integration_profile": "xai.grok.compat.2026-07-31.r1",
-          "integration_revision": "plakous-xai-responses-adapter-v9-tool-images",
+          "integration_revision": "plakous-xai-responses-adapter-v10-tool-images",
           "protocol": "xai.responses.grok-subscription.2026-07",
           "requested_model": "grok-4.6",
           "route": "xai.grok_subscription"
@@ -47080,14 +47080,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "0056183cf64d1cf0e18f00f474a86d6e8c1bfc5d6813786e420084d84c59ad36",
+      "bytes": "2170c1b42dc739600ef8c0ba300f690dd1680f5b2cfd99081823d0a9006faf9a",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "0056183cf64d1cf0e18f00f474a86d6e8c1bfc5d6813786e420084d84c59ad36",
+        "bytes": "2170c1b42dc739600ef8c0ba300f690dd1680f5b2cfd99081823d0a9006faf9a",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -47106,14 +47106,14 @@
       "route": "xai.grok_subscription",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "baa932b3c734439b8eecc2a54184db3a9bc00e99183960f4bc96e867a3613de0",
+        "bytes": "ad7365814f51e9616a27f21662cd946b82f415d12158dbf1e1671cfd5b1b0a6f",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "e785fc8f3b15a04d52568eb6a6097a5e7d640954379fe5677bdff7cc29f681db",
+      "bytes": "e8d7c4d337395cce04dab908d7716338e11739fee6b7b70bd9c1c0c185dad11c",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -47139,7 +47139,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "30ce13ec7395739c56ec99f8220b62e541ad311d157edd929e67b64e86cbe179",
+      "bytes": "2d0a5a619b806c04d8ca13f6bd04331e6833a80cc9e7af63269c93522c765d3c",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -47590,7 +47590,7 @@
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "baa932b3c734439b8eecc2a54184db3a9bc00e99183960f4bc96e867a3613de0",
+      "bytes": "ad7365814f51e9616a27f21662cd946b82f415d12158dbf1e1671cfd5b1b0a6f",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -47692,7 +47692,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -47932,7 +47932,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "0056183cf64d1cf0e18f00f474a86d6e8c1bfc5d6813786e420084d84c59ad36",
+          "bytes": "2170c1b42dc739600ef8c0ba300f690dd1680f5b2cfd99081823d0a9006faf9a",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -47950,7 +47950,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "baa932b3c734439b8eecc2a54184db3a9bc00e99183960f4bc96e867a3613de0",
+          "bytes": "ad7365814f51e9616a27f21662cd946b82f415d12158dbf1e1671cfd5b1b0a6f",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -47980,7 +47980,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -48124,7 +48124,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "baa932b3c734439b8eecc2a54184db3a9bc00e99183960f4bc96e867a3613de0",
+          "bytes": "ad7365814f51e9616a27f21662cd946b82f415d12158dbf1e1671cfd5b1b0a6f",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -48134,7 +48134,7 @@
           "authority_class": "oauth-subscription",
           "credential_selection": "primary",
           "integration_profile": "xai.grok.compat.2026-07-31.r1",
-          "integration_revision": "plakous-xai-responses-adapter-v9-tool-images",
+          "integration_revision": "plakous-xai-responses-adapter-v10-tool-images",
           "protocol": "xai.responses.grok-subscription.2026-07",
           "requested_model": "grok-4.6",
           "route": "xai.grok_subscription"
@@ -48145,14 +48145,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "0056183cf64d1cf0e18f00f474a86d6e8c1bfc5d6813786e420084d84c59ad36",
+      "bytes": "2170c1b42dc739600ef8c0ba300f690dd1680f5b2cfd99081823d0a9006faf9a",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "0056183cf64d1cf0e18f00f474a86d6e8c1bfc5d6813786e420084d84c59ad36",
+        "bytes": "2170c1b42dc739600ef8c0ba300f690dd1680f5b2cfd99081823d0a9006faf9a",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -48171,14 +48171,14 @@
       "route": "xai.grok_subscription",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "baa932b3c734439b8eecc2a54184db3a9bc00e99183960f4bc96e867a3613de0",
+        "bytes": "ad7365814f51e9616a27f21662cd946b82f415d12158dbf1e1671cfd5b1b0a6f",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "eb181b8ad3de923832c1d082bad362aedb4f4dedc46474d2ae5f7bae489f8edb",
+      "bytes": "fc390efb0456dd0cdb65971f860e8d97708cf37242976a697c06804cc9f77d8c",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -48204,7 +48204,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "631b23265a24285f2e7527cf0dc7756851cf9d71bcbe3e3aaa0c20b99193af2c",
+      "bytes": "55ca8c75d9874e1014d3dd9bb7654dc5d7b2e3637e79facaf0ac8cf3982e9903",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -48770,7 +48770,7 @@
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "baa932b3c734439b8eecc2a54184db3a9bc00e99183960f4bc96e867a3613de0",
+      "bytes": "ad7365814f51e9616a27f21662cd946b82f415d12158dbf1e1671cfd5b1b0a6f",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -48865,7 +48865,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -49028,7 +49028,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "fef1863caae688dc2ff2f3fe69ce335e2c02564714e0113943dbfe87c8c4a91c",
+          "bytes": "53613639096b318f0e3e7c0e5685cb78ebd7f2326144edc39dc086e03d07507b",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -49046,7 +49046,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "2114d4b8bd613958fc1e7246d0f49c9afa03b7dd3281d582e6e369fdc326bf59",
+          "bytes": "22cfaeac3f3d4de5a36253dcda61226df0ad851287ebfc89a2fab360a1e2c679",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -49076,7 +49076,7 @@
           "retention": {
             "RouteContract": {
               "profile": "xai.grok.compat.2026-07-31.r1",
-              "revision": "plakous-xai-responses-adapter-v9-tool-images"
+              "revision": "plakous-xai-responses-adapter-v10-tool-images"
             }
           },
           "storage": "DisabledOnWire",
@@ -49143,7 +49143,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "2114d4b8bd613958fc1e7246d0f49c9afa03b7dd3281d582e6e369fdc326bf59",
+          "bytes": "22cfaeac3f3d4de5a36253dcda61226df0ad851287ebfc89a2fab360a1e2c679",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -49153,7 +49153,7 @@
           "authority_class": "oauth-subscription",
           "credential_selection": "primary",
           "integration_profile": "xai.grok.compat.2026-07-31.r1",
-          "integration_revision": "plakous-xai-responses-adapter-v9-tool-images",
+          "integration_revision": "plakous-xai-responses-adapter-v10-tool-images",
           "protocol": "xai.responses.grok-subscription.2026-07",
           "requested_model": "grok-4.6",
           "route": "xai.grok_subscription"
@@ -49164,14 +49164,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "fef1863caae688dc2ff2f3fe69ce335e2c02564714e0113943dbfe87c8c4a91c",
+      "bytes": "53613639096b318f0e3e7c0e5685cb78ebd7f2326144edc39dc086e03d07507b",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "fef1863caae688dc2ff2f3fe69ce335e2c02564714e0113943dbfe87c8c4a91c",
+        "bytes": "53613639096b318f0e3e7c0e5685cb78ebd7f2326144edc39dc086e03d07507b",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -49190,14 +49190,14 @@
       "route": "xai.grok_subscription",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "2114d4b8bd613958fc1e7246d0f49c9afa03b7dd3281d582e6e369fdc326bf59",
+        "bytes": "22cfaeac3f3d4de5a36253dcda61226df0ad851287ebfc89a2fab360a1e2c679",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "998a7242ca273a8db90cd6831fa998a26c2cc7c646a4cee9c65caa1cfff9fb53",
+      "bytes": "3a57253dbf80618120144066dada2b90cd3ab57a06f900417a3c8ca938719158",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -49223,7 +49223,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "c760321c6f7ca77537a8811670d67feaeacdce82488f6611b91a7f1f4dec533f",
+      "bytes": "3f69ee9995964245bb91ca4e2c82ebcff0a95544c8e316bbc27d27d04f11950b",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -49628,7 +49628,7 @@
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "2114d4b8bd613958fc1e7246d0f49c9afa03b7dd3281d582e6e369fdc326bf59",
+      "bytes": "22cfaeac3f3d4de5a36253dcda61226df0ad851287ebfc89a2fab360a1e2c679",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -76721,7 +76721,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -76736,7 +76736,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -76751,7 +76751,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -79652,7 +79652,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -79667,7 +79667,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -79682,7 +79682,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -82219,7 +82219,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -82234,7 +82234,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -82249,7 +82249,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -83895,7 +83895,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -83910,7 +83910,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -83925,7 +83925,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -85680,7 +85680,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -85695,7 +85695,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -85710,7 +85710,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -87376,7 +87376,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -87391,7 +87391,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -87406,7 +87406,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -89103,7 +89103,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -89118,7 +89118,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -89133,7 +89133,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -105218,7 +105218,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -105233,7 +105233,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -105248,7 +105248,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -108953,7 +108953,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -108968,7 +108968,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -108983,7 +108983,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -112324,7 +112324,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -112339,7 +112339,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -112354,7 +112354,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -114804,7 +114804,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -114819,7 +114819,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -114834,7 +114834,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -117393,7 +117393,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -117408,7 +117408,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -117423,7 +117423,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -119893,7 +119893,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -119908,7 +119908,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -119923,7 +119923,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -122424,7 +122424,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -122439,7 +122439,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -122454,7 +122454,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -125537,7 +125537,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -125552,7 +125552,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -125567,7 +125567,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -125582,7 +125582,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -125616,12 +125616,12 @@
                 "expires_at": null,
                 "observed_at": {
                   "nanoseconds": 0,
-                  "seconds": 1793318400
+                  "seconds": 1794700800
                 }
               },
               "identity": {
                 "algorithm": "Sha256",
-                "bytes": "5313c8ee5e2d40395ec9a2fc31453a1277f7b25ba312ffceaa2a0eb017d2e88c",
+                "bytes": "621060711718f74e8172757b25c624dbe6a33ecb8f3fe106d5a03983fb086a59",
                 "domain": "ContextBudget",
                 "version": 3
               },
@@ -125637,7 +125637,7 @@
             },
             "identity": {
               "algorithm": "Sha256",
-              "bytes": "39230f067075f0f708ca46c847ccf248826deae61d2c9890dc34009628605482",
+              "bytes": "da27e9015fb2cce2d6185047ad0aff46a50d4d279bb94024136e9cdd2f7391d1",
               "domain": "ContextBudget",
               "version": 4
             },
@@ -125654,12 +125654,12 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   }
                 },
                 "identity": {
                   "algorithm": "Sha256",
-                  "bytes": "b61e5154682cb1fd8644d9b9bd5b1990cb042019f302ea7d1a7da35a7bbf450d",
+                  "bytes": "9da5e9e4ff21331ab334b708081d23800dd115617e81aaacae19486578a26e81",
                   "domain": "TokenMeasurement",
                   "version": 3
                 },
@@ -129561,7 +129561,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -129576,7 +129576,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -129591,7 +129591,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -129606,7 +129606,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -129640,12 +129640,12 @@
                 "expires_at": null,
                 "observed_at": {
                   "nanoseconds": 0,
-                  "seconds": 1793318400
+                  "seconds": 1794700800
                 }
               },
               "identity": {
                 "algorithm": "Sha256",
-                "bytes": "5313c8ee5e2d40395ec9a2fc31453a1277f7b25ba312ffceaa2a0eb017d2e88c",
+                "bytes": "621060711718f74e8172757b25c624dbe6a33ecb8f3fe106d5a03983fb086a59",
                 "domain": "ContextBudget",
                 "version": 3
               },
@@ -129661,7 +129661,7 @@
             },
             "identity": {
               "algorithm": "Sha256",
-              "bytes": "39230f067075f0f708ca46c847ccf248826deae61d2c9890dc34009628605482",
+              "bytes": "da27e9015fb2cce2d6185047ad0aff46a50d4d279bb94024136e9cdd2f7391d1",
               "domain": "ContextBudget",
               "version": 4
             },
@@ -129678,12 +129678,12 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   }
                 },
                 "identity": {
                   "algorithm": "Sha256",
-                  "bytes": "b61e5154682cb1fd8644d9b9bd5b1990cb042019f302ea7d1a7da35a7bbf450d",
+                  "bytes": "9da5e9e4ff21331ab334b708081d23800dd115617e81aaacae19486578a26e81",
                   "domain": "TokenMeasurement",
                   "version": 3
                 },
@@ -133037,7 +133037,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -133052,7 +133052,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -133067,7 +133067,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -133082,7 +133082,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -133116,12 +133116,12 @@
                 "expires_at": null,
                 "observed_at": {
                   "nanoseconds": 0,
-                  "seconds": 1793318400
+                  "seconds": 1794700800
                 }
               },
               "identity": {
                 "algorithm": "Sha256",
-                "bytes": "5313c8ee5e2d40395ec9a2fc31453a1277f7b25ba312ffceaa2a0eb017d2e88c",
+                "bytes": "621060711718f74e8172757b25c624dbe6a33ecb8f3fe106d5a03983fb086a59",
                 "domain": "ContextBudget",
                 "version": 3
               },
@@ -133137,7 +133137,7 @@
             },
             "identity": {
               "algorithm": "Sha256",
-              "bytes": "39230f067075f0f708ca46c847ccf248826deae61d2c9890dc34009628605482",
+              "bytes": "da27e9015fb2cce2d6185047ad0aff46a50d4d279bb94024136e9cdd2f7391d1",
               "domain": "ContextBudget",
               "version": 4
             },
@@ -133154,12 +133154,12 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   }
                 },
                 "identity": {
                   "algorithm": "Sha256",
-                  "bytes": "b61e5154682cb1fd8644d9b9bd5b1990cb042019f302ea7d1a7da35a7bbf450d",
+                  "bytes": "9da5e9e4ff21331ab334b708081d23800dd115617e81aaacae19486578a26e81",
                   "domain": "TokenMeasurement",
                   "version": 3
                 },
@@ -135436,7 +135436,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -135451,7 +135451,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -135466,7 +135466,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -135481,7 +135481,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -135515,12 +135515,12 @@
                 "expires_at": null,
                 "observed_at": {
                   "nanoseconds": 0,
-                  "seconds": 1793318400
+                  "seconds": 1794700800
                 }
               },
               "identity": {
                 "algorithm": "Sha256",
-                "bytes": "5313c8ee5e2d40395ec9a2fc31453a1277f7b25ba312ffceaa2a0eb017d2e88c",
+                "bytes": "621060711718f74e8172757b25c624dbe6a33ecb8f3fe106d5a03983fb086a59",
                 "domain": "ContextBudget",
                 "version": 3
               },
@@ -135536,7 +135536,7 @@
             },
             "identity": {
               "algorithm": "Sha256",
-              "bytes": "39230f067075f0f708ca46c847ccf248826deae61d2c9890dc34009628605482",
+              "bytes": "da27e9015fb2cce2d6185047ad0aff46a50d4d279bb94024136e9cdd2f7391d1",
               "domain": "ContextBudget",
               "version": 4
             },
@@ -135553,12 +135553,12 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   }
                 },
                 "identity": {
                   "algorithm": "Sha256",
-                  "bytes": "b61e5154682cb1fd8644d9b9bd5b1990cb042019f302ea7d1a7da35a7bbf450d",
+                  "bytes": "9da5e9e4ff21331ab334b708081d23800dd115617e81aaacae19486578a26e81",
                   "domain": "TokenMeasurement",
                   "version": 3
                 },
@@ -137944,7 +137944,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -137959,7 +137959,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -137974,7 +137974,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -137989,7 +137989,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -138023,12 +138023,12 @@
                 "expires_at": null,
                 "observed_at": {
                   "nanoseconds": 0,
-                  "seconds": 1793318400
+                  "seconds": 1794700800
                 }
               },
               "identity": {
                 "algorithm": "Sha256",
-                "bytes": "5313c8ee5e2d40395ec9a2fc31453a1277f7b25ba312ffceaa2a0eb017d2e88c",
+                "bytes": "621060711718f74e8172757b25c624dbe6a33ecb8f3fe106d5a03983fb086a59",
                 "domain": "ContextBudget",
                 "version": 3
               },
@@ -138044,7 +138044,7 @@
             },
             "identity": {
               "algorithm": "Sha256",
-              "bytes": "39230f067075f0f708ca46c847ccf248826deae61d2c9890dc34009628605482",
+              "bytes": "da27e9015fb2cce2d6185047ad0aff46a50d4d279bb94024136e9cdd2f7391d1",
               "domain": "ContextBudget",
               "version": 4
             },
@@ -138061,12 +138061,12 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   }
                 },
                 "identity": {
                   "algorithm": "Sha256",
-                  "bytes": "b61e5154682cb1fd8644d9b9bd5b1990cb042019f302ea7d1a7da35a7bbf450d",
+                  "bytes": "9da5e9e4ff21331ab334b708081d23800dd115617e81aaacae19486578a26e81",
                   "domain": "TokenMeasurement",
                   "version": 3
                 },
@@ -140363,7 +140363,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -140378,7 +140378,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -140393,7 +140393,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -140408,7 +140408,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -140442,12 +140442,12 @@
                 "expires_at": null,
                 "observed_at": {
                   "nanoseconds": 0,
-                  "seconds": 1793318400
+                  "seconds": 1794700800
                 }
               },
               "identity": {
                 "algorithm": "Sha256",
-                "bytes": "5313c8ee5e2d40395ec9a2fc31453a1277f7b25ba312ffceaa2a0eb017d2e88c",
+                "bytes": "621060711718f74e8172757b25c624dbe6a33ecb8f3fe106d5a03983fb086a59",
                 "domain": "ContextBudget",
                 "version": 3
               },
@@ -140463,7 +140463,7 @@
             },
             "identity": {
               "algorithm": "Sha256",
-              "bytes": "39230f067075f0f708ca46c847ccf248826deae61d2c9890dc34009628605482",
+              "bytes": "da27e9015fb2cce2d6185047ad0aff46a50d4d279bb94024136e9cdd2f7391d1",
               "domain": "ContextBudget",
               "version": 4
             },
@@ -140480,12 +140480,12 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   }
                 },
                 "identity": {
                   "algorithm": "Sha256",
-                  "bytes": "b61e5154682cb1fd8644d9b9bd5b1990cb042019f302ea7d1a7da35a7bbf450d",
+                  "bytes": "9da5e9e4ff21331ab334b708081d23800dd115617e81aaacae19486578a26e81",
                   "domain": "TokenMeasurement",
                   "version": 3
                 },
@@ -142813,7 +142813,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -142828,7 +142828,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -142843,7 +142843,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -142858,7 +142858,7 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   },
                   "source": "BuiltIn"
                 },
@@ -142892,12 +142892,12 @@
                 "expires_at": null,
                 "observed_at": {
                   "nanoseconds": 0,
-                  "seconds": 1793318400
+                  "seconds": 1794700800
                 }
               },
               "identity": {
                 "algorithm": "Sha256",
-                "bytes": "5313c8ee5e2d40395ec9a2fc31453a1277f7b25ba312ffceaa2a0eb017d2e88c",
+                "bytes": "621060711718f74e8172757b25c624dbe6a33ecb8f3fe106d5a03983fb086a59",
                 "domain": "ContextBudget",
                 "version": 3
               },
@@ -142913,7 +142913,7 @@
             },
             "identity": {
               "algorithm": "Sha256",
-              "bytes": "39230f067075f0f708ca46c847ccf248826deae61d2c9890dc34009628605482",
+              "bytes": "da27e9015fb2cce2d6185047ad0aff46a50d4d279bb94024136e9cdd2f7391d1",
               "domain": "ContextBudget",
               "version": 4
             },
@@ -142930,12 +142930,12 @@
                   "expires_at": null,
                   "observed_at": {
                     "nanoseconds": 0,
-                    "seconds": 1793318400
+                    "seconds": 1794700800
                   }
                 },
                 "identity": {
                   "algorithm": "Sha256",
-                  "bytes": "b61e5154682cb1fd8644d9b9bd5b1990cb042019f302ea7d1a7da35a7bbf450d",
+                  "bytes": "9da5e9e4ff21331ab334b708081d23800dd115617e81aaacae19486578a26e81",
                   "domain": "TokenMeasurement",
                   "version": 3
                 },
