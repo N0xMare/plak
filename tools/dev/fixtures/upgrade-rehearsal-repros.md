@@ -146,6 +146,13 @@ dormant durability fixture. Their cuts are source prepare, source commit,
 destination tree seed and native publication. They do not substitute for the
 two failing cases above or for future live/parked-tree qualification.
 
+The mixed dormant case stops its source host before releasing the promoted
+process. The process exits under its retained original worker while no idle
+driver can consume the notice during the remaining fixture inspections. Its
+captured move capsule must therefore contain the full terminal output and
+unchanged job-number floor, rather than a legitimately consumed exit notice
+that has already joined canonical history.
+
 The later bootstrap candidate
 `d6fab92455ab7b8082b49df585ef6e06ac726c29` (binary `eabc21b8fc9c`) also
 passes all four bootstrap observations from A `9e9785efe` / `816c1472acbd`.

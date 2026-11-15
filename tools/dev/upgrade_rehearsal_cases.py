@@ -607,8 +607,15 @@ def carry(case, *, cut=None, jobs=True):
         case.interrupt_child(child_root)
     sessions = [seeded, child_root]
     ordinary = list(sessions)
-    job_session = case.create("job") if jobs else None
+    job_session = case.create("job", release=False) if jobs else None
     if job_session:
+        # Keep the ordinary idle driver from consuming the terminal during fixture inspection.
+        case.stop()
+        (case.path / "job-release").touch()
+        case.s.wait_for(
+            lambda: (case.path / "job-done").exists(),
+            "dormant mixed process reached terminal output",
+        )
         sessions.append(job_session)
     case.script("idle")
     before = case.exports("source", ordinary)

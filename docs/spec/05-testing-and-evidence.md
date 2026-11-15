@@ -515,6 +515,9 @@ test capability; ordinary builds do not read these hooks.
 
 The dormant bound-child cases preserve product, tree, child, native session,
 branch and line identities, frozen product tool definitions and child history.
+The mixed fixture stops its source host before releasing its promoted process,
+so ordinary idle-driver delivery cannot consume the terminal during inspection;
+its move capsule must retain the complete output and job-number floor.
 Canonical root histories compare as complete export values. Child history
 inspection ignores only checkpoint-derived presentation-entry keys, retaining
 content, order, multiplicity and tool-call/result counts. Prepared, Committed,
