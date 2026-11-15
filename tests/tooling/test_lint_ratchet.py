@@ -26,6 +26,29 @@ class LintRatchetInventoryTests(unittest.TestCase):
     def inventory(self, files, roots=("src/lib.rs",)):
         return checker.lint_ratchet_inventory(files, set(roots))
 
+    def test_missing_docs_counts_module_item_and_conditional_suppressions(self):
+        inventory = self.inventory(
+            {
+                "src/lib.rs": (
+                    "//! Library.\n#![allow(missing_docs, reason = \"debt\")]\n"
+                    "#[allow(missing_docs, reason = \"module contract pending\")]\nmod a;\n"
+                    "mod inline { #![expect(missing_docs, reason = \"pending\")] }\n"
+                    "#[cfg_attr(test, allow(missing_docs))]\nmod b;\n"
+                    "// #[allow(missing_docs)]\n"
+                    '#[doc = "#[allow(missing_docs)]"]\n'
+                    "#[deny(missing_docs)]\nmod c;\n"
+                ),
+                "src/a.rs": '#![allow(missing_docs, reason = "module contract pending")]\n',
+                "tests/suite.rs": "#![expect(missing_docs)]\n",
+            },
+            roots=("src/lib.rs", "tests/suite.rs"),
+        )
+        self.assertEqual(
+            inventory["missing-docs"],
+            ["src/a.rs:1", "src/lib.rs:3", "src/lib.rs:5", "src/lib.rs:6"],
+        )
+        self.assertEqual(inventory["crate-wide-missing-docs"], ["src/lib.rs:2", "tests/suite.rs:1"])
+
     def test_item_level_and_crate_wide_suppressions_are_counted_apart(self):
         inventory = self.inventory(
             {
@@ -175,6 +198,41 @@ class LintRatchetValidationTests(unittest.TestCase):
     def test_exact_ceilings_pass(self):
         self.assertEqual(self.validate(self.EXACT), [])
 
+    def test_missing_docs_enrollment_is_exact_and_rejects_crate_wide_opt_outs(self):
+        inventory = {
+            **self.INVENTORY,
+            "missing-docs": ["src/lib.rs:8"],
+            "crate-wide-missing-docs": [],
+        }
+        exact = {**self.EXACT, "missing-docs-ceiling": 1}
+        self.assertEqual(self.validate(exact, inventory), [])
+        self.assertTrue(
+            any(
+                "missing-docs count 1 exceeds its ceiling 0" in error
+                for error in self.validate({**exact, "missing-docs-ceiling": 0}, inventory)
+            )
+        )
+        self.assertTrue(
+            any(
+                "set missing-docs-ceiling = 1" in error
+                for error in self.validate({**exact, "missing-docs-ceiling": 2}, inventory)
+            )
+        )
+        self.assertTrue(
+            any(
+                "must be a nonnegative integer" in error
+                for error in self.validate({**exact, "missing-docs-ceiling": True}, inventory)
+            )
+        )
+        self.assertTrue(
+            any(
+                "crate-wide missing_docs suppression src/lib.rs:1 is not permitted" in error
+                for error in self.validate(
+                    exact, {**inventory, "crate-wide-missing-docs": ["src/lib.rs:1"]}
+                )
+            )
+        )
+
     def test_above_a_ceiling_fails_and_below_must_be_lowered(self):
         errors = self.validate({**self.EXACT, "too-many-lines-ceiling": 1, "large-file-ceiling": 2})
         self.assertIn(
@@ -247,6 +305,10 @@ class LintRatchetValidationTests(unittest.TestCase):
 
     def test_the_workspace_ratchet_is_exact_and_lives_in_package_manifests(self):
         workspace = checker.load_workspace(checker.ROOT)
+        self.assertIn(
+            "missing-docs-ceiling",
+            checker.package_lint_rule(workspace.packages["plakous-hosted"]),
+        )
         self.assertNotIn("lint", workspace.root_manifest["workspace"]["metadata"]["plakous"])
         directories = {package.directory for package in workspace.packages.values()}
         for name, package in sorted(workspace.packages.items()):

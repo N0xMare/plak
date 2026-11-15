@@ -33,11 +33,6 @@
     reason = "inherited by the hosted extraction, which allowed \
               these crate-wide; tightening them is its own change"
 )]
-#![allow(
-    missing_docs,
-    reason = "hosted extraction; the public surface is \
-              documented as it is narrowed"
-)]
 #![cfg_attr(
     test,
     allow(
@@ -49,6 +44,10 @@
 )]
 
 /// Exact local account references and total vertical identity.
+#[allow(
+    missing_docs,
+    reason = "account identity constructors and vertical vocabulary await contracts"
+)]
 pub mod account;
 /// How the host classifies and renders one tool call's activity.
 pub mod activity;
@@ -56,8 +55,16 @@ pub mod activity;
 pub mod attachments;
 /// The session-binding vocabulary: composition, wire, target, and the
 /// `[root] agent` fact a session compares its bound tuple against.
+#[allow(
+    missing_docs,
+    reason = "binding variants and persisted binding fields await contracts"
+)]
 pub mod binding;
 /// The route identity and catalog capability registry.
+#[allow(
+    missing_docs,
+    reason = "capability admission errors and registry fields await contracts"
+)]
 pub mod capabilities;
 /// The provider-grounded context projection a turn reports against.
 pub mod context;
@@ -67,21 +74,37 @@ mod exchange_observation;
 /// Where a hosted session writes its event log.
 pub mod session_home;
 /// The session event log.
+#[allow(
+    missing_docs,
+    reason = "observational log value and event builder contracts remain undocumented"
+)]
 pub mod session_log;
 /// The port a hosted session persists its record through.
 pub mod session_store;
 /// The product session record and the rules it is committed under.
+#[allow(
+    missing_docs,
+    reason = "session record fields and projection vocabulary await contracts"
+)]
 pub mod sessions;
 /// The inert subscription-allowance projection.
 pub mod subscription_usage;
 mod visual_read;
 
+#[allow(
+    missing_docs,
+    reason = "agent attachment and provider configuration fields await contracts"
+)]
 pub mod agent;
 pub mod agent_tree_protocol;
 mod driver;
 pub(crate) mod jobs;
 mod node_usage;
 /// Host terminal-pin admission for destructive workspace operations.
+#[allow(
+    missing_docs,
+    reason = "workspace reclamation constructor contract remains undocumented"
+)]
 pub mod workspace_reclamation;
 // The hosted driver composes the tree runtime through its public vocabulary.
 pub(crate) use plakous_recursive_subagents::task_set::{TaskHandle, TaskSet};
@@ -90,6 +113,10 @@ pub use plakous_recursive_subagents::{
     tree as agent_tree,
 };
 pub mod coding_routes;
+#[allow(
+    missing_docs,
+    reason = "failure category fallback contract remains undocumented"
+)]
 pub mod error;
 /// The root's optional tools frozen into its session record at creation.
 pub mod frozen_tools;
@@ -103,17 +130,33 @@ pub use plakous_workspace::occupancy_vcs::maintenance as workspace_maintenance;
 pub use plakous_workspace::{JJ_CLI_SUPPORTED, JJ_LIB_VERSION, built_jj_library_version};
 pub(crate) mod intent_dispatch;
 pub(crate) mod interrupt;
+#[allow(
+    missing_docs,
+    reason = "catalog request and pricing fields await contracts"
+)]
 pub mod openrouter;
+#[allow(
+    missing_docs,
+    reason = "product observation fields and closed presentation vocabularies await contracts"
+)]
 pub mod product_observation;
 pub mod prompt_inputs;
 pub mod request_slots;
 #[cfg(test)]
 pub(crate) mod role_table;
+#[allow(
+    missing_docs,
+    reason = "runtime ports, configuration and injected test host contracts await documentation"
+)]
 pub mod runtime;
 pub mod skills;
 pub(crate) mod storage_pressure;
 pub mod surface_protocol;
 pub mod tool_plan;
+#[allow(
+    missing_docs,
+    reason = "test-only tool registration constructor remains undocumented"
+)]
 pub mod tools;
 pub mod topology_extensions;
 pub mod topology_navigator;
@@ -152,6 +195,10 @@ const _: () = assert!(
         >= 2 * plakous::agent::DEFAULT_STORE_OPERATION_TIMEOUT.as_nanos()
 );
 
+#[allow(
+    missing_docs,
+    reason = "catalog settings fields and credential refresh port contracts await documentation"
+)]
 pub mod platform;
 
 /// Child assignment instructions and their byte-pinned renderers.

@@ -4844,7 +4844,9 @@ def _suppression_body(body: str) -> str | None:
     return None
 
 
-def lint_suppressions(source: str, crate_root: bool = False) -> list[tuple[str, bool, int]]:
+def lint_suppressions(
+    source: str, crate_root: bool = False, *, include_missing_docs: bool = False
+) -> list[tuple[str, bool, int]]:
     """(lint, crate_wide, line) for each allow/expect of a ratcheted clippy lint.
 
     Line comments and single-line string contents are masked first (the
@@ -4854,7 +4856,10 @@ def lint_suppressions(source: str, crate_root: bool = False) -> list[tuple[str, 
     the first item.
     """
     found: list[tuple[str, bool, int]] = []
-    if not any(name in source for name in (*RATCHET_LINTS, *RATCHET_LINT_GROUPS)):
+    names = (*RATCHET_LINTS, *RATCHET_LINT_GROUPS)
+    if include_missing_docs:
+        names += ("missing_docs",)
+    if not any(name in source for name in names):
         return found
     masked = mask_comments_and_strings(source)
     leading = True
@@ -4882,6 +4887,8 @@ def lint_suppressions(source: str, crate_root: bool = False) -> list[tuple[str, 
         lints: list[str] = [
             lint for lint in RATCHET_LINTS if re.search(rf"\bclippy\s*::\s*{lint}\b", body)
         ]
+        if include_missing_docs and re.search(r"(?<!:)\bmissing_docs\b", body):
+            lints.append("missing_docs")
         for group, members in RATCHET_LINT_GROUPS.items():
             if re.search(rf"\bclippy\s*::\s*{group}\b", body):
                 lints.extend(member for member in members if member not in lints)
@@ -4913,10 +4920,19 @@ def lint_ratchet_inventory(
     """
     items: dict[str, list[str]] = {lint: [] for lint in RATCHET_LINTS}
     crate_wide: list[str] = []
+    missing_docs: list[str] = []
+    crate_wide_missing_docs: list[str] = []
     large: list[str] = []
     for path, source in sorted(files.items()):
-        for lint, wide, line in lint_suppressions(source, path in crate_roots):
-            if wide:
+        for lint, wide, line in lint_suppressions(
+            source, path in crate_roots, include_missing_docs=True
+        ):
+            if lint == "missing_docs":
+                if wide:
+                    crate_wide_missing_docs.append(f"{path}:{line}")
+                else:
+                    missing_docs.append(f"{path}:{line}")
+            elif wide:
                 crate_wide.append(f"{path}:{lint}")
             else:
                 items[lint].append(f"{path}:{line}")
@@ -4935,7 +4951,13 @@ def lint_ratchet_inventory(
         lines = non_test_lines(files[path])
         if lines > LARGE_FILE_LINES:
             large.append(f"{path} ({lines})")
-    return {"items": items, "crate-wide": sorted(set(crate_wide)), "large-files": large}
+    return {
+        "items": items,
+        "crate-wide": sorted(set(crate_wide)),
+        "large-files": large,
+        "missing-docs": missing_docs,
+        "crate-wide-missing-docs": crate_wide_missing_docs,
+    }
 
 
 def declared_test_module_paths(
@@ -4956,12 +4978,22 @@ def validate_lint_ratchet(package: str, inventory: dict[str, Any], rule: Any) ->
     """Ceilings fail above and must be lowered below, like the cfg ceilings."""
     if not isinstance(rule, dict):
         return [f"{package}: [package.metadata.plakous-lint] must be a table"]
-    allowed = {*RATCHET_LINTS.values(), "large-file-ceiling", "crate-wide-allows", "reason"}
+    allowed = {
+        *RATCHET_LINTS.values(),
+        "large-file-ceiling",
+        "missing-docs-ceiling",
+        "crate-wide-allows",
+        "reason",
+    }
     errors = [
         f"{package}: unknown [package.metadata.plakous-lint] key {key!r}"
         for key in sorted(set(rule) - allowed)
     ]
     ceilings = {key: rule.get(key, 0) for key in (*RATCHET_LINTS.values(), "large-file-ceiling")}
+    # Documentation debt is enrolled package by package; legacy crates with
+    # crate-wide opt-outs must be narrowed before they can join this ratchet.
+    if "missing-docs-ceiling" in rule:
+        ceilings["missing-docs-ceiling"] = rule["missing-docs-ceiling"]
     for key, ceiling in ceilings.items():
         if type(ceiling) is not int or ceiling < 0:
             errors.append(f"{package}: plakous-lint {key} must be a nonnegative integer")
@@ -4976,10 +5008,18 @@ def validate_lint_ratchet(package: str, inventory: dict[str, Any], rule: Any) ->
         errors.append(f"{package}: nonzero plakous-lint ceilings require a reviewed reason")
     counts = {RATCHET_LINTS[lint]: sites for lint, sites in inventory["items"].items()}
     counts["large-file-ceiling"] = inventory["large-files"]
+    if "missing-docs-ceiling" in rule:
+        counts["missing-docs-ceiling"] = inventory["missing-docs"]
+        for site in inventory["crate-wide-missing-docs"]:
+            errors.append(
+                f"{package}: crate-wide missing_docs suppression {site} is not permitted; "
+                "document the public surface or allow only the undocumented module"
+            )
     remedies = {
         "too-many-lines-ceiling": "split the item or remove the allow",
         "too-many-arguments-ceiling": "group the parameters or remove the allow",
         "large-file-ceiling": "split the file or move its tests to a sibling file",
+        "missing-docs-ceiling": "document the module or narrow its unused public surface",
     }
     for key, sites in counts.items():
         if len(sites) > ceilings[key]:

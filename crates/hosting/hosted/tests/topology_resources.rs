@@ -18,7 +18,6 @@
 //! cannot be reached from an integration test.
 
 #![allow(
-    missing_docs,
     clippy::expect_used,
     clippy::unwrap_used,
     reason = "integration test crate may unwrap"

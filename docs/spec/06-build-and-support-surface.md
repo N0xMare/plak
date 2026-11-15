@@ -388,6 +388,17 @@ tracked Rust file of the package, tests included:
   `clippy::pedantic` counts as `too_many_lines`, and `clippy::complexity` or
   `clippy::all` as `too_many_arguments`. Line comments and single-line string
   contents are not attributes.
+- `missing-docs-ceiling` enrolls a package in the documentation-suppression
+  ratchet. `plakous-hosted` is enrolled; other legacy packages are enrolled
+  when their crate-wide documentation opt-out is removed. It bounds every
+  non-crate-wide `allow(missing_docs)` or `expect(missing_docs)`, including
+  conditional attributes, items, inline modules and out-of-line modules.
+  Only modules whose public surface is not yet documented carry these
+  temporary allows, with a reason naming the remaining work. Crate-wide
+  documentation suppressions are forbidden in an enrolled package, including
+  integration-test targets. Growth fails and a reduction requires lowering
+  the package's ceiling in the same change. The tooling self-test preserves
+  enrollment as well as exact counts; removing the key is not an opt-out.
 - `crate-wide-allows` lists, as `path:lint`, the inner allows of these lints
   that remain at the top of a target root, before its first item. An unlisted
   one fails, so no new crate gains one; a listed one that is gone must be
