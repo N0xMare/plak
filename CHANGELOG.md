@@ -9,6 +9,15 @@ for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
+- Fresh provider review dated 2026-11-15 on all seven surfaces. Subscription
+  expiries (Codex, Grok, Claude) and API review-due dates (OpenAI Platform,
+  Anthropic API, xAI Platform, OpenRouter Chat) are all 2027-02-13T00:00:00Z.
+  Native references are Codex 0.169.0, Grok Build 1.0.77
+  (`x-grok-client-version` 1.0.77) and Claude Code 2.1.325. OAuth consent
+  identities stay unchanged. Enroll Fable 5.2 on Claude OAuth and Anthropic
+  API with explicit selection; Mythos 5.2, GPT-6.1 Terra, GPT-6 Cyber and
+  Rosalind stay `needs review`.
+
 - Fix child-result wakes remaining suppressed after a host restart continued
   the root's interrupted work. An admitted handoff or owner-loss continuation
   rearms waking durably; later operator stops and interrupts still suppress it.

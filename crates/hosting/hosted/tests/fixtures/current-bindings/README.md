@@ -28,8 +28,7 @@ before reading or hashing the database; a connection context alone commits but
 does not close/checkpoint WAL. Only then does it replace the database and
 checksum manifest here. No native rows are edited.
 
-The current seed's `source_commit` pin is
-`b7cbaf2b6c28bc1a1315a7bcdc10201f109578e8`; each regeneration records the current
-`git rev-parse HEAD` in the manifest. Rerun after **any runtime-schema change**,
+The manifest's `source_commit` pin records the source checkout's
+`git rev-parse HEAD` at each regeneration. Rerun after **any runtime-schema change**,
 including unshipped shape changes within the same schema number, and after a
 runtime codec/epoch or presentation/executor change that affects these cases.

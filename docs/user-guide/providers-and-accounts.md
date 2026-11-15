@@ -86,7 +86,7 @@ same low–max effort and the shared 1,000,000/128,000 window. It has no live
 acceptance yet. Disabled thinking is refused before dispatch. Forced tool choice is admitted
 and unqualified: Claude Code demotes it to auto while thinking is active.
 The OAuth
-inference request uses the pinned Claude Code 2.1.314 client identity,
+inference request uses the pinned Claude Code 2.1.325 client identity,
 headers, system identity text and billing attestation, including Claude Code's
 per-turn prompt and turn numbers and its previous-response diagnostics. The beta header and
 `max_tokens` follow the selected model. An OAuth request sends the
@@ -161,13 +161,16 @@ Codex OAuth enrolls `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
 Other ChatGPT/Codex catalog rows, including retired
 `gpt-5.3-codex-spark`, are not executable on this path.
 Claude OAuth enrolls `claude-sonnet-5`, `claude-sonnet-5-5`,
-`claude-haiku-5-5`, `claude-fable-5-1`, `claude-opus-5`, and `claude-opus-5-5`.
+`claude-haiku-5-5`, `claude-fable-5-1`, `claude-fable-5-2`, `claude-opus-5`,
+and `claude-opus-5-5`. Fable requires explicit selection and may consume usage
+credits instead of included subscription limits, depending on your plan.
 
 Direct API models come from each provider's own model list, cached for six
 hours under `~/.plak/cache/api-models/`. Offline, Plak uses the last cache,
 else the table built into Plak. Anthropic reads `GET /v1/models` and admits
 the Claude 5.x models and Opus/Sonnet 4.6 and later, including
-`claude-haiku-5-5`; Claude 4.5 models are listed as `needs review`. OpenAI
+`claude-haiku-5-5` and `claude-fable-5-2`; `claude-mythos-5-2` and Claude 4.5
+models are listed as `needs review`. OpenAI
 reads `GET /v1/models` (ids only) and admits `gpt-6-luna`, `gpt-6-sol`,
 `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra`. Other text models are
 `needs review`; speech, image, embedding, realtime, moderation and video
