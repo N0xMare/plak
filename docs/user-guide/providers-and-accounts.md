@@ -62,9 +62,25 @@ When bare `plak` attaches to `plak host` over its local socket, the public TUI
 is a remote face: Usage reads still work, but credential refresh is unavailable
 there. Run `plak refresh <account>` on the host, then
 `plak usage --account <account>` to read the result. Host-owned Settings and
-Set as default likewise require `plak config set <key> <value>` on the host
-(`root.profile <id>` for a profile default). Terminal-local preferences remain
-editable. A refused pending write shows an error and restores the UI rather
+Set as default likewise require host-side changes. For settings, run
+`plak config set <key> <value>`. For a profile default, materialize its agent
+templates under the host home's `agents/` directory, then edit `[root] agent`
+and `[roster] working_set` in its `config.toml` to name those templates. A
+profile ID is not a template name: neither `root.profile` nor substituting
+that ID into `root.agent` selects a profile. This affects new sessions only.
+For example, after creating the four `claude-default-*.toml` template files
+under `agents/`, the selection is:
+
+```toml
+[root]
+agent = "claude-default-root"
+[roster]
+working_set = ["claude-default-worker", "claude-default-reviewer", "claude-default-researcher"]
+```
+
+Template file creation is separate; setting these pointers does not extract
+the built-in profile. See [writing a template](configuration.md#write-a-template).
+Terminal-local preferences remain editable. A refused pending write shows an error and restores the UI rather
 than appearing saved or leaving refresh spinning.
 
 API-key environment variables override stored key files. In particular,

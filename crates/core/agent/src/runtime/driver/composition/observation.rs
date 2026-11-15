@@ -114,7 +114,7 @@ impl LocalCompositionObservation<'_> {
 enum ObservedResponse {
     Yielded(LocalCompositionResponse),
     Execute(Result<LocalCompositionResponse, LocalCompositionSessionLoss>),
-    Wait(Result<LocalCompositionWaitOutcome, String>),
+    Wait(Result<LocalCompositionWaitOutcome, crate::local_composition::LocalCompositionError>),
 }
 
 impl ObservedResponse {

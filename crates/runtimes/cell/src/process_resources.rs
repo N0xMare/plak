@@ -5,11 +5,17 @@ use std::time::Duration;
 /// Content-free resource snapshot.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ProcessResourceUsage {
+    /// Cumulative user CPU time in nanoseconds.
     pub user_cpu_ns: u64,
+    /// Cumulative system CPU time in nanoseconds.
     pub system_cpu_ns: u64,
+    /// Peak resident set size in bytes, when available.
     pub peak_rss_bytes: Option<u64>,
+    /// Current resident set size in bytes, when available.
     pub rss_bytes: Option<u64>,
+    /// Current thread count, when available.
     pub threads: Option<u64>,
+    /// Current open file descriptor count, when available.
     pub fds: Option<u64>,
 }
 

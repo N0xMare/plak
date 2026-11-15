@@ -469,7 +469,8 @@ enum TopCommand {
         #[arg(long = "session")]
         session: Option<String>,
         /// The stdio protocol: `v1` (JSONL, the default) or `v2` (the
-        /// framed wire, not yet supported).
+        /// framed protocol over the hidden, unsupported single-session entrypoint;
+        /// supported wire v2 clients use the host socket or stdio bridge).
         #[arg(long = "wire", hide = true, value_parser = ["v1", "v2"])]
         stdio_wire: Option<String>,
     },

@@ -1,5 +1,6 @@
 //! SDK calls lower only to driver-owned canonical children or named-state events.
 
+use super::LocalCompositionError;
 use super::{
     refs::Refs,
     values::{self, ValueBudget},
@@ -48,7 +49,7 @@ impl Tasks {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .poll_join_next(cx)
     }
-    pub(super) async fn stop(&self) -> Result<(), String> {
+    pub(super) async fn stop(&self) -> Result<(), LocalCompositionError> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -58,7 +59,8 @@ impl Tasks {
             if let Err(error) = result
                 && !error.is_cancelled()
             {
-                failure.get_or_insert_with(|| format!("SDK host task failed: {error}"));
+                let message = format!("SDK host task failed: {error}");
+                failure.get_or_insert_with(|| LocalCompositionError::with_source(message, error));
             }
         }
         failure.map_or(Ok(()), Err)
@@ -151,7 +153,7 @@ struct ToolReply {
     ack: oneshot::Sender<Delivery>,
 }
 struct NestedReply {
-    tx: oneshot::Sender<Result<ToolReply, String>>,
+    tx: oneshot::Sender<Result<ToolReply, LocalCompositionError>>,
     want: bool,
 }
 impl LocalCompositionNestedResponder for NestedReply {
@@ -178,7 +180,7 @@ impl LocalCompositionNestedResponder for NestedReply {
     }
     fn reject(self: Box<Self>, reason: String) -> LocalCompositionFuture<'static, Delivery> {
         Box::pin(async move {
-            let observed = self.tx.send(Err(reason)).is_ok();
+            let observed = self.tx.send(Err(reason.into())).is_ok();
             Ok(if observed {
                 Delivery::Accepted
             } else {
@@ -227,7 +229,7 @@ impl Scope {
         let reply = rx
             .await
             .map_err(|_| error_value("runtime", "SDK child reply closed"))?
-            .map_err(|message| error_value("runtime", message))?;
+            .map_err(|message| error_value("runtime", message.to_string()))?;
         self.acks
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -406,7 +408,7 @@ async fn execute(scope: &Scope, name: &str, input: Value) -> Result<V, V> {
         }
         _ => return Err(error_value("value", "unknown SDK function")),
     };
-    values::convert(converted).map_err(|message| error_value("runtime", message))
+    values::convert(converted).map_err(|message| error_value("runtime", message.to_string()))
 }
 
 async fn read(scope: &Scope, input: &Value) -> Result<V, V> {
@@ -455,11 +457,11 @@ async fn read(scope: &Scope, input: &Value) -> Result<V, V> {
                 lossy: false,
                 revision: None,
             }))
-            .map_err(|message| error_value("runtime", message));
+            .map_err(|message| error_value("runtime", message.to_string()));
         }
     }
     values::convert(scope.typed("read_file", args).await?)
-        .map_err(|message| error_value("runtime", message))
+        .map_err(|message| error_value("runtime", message.to_string()))
 }
 async fn process(scope: &Scope, tool: &str, args: Value) -> Result<ProcessValue, V> {
     match scope.typed(tool, args).await? {

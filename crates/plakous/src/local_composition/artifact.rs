@@ -349,9 +349,9 @@ pub(super) fn verify_cell_worker_before_spawn(
     engine: CellEngine,
     path: &Path,
     expected: &[u8],
-) -> Result<(), String> {
+) -> Result<(), LocalCompositionError> {
     let artifact = LocalCompositionEngineArtifact::cell_worker(engine, path)
-        .map_err(|error| error.to_string())?;
+        .map_err(LocalCompositionError::from_source)?;
     if artifact.worker.environment_identity() == expected {
         Ok(())
     } else {
@@ -359,7 +359,7 @@ pub(super) fn verify_cell_worker_before_spawn(
             CellEngine::Quickjs => "JavaScript sidecar identity changed after attachment",
             CellEngine::Monty => "Python worker identity changed after attachment",
         }
-        .to_owned())
+        .into())
     }
 }
 

@@ -730,7 +730,7 @@ impl Driver {
         let input = state
             .integration()
             .parse_wait(invocation.arguments().value().as_ref().clone())
-            .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
+            .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error.to_string()))?;
         let max_output_tokens = input.max_output_tokens;
         if max_output_tokens > state.integration().max_output_tokens() {
             return Err(AgentError::new(

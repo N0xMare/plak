@@ -1,3 +1,4 @@
+use super::LocalCompositionError;
 use plakous_compose::PythonHarnessSdkDescriptorV1 as Limits;
 use std::collections::{BTreeMap, VecDeque};
 
@@ -22,11 +23,11 @@ impl Reference {
 }
 
 impl Refs {
-    pub(super) fn insert(&mut self, text: String) -> Result<String, String> {
+    pub(super) fn insert(&mut self, text: String) -> Result<String, LocalCompositionError> {
         let bytes = text.len();
         self.insert_reference(Reference::Text(text), bytes)
     }
-    pub(super) fn job_output(&mut self, path: String) -> Result<String, String> {
+    pub(super) fn job_output(&mut self, path: String) -> Result<String, LocalCompositionError> {
         if let Some((id, _)) = self
             .values
             .iter()
@@ -37,7 +38,11 @@ impl Refs {
         let bytes = path.len();
         self.insert_reference(Reference::JobOutput(path), bytes)
     }
-    fn insert_reference(&mut self, value: Reference, bytes: usize) -> Result<String, String> {
+    fn insert_reference(
+        &mut self,
+        value: Reference,
+        bytes: usize,
+    ) -> Result<String, LocalCompositionError> {
         if bytes > Limits::REF_BYTES {
             return Err("SDK output reference capacity exceeded".into());
         }
@@ -66,7 +71,8 @@ impl Refs {
 mod tests {
     use super::*;
     #[test]
-    fn refs_are_opaque_and_bounded_by_count_and_retained_bytes() -> Result<(), String> {
+    fn refs_are_opaque_and_bounded_by_count_and_retained_bytes() -> Result<(), LocalCompositionError>
+    {
         let mut refs = Refs::default();
         let id = refs.insert("x".into())?;
         assert_eq!(id.len(), 36);

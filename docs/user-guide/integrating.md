@@ -6,7 +6,7 @@ whether you embed it or drive the product out of process.
 | Surface | Use it for |
 | --- | --- |
 | In-process `plakous` | A Rust application that owns construction, tools, credentials and persistence. Start with [Embedding](embedding.md). |
-| `plak agent --wire v2` | One session over a child process's stdin/stdout; diagnostics stay on stderr. |
+| `plak agent` | Existing single-session JSONL v1 clients; retained byte-identical until removal. |
 | `plak host` | A long-lived session directory over a private same-user Unix socket, `plak host connect --stdio`, or the authenticated WebSocket endpoint. |
 | `plak run` | Non-interactive jobs: prompt in, final answer on stdout, progress on stderr, and a process exit status. |
 | `plak runner` | Paired execution placement for an existing host, not a frontend API or another agent loop. |
@@ -15,18 +15,18 @@ The [CLI reference](cli.md) covers flags. The normative contracts are
 [wire v2](../spec/02-plak-product.md#44-wire-v2),
 [host lifecycle](../spec/02-plak-product.md#46-plak-host) and
 [exit classes](../spec/02-plak-product.md#33-exit-codes). The host and runner
-protocols are distinct. Do not use JSONL v1 as a new integration boundary.
+protocols are distinct. New framed-wire integrations use the supported host
+socket or stdio bridge. `plak agent --wire v2` is a hidden, unsupported
+single-session entrypoint, not the supported stdio integration boundary.
 
 ## Schema and exact versions
 
 ```sh
 plak wire schema > wire-schema.json
-plak agent --wire v2 --account codex --model gpt-5.6-luna --effort low
 plak host connect --stdio
 ```
 
-The last two commands start different wire transports; choose one. The stdio
-bridge discovers the current host; starting a missing host requires its
+The stdio bridge discovers the current host; starting a missing host requires its
 explicit `--auto-start` option. Bare `plak` does not auto-start a host.
 
 `plak wire schema` is supported in ordinary release builds. Release assets

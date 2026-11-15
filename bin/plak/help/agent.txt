@@ -32,11 +32,12 @@ OPTIONS:
 
 COMMANDS (stdin):
   prompt, interrupt, compact, resume_queue, tree, interrupt_node, close_node,
-  stop_all, clear, invoke_tool, fork, recover, background, quit
+  stop_all, clear, invoke_tool, fork, recover, resume, resolve_approval,
+  background, quit
 
 EVENTS (stdout):
   hello, ready, status, busy, assistant, assistant_done, tool, error,
-  turn, tree, queue, bye
+  turn, tree, queue, reasoning, approval, approval_resolved, steer_ack, bye
 
 NOTES:
   Stdout is machine-only. Diagnostics go to stderr.

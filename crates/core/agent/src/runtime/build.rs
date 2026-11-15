@@ -1103,7 +1103,9 @@ fn adopt_persisted_tool_semantics(
             let reconstructed = local_composition
                 .integration
                 .rebuild_descriptor(builder.job_config, builder.tools.clone(), target)
-                .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
+                .map_err(|error| {
+                    AgentError::new(AgentErrorKind::InvalidInput, error.to_string())
+                })?;
             if reconstructed.identity != local_composition.descriptor.identity {
                 return Err(AgentError::new(
                     AgentErrorKind::InvalidInput,
@@ -1128,7 +1130,7 @@ fn adopt_persisted_tool_semantics(
         let reconstructed = local_composition
             .integration
             .rebuild_descriptor(builder.job_config, builder.tools.clone(), target)
-            .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
+            .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error.to_string()))?;
         if reconstructed.identity != local_composition.descriptor.identity {
             return Err(AgentError::new(
                 AgentErrorKind::InvalidInput,

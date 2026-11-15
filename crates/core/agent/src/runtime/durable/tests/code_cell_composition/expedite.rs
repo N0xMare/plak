@@ -244,7 +244,7 @@ impl crate::local_composition::LocalCompositionNestedResponder for DelayedAcknow
         reason: String,
     ) -> LocalCompositionFuture<'static, crate::local_composition::LocalCompositionNestedDelivery>
     {
-        Box::pin(async move { Err(format!("unexpected delivery rejection: {reason}")) })
+        Box::pin(async move { Err(format!("unexpected delivery rejection: {reason}").into()) })
     }
 }
 

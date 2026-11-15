@@ -148,7 +148,8 @@ fn python_structured_inputs_accept_code_and_byte_bound() {
 }
 
 #[test]
-fn python_wait_defaults_clamps_and_rejects_invalid_bounds() -> Result<(), String> {
+fn python_wait_defaults_clamps_and_rejects_invalid_bounds()
+-> Result<(), super::LocalCompositionError> {
     let wait = super::python::parse_python_wait(serde_json::json!({"cell_id": "2"}))?;
     assert_eq!(wait.yield_time_ms, 10_000);
     assert_eq!(wait.max_output_tokens, 1_048_576);

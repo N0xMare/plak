@@ -1,5 +1,6 @@
 //! Typed canonical execution values become the catalog's plain-data records.
 
+use super::LocalCompositionError;
 use plakous_cell::CellValue as V;
 use plakous_compose::PythonHarnessSdkDescriptorV1 as Limits;
 use plakous_tools::{ExecutionValue, FileChangeAction, ListedEntryKind};
@@ -35,7 +36,7 @@ pub(super) fn job(id: u64) -> V {
     record("Job", [("id", text(id.to_string()))])
 }
 
-pub(super) fn convert(value: ExecutionValue) -> Result<V, String> {
+pub(super) fn convert(value: ExecutionValue) -> Result<V, LocalCompositionError> {
     Ok(match value {
         ExecutionValue::FileRead(v) => file(v),
         ExecutionValue::Listing(v) => record(

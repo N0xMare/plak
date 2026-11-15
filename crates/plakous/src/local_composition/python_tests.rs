@@ -448,7 +448,11 @@ async fn dispatch_same_tool_parallel(
 }
 
 async fn join_deliveries(
-    deliveries: Vec<tokio::task::JoinHandle<Result<LocalCompositionNestedDelivery, String>>>,
+    deliveries: Vec<
+        tokio::task::JoinHandle<
+            Result<LocalCompositionNestedDelivery, super::LocalCompositionError>,
+        >,
+    >,
 ) {
     for delivery in deliveries {
         // A liveness bound only: generous, so load never trips it.

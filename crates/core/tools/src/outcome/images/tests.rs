@@ -15,13 +15,13 @@ struct Normalizer {
 }
 
 impl ImageNormalizer for Normalizer {
-    fn normalize(&self, bytes: &[u8]) -> Result<PreparedImage, String> {
+    fn normalize(&self, bytes: &[u8]) -> Result<PreparedImage, crate::ImageNormalizationError> {
         self.calls
             .lock()
             .map_err(|_| "recording lock")?
             .push(bytes.to_vec());
         if self.fail {
-            return Err("invalid image data".to_owned());
+            return Err("invalid image data".into());
         }
         Ok(PreparedImage::new("image/png", vec![9, 8, 7]))
     }
@@ -115,7 +115,7 @@ struct BlockingNormalizer {
 }
 
 impl ImageNormalizer for BlockingNormalizer {
-    fn normalize(&self, bytes: &[u8]) -> Result<PreparedImage, String> {
+    fn normalize(&self, bytes: &[u8]) -> Result<PreparedImage, crate::ImageNormalizationError> {
         self.started.send(()).map_err(|_| "started channel")?;
         self.release
             .lock()

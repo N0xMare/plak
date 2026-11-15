@@ -22,8 +22,55 @@ use plakous_tools::{
 };
 use serde_json::Value;
 
+/// A local-composition refusal with the original failure retained when available.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct LocalCompositionError {
+    message: String,
+    #[source]
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl LocalCompositionError {
+    /// A validation or policy refusal without an underlying failure.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// Retains a failure while preserving its existing display text.
+    pub fn from_source(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::with_source(source.to_string(), source)
+    }
+
+    /// Retains a failure under an existing safe, boundary-owned message.
+    pub fn with_source(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            message: message.into(),
+            source: Some(Box::new(source)),
+        }
+    }
+}
+
+impl From<String> for LocalCompositionError {
+    fn from(message: String) -> Self {
+        Self::new(message)
+    }
+}
+
+impl From<&str> for LocalCompositionError {
+    fn from(message: &str) -> Self {
+        Self::new(message)
+    }
+}
+
 pub type LocalCompositionFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, String>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<T, LocalCompositionError>> + Send + 'a>>;
 
 pub type LocalCompositionSessionFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, LocalCompositionSessionLoss>> + Send + 'a>>;
@@ -468,8 +515,11 @@ pub trait LocalCompositionIntegration: Send + Sync {
     /// Declares the exact result grammar and meaning of the numeric output cap.
     fn result_projection(&self) -> LocalCompositionResultProjection;
     fn environment_identity(&self) -> Vec<u8>;
-    fn parse_execute(&self, input: Value) -> Result<LocalCompositionExecuteInput, String>;
-    fn parse_wait(&self, input: Value) -> Result<LocalCompositionWaitInput, String>;
+    fn parse_execute(
+        &self,
+        input: Value,
+    ) -> Result<LocalCompositionExecuteInput, LocalCompositionError>;
+    fn parse_wait(&self, input: Value) -> Result<LocalCompositionWaitInput, LocalCompositionError>;
     fn create_session(
         &self,
         generation: u64,
@@ -483,7 +533,7 @@ pub trait LocalCompositionIntegration: Send + Sync {
         job_config: plakous_tools::JobConfig,
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
-    ) -> Result<LocalCompositionDescriptor, String>;
+    ) -> Result<LocalCompositionDescriptor, LocalCompositionError>;
     fn validate_configuration(
         &self,
         job_config: plakous_tools::JobConfig,
@@ -491,7 +541,7 @@ pub trait LocalCompositionIntegration: Send + Sync {
         projection: &ToolProjectionMap,
         registry: FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
-    ) -> Result<(), String>;
+    ) -> Result<(), LocalCompositionError>;
     fn truncate_items(
         &self,
         items: Vec<LocalCompositionContentItem>,

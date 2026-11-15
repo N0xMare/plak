@@ -785,7 +785,9 @@ remote face even on the same machine. Host-owned settings (currently Auto
 compaction and Edit raw config) are marked read-only; use
 `plak config set compaction.enabled <true|false>` or `plak config edit` on the
 host. The Agents dialog explains **Set as default** but does not offer its
-button: run `plak config set root.profile <id>` on the host. **Use now**,
+button: materialize that profile's templates on the host and edit `root.agent`
+and `roster.working_set` in its `config.toml` (see
+[host-side defaults](providers-and-accounts.md#accounts)). **Use now**,
 **Switch now** and **Fork now** still work, but remote Use now never sets a
 home default. Usage still reads allowances, but offers no `[refresh]` control:
 run `plak refresh <account>`, then `plak usage --account <account>` on the host.

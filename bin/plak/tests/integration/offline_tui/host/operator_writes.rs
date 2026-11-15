@@ -17,7 +17,7 @@ fn socket_tui_explains_unavailable_settings_default_and_credential_refresh() {
     terminal.wait_ready();
     terminal.wait_screen("plak config set compaction.enabled");
     terminal.send(b"/agents codex\r");
-    let frame = terminal.wait_screen("plak config set root.profile");
+    let frame = terminal.wait_screen("roster.working_set");
     assert!(!frame.contains("[ Set as default ]"), "{frame}");
     terminal.send(b"\x1b");
     terminal.wait_where("the profile dialog closed", |frame| {

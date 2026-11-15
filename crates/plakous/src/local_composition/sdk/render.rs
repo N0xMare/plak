@@ -48,9 +48,11 @@ pub(super) fn observation(response: &mut LocalCompositionResponse, refs: &Arc<Mu
 
 #[cfg(test)]
 mod tests {
+    use super::super::LocalCompositionError;
     use super::*;
     #[test]
-    fn bounded_output_keeps_a_reference_to_the_exact_full_stream() -> Result<(), String> {
+    fn bounded_output_keeps_a_reference_to_the_exact_full_stream()
+    -> Result<(), LocalCompositionError> {
         let refs = Arc::default();
         let full = "é".repeat(10_000);
         let mut response = LocalCompositionResponse::Result {

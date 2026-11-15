@@ -680,7 +680,11 @@ pub async fn normalize_tool_image(
     .await?;
     join_blocking(cancellation, move || {
         let _permit = permit;
-        bytes.and_then(|bytes| normalizer.normalize(&bytes))
+        bytes.and_then(|bytes| {
+            normalizer
+                .normalize(&bytes)
+                .map_err(|error| error.to_string())
+        })
     })
     .await
 }

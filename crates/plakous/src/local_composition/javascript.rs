@@ -44,12 +44,10 @@ pub(crate) struct WaitWireInput {
     pub(crate) terminate: Option<bool>,
 }
 
-pub(crate) fn whole_u64(value: f64, field: &str) -> Result<u64, String> {
+pub(crate) fn whole_u64(value: f64, field: &str) -> Result<u64, LocalCompositionError> {
     if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > 9_007_199_254_740_991.0
     {
-        return Err(format!(
-            "Code Mode wait {field} must be a non-negative whole number"
-        ));
+        return Err(format!("Code Mode wait {field} must be a non-negative whole number").into());
     }
     #[allow(
         clippy::cast_possible_truncation,
@@ -61,7 +59,7 @@ pub(crate) fn whole_u64(value: f64, field: &str) -> Result<u64, String> {
 
 pub(crate) fn neutral_descriptor(
     exact: &CodexNativeLocalCodeModeDescriptorV1,
-) -> Result<LocalCompositionDescriptor, String> {
+) -> Result<LocalCompositionDescriptor, LocalCompositionError> {
     let nested_tools = exact
         .nested_tools()
         .iter()
@@ -79,13 +77,13 @@ pub(crate) fn neutral_descriptor(
         execute_name: "exec".into(),
         wait_name: "wait".into(),
         marker_executor: ToolExecutorId::new("plakous.codex-code-mode.driver-marker.v1")
-            .map_err(|error| error.to_string())?,
+            .map_err(LocalCompositionError::from_source)?,
     })
 }
 
 pub(crate) fn neutral_minimal_descriptor(
     exact: &CodexMinimalLocalCodeModeDescriptorV1,
-) -> Result<LocalCompositionDescriptor, String> {
+) -> Result<LocalCompositionDescriptor, LocalCompositionError> {
     let nested_tools = exact
         .nested_tools()
         .iter()
@@ -105,13 +103,13 @@ pub(crate) fn neutral_minimal_descriptor(
         marker_executor: ToolExecutorId::new(
             plakous_tools::CODEX_NATIVE_CODE_MODE_DRIVER_MARKER_EXECUTOR_ID_V1,
         )
-        .map_err(|error| error.to_string())?,
+        .map_err(LocalCompositionError::from_source)?,
     })
 }
 
 pub(super) fn neutral_product_descriptor(
     exact: &ProductJavaScriptCompositionDescriptorV1,
-) -> Result<LocalCompositionDescriptor, String> {
+) -> Result<LocalCompositionDescriptor, LocalCompositionError> {
     let nested_tools = exact
         .nested_tools()
         .iter()
@@ -129,7 +127,7 @@ pub(super) fn neutral_product_descriptor(
         execute_name: PRODUCT_JAVASCRIPT_RUN_NAME_V1.into(),
         wait_name: PRODUCT_JAVASCRIPT_WAIT_NAME_V1.into(),
         marker_executor: ToolExecutorId::new(PRODUCT_JAVASCRIPT_DRIVER_MARKER_EXECUTOR_ID_V1)
-            .map_err(|error| error.to_string())?,
+            .map_err(LocalCompositionError::from_source)?,
     })
 }
 

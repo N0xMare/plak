@@ -44,14 +44,17 @@ pub(super) trait Presentation: Send + Sync {
     fn parse_execute(
         &self,
         input: serde_json::Value,
-    ) -> Result<LocalCompositionExecuteInput, String>;
-    fn parse_wait(&self, input: serde_json::Value) -> Result<LocalCompositionWaitInput, String>;
+    ) -> Result<LocalCompositionExecuteInput, LocalCompositionError>;
+    fn parse_wait(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<LocalCompositionWaitInput, LocalCompositionError>;
     fn rebuild_descriptor(
         &self,
         job_config: plakous_tools::JobConfig,
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
-    ) -> Result<LocalCompositionDescriptor, String>;
+    ) -> Result<LocalCompositionDescriptor, LocalCompositionError>;
     fn validate_configuration(
         &self,
         job_config: plakous_tools::JobConfig,
@@ -59,7 +62,7 @@ pub(super) trait Presentation: Send + Sync {
         projection: &ToolProjectionMap,
         registry: FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
-    ) -> Result<(), String>;
+    ) -> Result<(), LocalCompositionError>;
     fn truncate_items(
         &self,
         items: Vec<LocalCompositionContentItem>,
@@ -73,7 +76,7 @@ pub(super) trait Presentation: Send + Sync {
     /// The worker build and limits this presentation runs on.
     fn worker(&self) -> (WorkerIdentity, EngineConfig);
     /// Refuses a worker whose bytes changed since attachment.
-    fn verify_worker(&self, path: &Path, identity: &[u8]) -> Result<(), String>;
+    fn verify_worker(&self, path: &Path, identity: &[u8]) -> Result<(), LocalCompositionError>;
     /// The engine state of a fresh session.
     fn session_engine(&self) -> Box<dyn SessionEngine>;
 }
@@ -108,11 +111,14 @@ impl LocalCompositionIntegration for CellIntegration {
     fn parse_execute(
         &self,
         input: serde_json::Value,
-    ) -> Result<LocalCompositionExecuteInput, String> {
+    ) -> Result<LocalCompositionExecuteInput, LocalCompositionError> {
         self.presentation.parse_execute(input)
     }
 
-    fn parse_wait(&self, input: serde_json::Value) -> Result<LocalCompositionWaitInput, String> {
+    fn parse_wait(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<LocalCompositionWaitInput, LocalCompositionError> {
         self.presentation.parse_wait(input)
     }
 
@@ -131,7 +137,7 @@ impl LocalCompositionIntegration for CellIntegration {
             } else {
                 CellClient::spawn(&self.worker, expected, config).await
             }
-            .map_err(|error| error.to_string())?;
+            .map_err(LocalCompositionError::from_source)?;
             Ok(session_bundle(
                 Arc::new(client),
                 self.presentation.session_engine(),
@@ -150,7 +156,7 @@ impl LocalCompositionIntegration for CellIntegration {
         job_config: plakous_tools::JobConfig,
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
-    ) -> Result<LocalCompositionDescriptor, String> {
+    ) -> Result<LocalCompositionDescriptor, LocalCompositionError> {
         self.presentation
             .rebuild_descriptor(job_config, registry, target)
     }
@@ -162,7 +168,7 @@ impl LocalCompositionIntegration for CellIntegration {
         projection: &ToolProjectionMap,
         registry: FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
-    ) -> Result<(), String> {
+    ) -> Result<(), LocalCompositionError> {
         self.presentation.validate_configuration(
             job_config,
             descriptor,
@@ -239,11 +245,11 @@ impl Presentation for JavaScriptPresentation {
     fn parse_execute(
         &self,
         input: serde_json::Value,
-    ) -> Result<LocalCompositionExecuteInput, String> {
+    ) -> Result<LocalCompositionExecuteInput, LocalCompositionError> {
         match self {
             JavaScriptPresentation::CodexExact | JavaScriptPresentation::CodexMinimal { .. } => {
                 let serde_json::Value::String(raw) = input else {
-                    return Err("Code Mode exec input is not a custom UTF-8 string".to_owned());
+                    return Err("Code Mode exec input is not a custom UTF-8 string".into());
                 };
                 let parsed = native::parse_exec_source(&raw)?;
                 Ok(LocalCompositionExecuteInput {
@@ -256,11 +262,15 @@ impl Presentation for JavaScriptPresentation {
         }
     }
 
-    fn parse_wait(&self, input: serde_json::Value) -> Result<LocalCompositionWaitInput, String> {
+    fn parse_wait(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<LocalCompositionWaitInput, LocalCompositionError> {
         match self {
             JavaScriptPresentation::CodexExact | JavaScriptPresentation::CodexMinimal { .. } => {
-                let input: WaitWireInput = serde_json::from_value(input)
-                    .map_err(|_| "invalid Code Mode wait input".to_owned())?;
+                let input: WaitWireInput = serde_json::from_value(input).map_err(|error| {
+                    LocalCompositionError::with_source("invalid Code Mode wait input", error)
+                })?;
                 Ok(LocalCompositionWaitInput {
                     cell_id: input.cell_id,
                     yield_time_ms: input
@@ -269,9 +279,11 @@ impl Presentation for JavaScriptPresentation {
                         .min(600_000),
                     max_output_tokens: input.max_tokens.map_or(Ok(10_000), |value| {
                         whole_u64(value, "max_tokens").and_then(|value| {
-                            usize::try_from(value).map_err(|_| {
-                                "Code Mode wait max_tokens exceeds the host integer boundary"
-                                    .to_owned()
+                            usize::try_from(value).map_err(|error| {
+                                LocalCompositionError::with_source(
+                                    "Code Mode wait max_tokens exceeds the host integer boundary",
+                                    error,
+                                )
                             })
                         })
                     })?,
@@ -286,7 +298,7 @@ impl Presentation for JavaScriptPresentation {
         (QUICKJS_WORKER, EngineConfig::QUICKJS)
     }
 
-    fn verify_worker(&self, path: &Path, identity: &[u8]) -> Result<(), String> {
+    fn verify_worker(&self, path: &Path, identity: &[u8]) -> Result<(), LocalCompositionError> {
         verify_cell_worker_before_spawn(CellEngine::Quickjs, path, identity)
     }
 
@@ -299,11 +311,11 @@ impl Presentation for JavaScriptPresentation {
         job_config: plakous_tools::JobConfig,
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
-    ) -> Result<LocalCompositionDescriptor, String> {
+    ) -> Result<LocalCompositionDescriptor, LocalCompositionError> {
         match self {
             JavaScriptPresentation::CodexExact => {
                 CodexNativeLocalCodeModeV1::compile(job_config, registry, target)
-                    .map_err(|error| error.to_string())
+                    .map_err(LocalCompositionError::from_source)
                     .and_then(|value| neutral_descriptor(&value))
             }
             JavaScriptPresentation::CodexMinimal { nested_catalog } => {
@@ -313,7 +325,7 @@ impl Presentation for JavaScriptPresentation {
                     target,
                     nested_catalog,
                 )
-                .map_err(|error| error.to_string())
+                .map_err(LocalCompositionError::from_source)
                 .and_then(|value| neutral_minimal_descriptor(&value))
             }
             JavaScriptPresentation::Product(product) => {
@@ -324,7 +336,7 @@ impl Presentation for JavaScriptPresentation {
                     product.presentation_kind,
                     product.nested_names.iter().cloned(),
                 )
-                .map_err(|error| error.to_string())
+                .map_err(LocalCompositionError::from_source)
                 .and_then(|descriptor| neutral_product_descriptor(&descriptor))
             }
         }
@@ -337,7 +349,7 @@ impl Presentation for JavaScriptPresentation {
         projection: &ToolProjectionMap,
         registry: FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
-    ) -> Result<(), String> {
+    ) -> Result<(), LocalCompositionError> {
         match self {
             JavaScriptPresentation::CodexExact => {
                 let exact = CodexNativeLocalCodeModeV1::compile(
@@ -345,7 +357,7 @@ impl Presentation for JavaScriptPresentation {
                     registry.clone(),
                     descriptor.outer_projection.target().clone(),
                 )
-                .map_err(|error| error.to_string())?;
+                .map_err(LocalCompositionError::from_source)?;
                 if neutral_descriptor(&exact)?.identity != descriptor.identity {
                     return Err(
                         "neutral descriptor disagrees with exact provider descriptor".into(),
@@ -357,7 +369,7 @@ impl Presentation for JavaScriptPresentation {
                     registry,
                     configuration,
                 )
-                .map_err(|error| error.to_string())
+                .map_err(LocalCompositionError::from_source)
             }
             JavaScriptPresentation::CodexMinimal { nested_catalog } => {
                 let exact = CodexMinimalLocalCodeModeV1::compile_for_catalog(
@@ -366,7 +378,7 @@ impl Presentation for JavaScriptPresentation {
                     descriptor.outer_projection.target().clone(),
                     nested_catalog,
                 )
-                .map_err(|error| error.to_string())?;
+                .map_err(LocalCompositionError::from_source)?;
                 if neutral_minimal_descriptor(&exact)?.identity != descriptor.identity {
                     return Err(
                         "neutral descriptor disagrees with minimal provider descriptor".into(),
@@ -378,7 +390,7 @@ impl Presentation for JavaScriptPresentation {
                     registry,
                     configuration,
                 )
-                .map_err(|error| error.to_string())
+                .map_err(LocalCompositionError::from_source)
             }
             JavaScriptPresentation::Product(product) => validate_product_configuration(
                 job_config,
@@ -430,16 +442,17 @@ impl ProductJavaScript {
     fn parse_execute(
         &self,
         input: serde_json::Value,
-    ) -> Result<LocalCompositionExecuteInput, String> {
-        let input: ProductRunWireInput = serde_json::from_value(input)
-            .map_err(|_| "invalid product JavaScript run input".to_owned())?;
+    ) -> Result<LocalCompositionExecuteInput, LocalCompositionError> {
+        let input: ProductRunWireInput = serde_json::from_value(input).map_err(|error| {
+            LocalCompositionError::with_source("invalid product JavaScript run input", error)
+        })?;
         if input.source.is_empty()
             || u64::try_from(input.source.len())
                 .map_or(true, |length| length > self.limits.max_source_bytes)
         {
             return Err(
                 "product JavaScript source must be non-empty and within its UTF-8 byte limit"
-                    .to_owned(),
+                    .into(),
             );
         }
         let yield_time_ms = input
@@ -452,23 +465,29 @@ impl ProductJavaScript {
             || max_output_tokens == 0
             || max_output_tokens > self.limits.max_output_tokens
         {
-            return Err(
-                "product JavaScript run input exceeds its evidence-bound limits".to_owned(),
-            );
+            return Err("product JavaScript run input exceeds its evidence-bound limits".into());
         }
         Ok(LocalCompositionExecuteInput {
             source: input.source,
             yield_time_ms,
-            max_output_tokens: usize::try_from(max_output_tokens)
-                .map_err(|_| "product JavaScript output limit exceeds usize".to_owned())?,
+            max_output_tokens: usize::try_from(max_output_tokens).map_err(|error| {
+                LocalCompositionError::with_source(
+                    "product JavaScript output limit exceeds usize",
+                    error,
+                )
+            })?,
         })
     }
 
-    fn parse_wait(&self, input: serde_json::Value) -> Result<LocalCompositionWaitInput, String> {
-        let input: WaitWireInput = serde_json::from_value(input)
-            .map_err(|_| "invalid product JavaScript wait input".to_owned())?;
+    fn parse_wait(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<LocalCompositionWaitInput, LocalCompositionError> {
+        let input: WaitWireInput = serde_json::from_value(input).map_err(|error| {
+            LocalCompositionError::with_source("invalid product JavaScript wait input", error)
+        })?;
         if input.cell_id.is_empty() {
-            return Err("product JavaScript wait cell_id must not be empty".to_owned());
+            return Err("product JavaScript wait cell_id must not be empty".into());
         }
         let yield_time_ms = input
             .yield_time_ms
@@ -477,19 +496,26 @@ impl ProductJavaScript {
             })?
             .min(600_000);
         let default_output_tokens = usize::try_from(PRODUCT_JAVASCRIPT_DEFAULT_OUTPUT_TOKENS)
-            .map_err(|_| "product JavaScript default output limit exceeds usize".to_owned())?;
+            .map_err(|error| {
+                LocalCompositionError::with_source(
+                    "product JavaScript default output limit exceeds usize",
+                    error,
+                )
+            })?;
         let max_output_tokens = input
             .max_tokens
             .map_or(Ok(default_output_tokens), |value| {
                 whole_u64(value, "max_tokens").and_then(|value| {
-                    usize::try_from(value)
-                        .map_err(|_| "product JavaScript wait max_tokens exceeds usize".to_owned())
+                    usize::try_from(value).map_err(|error| {
+                        LocalCompositionError::with_source(
+                            "product JavaScript wait max_tokens exceeds usize",
+                            error,
+                        )
+                    })
                 })
             })?;
         if max_output_tokens == 0 || max_output_tokens > self.max_output_tokens {
-            return Err(
-                "product JavaScript wait input exceeds its evidence-bound limits".to_owned(),
-            );
+            return Err("product JavaScript wait input exceeds its evidence-bound limits".into());
         }
         Ok(LocalCompositionWaitInput {
             cell_id: input.cell_id,

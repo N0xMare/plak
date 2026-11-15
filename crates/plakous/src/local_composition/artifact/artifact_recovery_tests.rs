@@ -20,7 +20,10 @@ async fn sidecar_spawn_refuses_bytes_changed_after_attachment()
         .await
         .err()
         .ok_or("changed sidecar was spawned")?;
-    assert!(error.contains("changed after attachment"), "{error}");
+    assert!(
+        error.to_string().contains("changed after attachment"),
+        "{error}"
+    );
     Ok(())
 }
 #[test]

@@ -4344,9 +4344,11 @@ write. Private remote web and host-client TUI forms use the consented host reque
 The public socket-attached TUI is also a remote face, even on the same machine.
 Until it has those forms, host-owned Settings rows are read-only, Set as default
 is not an offered button, and Usage has no credential-refresh control. The
-screen names the host CLI remedies (`plak config set <key> <value>`,
-`plak config set root.profile <id>`, and `plak refresh <account>` followed by
-`plak usage --account <account>`). A late refusal of any of these legacy writes
+screen names the host remedies: `plak config set <key> <value>` for settings;
+materialize the selected profile's templates on the host and edit `root.agent`
+and `roster.working_set` in its `config.toml` for new-session defaults (a profile
+id is not a template name or config key); and `plak refresh <account>` followed
+by `plak usage --account <account>` for credentials. A late refusal of any of these legacy writes
 is a visible transcript error (also shown in an open Menu), not background work
 to rearm: restore the Settings product draft to its last authoritative snapshot and clear any active
 Usage refresh. An unknown outcome also clears pending UI state but tells the
@@ -4383,13 +4385,13 @@ saved placement, decorated by the host. Clients pair the existing product
 workspace text with this label; a child never borrows its root's placement.
 This is in-process chrome, not a persisted/exported field or a JSONL v1 event.
 
-The client protocol number is **9**. It must match exactly; the runner
+The client protocol number is **10**. It must match exactly; the runner
 transport has its own independent version. Protocol 5 adds explicit placement,
 bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
 
-The protocol-9 schema pin is SHA-256
-`8db0a47912d5130e11bc52485656fed3489d5b8450a0d95ba8fd296728be2e0c`:
+The protocol-10 schema pin is SHA-256
+`45787a3b78da7e1923a12d2dbf9d1f8987a8d6816edebed10d5b8802c43cf9e2`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
 checks this build-independent pin.

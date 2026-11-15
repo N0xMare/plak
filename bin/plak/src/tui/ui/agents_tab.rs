@@ -16,6 +16,12 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 
+pub(super) fn host_default_remedy(id: &str) -> String {
+    format!(
+        "On the host: materialize profile `{id}` templates; edit `root.agent` and `roster.working_set` in config.toml."
+    )
+}
+
 /// Everything the Agents tab and its dialog hold.
 #[derive(Default)]
 pub(super) struct ProfilesPane {
@@ -192,7 +198,7 @@ impl App {
         }
         if self.host_mode {
             lines.push("Set as default is unavailable on a host attachment.".into());
-            lines.push(format!("On the host: `plak config set root.profile {id}`."));
+            lines.push(host_default_remedy(&id));
         } else {
             lines.push(
                 "Set as default makes it the profile new sessions start with; existing sessions keep their own."

@@ -1744,9 +1744,9 @@ class RepositoryPolicyTests(unittest.TestCase):
         errors = workspace_policy.validate_local_production_lints(missing_inheritance)
         self.assertTrue(any("plakous-compose" in error for error in errors), errors)
 
-        weakened_js = copy.deepcopy(workspace_manifests)
-        weakened_js["plakous-cell"]["lints"]["rust"]["unsafe_code"] = "allow"
-        errors = workspace_policy.validate_local_production_lints(weakened_js)
+        weakened_cell = copy.deepcopy(workspace_manifests)
+        weakened_cell["plakous-cell"]["lints"] = {"rust": {"unsafe_code": "forbid"}}
+        errors = workspace_policy.validate_local_production_lints(weakened_cell)
         self.assertTrue(any("plakous-cell" in error for error in errors), errors)
 
     def test_supported_compile_fixture_inventory_and_dependencies_are_exact(self) -> None:

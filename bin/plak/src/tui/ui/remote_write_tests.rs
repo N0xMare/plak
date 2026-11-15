@@ -75,7 +75,7 @@ fn socket_tui_legacy_write_refusals_restore_settings_and_release_refresh() {
     ];
     for (write, remedy) in writes.into_iter().zip([
         "plak config set <key> <value>",
-        "plak config set root.profile claude-default",
+        "materialize profile `claude-default` templates",
         "plak refresh claude",
     ]) {
         sender.send(UserAction::Extension(write)).unwrap();
@@ -103,7 +103,7 @@ fn socket_tui_legacy_write_refusals_restore_settings_and_release_refresh() {
     for message in [
         "this face may not send that (local_face)",
         "plak config set <key> <value>",
-        "plak config set root.profile claude-default",
+        "materialize profile `claude-default` templates",
         "plak refresh claude",
         "plak usage --account claude",
     ] {
@@ -165,7 +165,9 @@ fn socket_tui_marks_host_writes_read_only_but_keeps_terminal_preferences() {
     app.control_tab = Some(ControlTab::Models);
     app.arm_profile_confirm();
     let frame = render_to_string(&mut app, 120, 40);
-    assert!(frame.contains("plak config set root.profile"), "{frame}");
+    assert!(frame.contains("root.agent"), "{frame}");
+    assert!(frame.contains("roster.working_set"), "{frame}");
+    assert!(!frame.contains("root.profile"), "{frame}");
     assert!(!frame.contains("[ Set as default ]"), "{frame}");
     app.destructive_confirm = None;
     app.control_tab = Some(ControlTab::Usage);

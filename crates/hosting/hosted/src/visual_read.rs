@@ -22,15 +22,21 @@ pub(crate) fn normalizer() -> Arc<dyn ImageNormalizer> {
 struct HostedImageNormalizer;
 
 impl ImageNormalizer for HostedImageNormalizer {
-    fn normalize(&self, bytes: &[u8]) -> Result<PreparedImage, String> {
+    fn normalize(
+        &self,
+        bytes: &[u8],
+    ) -> Result<PreparedImage, plakous::tools::ImageNormalizationError> {
         match normalize_tool(bytes) {
             Ok((media_type, bytes)) => Ok(PreparedImage::new(media_type, bytes)),
-            Err(error) => Err(tool_normalize_error(error)),
+            Err(error) => Err(plakous::tools::ImageNormalizationError::with_source(
+                tool_normalize_error(&error),
+                error,
+            )),
         }
     }
 }
 
-fn tool_normalize_error(error: NormalizeError) -> String {
+fn tool_normalize_error(error: &NormalizeError) -> String {
     match error {
         NormalizeError::Image(plakous_image::NormalizeError::Unfit) => IMAGE_BUDGET.to_owned(),
         NormalizeError::Unavailable(_) => IMAGE_READS_UNAVAILABLE.to_owned(),
@@ -43,13 +49,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn decoder_refusals_keep_the_safe_sentence_and_original_failure() {
+        use std::error::Error as _;
+        let error = normalizer().normalize(b"not an image").unwrap_err();
+        assert!(matches!(
+            error.to_string().as_str(),
+            UNSUPPORTED_IMAGE | IMAGE_READS_UNAVAILABLE
+        ));
+        assert!(
+            error
+                .source()
+                .is_some_and(<dyn std::error::Error + 'static>::is::<NormalizeError>)
+        );
+    }
+
+    #[test]
     fn a_missing_decoder_refuses_with_the_build_sentence() {
         let error = NormalizeError::Unavailable(crate::capabilities::CapabilityUnavailable {
             id: "images",
             kind: crate::capabilities::CapabilityKind::Surface,
             feature: "images",
         });
-        assert_eq!(tool_normalize_error(error), IMAGE_READS_UNAVAILABLE);
+        assert_eq!(tool_normalize_error(&error), IMAGE_READS_UNAVAILABLE);
     }
 
     #[cfg(not(feature = "images"))]
@@ -58,12 +79,12 @@ mod tests {
         match normalize_tool(b"\x89PNG\r\n\x1a\n") {
             Err(error) => {
                 assert!(matches!(error, NormalizeError::Unavailable(_)));
-                assert_eq!(tool_normalize_error(error), IMAGE_READS_UNAVAILABLE);
+                assert_eq!(tool_normalize_error(&error), IMAGE_READS_UNAVAILABLE);
             }
             Ok(_) => panic!("a build without image decoding decoded an image"),
         }
         match normalizer().normalize(b"\x89PNG\r\n\x1a\n") {
-            Err(error) => assert_eq!(error, IMAGE_READS_UNAVAILABLE),
+            Err(error) => assert_eq!(error.to_string(), IMAGE_READS_UNAVAILABLE),
             Ok(_) => panic!("a build without image decoding returned image bytes"),
         }
     }
@@ -493,7 +514,10 @@ mod executor {
     }
 
     impl ImageNormalizer for SlowNormalizer {
-        fn normalize(&self, bytes: &[u8]) -> Result<plakous_tools::PreparedImage, String> {
+        fn normalize(
+            &self,
+            bytes: &[u8],
+        ) -> Result<plakous_tools::PreparedImage, plakous_tools::ImageNormalizationError> {
             if let Some(started) = self.started.lock().unwrap().take() {
                 let _ = started.send(());
             }

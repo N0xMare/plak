@@ -9,7 +9,10 @@ mod fake_composition;
 pub(in crate::runtime) struct FixtureImageNormalizer;
 
 impl plakous_tools::ImageNormalizer for FixtureImageNormalizer {
-    fn normalize(&self, bytes: &[u8]) -> Result<plakous_tools::PreparedImage, String> {
+    fn normalize(
+        &self,
+        bytes: &[u8],
+    ) -> Result<plakous_tools::PreparedImage, plakous_tools::ImageNormalizationError> {
         Ok(plakous_tools::PreparedImage::new(
             "image/png",
             bytes.to_vec(),
@@ -125,13 +128,14 @@ mod terminal_publication;
 use crate::lease::{LeaseDomain, LeaseInstant};
 use crate::local_composition::{
     LocalCompositionAttachmentIdentity, LocalCompositionConstruction, LocalCompositionContentItem,
-    LocalCompositionDescriptor, LocalCompositionEvent, LocalCompositionEventReceiver,
-    LocalCompositionExecuteInput, LocalCompositionExecuteRequest, LocalCompositionFuture,
-    LocalCompositionIntegration, LocalCompositionLifecycle, LocalCompositionResponse,
-    LocalCompositionResultProjection, LocalCompositionSession, LocalCompositionSessionBundle,
-    LocalCompositionSessionFuture, LocalCompositionSessionLoss, LocalCompositionShutdownResult,
-    LocalCompositionStartedCell, LocalCompositionTerminateResult, LocalCompositionToolDefinition,
-    LocalCompositionWaitInput, LocalCompositionWaitOutcome, LocalCompositionWaitRequest,
+    LocalCompositionDescriptor, LocalCompositionError, LocalCompositionEvent,
+    LocalCompositionEventReceiver, LocalCompositionExecuteInput, LocalCompositionExecuteRequest,
+    LocalCompositionFuture, LocalCompositionIntegration, LocalCompositionLifecycle,
+    LocalCompositionResponse, LocalCompositionResultProjection, LocalCompositionSession,
+    LocalCompositionSessionBundle, LocalCompositionSessionFuture, LocalCompositionSessionLoss,
+    LocalCompositionShutdownResult, LocalCompositionStartedCell, LocalCompositionTerminateResult,
+    LocalCompositionToolDefinition, LocalCompositionWaitInput, LocalCompositionWaitOutcome,
+    LocalCompositionWaitRequest,
 };
 use crate::manifest::RuntimeCompactionStrategy;
 use crate::manifest::{

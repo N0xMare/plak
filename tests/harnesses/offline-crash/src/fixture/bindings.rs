@@ -1000,7 +1000,10 @@ pub(super) fn scripted_runtime_binding_with_cursor_inner(
 struct ScriptImageNormalizer;
 
 impl plakous::tools::ImageNormalizer for ScriptImageNormalizer {
-    fn normalize(&self, bytes: &[u8]) -> Result<plakous::tools::PreparedImage, String> {
+    fn normalize(
+        &self,
+        bytes: &[u8],
+    ) -> Result<plakous::tools::PreparedImage, plakous::tools::ImageNormalizationError> {
         Ok(plakous::tools::PreparedImage::new(
             "image/png",
             bytes.to_vec(),

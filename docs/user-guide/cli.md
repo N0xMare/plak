@@ -44,7 +44,8 @@ coordinated upgrade rather than silently replacing an older running build.
 
 Programmatic clients can use `plak host connect --stdio`. Stdout carries only
 wire frames; stderr carries connection diagnostics. The client supplies the
-handshake (host-control wire version 9, distinct from `plak agent`'s JSONL
+handshake (host-control wire version 10, reported by `plak wire schema` and
+distinct from `plak agent`'s JSONL
 version 1). Closing stdin detaches that client without stopping host sessions.
 An absent or incompatible host refuses; there is no embedded fallback and no
 automatic replay after a broken connection.

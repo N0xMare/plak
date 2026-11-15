@@ -97,7 +97,7 @@ impl LocalCompositionIntegration for FakeComposition {
     fn parse_execute(
         &self,
         input: serde_json::Value,
-    ) -> Result<LocalCompositionExecuteInput, String> {
+    ) -> Result<LocalCompositionExecuteInput, LocalCompositionError> {
         match self {
             Self::Neutral(_) => {
                 let source = match input {
@@ -106,7 +106,7 @@ impl LocalCompositionIntegration for FakeComposition {
                         .remove("source")
                         .and_then(|source| source.as_str().map(str::to_owned))
                         .ok_or_else(|| "fake structured execute omitted source".to_owned())?,
-                    _ => return Err("fake execute input has the wrong shape".to_owned()),
+                    _ => return Err("fake execute input has the wrong shape".into()),
                 };
                 Ok(LocalCompositionExecuteInput {
                     source,
@@ -160,7 +160,10 @@ impl LocalCompositionIntegration for FakeComposition {
             }
         }
     }
-    fn parse_wait(&self, input: serde_json::Value) -> Result<LocalCompositionWaitInput, String> {
+    fn parse_wait(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<LocalCompositionWaitInput, LocalCompositionError> {
         match self {
             Self::Neutral(_) => {
                 fn whole_u64(value: &serde_json::Value) -> Option<u64> {
@@ -184,8 +187,12 @@ impl LocalCompositionIntegration for FakeComposition {
                         .get("max_tokens")
                         .and_then(whole_u64)
                         .map_or(Ok(128_usize), |value| {
-                            usize::try_from(value)
-                                .map_err(|_| "fake max_tokens overflowed".to_owned())
+                            usize::try_from(value).map_err(|error| {
+                                LocalCompositionError::with_source(
+                                    "fake max_tokens overflowed",
+                                    error,
+                                )
+                            })
                         })?;
                 let parsed = LocalCompositionWaitInput {
                     cell_id,
@@ -198,7 +205,7 @@ impl LocalCompositionIntegration for FakeComposition {
                 };
                 Ok(parsed)
             }
-            Self::Scheduler(_) => Err("scheduler fixture does not wait".to_owned()),
+            Self::Scheduler(_) => Err("scheduler fixture does not wait".into()),
             Self::Cancel(_) => Ok(LocalCompositionWaitInput {
                 cell_id: input
                     .get("cell_id")
@@ -215,7 +222,7 @@ impl LocalCompositionIntegration for FakeComposition {
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false),
             }),
-            Self::Lineage(_) => Err("lineage fixture does not wait".to_owned()),
+            Self::Lineage(_) => Err("lineage fixture does not wait".into()),
         }
     }
     fn create_session(
@@ -358,7 +365,7 @@ impl LocalCompositionIntegration for FakeComposition {
         _job_config: plakous_tools::JobConfig,
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
-    ) -> Result<LocalCompositionDescriptor, String> {
+    ) -> Result<LocalCompositionDescriptor, LocalCompositionError> {
         match self {
             #[cfg(feature = "test-hooks")]
             Self::Neutral(fixture)
@@ -368,7 +375,8 @@ impl LocalCompositionIntegration for FakeComposition {
                     .iter()
                     .any(|tool| tool.name == "probe") =>
             {
-                let name = ToolName::new("probe").map_err(|error| error.to_string())?;
+                let name = ToolName::new("probe")
+                    .map_err(|error| LocalCompositionError::new(error.to_string()))?;
                 ledger_review::review_composition(
                     registry,
                     target,
@@ -378,20 +386,22 @@ impl LocalCompositionIntegration for FakeComposition {
                         .by_exposed(&name)
                         .is_some(),
                 )
-                .map_err(|error| error.to_string())
+                .map_err(|error| LocalCompositionError::new(error.to_string()))
             }
-            Self::Neutral(_) => {
-                neutral_composition_descriptor(registry, target).map_err(|error| error.to_string())
-            }
+            Self::Neutral(_) => neutral_composition_descriptor(registry, target)
+                .map_err(|error| LocalCompositionError::new(error.to_string())),
             Self::Scheduler(fixture) => {
                 let nested_names = fixture
                     .descriptor
                     .nested_tools
                     .iter()
-                    .map(|tool| ToolName::new(tool.name.clone()).map_err(|error| error.to_string()))
+                    .map(|tool| {
+                        ToolName::new(tool.name.clone())
+                            .map_err(|error| LocalCompositionError::new(error.to_string()))
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 let exact = ProductJavaScriptCompositionV1::compile(registry, target, nested_names)
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| LocalCompositionError::new(error.to_string()))?;
                 Ok(LocalCompositionDescriptor {
                     outer_projection: exact.outer_projection().clone(),
                     nested_projection: exact.nested_projection().clone(),
@@ -411,38 +421,41 @@ impl LocalCompositionIntegration for FakeComposition {
                     marker_executor: ToolExecutorId::new(
                         "plakous.product-javascript-composition.driver-marker.v1",
                     )
-                    .map_err(|error| error.to_string())?,
+                    .map_err(|error| LocalCompositionError::new(error.to_string()))?,
                 })
             }
             Self::Cancel(fixture) => {
                 if fixture.mode.codex_process_catalog() {
                     return neutral_composition_descriptor(registry, target)
-                        .map_err(|error| error.to_string());
+                        .map_err(|error| LocalCompositionError::new(error.to_string()));
                 }
                 if fixture.evidence.python_fixture.load(Ordering::Acquire) {
                     return cancel_cell_python_descriptor(registry, target)
-                        .map_err(|error| error.to_string());
+                        .map_err(|error| LocalCompositionError::new(error.to_string()));
                 }
                 let nested_names = fixture
                     .descriptor
                     .nested_tools
                     .iter()
-                    .map(|tool| ToolName::new(tool.name.clone()).map_err(|error| error.to_string()))
+                    .map(|tool| {
+                        ToolName::new(tool.name.clone())
+                            .map_err(|error| LocalCompositionError::new(error.to_string()))
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 let exact =
                     ProductJavaScriptCompositionV1::compile(registry.clone(), target, nested_names)
-                        .map_err(|error| error.to_string())?;
-                let mut descriptor =
-                    cancel_cell_descriptor(&exact).map_err(|error| error.to_string())?;
+                        .map_err(|error| LocalCompositionError::new(error.to_string()))?;
+                let mut descriptor = cancel_cell_descriptor(&exact)
+                    .map_err(|error| LocalCompositionError::new(error.to_string()))?;
                 if fixture.evidence.mixed_tool_fixture.load(Ordering::Acquire) {
                     extend_cancel_cell_outer(&mut descriptor, registry)
-                        .map_err(|error| error.to_string())?;
+                        .map_err(|error| LocalCompositionError::new(error.to_string()))?;
                 }
                 Ok(descriptor)
             }
             Self::Lineage(fixture) => {
                 lineage_composition_descriptor(fixture.class, fixture.scenario, registry, target)
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| LocalCompositionError::new(error.to_string()))
             }
         }
     }
@@ -453,13 +466,13 @@ impl LocalCompositionIntegration for FakeComposition {
         projection: &ToolProjectionMap,
         _registry: FrozenToolRegistry,
         _configuration: &CompiledProviderConfiguration,
-    ) -> Result<(), String> {
+    ) -> Result<(), LocalCompositionError> {
         match self {
             Self::Neutral(fixture) => {
                 if descriptor.identity != fixture.descriptor.identity
                     || projection.digest() != descriptor.outer_projection.digest()
                 {
-                    return Err("fake composition descriptor drifted".to_owned());
+                    return Err("fake composition descriptor drifted".into());
                 }
                 Ok(())
             }
@@ -467,7 +480,7 @@ impl LocalCompositionIntegration for FakeComposition {
                 if descriptor.identity != fixture.descriptor.identity
                     || projection.digest() != descriptor.outer_projection.digest()
                 {
-                    return Err("scheduler composition descriptor drifted".to_owned());
+                    return Err("scheduler composition descriptor drifted".into());
                 }
                 Ok(())
             }
@@ -475,7 +488,7 @@ impl LocalCompositionIntegration for FakeComposition {
                 if descriptor.identity != fixture.descriptor.identity
                     || projection.digest() != descriptor.outer_projection.digest()
                 {
-                    return Err("cancel-cell composition descriptor drifted".to_owned());
+                    return Err("cancel-cell composition descriptor drifted".into());
                 }
                 Ok(())
             }
@@ -483,7 +496,7 @@ impl LocalCompositionIntegration for FakeComposition {
                 if descriptor.identity != fixture.descriptor.identity
                     || projection.digest() != descriptor.outer_projection.digest()
                 {
-                    return Err("lineage composition descriptor drifted".to_owned());
+                    return Err("lineage composition descriptor drifted".into());
                 }
                 Ok(())
             }
@@ -967,10 +980,10 @@ impl LocalCompositionSession for FakeSession {
                         ));
                     }
                     if request.cell_id != "C" {
-                        return Err("unexpected fake cell".to_owned());
+                        return Err("unexpected fake cell".into());
                     }
                     if fixture.evidence.fail_wait.load(Ordering::Acquire) {
-                        return Err("injected wait transport failure".to_owned());
+                        return Err("injected wait transport failure".into());
                     }
                     Ok(LocalCompositionWaitOutcome::Live(
                         LocalCompositionResponse::Result {
@@ -981,9 +994,7 @@ impl LocalCompositionSession for FakeSession {
                     ))
                 })
             }
-            Self::Scheduler(_) => {
-                Box::pin(async { Err("scheduler fixture does not wait".to_owned()) })
-            }
+            Self::Scheduler(_) => Box::pin(async { Err("scheduler fixture does not wait".into()) }),
             Self::Cancel(fixture) => {
                 fixture.evidence.wait_count.fetch_add(1, Ordering::AcqRel);
                 if let Some(control) = lock_mutex(&fixture.evidence.steer_on_wait).take() {
@@ -1032,7 +1043,7 @@ impl LocalCompositionSession for FakeSession {
                     std::future::pending().await
                 })
             }
-            Self::Lineage(_) => Box::pin(async { Err("lineage fixture does not wait".to_owned()) }),
+            Self::Lineage(_) => Box::pin(async { Err("lineage fixture does not wait".into()) }),
         }
     }
     fn generation_lost(&self) -> bool {

@@ -20,7 +20,7 @@ pub(super) fn validate_product_configuration(
     nested_names: &[ToolName],
     presentation_kind: plakous_tools::CodingPresentation,
     evidence: &ProductExtensionEvidence,
-) -> Result<(), String> {
+) -> Result<(), LocalCompositionError> {
     if !projection.is_for_registry(&registry)
         || !descriptor.outer_projection.is_for_registry(&registry)
         || !descriptor.nested_projection.is_for_registry(&registry)
@@ -43,7 +43,7 @@ pub(super) fn validate_product_configuration(
         configuration.effective_identity(),
         PROCESS_TOOL_PROJECTION_REVISION,
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(LocalCompositionError::from_source)?;
     if !matches!(
         expected_target.integration_class(),
         IntegrationClass::Standard | IntegrationClass::Custom
@@ -94,7 +94,7 @@ pub(super) fn validate_product_configuration(
         presentation_kind,
         nested_names.iter().cloned(),
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(LocalCompositionError::from_source)?;
     let neutral = neutral_product_descriptor(&exact)?;
     let (_, _, catalog, presentation, _, _) = evidence.extension_facts();
     if neutral.identity != descriptor.identity
@@ -121,7 +121,7 @@ pub(super) fn validate_python_configuration(
     presentation: plakous_compose::PythonPtcPresentationV1,
     presentation_kind: plakous_tools::CodingPresentation,
     evidence: &ProductExtensionEvidence,
-) -> Result<(), String> {
+) -> Result<(), LocalCompositionError> {
     if !projection.is_for_registry(&registry)
         || !descriptor.outer_projection.is_for_registry(&registry)
         || !descriptor.nested_projection.is_for_registry(&registry)
@@ -144,7 +144,7 @@ pub(super) fn validate_python_configuration(
         configuration.effective_identity(),
         PROCESS_TOOL_PROJECTION_REVISION,
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(LocalCompositionError::from_source)?;
     if !matches!(
         target.integration_class(),
         IntegrationClass::Standard | IntegrationClass::Custom
@@ -170,7 +170,7 @@ pub(super) fn validate_python_configuration(
         presentation_kind,
         nested_names.iter().cloned(),
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(LocalCompositionError::from_source)?;
     let neutral = neutral_python_descriptor(&exact)?;
     let (_, _, catalog, presentation_fact, limits, _) = evidence.extension_facts();
     if neutral.identity != descriptor.identity

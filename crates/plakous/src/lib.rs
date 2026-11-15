@@ -1413,7 +1413,8 @@ pub mod tools {
         drifted_pins, menu_names, register_packs,
     };
     pub use plakous_tools::{
-        ImageHeader, ImageNormalizer, ImageSniffError, PreparedImage, sniff_image,
+        ImageHeader, ImageNormalizationError, ImageNormalizer, ImageSniffError, PreparedImage,
+        sniff_image,
     };
 }
 /// Exact-origin xAI API-key execution and the separate SuperGrok subscription integration.

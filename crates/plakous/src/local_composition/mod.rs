@@ -31,10 +31,11 @@ use std::{
 use plakous_agent::internal::{
     AgentBuilder, AgentError, AgentErrorKind, LocalCompositionAttachmentIdentity,
     LocalCompositionConstruction, LocalCompositionContentItem, LocalCompositionDescriptor,
-    LocalCompositionExecuteInput, LocalCompositionFuture, LocalCompositionImageDetail,
-    LocalCompositionIntegration, LocalCompositionLifecycle, LocalCompositionResultProjection,
-    LocalCompositionRuntimeContract, LocalCompositionSessionBundle, LocalCompositionShutdownResult,
-    LocalCompositionToolDefinition, LocalCompositionWaitInput,
+    LocalCompositionError, LocalCompositionExecuteInput, LocalCompositionFuture,
+    LocalCompositionImageDetail, LocalCompositionIntegration, LocalCompositionLifecycle,
+    LocalCompositionResultProjection, LocalCompositionRuntimeContract,
+    LocalCompositionSessionBundle, LocalCompositionShutdownResult, LocalCompositionToolDefinition,
+    LocalCompositionWaitInput,
 };
 use plakous_compose::codex_exec as native;
 use plakous_compose::{
@@ -89,8 +90,8 @@ use python::neutral_python_descriptor;
 use validate::validate_product_configuration;
 use validate::validate_python_configuration;
 
-fn invalid(message: impl Into<String>) -> AgentError {
-    AgentError::new(AgentErrorKind::InvalidInput, message.into())
+fn invalid(message: impl fmt::Display) -> AgentError {
+    AgentError::new(AgentErrorKind::InvalidInput, message.to_string())
 }
 
 fn identity_error(error: plakous_model::DigestError) -> AgentError {

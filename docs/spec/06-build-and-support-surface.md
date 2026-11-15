@@ -813,11 +813,10 @@ The workspace lint table sets `unsafe_code = "forbid"`, together with
 "deny"`, `unused_qualifications = "warn"`, and denied broken and private
 intra-doc links. On the Clippy side, `all` and `pedantic` are warnings while
 `unwrap_used`, `expect_used`, `dbg_macro`, `todo`, and `unimplemented` are
-denied and `allow_attributes_without_reason` warns. Packages inherit this table with `[lints] workspace = true`, except for the
-explicit local lint table described below.
-
-`plakous-cell` maintains local documentation/Clippy defaults but still sets
-`unsafe_code = "forbid"`; `plakous-js-runtime` inherits the workspace lints.
+denied and `allow_attributes_without_reason` warns. Local production packages,
+including `plakous-cell` and `plakous-js-runtime`, inherit this table with
+`[lints] workspace = true`; only the reviewed vendor snapshot retains its
+upstream local lint table (§3).
 The sidecar client and evaluator use
 safe Rust interfaces. Unsafe implementation inside upstream binding crates does
 not require an in-tree allowance. Every local production crate, including the

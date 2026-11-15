@@ -44,10 +44,15 @@ pub enum ObservationMode {
     /// The cell keeps running between observations. `request_bound` limits
     /// how long the worker computes without a nested call, a wait on nested
     /// results or a terminal before it is killed.
-    HostWindow { request_bound: Duration },
+    HostWindow {
+        /// Maximum uninterrupted worker compute interval.
+        request_bound: Duration,
+    },
     /// One foreground terminal, bounded across compute and external waits.
     Foreground {
+        /// Maximum uninterrupted worker compute interval.
         request_bound: Duration,
+        /// Total foreground execution budget.
         budget: Duration,
     },
 }
@@ -56,11 +61,19 @@ pub enum ObservationMode {
 #[derive(Clone, Debug, PartialEq)]
 pub enum CellResponse {
     /// The cell parked; it continues on the next observation.
-    Yielded { cell: u64, items: Vec<OutputItem> },
+    Yielded {
+        /// Parked cell identity.
+        cell: u64,
+        /// Output collected since the previous observation.
+        items: Vec<OutputItem>,
+    },
     /// The cell ended, with its error text when it failed.
     Result {
+        /// Completed cell identity.
         cell: u64,
+        /// Remaining output in production order.
         items: Vec<OutputItem>,
+        /// Model-visible error text on failure.
         error: Option<String>,
     },
 }
@@ -70,33 +83,48 @@ pub type CellCompletion = Result<CellResponse, String>;
 
 /// A started cell and its first observation.
 pub struct StartedCell {
+    /// Host-assigned cell identity.
     pub cell: u64,
+    /// First observation; dropping it does not cancel execution.
     pub initial: Pin<Box<dyn Future<Output = CellCompletion> + Send>>,
 }
 
 /// The answer to a later observation of a cell.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WaitOutcome {
+    /// An observation from the requested cell.
     Live(CellResponse),
     /// No such cell is running; `error` explains an id that is not a cell id.
     Missing {
+        /// Diagnostic for a malformed identity, otherwise absent.
         error: Option<String>,
     },
+    /// The worker was lost without a definite terminal.
     Lost(String),
 }
 
 /// A request from the running cell that the owner must answer.
 pub enum CellSessionEvent {
+    /// A nested tool call requiring an exact correlated response.
     NestedCall {
+        /// Owning cell identity.
         cell: u64,
+        /// Worker-assigned call identity.
         call: u64,
+        /// Exposed tool name.
         name: String,
+        /// JSON input for host validation.
         input: Value,
+        /// One-shot result delivery authority.
         responder: NestedResponder,
     },
+    /// An operator notification requiring acknowledgement.
     Notification {
+        /// Producing cell identity.
         cell: u64,
+        /// Notification text.
         text: String,
+        /// One-shot acknowledgement authority.
         responder: NotificationResponder,
     },
 }

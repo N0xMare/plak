@@ -102,9 +102,9 @@ struct PythonWaitInput {
 
 pub(super) fn parse_python_wait(
     input: serde_json::Value,
-) -> Result<LocalCompositionWaitInput, String> {
-    let input: PythonWaitInput =
-        serde_json::from_value(input).map_err(|_| "invalid Python wait input".to_owned())?;
+) -> Result<LocalCompositionWaitInput, LocalCompositionError> {
+    let input: PythonWaitInput = serde_json::from_value(input)
+        .map_err(|error| LocalCompositionError::with_source("invalid Python wait input", error))?;
     if input.cell_id.is_empty() {
         return Err("Python wait cell_id must not be empty".into());
     }
@@ -125,8 +125,9 @@ pub(super) fn parse_python_wait(
     Ok(LocalCompositionWaitInput {
         cell_id: input.cell_id,
         yield_time_ms,
-        max_output_tokens: usize::try_from(max_output_bytes)
-            .map_err(|_| "Python output bound exceeds usize".to_owned())?,
+        max_output_tokens: usize::try_from(max_output_bytes).map_err(|error| {
+            LocalCompositionError::with_source("Python output bound exceeds usize", error)
+        })?,
         terminate: input.terminate.unwrap_or(false),
     })
 }
@@ -148,7 +149,10 @@ impl Presentation for PythonPresentation {
         Some(&self.evidence)
     }
 
-    fn parse_wait(&self, input: serde_json::Value) -> Result<LocalCompositionWaitInput, String> {
+    fn parse_wait(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<LocalCompositionWaitInput, LocalCompositionError> {
         parse_python_wait(input)
     }
 
@@ -159,7 +163,7 @@ impl Presentation for PythonPresentation {
         projection: &ToolProjectionMap,
         registry: FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
-    ) -> Result<(), String> {
+    ) -> Result<(), LocalCompositionError> {
         validate_python_configuration(
             job_config,
             descriptor,
@@ -200,7 +204,7 @@ impl Presentation for PythonPresentation {
         )
     }
 
-    fn verify_worker(&self, path: &Path, identity: &[u8]) -> Result<(), String> {
+    fn verify_worker(&self, path: &Path, identity: &[u8]) -> Result<(), LocalCompositionError> {
         verify_cell_worker_before_spawn(CellEngine::Monty, path, identity)
     }
 
@@ -214,11 +218,16 @@ impl Presentation for PythonPresentation {
     fn parse_execute(
         &self,
         input: serde_json::Value,
-    ) -> Result<LocalCompositionExecuteInput, String> {
+    ) -> Result<LocalCompositionExecuteInput, LocalCompositionError> {
         let (source, max_output_bytes, yield_time_ms) = match self.presentation {
             plakous_compose::PythonPtcPresentationV1::StructuredFunctions => {
-                let value: PythonStructuredRunInput = serde_json::from_value(input)
-                    .map_err(|_| "invalid structured Python run input".to_owned())?;
+                let value: PythonStructuredRunInput =
+                    serde_json::from_value(input).map_err(|error| {
+                        LocalCompositionError::with_source(
+                            "invalid structured Python run input",
+                            error,
+                        )
+                    })?;
                 (
                     value.code,
                     value
@@ -257,8 +266,9 @@ impl Presentation for PythonPresentation {
         Ok(LocalCompositionExecuteInput {
             source,
             yield_time_ms,
-            max_output_tokens: usize::try_from(max_output_bytes)
-                .map_err(|_| "Python output byte bound exceeds usize".to_owned())?,
+            max_output_tokens: usize::try_from(max_output_bytes).map_err(|error| {
+                LocalCompositionError::with_source("Python output byte bound exceeds usize", error)
+            })?,
         })
     }
     fn rebuild_descriptor(
@@ -266,7 +276,7 @@ impl Presentation for PythonPresentation {
         job_config: plakous_tools::JobConfig,
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
-    ) -> Result<LocalCompositionDescriptor, String> {
+    ) -> Result<LocalCompositionDescriptor, LocalCompositionError> {
         PythonPtcV1::compile_for_kind(
             job_config,
             registry,
@@ -275,7 +285,7 @@ impl Presentation for PythonPresentation {
             self.presentation_kind,
             self.nested_names.iter().cloned(),
         )
-        .map_err(|error| error.to_string())
+        .map_err(LocalCompositionError::from_source)
         .and_then(|value| neutral_python_descriptor(&value))
     }
 }
@@ -309,7 +319,7 @@ pub(super) fn truncate_python_items(
 
 pub(super) fn neutral_python_descriptor(
     exact: &PythonPtcDescriptorV1,
-) -> Result<LocalCompositionDescriptor, String> {
+) -> Result<LocalCompositionDescriptor, LocalCompositionError> {
     let nested_tools = exact
         .nested_tools()
         .iter()
@@ -327,7 +337,7 @@ pub(super) fn neutral_python_descriptor(
         execute_name: PYTHON_PTC_RUN_NAME_V1.into(),
         wait_name: PYTHON_PTC_WAIT_NAME_V1.into(),
         marker_executor: ToolExecutorId::new(PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1)
-            .map_err(|error| error.to_string())?,
+            .map_err(LocalCompositionError::from_source)?,
     })
 }
 
@@ -499,6 +509,27 @@ impl SessionEngine for Monty {
 #[cfg(test)]
 mod prompt_tests {
     use super::*;
+
+    #[test]
+    fn wait_refusals_keep_safe_text_and_parser_sources() -> Result<(), Box<dyn std::error::Error>> {
+        use std::error::Error as _;
+        let Err(malformed) = parse_python_wait(serde_json::json!({"cell_id": 12})) else {
+            return Err("a numeric cell identity was admitted".into());
+        };
+        assert_eq!(malformed.to_string(), "invalid Python wait input");
+        assert!(
+            malformed
+                .source()
+                .is_some_and(<dyn std::error::Error + 'static>::is::<serde_json::Error>)
+        );
+
+        let Err(policy) = parse_python_wait(serde_json::json!({"cell_id": ""})) else {
+            return Err("an empty cell identity was admitted".into());
+        };
+        assert_eq!(policy.to_string(), "Python wait cell_id must not be empty");
+        assert!(policy.source().is_none());
+        Ok(())
+    }
 
     #[test]
     fn host_prompts_digest_is_stable() {

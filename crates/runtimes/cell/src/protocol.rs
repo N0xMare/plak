@@ -19,9 +19,13 @@ pub const CELL_PROTOCOL_REVISION: &str = "plakous-cell-protocol.v2";
 /// version its engine contract records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WorkerIdentity {
+    /// Executable name used to locate the worker artifact.
     pub binary: &'static str,
+    /// Interpreter family named in the handshake.
     pub engine: &'static str,
+    /// Interpreter version recorded in the engine contract.
     pub version: &'static str,
+    /// Exact adapter revision named in the handshake.
     pub adapter: &'static str,
 }
 
@@ -47,8 +51,11 @@ pub const MONTY_WORKER: WorkerIdentity = WorkerIdentity {
 pub enum HostFrame {
     /// Once, after `Hello`: the protocol revision and the engine's limits.
     Configure {
+        /// Exact cell protocol revision.
         revision: String,
+        /// Engine identity and resource limits.
         engine: EngineConfig,
+        /// Generated Python SDK declarations, when selected.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sdk_stubs: Option<String>,
     },
@@ -57,22 +64,37 @@ pub enum HostFrame {
     /// Starts one cell. `window` is the engine-parked yield interval in
     /// milliseconds, when the presentation yields inside the engine.
     StartCell {
+        /// Host-assigned cell identity.
         cell: u64,
+        /// Source admitted for this execution.
         source: String,
+        /// Visible bindings and retained state.
         prelude: CellPrelude,
+        /// Engine-parked observation interval in milliseconds.
         window: Option<u64>,
     },
     /// The outcome of one nested call: its value, or the failure the cell
     /// observes as a thrown error.
     NestedResult {
+        /// Owning cell identity.
         cell: u64,
+        /// Correlated nested call identity.
         call: u64,
+        /// Returned value or model-visible failure.
         outcome: Result<CellValue, String>,
     },
     /// Resumes an engine-parked yield for another window.
-    Resume { cell: u64, window: u64 },
+    Resume {
+        /// Parked cell identity.
+        cell: u64,
+        /// Next observation interval in milliseconds.
+        window: u64,
+    },
     /// Cooperative interrupt of the running cell.
-    Cancel { cell: u64 },
+    Cancel {
+        /// Cell to interrupt.
+        cell: u64,
+    },
     /// Ends the worker; it answers with `ResourceReport` and exits.
     Shutdown,
 }
@@ -83,35 +105,71 @@ pub enum HostFrame {
 pub enum WorkerFrame {
     /// First frame: the protocol revision, engine and adapter identities.
     Hello {
+        /// Exact cell protocol revision.
         revision: String,
+        /// Interpreter family.
         engine: String,
+        /// Exact adapter revision.
         adapter: String,
     },
     /// A nested call the cell made; the host validates `name`.
     NestedCall {
+        /// Owning cell identity.
         cell: u64,
+        /// Worker-assigned nested call identity.
         call: u64,
+        /// Exposed tool name.
         name: String,
+        /// Tool input before host validation.
         input: CellValue,
     },
     /// Output in production order.
-    Output { cell: u64, item: OutputItem },
+    Output {
+        /// Producing cell identity.
+        cell: u64,
+        /// One ordered output item.
+        item: OutputItem,
+    },
     /// What became of one `NestedResult`, sent once the worker knows.
     Delivery {
+        /// Owning cell identity.
         cell: u64,
+        /// Correlated nested call identity.
         call: u64,
+        /// What the interpreter proved about acceptance.
         verdict: DeliveryVerdict,
     },
     /// The cell suspended on these nested calls and waits for their results.
-    Waiting { cell: u64, calls: Vec<u64> },
+    Waiting {
+        /// Suspended cell identity.
+        cell: u64,
+        /// Outstanding nested calls blocking execution.
+        calls: Vec<u64>,
+    },
     /// The cell parked at a yield and waits for `Resume`.
-    Yielded { cell: u64 },
+    Yielded {
+        /// Parked cell identity.
+        cell: u64,
+    },
     /// The cell's one terminal.
-    CellDone { cell: u64, outcome: CellOutcome },
+    CellDone {
+        /// Completed cell identity.
+        cell: u64,
+        /// The cell's definite terminal outcome.
+        outcome: CellOutcome,
+    },
     /// The worker lost its evaluator; nothing after this is reliable.
-    HostLost { class: LossClass, message: String },
+    HostLost {
+        /// Closed loss category.
+        class: LossClass,
+        /// Diagnostic describing the loss.
+        message: String,
+    },
     /// Self-reported usage, sent once in answer to `Shutdown`.
-    ResourceReport { usage: ResourceUsage },
+    ResourceReport {
+        /// Worker process resource sample.
+        usage: ResourceUsage,
+    },
 }
 
 /// Engine limits the host declares and the worker checks against its own.
@@ -119,9 +177,17 @@ pub enum WorkerFrame {
 #[serde(tag = "engine", rename_all = "snake_case")]
 pub enum EngineConfig {
     /// The `QuickJS` worker.
-    Quickjs { heap_bytes: u64, stack_bytes: u64 },
+    Quickjs {
+        /// Maximum interpreter heap bytes.
+        heap_bytes: u64,
+        /// Maximum interpreter stack bytes.
+        stack_bytes: u64,
+    },
     /// The Monty worker: the interpreter's soft memory limit.
-    Monty { memory_bytes: u64 },
+    Monty {
+        /// Soft interpreter memory bound in bytes.
+        memory_bytes: u64,
+    },
 }
 
 impl EngineConfig {
@@ -143,7 +209,9 @@ impl EngineConfig {
 pub enum CellPrelude {
     /// `QuickJS`: the visible tool declarations and the retained `store` map.
     Quickjs {
+        /// Visible tool declarations.
         tools: Vec<Value>,
+        /// Retained session values supplied to the cell.
         #[serde(
             serialize_with = "crate::stored::serialize",
             deserialize_with = "crate::stored::deserialize"
@@ -151,24 +219,35 @@ pub enum CellPrelude {
         stored: HashMap<String, Value>,
     },
     /// Monty: the session's tool wrappers, on the session's first cell only.
-    Monty { bootstrap: Option<MontyBootstrap> },
-    /// Fresh Python SDK globals; the client sends Reset before StartCell.
-    MontySdk { bootstrap: MontyBootstrap },
+    Monty {
+        /// Wrappers installed only on the session's first cell.
+        bootstrap: Option<MontyBootstrap>,
+    },
+    /// Fresh Python SDK globals; the client sends `Reset` before `StartCell`.
+    MontySdk {
+        /// Generated SDK wrappers for the fresh globals.
+        bootstrap: MontyBootstrap,
+    },
 }
 
 /// The Python wrappers a Monty session installs before its first cell: the
 /// generated source and the private host functions it calls.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MontyBootstrap {
+    /// Generated Python wrapper source.
     pub source: String,
+    /// Private host functions the source calls.
     pub bindings: Vec<MontyBinding>,
 }
 
 /// One private host function: the tool it calls and the argument it takes.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MontyBinding {
+    /// Private Python function name.
     pub function: String,
+    /// Exposed tool name resolved by the host.
     pub tool: String,
+    /// Required argument shape.
     pub input: BindingInput,
 }
 
@@ -186,10 +265,28 @@ pub enum BindingInput {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutputItem {
-    Text { text: String },
-    Image { url: String, detail: Option<String> },
-    Audio { url: String },
-    Notify { text: String },
+    /// Model-visible text.
+    Text {
+        /// Exact output text.
+        text: String,
+    },
+    /// Model-visible image reference.
+    Image {
+        /// Image URL or data URL.
+        url: String,
+        /// Optional image detail hint.
+        detail: Option<String>,
+    },
+    /// Model-visible audio reference.
+    Audio {
+        /// Audio URL or data URL.
+        url: String,
+    },
+    /// Operator notification requiring host acknowledgement.
+    Notify {
+        /// Notification text.
+        text: String,
+    },
 }
 
 /// What a worker proved about one nested result.
@@ -212,22 +309,32 @@ pub enum DeliveryVerdict {
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum CellOutcome {
     /// A host or worker resource bound, never inferred from Python exception text.
-    Stopped { reason: CellStopReason },
+    Stopped {
+        /// Resource bound that ended execution.
+        reason: CellStopReason,
+    },
+    /// Successful execution and its retained state.
     Completed {
+        /// Optional displayed return value.
         value: Option<String>,
+        /// Session values retained after success.
         #[serde(
             serialize_with = "crate::stored::serialize",
             deserialize_with = "crate::stored::deserialize"
         )]
         stored: HashMap<String, Value>,
     },
+    /// Definite execution failure and remaining session state.
     Failed {
+        /// Model-visible error text.
         message: String,
+        /// Session values retained after failure.
         #[serde(
             serialize_with = "crate::stored::serialize",
             deserialize_with = "crate::stored::deserialize"
         )]
         stored: HashMap<String, Value>,
+        /// Whether the known terminal also cost the evaluator generation.
         generation_lost: bool,
     },
 }
@@ -235,6 +342,7 @@ pub enum CellOutcome {
 /// Typed resource stop for a cell with a known terminal outcome.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum CellStopReason {
+    /// The total foreground execution budget expired.
     ForegroundBudget,
 }
 
@@ -242,8 +350,11 @@ pub enum CellStopReason {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LossClass {
+    /// A worker resource bound was exceeded.
     ResourceLimit,
+    /// A frame or correlation violated the cell protocol.
     ProtocolViolation,
+    /// The interpreter or its process failed.
     EngineFailure,
 }
 
@@ -287,18 +398,29 @@ pub fn json_depth(value: &Value) -> usize {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum CellValue {
+    /// JSON null or Python None.
     Null,
+    /// A boolean.
     Bool(bool),
+    /// A signed 64-bit integer.
     Int(i64),
     /// An integer outside `i64`, in decimal.
     BigInt(String),
+    /// A floating-point number.
     Float(f64),
+    /// A UTF-8 string.
     Str(String),
+    /// Binary data.
     Bytes(Vec<u8>),
+    /// An ordered sequence.
     List(Vec<CellValue>),
+    /// String-keyed dictionary entries.
     Dict(Vec<(String, CellValue)>),
+    /// A named record with ordered fields.
     Record {
+        /// Record type name.
         name: String,
+        /// Field names and values.
         fields: Vec<(String, CellValue)>,
     },
 }

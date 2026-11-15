@@ -294,13 +294,16 @@ pub(in crate::runtime) fn construction_tool_presentation(
     match builder.tool_projection.as_ref() {
         Some(projection) => {
             let admission = if let Some(local_composition) = builder.local_composition.as_ref() {
-                local_composition.integration.validate_configuration(
-                    builder.job_config,
-                    &local_composition.descriptor,
-                    projection,
-                    builder.tools.clone(),
-                    &builder.provider_configuration,
-                )
+                local_composition
+                    .integration
+                    .validate_configuration(
+                        builder.job_config,
+                        &local_composition.descriptor,
+                        projection,
+                        builder.tools.clone(),
+                        &builder.provider_configuration,
+                    )
+                    .map_err(|error| error.to_string())
             } else if projection.target().integration_class()
                 == plakous_model::IntegrationClass::Custom
             {

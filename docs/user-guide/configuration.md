@@ -232,9 +232,12 @@ access = "full"
 agent = "root-agent"
 ```
 
-`account` must be one you are logged in to (`plak status`), and `model` must be
-one that account offers. Neither is checked when the file is read — they are
-checked when a session binds — so a typo shows up at launch, not at save.
+Reading a template validates the account vocabulary and direct API model/effort
+against the bundled catalog; unknown accounts and invalid API selections can
+make `plak config show` fail before launch. This does not prove credential
+readiness or live catalog availability. When the session binds, the selected
+account must be ready (`plak status`) and its current catalog must admit the
+model, effort and composition.
 
 The Agents tab's **Set as default** writes a profile's templates and points
 the root and working set at them for new sessions. **Switch now** and

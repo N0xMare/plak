@@ -1,13 +1,17 @@
 //! The host protocol between a hosted Plakous session and whoever drives it.
 //!
 //!
-//! Three faces of one vocabulary:
+//! The in-process, framed wire v2 and JSONL v1 faces share one vocabulary:
 //!
 //! * [`SessionIntent`] in and [`SessionObservation`] out, with the immutable
 //!   [`views`] an observation carries and the [`selection`] enums both share;
 //! * the two bounded in-process mailboxes in [`channel`], whose coalescing and
 //!   eviction semantics every driver depends on, and the [`limits`] they and
 //!   the host agree on;
+//! * framed wire v2 in [`wire`] and its typed [`client`], used by the supported
+//!   host socket, stdio bridge and authenticated web endpoint. The current
+//!   [`wire::WIRE_VERSION`] must match exactly, without negotiation. The
+//!   single-session `plak agent --wire v2` entrypoint is hidden and unsupported;
 //! * the `plak agent` JSONL wire: the v1 [`envelope`], the [`topology`]
 //!   request/receipt shapes, and the [`jsonl`] projection of every
 //!   observation, an exhaustive match so a new variant is a wire decision.
@@ -20,7 +24,12 @@
 //! overlay) threads it through the [`ProtocolExtension`] slot; the protocol
 //! carries it and never reads it.
 //!
-//! # Framing
+//! JSONL v1 remains the default for `plak agent`, byte-identical until removal;
+//! it is not wire v2 and its version is independent of the framed protocol.
+//! New wire integrations use the supported host transports and the schema
+//! printed by `plak wire schema`. The following sections describe JSONL v1.
+//!
+//! # JSONL v1 framing
 //!
 //! One JSON object per line in both directions. Every line carries `v`, and
 //! every line a client sends MUST carry `v` equal to [`envelope::SCHEMA_V`],
@@ -30,7 +39,7 @@
 //! client reads fields by name. The presentation major is independent of the
 //! product `SQLite` schema and of Plakous.
 //!
-//! # Versioning
+//! # JSONL v1 versioning
 //!
 //! **v1 is frozen and growth is additive only.** Unknown additive fields on a
 //! known kind are ignored, and an unknown inbound `kind` is a typed diagnostic
@@ -48,6 +57,9 @@
 //! | --- | --- |
 //! | `prompt` | `text`, optional `steer` (only literal `true` counts) |
 //! | `interrupt`, `compact`, `clear`, `quit` | — |
+//! | `background`, `resume_queue`, `recover` | — |
+//! | `resume` | optional `agent_id` (otherwise all held work) |
+//! | `resolve_approval` | `approval_id`, `choice` (`allow` or `deny`) |
 //! | `fork` | optional `account` |
 //! | `tree`, `stop_all` | — |
 //! | `interrupt_node`, `close_node` | `agent_id` |

@@ -189,7 +189,7 @@ impl App {
             UserAction::Extension(SurfaceIntent::ApplyProfile {
                 name,
                 apply: crate::tui::ProfileApply::Default,
-            }) => format!("run `plak config set root.profile {name}` on the host"),
+            }) => super::agents_tab::host_default_remedy(name),
             UserAction::Extension(SurfaceIntent::RefreshUsageCredential { account }) => {
                 if self.usage_refresh.active.as_ref() == Some(account) {
                     self.usage_refresh.active = None;

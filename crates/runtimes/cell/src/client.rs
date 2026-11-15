@@ -19,8 +19,11 @@ use crate::protocol::{
 /// Content-free child-process usage returned when a worker exits.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ChildProcessUsage {
+    /// User CPU time attributed to the worker.
     pub user_cpu: Duration,
+    /// System CPU time attributed to the worker.
     pub system_cpu: Duration,
+    /// Peak resident set size in bytes, when available.
     pub peak_rss_bytes: Option<u64>,
 }
 
@@ -35,7 +38,9 @@ impl ChildProcessUsage {
 /// How a worker stopped: its usage, and whether it had to be killed.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct WorkerStop {
+    /// Process resource sample, when available.
     pub usage: Option<ChildProcessUsage>,
+    /// Whether shutdown required a forced kill.
     pub forced: bool,
 }
 
@@ -77,25 +82,41 @@ pub const COMMAND_QUEUE_ITEMS: usize = 32;
 /// One event of a running cell, in the order the worker produced it.
 #[derive(Debug)]
 pub enum CellEvent {
+    /// A nested tool call awaiting a correlated result.
     NestedCall {
+        /// Owning cell identity.
         cell: u64,
+        /// Worker-assigned nested call identity.
         call: u64,
+        /// Exposed tool name.
         name: String,
+        /// Input before host validation.
         input: CellValue,
     },
+    /// One ordered output item.
     Output {
+        /// Producing cell identity.
         cell: u64,
+        /// Produced content or notification.
         item: OutputItem,
     },
+    /// Execution suspended on nested results.
     Waiting {
+        /// Suspended cell identity.
         cell: u64,
+        /// Outstanding calls blocking execution.
         calls: Vec<u64>,
     },
+    /// Execution parked at an engine yield.
     Yielded {
+        /// Parked cell identity.
         cell: u64,
     },
+    /// The cell's one definite terminal.
     Done {
+        /// Completed cell identity.
         cell: u64,
+        /// Terminal result and retained state.
         outcome: CellOutcome,
     },
 }
@@ -318,6 +339,7 @@ impl CellClient {
         })
     }
 
+    /// Process identifier of the owned worker.
     #[must_use]
     pub fn child_id(&self) -> Option<u32> {
         Some(self.pid)

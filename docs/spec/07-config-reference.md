@@ -21,12 +21,16 @@ User-profile writes use root/working_set only; built-ins are read-only. No
 console operation accepts a filesystem destination or raw TOML.
 
 `plak host install --web unix:<absolute socket> --ui <absolute dir>
-[--dry-run]` writes `$HOME/.config/systemd/user/plak-host.service` on Linux
-only (chapter 02 §4.6). The required socket and UI paths have no defaults;
+[--dry-run]` writes `$HOME/.config/systemd/user/plak-host.service` on Linux,
+or `$HOME/Library/LaunchAgents/com.plak.host.plist` on macOS (chapter 02 §4.6).
+Linux installation reloads the user manager without enabling or starting the
+service; macOS installation prepares private logs and prints the commands to
+load/start the LaunchAgent, never calling `launchctl` itself.
+The required socket and UI paths have no defaults;
 relative paths, TCP listeners and `--dev-login` are refused. This adds no
 configuration keys. The unit uses `$HOME/.local/bin/plak` and pins the
 resolved `PLAK_HOME` selected at installation, independently of the invoking
-shell on later starts. If XDG_CONFIG_HOME is set, it must resolve to
+shell on later starts. On Linux, if XDG_CONFIG_HOME is set, it must resolve to
 `$HOME/.config`; a different unit search path is refused. HOME may contain
 neither `=` nor `:`. A missing or non-executable stable link produces a warning,
 not a refusal.
@@ -296,9 +300,8 @@ host upgrade. `plak runner pair` and `plak runner ps` dial the configured
 runner; `plak doctor` inspects its SSH resolution without connecting (§3.6).
 `[web] allow` and `[web] origin` are
 read by `plak host` when it serves its web endpoint (`--web`, chapter 02 §4.5,
-chapter 04 §2.10) and by nothing else. A
-0.0.3 build refuses a `config.toml` that sets any of them (unknown section or
-key), so `plak` writes them only when the operator sets them: `plak config
+chapter 04 §2.10) and by nothing else.
+`plak` writes these opt-in settings only when the operator sets them: `plak config
 init` and a fresh save write the `[host]` and `[web]` headers commented out, a
 save of another key never adds one, and a save that clears the last key of
 `[host]` or `[web]` removes the empty table. `plak doctor` names each one the
@@ -342,13 +345,13 @@ repository can never grant web access.
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
 | `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plak mcp login`. |
-| `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset holds; home-scoped | Whether the root and the sub-agents whose host was lost (a crash, a lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). Read when the root attaches and opens, and by plak host's start scan, which under continue opens a session whose root's loss is held; a released 0.0.3 build (or older) refuses a config.toml that sets it. |
+| `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset holds; home-scoped | Whether the root and the sub-agents whose host was lost (a crash, a lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). Read when the root attaches and opens, and by plak host's start scan, which under continue opens a session whose root's loss is held. |
 
-| `web.allow` | array of string | `(unset)` | tailnet logins, no duplicates; unset admits no one; home-scoped | The tailnet logins (Tailscale-User-Login) plak host --web admits through tailscale serve. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it. |
-| `web.origin` | string | `(unset)` | https://<host>[:port], nothing after it; home-scoped | The exact origin tailscale serve publishes plak host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it. |
-| `web.accounts_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home account status and usage. Same-user sockets are trusted independently. Captured at host startup; restart to change it; a 0.0.3 build refuses a config.toml that sets it. |
+| `web.allow` | array of string | `(unset)` | tailnet logins, no duplicates; unset admits no one; home-scoped | The tailnet logins (Tailscale-User-Login) plak host --web admits through tailscale serve. Read when plak host starts with --web. |
+| `web.origin` | string | `(unset)` | https://<host>[:port], nothing after it; home-scoped | The exact origin tailscale serve publishes plak host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plak host starts with --web. |
+| `web.accounts_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home account status and usage. Same-user sockets are trusted independently. Captured at host startup; restart to change it. |
 | `web.credentials_write` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed operator credential mutations. Requires accounts_read; home-only, default off and captured at host startup. Credentials replace this user's machine-wide selected account, not the browser's credentials. |
-| `web.config_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home profiles, templates and allowlisted configuration. Same-user sockets are trusted independently. Captured at host startup; restart to change it; a 0.0.3 build refuses a config.toml that sets it. |
+| `web.config_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home profiles, templates and allowlisted configuration. Same-user sockets are trusted independently. Captured at host startup; restart to change it. |
 | `web.config_write` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed allowlisted home configuration, template and profile writes. Grants deferred execution through tools, on_mint and env. Requires config_read; home-only, default off and captured at host startup. |
 | `web.files_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to inspect saved workspaces and Changes. Exact file bytes may contain secrets. Same-user sockets are trusted independently; default off and captured at host startup. |
 | `web.terminal` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed interactive operator shells as the runner user. Shells are not confined to the workspace. Same-user sockets are trusted independently; default off and captured at host startup. |

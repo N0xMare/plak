@@ -503,7 +503,7 @@ $ plak agent --account grok --model grok-4.6 --effort low
 ```
 
 Commands you can send: `prompt`, `interrupt`, `background`, `compact`,
-`recover`, `resume_queue`, `tree`, `interrupt_node`,
+`recover`, `resume`, `resume_queue`, `resolve_approval`, `tree`, `interrupt_node`,
 `close_node`, `stop_all`, `clear`, `invoke_tool`, `fork`, `quit`.
 
 Events you will commonly receive: `hello`, `ready`, `status`, `busy`,

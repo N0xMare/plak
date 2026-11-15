@@ -237,7 +237,10 @@ struct CancellingNormalizer {
 }
 
 impl plakous_tools::ImageNormalizer for CancellingNormalizer {
-    fn normalize(&self, bytes: &[u8]) -> Result<plakous_tools::PreparedImage, String> {
+    fn normalize(
+        &self,
+        bytes: &[u8],
+    ) -> Result<plakous_tools::PreparedImage, plakous_tools::ImageNormalizationError> {
         self.cancellation.cancel();
         self.release
             .lock()

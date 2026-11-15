@@ -38,13 +38,16 @@ struct RecordingNormalizer {
 }
 
 impl ImageNormalizer for RecordingNormalizer {
-    fn normalize(&self, bytes: &[u8]) -> Result<PreparedImage, String> {
+    fn normalize(
+        &self,
+        bytes: &[u8],
+    ) -> Result<PreparedImage, plakous_tools::ImageNormalizationError> {
         self.calls
             .lock()
             .map_err(|_| "recording lock")?
             .push(bytes.to_vec());
         if self.reject {
-            return Err("invalid image data".to_owned());
+            return Err("invalid image data".into());
         }
         Ok(PreparedImage::new("image/png", png(1, 1)))
     }

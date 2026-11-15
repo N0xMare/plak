@@ -6129,6 +6129,9 @@ policy. Without acceptance, a visual-read fact, or its normalizer, images are
 removed and the text ends with
 `[<n> image(s) omitted: this tool's result carries text only here]`. A result
 wrapper remains one valid JSON object, with the note inside its `result` text.
+`ImageNormalizer::normalize` returns `ImageNormalizationError`: its display
+text is the existing secret-free refusal, and its source retains the decoder
+failure when present. Policy refusals need no underlying source.
 Accepted images pass through `VisualReadSession::normalizer()` on
 `join_blocking`: inline bytes and MCP base64 data URLs are decoded and fitted
 to the 2,048 px edge bound before entering model history. An ephemeral prepared
@@ -9617,6 +9620,14 @@ presentation, and semantic revisions are all frozen before dispatch.
 `yield_control` parks until `wait`.
 
 ### 9.4 Engines and deployment
+
+The agent-owned local-composition parser, validation, descriptor and ordinary
+future seams return `LocalCompositionError`, also used by the facade
+implementation. Existing refusal text and classification are unchanged; parser,
+compiler and worker-start failures retain their original error as a source,
+while policy refusals have none. Evaluator session loss remains the separate
+closed `LocalCompositionSessionLoss` outcome. These process-local error types
+change no model-visible grammar, binding input or persisted encoding.
 
 `LocalCompositionProfile::cell(&CellDescriptor)` is the sole profile
 constructor. The crate-root `plakous-compose::CellDescriptor` (also exposed as

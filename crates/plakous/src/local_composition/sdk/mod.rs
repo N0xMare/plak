@@ -7,9 +7,9 @@ use super::{
     session::{SessionCore, SessionEngine, SessionFuture},
 };
 use plakous_agent::internal::{
-    LocalCompositionContentItem, LocalCompositionDescriptor, LocalCompositionEventReceiver,
-    LocalCompositionExecuteInput, LocalCompositionExecuteRequest, LocalCompositionLifecycle,
-    LocalCompositionResultProjection, LocalCompositionRuntimeContract,
+    LocalCompositionContentItem, LocalCompositionDescriptor, LocalCompositionError,
+    LocalCompositionEventReceiver, LocalCompositionExecuteInput, LocalCompositionExecuteRequest,
+    LocalCompositionLifecycle, LocalCompositionResultProjection, LocalCompositionRuntimeContract,
     LocalCompositionSessionFuture, LocalCompositionSessionLoss, LocalCompositionShutdownResult,
     LocalCompositionStartedCell, LocalCompositionTerminateResult, LocalCompositionToolDefinition,
     LocalCompositionWaitInput,
@@ -35,7 +35,7 @@ pub(super) struct SdkPresentation {
 
 pub(super) fn descriptor(
     exact: &PythonHarnessSdkDescriptorV1,
-) -> Result<LocalCompositionDescriptor, String> {
+) -> Result<LocalCompositionDescriptor, LocalCompositionError> {
     Ok(LocalCompositionDescriptor {
         outer_projection: exact.outer_projection().clone(),
         nested_projection: exact.nested_projection().clone(),
@@ -60,7 +60,7 @@ pub(super) fn descriptor(
         marker_executor: plakous_tools::ToolExecutorId::new(
             plakous_tools::PYTHON_SDK_DRIVER_MARKER_EXECUTOR_ID_V1,
         )
-        .map_err(|e| e.to_string())?,
+        .map_err(LocalCompositionError::from_source)?,
     })
 }
 
@@ -89,14 +89,15 @@ impl Presentation for SdkPresentation {
     fn parse_execute(
         &self,
         input: serde_json::Value,
-    ) -> Result<LocalCompositionExecuteInput, String> {
+    ) -> Result<LocalCompositionExecuteInput, LocalCompositionError> {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Input {
             code: String,
         }
-        let input: Input =
-            serde_json::from_value(input).map_err(|_| "run_py requires exactly one code string")?;
+        let input: Input = serde_json::from_value(input).map_err(|error| {
+            LocalCompositionError::with_source("run_py requires exactly one code string", error)
+        })?;
         if input.code.is_empty()
             || input.code.len() > PythonHarnessSdkDescriptorV1::SOURCE_BYTES as usize
         {
@@ -108,7 +109,10 @@ impl Presentation for SdkPresentation {
             max_output_tokens: PythonHarnessSdkDescriptorV1::OUTPUT_BYTES,
         })
     }
-    fn parse_wait(&self, _input: serde_json::Value) -> Result<LocalCompositionWaitInput, String> {
+    fn parse_wait(
+        &self,
+        _input: serde_json::Value,
+    ) -> Result<LocalCompositionWaitInput, LocalCompositionError> {
         Err("the SDK has no wait tool".into())
     }
     fn rebuild_descriptor(
@@ -116,8 +120,11 @@ impl Presentation for SdkPresentation {
         job: JobConfig,
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
-    ) -> Result<LocalCompositionDescriptor, String> {
-        descriptor(&PythonHarnessSdkV1::compile(job, registry, target).map_err(|e| e.to_string())?)
+    ) -> Result<LocalCompositionDescriptor, LocalCompositionError> {
+        descriptor(
+            &PythonHarnessSdkV1::compile(job, registry, target)
+                .map_err(LocalCompositionError::from_source)?,
+        )
     }
     fn validate_configuration(
         &self,
@@ -126,7 +133,7 @@ impl Presentation for SdkPresentation {
         projection: &ToolProjectionMap,
         registry: FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
-    ) -> Result<(), String> {
+    ) -> Result<(), LocalCompositionError> {
         if !projection.is_for_registry(&registry)
             || !exact.nested_projection.is_for_registry(&registry)
             || !exact.outer_projection.is_for_registry(&registry)
@@ -149,7 +156,7 @@ impl Presentation for SdkPresentation {
             configuration.effective_identity(),
             plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(LocalCompositionError::from_source)?;
         if projection.target() != &target
             || self.evidence.configuration_identities()
                 != (
@@ -168,8 +175,8 @@ impl Presentation for SdkPresentation {
         {
             return Err("SDK configuration requires only run_py".into());
         }
-        let compiled =
-            PythonHarnessSdkV1::compile(job, registry, target).map_err(|e| e.to_string())?;
+        let compiled = PythonHarnessSdkV1::compile(job, registry, target)
+            .map_err(LocalCompositionError::from_source)?;
         let (_, _, nested, outer, _, _) = self.evidence.extension_facts();
         if compiled.identity() != exact.identity
             || compiled.outer_projection().digest() != projection.digest()
@@ -199,7 +206,11 @@ impl Presentation for SdkPresentation {
             plakous_cell::EngineConfig::MONTY,
         )
     }
-    fn verify_worker(&self, path: &std::path::Path, identity: &[u8]) -> Result<(), String> {
+    fn verify_worker(
+        &self,
+        path: &std::path::Path,
+        identity: &[u8],
+    ) -> Result<(), LocalCompositionError> {
         super::verify_cell_worker_before_spawn(super::CellEngine::Monty, path, identity)
     }
     fn session_engine(&self) -> Box<dyn SessionEngine> {
@@ -291,7 +302,7 @@ impl SessionEngine for SdkEngine {
             match self.tasks.stop().await {
                 Ok(()) => shutdown,
                 Err(error) => LocalCompositionShutdownResult::Lost(
-                    LocalCompositionSessionLoss::HostLost(error),
+                    LocalCompositionSessionLoss::HostLost(error.to_string()),
                 ),
             }
         })
@@ -322,7 +333,7 @@ mod tests {
                 "while True:\n    pass",
                 CellPrelude::Monty { bootstrap: None },
                 u64::MAX,
-                async { Ok::<(), String>(()) },
+                async { Ok::<(), LocalCompositionError>(()) },
             )
             .await
             .map_err(|e| format!("{e:?}"))?;

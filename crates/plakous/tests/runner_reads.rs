@@ -40,7 +40,10 @@ impl ToolPolicy for Allow {
 struct ExactImage(Vec<u8>);
 
 impl ImageNormalizer for ExactImage {
-    fn normalize(&self, bytes: &[u8]) -> Result<PreparedImage, String> {
+    fn normalize(
+        &self,
+        bytes: &[u8],
+    ) -> Result<PreparedImage, plakous_tools::ImageNormalizationError> {
         assert_eq!(bytes, self.0);
         Ok(PreparedImage::new("image/png", bytes.to_vec()))
     }

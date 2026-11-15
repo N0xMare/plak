@@ -2078,7 +2078,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # Workspace image reads install only the decoder. The agent derives the
     # route, model and image-input fact from the bound provider configuration.
     ("plakous-hosted", "src/visual_read.rs"): {
-        "tools": {"ImageNormalizer", "PreparedImage"},
+        "tools": {"ImageNormalizationError", "ImageNormalizer", "PreparedImage"},
     },
     ("plakous-hosted", "src/sessions/queue.rs"): {
         "agent": {"MAX_USER_IMAGES", "MAX_USER_IMAGE_BYTES", "UserInput", "UserPart"},
@@ -4130,7 +4130,7 @@ def validate_local_production_lints(
     """Require the repository's unsafe prohibition for every local production crate."""
     errors = []
     for name, manifest in workspace_manifests.items():
-        if name in ("plakous-cell", VENDOR_PACKAGE):
+        if name == VENDOR_PACKAGE:
             unsafe_code = manifest.get("lints", {}).get("rust", {}).get("unsafe_code")
             if unsafe_code != "forbid":
                 errors.append(f'{name}: unsafe_code must be explicitly "forbid"')
