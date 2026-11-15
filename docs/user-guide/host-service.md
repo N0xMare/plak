@@ -282,7 +282,7 @@ On macOS, the UI-only reload command is
 
 Before an upgrade that changes the runner protocol, finish or stop all
 home-local background jobs using the old build. This build uses runner
-protocol 8 and does not see another native protocol's home-local daemon or its jobs,
+protocol 9 and does not see another native protocol's home-local daemon or its jobs,
 including during the embedded startup check. Settle those jobs before
 installing the new build and using `/reload`; reloading does not transfer them
 across protocol directories. This is separate from the coordinated host
@@ -298,7 +298,7 @@ both. Once a host/line becomes retention-only, reinstalling or downgrading
 cannot restore native control. An incompatible endpoint requires its matching
 build to settle the original jobs; if the original process is proved lost,
 follow the reported lost-job remedy rather than starting or replaying it.
-Retention endpoint 1, native runner protocol 8, host wire 10 and JSONL 1 are
+Retention endpoint 1, native runner protocol 9, host wire 10 and JSONL 1 are
 independent versions. Retention support does not remove `host upgrade`'s
 settled-job restriction across changed triples.
 
