@@ -39,13 +39,21 @@ pub struct ProductOpenRouterSpec {
     /// The product home whose instructions the profile enrolls, when there is
     /// one. The binder reads nothing else out of it.
     pub product_home: Option<PathBuf>,
+    /// Exact gateway model id; provider/model aliases are not expanded here.
     pub literal_model: String,
+    /// Explicit reasoning level, or the admitted model's default when absent.
     pub effort: Option<ReasoningEffort>,
+    /// Tool presentation selected once for the runtime binding.
     pub composition: CompositionSelection,
+    /// Already resolved gateway request/stream protocol.
     pub wire: ResolvedProtocol,
+    /// Workspace identity bound into the canonical session target.
     pub workspace_root: PathBuf,
+    /// Execution directory within the explicit workspace authority.
     pub cwd: PathBuf,
+    /// Product-supplied namespace for the node's plan state.
     pub plan_state_authority: String,
+    /// Revalidate frozen creation evidence instead of admitting a fresh session.
     pub opening_durable_session: bool,
     /// Spawn tier of this session's node; the root is `mutate`.
     pub occupancy_tier: crate::agent_tree_protocol::Tier,
@@ -53,8 +61,11 @@ pub struct ProductOpenRouterSpec {
     pub scheduled_compaction: bool,
     /// Product `turn.max_model_rounds`: the round cap each root turn is admitted under.
     pub max_model_rounds: usize,
+    /// Frozen canonical tool registrations and their execution authorities.
     pub topology_extensions: crate::tools::ProductToolExtensions,
+    /// Admitted catalog facts for exact reconstruction, never credential authority.
     pub cached_evidence: Option<OpenRouterChatModelEvidence>,
+    /// Optional content-safe observation sink; not execution or recovery authority.
     pub telemetry: Option<Arc<plakous::agent::TelemetryEmitter>>,
     /// A `spawn_agent` child in the parent's process; see
     /// `isolated_tool_scheduler`.
@@ -65,8 +76,11 @@ pub struct ProductOpenRouterSpec {
 pub struct ProductOpenRouterRuntime {
     /// Set when this reopen kept a budget the route has since moved.
     pub output_bound_rederived: Option<OutputBoundRederived>,
+    /// Executable facade binding, with the admitted account and tool composition.
     pub runtime: SessionRuntimeBinding,
+    /// Exact reconstruction identity persisted by canonical session creation.
     pub target: SessionTargetBinding,
+    /// Catalog facts that must be revalidated on an exact reopen.
     pub evidence: OpenRouterChatModelEvidence,
 }
 

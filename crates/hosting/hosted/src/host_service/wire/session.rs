@@ -37,6 +37,14 @@ pub struct WireSession<P: ProtocolExtension> {
     reopening: AtomicBool,
 }
 
+impl<P: ProtocolExtension> std::fmt::Debug for WireSession<P> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WireSession")
+            .finish_non_exhaustive()
+    }
+}
+
 impl<P: ProtocolExtension> WireSession<P> {
     pub(super) fn reject_queued_wire_drafts(&self) {
         let service = served::lock(&self.served).service();

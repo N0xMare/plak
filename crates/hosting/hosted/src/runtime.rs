@@ -323,6 +323,12 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     recorded: Option<Arc<std::sync::Mutex<Vec<ContentEvent<P>>>>>,
 }
 
+impl<P: plakous_host_protocol::ProtocolExtension> std::fmt::Debug for Sender<P> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("Sender").finish_non_exhaustive()
+    }
+}
+
 /// The correlation one `IntentStarted` carried.
 #[derive(Clone, Eq, PartialEq)]
 struct Started(Option<String>);
@@ -685,24 +691,37 @@ pub struct HostLaunchNativeModelFact {
 /// Closed product runtime authority. Invalid native/OpenRouter mixtures are
 /// unrepresentable; protocol-specific construction remains behind this enum.
 pub enum HostTargetAuthority {
+    /// Native subscription route with its admitted provider and catalog lease.
     Native {
+        /// Identity that must agree with the resolved provider and session binding.
         provider: NativeProvider,
+        /// Authenticated provider resolution; never substituted across accounts.
         resolved: Arc<ResolvedProvider>,
+        /// Credential lifecycle owner retained while this host uses the route.
         subscriptions: NativeSubscriptions,
+        /// Exact catalog facts captured for launch, not speculative alternatives.
         catalog_candidates: Arc<[HostLaunchNativeModelFact]>,
     },
+    /// Direct API route whose key source is supplied through the product ports.
     Platform {
+        /// Exact provider namespace, independent of subscription authentication.
         provider: crate::binding::PlatformProvider,
+        /// Subscription service for auxiliary host reads, not this route's API key.
         subscriptions: NativeSubscriptions,
     },
+    /// Gateway API route, with model evidence bound to one resolved wire.
     OpenRouter {
+        /// Subscription service for auxiliary reads, never gateway authentication.
         subscriptions: NativeSubscriptions,
+        /// Previously admitted catalog facts, reused only for the exact model and wire.
         evidence: Option<Box<OpenRouterHostEvidence>>,
     },
 
     /// A route whose factory owns runtime authority rather than a native subscription.
     Registered {
+        /// Test route's native identity, not permission to construct production OAuth.
         provider: NativeProvider,
+        /// Unforgeable production-side marker minted only by the test kit.
         token: RegisteredRuntimeAuthority,
     },
 }
@@ -713,8 +732,28 @@ pub enum HostTargetAuthority {
 /// use plakous_hosted::runtime::RegisteredRuntimeAuthority;
 /// let _ = RegisteredRuntimeAuthority(());
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RegisteredRuntimeAuthority(());
+
+impl std::fmt::Debug for HostTargetAuthority {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Native { provider, .. } => formatter
+                .debug_struct("Native")
+                .field("provider", provider)
+                .finish_non_exhaustive(),
+            Self::Platform { provider, .. } => formatter
+                .debug_struct("Platform")
+                .field("provider", provider)
+                .finish_non_exhaustive(),
+            Self::OpenRouter { .. } => formatter.debug_struct("OpenRouter").finish_non_exhaustive(),
+            Self::Registered { provider, .. } => formatter
+                .debug_struct("Registered")
+                .field("provider", provider)
+                .finish_non_exhaustive(),
+        }
+    }
+}
 
 impl HostTargetAuthority {
     const fn native_provider(&self) -> Option<NativeProvider> {
@@ -751,10 +790,22 @@ impl HostTargetAuthority {
     }
 }
 
+/// Admitted gateway model facts tied to one literal id and resolved wire.
+/// Only hosted construction creates this evidence; it is not a credential.
 pub struct OpenRouterHostEvidence {
     literal_model: String,
     wire: crate::binding::ResolvedProtocol,
     evidence: crate::openrouter::OpenRouterChatModelEvidence,
+}
+
+impl std::fmt::Debug for OpenRouterHostEvidence {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OpenRouterHostEvidence")
+            .field("literal_model", &self.literal_model)
+            .field("wire", &self.wire)
+            .finish_non_exhaustive()
+    }
 }
 
 impl OpenRouterHostEvidence {
@@ -778,12 +829,19 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     pub event_renderer: Option<fn(&mut crate::session_log::SessionEvent)>,
     /// The port this session's record is loaded, saved, prepared and published through.
     pub store: Arc<dyn SessionRecordStore>,
+    /// Product-supplied runtime, topology and runner authorities for this home.
     pub state_roots: crate::agent::ProductStateRoots,
+    /// Durable product record, including its compare-and-swap revision token.
     pub session: SessionRecord,
+    /// Exactly one route's construction authority; must agree with the saved binding.
     pub target: HostTargetAuthority,
+    /// Literal model id selected within the target's catalog namespace.
     pub model_id: String,
+    /// Requested reasoning level; `None` leaves the provider's default in force.
     pub effort: Option<ReasoningEffort>,
+    /// Whether the effort was explicitly selected rather than inherited.
     pub effort_explicit: bool,
+    /// Whether this host may initiate paid context compaction.
     pub compaction_enabled: bool,
     /// Product `turn.max_model_rounds`, handed to every agent this host builds.
     pub max_model_rounds: usize,
@@ -806,6 +864,7 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     pub root_template: Option<crate::binding::RootTemplateFact>,
     /// CLI one-shot attach (`plak compact --yes`) must not start a second paid turn.
     pub attached_one_shot: bool,
+    /// Frozen launch workspace used to construct tool execution, not ambient cwd.
     pub cwd: PathBuf,
     /// Exact Ready catalog supplied by the product discovery boundary.
     pub ready_catalog: plakous_host_protocol::views::ReadyCatalog,
@@ -817,6 +876,7 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     /// record and observation are published only after the canonical runtime
     /// has opened successfully.
     pub resume_publication: Option<Arc<AtomicBool>>,
+    /// Sealed production constructor or repository-only scripted implementation.
     pub runtime_factory: Arc<dyn RuntimeFactory<P>>,
     /// Presentation + provider-resolve timings captured before `run_host_loop`.
     pub ready_path: ReadyPathTiming,
@@ -985,6 +1045,16 @@ pub(super) fn production_carry_input_window<P: plakous_host_protocol::ProtocolEx
     crate::openrouter::carry_input_window(config)
 }
 
+impl<P: plakous_host_protocol::ProtocolExtension> std::fmt::Debug for HostConfig<P> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HostConfig")
+            .field("target", &self.target)
+            .field("model_id", &self.model_id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<P: plakous_host_protocol::ProtocolExtension> HostConfig<P> {
     pub(crate) fn prompt_host_facts(&self) -> plakous_host_protocol::PromptHostFacts {
         plakous_host_protocol::PromptHostFacts {
@@ -1048,29 +1118,45 @@ struct ProcessResources {
 /// Content-free process resource snapshot for telemetry (Linux + macOS).
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ProcessResourceSnapshot {
+    /// Current resident bytes, absent when the platform probe cannot supply them.
     pub rss_bytes: Option<u64>,
+    /// Peak resident bytes observed by the OS, not a host-enforced memory limit.
     pub peak_rss_bytes: Option<u64>,
+    /// Process user-mode CPU time accumulated at the snapshot.
     pub user_cpu: Duration,
+    /// Process kernel CPU time accumulated at the snapshot.
     pub system_cpu: Duration,
+    /// Live thread count, absent when unavailable.
     pub threads: Option<u64>,
+    /// Open descriptor count, absent when unavailable.
     pub fds: Option<u64>,
 }
 
+/// Purpose of a runtime construction, not an independent execution owner.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeRole {
+    /// Construct the session's ordinary root turn binding.
     Primary,
+    /// Construct the one paid compaction binding for an admitted operation.
     Compact,
+    /// Recompile an explicit successor binding without silently changing the source.
     Rebind,
 }
 
 use HostTransitionStage as HostLifecyclePhase;
 
+/// Workflow identity attached to host lifecycle observations and test crash cuts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostWorkflow {
+    /// Delivery of a queued root prompt to canonical admission.
     RootDelivery,
+    /// Immediate operator send using the current turn's control path.
     SendNow,
+    /// Construction and publication of a forked session.
     Fork,
+    /// Explicit successor construction under a new bound tuple.
     Rebind,
+    /// One paid compaction dispatch and its product publication.
     Compact,
     /// A switched-away attachment, after its runtime release.
     SourceRelease,
@@ -1079,15 +1165,22 @@ pub enum HostWorkflow {
     SeededCreate,
 }
 
+/// Observable workflow boundary; observing it grants no mutation or replay authority.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostBoundary {
+    /// Product preparation has completed before the canonical runtime call.
     Prepared,
+    /// Canonical runtime work returned, before product-side publication.
     RuntimeReturned,
+    /// Product projection or receipt was published for the workflow.
     ProductPublished,
+    /// Product-side durable commit completed.
     ProductCommitted,
+    /// The host has the workflow's authoritative terminal result ready.
     TerminalReady,
 }
 
+/// Scripted prompt that deterministically races completion with an accepted quit.
 #[cfg(any(test, feature = "test-support"))]
 pub const COMPLETION_WINS_QUIT_PROMPT: &str = "complete while quit is accepted";
 

@@ -18,12 +18,17 @@ use crate::binding::{CompositionSelection, ProtocolSelection};
 /// The six identity rows of a root binding (spec 02 §5.5).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RootBindingDraft {
+    /// Exact default or named account reference; an empty value clears the binding.
     pub account: String,
+    /// Literal model id in that account's route; empty also clears the binding.
     pub model: String,
+    /// Explicit reasoning token, or `None` to retain the route default.
     pub effort: Option<String>,
     /// Closed to `priority` on `codex`.
     pub extra: Option<String>,
+    /// Explicit tool-composition choice, absent when inherited from product policy.
     pub composition: Option<CompositionSelection>,
+    /// Explicit gateway wire choice, absent when the default resolution rule applies.
     pub protocol: Option<ProtocolSelection>,
 }
 
@@ -42,7 +47,10 @@ impl RootBindingDraft {
 /// binding; after it the binding stands and only its durability is in doubt.
 #[derive(Debug)]
 pub enum RootBindingSaveError {
+    /// No new binding was published; the host may roll its session write back.
     BeforePublication(String),
+    /// Publication occurred; keep the new binding and report uncertain durability
+    /// rather than pretending the old session/config pair can be restored.
     PublishedDurabilityUncertain(String),
 }
 

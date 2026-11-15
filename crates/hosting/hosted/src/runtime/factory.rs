@@ -29,6 +29,8 @@ pub(super) mod sealed {
 
 /// A per-turn lifecycle observer, selected at admission without retaining the prompt.
 pub trait TurnObserver: Send {
+    /// Observe a lifecycle fact without retaining model input or taking ownership
+    /// of the driver. The callback must not replay an effect at a crash cut.
     fn observe(&self, boundary: HostBoundary);
 }
 
@@ -74,12 +76,16 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
     ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
         self.runtime(config, RuntimeRole::Rebind, stderr)
     }
+    /// Compile the exact saved target for this role, without creating a second
+    /// turn owner. Construction failures remain errors, never fallback routes.
     fn runtime<'a>(
         &'a self,
         config: &'a HostConfig<P>,
         role: RuntimeRole,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>>;
+    /// Revalidate and attach the exact canonical head. Failure retains the
+    /// typed open/refusal facts rather than selecting another session.
     fn open_head<'a>(
         &'a self,
         config: &'a mut HostConfig<P>,
@@ -94,12 +100,16 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
         head: SessionLocator,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, Result<(), CodingSessionOpenFailure>>;
+    /// Create a canonical attachment, consuming optional portable history once.
+    /// A failed create does not authorize publishing a product locator.
     fn create<'a>(
         &'a self,
         config: &'a mut HostConfig<P>,
         seed: Option<SeededHistory>,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, CliResult<AttachedCodingSession>>;
+    /// Open the supplied record's exact locator under the requested role;
+    /// credentials and binding facts are revalidated by the runtime.
     fn open<'a>(
         &'a self,
         config: &'a HostConfig<P>,
@@ -108,6 +118,8 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
         role: RuntimeRole,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>>;
+    /// Open an explicitly selected successor tuple and locator, retaining its
+    /// own topology lease rather than reusing the source's execution authority.
     fn open_rebind_target<'a>(
         &'a self,
         config: &'a HostConfig<P>,
@@ -123,6 +135,8 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
         tree_id: &'a str,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>>;
+    /// Compile a successor against the supplied topology attachment. The
+    /// optional returned tree id is construction evidence, not a commit.
     fn rebind_runtime<'a>(
         &'a self,
         config: &'a HostConfig<P>,
@@ -131,7 +145,14 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
         native_target: bool,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, (CliResult<SessionRuntimeBinding>, Option<String>)>;
+    /// Resolve the exact target's admitted input window, without an inference call.
+    ///
+    /// # Errors
+    /// Refuses missing or inconsistent model facts or an unavailable capability.
     fn input_window(&self, config: &HostConfig<P>) -> CliResult<SessionInputWindow>;
+    /// Create the explicit empty successor of a clear operation; the source
+    /// attachment remains borrowed until construction returns. The operation id
+    /// binds retries to this create, not to a second admitted turn.
     #[allow(
         clippy::too_many_arguments,
         reason = "The runtime factory clear seam receives both the source session authority and the complete new-session construction facts."
@@ -152,6 +173,8 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
             Option<Arc<plakous::subscriptions::ResolvedProvider>>,
         )>,
     >;
+    /// Compile an API target with exact account credentials and its own topology
+    /// attachment. Opening a durable session revalidates its frozen evidence.
     fn api_runtime<'a>(
         &'a self,
         config: &'a HostConfig<P>,
@@ -161,20 +184,27 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
         tree_id: Option<&'a str>,
         attached_tree: &'a mut Option<String>,
     ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>>;
+    /// Scripted target identity, when the factory supplies one. Production
+    /// construction derives its identity from the admitted route instead.
     fn target_binding(
         &self,
     ) -> Option<(plakous::subscriptions::NativeProvider, SessionTargetBinding)> {
         None
     }
+    /// Observe a workflow cut; the production default has no side effects.
     fn observe(&self, _workflow: HostWorkflow, _boundary: HostBoundary) {}
+    /// Select one observer at turn admission; no prompt is retained by default.
     fn turn_observer(&self, _prompt: &str) -> Option<Box<dyn TurnObserver>> {
         None
     }
+    /// Install factory-owned construction facts before opening the runtime.
     fn configure(&self, _config: &mut HostConfig<P>) {}
+    /// Notify the factory after exact attachment, before the host drives work.
     fn attached(&self, _config: &HostConfig<P>, _opened: &mut AttachedCodingSession) {}
 }
 
 /// Registers the production route builders, including their topology leases.
+#[derive(Debug)]
 pub struct ProductionRuntimeFactory;
 impl sealed::Sealed for ProductionRuntimeFactory {}
 impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for ProductionRuntimeFactory {

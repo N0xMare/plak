@@ -29,6 +29,15 @@ pub struct FaceSender<P: ProtocolExtension> {
     attachment: AttachmentId,
 }
 
+impl<P: ProtocolExtension> std::fmt::Debug for FaceSender<P> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("FaceSender")
+            .field("attachment", &self.attachment)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<P: ProtocolExtension> Clone for FaceSender<P> {
     fn clone(&self) -> Self {
         Self {
@@ -107,6 +116,15 @@ pub struct FaceReceiver<P: ProtocolExtension> {
     service: HostService<P>,
     attachment: AttachmentId,
     taken: Mutex<VecDeque<SessionObservation<P>>>,
+}
+
+impl<P: ProtocolExtension> std::fmt::Debug for FaceReceiver<P> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("FaceReceiver")
+            .field("attachment", &self.attachment)
+            .finish_non_exhaustive()
+    }
 }
 
 /// How far a later attachment of a face's session may fall behind before it
@@ -193,6 +211,15 @@ pub struct FacePublisher<P: ProtocolExtension> {
     /// Wakes the wire connection that serves the service, which waits for
     /// nothing but its own channel.
     wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+}
+
+impl<P: ProtocolExtension> std::fmt::Debug for FacePublisher<P> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("FacePublisher")
+            .field("service", &self.service)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<P: ProtocolExtension> Clone for FacePublisher<P> {

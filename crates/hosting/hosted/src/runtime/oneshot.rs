@@ -62,6 +62,7 @@ pub(super) struct RunState {
 }
 
 /// The one-shot face of the attached host. Observations never authorize completion.
+#[derive(Debug)]
 pub struct OneShot;
 
 impl OneShot {

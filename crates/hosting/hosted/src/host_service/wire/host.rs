@@ -73,6 +73,7 @@ pub struct StoredSessionView<P: ProtocolExtension> {
 }
 
 /// One bounded picker phase or completed row, scoped to the caller's request.
+#[derive(Debug)]
 pub struct PickerProgress {
     /// Canonical runner identity.
     pub runner: plakous_host_protocol::wire::RunnerLabel,
@@ -83,6 +84,7 @@ pub struct PickerProgress {
 }
 
 /// Borrowed complete creation input, resolved by the product before one record commit.
+#[derive(Debug)]
 pub struct Creation<'a> {
     /// Explicit pinned runner selection.
     pub runner: &'a plakous_host_protocol::wire::RunnerLabel,

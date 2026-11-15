@@ -43,21 +43,33 @@ pub(crate) use transcript::{draft_image_chip, image_chip, with_image_chips};
 /// Product transcript is a bounded UI/read-model projection, never canonical
 /// conversation or recovery authority.
 pub const MAX_TRANSCRIPT_LINES: usize = 10_000;
+/// Aggregate byte ceiling for the discardable product transcript, not canonical history.
 pub const MAX_TRANSCRIPT_BYTES: usize = 16 * 1024 * 1024;
+/// Maximum retained queue items before a new submission is refused.
 pub const MAX_PENDING_PROMPTS: usize = 256;
+/// UTF-8 byte ceiling for one prompt's text, independent of attached image bytes.
 pub const MAX_PROMPT_BYTES: usize = 1024 * 1024;
+/// Maximum composer-history entries retained for product recall.
 pub const MAX_PROMPT_HISTORY: usize = 500;
 /// Keeps the fast product shelf useful without allowing 500 individually
 /// valid 1 MiB prompts to retain 500 MiB in every session.
 pub const MAX_PROMPT_HISTORY_BYTES: usize = 4 * 1024 * 1024;
+/// Aggregate text-byte ceiling across all retained queue items.
 pub const MAX_PENDING_QUEUE_BYTES: usize = 16 * 1024 * 1024;
 /// Raw image bytes all queued items of one session may hold together.
 pub const MAX_PENDING_QUEUE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+/// Redacted tool-detail preview ceiling; this is not a model-output budget.
 pub const MAX_TOOL_ACTIVITY_DETAIL_BYTES: usize = 2 * 1024;
 /// Same ceiling as the host's pending-reasoning buffer: one operator-visible
 /// thought block, never model-facing history.
 pub const MAX_THINKING_ACTIVITY_BYTES: usize = 64 * 1024;
 
+/// Derive the stable canonical-create identity for one product workflow.
+/// Reusing the workflow id reuses the create id, allowing reconciliation
+/// without starting another canonical create after a crash.
+///
+/// # Errors
+/// Refuses an invalid workflow identity or a derived id exceeding its bound.
 pub fn new_session_create_operation_id(workflow_operation_id: &str) -> Result<String, String> {
     validate_portable_identity(workflow_operation_id, "new session workflow operation")?;
     let operation = format!("{workflow_operation_id}:create");
@@ -152,6 +164,9 @@ fn bound_activity(value: String, maximum: usize) -> String {
 /// stops at it.
 pub const CARRY_FORWARD_OPERATION_PREFIX: &str = "plak:carry-forward:";
 
+/// Product intent and presentation state for one immutable session identity.
+/// Canonical conversation and execution authority belong to the exact Plakous
+/// locator; copying this record never acquires its runtime lease.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionRecord {
     /// Product-store CAS token: the revision this record was loaded at or last
@@ -159,6 +174,7 @@ pub struct SessionRecord {
     /// and advances; it is never product meaning, never sent to Plakous and
     /// never rendered.
     pub store_revision: u64,
+    /// Canonical lowercase UUID used by the product store and session paths.
     pub id: String,
     /// The agent node this session is, written at creation: the root of a
     /// tree of its own, or the source's node for a successor that stays on
@@ -166,16 +182,24 @@ pub struct SessionRecord {
     pub node: SessionNode,
     /// Stable product-owned identity reused to reconcile runtime creation.
     pub create_operation_id: String,
+    /// Workspace identity captured at creation, not the process's ambient cwd.
     pub workspace_root: PathBuf,
+    /// Creation time as Unix seconds; successors receive their own timestamp.
     pub created_at_unix: u64,
+    /// Last product-record mutation time as Unix seconds, not a CAS token.
     pub updated_at_unix: u64,
+    /// Exact default or named account; absence denotes an unbound product record.
     pub account: Option<String>,
+    /// Literal model id within the selected account's route namespace.
     pub model: Option<String>,
+    /// Explicit reasoning token; absence leaves the admitted route default.
     pub effort: Option<String>,
+    /// Saved tool-presentation selection, never re-derived from current config.
     pub composition: ProductCompositionSelection,
     /// Exact product target selected before construction. This is never
     /// reconstructed from account/model strings or current defaults.
     pub target_selection: ProductTargetSelection,
+    /// Session-derived title, distinct from the home-local operator override.
     pub title: Option<String>,
     /// Home-local operator label, never part of an export or binding.
     pub title_override: Option<String>,
@@ -183,6 +207,7 @@ pub struct SessionRecord {
     pub archived: bool,
     /// Product-only lineage for branch presentation; Plakous remains canonical authority.
     pub source_product_session_id: Option<String>,
+    /// Workflow provenance of the successor, not permission to replay the source.
     pub source_workflow_operation_id: Option<String>,
     /// Exact immutable Plakous checkpoint currently bound to this product session.
     pub plakous_locator: Option<SessionLocator>,
@@ -305,11 +330,14 @@ pub struct ContextCounters {
 /// a collection that did not change is not rewritten.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct StoreBaseline {
+    /// Composer-history collection observed at the last load or successful commit.
     pub prompt_history: Vec<String>,
+    /// Queue collection observed at the same revision, including stable item ids.
     pub pending_queue: Vec<QueueItem>,
 }
 
 impl StoreBaseline {
+    /// Snapshot only the collections the store diffs; no read or commit occurs.
     #[must_use]
     pub fn of(session: &SessionRecord) -> Self {
         Self {
@@ -321,6 +349,9 @@ impl StoreBaseline {
 
 impl SessionRecord {
     /// The exact selected account; a target never supplies an absent account.
+    ///
+    /// # Errors
+    /// Refuses an unbound record or an invalid account reference.
     pub fn account_ref(
         &self,
     ) -> Result<crate::account::AccountRef, crate::capabilities::AccountAdmissionError> {
@@ -334,6 +365,8 @@ impl SessionRecord {
             .parse()
     }
 
+    /// Create an unbound, uncommitted record with a fresh product/node identity,
+    /// empty projections and a live queue. No canonical session is created.
     #[must_use]
     pub fn new(workspace_root: PathBuf) -> Self {
         let now = now_unix_secs();
@@ -421,6 +454,7 @@ impl SessionRecord {
         self.compaction_count = self.compaction_count.saturating_add(1);
     }
 
+    /// Refresh the product mutation timestamp without advancing its store revision.
     pub fn touch(&mut self) {
         self.updated_at_unix = now_unix_secs();
     }
@@ -449,6 +483,11 @@ impl SessionRecord {
         self.root_turn_count = self.root_turn_count.saturating_add(1);
     }
 
+    /// Bind or advance the exact canonical checkpoint without changing branches.
+    /// A successful update refreshes the product timestamp but does not save it.
+    ///
+    /// # Errors
+    /// Refuses changing an already bound canonical session or branch identity.
     pub fn bind_plakous_locator(&mut self, locator: SessionLocator) -> Result<(), String> {
         if let Some(current) = self.plakous_locator
             && (current.session_id() != locator.session_id()
@@ -515,6 +554,12 @@ impl SessionRecord {
         }
     }
 
+    /// Validate product identities, reconstruction facts and collection bounds
+    /// before persistence; this does not acquire or revalidate a runtime lease.
+    ///
+    /// # Errors
+    /// Refuses inconsistent account/target or node facts, a carry intent already
+    /// bound to a locator, invalid frozen tools, or out-of-bounds projections.
     pub fn validate_for_store(&self) -> Result<(), String> {
         self.target_selection.validate()?;
         self.node.validate()?;
@@ -616,6 +661,8 @@ fn validate_prompt_history(history: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Canonicalize an accessible workspace path, preserving the supplied path when
+/// canonicalization fails. This presentation identity grants no workspace authority.
 #[must_use]
 pub fn workspace_identity(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
@@ -628,6 +675,9 @@ fn new_uuid_v4_string() -> String {
 /// Accept only the one lowercase, hyphenated spelling used for durable product
 /// identities. Callers may use the returned value in filesystem paths because
 /// it contains exactly the canonical UUID alphabet and separators.
+///
+/// # Errors
+/// Refuses invalid UUIDs and valid UUIDs written in any noncanonical spelling.
 pub fn canonical_product_session_id(value: &str) -> Result<&str, String> {
     let parsed = uuid::Uuid::parse_str(value)
         .map_err(|_| "session has invalid product identity".to_owned())?;

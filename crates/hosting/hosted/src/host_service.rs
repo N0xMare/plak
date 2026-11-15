@@ -254,6 +254,17 @@ pub struct HostService<P: ProtocolExtension> {
     state: Arc<Mutex<State<P>>>,
 }
 
+impl<P: ProtocolExtension> std::fmt::Debug for HostService<P> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Do not lock session state or render queued observations during diagnostics.
+        formatter
+            .debug_struct("HostService")
+            .field("root", &self.root)
+            .field("capacity", &self.capacity)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<P: ProtocolExtension> Clone for HostService<P> {
     fn clone(&self) -> Self {
         Self {

@@ -66,10 +66,6 @@ pub mod session_log;
 /// The port a hosted session persists its record through.
 pub mod session_store;
 /// The product session record and the rules it is committed under.
-#[allow(
-    missing_docs,
-    reason = "session record fields and projection vocabulary await contracts"
-)]
 pub mod sessions;
 /// The inert subscription-allowance projection.
 pub mod subscription_usage;
@@ -106,10 +102,6 @@ pub use plakous_workspace::occupancy_vcs::maintenance as workspace_maintenance;
 pub use plakous_workspace::{JJ_CLI_SUPPORTED, JJ_LIB_VERSION, built_jj_library_version};
 pub(crate) mod intent_dispatch;
 pub(crate) mod interrupt;
-#[allow(
-    missing_docs,
-    reason = "catalog request and pricing fields await contracts"
-)]
 pub mod openrouter;
 #[allow(
     missing_docs,

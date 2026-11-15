@@ -21,6 +21,8 @@ pub struct QueueCommands(
 );
 
 impl QueueCommands {
+    /// Unresolved immutable submission for this exact item revision. A newer
+    /// edit is not treated as the text of an already submitted command.
     #[must_use]
     pub fn pending_for(&self, item: &QueueItem) -> Option<&super::projector::Submission> {
         self.0.iter().find_map(|(submission, delivery)| {
@@ -31,11 +33,14 @@ impl QueueCommands {
         })
     }
 
+    /// Whether any submitted command still lacks a projected terminal delivery fact.
     #[must_use]
     pub fn has_pending(&self) -> bool {
         self.0.iter().any(|(_, delivery)| delivery.is_none())
     }
 
+    /// Join durable submission intents to feed-derived facts. Submissions below
+    /// the retained feed floor are treated as accepted, not replay candidates.
     #[must_use]
     pub fn from_join(
         intents: &super::projector::ProductIntents,
@@ -61,6 +66,8 @@ impl QueueCommands {
         )
     }
 
+    /// Whether this exact item revision has a recorded rejection, independent
+    /// of other revisions of the same queue identity.
     #[must_use]
     pub fn is_rejected(&self, item: &QueueItem) -> bool {
         self.0.iter().any(|(submission, delivery)| {
@@ -70,6 +77,7 @@ impl QueueCommands {
         })
     }
 
+    /// Whether any unresolved submission holds this item identity against edits.
     #[must_use]
     pub fn is_locked(&self, id: &str) -> bool {
         self.0
@@ -77,6 +85,8 @@ impl QueueCommands {
             .any(|(submission, delivery)| submission.queue_item_id == id && delivery.is_none())
     }
 
+    /// Whether canonical admission or consumption already settled this exact
+    /// revision, so restoring its queue projection must not submit it again.
     #[must_use]
     pub fn is_consumed(&self, item: &QueueItem) -> bool {
         self.0.iter().any(|(submission, delivery)| {
@@ -92,10 +102,14 @@ impl QueueCommands {
     }
 }
 
+/// One retained user draft with stable identity and revision-scoped delivery.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueueItem {
+    /// Canonical product UUID retained through moves and text edits.
     pub id: String,
+    /// Text revision captured by immutable submissions; starts at one.
     pub revision: u64,
+    /// User-authored text, not an admitted canonical command until delivery.
     pub text: String,
     /// When the operator submitted the prompt to the host, Unix
     /// milliseconds. Edits and moves keep it; the prompt's transcript row
@@ -107,6 +121,8 @@ pub struct QueueItem {
 }
 
 impl QueueItem {
+    /// Create a fresh text-only draft. Insertion into a session separately
+    /// enforces queue and prompt bounds; construction itself does not admit work.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             id: new_uuid_v4_string(),
@@ -151,13 +167,17 @@ pub(crate) fn user_input(text: &str, images: &[DraftImage]) -> plakous::agent::U
     plakous::agent::UserInput::new(parts)
 }
 
+/// Process-local queue delivery permission; reopening never restores live authority.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum QueueDrainState {
+    /// This running host may automatically submit the next mutable draft.
     LiveAutoDrain,
+    /// Reopened work waits for explicit operator action before automatic delivery.
     RestoredPaused,
 }
 
 impl QueueDrainState {
+    /// Closed projection token; it must not be persisted as execution authority.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -166,6 +186,7 @@ impl QueueDrainState {
         }
     }
 
+    /// Parse the closed projection vocabulary, returning `None` for unknown tokens.
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value {

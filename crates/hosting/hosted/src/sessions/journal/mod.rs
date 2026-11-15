@@ -7,25 +7,43 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResultMailBatch {
+    /// Tree whose durable mailbox owns these messages.
     pub tree_id: String,
+    /// Exact parent node receiving the admitted command.
     pub recipient: String,
+    /// Exact included message identities, not a request to reread all pending mail.
     pub message_ids: Vec<String>,
 }
 
+/// Reconstruction-complete successor request, journaled before runtime work.
+/// Stored configuration and account evidence bind reconciliation to this exact
+/// selection; current defaults must not silently replace any of them.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RebindSelection {
+    /// Selected provider identity under the target's construction contract.
     pub provider: String,
+    /// Exact default or named credential account.
     pub account: String,
+    /// Resolved literal model id, not a recommendation alias.
     pub model: String,
+    /// Explicit reasoning selection, absent for the admitted default.
     pub effort: Option<String>,
+    /// Saved tool-presentation choice for the successor.
     pub composition: ProductCompositionSelection,
+    /// Exact target, including gateway wire and routing facts where applicable.
     pub target_selection: ProductTargetSelection,
+    /// Frozen protocol identity used by the reconstructed binding.
     pub protocol: String,
+    /// Frozen route identity, independent of current product defaults.
     pub route: String,
+    /// Original requested model spelling retained beside the resolved model.
     pub requested_model: String,
+    /// Canonical selected provider configuration encoding.
     pub selected_configuration: String,
+    /// Canonical effective provider configuration encoding after admission.
     pub effective_configuration: String,
+    /// Exact account-binding evidence; not credential material or a fallback hint.
     pub account_binding: String,
     /// The profile of the tree named after the successor's own id that it
     /// compiles against (a profile fork's seeded tree, or a py-sdk root with
@@ -123,20 +141,25 @@ impl SwitchSelection {
     }
 }
 
+/// Immutable workflow intent; its recorded operation identity governs replay.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionWorkflowKind {
+    /// One paid compaction operation, retaining its original admission reason.
     Compact(ProductCompactReason),
     /// `/new`: a new session (a new node, tree and line) on the current
     /// binding; the source is left as it is.
     New,
+    /// Explicit branch successor retaining the source's bound tuple.
     Fork,
+    /// Explicit successor under a new, reconstruction-complete binding.
     Rebind(Box<RebindSelection>),
     /// Decoded today; live succession writes it.
     Switch(Box<SwitchSelection>),
 }
 
 impl SessionWorkflowKind {
+    /// Stable workflow-kind token; payload details remain in the journaled intent.
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -153,16 +176,20 @@ impl SessionWorkflowKind {
     }
 }
 
+/// Origin of a paid compaction admission, not permission to dispatch it again.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProductCompactReason {
+    /// Explicit operator-requested compaction.
     Manual,
+    /// Host/tool scheduling policy requested compaction.
     Scheduled,
     /// Explicit operator recovery after a terminal in-turn compactable overflow.
     CapacityRecovery,
 }
 
 impl ProductCompactReason {
+    /// Stable persisted reason token, independent of frontend command spelling.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -172,6 +199,7 @@ impl ProductCompactReason {
         }
     }
 
+    /// Accept only the closed persisted token set; unknown tokens return `None`.
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value {

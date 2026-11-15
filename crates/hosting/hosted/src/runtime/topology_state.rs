@@ -23,14 +23,24 @@ use crate::topology_runtime::lookup;
 /// for a headless CLI flow. Session ancestry additionally needs `TopologyRows`.
 pub trait TreeRows {
     /// The persisted tree with the reopen law applied.
+    ///
+    /// # Errors
+    /// Refuses unavailable storage or invalid authoritative rows. `None` means
+    /// absence, not a storage failure or permission to invent a replacement tree.
     fn tree(&self, tree_id: &str) -> Result<Option<ProductAgentTree>, String>;
 
     /// Whether a tree is persisted at all.
+    ///
+    /// # Errors
+    /// Returns storage-read failures rather than treating them as absence.
     fn tree_exists(&self, tree_id: &str) -> Result<bool, String>;
 
     /// Publish a whole tree through the store's compare-and-swap.
     /// A capacity refusal retains its typed recovery-storage classification,
     /// and another host's custody its typed refusal.
+    ///
+    /// # Errors
+    /// Refuses a stale revision, lost custody, invalid tree or unavailable storage.
     fn save_tree(&self, tree: &mut ProductAgentTree) -> Result<(), TreeWriteError>;
 
     /// Delete one tree's rows, compare-and-swapped on `expected_revision`;
@@ -118,6 +128,9 @@ impl From<TreeWriteError> for crate::error::ReadFailure {
 /// Tree rows plus session ancestry through the supplied product record service.
 pub trait TopologyRows: TreeRows {
     /// One persisted session record.
+    ///
+    /// # Errors
+    /// Refuses missing, invalid or unreadable rows rather than synthesizing ancestry.
     fn session(&self, session_id: &str) -> Result<SessionRecord, String>;
 }
 
@@ -678,6 +691,8 @@ pub struct HostRows<'a> {
 }
 
 impl<'a> HostRows<'a> {
+    /// Borrow the product's exact tree and session authorities; construction
+    /// performs no reads and does not acquire custody of either store.
     #[must_use]
     pub const fn new(
         roots: &'a crate::agent::ProductStateRoots,

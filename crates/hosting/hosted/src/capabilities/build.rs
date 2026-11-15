@@ -181,7 +181,7 @@ pub fn require_composition(
     Ok(())
 }
 
-/// Sorted, deduplicated feature names absent from this build, for diagnostics.
+/// Sorted feature names absent from this build, for diagnostics.
 pub fn omitted_features() -> Vec<&'static str> {
     let mut features: Vec<_> = BUILD_CAPABILITIES
         .iter()
@@ -198,7 +198,7 @@ pub fn omitted_features() -> Vec<&'static str> {
     features
 }
 
-/// Sorted, deduplicated included features; inclusion is not credential readiness.
+/// Sorted included features; inclusion is not credential readiness.
 pub fn compiled_features() -> Vec<&'static str> {
     let mut features: Vec<_> = super::ROUTES
         .iter()

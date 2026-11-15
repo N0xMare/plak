@@ -449,6 +449,15 @@ const fn is_mail<P: ProtocolExtension>(intent: &SessionIntent<P>) -> bool {
     )
 }
 
+impl<P: ProtocolExtension, W: Write> std::fmt::Debug for WireConnection<P, W> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WireConnection")
+            .field("attachment", &self.attachment)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<P: ProtocolExtension, W: Write> WireConnection<P, W>
 where
     HostFrame<P>: Serialize,

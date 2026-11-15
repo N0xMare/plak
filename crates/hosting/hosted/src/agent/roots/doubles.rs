@@ -12,6 +12,7 @@ impl super::ProductStateRoots {
 }
 
 /// The conformance-tested in-memory tree store, opened once per factory.
+#[derive(Debug)]
 pub struct MemoryTreeStoreFactory;
 
 impl TreeStoreFactory for MemoryTreeStoreFactory {
@@ -21,6 +22,7 @@ impl TreeStoreFactory for MemoryTreeStoreFactory {
 }
 
 /// A roster that freezes the tuple it is handed and reads no configuration.
+#[derive(Debug)]
 pub struct UnpinnedRosterSource;
 
 impl RosterSource for UnpinnedRosterSource {
@@ -51,6 +53,7 @@ impl RosterSource for UnpinnedRosterSource {
 }
 
 /// No evaluator workers are installed.
+#[derive(Debug)]
 pub struct NoSidecars;
 
 impl plakous::tools::SidecarLocator for NoSidecars {
@@ -64,6 +67,7 @@ impl plakous::tools::SidecarLocator for NoSidecars {
 }
 
 /// No OpenRouter key is configured.
+#[derive(Debug)]
 pub struct NoOpenRouterCredential;
 
 #[cfg(feature = "openrouter")]

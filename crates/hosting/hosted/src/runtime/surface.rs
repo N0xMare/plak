@@ -62,6 +62,7 @@ pub enum SurfacePhase {
 }
 
 /// Immutable facts available while handling one extension intent.
+#[derive(Debug)]
 pub struct SurfaceFacts<'a> {
     /// Current host phase.
     pub phase: SurfacePhase,
@@ -133,6 +134,7 @@ pub type ReadinessRead =
     Box<dyn FnOnce() -> Result<(Vec<ProviderDef>, Vec<ProviderSection>), String> + Send>;
 
 /// Frozen session facts for product-owned identity and workspace presentation.
+#[derive(Debug)]
 pub struct SurfaceSession {
     /// Saved execution placement; absence denotes the host-local runner.
     pub runner: Option<crate::sessions::RunnerDisplay>,
