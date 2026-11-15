@@ -465,7 +465,10 @@ fn api_catalog_command_lists_every_listed_id_with_status_efforts_and_windows() {
         assert_eq!(usable, models(provider).len());
     }
     let anthropic = listing(PlatformProvider::Anthropic);
-    assert_eq!(anthropic.lines().count(), 15, "{anthropic}");
+    assert_eq!(anthropic.lines().count(), 16, "{anthropic}");
+    assert!(anthropic.contains(
+        "claude-fable-5-2\tusable\tefforts=low,medium,high,xhigh,max\twindow=1000000\tfull_window=1000000\tmax_output=128000\t"
+    ), "{anthropic}");
     assert!(anthropic.contains(
         "claude-haiku-5-5\tusable\tefforts=low,medium,high,xhigh,max\twindow=100000\tfull_window=1000000\tmax_output=128000\tcomposition=direct,js-ptc,py-ptc,py-sdk\tplakous-default=direct\n"
     ), "{anthropic}");

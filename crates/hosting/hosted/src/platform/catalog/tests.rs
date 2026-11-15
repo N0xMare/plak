@@ -162,7 +162,11 @@ fn reopen_keeps_the_stored_window_and_refuses_moved_facts_with_the_rebind_remedy
     assert_eq!(haiku.reopen_window(provider, &working), Ok(100_000));
 
     let mut moved = live_listing();
-    moved[0].max_tokens = Some(64_000);
+    moved
+        .iter_mut()
+        .find(|model| model.id == "claude-haiku-5-5")
+        .unwrap()
+        .max_tokens = Some(64_000);
     let moved = anthropic_catalog(&moved, ApiCatalogSource::Live, 0).unwrap();
     let moved_haiku = moved.find("claude-haiku-5-5").unwrap();
     assert_ne!(
