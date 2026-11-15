@@ -4474,13 +4474,13 @@ whole listing (`accept_anthropic_listed_models`, which a cached list also
 passes); unknown fields are ignored. The listing function has no dial-origin
 parameter; an installed exchange observer sees its requests (empty bodies, the
 key header sensitive). The bundled reviewed table (`api_models.json` in the crate, revision
-`anthropic.api-models.2026-10-24.v1`) carries, per id, the published window,
+`anthropic.api-models.2026-11-15.v2`, reviewed 2026-11-15) carries, per id, the published window,
 output limit, effort levels and adaptive-thinking support, the published
 lifecycle with its `deprecated_at` and `retires_at` times (Sonnet 4.5,
 `claude-sonnet-4-5-20250929`, is deprecated from 2026-09-30 and retires
 2026-11-30; Anthropic names `claude-sonnet-5-5` as its replacement, which the
 table does not record), the input price threshold where the pricing page
-publishes one (Haiku 5.5: 100,000 tokens, rechecked on 2026-10-30) and
+publishes one (Haiku 5.5: 100,000 tokens, rechecked on 2026-11-15) and
 the hosted features its docs list (`featureMetadata.supportedModels`:
 compaction, hosted programmatic tool calling, tool search, web search, web
 fetch, code execution; recorded, not yet used). Classification
@@ -4507,6 +4507,34 @@ facts digest (`anthropic.api-model-facts.v2`) binds the id, family, effort
 ladder and output limit only. `anthropic_api_key_fingerprint` is the first 16 hex digits of a
 domain-separated SHA-256 of the key, for keying a cache: not a credential, but
 a candidate key can be checked against it, so it stays in owner-only files.
+
+The 2026-11-15 API review enrolls `claude-fable-5-2` as `claude-5-fable`:
+1,000,000 input tokens, 128,000 output tokens, always-on adaptive thinking and
+low/medium/high/xhigh/max effort. Its API default is high, not the native
+client's medium; this route always sends the caller's explicit effort.
+The November 9 [Platform release notes](https://platform.claude.com/docs/en/release-notes/overview),
+[models overview](https://platform.claude.com/docs/en/about-claude/models/overview),
+[Messages reference](https://platform.claude.com/docs/en/api/messages), thinking,
+effort and pricing pages are the authorities. The Messages endpoint,
+`x-api-key` and `anthropic-version: 2023-06-01` are unchanged. The API review
+is due 2027-02-13T00:00:00Z and does not calendar-refuse. Mythos 5.2 is
+verification-gated and its line remains unreviewed (`NeedsReview`), even if
+listed by a key. A future Fable id without its own reviewed row also stays
+`NeedsReview`; API enrollment does not confer subscription enrollment.
+
+Fable 5.2 enforces preserved-thinking prefix checks for every account. Existing
+exact account/model/configuration replay checks remain mandatory; they are not
+a local certificate of the provider's prefix check. A prefix rejection is a
+permanent HTTP 400, with no retry, header removal or model fallback. Frozen
+construction keeps system/tools stable; history edits and compaction still
+need the provider's prefix rules and live replay qualification. A model/account
+switch strips incompatible opaque thinking rather than using the API's broader
+cross-model/account-link allowances. Computer toolsets,
+advisor tools, fast mode, per-message effort and provider fallback are not
+enrolled by this coding profile. In particular, the release's
+`computer_toolset_20260801` and advisor-model restrictions do not authorize
+new tools. Fable 5.2 requires 30-day provider retention unless Anthropic
+expressly authorizes otherwise; this route makes no zero-retention claim.
 
 The OpenAI Platform manifest and the xAI Platform binding and model table were
 re-reviewed on 2026-11-15 against official release notes, model pages, Responses,
@@ -5102,8 +5130,8 @@ present. A mismatch refuses before token/device dispatch; a discovered URL is
 never used. Grok does not refuse a token response on its granted `scope`, at
 login or refresh: no such acceptance gate is evidenced by the pinned native
 reference. Claude login requires only `user:inference`, matching Claude Code
-2.1.314's inference-scope membership check, not equality with its six requested
-or five refresh scopes. Reordered grants and supersets are accepted. This is
+2.1.325's inference-scope membership check, not equality with Plak's six requested
+or five refresh scopes (an intentional subset of the native full-product scopes). Reordered grants and supersets are accepted. This is
 reference-client evidence, not a live-login claim; refresh does not recheck
 login grant scopes. Codex checks JWKS on login and refresh, ignoring keys for
 other algorithms in a mixed set and refusing drift only when no RS256 key
@@ -5327,10 +5355,45 @@ The official changelog locations returned HTTP 403 during this review; no
 release-note claim is inferred from them. The recorder used only synthetic
 local credentials and did not qualify a subscription account or paid traffic.
 
-Claude OAuth Messages inference uses the pinned Claude Code 2.1.314 gateway
+Claude OAuth Messages inference uses the pinned Claude Code 2.1.325 gateway
 costume — HTTP attribution plus `system[0]`/`system[1]`, with native `cch` body
-attestation. The 2026-10-30 review captured all six enrolled models through the
+attestation. The 2026-11-15 review captured all seven enrolled models through the
 interactive native TUI against an isolated recorder with synthetic credentials.
+GitHub's latest non-prerelease release and npm's `latest`/`next` tags agree on
+2.1.325 (published 2026-11-13); npm's separately named delayed `stable` channel
+is 2.1.311, not a reason to downgrade the inference reference. The public
+release tag commit is `715ff104ba2f38c7158fbb7dd831f5cc3f21e5c9`; the native
+artifact embeds source commit `a360e7297ecfcddeae9ec99fb3c93153ed86aca4`.
+The official Linux x64 npm tarball's SHA-256 is
+`e8735d37521f49c31d65c3dcd8c0c8babe6d1f5f72c2066346b3ae88d32ac31d`,
+and its executable's SHA-256 is
+`0dc4f4a9a165fc60746d7ae8489712e5fc352f1e7ad4eb22e7141bd0812eb0cf`.
+These identify the inference review, not a new context-envelope certificate.
+Primary sources are the [official release](https://github.com/anthropics/claude-code/releases/tag/v2.1.325),
+[npm package metadata](https://registry.npmjs.org/@anthropic-ai/claude-code/2.1.325)
+and its exact-version `@anthropic-ai/claude-code-linux-x64` dependency.
+The review expires 2027-02-13T00:00:00Z.
+
+The [official model configuration guide](https://code.claude.com/docs/en/model-config)
+describes Fable 5.2 selection on Pro, Max, Ultra, Team and Enterprise plans;
+organization settings may defer or prevent selection. Fable is never a native
+account-type default, and depending on plan/seat tier it may require usage
+credits instead of included subscription limits. Plak keeps Sonnet 5 as its
+default, requires explicit Fable selection and does not implement native
+model-alias migration, credit-consent prompts or automatic model fallback.
+Bundled picker/runtime evidence is not evidence that every account can use a
+model or that usage is included in its plan; service acceptance is unqualified.
+
+The native full-product login additionally requests `user:plugins` and
+`user:privacy_consents:write`; refresh adds plugins and preserves already
+granted optional project/privacy scopes. Plak implements none of those
+surfaces and keeps its six authorize/five refresh inference-route scopes.
+The native inference gate still checks only `user:inference` membership and
+supports an inference-only login. Client id, authorize/token endpoints,
+manual redirect, PKCE and refresh JSON remain unchanged. This intentional
+bounded scope subset is separate from the inference costume; its consent
+fingerprint, profile id, notice, kill switch and source revision do not move.
+
 The inference costume revision does not alter the OAuth client,
 credential slot, token exchange, or compatibility acceptance/source revision
 and must not require a fresh login or consent. Billing attribution carries the
@@ -5346,7 +5409,7 @@ provider-issued request identifiers, not invented native session identifiers.
 A rooted direct customer prompt also carries `cc_prompt_index=<p>; cc_turn_index=<t>;`
 after `cc_turn_origin`, the root turn's 1-based session position: `t` counts
 every root turn (prompts and host wakes) through the current one, `p` only the
-turns a person submitted. The 2.1.314 captures (three human turns, one with two
+turns a person submitted. The 2.1.325 captures (three human turns, one with two
 tool rounds, one answered after a 529 retry, then `--continue` and a fourth)
 show 1, 2, 3 and 4: the position is fixed per turn, unchanged across tool
 continuations and retries, and continues across resume. Plakous derives it from
@@ -5396,23 +5459,26 @@ nested arrays and quoted strings. Retained bytes are never reserialized, and all
 excluded fields remain unchanged on the wire; only the five billing-placeholder
 bytes are overwritten. Bodies without billing attribution remain untouched.
 The refreshed header omits `mid-conversation-system-2026-04-07`;
-`thinking-token-count-2026-05-13` follows the optional per-turn/tool flags.
-The 2.1.314 costume is reviewed against native interactive request captures
-(mock origin, synthetic OAuth): user agent `claude-cli/2.1.314 (external, cli)`,
-Stainless package `0.128.0`, runtime `v26.12.1`, and billing `cc_version=2.1.314.<suffix>`
-(`hello` is `ece`, empty first text `cfe`); the `cch` attestation algorithm is
-verified against raw 2.1.314 bodies for every enrolled model; its seed, salt and
-byte exclusions are unchanged. The
+`tool-provenance-2026-10-26` follows the optional per-turn/tool flags, then
+`thinking-token-count-2026-05-13` starts the unchanged tail.
+The 2.1.325 costume is reviewed against native interactive request captures
+(mock origin, synthetic OAuth): user agent `claude-cli/2.1.325 (external, cli)`,
+Stainless package `0.128.0`, runtime `v26.12.1`, and billing `cc_version=2.1.325.<suffix>`
+(`hello` is `f16`, empty first text `ff3`); the `cch` attestation algorithm is
+reviewed against the native artifact and synthetic request captures. A fresh
+Fable 5.2 raw request matches independent xxHash 0.8.3 with the existing seed
+and model/maximum-output exclusions; retained historical routing-exclusion
+vectors remain unchanged. The
 `anthropic-beta` header and the Messages `max_tokens` value come from that
-model's enrollment row, not from one shared list. Every enrolled row, Fable 5.1
-included, has its own 2.1.314 capture. Header
-order is: Sonnet 5 sends the 13-beta baseline and `max_tokens`
+model's enrollment row, not from one shared list. Every enrolled row, including both Fable 5.1 and 5.2, has its own 2.1.325
+capture; Fable 5.2 was captured at both low and max effort. Header
+order is: Sonnet 5 sends the 14-beta baseline and `max_tokens`
 64000; Opus 5 adds `mid-conversation-tool-changes-2026-07-01` after
 `prompt-caching-scope-2026-01-05` and before `thinking-token-count-2026-05-13` and sends 64000; Sonnet 5.5 and Opus 5.5
-add that beta and `per-turn-control-2026-07-01` (15 betas) and send 128000;
-Haiku 5.5 sends those same 15 with `claude-code-20250219` fifth and sends
-128000. Fable sets both flags and a 64000 request default, and
-its id is not Haiku, so it takes the non-Haiku 15-beta header. Effort does
+add that beta and `per-turn-control-2026-07-01` (16 betas) and send 128000;
+Haiku 5.5 sends those same 16 with `claude-code-20250219` fifth and sends
+128000. Fable 5.1 sets both flags and a 64000 request default; Fable 5.2 uses
+128000. Both take the non-Haiku 16-beta header. Effort does
 not change the header. The 128000 figure remains the output ceiling: the
 descriptor maximum and the product output bound. It is not the
 semantic-compaction bound. Compaction asks for the minimum of the turn's
@@ -5423,17 +5489,17 @@ default, so a smaller configured bound is not raised. A Claude OAuth
 request sends `context_management`
 `{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}` only when
 thinking is enabled or adaptive (`thinking.type` is not `disabled`). Disabled
-reasoning, which Sonnet 5, Opus 5 and Fable admit, sends none. That edit is
+reasoning, which Sonnet 5, Opus 5 and Fable 5.1 admit, sends none.
+Fable 5.2 requires adaptive thinking and refuses disabled thinking before dispatch. That edit is
 request-only; it does not rewrite canonical thinking or the response
 `applied_edits` parser. These request-lowering semantics are bound by
 `anthropic.claude.oauth.lowering.2026-10-09.v12` (adapter revision
-`anthropic.claude.oauth.2026-10-30.v9`) and the
+`anthropic.claude.oauth.2026-11-15.v10`) and the
 prepared wire/context projection by `messages.projection.v3`. The native
 context reference pins still identify Claude Code 2.1.284 executables. The
 context reference is deliberately decoupled from the costume: a costume
 refresh does not move it, and it moves only in a separate cutover that records
-reviewed Linux executable identities for the new version (none is recorded for
-2.1.314). The macOS arm64
+reviewed cross-platform context-envelope evidence for the new version. The macOS arm64
 identity comes from the installed native binary; Linux x86_64 and arm64
 identities come from the same official manifest.
 Those binary identities do not by themselves establish captured wire behavior.
@@ -5473,7 +5539,7 @@ route it is admitted by the reviewed table and family rules (§6.3). Its family
 is `claude-5-haiku`. It uses the shared enrollment
 window: 1,000,000 context tokens and 128,000 output tokens, with adaptive
 thinking and low/medium/high/xhigh/max effort. Picker order places it after
-the Sonnet rows. The 2.1.314 low capture (synthetic OAuth, no provider acceptance) shows the exact model id, a
+the Sonnet rows. The 2.1.325 low capture (synthetic OAuth, no provider acceptance) shows the exact model id, a
 128,000-token output request, adaptive thinking with updates, and
 `output_config.effort`. Its enrollment row supplies the Haiku beta header
 (`claude-code-20250219` fifth, including `per-turn-control-2026-07-01` and

@@ -696,7 +696,7 @@ and later present no TaskOutput (a background task's output file is read with
 `Read`), so the Claude pack presents no output tool. Its five-tool surface
 (`Bash`, `Edit`, `Read`, `TaskStop`, `Write`) is pinned by exact exposed-name
 tests on every catalog path, and the retired `BashOutput`, `Grep`, `Glob` and
-`TodoWrite` names are tested to fail to lower. The Claude Code 2.1.314 native
+`TodoWrite` names are tested to fail to lower. The Claude Code 2.1.325 native
 interactive captures (mock origin, synthetic OAuth) are the costume evidence for
 the user agent and billing `cc_version` pin; the capture tool's scripted
 multi-turn mode (`--claude-scenario multiturn`: two `tool_use` rounds, one 529
@@ -704,7 +704,7 @@ retry, a `--continue` reopen) is the evidence for `diagnostics` and the turn
 indices, pinned offline by sanitized facts in the Anthropic protocol tests. Native Bash/Read/Edit/Write
 schemas and descriptions remain those compared with native 2.1.289 (Plak's
 presented descriptions are its own truthful wording in that vocabulary, not
-the native text). The version suffix test pins `hello` to the captured `05c`;
+the native text). The version suffix test pins `hello` to the captured `f16` for 2.1.325;
 `2.1.293` stays `72d`. Occupancy fixtures
 keep the stop name process-allowlist gated without changing its effect tag.
 The job-ledger fixture carries a promoted row across later turns and their operation-only and

@@ -92,9 +92,9 @@ fn a_digest_only_capability_change_names_its_category_and_this_builds_revision()
     assert_eq!(
         binding_change_words(
             &BindingChange::ModelCapabilities,
-            Some("anthropic.claude.oauth.2026-10-30.v9")
+            Some("anthropic.claude.oauth.2026-11-15.v10")
         ),
-        "model capability binding (adapter revision, declared features or context contract; this build: anthropic.claude.oauth.2026-10-30.v9)"
+        "model capability binding (adapter revision, declared features or context contract; this build: anthropic.claude.oauth.2026-11-15.v10)"
     );
     assert_eq!(
         binding_change_words(&BindingChange::ModelCapabilities, None),

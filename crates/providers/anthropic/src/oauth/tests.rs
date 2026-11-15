@@ -123,11 +123,11 @@ fn compatibility_envelope_is_pinned_to_claude_code_messages_costume() {
     assert!(CLAUDE_OAUTH_USER_AGENT.starts_with("plak/"));
     assert_eq!(
         CLAUDE_OAUTH_MESSAGES_USER_AGENT,
-        "claude-cli/2.1.314 (external, cli)"
+        "claude-cli/2.1.325 (external, cli)"
     );
     assert_eq!(
         crate::cch::CLAUDE_OAUTH_BILLING_HEADER,
-        "x-anthropic-billing-header: cc_version=2.1.314.cfe; cc_entrypoint=cli; cch=00000;"
+        "x-anthropic-billing-header: cc_version=2.1.325.ff3; cc_entrypoint=cli; cch=00000;"
     );
     assert_eq!(
         CLAUDE_OAUTH_IDENTITY,
@@ -143,6 +143,7 @@ fn enrolled_effort_options_are_exact_per_model_and_unknowns_fail_closed() {
         "claude-sonnet-5",
         "claude-haiku-5-5",
         "claude-fable-5-1",
+        "claude-fable-5-2",
         "claude-opus-5",
         "claude-opus-5-5",
     ] {
@@ -189,6 +190,7 @@ fn enrolled_context_and_output_facts_come_from_one_table_and_unknowns_fail_close
             "claude-sonnet-5-5",
             "claude-haiku-5-5",
             "claude-fable-5-1",
+            "claude-fable-5-2",
             "claude-opus-5",
             "claude-opus-5-5",
         ]
@@ -198,6 +200,7 @@ fn enrolled_context_and_output_facts_come_from_one_table_and_unknowns_fail_close
         "claude-sonnet-5-5",
         "claude-haiku-5-5",
         "claude-fable-5-1",
+        "claude-fable-5-2",
         "claude-opus-5",
         "claude-opus-5-5",
     ] {
@@ -216,6 +219,7 @@ fn enrolled_context_and_output_facts_come_from_one_table_and_unknowns_fail_close
         ("claude-sonnet-5-5", 128_000, true, true),
         ("claude-haiku-5-5", 128_000, true, true),
         ("claude-fable-5-1", 64_000, true, true),
+        ("claude-fable-5-2", 128_000, true, true),
         ("claude-opus-5", 64_000, false, true),
         ("claude-opus-5-5", 128_000, true, true),
     ];
@@ -240,6 +244,15 @@ fn enrolled_context_and_output_facts_come_from_one_table_and_unknowns_fail_close
         );
         assert!(!header.contains("context-1m"), "{model}");
         let tokens: Vec<&str> = header.split(',').collect();
+        let provenance_at = tokens
+            .iter()
+            .position(|token| *token == "tool-provenance-2026-10-26")
+            .expect("native 2.1.325 tool provenance beta");
+        assert_eq!(
+            provenance_at,
+            5 + usize::from(per_turn) + usize::from(mid_tools)
+        );
+        assert_eq!(tokens[provenance_at + 1], "thinking-token-count-2026-05-13");
         let code_at = tokens
             .iter()
             .position(|token| *token == "claude-code-20250219")

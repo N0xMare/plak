@@ -1,12 +1,13 @@
 {
-  "revision": "anthropic.api-models.2026-10-24.v1",
-  "reviewed_at": "2026-10-24",
+  "revision": "anthropic.api-models.2026-11-15.v2",
+  "reviewed_at": "2026-11-15",
   "sources": [
     "GET https://api.anthropic.com/v1/models (2026-10-09)",
     "platform.claude.com/docs: models/overview, about-claude/pricing, feature pages featureMetadata.supportedModels",
-    "platform.claude.com/docs (2026-10-24): about-claude/model-deprecations (Sonnet 4.5 deprecation, retirement and replacement), about-claude/pricing (Haiku 5.5 threshold rechecked)"
+    "platform.claude.com/docs (2026-11-15): release-notes/overview, about-claude/models/overview, about-claude/model-deprecations, about-claude/pricing, build-with-claude/thinking, build-with-claude/adaptive-thinking, build-with-claude/effort, api/messages, api/versioning; agents-and-tools/tool-use/{programmatic-tool-calling,tool-search-tool,web-search-tool,web-fetch-tool,code-execution-tool}, build-with-claude/compaction"
   ],
   "models": [
+    {"id": "claude-fable-5-2", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "deprecated_at": null, "retires_at": null, "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
     {"id": "claude-haiku-5-5", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": 100000, "lifecycle": "active", "deprecated_at": null, "retires_at": null, "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
     {"id": "claude-sonnet-5-5", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "deprecated_at": null, "retires_at": null, "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
     {"id": "claude-opus-5-5", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "deprecated_at": null, "retires_at": null, "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},

@@ -994,7 +994,7 @@ pub(crate) mod suite {
         ),
         (
             "claude.direct.root",
-            "7f71855ee5656aa04bf86361a894d4221dc0c146ac9a4d9e194befb849752bf0",
+            "52f0f80c88149530d6cf5704ad3fce9d4ccca01c55bdc34dc57fc2f4ee72e77f",
         ),
         (
             "openrouter-chat.direct.root",

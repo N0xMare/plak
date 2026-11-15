@@ -366,6 +366,16 @@ fn policy_for(
     oauth_identity: Option<&crate::ClaudeOAuthRequestIdentity>,
 ) -> Result<MessagesRequestPolicy, AnthropicError> {
     if target.dialect().is_claude_oauth()
+        && target.model().remote_id().as_str() == "claude-fable-5-2"
+        && matches!(plan.request().reasoning(), ReasoningPolicy::Disabled)
+    {
+        return Err(AnthropicError::new(
+            AnthropicErrorKind::InvalidRequest,
+            AnthropicErrorPhase::Prepare,
+            "Claude Fable 5.2 requires adaptive thinking",
+        ));
+    }
+    if target.dialect().is_claude_oauth()
         && matches!(
             target.model().remote_id().as_str(),
             "claude-opus-5-5" | "claude-sonnet-5-5" | "claude-haiku-5-5"

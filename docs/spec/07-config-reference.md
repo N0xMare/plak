@@ -838,6 +838,13 @@ error; on a direct API account both `effort` and `model` are checked when the
 file is read. The file stem alone is the template's name; there is no `name`
 key.
 
+`claude-fable-5-2` is enrolled independently for `claude` subscription and
+`anthropic` API templates. Both admit low/medium/high/xhigh/max effort and
+require adaptive thinking; the model is never selected by an alias
+migration. `claude-mythos-5-2` remains unreviewed. Subscription availability and
+whether Fable consumes usage credits remain provider/account facts, not a
+template guarantee (chapter 01 §7.2).
+
 The hook receives tree-supplied `PLAK_LAUNCH_CHECKOUT`, `PLAK_PARENT_PATH`, and
 `PLAK_COPY_ID` values, overriding same-named `[env]` entries. Chapter 03 §13
 defines their meanings and the hook's cleared-environment lifecycle.

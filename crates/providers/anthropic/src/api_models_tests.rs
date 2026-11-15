@@ -76,6 +76,42 @@ fn per_model_output_limits_windows_and_thresholds_come_from_their_sources() -> T
 }
 
 #[test]
+fn fable_52_is_reviewed_but_mythos_and_future_neighbors_are_not() -> TestResult {
+    // Authored listing, not an authenticated Models API observation. The
+    // November 9 release and model/effort docs supply the reviewed facts.
+    let page = parse_anthropic_models_page(
+        br#"{"data":[{"id":"claude-fable-5-2"},{"id":"claude-mythos-5-2"},{"id":"claude-fable-5-3"}]}"#,
+    )?;
+    let models = anthropic_api_models(&page.models, 1_794_700_800)?;
+    let fable = find(&models, "claude-fable-5-2");
+    assert_eq!(fable.status(), &AnthropicApiModelStatus::Usable);
+    assert_eq!(fable.family(), Some("claude-5-fable"));
+    assert_eq!(fable.max_input_tokens(), 1_000_000);
+    assert_eq!(fable.max_tokens(), 128_000);
+    assert_eq!(fable.price_threshold_input_tokens(), None);
+    assert_eq!(
+        fable.efforts(),
+        [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::XHigh,
+            ReasoningEffort::Max,
+        ]
+    );
+    for id in ["claude-mythos-5-2", "claude-fable-5-3"] {
+        assert!(matches!(
+            find(&models, id).status(),
+            AnthropicApiModelStatus::NeedsReview(_)
+        ));
+    }
+    // API discovery cannot silently enroll a subscription model.
+    assert!(crate::claude_oauth_enrolled_model("claude-fable-5-2"));
+    assert!(!crate::claude_oauth_enrolled_model("claude-mythos-5-2"));
+    Ok(())
+}
+
+#[test]
 fn effort_ladders_are_the_published_levels() -> TestResult {
     let models = live()?;
     assert_eq!(
@@ -112,8 +148,11 @@ fn hosted_feature_flags_follow_the_reviewed_docs() -> TestResult {
 }
 
 #[test]
-fn bundled_table_agrees_with_the_live_fixture() -> TestResult {
-    let bundled = anthropic_api_models(&anthropic_api_bundled_listing()?, 1_800_000_000)?;
+fn bundled_table_agrees_with_the_historical_live_fixture() -> TestResult {
+    let mut bundled = anthropic_api_models(&anthropic_api_bundled_listing()?, 1_800_000_000)?;
+    // The October 9 authenticated capture predates Fable 5.2. Keep it as
+    // captured: the new row has its own authored listing and source review.
+    bundled.retain(|model| model.id() != "claude-fable-5-2");
     let live = live()?;
     assert_eq!(bundled, live);
     Ok(())

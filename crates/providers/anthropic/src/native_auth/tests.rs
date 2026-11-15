@@ -319,7 +319,7 @@ fn persist_and_logout_round_trip_offline() {
         )
         .unwrap();
     assert_eq!(status.status(), CredentialStatus::Ready);
-    assert_eq!(manager.enrolled_catalog().unwrap().len(), 6);
+    assert_eq!(manager.enrolled_catalog().unwrap().len(), 7);
     assert_eq!(
         manager.enrolled_catalog().unwrap()[0].exact_id(),
         "claude-sonnet-5"

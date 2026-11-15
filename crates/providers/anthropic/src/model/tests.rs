@@ -244,6 +244,7 @@ async fn production_api_executes_sonnet_and_opus_5_family_low_medium_through_age
         crate::CLAUDE_SONNET_5_MODEL_ID,
         crate::config::CLAUDE_OPUS_5_MODEL_ID,
         crate::config::CLAUDE_OPUS_5_5_MODEL_ID,
+        "claude-fable-5-2",
     ] {
         for effort in [ReasoningEffort::Low, ReasoningEffort::Medium] {
             let body = SUCCESS_SSE.replace("claude-sonnet-5", model);
@@ -730,7 +731,15 @@ impl plakous_tools::ToolExecutor for Echo {
 
 #[tokio::test]
 async fn production_api_tool_result_continues_without_redispatching_effect() -> TestResult {
-    let tool_sse = SUCCESS_SSE
+    for model in [crate::CLAUDE_SONNET_5_MODEL_ID, "claude-fable-5-2"] {
+        tool_result_continues_without_redispatching_effect(model).await?;
+    }
+    Ok(())
+}
+
+async fn tool_result_continues_without_redispatching_effect(model: &str) -> TestResult {
+    let success_sse = SUCCESS_SSE.replace("claude-sonnet-5", model);
+    let tool_sse = success_sse
         .replace(
             "\"type\":\"text\",\"text\":\"\"",
             "\"type\":\"tool_use\",\"id\":\"call_echo\",\"name\":\"echo\",\"input\":{}",
@@ -755,7 +764,7 @@ async fn production_api_tool_result_continues_without_redispatching_effect() -> 
         1,
     );
     let (client, origin, peer) = tls_exchange(
-        vec![Some(response(&tool_sse)), Some(response(SUCCESS_SSE))],
+        vec![Some(response(&tool_sse)), Some(response(&success_sse))],
         false,
     )
     .await?;
@@ -788,7 +797,7 @@ async fn production_api_tool_result_continues_without_redispatching_effect() -> 
     let binding = AnthropicLanguageModel::build(
         static_key_source("offline-only")?,
         "fixture-account",
-        &crate::AnthropicApiModel::bundled(crate::CLAUDE_SONNET_5_MODEL_ID)?,
+        &crate::AnthropicApiModel::bundled(model)?,
         b"",
         policy,
         NonZeroU64::new(64_000).unwrap(),
@@ -1272,13 +1281,23 @@ async fn api_turn_rate_limits_retry_to_the_policy_budget_then_fail() -> TestResu
     Ok(())
 }
 
-/// A refusal the policy does not name (a `403`) and an ambiguous server
-/// failure (a `500`) end the turn after one dispatch, whatever their body.
+/// Refusals the policy does not name end after one dispatch, including a
+/// Fable 5.2 preserved-thinking prefix rejection with `Retry-After` present.
 #[tokio::test]
 async fn api_turn_does_not_retry_a_status_the_policy_does_not_name() -> TestResult {
-    let body =
+    let ordinary =
         r#"{"type":"error","error":{"type":"rate_limit_error","message":"fixture refusal"}}"#;
-    for (status, retry_after) in [(403, ""), (400, "retry-after: 0\r\n")] {
+    let prefix = r#"{"type":"error","error":{"type":"invalid_request_error","message":"The block is bound to a different conversation"}}"#;
+    for (status, retry_after, body, model) in [
+        (403, "", ordinary, crate::CLAUDE_SONNET_5_MODEL_ID),
+        (
+            400,
+            "retry-after: 0\r\n",
+            ordinary,
+            crate::CLAUDE_SONNET_5_MODEL_ID,
+        ),
+        (400, "retry-after: 0\r\n", prefix, "claude-fable-5-2"),
+    ] {
         let wire = format!(
             "HTTP/1.1 {status} Rejected\r\ncontent-type: application/json\r\n{retry_after}content-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()
@@ -1289,7 +1308,7 @@ async fn api_turn_does_not_retry_a_status_the_policy_does_not_name() -> TestResu
             client,
             origin,
             static_key_source("offline-only")?,
-            crate::CLAUDE_SONNET_5_MODEL_ID,
+            model,
             ReasoningEffort::Low,
         )?;
         let root = tempfile::tempdir()?;
