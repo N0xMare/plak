@@ -59,15 +59,19 @@ impl ApiModelStatus {
 /// them, never raw request bytes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ApiWindow {
+    /// Use the provider's price threshold, capped by its full input window.
     #[default]
     Working,
+    /// Use the full input window even when input above the threshold costs more.
     Full,
 }
 
 /// One model a direct API-key route lists, with the facts it runs under.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlatformModel {
+    /// Literal provider model id; it is not an account or recommendation alias.
     pub model: String,
+    /// Reviewed admission decision; listing alone does not permit inference.
     pub status: ApiModelStatus,
     /// The model's published effort levels, in ladder order.
     pub efforts: Vec<ReasoningEffort>,
@@ -198,16 +202,25 @@ pub enum ApiCatalogSource {
     /// Fetched from the provider now.
     Live,
     /// The cached provider list, fetched `age_seconds` ago.
-    Cached { age_seconds: u64 },
+    Cached {
+        /// Elapsed seconds since the provider list was fetched.
+        age_seconds: u64,
+    },
     /// The bundled reviewed table: the list was unavailable.
-    Bundled { reason: String },
+    Bundled {
+        /// Diagnostic explanation for using reviewed bundled facts.
+        reason: String,
+    },
 }
 
 /// Every model one API route lists, in provider order.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApiModelCatalog {
+    /// Exact route whose namespace owns every listed id.
     pub provider: PlatformProvider,
+    /// Provenance of the list, not independent permission to execute its rows.
     pub source: ApiCatalogSource,
+    /// Classified provider rows; refused and unreviewed models remain visible.
     pub models: Vec<PlatformModel>,
 }
 
@@ -216,20 +229,29 @@ pub struct ApiModelCatalog {
 pub enum ApiAdmissionError {
     /// The id is not on the provider's list.
     Unknown {
+        /// Route on which lookup was attempted; no other route is searched.
         provider: PlatformProvider,
+        /// Literal id that was not listed.
         model: String,
+        /// Nearby listed ids for an explicit caller selection, never fallback.
         suggestions: Vec<String>,
     },
     /// Listed, but refused with a reason.
     Refused {
+        /// Route that listed but did not admit the model.
         provider: PlatformProvider,
+        /// Literal listed id.
         model: String,
+        /// Reviewed refusal classification and its explanation.
         status: ApiModelStatus,
     },
     /// The effort is not on the model's published ladder.
     Effort {
+        /// Route whose reviewed effort ladder was checked.
         provider: PlatformProvider,
+        /// Literal model id whose effort was refused.
         model: String,
+        /// Admitted ladder in provider order, for explicit reselection.
         offered: Vec<ReasoningEffort>,
     },
 }

@@ -19,6 +19,8 @@ pub type ReclamationFuture<'a> = VcsFuture<'a, Result<Box<dyn ReclamationAdmissi
 
 /// The host's terminal-pin authority, independent of agent jobs and line ownership.
 pub trait ReclamationFence: Send + Sync {
+    /// Admit reclamation of this exact runner-owned path, retaining the returned
+    /// guard through the destructive operation. A refusal grants no authority.
     fn admit<'a>(&'a self, runner: &'a str, path: &'a Path) -> ReclamationFuture<'a>;
 }
 

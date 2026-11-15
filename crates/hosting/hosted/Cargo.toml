@@ -21,7 +21,7 @@ class = "published-internal"
 too-many-lines-ceiling = 101
 too-many-arguments-ceiling = 29
 large-file-ceiling = 0
-missing-docs-ceiling = 13
+missing-docs-ceiling = 7
 crate-wide-allows = []
 reason = "Existing lint and size debt, frozen at the counts on main; ratchet down as the splits land."
 

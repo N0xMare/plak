@@ -191,7 +191,7 @@ impl ProductToolExtensions {
     }
 
     #[cfg(test)]
-    pub fn new(registrations: impl IntoIterator<Item = ToolRegistration>) -> CliResult<Self> {
+    pub(crate) fn new(registrations: impl IntoIterator<Item = ToolRegistration>) -> CliResult<Self> {
         Self::from_nested_registrations(registrations)
     }
 

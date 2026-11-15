@@ -31,7 +31,10 @@ const LOG_LOCK_WAIT: Duration = Duration::from_secs(2);
 /// One structured session event (serialized as a single JSON object line).
 #[derive(Clone, Debug)]
 pub struct SessionEvent {
+    /// Dot-delimited event name. The log reserves `kind` for this value.
     pub kind: String,
+    /// Scalar event facts. Reserved `ts`, `seq` and `kind` keys are ignored;
+    /// later duplicate keys replace earlier ones when encoding the record.
     pub fields: Vec<(String, JsonVal)>,
     /// Transient presentation fact; not a JSONL field or recovery authority.
     pub presentation: Option<SessionEventPresentation>,
@@ -44,15 +47,21 @@ pub enum SessionEventPresentation {
     CompactCommittedOverflow,
 }
 
+/// Scalar log vocabulary: no nested payloads, provider fixtures or credentials.
 #[derive(Clone, Debug)]
 pub enum JsonVal {
+    /// Explicit absence, distinct from an omitted event field.
     Null,
+    /// A categorical yes/no fact.
     Bool(bool),
+    /// A nonnegative count or identifier represented exactly in JSON.
     U64(u64),
+    /// Text bounded by the log encoder before it reaches the JSONL file.
     Str(String),
 }
 
 impl SessionEvent {
+    /// Begin an event without fields or transient presentation metadata.
     pub fn new(kind: impl Into<String>) -> Self {
         Self {
             kind: kind.into(),
@@ -61,6 +70,7 @@ impl SessionEvent {
         }
     }
 
+    /// Append a text field; encoding, not this builder, bounds its size.
     pub fn str(mut self, key: &str, value: impl Into<String>) -> Self {
         self.fields
             .push((key.to_owned(), JsonVal::Str(value.into())));
@@ -68,6 +78,7 @@ impl SessionEvent {
     }
 
     #[must_use]
+    /// Append a text field or an explicit JSON null when the value is absent.
     pub fn opt_str(self, key: &str, value: Option<&str>) -> Self {
         match value {
             Some(v) => self.str(key, v),
@@ -76,18 +87,21 @@ impl SessionEvent {
     }
 
     #[must_use]
+    /// Append a boolean fact without converting it to diagnostic text.
     pub fn bool(mut self, key: &str, value: bool) -> Self {
         self.fields.push((key.to_owned(), JsonVal::Bool(value)));
         self
     }
 
     #[must_use]
+    /// Append a nonnegative integer fact without converting it to text.
     pub fn u64(mut self, key: &str, value: u64) -> Self {
         self.fields.push((key.to_owned(), JsonVal::U64(value)));
         self
     }
 
     #[must_use]
+    /// Append an explicit null rather than omitting the named field.
     pub fn null(mut self, key: &str) -> Self {
         self.fields.push((key.to_owned(), JsonVal::Null));
         self
@@ -155,7 +169,20 @@ pub struct SessionLog {
     state: RefCell<WriterState>,
 }
 
+impl std::fmt::Debug for SessionLog {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Formatting must not borrow an active writer or expose event contents.
+        formatter.debug_struct("SessionLog").finish_non_exhaustive()
+    }
+}
+
 impl SessionLog {
+    /// Open the exact session's observational journal, creating its directory
+    /// and recovering sequence allocation without opening an authoritative store.
+    ///
+    /// # Errors
+    /// Refuses noncanonical session ids, filesystem failures, lock timeouts or
+    /// sequence recovery beyond the bounded scan.
     pub fn open(home: &SessionHome, session_id: &str) -> Result<Self, String> {
         canonical_product_session_id(session_id)?;
         home.ensure()?;
@@ -165,6 +192,12 @@ impl SessionLog {
         })
     }
 
+    /// Append to the currently selected session using coordinated sequence
+    /// allocation. An append is observational, not a durable workflow commit.
+    ///
+    /// # Errors
+    /// Returns the same validation, capacity, lock or I/O failures as
+    /// [`Self::append_for`].
     pub fn append(&self, event: SessionEvent) -> Result<(), String> {
         let session_id = self.state.borrow().session_id.clone();
         self.append_for(&session_id, event)
@@ -172,6 +205,9 @@ impl SessionLog {
 
     /// Persist the event-count projection now. Called on close and on session
     /// switch so an idle log always leaves an exact sidecar behind.
+    ///
+    /// # Errors
+    /// Returns lock or I/O failures while refreshing the rebuildable sidecar.
     pub fn flush(&self) -> Result<(), String> {
         flush_writer(&self.home, &mut self.state.borrow_mut())
     }
@@ -183,6 +219,10 @@ impl SessionLog {
     /// sidecar rename happen on this path. The count index is advanced in
     /// memory and persisted at most once per `SESSION_LOG_INDEX_INTERVAL`.
     ///
+    /// # Errors
+    /// Refuses invalid session ids, exhausted sequence numbers, oversized
+    /// records, lock timeouts and filesystem failures. It grants no retry or
+    /// recovery authority over the session's canonical history.
     pub fn append_for(&self, session_id: &str, event: SessionEvent) -> Result<(), String> {
         canonical_product_session_id(session_id)?;
         let mut state = self.state.borrow_mut();
@@ -422,6 +462,10 @@ pub fn emit(home: &SessionHome, session_id: &str, event: SessionEvent) {
 }
 
 /// Read last `limit` valid raw records (oldest first among the window).
+///
+/// # Errors
+/// Refuses invalid session ids, I/O failures or a tail beyond the bounded
+/// reverse scan. A missing log or zero limit returns an empty window.
 pub fn read_tail(
     home: &SessionHome,
     session_id: &str,
@@ -434,6 +478,10 @@ pub fn read_tail(
 /// in its dot-delimited namespace (for example, `tool` matches `tool.started`).
 /// Filtering happens during the reverse scan, so `limit` applies to matching
 /// records rather than to an arbitrarily selected unfiltered suffix.
+///
+/// # Errors
+/// Refuses invalid session ids, I/O failures or a matching suffix beyond the
+/// bounded reverse scan. Invalid records are skipped, not repaired.
 pub fn read_tail_for_kind(
     home: &SessionHome,
     session_id: &str,
@@ -456,6 +504,10 @@ pub fn read_tail_for_kind(
 /// Read the rebuildable event-count projection. A missing, corrupt, or stale
 /// sidecar is reconstructed by one bounded-memory log pass; ordinary reads are
 /// independent of total event-log size.
+///
+/// # Errors
+/// Refuses invalid session ids, lock timeouts or log-read failures. Rebuilding
+/// the projection never turns the journal into recovery authority.
 pub fn count_events(home: &SessionHome, session_id: &str) -> Result<u64, String> {
     canonical_product_session_id(session_id)?;
     let path = home.session_events_file(session_id);
@@ -475,6 +527,9 @@ pub fn count_events(home: &SessionHome, session_id: &str) -> Result<u64, String>
 
 /// Counts valid event records without creating or refreshing the rebuildable
 /// index. Diagnostic callers can inspect a session without changing its home.
+///
+/// # Errors
+/// Refuses invalid session ids, lock timeouts or log-read failures.
 pub fn count_events_read_only(home: &SessionHome, session_id: &str) -> Result<u64, String> {
     canonical_product_session_id(session_id)?;
     let path = home.session_events_file(session_id);
@@ -630,7 +685,8 @@ fn write_event_count_index(
 
 /// Filter lines whose parsed `kind` matches the expected namespace.
 #[must_use]
-pub fn filter_kind(lines: &[String], expected: &str) -> Vec<String> {
+#[cfg(test)]
+pub(crate) fn filter_kind(lines: &[String], expected: &str) -> Vec<String> {
     lines
         .iter()
         .filter(|line| event_kind_is(line.as_bytes(), expected))
@@ -834,7 +890,7 @@ fn bounded_string(value: &str) -> String {
 }
 
 #[must_use]
-pub fn redact_json_preview(value: &Value) -> String {
+pub(crate) fn redact_json_preview(value: &Value) -> String {
     let mut value = value.clone();
     plakous::tools::preview_redaction::json(&mut value);
     bound_json_atoms(&mut value);
@@ -844,7 +900,7 @@ pub fn redact_json_preview(value: &Value) -> String {
 }
 
 #[must_use]
-pub fn redact_text_preview(value: &str) -> String {
+pub(crate) fn redact_text_preview(value: &str) -> String {
     bounded_string(&plakous::tools::preview_redaction::text(value))
 }
 

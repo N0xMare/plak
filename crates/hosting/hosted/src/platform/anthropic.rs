@@ -10,6 +10,11 @@ pub(super) use plakous::anthropic::AnthropicListedModel as ListedModel;
 
 /// Product-owned credentials for this compiled API route.
 pub trait Credentials: Send + Sync + 'static {
+    /// Resolve a refreshable key source for this exact account. Named accounts
+    /// must not fall back to another account's file or environment key.
+    ///
+    /// # Errors
+    /// Refuses unavailable credentials or an account outside this route.
     fn anthropic(
         &self,
         _account: &crate::account::AccountRef,

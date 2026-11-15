@@ -4,18 +4,28 @@ use std::{fmt, str::FromStr};
 
 use crate::capabilities::{self, AccountAdmissionError, RouteCapability};
 
+/// A known credential route, whether or not this build can execute it.
+/// Identity parsing never admits a route or resolves credentials.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Vertical {
+    /// Claude subscription authentication and native model behavior.
     Claude,
+    /// ChatGPT subscription authentication and Codex model behavior.
     Codex,
+    /// Grok subscription authentication and native model behavior.
     Grok,
+    /// Anthropic's direct API-key route, not a Claude subscription.
     Anthropic,
+    /// OpenAI's direct API-key route, not a ChatGPT subscription.
     OpenAi,
+    /// xAI's direct API-key route, not a Grok subscription.
     XaiApi,
+    /// OpenRouter's catalog-backed API-key route.
     OpenRouter,
 }
 
 impl Vertical {
+    /// Every known identity, including routes omitted from this build.
     pub const ALL: [Self; 7] = [
         Self::Claude,
         Self::Codex,
@@ -26,6 +36,7 @@ impl Vertical {
         Self::OpenRouter,
     ];
 
+    /// Static route facts; reading these does not perform capability admission.
     pub const fn capability(self) -> &'static RouteCapability {
         match self {
             Self::Claude => &capabilities::CLAUDE,
@@ -38,10 +49,12 @@ impl Vertical {
         }
     }
 
+    /// Canonical account prefix, shared by persistence and credential lookup.
     pub const fn as_str(self) -> &'static str {
         self.capability().account
     }
 
+    /// Whether this identity uses an API key rather than subscription OAuth.
     pub const fn is_api(self) -> bool {
         matches!(
             self,
@@ -49,19 +62,27 @@ impl Vertical {
         )
     }
 
+    /// Admit execution on this route without looking up an account's credentials.
+    ///
+    /// # Errors
+    /// Returns a typed capability refusal if this build omits the route.
     pub fn require(self) -> Result<(), AccountAdmissionError> {
         capabilities::require(self.as_str())
     }
 }
 
+/// A validated named-account suffix, excluding the implicit default account.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct AccountName(String);
 
 impl AccountName {
+    /// The validated suffix, without the route prefix or slash.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
+    /// Accept 1–32 ASCII bytes beginning with a lowercase letter, followed by
+    /// lowercase letters, digits or hyphens. `default` is reserved and refused.
     pub fn parse(name: &str) -> Option<Self> {
         ((1..=32).contains(&name.len())
             && name != "default"
@@ -73,6 +94,8 @@ impl AccountName {
     }
 }
 
+/// Exact local credential identity: a route and an optional validated name.
+/// Named accounts never fall back to the route's default credentials.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct AccountRef {
     vertical: Vertical,
@@ -81,6 +104,7 @@ pub struct AccountRef {
 }
 
 impl AccountRef {
+    /// The route's implicit default account; no credentials are resolved.
     pub fn default_for(vertical: Vertical) -> Self {
         Self {
             vertical,
@@ -88,20 +112,26 @@ impl AccountRef {
             reference: vertical.as_str().to_owned(),
         }
     }
+    /// The route whose authentication rules govern this account.
     pub const fn vertical(&self) -> Vertical {
         self.vertical
     }
+    /// The named suffix, or `None` for the implicit default.
     pub fn name(&self) -> Option<&AccountName> {
         self.name.as_ref()
     }
+    /// Whether this identity requires an isolated named-account source.
     pub fn is_named(&self) -> bool {
         self.name.is_some()
     }
 
+    /// Canonical `route` or `route/name`, with accepted route aliases normalized.
     pub fn as_str(&self) -> &str {
         &self.reference
     }
 
+    /// Preserve the default source's identity, or domain-separate it by the exact
+    /// named account. This is an authority label, not a credential or endpoint.
     pub fn source_authority(&self, default: &str) -> String {
         if self.is_named() {
             format!("{default}/plak.account-scope.v1/{self}")
@@ -110,6 +140,7 @@ impl AccountRef {
         }
     }
 
+    /// Application credential reference for this exact account, never a secret.
     pub fn credential_reference(&self) -> String {
         format!("plak/{self}")
     }

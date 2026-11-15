@@ -163,6 +163,10 @@ pub trait SessionRecordStore: Send + Sync {
     }
 
     /// Retry a capacity-blocked store through a minimal authoritative write.
+    ///
+    /// # Errors
+    /// Returns the write's refusal if capacity or store availability has not
+    /// recovered. A failed probe does not clear the outstanding capacity debt.
     fn recover_storage(&self) -> Result<(), RecordStoreError> {
         Ok(())
     }

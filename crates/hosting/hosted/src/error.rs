@@ -449,6 +449,8 @@ impl CliFailure {
         matches!(self.kind, CliFailureKind::RecoveryRequired)
     }
 
+    /// Replace only the generic internal category; preserve specific refusals,
+    /// typed sources and remedies when adding a caller's fallback category.
     #[must_use]
     pub fn or_kind(mut self, kind: CliFailureKind) -> Self {
         if self.kind == CliFailureKind::Internal {

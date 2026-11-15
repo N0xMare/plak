@@ -44,10 +44,6 @@
 )]
 
 /// Exact local account references and total vertical identity.
-#[allow(
-    missing_docs,
-    reason = "account identity constructors and vertical vocabulary await contracts"
-)]
 pub mod account;
 /// How the host classifies and renders one tool call's activity.
 pub mod activity;
@@ -74,10 +70,6 @@ mod exchange_observation;
 /// Where a hosted session writes its event log.
 pub mod session_home;
 /// The session event log.
-#[allow(
-    missing_docs,
-    reason = "observational log value and event builder contracts remain undocumented"
-)]
 pub mod session_log;
 /// The port a hosted session persists its record through.
 pub mod session_store;
@@ -101,10 +93,6 @@ mod driver;
 pub(crate) mod jobs;
 mod node_usage;
 /// Host terminal-pin admission for destructive workspace operations.
-#[allow(
-    missing_docs,
-    reason = "workspace reclamation constructor contract remains undocumented"
-)]
 pub mod workspace_reclamation;
 // The hosted driver composes the tree runtime through its public vocabulary.
 pub(crate) use plakous_recursive_subagents::task_set::{TaskHandle, TaskSet};
@@ -113,10 +101,6 @@ pub use plakous_recursive_subagents::{
     tree as agent_tree,
 };
 pub mod coding_routes;
-#[allow(
-    missing_docs,
-    reason = "failure category fallback contract remains undocumented"
-)]
 pub mod error;
 /// The root's optional tools frozen into its session record at creation.
 pub mod frozen_tools;
@@ -153,10 +137,6 @@ pub mod skills;
 pub(crate) mod storage_pressure;
 pub mod surface_protocol;
 pub mod tool_plan;
-#[allow(
-    missing_docs,
-    reason = "test-only tool registration constructor remains undocumented"
-)]
 pub mod tools;
 pub mod topology_extensions;
 pub mod topology_navigator;
@@ -195,10 +175,6 @@ const _: () = assert!(
         >= 2 * plakous::agent::DEFAULT_STORE_OPERATION_TIMEOUT.as_nanos()
 );
 
-#[allow(
-    missing_docs,
-    reason = "catalog settings fields and credential refresh port contracts await documentation"
-)]
 pub mod platform;
 
 /// Child assignment instructions and their byte-pinned renderers.

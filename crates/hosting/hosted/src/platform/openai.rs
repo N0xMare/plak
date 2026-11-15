@@ -36,6 +36,11 @@ pub(super) fn profile(model: &str) -> Option<&'static str> {
 
 /// Product-owned credentials for this compiled API route.
 pub trait Credentials: Send + Sync + 'static {
+    /// Resolve a refreshable key source for this exact OpenAI API account, retaining its
+    /// credential scope rather than borrowing subscription authentication.
+    ///
+    /// # Errors
+    /// Refuses unavailable credentials or an account outside this route.
     fn openai(
         &self,
         _account: &crate::account::AccountRef,

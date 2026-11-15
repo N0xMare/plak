@@ -10,6 +10,11 @@ pub(super) use plakous::xai::XaiListedModel as ListedModel;
 
 /// Product-owned credentials for this compiled API route.
 pub trait Credentials: Send + Sync + 'static {
+    /// Resolve a refreshable API-key source for this exact xAI account. Neither
+    /// another named account nor Grok subscription authentication is a fallback.
+    ///
+    /// # Errors
+    /// Refuses unavailable credentials or an account outside this route.
     fn xai(
         &self,
         _account: &crate::account::AccountRef,
