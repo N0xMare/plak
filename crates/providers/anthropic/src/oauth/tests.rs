@@ -214,6 +214,10 @@ fn enrolled_context_and_output_facts_come_from_one_table_and_unknowns_fail_close
             "{model} beta header must come from its enrollment row"
         );
     }
+}
+
+#[test]
+fn enrolled_request_limits_and_beta_order_match_native_captures() {
     let expected = [
         ("claude-sonnet-5", 64_000, false, false),
         ("claude-sonnet-5-5", 128_000, true, true),
