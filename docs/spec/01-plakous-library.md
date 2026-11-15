@@ -5344,8 +5344,11 @@ redirect and truthful `referrer=plak`; the current official OIDC discovery
 still advertises all six and the pinned endpoints. An isolated expired-token
 refresh sends the same `client_id`, `grant_type=refresh_token` and
 `refresh_token` form to the token endpoint; no extra scopes are requested.
-No consent facts or `oauth_pins` change is made, and the subscription profile's existing
-2026-10-30 review / 2027-01-28 expiry is not renewed by this wire review.
+The same 2026-11-15 verification renews the existing subscription profile's
+review to 2026-11-15 and expiry to 2027-02-13T00:00:00Z. Only its review clock
+changes: the six consent scopes, client, redirects, endpoints, profile id,
+notice and kill-switch revisions remain unchanged; the new cloud scopes are
+not adopted. Existing acceptance and credentials remain current.
 
 The release artifact is
 [`@xai-official/grok-linux-x64@1.0.77`](https://registry.npmjs.org/@xai-official/grok-linux-x64/1.0.77):
