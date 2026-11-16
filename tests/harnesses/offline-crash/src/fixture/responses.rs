@@ -529,7 +529,7 @@ fn scripted_response(
                 .iter()
                 .filter(|item| item.actor() == Actor::User)
                 .last()
-                .map(|item| {
+                .map_or_default(|item| {
                     item.blocks()
                         .iter()
                         .filter_map(|block| match block {
@@ -541,8 +541,7 @@ fn scripted_response(
                             _ => None,
                         })
                         .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+                });
             vec![ContentBlock::Text(
                 TextBlock::new(
                     format!("images seen: [{}]", images.join(", ")),

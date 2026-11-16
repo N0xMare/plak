@@ -184,7 +184,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .tree_id()
                 .ok_or(())
                 .and_then(|tree_id| rows.tree(tree_id).map_err(|_| ()))
-                .map(|tree| tree.as_ref().map(TreeFacts::of).unwrap_or_default());
+                .map(|tree| tree.as_ref().map_or_default(TreeFacts::of));
             ("store", observed)
         };
         let Ok(tree) = observed else {

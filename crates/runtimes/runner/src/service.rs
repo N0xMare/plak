@@ -942,7 +942,7 @@ impl RunnerService {
             },
             RunnerVerbFamily::Extension => self.serve_extension(verb, payload),
             RunnerVerbFamily::Sessions if verb == RunnerVerb::JobsWatch => {
-                let line = request.owner.map(|owner| owner.line).unwrap_or_default();
+                let line = request.owner.map_or_default(|owner| owner.line);
                 self.watch_jobs(&host, connection, &line, &payload)
             }
             RunnerVerbFamily::Sessions => {

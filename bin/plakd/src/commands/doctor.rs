@@ -168,7 +168,7 @@ pub(crate) fn run_doctor(
         version: plakous::VERSION.to_owned(),
         jj_cli: product_doctor::jj_cli::probe(
             path.as_deref(),
-            &paths.workspace().map(Path::to_path_buf).unwrap_or_default(),
+            &paths.workspace().map_or_default(Path::to_path_buf),
         ),
         paths: doctor_paths,
         config,

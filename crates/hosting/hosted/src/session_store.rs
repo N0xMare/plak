@@ -715,7 +715,7 @@ mod memory {
             record.queue_drain_state = crate::sessions::QueueDrainState::RestoredPaused;
         }
         // Spec 02 §2.6: the persisted counters are the views' only.
-        let counters = views.map(|views| views.state.counters).unwrap_or_default();
+        let counters = views.map_or_default(|views| views.state.counters);
         record.root_turn_count = counters.root_turns;
         record.tool_call_count = counters.tool_calls;
         record.compaction_count = counters.compactions;

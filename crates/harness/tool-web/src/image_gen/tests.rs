@@ -49,7 +49,7 @@ impl FakePort {
     }
 
     fn requests(&self) -> Vec<ImageGenRequest> {
-        self.requests.lock().map(|r| r.clone()).unwrap_or_default()
+        self.requests.lock().map_or_default(|r| r.clone())
     }
 }
 

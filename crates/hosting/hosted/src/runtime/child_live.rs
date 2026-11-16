@@ -627,7 +627,7 @@ async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
         context.send_transcript(rows, replace);
         return;
     }
-    let covered_calls = rows.as_deref().map(covered_tool_calls).unwrap_or_default();
+    let covered_calls = rows.as_deref().map_or_default(covered_tool_calls);
     if !context.send_transcript(rows, replace) {
         return;
     }

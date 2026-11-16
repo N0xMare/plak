@@ -2422,22 +2422,16 @@ impl FaceAgent {
     }
 
     fn records(&self) -> Vec<Value> {
-        self.lines
-            .lock()
-            .map(|lines| {
-                lines
-                    .iter()
-                    .filter_map(|line| serde_json::from_str(line).ok())
-                    .collect()
-            })
-            .unwrap_or_default()
+        self.lines.lock().map_or_default(|lines| {
+            lines
+                .iter()
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .collect()
+        })
     }
 
     fn stderr(&self) -> String {
-        self.stderr
-            .lock()
-            .map(|text| text.clone())
-            .unwrap_or_default()
+        self.stderr.lock().map_or_default(|text| text.clone())
     }
 
     /// Waits until a record satisfies `predicate`, or fails.

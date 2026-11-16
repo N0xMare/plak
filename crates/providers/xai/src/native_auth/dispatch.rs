@@ -419,16 +419,11 @@ pub(super) fn supergrok_generation_fingerprint(
 }
 
 fn supergrok_origin_allowed(origin: &str) -> bool {
-    if origin == crate::SUPERGROK_RESPONSES_ORIGIN {
+    #[cfg(test)]
+    if origin.strip_prefix("https://127.0.0.1:").is_some()
+        || origin.strip_prefix("https://localhost:").is_some()
+    {
         return true;
     }
-    #[cfg(test)]
-    {
-        origin.strip_prefix("https://127.0.0.1:").is_some()
-            || origin.strip_prefix("https://localhost:").is_some()
-    }
-    #[cfg(not(test))]
-    {
-        false
-    }
+    origin == crate::SUPERGROK_RESPONSES_ORIGIN
 }

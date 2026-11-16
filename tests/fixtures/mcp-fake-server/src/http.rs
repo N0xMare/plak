@@ -220,8 +220,7 @@ impl GateState {
                     .into_body()
                     .collect()
                     .await
-                    .map(http_body_util::Collected::to_bytes)
-                    .unwrap_or_default();
+                    .map_or_default(http_body_util::Collected::to_bytes);
                 let reply = oauth
                     .handle(
                         &method,

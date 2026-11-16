@@ -502,16 +502,11 @@ pub(super) fn validate_codex_request_authority(
 }
 
 fn codex_origin_allowed(origin: &EndpointOrigin) -> bool {
-    if origin.as_str() == OPENAI_CHATGPT_ORIGIN {
+    #[cfg(test)]
+    if origin.as_str().strip_prefix("https://127.0.0.1:").is_some()
+        || origin.as_str().strip_prefix("https://localhost:").is_some()
+    {
         return true;
     }
-    #[cfg(test)]
-    {
-        origin.as_str().strip_prefix("https://127.0.0.1:").is_some()
-            || origin.as_str().strip_prefix("https://localhost:").is_some()
-    }
-    #[cfg(not(test))]
-    {
-        false
-    }
+    origin.as_str() == OPENAI_CHATGPT_ORIGIN
 }

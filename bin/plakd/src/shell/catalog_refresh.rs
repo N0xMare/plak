@@ -23,7 +23,7 @@ pub(crate) fn hook(
     paths: PlakPaths,
     mode: Option<&HostLaunchMode<PlakExtension>>,
 ) -> impl FnOnce(Option<Sender<PlakExtension>>) + Send + use<> {
-    let (session_id, account) = mode.map(refresh_context).unwrap_or_default();
+    let (session_id, account) = mode.map_or_default(refresh_context);
     move |events| spawn(paths, session_id, account, events)
 }
 

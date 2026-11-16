@@ -1433,20 +1433,16 @@ fn concrete_model_id(value: &str) -> bool {
     let Some((author, model)) = value.split_once('/') else {
         return false;
     };
-    if author.is_empty()
-        || model.is_empty()
-        || model.contains('/')
-        || value.len() > 256
-        || value.bytes().any(|byte| {
-            !(byte.is_ascii_lowercase()
+    !author.is_empty()
+        && !model.is_empty()
+        && !model.contains('/')
+        && value.len() <= 256
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
                 || byte.is_ascii_digit()
-                || matches!(byte, b'-' | b'_' | b'.' | b'/' | b':'))
+                || matches!(byte, b'-' | b'_' | b'.' | b'/' | b':')
         })
-        || value.matches(':').count() > 1
-    {
-        return false;
-    }
-    true
+        && value.matches(':').count() <= 1
 }
 
 pub(crate) fn context_within_discovery(contract: &ContextContract, discovered: u64) -> bool {
