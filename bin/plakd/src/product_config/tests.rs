@@ -2500,6 +2500,17 @@ fn a_semantic_refusal_leaves_the_file_byte_identical() {
 }
 
 #[test]
+fn removed_terminal_section_names_the_cutover_remedy_without_accepting_it() {
+    for header in ["[tui]", "[tui.theme]"] {
+        let error = ProductConfig::parse(&format!("{header}\nenabled = true\n")).unwrap_err();
+        assert_eq!(
+            error,
+            "the [tui] section was removed with the public terminal client in 0.0.4; delete it (line 1, column 1)"
+        );
+    }
+}
+
+#[test]
 fn section_scope_is_exact_and_unknown_controls_fail_visibly() {
     assert!(ProductConfig::parse("[tui]\nenabled = true\n").is_err());
     assert!(ProductConfig::parse("[orchestration]\nsandbox = true\n").is_err());

@@ -6,6 +6,13 @@ are separate and must not be copied as configuration. Comments, multi-line
 strings and arrays are supported, and configuration saves preserve unrelated
 formatting.
 
+Before upgrading to 0.0.4, remove `[tui]` and all its keys and subtables from
+`config.toml`. The public terminal client and its configuration are gone;
+plakd refuses leftover terminal settings rather than ignoring or converting
+them. Leave `reload_requests` out of `[host]` until the old build is retired:
+the previous 0.0.3/U27 build rejects that new key. The new build defaults to
+allowing host reload requests when it is unset.
+
 For the exhaustive list of keys — type, default, constraint, meaning — see
 [`../spec/07-config-reference.md`](../spec/07-config-reference.md), or read
 `docs/reference-config/config.toml` in this repo, which is the same list as a

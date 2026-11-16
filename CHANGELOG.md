@@ -12,6 +12,12 @@ for one version bump, without native protocol compatibility.
 - Classify Anthropic API HTTP 400 insufficient-credit responses as permanent
   `QuotaExceeded` failures with an API-credit repair remedy.
 
+- Before upgrading to `0.0.4`, delete the removed `[tui]` section (and its
+  subtables) from `config.toml`; the new daemon refuses it with a deletion
+  remedy. Leave `[host] reload_requests` unset until the old build is retired:
+  the previous `0.0.3`/U27 build rejects that new key. No automatic config
+  conversion or acceptance of removed terminal settings is provided.
+
 - Advance the Rust workspace release cohort to `0.0.4`, including `plakd`.
   The vendored Code Mode protocol keeps its upstream version.
 

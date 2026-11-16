@@ -583,6 +583,12 @@ plakd: /path/to/config.toml: unknown config key: misspelled_key (line 2, column 
 A key the product does not know is an unknown key, whatever it once meant.
 A few older sections still fail with the replacement named in the message:
 
+- `[tui]` and its subtables — delete the section and all its settings before
+  upgrading to 0.0.4. For a section beginning on the first line, the exact
+  config diagnostic is `the [tui] section was removed with the public terminal client in 0.0.4; delete it (line 1, column 1)`.
+  Leave `[host] reload_requests` unset until the old build is retired;
+  the previous 0.0.3/U27 build rejects it. There is no acceptance or automatic
+  conversion of old terminal configuration.
 - `[agent.<name>]` in `config.toml` — move it to `~/.plak/agents/<name>.toml`.
 - `[default]` — its tuple fields moved into template files, and
   `subagents` moved to `[orchestration]`.

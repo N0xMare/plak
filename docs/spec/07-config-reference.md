@@ -873,6 +873,7 @@ and a template message is prefixed `template <name>: `.
 | `[agent.<name>]` in config.toml | `[agent.<name>] in config.toml is no longer a template; move it to ~/.plak/agents/<name>.toml` |
 | `[default]` | `unknown config section [default]; tuple fields moved to template files under ~/.plak/agents with [root] agent, and subagents moved to [orchestration]` |
 | `[roster.<x>]` | `unknown config section [roster.<x>]; [roster] holds only working_set = ["<template>", ...]` |
+| `[tui]` or its subtables | `the [tui] section was removed with the public terminal client in 0.0.4; delete it` |
 | any other unknown section | `unknown config section [<name>]` |
 | any other `[roster]` key | `[roster] only accepts working_set; move <key> into agents/<name>.toml` |
 | any other unknown key | `unknown config key: <section>.<key>` |

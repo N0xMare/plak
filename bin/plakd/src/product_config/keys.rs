@@ -116,6 +116,10 @@ pub(super) fn unknown_key(section: &str, key: &str) -> String {
 
 /// The removed sections name their replacement.
 pub(super) fn removed_or_unknown_section(section: &str) -> String {
+    if section == "tui" || section.starts_with("tui.") {
+        return "the [tui] section was removed with the public terminal client in 0.0.4; delete it"
+            .to_owned();
+    }
     if let Some(template) = section.strip_prefix("agent.") {
         return format!(
             "[agent.{template}] in config.toml is no longer a template; move it to ~/.plak/agents/{template}.toml"
