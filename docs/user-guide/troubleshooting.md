@@ -757,8 +757,8 @@ Inspect paths with `plak doctor` and use `plak state prune-legacy` only when you
 no longer need the sessions in those older or newer builds. A `plak resume` of
 one of those sessions says it was created by an incompatible plak build and
 names `plak session export` / `plak session import`, the way to carry it into
-this build when that build's export version is one this build imports (11 or
-12; 0.0.2 wrote version 8, which is refused). Finish a 0.0.2 session on 0.0.2,
+this build when that build's export version is one this build imports (13 or
+12). Export versions 11 and older are refused. Finish a 0.0.2 session on 0.0.2,
 or start a new one. 0.0.2 state is left untouched for the 0.0.2 binary.
 
 ## `… was created by an incompatible plak build; move it aside to start fresh`
