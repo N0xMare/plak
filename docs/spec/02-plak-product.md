@@ -4000,7 +4000,9 @@ latency, and nothing else. Prompt text never reaches a span.
 ### 4.4 Wire v2
 
 Current client protocol **11** requires `Welcome.state_key`, the serving host's
-native state identity, alongside its binary id and process generation. An
+native state identity, alongside its binary id and process generation.
+`host_generation` is a wall-clock-nanosecond identity, not a monotonic counter.
+Compare generations for inequality only; numeric ordering confers no authority. An
 ephemeral extension-free session host uses an empty key. Protocol 11 adds the
 product advisory frame `host_lifecycle {host_generation, phase, reason,
 target?, retry_after_ms?}`. `phase` is `draining`, `restarting`, `stopping` or

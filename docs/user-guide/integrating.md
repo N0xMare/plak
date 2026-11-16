@@ -69,7 +69,9 @@ Send hello first:
 ```
 
 The host replies `welcome` with its matching `proto`, binary id, `state_key`, generation,
-capabilities and principal-specific extension. List sessions:
+capabilities and principal-specific extension. Generations are wall-clock-based
+identities, not monotonic counters: compare for inequality only, never ordering.
+List sessions:
 
 ```json
 {"frame":"request","id":1,"op":{"op":"list_sessions","include_archived":false}}
