@@ -21,6 +21,7 @@ fn private_run() -> (tempfile::TempDir, std::path::PathBuf) {
 
 fn discovery_paths() -> (tempfile::TempDir, crate::product_paths::PlakPaths) {
     let (root, paths) = crate::product_paths::PlakPaths::isolated_test_home();
+    std::fs::create_dir_all(paths.host_lock().parent().unwrap()).unwrap();
     let directory = paths.host_socket().parent().unwrap().to_owned();
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).unwrap();

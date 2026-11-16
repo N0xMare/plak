@@ -585,7 +585,7 @@ A few older sections still fail with the replacement named in the message:
 
 - `[tui]` and its subtables — delete the section and all its settings before
   upgrading to 0.0.4. For a section beginning on the first line, the exact
-  config diagnostic is `the [tui] section was removed with the public terminal client in 0.0.4; delete it (line 1, column 1)`.
+  config diagnostic is `the [tui] section was removed with the public terminal client in 0.0.4; delete it (line 1, column 2)`.
   Leave `[host] reload_requests` unset until the old build is retired;
   the previous 0.0.3/U27 build rejects it. There is no acceptance or automatic
   conversion of old terminal configuration.

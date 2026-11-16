@@ -2505,7 +2505,7 @@ fn removed_terminal_section_names_the_cutover_remedy_without_accepting_it() {
         let error = ProductConfig::parse(&format!("{header}\nenabled = true\n")).unwrap_err();
         assert_eq!(
             error,
-            "the [tui] section was removed with the public terminal client in 0.0.4; delete it (line 1, column 1)"
+            "the [tui] section was removed with the public terminal client in 0.0.4; delete it (line 1, column 2)"
         );
     }
 }
