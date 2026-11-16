@@ -9,6 +9,9 @@ for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
+- Classify Anthropic API HTTP 400 insufficient-credit responses as permanent
+  `QuotaExceeded` failures rather than retryable provider errors.
+
 - Advance the Rust workspace release cohort to `0.0.4`, including `plakd`.
   The vendored Code Mode protocol keeps its upstream version.
 

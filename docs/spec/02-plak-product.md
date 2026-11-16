@@ -4245,17 +4245,17 @@ saved placement, decorated by the host. Clients pair the existing product
 workspace text with this label; a child never borrows its root's placement.
 This is in-process chrome, not a persisted/exported field or a JSONL v1 event.
 
-The client protocol number is **10**. It must match exactly; the runner
+The client protocol number is **11**. It must match exactly; the runner
 transport has its own independent version. Protocol 5 adds explicit placement,
 bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
 
-The protocol-10 schema pin is SHA-256
-`af129ebed85758035fae95c4eb35256be69950c66d66652179a530478ff3ce5f`:
+The protocol-11 schema pin is SHA-256
+`f412603494165e8aa8f5e35cf883c71d4957c41dedb73755cd77ae09116fc787`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
 checks this build-independent pin. The schema title is `plakd wire v2`;
-frame and protocol identifiers retain their exact protocol-10 spellings.
+frame and protocol identifiers retain their exact protocol-11 spellings.
 
 Protocol 7 adds process-local `operator_prepare {action}` and
 `operator_confirm {nonce}` through that same attachment-free seam. Prepare

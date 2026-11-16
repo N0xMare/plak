@@ -119,7 +119,7 @@ fn host_lifecycle_stalled_peer_uses_the_same_total_stop_budget_as_handoff() {
         stop(&mut host);
         stopped.send(()).unwrap();
     });
-    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let marker_deadline = Instant::now() + Duration::from_secs(1);
     while !std::fs::read_to_string(paths.host_lock())
         .unwrap()
@@ -199,7 +199,7 @@ fn host_lifecycle_same_key_restart_precedes_eof_and_changes_generation() {
         .args(["host", "upgrade", "--expect-binary", &id, "--drain", "0"])
         .env("PLAK_TEST_FORCE_HOST_UPGRADE", "1");
     let upgrading = std::thread::spawn(move || request.output().unwrap());
-    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let deadline = Instant::now() + WAIT;
     while !std::fs::read_to_string(paths.host_lock())
         .unwrap_or_default()

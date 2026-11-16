@@ -125,7 +125,7 @@ fn bridge_refusal_incompatible_state_requires_a_live_kernel_lock() {
 #[test]
 fn bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed() {
     let Some(fixture) = fixture() else { return };
-    let key = plak::home::state::state_key();
+    let key = plakd::home::state::state_key();
     let held = held_lock(&fixture, &key, "starting");
     refusal(&fixture, "starting");
     drop(held);

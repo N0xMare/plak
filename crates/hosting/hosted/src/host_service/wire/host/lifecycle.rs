@@ -73,7 +73,6 @@ where
             .lifecycle
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        *latest = Some(notice.clone());
         for delivery in deliveries.values_mut() {
             let queue = &mut delivery.pending;
             // A slow client must not grow host memory across repeated aborted upgrades.
@@ -82,6 +81,7 @@ where
             }
             queue.push_back(notice.clone());
         }
+        *latest = Some(notice);
         drop(deliveries);
         drop(latest);
         self.changed();

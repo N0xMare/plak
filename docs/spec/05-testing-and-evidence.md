@@ -4398,7 +4398,7 @@ public runtime invariant.
 Settings payload and publication fixtures use product fields. Client-local
 preferences are not serialized or persisted by the host. Role checks refuse
 remote legacy saves before product dispatch; confirmed operator paths keep
-their capability, consent and etag rules (current client protocol 10).
+their capability, consent and etag rules (current client protocol 11).
 Product DTO contract examples decode and re-encode unchanged before and after
 extraction, including temporary reload values. Schema extraction is checked
 against raw `plakd wire schema` output with an uninstalled executable and an
@@ -6455,7 +6455,7 @@ The witness neither changes nor replaces the existing recovery crash contracts.
 They use synthetic account IDs and no provider traffic. No persisted format
 or binding input changes are introduced by the consent machinery.
 
-Account-write contracts, introduced in protocol 7 (current client protocol 10),
+Account-write contracts, introduced in protocol 7 (current client protocol 11),
 use temporary isolated homes and synthetic
 secrets to verify write-only replies, Debug/input-bound redaction, exact named
 creation/removal and absent-slot isolation. Attempt-table contracts verify
