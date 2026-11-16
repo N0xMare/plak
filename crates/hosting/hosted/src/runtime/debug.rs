@@ -1,6 +1,6 @@
 //! Nonblocking diagnostics never inspect queued observations or credential sources.
 
-use super::{HostConfig, HostTargetAuthority, OpenRouterHostEvidence, Sender};
+use super::{HostTargetAuthority, OpenRouterHostEvidence, Sender};
 
 impl<P: plakous_host_protocol::ProtocolExtension> std::fmt::Debug for Sender<P> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -34,16 +34,6 @@ impl std::fmt::Debug for OpenRouterHostEvidence {
             .debug_struct("OpenRouterHostEvidence")
             .field("literal_model", &self.literal_model)
             .field("wire", &self.wire)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<P: plakous_host_protocol::ProtocolExtension> std::fmt::Debug for HostConfig<P> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("HostConfig")
-            .field("target", &self.target)
-            .field("model_id", &self.model_id)
             .finish_non_exhaustive()
     }
 }
