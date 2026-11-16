@@ -148,7 +148,8 @@ fn host_lifecycle_sigterm_notice_precedes_transport_eof() {
 fn host_lifecycle_same_key_restart_precedes_eof_and_changes_generation() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
-    let mut host = start(&fixture);
+    let order = fixture.root.join("ready-order");
+    let mut host = start_env(&fixture, &[], &[("PLAK_TEST_HOST_UPGRADE_READY_ORDER", order.display().to_string())]);
     let (reader, generation) = observe(&host);
     let id = binary(&fixture);
     let result = output_env(
@@ -162,6 +163,7 @@ fn host_lifecycle_same_key_restart_precedes_eof_and_changes_generation() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
+    assert_eq!(std::fs::read_to_string(order).unwrap(), "restarting", "ready became observable before restarting was published");
     let notices = notices_to_eof(reader, generation);
     assert_eq!(notices.first().unwrap().phase, HostLifecyclePhase::Draining);
     assert_eq!(

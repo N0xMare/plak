@@ -142,6 +142,7 @@ pub mod telemetry_store;
 mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]
 mod test_hooks {
+    pub(crate) fn record_upgrade_ready_order(_restarting: bool) {}
     pub(crate) const fn binding_executor_cut() -> bool {
         false
     }

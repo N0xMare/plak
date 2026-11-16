@@ -50,6 +50,12 @@ pub(crate) fn record_host_handoff_budget(elapsed: std::time::Duration, remaining
     }
 }
 
+pub(crate) fn record_upgrade_ready_order(restarting: bool) {
+    if let Some(path) = std::env::var_os("PLAK_TEST_HOST_UPGRADE_READY_ORDER") {
+        let _ = std::fs::write(path, if restarting { "restarting" } else { "missing" });
+    }
+}
+
 pub(crate) fn upgrade_state_key() -> Option<String> {
     std::env::var("PLAK_TEST_STATE_KEY")
         .ok()

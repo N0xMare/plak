@@ -778,9 +778,7 @@ fn handle(
                 .move_guard
                 .as_ref()
                 .is_some_and(moves::Frozen::decision_pending);
-            *pending
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ready);
+            publish_ready(pending, ready, host);
             if decision_pending {
                 write(
                     &mut stream,
@@ -803,6 +801,15 @@ fn handle(
             )
         }
     }
+}
+
+fn publish_ready(pending: &Pending, ready: Ready, host: &SessionHost<PlakExtension>) {
+    let mut pending = pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    *pending = Some(ready);
+    // The observer runs under the publication lock, before any acceptor can
+    // see ready. Moving the lifecycle publication after this seam is detectable.
+    crate::test_hooks::record_upgrade_ready_order(host.lifecycle().is_some_and(|notice|
+        notice.phase == plakd_wire_types::lifecycle::HostLifecyclePhase::Restarting));
 }
 
 fn resume_rollback(
