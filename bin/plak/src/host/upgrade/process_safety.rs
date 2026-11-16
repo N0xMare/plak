@@ -46,8 +46,14 @@ pub(super) fn check(
     for (id, client) in clients {
         let lines = runtime
             .block_on(async { tokio::time::timeout(Duration::from_secs(5), client.lines()).await })
-            .map_err(|_| unavailable(&id))?
-            .map_err(|_| unavailable(&id))?;
+            .map_err(|_| inspection_timeout(&id))?
+            .map_err(|_| {
+                if client.is_connected() {
+                    inspection_incomplete(&id)
+                } else {
+                    unavailable(&id)
+                }
+            })?;
         for line in lines.iter().filter(|line| {
             line.host_id == plakous_recursive_subagents::tree::custody_host().host_id
         }) {
@@ -81,14 +87,57 @@ fn refused() -> CliFailure {
 }
 
 fn unavailable(runner: &str) -> CliFailure {
+    if runner == "local" {
+        return CliFailure::new(
+            "host_upgrade_process_retention_unavailable: native process inspection is unavailable for the local runner; restore the old host's home-local runner connection, inspect and settle its processes using the old build, then retry; no paired dedicated link change is needed; no source surrendered",
+        );
+    }
     CliFailure::new(format!(
         "host_upgrade_process_retention_unavailable: native process inspection is unavailable for runner {runner}; restore its source-compatible dedicated link, reconnect a settled source root on that runner read-only and keep it attached until upgrade completes, then advance the destination runner link and retry; a picker Ready row alone does not retain the source connection; no source surrendered"
+    ))
+}
+
+fn inspection_timeout(runner: &str) -> CliFailure {
+    CliFailure::new(format!(
+        "host_upgrade_process_retention_unavailable: process inspection for runner {runner} did not answer within 5 seconds; wait for the source runner to respond, check its reachability and load, then retry; a slow response does not require changing its link or attaching a root; no source surrendered"
+    ))
+}
+
+fn inspection_incomplete(runner: &str) -> CliFailure {
+    CliFailure::new(format!(
+        "host_upgrade_process_retention_unavailable: runner {runner} is connected but its native inspection did not complete; check its response, reachability and load, then retry; a failed read alone does not require changing its link or attaching a root; no source surrendered"
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_upgrade_process_inspection_local_and_timeout_remedies_are_distinct() {
+        let local = unavailable("local");
+        assert!(local.message().contains("home-local runner connection"));
+        assert!(!local.message().contains("reconnect a settled source root"));
+        let timeout = inspection_timeout("paired");
+        assert!(timeout.message().contains("within 5 seconds"));
+        assert!(timeout.message().contains("reachability and load"));
+        assert!(!timeout.message().contains("restore its source-compatible"));
+        let incomplete = inspection_incomplete("paired");
+        assert!(incomplete.message().contains("connected"));
+        assert!(
+            !incomplete
+                .message()
+                .contains("restore its source-compatible")
+        );
+        for failure in [local, timeout, incomplete] {
+            assert!(
+                failure
+                    .message()
+                    .starts_with("host_upgrade_process_retention_unavailable:")
+            );
+            assert!(failure.message().contains("no source surrendered"));
+        }
+    }
 
     #[test]
     fn host_upgrade_missing_process_inspection_names_the_source_connection_remedy() {

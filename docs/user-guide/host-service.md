@@ -162,15 +162,20 @@ triple. Until cross-build job retention lands, changed-triple requests with live
 foreground/background processes or unknown runner state refuse before drain;
 settle and drain them using the old build, then retry. Source process
 inspection needs a live source-compatible native connection, not just a cached
-picker **Ready** row. For a cold source or a runner with no native backend user,
+picker **Ready** row. For a cold source or a paired runner with no native backend user,
 reconnect a settled root on that runner read-only using the old client and keep
 it attached until the upgrade completes; do not send a prompt. Do this before
 advancing the dedicated runner link. If it was already advanced, restore the old
 link first, establish the old connection, then advance it again and retry.
 An unavailable-inspection refusal names this remedy and leaves the source
-authoritative. No source restart is needed. Source-owned runner
-clients are checked again before surrender, without another bind or custody
-transfer, including child placements. A process started during preparation can
+authoritative. For the local runner, restore the old host's home-local connection
+instead; there is no paired dedicated link to advance. If inspection times out
+after five seconds, check runner reachability and load, wait and retry; a slow
+response alone does not call for a link change or root attachment. No source restart
+is needed. Same-key upgrade checks source-owned runner clients again before
+surrender, without another bind or custody transfer, including child placements.
+Cross-key settled carry checks once, before pausing admissions. On the same-key
+path a process started during preparation can
 already have been promoted by Notice when the final check refuses; it keeps
 running on the source and can be stopped or drained there. Cross-key carry still
 requires settled jobs and trees.

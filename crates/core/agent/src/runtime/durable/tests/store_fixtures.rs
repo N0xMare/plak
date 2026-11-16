@@ -62,6 +62,9 @@ pub(super) struct TestCreateStore {
     pub(super) releases: AtomicUsize,
     pub(super) flushes: AtomicUsize,
     pub(super) flush_refusals: Mutex<std::collections::VecDeque<SessionStoreError>>,
+    pub(super) flush_delays: Mutex<std::collections::VecDeque<Duration>>,
+    pub(super) hang_flush: AtomicBool,
+    pub(super) release_refusals: Mutex<std::collections::VecDeque<SessionStoreError>>,
     pub(super) renew_calls: AtomicUsize,
     pub(super) hang_release_on: AtomicUsize,
     pub(super) hang_shutdown: AtomicBool,
@@ -761,6 +764,14 @@ impl SessionStore for TestCreateStore {
             }
             if self.hang_release_on.load(Ordering::Acquire) == call {
                 std::future::pending::<()>().await;
+            }
+            if let Some(error) = self
+                .release_refusals
+                .lock()
+                .expect("release refusals")
+                .pop_front()
+            {
+                return Err(error);
             }
             let mut state = lock_mutex(&self.state);
             if state.active_lease.as_ref() == Some(&lease) {
@@ -1551,6 +1562,13 @@ impl SessionStore for TestCreateStore {
             .expect("flush refusals")
             .pop_front();
         Box::pin(async move {
+            let delay = self.flush_delays.lock().expect("flush delays").pop_front();
+            if let Some(delay) = delay {
+                tokio::time::sleep(delay).await;
+            }
+            if self.hang_flush.load(Ordering::Acquire) {
+                std::future::pending::<()>().await;
+            }
             if let Some(error) = refusal {
                 return Err(error);
             }

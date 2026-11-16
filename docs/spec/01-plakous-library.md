@@ -1874,8 +1874,9 @@ one bounded blocking actor and connection, WAL, `synchronous=FULL` for every
 transaction except lease renewal and revival, explicit canonical codecs, and
 atomic publication of relational authority plus content-addressed objects.
 Independent owners can contend on a passive checkpoint during concurrent
-release. Runtime cleanup retries only a definite busy flush within the original
-flush cleanup bound; other failures and lost acknowledgements remain failures.
+release. Runtime cleanup retries only definite busy lease releases and flushes,
+each within its original cleanup bound. No zero-budget operation is enqueued;
+other failures and lost acknowledgements remain failures.
 Renewal and revival commit under `synchronous=NORMAL`, with no commit fsync of
 their own (a WAL restart or an automatic checkpoint may still sync): they append
 no feed record, so nothing in another file depends on them; no grant outlives its

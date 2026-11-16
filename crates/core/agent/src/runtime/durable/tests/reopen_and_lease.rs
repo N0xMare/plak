@@ -1094,15 +1094,17 @@ async fn shutdown_releases_the_lease_a_heartbeat_renewed_while_cleanup_joined_it
 
 #[tokio::test]
 async fn settled_release_retries_only_busy_flushes_within_one_cleanup_bound() -> TestResult {
-    for (refusals, succeeds) in [
-        (vec![SessionStoreError::BackendBusy; 2], true),
-        (vec![SessionStoreError::BackendUnavailable], false),
-        (vec![SessionStoreError::BackendBusy; 128], false),
+    for (refusals, succeeds, release) in [
+        (vec![SessionStoreError::BackendBusy; 2], true, false),
+        (vec![SessionStoreError::BackendUnavailable], false, false),
+        (vec![SessionStoreError::BackendBusy; 128], false, false),
+        (vec![SessionStoreError::BackendBusy; 2], true, true),
+        (vec![SessionStoreError::BackendUnavailable], false, true),
+        (vec![SessionStoreError::BackendBusy; 128], false, true),
     ] {
         let directory = tempfile::tempdir()?;
         let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
         let store = Arc::new(TestCreateStore::default());
-        *store.flush_refusals.lock().expect("flush refusals") = refusals.clone().into();
         let cleanup = if succeeds {
             Duration::from_secs(5)
         } else {
@@ -1126,25 +1128,89 @@ async fn settled_release_retries_only_busy_flushes_within_one_cleanup_bound() ->
                 )?,
             )
             .await?;
+        let releases = store.releases.load(Ordering::Acquire);
+        if release {
+            *store.release_refusals.lock().expect("release refusals") = refusals.clone().into();
+        } else {
+            *store.flush_refusals.lock().expect("flush refusals") = refusals.clone().into();
+        }
         let result =
             tokio::time::timeout(cleanup + Duration::from_secs(1), agent.shutdown()).await?;
         assert_eq!(result.is_ok(), succeeds);
-        assert!(crate::runtime::lease_released(&agent));
-        let flushes = store.flushes.load(Ordering::Acquire);
+        assert_eq!(crate::runtime::lease_released(&agent), !release || succeeds);
+        let calls = if release {
+            store.releases.load(Ordering::Acquire) - releases
+        } else {
+            store.flushes.load(Ordering::Acquire)
+        };
         if succeeds {
-            assert_eq!(flushes, 3);
+            assert_eq!(calls, 3);
         } else {
             assert_eq!(result.unwrap_err().store_error(), refusals.first().copied());
             if refusals.len() == 1 {
-                assert_eq!(flushes, 1, "ambiguous failure must not retry");
+                assert_eq!(calls, 1, "ambiguous failure must not retry");
             } else {
-                assert!(
-                    (1..128).contains(&flushes),
-                    "persistent busy was not bounded"
-                );
+                assert!((1..128).contains(&calls), "persistent busy was not bounded");
             }
         }
     }
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn settled_cleanup_flush_timeout_is_not_retried_or_given_a_fresh_bound() -> TestResult {
+    use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, cleanup_store_call};
+
+    for slow_busy in [false, true] {
+        let store = TestCreateStore::default();
+        if slow_busy {
+            *store.flush_refusals.lock().expect("flush refusals") =
+                vec![SessionStoreError::BackendBusy].into();
+            *store.flush_delays.lock().expect("flush delays") =
+                vec![Duration::from_millis(200); 2].into();
+        } else {
+            store.hang_flush.store(true, Ordering::Release);
+        }
+        let start = crate::executor::now();
+        let result = cleanup_store_call(
+            StorePhase::Flush,
+            Duration::from_millis(300),
+            || store.flush(),
+            || false,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(StoreCallError::Timeout(StorePhase::Flush))
+        ));
+        assert_eq!(start.elapsed(), Duration::from_millis(300));
+        assert_eq!(
+            store.flushes.load(Ordering::Acquire),
+            if slow_busy { 2 } else { 1 }
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn settled_cleanup_busy_at_the_bound_does_not_enqueue_a_zero_budget_flush() -> TestResult {
+    use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, cleanup_store_call};
+
+    let store = TestCreateStore::default();
+    *store.flush_refusals.lock().expect("flush refusals") =
+        vec![SessionStoreError::BackendBusy; 128].into();
+    let result = cleanup_store_call(
+        StorePhase::Flush,
+        Duration::from_millis(5),
+        || store.flush(),
+        || false,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(StoreCallError::Store(SessionStoreError::BackendBusy))
+    ));
+    assert_eq!(store.flushes.load(Ordering::Acquire), 1);
     Ok(())
 }
 

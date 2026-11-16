@@ -1,4 +1,5 @@
-//! Settled actors release together without requiring a live client attachment.
+//! Smoke: settled actors release together without a live client attachment.
+//! Deterministic agent tests, not this process smoke, reproduce the Busy race.
 
 use super::*;
 

@@ -5615,23 +5615,27 @@ remains an ordinary no-op.
 
 A changed local-runner protocol refuses before handoff. Step draining adds no
 job-retention channel across different native runner triples. One read-only gate
-checks the source's existing bound runner clients before drain and again before
-surrender: a changed-triple request with live foreground/background processes or
+checks the source's existing bound runner clients before drain. Same-key upgrade
+checks again before surrender; cross-key settled carry checks once, before the
+admission pause. A changed-triple request with live foreground/background processes or
 unknown process state refuses with the remedy to settle/drain using the old
 build. A cached picker Ready row is not a process-state proof: a source with no
 native backend user may have retired its idle paired connection. Before changing
-the dedicated link, reconnect a settled source root on that runner read-only
+a paired runner's dedicated link, reconnect a settled source root on that runner read-only
 and retain that attachment through the upgrade. This opens no new turn. If the
 link was already advanced, restore the source-compatible link first, establish
 the old connection, then advance it again. The source names this remedy when
 inspection is unavailable; it never treats missing inspection as an empty job
-inventory or substitutes a destination bind. A source restart is not required.
-Concurrent resident release retries a definite busy durability flush under its
-original cleanup bound; it does not retry an ambiguous flush failure or require
+inventory or substitutes a destination bind. Unavailable local inspection instead
+names the old host's home-local runner connection. A five-second inspection timeout
+names runner reachability/load and retry, not a mandatory link change or attachment.
+A source restart is not required.
+Concurrent resident release retries definite busy lease releases and durability
+flushes, each under its original cleanup bound; it does not retry ambiguous failures or require
 an operator restart to avoid checkpoint contention. A persistent cleanup refusal
 still aborts before surrender.
-Promoted-job continuation is qualified only for an unchanged exact triple;
-If a process begins after the first check, Notice may already have promoted its
+Promoted-job continuation is qualified only for an unchanged exact triple.
+On the same-key path, if a process begins after the first check, Notice may already have promoted its
 wait by the final check. Refusal leaves that process running under the source;
 it does not stop the process or surrender its custody. The gate checks child
 runner placements too, not just each root's runner. This temporary gate does not

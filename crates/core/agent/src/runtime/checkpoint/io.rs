@@ -124,33 +124,40 @@ pub(in crate::runtime) async fn store_call<T>(
 }
 
 /// Independent store owners can contend on a passive SQLite checkpoint while
-/// releasing together. Flush is idempotent; retry only its definite busy
-/// refusal, under the original cleanup bound, never an ambiguous failure.
-pub(in crate::runtime) async fn cleanup_flush(
-    store: &Arc<dyn SessionStore>,
+/// releasing together. Lease release and flush are idempotent; retry only a
+/// definite busy refusal under the original bound, never an ambiguous failure.
+pub(in crate::runtime) async fn cleanup_store_call<T, F>(
+    phase: StorePhase,
     timeout: Duration,
-) -> Result<crate::DurabilityReport, StoreCallError> {
+    mut operation: impl FnMut() -> F,
+    externally_cancelled: impl Fn() -> bool + Sync,
+) -> Result<T, StoreCallError>
+where
+    F: Future<Output = Result<T, SessionStoreError>>,
+{
     let start = crate::executor::now();
+    let mut remaining = timeout;
+    if remaining.is_zero() {
+        return Err(StoreCallError::Timeout(phase));
+    }
     loop {
-        let remaining = timeout.saturating_sub(start.elapsed());
-        let result = capacity_store_call(
-            StorePhase::Flush,
-            remaining,
-            || store.flush(),
-            || store.storage_wait_cancelled(),
-        )
-        .await;
+        let result =
+            capacity_store_call(phase, remaining, &mut operation, &externally_cancelled).await;
         if !matches!(
             result,
             Err(StoreCallError::Store(SessionStoreError::BackendBusy))
         ) {
             return result;
         }
-        let remaining = timeout.saturating_sub(start.elapsed());
+        remaining = timeout.saturating_sub(start.elapsed());
         if remaining.is_zero() {
             return result;
         }
         crate::executor::sleep(remaining.min(Duration::from_millis(10))).await;
+        remaining = timeout.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            return result;
+        }
     }
 }
 
