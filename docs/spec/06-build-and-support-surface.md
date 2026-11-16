@@ -1008,6 +1008,8 @@ or build artifacts enter the container. Its target cache defaults to
 mounted read-only, and test scratch uses an executable 16 GiB `/dev/shm`.
 The container runs with the caller's UID/GID, so exported source and target
 artifacts remain caller-owned.
+The gate runs at nice 19 inside the container as well as on the lane host;
+nicing only the Docker client does not set the daemon-created process priority.
 Cargo artifacts use `/qual/target/artifacts` inside the writable target mount,
 not under the root-owned `/qual` directory. Cargo-tree structure checks fail
 closed and report the failed command, exit status and Cargo stderr, including

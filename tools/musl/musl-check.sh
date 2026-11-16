@@ -52,6 +52,6 @@ docker run --rm --platform linux/amd64 --pull never --network none \
     rustc -V; rustc -Vv | grep "^host:"; cargo nextest --version; python3 -V
     # An image without the wasm32-unknown-unknown target skips that one check
     # and names the skip (spec 06 section 7.5); the pinned image has it.
-    bash tools/gate/dev-check.sh --qual-container "$@"' sh "$@" || status=$?
+    nice -n 19 bash tools/gate/dev-check.sh --qual-container "$@"' sh "$@" || status=$?
 echo "EXIT $status"
 exit "$status"
