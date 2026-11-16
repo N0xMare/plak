@@ -11,10 +11,10 @@ pub(super) struct Delivery<T> {
     sending: bool,
 }
 
-impl<T> Default for Delivery<T> {
-    fn default() -> Self {
+impl<T> Delivery<T> {
+    pub(super) fn new(latest: Option<T>) -> Self {
         Self {
-            pending: std::collections::VecDeque::new(),
+            pending: latest.into_iter().collect(),
             sending: false,
         }
     }
@@ -65,16 +65,16 @@ where
     /// Publishes advisory product state only to handshaken connections.
     /// It does not touch admission, sessions, drafts or their outcomes.
     pub fn publish_lifecycle(&self, notice: plakous_host_protocol::wire::HostLifecycle<P>) {
-        *self
+        let mut latest = self
             .lifecycle_latest
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(notice.clone());
-        for delivery in self
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut deliveries = self
             .lifecycle
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .values_mut()
-        {
+            .unwrap_or_else(PoisonError::into_inner);
+        *latest = Some(notice.clone());
+        for delivery in deliveries.values_mut() {
             let queue = &mut delivery.pending;
             // A slow client must not grow host memory across repeated aborted upgrades.
             if queue.len() == 16 {
@@ -82,6 +82,8 @@ where
             }
             queue.push_back(notice.clone());
         }
+        drop(deliveries);
+        drop(latest);
         self.changed();
     }
 }

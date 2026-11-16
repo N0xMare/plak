@@ -4020,7 +4020,9 @@ the time remaining since stop was observed, less the existing stop margin; slow 
 can miss notices, and duplicate final notices are allowed. Notices never
 acknowledge a prompt, authorize replay, or alter admission. The native client
 keeps lifecycle in a separate latest-only slot (`try_host_lifecycle`), never in
-the bounded operator-stream queue; unread aborted-drain notices coalesce. Failure without a
+the bounded operator-stream queue; unread aborted-drain notices coalesce. New
+admitted connections are seeded with the current phase, including a directory
+connection arriving mid-drain; registration cannot race publication and miss it. Failure without a
 notice remains possible. A destination serves ordinary Welcome; committed,
 ready carried-root aliases use the existing `RequestRefusal::Moved`, not a new
 successor field. Versions still match exactly: a wire-10 hello gets only

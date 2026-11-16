@@ -170,6 +170,22 @@ fn lifecycle_notice(phase: u8) -> plakous_host_protocol::wire::HostLifecycle<Rea
     }
 }
 
+#[test]
+fn a_mid_drain_directory_connection_gets_the_current_phase_before_later_notices() {
+    let (host, _) = fixture(limits());
+    host.publish_lifecycle(lifecycle_notice(1));
+    for principal in [HostPrincipal::Socket(501), HostPrincipal::Web("fixture-login".into())] {
+        let out = Output::default();
+        let mut connection = host.connect(out.clone(), Face::Remote, principal, || false);
+        connection.flush().unwrap();
+        assert_eq!(out.take(), [HostFrame::from(lifecycle_notice(1))]);
+        host.publish_lifecycle(lifecycle_notice(2));
+        connection.flush().unwrap();
+        assert_eq!(out.take(), [HostFrame::from(lifecycle_notice(2))]);
+        host.publish_lifecycle(lifecycle_notice(1));
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn lifecycle_advisories_preserve_order_and_join_transport_attempts_not_admission() {
     let (host, state) = fixture(limits());

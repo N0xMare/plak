@@ -307,10 +307,14 @@ where
         stopped: impl Fn() -> bool + Send + Sync + 'static,
     ) -> HostConnection<P, W> {
         let connection_id = self.next_connection.fetch_add(1, Ordering::Relaxed);
+        // Register under the same lock order as publication, so a concurrent
+        // drain is either seeded here or queued by the publisher, never missed.
+        let latest = self.lifecycle_latest.lock().unwrap_or_else(PoisonError::into_inner);
         self.lifecycle
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(connection_id, lifecycle::Delivery::default());
+            .insert(connection_id, lifecycle::Delivery::new(latest.clone()));
+        drop(latest);
         HostConnection {
             connection_id,
             principal_budget: self.admission.principal(&principal),
