@@ -16,7 +16,9 @@ mod implementation;
 pub(crate) use implementation::binding_matrix_facts;
 pub use implementation::*;
 pub(crate) use implementation::{carry_input_window, construct_openrouter_runtime_with_fence};
-/// Inputs for a newly discovered Custom/experimental `OpenRouter` Chat runtime.
+/// Exact `OpenRouter` runtime inputs for creation, reopen and compaction over
+/// the resolved Chat, Responses or Messages wire. Reopen revalidates the frozen
+/// model evidence and creation bounds instead of selecting fresh defaults.
 pub struct ProductOpenRouterSpec {
     /// Explicit workspace authority of this node.
     pub runner_services: Option<plakous::runner::RunnerServices>,
