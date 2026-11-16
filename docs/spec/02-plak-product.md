@@ -4034,14 +4034,16 @@ and no new frame is sent at wire 10. On a matching version, discovery failure
 emits one `HandshakeRefusal::BridgeUnavailable` and closes (exit 1):
 `{"frame":"refused","kind":"bridge_unavailable","reason":"absent","retry_after_ms":500}`.
 The closed `BridgeUnavailableReason` vocabulary is `absent`, `starting`,
-`stopping`, `incompatible_state`, and `verification_failed`. Optional hints use
+`stopping`, `incompatible_state`, `verification_failed`, and `start_refused`. Optional hints use
 serde default/skip-none and are bounded to 30000 ms. Absence, starting and stopping
-are retryable; incompatible state and verification failure need operator repair.
+are retryable; incompatible state, verification failure and start refusal need operator repair.
 No path, socket, raw error or stderr parser is part of this shape.
 Absence requires no live socket or kernel-held host lock; incompatible state
 requires a proved live host under another key (or conflicting live hosts).
-Starting means readiness was not reached within the discovery budget, including
-an explicitly requested startup that refused. Stopping is backed by a stopping
+Starting means a helper timed out or readiness was not reached within the discovery
+budget. Layout, private-directory and permission failures are `verification_failed`;
+remote-shell and unit-managed startup policy refusals are `start_refused`, with no
+retry hint. Stopping is backed by a stopping
 diagnostic on a verified kernel-held private lock; stale file text grants no
 authority. Verification failures never become absence or auto-start permission.
 These are neutral transport handshake reasons; product lifecycle phase, reason

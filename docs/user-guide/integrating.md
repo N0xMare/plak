@@ -101,9 +101,12 @@ the existing `moved` refusal once the destination is ready.
 The stdio bridge reads one bounded Hello first. With a matching version it can
 instead print one `{"frame":"refused","kind":"bridge_unavailable","reason":"absent","retry_after_ms":500}`
 and exit 1. Other reasons are
-`starting`, `stopping`, `incompatible_state`, and `verification_failed`; clients
+`starting`, `stopping`, `incompatible_state`, `verification_failed`, and
+`start_refused`; clients
 must not parse stderr to classify them. Absence, starting and stopping are
-retryable; incompatible state and verification failure need operator repair.
+retryable; incompatible state, verification failure and start refusal need operator repair.
+`start_refused` means local startup policy requires an explicit operator action
+(for example, a remote shell or an installed user unit), and carries no retry hint.
 An optional hint is at most 30000 ms. A connected bridge forwards that Hello
 unchanged; wire 10 receives only `version_mismatch`, even with no host.
 

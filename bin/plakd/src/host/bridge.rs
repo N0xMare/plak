@@ -46,7 +46,8 @@ pub(super) fn connect(paths: &PlakPaths, auto_start: bool) -> CliResult<ProcessO
                 | BridgeUnavailableReason::Starting
                 | BridgeUnavailableReason::Stopping => Some(500),
                 BridgeUnavailableReason::IncompatibleState
-                | BridgeUnavailableReason::VerificationFailed => None,
+                | BridgeUnavailableReason::VerificationFailed
+                | BridgeUnavailableReason::StartRefused => None,
             };
             refuse(HandshakeRefusal::BridgeUnavailable {
                 reason,
@@ -144,7 +145,7 @@ fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
         if !started && live.is_empty() && holder.is_none() {
             if auto_start {
                 started = super::starter::start(paths, deadline)
-                    .map_err(|failure| Box::new((BridgeUnavailableReason::Starting, failure)))?;
+                    .map_err(|error| Box::new((error.reason, *error.failure)))?;
                 if started {
                     continue;
                 }

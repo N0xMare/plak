@@ -61,6 +61,18 @@ fn bridge_refusal_requires_one_bounded_hello_before_discovery() {
 }
 
 #[test]
+fn bridge_refusal_auto_start_permission_failure_requires_repair() {
+    let Some(fixture) = fixture() else { return };
+    let host = fixture.home().join("host");
+    std::fs::create_dir_all(&host).unwrap();
+    std::fs::set_permissions(host, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let result = output_after_hello(fixture.command().args(["host", "connect", "--stdio", "--auto-start"]), WIRE_VERSION);
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap(),
+        json!({"frame":"refused","kind":"bridge_unavailable","reason":"verification_failed"}));
+}
+
+#[test]
 fn bridge_refusal_absent_is_typed_without_starting_any_host() {
     let Some(fixture) = fixture() else { return };
     refusal(&fixture, "absent");

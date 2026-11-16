@@ -61,4 +61,6 @@ pub enum BridgeUnavailableReason {
     IncompatibleState,
     /// Discovery could not verify host authority; repair is required.
     VerificationFailed,
+    /// Local startup policy forbids an unmanaged host; operator repair is required.
+    StartRefused,
 }

@@ -10,12 +10,29 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::{CliFailure, CliResult, ProcessOutcome, product_paths::PlakPaths};
+use plakous_host_protocol::wire::BridgeUnavailableReason;
 
 const LOG_LIMIT: usize = 1024 * 1024;
 
-pub(super) fn start(paths: &PlakPaths, deadline: Instant) -> CliResult<bool> {
+#[derive(Debug)]
+pub(super) struct StartFailure {
+    pub(super) reason: BridgeUnavailableReason,
+    pub(super) failure: Box<CliFailure>,
+}
+
+impl From<CliFailure> for StartFailure {
+    fn from(failure: CliFailure) -> Self {
+        Self { reason: BridgeUnavailableReason::VerificationFailed, failure: Box::new(failure) }
+    }
+}
+
+fn policy_refused(detail: &str) -> StartFailure {
+    StartFailure { reason: BridgeUnavailableReason::StartRefused, failure: Box::new(CliFailure::new(detail)) }
+}
+
+pub(super) fn start(paths: &PlakPaths, deadline: Instant) -> Result<bool, StartFailure> {
     if crate::environment::host::remote_shell() {
-        return Err(CliFailure::new(
+        return Err(policy_refused(
             "--auto-start is local only; start the remote host or its user unit explicitly",
         ));
     }
@@ -47,13 +64,14 @@ pub(super) fn start(paths: &PlakPaths, deadline: Instant) -> CliResult<bool> {
                     .map_err(failed)?;
                 Ok(acknowledgement == [1])
             } else {
-                Err(CliFailure::new("the detached host starter failed"))
+                Err(CliFailure::new("the detached host starter failed").into())
             };
         }
         if Instant::now() >= deadline {
             let _ = helper.kill();
             let _ = helper.wait();
-            return Err(CliFailure::new("the detached host starter timed out"));
+            return Err(StartFailure { reason: BridgeUnavailableReason::Starting,
+                failure: Box::new(CliFailure::new("the detached host starter timed out")) });
         }
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -240,7 +258,7 @@ fn cap_log(log: &mut File, bytes: &[u8]) -> io::Result<()> {
 fn refuse_installed_unit(
     inputs: &[(&str, OsString)],
     unit_path: Option<&std::ffi::OsStr>,
-) -> CliResult<()> {
+) -> Result<(), StartFailure> {
     let value = |name| {
         inputs
             .iter()
@@ -285,34 +303,34 @@ fn refuse_installed_unit(
         if !directory.is_absolute() {
             return Err(CliFailure::new(
                 "host unit lookup needs absolute OS configuration paths; absence is unproven",
-            ));
+            ).into());
         }
         let path = directory.join("plakd-host.service");
         match std::fs::symlink_metadata(&path) {
             Ok(_) => {
-                return Err(CliFailure::new(
+                return Err(policy_refused(
                     "plakd-host.service is installed (its home was not inspected); check its configuration and use systemctl --user start plakd-host.service if appropriate, or run plakd host in the foreground for this home; no unmanaged host was started",
                 ));
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(failed(error)),
+            Err(error) => return Err(failed(error).into()),
         }
     }
     Ok(())
 }
 
 #[cfg(any(target_os = "macos", test))]
-fn refuse_launch_agent(home: &std::path::Path) -> CliResult<()> {
+fn refuse_launch_agent(home: &std::path::Path) -> Result<(), StartFailure> {
     let path = home.join("Library/LaunchAgents/com.plakd.host.plist");
     match std::fs::symlink_metadata(&path) {
-        Ok(_) => Err(CliFailure::new(
+        Ok(_) => Err(policy_refused(
             "com.plakd.host.plist is installed (its home was not inspected); load and start the LaunchAgent explicitly, or run plakd host in the foreground for this home; no unmanaged host was started",
         )),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(CliFailure::new(format!(
             "could not inspect {}: {error}; LaunchAgent absence is unproven; no unmanaged host was started",
             path.display()
-        ))),
+        )).into()),
     }
 }
 

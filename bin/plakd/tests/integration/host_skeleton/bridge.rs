@@ -390,7 +390,7 @@ fn a_remote_or_unit_managed_bridge_never_starts_an_unmanaged_host() {
         assert!(!output.status.success());
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
-            json!({"frame":"refused","kind":"bridge_unavailable","reason":"starting","retry_after_ms":500})
+            json!({"frame":"refused","kind":"bridge_unavailable","reason":"start_refused"})
         );
         let message = String::from_utf8_lossy(&output.stderr);
         assert!(

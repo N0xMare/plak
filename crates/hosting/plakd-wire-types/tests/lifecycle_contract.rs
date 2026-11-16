@@ -43,6 +43,7 @@ fn bridge_refusals_have_exact_product_bytes_and_no_untrusted_detail() {
         (BridgeUnavailableReason::Absent, "absent"),
         (BridgeUnavailableReason::Starting, "starting"),
         (BridgeUnavailableReason::Stopping, "stopping"),
+        (BridgeUnavailableReason::StartRefused, "start_refused"),
         (
             BridgeUnavailableReason::IncompatibleState,
             "incompatible_state",
