@@ -4779,6 +4779,9 @@ RATCHET_LINTS = {
     "too_many_lines": "too-many-lines-ceiling",
     "too_many_arguments": "too-many-arguments-ceiling",
 }
+# Enrollment is reviewed here so deleting a manifest key cannot restore a
+# package's former crate-wide documentation opt-out.
+MISSING_DOCS_ENROLLED_PACKAGES = frozenset({"plakous-hosted"})
 # Lint groups that suppress a ratcheted lint: too_many_lines is pedantic,
 # too_many_arguments is complexity (and so part of clippy::all).
 RATCHET_LINT_GROUPS = {
@@ -4989,6 +4992,11 @@ def validate_lint_ratchet(package: str, inventory: dict[str, Any], rule: Any) ->
         f"{package}: unknown [package.metadata.plakous-lint] key {key!r}"
         for key in sorted(set(rule) - allowed)
     ]
+    if package in MISSING_DOCS_ENROLLED_PACKAGES and "missing-docs-ceiling" not in rule:
+        errors.append(
+            f"{package}: documentation ratchet enrollment requires missing-docs-ceiling; "
+            "removing the key is not an opt-out"
+        )
     ceilings = {key: rule.get(key, 0) for key in (*RATCHET_LINTS.values(), "large-file-ceiling")}
     # Documentation debt is enrolled package by package; legacy crates with
     # crate-wide opt-outs must be narrowed before they can join this ratchet.

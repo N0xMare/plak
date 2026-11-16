@@ -233,6 +233,27 @@ class LintRatchetValidationTests(unittest.TestCase):
             )
         )
 
+    def test_removing_enrollment_and_restoring_a_crate_wide_allow_fails_static(self):
+        inventory = checker.lint_ratchet_inventory(
+            {"src/lib.rs": '#![allow(missing_docs, reason = "restored opt-out")]\n'},
+            {"src/lib.rs"},
+        )
+        self.assertEqual(
+            checker.validate_lint_ratchet("plakous-hosted", inventory, {}),
+            [
+                "plakous-hosted: documentation ratchet enrollment requires missing-docs-ceiling; "
+                "removing the key is not an opt-out"
+            ],
+        )
+        self.assertTrue(
+            any(
+                "crate-wide missing_docs suppression" in error
+                for error in checker.validate_lint_ratchet(
+                    "plakous-hosted", inventory, {"missing-docs-ceiling": 0}
+                )
+            )
+        )
+
     def test_above_a_ceiling_fails_and_below_must_be_lowered(self):
         errors = self.validate({**self.EXACT, "too-many-lines-ceiling": 1, "large-file-ceiling": 2})
         self.assertIn(
