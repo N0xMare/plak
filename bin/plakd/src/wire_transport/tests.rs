@@ -19,6 +19,83 @@ fn private_run() -> (tempfile::TempDir, std::path::PathBuf) {
     (root, run)
 }
 
+fn discovery_paths() -> (tempfile::TempDir, crate::product_paths::PlakPaths) {
+    let (root, paths) = crate::product_paths::PlakPaths::isolated_test_home();
+    let directory = paths.host_socket().parent().unwrap().to_owned();
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    (root, paths)
+}
+
+#[test]
+fn review2_probe_empty_free_lock_is_an_absent_host() {
+    let (_root, paths) = discovery_paths();
+    for hint in ["", "not a pid"] {
+        std::fs::write(paths.host_lock(), hint).unwrap();
+        assert!(
+            discovery::connect(&paths, Duration::ZERO)
+                .unwrap()
+                .is_none()
+        );
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(paths.host_lock())
+            .unwrap();
+        lock.try_lock().unwrap();
+        assert!(
+            discovery::connect(&paths, Duration::ZERO).is_err(),
+            "an incomplete pid write must still respect a starting host's lock"
+        );
+        drop(lock);
+    }
+}
+
+#[test]
+fn review2_probe_reused_pid_with_free_lock_is_an_absent_host() {
+    let (_root, paths) = discovery_paths();
+    std::fs::write(
+        paths.host_lock(),
+        format!("{} old-build\n", std::process::id()),
+    )
+    .unwrap();
+    assert!(
+        discovery::connect(&paths, Duration::ZERO)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn a_kernel_locked_host_without_a_socket_refuses_until_the_lock_is_free() {
+    let (_root, paths) = discovery_paths();
+    let pid = std::process::id();
+    std::fs::write(paths.host_lock(), format!("{pid} fixture\n")).unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(paths.host_lock())
+        .unwrap();
+    lock.try_lock().unwrap();
+    for stale in [false, true] {
+        if stale {
+            drop(UnixListener::bind(paths.host_socket()).unwrap());
+        }
+        let error = discovery::connect(&paths, Duration::ZERO).err().unwrap();
+        assert!(error.message().contains(&format!("pid {pid}")), "{error}");
+        assert!(
+            error.message().contains("starting or stopping; retry"),
+            "{error}"
+        );
+    }
+    drop(lock);
+    assert!(
+        discovery::connect(&paths, Duration::ZERO)
+            .unwrap()
+            .is_none()
+    );
+}
+
 #[test]
 fn lifecycle_forwarding_never_turns_a_host_refusal_or_unknown_outcome_into_offline_permission() {
     use plakous_host_protocol::wire::{Answer, Op, Outcome};
