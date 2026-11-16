@@ -13,6 +13,8 @@ for one version bump, without native protocol compatibility.
   for RC2; source builds and embedders now require Rust 1.100.0 or later.
   Adopt equivalent `map_or_default` combinators for clippy and remove redundant
   package homepage metadata (the repository URL is unchanged).
+  The standard library now uses Unicode 18 and `str::escape_debug` always
+  escapes grapheme extenders, including after printable characters.
 
 - Classify Anthropic API HTTP 400 insufficient-credit responses as permanent
   `QuotaExceeded` failures with an API-credit repair remedy.

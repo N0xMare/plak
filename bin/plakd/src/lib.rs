@@ -319,7 +319,6 @@ use crate::presentation::{
 use crate::shell::services::Services;
 
 /// Run the Plak CLI using process arguments from the environment.
-#[must_use]
 pub fn main_from_env() -> ExitCode {
     open_file_limit::raise();
     // Read the system zone once, before anything spawns a thread. Resume
@@ -341,7 +340,6 @@ fn local_time_zone() -> &'static jiff::tz::TimeZone {
 ///
 /// Exit codes (spec 02 §3.3): 0 ok, 2 usage, 3 auth, 4 cancel, 5 agent,
 /// 6 run bound, 130 escalated quit, else 1.
-#[must_use]
 pub fn run_from_args(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
     match run(arguments) {
         Ok(ProcessOutcome::Success) => ExitCode::SUCCESS,

@@ -49,6 +49,10 @@ the ordinary development build is the MSRV build and there is no separate MSRV
 job. `.clippy.toml` repeats the MSRV so lint suggestions stay inside it.
 The pinned stable release is dated 2026-11-12, with rustc
 `1.100.0 (0ef1bc386 2026-11-09)`.
+This adopts the standard library's Unicode 18 tables and its changed
+`str::escape_debug` behavior: grapheme extenders are always escaped, including
+after a printable character. These are toolchain behavior changes, not wire or
+persisted-format changes.
 `.cargo/config.toml` sets `resolver.incompatible-rust-versions = "fallback"`.
 `rust-toolchain.toml` lists no extra targets. `wasm32-unknown-unknown` is
 installed by `just dev-tools install` (section 7.5), not by that file: listing
