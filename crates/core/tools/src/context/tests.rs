@@ -107,9 +107,13 @@ fn host_cwd_accepts_symlinked_workspace_spellings() -> Result<(), Box<dyn std::e
     fs::create_dir_all(root.join("src"))?;
     let alias = directory.path().join("alias");
     std::os::unix::fs::symlink(&root, &alias)?;
+    let outside = directory.path().join("outside");
+    fs::create_dir(&outside)?;
+    let outside_link = outside.join("into-workspace");
+    std::os::unix::fs::symlink(root.join("src"), &outside_link)?;
     let canonical = root.canonicalize()?;
     for root in [&root, &alias, &canonical] {
-        for cwd in [&alias, &canonical, &alias.join("src")] {
+        for cwd in [&alias, &canonical, &alias.join("src"), &outside_link] {
             let policy = WorkspacePolicy::host(root, cwd)?;
             assert_eq!(policy.root(), canonical);
             assert_eq!(policy.cwd(), cwd.canonicalize()?);
@@ -132,12 +136,14 @@ fn host_cwd_refuses_symlink_escape_and_traversal() -> Result<(), Box<dyn std::er
     let alias = directory.path().join("alias");
     std::os::unix::fs::symlink(&root, &alias)?;
     std::os::unix::fs::symlink(&outside, root.join("escape"))?;
+    std::os::unix::fs::symlink(directory.path(), root.join("up"))?;
     for cwd in [
         alias.join("escape"),
         root.join("escape"),
         outside,
         root.join("../workspace"),
         PathBuf::from("escape"),
+        PathBuf::from("up"),
         PathBuf::from("../workspace"),
     ] {
         let error = WorkspacePolicy::host(&alias, cwd).expect_err("cwd must stay contained");

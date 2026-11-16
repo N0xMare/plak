@@ -7465,11 +7465,12 @@ Filesystem, process, environment, and network effects require an explicit
 validated against traversal and symlink escape. At host environment construction,
 `WorkspacePolicy::host` accepts an existing cwd relative to the root or absolute.
 The root and an absolute cwd are canonicalized before computing the relative
-suffix, so symlinked ancestor spellings are accepted only when the resolved cwd
-is beneath the canonical root. Parent traversal remains refused. This does not
-relax model-supplied tool-path or process-`workdir` rules. Process-cwd resolution
-happens before spawn: an absolute or parent-traversing `workdir`, a symlink escape, or a
-missing or inaccessible cwd that cannot be inspected or resolved is a no-effect
+suffix. Any absolute cwd spelling, including one through symlinks, is accepted
+only when it resolves beneath the canonical root. Parent traversal remains
+refused. This does not relax model-supplied tool-path or process-`workdir` rules.
+Process-cwd resolution happens before spawn: an absolute or parent-traversing
+`workdir`, a symlink escape, or a missing or inaccessible cwd that cannot be
+inspected or resolved is a no-effect
 workspace-policy rejection, returned as a model-visible tool failure. A parent
 component of the cwd that exists and is not a directory is `NotADirectory`
 (`a parent component is not a directory: {path}`), the same pre-effect refusal

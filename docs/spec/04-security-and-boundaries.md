@@ -234,10 +234,10 @@ effects retains the existing reconciliation requirement.
 ### 2.1 File tools are path-contained
 
 Host workspace-policy construction canonicalizes the root and any absolute cwd
-before deriving the workspace-relative suffix. Symlinked ancestor spellings
-(for example macOS `/tmp` and `/var`) are accepted only when the resolved cwd
-stays beneath the canonical root; parent traversal and symlink escape remain
-refused. This construction rule does not change tool-input admission below.
+before deriving the workspace-relative suffix. Any absolute cwd spelling,
+including one through symlinks, is accepted only when it resolves beneath the
+canonical root; parent traversal and symlink escape remain refused. This
+construction rule does not change tool-input admission below.
 
 Operator Changes reads are a separate fixed-query authority, not shell or
 file-tool requests. They exclude both the product home and the resolved
