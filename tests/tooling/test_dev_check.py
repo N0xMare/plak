@@ -493,6 +493,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.worker.write_text('#!/bin/sh\nexit 0\n')
         self.worker.chmod(0o700)
         self.env['PLAK_JS_HOST'] = str(self.worker)
+        self.env['PLAK_MCP_SERVER'] = str(self.worker)
         for value in ('', 'missing', str(directory), str(ordinary)):
             with self.subTest(value=value):
                 self.env['PLAK_PY_HOST'] = value
@@ -511,6 +512,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.worker.write_text('#!/bin/sh\nexit 0\n')
         self.worker.chmod(0o700)
         self.env['PLAK_PY_HOST'] = str(self.worker)
+        self.env['PLAK_MCP_SERVER'] = str(self.worker)
         for value in ('', 'missing', str(self.root)):
             with self.subTest(value=value):
                 self.env['PLAK_JS_HOST'] = value
