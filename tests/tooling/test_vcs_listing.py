@@ -115,6 +115,78 @@ class ListingTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'conflicted @'):
                     vcs.evidence_tree(root)
 
+    def test_git_linked_worktree_evidence_requires_a_clean_unconflicted_root(self):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(
+                os.environ,
+                {
+                    'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+                    'GIT_CONFIG_GLOBAL': os.devnull,
+                    'GIT_CONFIG_NOSYSTEM': '1',
+                },
+                clear=True,
+            ),
+        ):
+            root = Path(temporary) / 'primary'
+            linked = Path(temporary) / 'linked'
+            root.mkdir()
+
+            def git(cwd, *args, check=True):
+                return subprocess.run(
+                    [
+                        'git',
+                        '-c',
+                        'user.name=test',
+                        '-c',
+                        'user.email=test@example.invalid',
+                        *args,
+                    ],
+                    cwd=cwd,
+                    check=check,
+                    capture_output=True,
+                    text=True,
+                )
+
+            git(root, 'init', '-q', '-b', 'main')
+            (root / 'tracked').write_text('base\n')
+            git(root, 'add', 'tracked')
+            git(root, 'commit', '-qm', 'base')
+            git(root, 'worktree', 'add', '-q', '--detach', str(linked))
+            self.assertTrue((linked / '.git').is_file())
+            self.assertEqual(vcs.kind(linked), 'git')
+            tree = git(linked, 'rev-parse', 'HEAD^{tree}').stdout.strip()
+            self.assertEqual(vcs.evidence_tree(linked), tree)
+
+            (linked / 'untracked').write_text('untracked')
+            self.assertEqual(vcs.evidence_tree(linked), '')
+            (linked / 'untracked').unlink()
+            (linked / 'tracked').write_text('linked\n')
+            self.assertEqual(vcs.evidence_tree(linked), '')
+            git(linked, 'add', 'tracked')
+            self.assertEqual(vcs.evidence_tree(linked), '')
+            git(linked, 'commit', '-qm', 'linked change')
+            self.assertEqual(
+                vcs.evidence_tree(linked), git(linked, 'rev-parse', 'HEAD^{tree}').stdout.strip()
+            )
+
+            (root / 'tracked').write_text('primary\n')
+            git(root, 'commit', '-qam', 'primary change')
+            self.assertEqual(git(linked, 'merge', '--no-edit', 'main', check=False).returncode, 1)
+            self.assertTrue(git(linked, 'ls-files', '--unmerged').stdout)
+            self.assertEqual(vcs.evidence_tree(linked), '')
+
+            with patch.object(vcs, 'run', return_value=str(root)):
+                with self.assertRaisesRegex(RuntimeError, 'root does not match'):
+                    vcs.evidence_tree(linked)
+
+    def test_evidence_refuses_secondary_jj_with_a_gitdir_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / '.jj').mkdir()
+            (root / '.git').write_text('gitdir: elsewhere\n')
+            self.assertEqual(vcs.evidence_tree(root), '')
+
     def test_git_ignored_regressions_outside_crates_are_inputs(self):
         with (
             tempfile.TemporaryDirectory() as temporary,

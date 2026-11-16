@@ -968,7 +968,10 @@ installation requirements are chapter 06 §8. Full is their union
 plus variants, rustdoc and the package dry run; a passing full run that started and ended
 on the same clean git tree writes that tree id to
 `$CARGO_TARGET_DIR/gate-evidence/full` (default `target/`), the evidence
-`tools/release/publish.sh` requires. Any passing run that includes the package group
+`tools/release/publish.sh` requires. Clean Git roots include primary checkouts
+and linked worktrees whose `.git` is a gitdir file; both must match Git's
+reported repository root. Secondary JJ workspaces remain ineligible.
+Any passing run that includes the package group
 on a clean tree (full, or `--steps` naming `package`) writes its tree id to
 `gate-evidence/package` beside it. A run that skipped a check (today only the
 musl qualification container's wasm check, chapter 06 §7.5) names each skip as

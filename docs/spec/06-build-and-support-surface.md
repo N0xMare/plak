@@ -1575,10 +1575,12 @@ way.
 
 On a colocated JJ root, `just full` records the Git tree of snapshotted `@`
 at start and end, refuses conflicted `@`, and requires equal trees. `@` need
-not be empty. Evidence is recorded only where `.git` is a directory, never
-in linked Git or secondary JJ workspaces; their package dry run still uses
-the shared VCS listing. Copies reuse the launch's `.dev-tools` when they have
-none of their own. Install/relink builds likewise require a `.git` directory.
+not be empty. Clean Git primary checkouts and linked worktrees with a gitdir
+file are eligible for evidence after validating the repository root against
+Git's `--show-toplevel`. JJ evidence still requires a colocated root with a
+`.git` directory, never a secondary JJ workspace; its package dry run still
+uses the shared VCS listing. Copies reuse the launch's `.dev-tools` when they
+have none of their own. Install/relink builds still require a `.git` directory.
 The evidence file is written only by a passing `just full` that began and
 ended on the same clean Git tree or unconflicted colocated JJ tree (chapter 05 §1)
 and skipped no check; a run that skipped one (section 7.5) writes neither

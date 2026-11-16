@@ -124,7 +124,9 @@ def changed_paths(root: Path, base: str | None = None) -> list[str]:
 
 
 def evidence_tree(root: Path) -> str:
-    if not (root / '.git').is_dir():
+    if not (root / '.git').exists():
+        return ''
+    if (root / '.jj').is_dir() and not (root / '.git').is_dir():
         return ''
     if kind(root) == 'jj':
         if jj(root, 'log', '-r', '@', '--no-graph', '-T', 'conflict').strip() != 'false':
