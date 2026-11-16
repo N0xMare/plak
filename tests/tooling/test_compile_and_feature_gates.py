@@ -728,7 +728,7 @@ class FeatureGateTests(unittest.TestCase):
 
     def test_test_only_dependency_features_are_read_from_normal_edges(self) -> None:
         tree = (
-            "plak v0.1.0 (/repo/bin/plak) default\n"
+            "plakd v0.1.0 (/repo/bin/plakd) default\n"
             "plakous-http v0.1.0 (/repo/crates/common/http) fault-injection\n"
             "plakous-http v0.1.0 (/repo/crates/common/http) fault-injection (*)\n"
             "tokio v1.53.1 io-util,rt\n"
@@ -737,7 +737,7 @@ class FeatureGateTests(unittest.TestCase):
             feature_gate.subprocess, "check_output", return_value=tree
         ) as check_output:
             self.assertEqual(
-                feature_gate.resolved_dependency_features("plak", ("test-hooks",), "plakous-http"),
+                feature_gate.resolved_dependency_features("plakd", ("test-hooks",), "plakous-http"),
                 {"fault-injection"},
             )
         command = check_output.call_args.args[0]
@@ -752,7 +752,7 @@ class FeatureGateTests(unittest.TestCase):
             mock.patch.object(feature_gate.subprocess, "check_output", side_effect=tree),
             mock.patch.dict(
                 feature_gate.TEST_ONLY_DEPENDENCY_FEATURES,
-                {("plak", "test-hooks"): (("plakous-http", "fault-injection"),)},
+                {("plakd", "test-hooks"): (("plakous-http", "fault-injection"),)},
                 clear=True,
             ),
         ):
@@ -760,9 +760,9 @@ class FeatureGateTests(unittest.TestCase):
         self.assertEqual(
             errors,
             [
-                "plak [default]: enables plakous-http/fault-injection, which only "
+                "plakd [default]: enables plakous-http/fault-injection, which only "
                 "`test-hooks` may enable",
-                "plak [maintainer]: enables plakous-http/fault-injection, which only "
+                "plakd [maintainer]: enables plakous-http/fault-injection, which only "
                 "`test-hooks` may enable",
             ],
         )
@@ -782,7 +782,7 @@ class FeatureGateTests(unittest.TestCase):
             errors = feature_gate.validate_test_only_dependency_features()
         for name in ("plakous", "plakous-openai", "plakous-openrouter"):
             self.assertTrue(any(f"{name}/test-clock" in error for error in errors))
-        self.assertTrue(any("plak [maintainer]" in error for error in errors))
+        self.assertTrue(any("plakd [maintainer]" in error for error in errors))
         self.assertTrue(any("plakous [full]" in error for error in errors))
         for name in ("plakous-anthropic", "plakous-xai"):
             self.assertIn(f"{name} [default]: test-clock is test-only", errors)
@@ -811,26 +811,26 @@ class FeatureGateTests(unittest.TestCase):
         self.assertIn(
             "test-hooks",
             feature_gate.optional_features(
-                {"package": {"name": "plak"}, "features": {"test-hooks": [], "auth": []}}
+                {"package": {"name": "plakd"}, "features": {"test-hooks": [], "auth": []}}
             ),
         )
 
     def test_no_plak_build_resolves_the_anchored_provider_clocks(self) -> None:
         def features(package, profile, dependency):
-            if package == "plak" and profile == ("test-hooks",) and dependency == "plakous-xai":
+            if package == "plakd" and profile == ("test-hooks",) and dependency == "plakous-xai":
                 return {"native-auth", "test-clock"}
             return {"test-clock"} if (package, profile, dependency) in pinned else set()
 
         pinned = {
-            ("plak", ("test-hooks",), "plakous-http"),
-            ("plak", ("test-hooks",), "plakous"),
-            ("plak", ("test-hooks",), "plakous-openai"),
-            ("plak", ("test-hooks",), "plakous-openrouter"),
+            ("plakd", ("test-hooks",), "plakous-http"),
+            ("plakd", ("test-hooks",), "plakous"),
+            ("plakd", ("test-hooks",), "plakous-openai"),
+            ("plakd", ("test-hooks",), "plakous-openrouter"),
         }
         with mock.patch.object(feature_gate, "resolved_dependency_features", side_effect=features):
             errors = feature_gate.validate_test_only_dependency_features()
         self.assertIn(
-            "plak [test-hooks]: enables plakous-xai/test-clock, which only offline test builds may enable",
+            "plakd [test-hooks]: enables plakous-xai/test-clock, which only offline test builds may enable",
             errors,
         )
         self.assertFalse(any("plakous-anthropic/test-clock" in error for error in errors))
@@ -844,11 +844,11 @@ class FeatureGateTests(unittest.TestCase):
 
     def test_commit_trace_inventory_is_test_only(self) -> None:
         pins = feature_gate.TEST_ONLY_DEPENDENCY_FEATURES
-        self.assertIn(("plakous-store", "commit-trace"), pins[("plak", "test-hooks")])
-        self.assertIn(("plakous-hosted", "test-support"), pins[("plak", "test-hooks")])
+        self.assertIn(("plakous-store", "commit-trace"), pins[("plakd", "test-hooks")])
+        self.assertIn(("plakous-hosted", "test-support"), pins[("plakd", "test-hooks")])
         self.assertIn(
             ("plakous-recursive-subagents-store", "commit-trace"),
-            pins[("plak", "test-hooks")],
+            pins[("plakd", "test-hooks")],
         )
         self.assertEqual(
             pins[("plakous-recursive-subagents-store", "commit-trace")],
@@ -861,7 +861,7 @@ class FeatureGateTests(unittest.TestCase):
                 with self.subTest(profile=profile, dependency=dependency):
                     self.assertNotIn(
                         "commit-trace",
-                        feature_gate.resolved_dependency_features("plak", profile, dependency),
+                        feature_gate.resolved_dependency_features("plakd", profile, dependency),
                     )
         command = feature_gate.cargo_command("tree", (), True, "plakous-recursive-subagents-store")
         command.extend(["-e", "normal,build", "--depth", "1", "--prefix", "none"])
@@ -882,7 +882,7 @@ class FeatureGateTests(unittest.TestCase):
         )
         self.assertIn("plakous-codex-code-mode-protocol", closure)
         self.assertNotIn("plakous-cell", closure)
-        self.assertNotIn("plak-compose-protocol", closure)
+        self.assertNotIn("plakd-compose-protocol", closure)
 
     def test_feature_profiles_are_per_package_and_capped(self) -> None:
         manifests = feature_gate.load_workspace_manifests()
@@ -892,8 +892,8 @@ class FeatureGateTests(unittest.TestCase):
         store = feature_gate.optional_features(manifests["plakous-store"])
         self.assertEqual(len(feature_gate.feature_sets(store, False)), 2 * len(store) + 3)
         self.assertEqual(
-            feature_gate.cargo_command("tree", (), True, "plak")[:6],
-            ["cargo", "tree", "--locked", "--offline", "-p", "plak"],
+            feature_gate.cargo_command("tree", (), True, "plakd")[:6],
+            ["cargo", "tree", "--locked", "--offline", "-p", "plakd"],
         )
 
     def test_linear_witnesses_cover_every_feature_present_and_absent_at_both_extremes(self) -> None:
@@ -919,8 +919,8 @@ class FeatureGateTests(unittest.TestCase):
         manifests = feature_gate.load_workspace_manifests()
         self.assertNotIn("maintainer", manifests["plakous"]["features"])
         self.assertNotIn("maintainer", manifests["plakous-hosted"]["features"])
-        self.assertEqual(manifests["plak"]["features"]["maintainer"], ["jj", "web"])
-        self.assertIn("maintainer", feature_gate.optional_features(manifests["plak"]))
+        self.assertEqual(manifests["plakd"]["features"]["maintainer"], ["jj", "web"])
+        self.assertIn("maintainer", feature_gate.optional_features(manifests["plakd"]))
 
 
 if __name__ == "__main__":

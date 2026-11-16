@@ -105,7 +105,11 @@ def frozen_binaries(root: Path, arch: str, name: str) -> dict:
 
     prefix = Path(".plak/installed") / arch
     if name.startswith("plak-"):
-        return {key: str(prefix / key) for key in ("plak", "plakous-js-host", "plakous-py-host")}
+        return {
+            "plak": str(prefix / "plakd"),
+            "plakous-js-host": str(prefix / "plakous-js-host"),
+            "plakous-py-host": str(prefix / "plakous-py-host"),
+        }
     cli = {
         "codex": "codex",
         "pi-codex-oauth": "pi",
@@ -314,7 +318,7 @@ def generate(root: Path, inventory: dict, *, phase: str, slice_name: str, blocks
         if name.startswith("plak-"):
             from harbor_adapter.artifact_identity import require_plak_provenance
 
-            binary = root / ".plak/installed" / arch / "plak"
+            binary = root / ".plak/installed" / arch / "plakd"
             provenance = require_plak_provenance(
                 binary, binary.with_name("plakous-js-host"), binary.with_name("plakous-py-host")
             )

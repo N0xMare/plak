@@ -680,7 +680,7 @@ async fn a_recent_listing_failure_is_not_retried_for_five_minutes() {
 }
 
 /// Every (usable row, published effort) the offline catalog admits -- what
-/// `plak models <api>` advertises and admission accepts -- constructs on its
+/// `plakd models <api>` advertises and admission accepts -- constructs on its
 /// route, on all three API routes, so the catalog and the route request
 /// policy cannot drift apart.
 #[tokio::test]

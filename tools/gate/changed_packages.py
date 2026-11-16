@@ -42,12 +42,12 @@ WORKSPACE_INPUTS = {
 }
 WORKSPACE_PREFIXES = (".cargo/", "vendor/")
 # Files and directories outside every package that the named package's tests
-# read: plak compares its config key table, template schema and reference
+# read: plakd compares its config key table, template schema and reference
 # config with these and loads every scenario home.
 PACKAGE_INPUTS = {
-    "docs/spec/07-config-reference.md": "plak",
-    "docs/reference-config": "plak",
-    "tests/fixtures/config-scenarios": "plak",
+    "docs/spec/07-config-reference.md": "plakd",
+    "docs/reference-config": "plakd",
+    "tests/fixtures/config-scenarios": "plakd",
 }
 
 

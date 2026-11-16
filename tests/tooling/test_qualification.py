@@ -160,7 +160,7 @@ class QualificationTests(unittest.TestCase):
             patch("live.binary_sha256", return_value="build"),
             patch("live.capture_root_mismatch", return_value=None),
         ):
-            binary = Path(directory) / "plak"
+            binary = Path(directory) / "plakd"
             result = qualification.run_cell(
                 Path(directory) / "cell",
                 lambda path: qualification.execute(
@@ -175,7 +175,7 @@ class QualificationTests(unittest.TestCase):
 
     def test_randomized_long_session_and_jobs_inputs_replay(self):
         route = live.ROUTES["grok"]
-        env = live.Env(Path("plak"), Path("home"), Path("artifacts"))
+        env = live.Env(Path("plakd"), Path("home"), Path("artifacts"))
         env.fixture_seed = 123
         first = long_session.LongSession(route, env)
         second = long_session.LongSession(route, env)
@@ -237,7 +237,7 @@ class QualificationTests(unittest.TestCase):
     def test_soak_rerun_starts_on_retained_original_build(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            binary = root / "target/release/plak"
+            binary = root / "target/release/plakd"
             binary.parent.mkdir(parents=True)
             binary.write_bytes(b"original build")
             starts = []
@@ -372,7 +372,7 @@ class QualificationReviewTests(unittest.TestCase):
     def test_soak_task_records_its_capture_segment(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            env = live.Env(root / "plak", root / "home", root)
+            env = live.Env(root / "plakd", root / "home", root)
             env._capture_root = root
             runner = soak.Soak(live.ROUTES["codex"], env, root)
             turn = live.Turn(phase="completed", text="wrong answer")
@@ -433,7 +433,7 @@ class QualificationReviewTests(unittest.TestCase):
             result = qualification.run_cell(
                 Path(directory) / "cell",
                 lambda path: qualification.execute(
-                    "long-session", "codex", Path("plak"), ["--all"], 17, path
+                    "long-session", "codex", Path("plakd"), ["--all"], 17, path
                 ),
             )
         self.assertEqual(result["status"], "PASS after MODEL rerun")
@@ -543,7 +543,7 @@ class QualificationReviewTests(unittest.TestCase):
         ):
             with self.subTest(route=route), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                binary = root / "plak"
+                binary = root / "plakd"
                 binary.write_bytes(b"build")
                 with (
                     patch.object(live, "ROOT", root),
@@ -589,7 +589,7 @@ class QualificationReviewTests(unittest.TestCase):
                         [
                             "codex",
                             "--binary",
-                            "plak",
+                            "plakd",
                             "--artifacts",
                             str(path),
                             "--only",
@@ -603,7 +603,7 @@ class QualificationReviewTests(unittest.TestCase):
 
                 with patch.object(driver, "main", side_effect=main):
                     qualification.execute(
-                        lane, "codex", Path("plak"), ["--only", "compaction"], 17, path
+                        lane, "codex", Path("plakd"), ["--only", "compaction"], 17, path
                     )
 
     def test_each_lane_main_assigns_fixture_seed(self):
@@ -616,7 +616,7 @@ class QualificationReviewTests(unittest.TestCase):
             (jobs, "Jobs", []),
         ):
             with self.subTest(driver=driver.__name__), tempfile.TemporaryDirectory() as directory:
-                binary = Path(directory) / "plak"
+                binary = Path(directory) / "plakd"
                 binary.write_bytes(b"not executed")
 
                 def observe(route, env, *rest):
@@ -652,7 +652,7 @@ class QualificationReviewTests(unittest.TestCase):
     ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            binary = root / "plak"
+            binary = root / "plakd"
             binary.write_bytes(b"original")
             original_sha = live.binary_sha256(binary)
             starts = []
@@ -673,7 +673,7 @@ class QualificationReviewTests(unittest.TestCase):
                     used_binary.write_bytes(after_first)
                 report["summary"]["binary_sha256_end"] = live.binary_sha256(used_binary)
                 if corrupt == "before_restore":
-                    (path.parent / "starting-plak").write_bytes(b"corrupted")
+                    (path.parent / "starting-plakd").write_bytes(b"corrupted")
                 return 0, report
 
             real_copy = qualification.shutil.copy2
@@ -727,7 +727,7 @@ class QualificationReviewTests(unittest.TestCase):
             nonlocal binary_path
             result = real_score(code, report)
             if binary_path is None and report.get("summary", {}).get("rebuild") == "changed":
-                binary_path = next(live.ROOT.glob("plak"))
+                binary_path = next(live.ROOT.glob("plakd"))
                 binary_path.write_bytes(b"operator")
             return result
 
@@ -796,7 +796,7 @@ class QualificationReviewTests(unittest.TestCase):
         for lane in qualification.LANES:
             with self.subTest(lane=lane), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                binary = root / "plak"
+                binary = root / "plakd"
                 binary.write_bytes(b"never executed")
                 with (
                     patch.object(live, "ROOT", root),
@@ -828,7 +828,7 @@ class QualificationReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "tests").mkdir()
-            binary = root / "plak"
+            binary = root / "plakd"
             binary.write_bytes(b"original")
             real_digest = live.binary_sha256
             digests = []
@@ -891,7 +891,7 @@ class QualificationReviewTests(unittest.TestCase):
         for ceiling in (None, "nope", "967232"):
             with self.subTest(ceiling=ceiling), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                binary = root / "plak"
+                binary = root / "plakd"
                 binary.write_bytes(b"never executed")
                 environ = {} if ceiling is None else {"PLAK_LIVE_INPUT_CEILING": ceiling}
                 with (
@@ -918,7 +918,7 @@ class QualificationReviewTests(unittest.TestCase):
                 self.assertEqual(len(report["attempts"]), 1)
                 reason = report["attempts"][0]["reason"]
                 self.assertIn("PLAK_LIVE_INPUT_CEILING", reason)
-                self.assertIn("`plak usage --session <id>`", reason)
+                self.assertIn("`plakd usage --session <id>`", reason)
                 self.assertTrue(reason.endswith("no paid attempt"), reason)
                 self.assertNotIn("raw exchange evidence", reason)
                 self.assertEqual(

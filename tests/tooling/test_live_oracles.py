@@ -215,7 +215,7 @@ class LiveOracleTests(unittest.TestCase):
             live._plak_child_source = None
             gate = {
                 "TMPDIR": "/gate/tmp",
-                "PLAK_HOME": "/gate/tmp/plak-isolated-home",
+                "PLAK_HOME": "/gate/tmp/plakd-isolated-home",
                 "GIT_CONFIG_GLOBAL": "/gate/tmp/gitconfig",
                 "GIT_CONFIG_NOSYSTEM": "1",
             }
@@ -225,7 +225,7 @@ class LiveOracleTests(unittest.TestCase):
             self.assertEqual(os.environ["TMPDIR"], "/gate/tmp")
             self.assertEqual(os.environ["GIT_CONFIG_NOSYSTEM"], "1")
             base = self.capture_workspace
-            child = live.Env(base / "plak", base / "home", base).environ()
+            child = live.Env(base / "plakd", base / "home", base).environ()
             self.assertEqual(child["TMPDIR"], "/operator/tmp")
             self.assertEqual(child["GIT_CONFIG_GLOBAL"], "/operator/gitconfig")
             self.assertNotIn("GIT_CONFIG_NOSYSTEM", child)
@@ -239,7 +239,7 @@ class LiveOracleTests(unittest.TestCase):
     def test_environment_removes_override(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            env = live.Env(base / "plak", base / "home", base)
+            env = live.Env(base / "plakd", base / "home", base)
             source = {
                 "PATH": "/bin",
                 "OPENROUTER_API_KEY": "fixture-override",
@@ -272,7 +272,7 @@ class LiveOracleTests(unittest.TestCase):
             self.assertNotEqual(env.capture_root, other.capture_root)
 
     def test_explicit_capture_segment_must_be_fresh_owned_and_private(self):
-        env = live.Env(Path("plak"), Path("home"), Path("artifacts"))
+        env = live.Env(Path("plakd"), Path("home"), Path("artifacts"))
         segment = env.capture_root / "explicit"
         child = env.environ(capture_dir=segment, source={})
         self.assertEqual(child["PLAK_TEST_EXCHANGE_CAPTURE_DIR"], str(segment))
@@ -301,7 +301,7 @@ class LiveOracleTests(unittest.TestCase):
     def test_capture_root_rejects_public_or_symlinked_authority_directory(self):
         root = self.capture_workspace / "tests/provider-authority"
         root.mkdir(mode=0o755)
-        env = live.Env(Path("plak"), Path("home"), Path("artifacts"))
+        env = live.Env(Path("plakd"), Path("home"), Path("artifacts"))
         with self.assertRaises(live.ScenarioFailure):
             env.environ(source={})
         root.rmdir()
@@ -310,7 +310,7 @@ class LiveOracleTests(unittest.TestCase):
             env.environ(source={})
 
     def test_smoke_cannot_qualify_missing_or_incomplete_raw_evidence(self):
-        binary = self.capture_workspace / "plak"
+        binary = self.capture_workspace / "plakd"
         binary.write_bytes(b"synthetic executable; never launched")
         for condition in ("complete", "empty", "incomplete", "pending", "not_started"):
             with self.subTest(condition=condition):
@@ -471,14 +471,14 @@ class LiveOracleTests(unittest.TestCase):
 
     def judge_timeline(self, steps, faults=None, route="or-lfm-free"):
         base = self.capture_workspace
-        env = live.Env(base / "plak", base / "home", base)
+        env = live.Env(base / "plakd", base / "home", base)
         env.route = live.ROUTES[route] if route else None
         env.environ(source={})
         segment = env.capture_segments[-1]
         kill = time.time()
         self.write_timeline(segment, steps, kill)
         failure = live.timeout_failure(
-            env, segment, "plak run did not finish in 300s", faults, timeout=300, killed_at=kill
+            env, segment, "plakd run did not finish in 300s", faults, timeout=300, killed_at=kill
         )
         self.assertEqual(
             env.provider_pending, {segment} if failure.outcome == live.PROVIDER else set()
@@ -491,7 +491,7 @@ class LiveOracleTests(unittest.TestCase):
         self.assertEqual(
             str(failure),
             (
-                "plak run did not finish in 300s: provider did not respond within the scenario "
+                "plakd run did not finish in 300s: provider did not respond within the scenario "
                 "budget (provider 140.0s, token-explained 129.3s, credited wait 30.1s, local 0.6s; "
                 "exchange 9 pending)"
             ),
@@ -704,10 +704,12 @@ class LiveOracleTests(unittest.TestCase):
     def test_injected_faults_and_missing_captures_keep_a_timeout_harness(self):
         failure = self.judge_timeline(self.OBSERVED, faults="fault=stall,seconds=40")
         self.assertEqual(
-            (failure.outcome, str(failure)), (live.HARNESS, "plak run did not finish in 300s")
+            (failure.outcome, str(failure)), (live.HARNESS, "plakd run did not finish in 300s")
         )
         env = live.Env(
-            self.capture_workspace / "plak", self.capture_workspace / "home", self.capture_workspace
+            self.capture_workspace / "plakd",
+            self.capture_workspace / "home",
+            self.capture_workspace,
         )
         missing = live.timeout_failure(env, self.capture_workspace / "missing", "x", timeout=300)
         self.assertEqual((missing.outcome, str(missing)), (live.HARNESS, "x (capture incomplete)"))
@@ -801,7 +803,7 @@ class LiveOracleTests(unittest.TestCase):
         )
 
     def timed_out_run(self, env, *, pending: bool, faults: str | None = None):
-        """`plak run` killed at its timeout, its capture as the process left it."""
+        """`plakd run` killed at its timeout, its capture as the process left it."""
 
         def run(*args, **kwargs):
             segment = Path(kwargs["env"]["PLAK_TEST_EXCHANGE_CAPTURE_DIR"])
@@ -856,13 +858,13 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_run_cli_timeout_on_a_pending_exchange_is_provider(self):
         base = self.capture_workspace
-        env = live.Env(base / "plak", base / "home", base)
+        env = live.Env(base / "plakd", base / "home", base)
         env.route = live.ROUTES["grok"]
         failure = self.timed_out_run(env, pending=True)
         self.assertEqual(failure.outcome, live.PROVIDER)
         self.assertRegex(
             str(failure),
-            r"^plak run did not finish in 300s: provider did not "
+            r"^plakd run did not finish in 300s: provider did not "
             r"respond within the scenario budget \(provider 292\.0s, "
             r"token-explained 8\.0s, credited wait 0\.0s, local 0\.0s; "
             r"exchange 2 pending\)$",
@@ -875,12 +877,12 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_run_cli_timeout_without_a_pending_exchange_is_harness(self):
         base = self.capture_workspace
-        env = live.Env(base / "plak", base / "home", base)
+        env = live.Env(base / "plakd", base / "home", base)
         failure = self.timed_out_run(env, pending=False)
         self.assertEqual(failure.outcome, live.HARNESS)
         self.assertRegex(
             str(failure),
-            r"^plak run did not finish in 300s \(provider 92\.0s, .*"
+            r"^plakd run did not finish in 300s \(provider 92\.0s, .*"
             r"killed 200\.0s after exchange 1 ended\)$",
         )
         # A fault the scenario injected must be absorbed, so it never relabels a hang.
@@ -896,7 +898,7 @@ class LiveOracleTests(unittest.TestCase):
             (True, "fault=stall", live.HARNESS),
         ):
             with self.subTest(pending=pending, faults=faults):
-                env = live.Env(base / "plak", base / "home", base)
+                env = live.Env(base / "plakd", base / "home", base)
                 env.route = live.ROUTES["grok"]
                 env.environ(source={})
                 segment = env.capture_segments[-1]
@@ -918,7 +920,7 @@ class LiveOracleTests(unittest.TestCase):
                 )
 
     def test_provider_timeout_keeps_the_cell_provider_and_a_hang_stays_harness(self):
-        binary = self.capture_workspace / "plak"
+        binary = self.capture_workspace / "plakd"
         binary.write_bytes(b"synthetic executable; never launched")
         for pending in (True, False):
             with self.subTest(pending=pending):
@@ -949,7 +951,7 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_drivers_default_to_release_and_remove_capture_opt_in(self):
         def inspect(parser, argv):
-            self.assertEqual(parser.get_default("binary"), live.ROOT / "target/release/plak")
+            self.assertEqual(parser.get_default("binary"), live.ROOT / "target/release/plakd")
             self.assertNotIn("--capture-exchanges", parser._option_string_actions)
             raise RuntimeError("stop before any launch")
 
@@ -1053,7 +1055,7 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_run_cli_can_use_a_private_home(self):
         base = self.capture_workspace
-        env = live.Env(base / "plak", base / "home", base)
+        env = live.Env(base / "plakd", base / "home", base)
         private = base / "private-home"
         with patch.object(
             live.subprocess, "run", return_value=Mock(returncode=0, stdout="ok", stderr="")
@@ -1064,10 +1066,8 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_run_cli_closes_stdin_and_scores_a_truncated_answer_as_completed(self):
         base = self.capture_workspace
-        env = live.Env(base / "plak", base / "home", base)
-        truncated = (
-            "plak: answer truncated at its 64-token output limit\nplak: turn_failed:output-limit\n"
-        )
+        env = live.Env(base / "plakd", base / "home", base)
+        truncated = "plakd: answer truncated at its 64-token output limit\nplakd: turn_failed:output-limit\n"
         with patch.object(
             live.subprocess,
             "run",
@@ -1081,9 +1081,9 @@ class LiveOracleTests(unittest.TestCase):
         self.assertIn("turn_failed:output-limit", log)
         # The line must be the final status; any other exit 5 stays a failure.
         for code, stderr in (
-            (5, "plak: turn_failed:output-limit\nplak: agent turn failed: x\n"),
+            (5, "plakd: turn_failed:output-limit\nplakd: agent turn failed: x\n"),
             (1, truncated),
-            (5, "plak: agent turn failed: x\n"),
+            (5, "plakd: agent turn failed: x\n"),
         ):
             with patch.object(
                 live.subprocess, "run", return_value=Mock(returncode=code, stdout="", stderr=stderr)
@@ -1106,7 +1106,7 @@ class LiveOracleTests(unittest.TestCase):
                 live.classify_incomplete(turn, "coding turn", segments=[])
             self.assertEqual(raised.exception.outcome, live.PROVIDER, kind)
         with self.assertRaises(live.ScenarioFailure) as raised:
-            live.classify_cli_failure(5, f"plak: {text}\n", "cli_task", segments=[])
+            live.classify_cli_failure(5, f"plakd: {text}\n", "cli_task", segments=[])
         self.assertEqual(raised.exception.outcome, live.PROVIDER)
         self.assertTrue(live.provider_child_text(text))
         prefix = "OpenRouter returned an in-band error after accepting the request: "
@@ -1150,7 +1150,7 @@ class LiveOracleTests(unittest.TestCase):
                 live.classify_incomplete(turn, "coding turn", segments=[])
             self.assertEqual(raised.exception.outcome, live.HARNESS, (kind, status))
         with self.assertRaises(live.ScenarioFailure) as raised:
-            live.classify_cli_failure(5, f"plak: {text}\n", "cli_task", segments=[])
+            live.classify_cli_failure(5, f"plakd: {text}\n", "cli_task", segments=[])
         self.assertEqual(raised.exception.outcome, live.HARNESS)
         # A typed non-provider status outranks provider prose.
         self.assertIsNone(live.provider_reason_from(None, 400, "too many requests"))
@@ -1229,16 +1229,16 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_unaccepted_compatibility_notice_names_its_remedy(self):
         for stderr in (
-            "plak: the codex compatibility notice needs an answer on stdin and none came; "
-            "accept it once with `plak models codex` from a terminal, or pipe `y` to this command\n",
-            "plak: the codex compatibility notice is not accepted; run `plak models codex` to "
+            "plakd: the codex compatibility notice needs an answer on stdin and none came; "
+            "accept it once with `plakd models codex` from a terminal, or pipe `y` to this command\n",
+            "plakd: the codex compatibility notice is not accepted; run `plakd models codex` to "
             "review and accept it (the login is kept)\n",
         ):
             with self.assertRaises(live.ScenarioFailure) as raised:
                 live.classify_cli_failure(3, stderr, "cli_task")
             self.assertEqual(raised.exception.outcome, live.HARNESS)
             self.assertIn("compatibility notice is not accepted", str(raised.exception))
-            self.assertIn("`plak models codex`", str(raised.exception))
+            self.assertIn("`plakd models codex`", str(raised.exception))
 
     def test_wrap_up_oracle_rejects_binding_loss_and_an_empty_answer(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1264,7 +1264,7 @@ class LiveOracleTests(unittest.TestCase):
     def test_headless_soak_records_reopen_failure_instead_of_losing_report(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            env = live.Env(base / "plak", base / "home", base)
+            env = live.Env(base / "plakd", base / "home", base)
             runner = soak.Soak(live.ROUTES["grok"], env, base)
 
             def refused(_faults):
@@ -1278,7 +1278,7 @@ class LiveOracleTests(unittest.TestCase):
     def test_headless_soak_output_limit_turn_is_a_model_miss_not_a_dead_end(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            env = live.Env(base / "plak", base / "home", base)
+            env = live.Env(base / "plakd", base / "home", base)
             runner = soak.Soak(live.ROUTES["grok"], env, base)
             agent = Mock(proc=Mock(pid=1, poll=Mock(return_value=0)), capture_dir=base)
             agent.prompt.return_value = live.Turn(phase="failed", model_error_kind="OutputLimit")
@@ -1338,7 +1338,7 @@ class LiveOracleTests(unittest.TestCase):
 
                 # A plant that cannot run is that task's harness result, not a crash.
                 source.write_text("def ilen(:\n")
-                env = live.Env(repo / "plak", repo / "home", Path(directory))
+                env = live.Env(repo / "plakd", repo / "home", Path(directory))
                 runner = soak.Soak(live.ROUTES["grok"], env, repo)
                 runner.open = Mock(side_effect=AssertionError("must not open"))
                 record = runner.run_task(soak.Task("fix_ilen", "fix", bug="ilen"), 2, None, False)
@@ -1506,7 +1506,7 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_live_binary_identity_is_the_executable_bytes_not_a_task_repo_commit(self):
         with tempfile.TemporaryDirectory() as directory:
-            binary = Path(directory) / "plak"
+            binary = Path(directory) / "plakd"
             binary.write_bytes(b"first binary")
             first = live.binary_sha256(binary)
             binary.write_bytes(b"second binary")
@@ -1525,14 +1525,14 @@ class AgentStartupFailureTests(unittest.TestCase):
         # stderr line, here an exhausted lookup on a provider timeout.
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            binary = base / "plak"
+            binary = base / "plakd"
             binary.write_text(
                 "#!/bin/sh\n"
                 "echo 'retrying model lookup (2/3): HTTP transport failed in ResponseHead "
                 "(MayHaveTransmitted, DeadlineExceeded)' >&2\n"
                 "echo '{\"kind\": \"bye\", \"v\": 1}'\n"
                 "sleep 1\n"
-                "echo 'plak: resolve codex/gpt-6.1-sol: model lookup failed after 2 attempts: "
+                "echo 'plakd: resolve codex/gpt-6.1-sol: model lookup failed after 2 attempts: "
                 "transport timeout' >&2\n"
                 "exit 5\n"
             )

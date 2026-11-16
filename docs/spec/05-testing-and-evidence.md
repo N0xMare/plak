@@ -659,7 +659,7 @@ schemas come from a sanitized Grok Build 1.0.46 native capture; draft,
 format/default annotations and nullable optional hints are narrowed to the
 strict portable schema subset, with the changed budgets described explicitly.
 Claude Code 2.1.289's TaskStop takes a strict object with one string task id;
-Plak presents that shape and does not expose the deprecated shell-id alias.
+plakd presents that shape and does not expose the deprecated shell-id alias.
 The output file is named by the pack-neutral `full output: <path>` line rather
 than native `Output is being written to:` wording; tests pin that the Claude
 `Bash` description names that line and `Read`, that the `Read` description
@@ -676,7 +676,7 @@ the user agent and billing `cc_version` pin; the capture tool's scripted
 multi-turn mode (`--claude-scenario multiturn`: two `tool_use` rounds, one 529
 retry, a `--continue` reopen) is the evidence for `diagnostics` and the turn
 indices, pinned offline by sanitized facts in the Anthropic protocol tests. Native Bash/Read/Edit/Write
-schemas and descriptions remain those compared with native 2.1.289 (Plak's
+schemas and descriptions remain those compared with native 2.1.289 (plakd's
 presented descriptions are its own truthful wording in that vocabulary, not
 the native text). The version suffix test pins `hello` to the captured `f16` for 2.1.325;
 `2.1.293` stays `72d`. Occupancy fixtures
@@ -731,7 +731,7 @@ In-process fences recover in place. The hosted and spawned-binary suites drive a
 scripted turn whose stream reports an unobservable outcome after two deltas and
 require: one `recovery_required` terminal per turn, one `recovered` record with
 the `model_request` claim and `interrupted` cause (from JSONL `recover`, from the
-next prompt, from `plak run --session`, and from `plak session recover`), exactly
+next prompt, from `plakd run --session`, and from `plakd session recover`), exactly
 one harness note, no second provider dispatch, and no text naming a new-session operation.
 Unit tests pin the abandonment fold per obligation shape, the claim precedence
 and each claim × cause note, the process-session and Code Cell abandonments at
@@ -820,7 +820,7 @@ scripted construction does not replace the real admission or publication path.
 ### The Harbor bakeoff plane
 
 `eval/` is a separate, opt-in and paid Harbor bakeoff plane that runs
-the same `plak run` binary against other coding CLIs. It is maintainer tooling,
+the same `plakd run` binary against other coding CLIs. It is maintainer tooling,
 in no gate tier and not product qualification; its adapter tests run with
 `just harbor test`, and `eval/README.md` owns its datasets, arms,
 evidence rules and recipes.
@@ -830,9 +830,9 @@ The preparation plane freezes common root/package task images and writes
 private, digest-reviewed campaign plans without inference. Calibration plans
 are explicitly unscored, admit no fabricated prior calibration, and run one
 plumbing trial per arm. Comparator HTTPS recording is cell-local, verifies
-upstream TLS, and exports only structural fields and digests; Plak retains
+upstream TLS, and exports only structural fields and digests; plakd retains
 its exact-URL subscription routes and uses its own wire capture instead.
-The A/A recipe requires eight tasks, three serial blocks and identical Plak
+The A/A recipe requires eight tasks, three serial blocks and identical plakd
 labels; the Codex campaign recipe requires its successful source/platform/
 binary-bound A/A receipt. All paid entry points remain explicit opt-ins.
 Account leases are host-local; the operator must prevent cross-host reuse.
@@ -935,8 +935,8 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these 
 | Group (canonical order) | Coverage |
 | --- | --- |
 | `static` | fmt, then `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/` (root `pyproject.toml` is tool config only; `vendor/` and `eval/datasets` stay excluded), then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch, ruff and structure checkers not in platform), then workspace all-features clippy, then clippy on each supported package alone in its own default resolution with all its targets (`cargo clippy -p <package> --all-targets`); all deny warnings. Worker fast narrows only the lint roots and affected facade/hosted profile compiles, never the global fmt/ruff/structure/closure checks |
-| `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); Plak maintainer-feature build; then `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each portable crate and each portable default library (chapter 06 §7.5). All deny rustc warnings. The musl qualification container (`--qual-container`) skips only that wasm check when its preloaded image has no such rustc target; the final summary names the skip and the run records no gate evidence |
-| `variants` | Reduced Plak resolutions, each built (lib and bins) and clippy-linted with warnings denied (a linker warning that holds only Apple ld's compact-unwind size note for a large debug binary, which rustc forwards through the `linker_messages` lint outside `-D warnings`, is not a failure; any other linker line is), using the gate's target and rustflags, then smoke-checked (version, doctor build features, CLI/JSONL feature refusals): the default product is headless; api is default minus `codex`, `grok` and `claude`; minimal is exactly `openrouter` and `git-cli`; the admission fixture is default minus `images`, `python` and `mcp`. Helper builds (a full `test-hooks` fixture writer, the MCP fake server, a reduced `test-hooks`+`maintainer` reader) drive the feature-admission and JSONL contracts, the api and minimal route checks, the canonical Python/MCP store read/refusal and byte-preservation fixtures, and the image diagnostic. Those plak processes use a private `HOME` and `XDG_*` directories inside the fixture temporary directory and accept the codex compatibility notice on stdin, so the fixture never reads or writes the operator subscription store. Selected by full only, never check, fast or platform; it runs at the release-candidate tier, not in the integration batch gate |
+| `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); plakd maintainer-feature build; then `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each portable crate and each portable default library (chapter 06 section 7.5). All deny rustc warnings. The musl qualification container (`--qual-container`) skips only that wasm check when its preloaded image has no such rustc target; the final summary names the skip and the run records no gate evidence |
+| `variants` | Reduced plakd resolutions, each built (lib and bins) and clippy-linted with warnings denied (a linker warning that holds only Apple ld's compact-unwind size note for a large debug binary, which rustc forwards through the `linker_messages` lint outside `-D warnings`, is not a failure; any other linker line is), using the gate's target and rustflags, then smoke-checked (version, doctor build features, CLI/JSONL feature refusals): the default product is headless; api is default minus `codex`, `grok` and `claude`; minimal is exactly `openrouter` and `git-cli`; the admission fixture is default minus `images`, `python` and `mcp`. Helper builds (a full `test-hooks` fixture writer, the MCP fake server, a reduced `test-hooks`+`maintainer` reader) drive the feature-admission and JSONL contracts, the api and minimal route checks, the canonical Python/MCP store read/refusal and byte-preservation fixtures, and the image diagnostic. Those plakd processes use a private `HOME` and `XDG_*` directories inside the fixture temporary directory and accept the codex compatibility notice on stdin, so the fixture never reads or writes the operator subscription store. Selected by full only, never check, fast or platform; it runs at the release-candidate tier, not in the integration batch gate |
 | `rustdoc` | Workspace all-features documentation, then each supported package alone in its default resolution, all with warnings denied; the same group in every integration batch, explicit step and full/RC run (chapter 06 §8), never selected by `--fast` |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
 | `tests-serial` | nextest profile `serial`: wall-clock budgets, one test thread |
@@ -1002,7 +1002,7 @@ reports success when any group failed.
 non-ignored files (and ignored `**/proptest-regressions/**` seeds) to their
 longest-prefix package owner with `tools/gate/changed_packages.py`. Named
 packages replace the diff. At a JJ root, shared root-checked listings use
-`builtin_immutable_heads()..@`; inside a Plak copy they diff `plak_base()` to
+`builtin_immutable_heads()..@`; inside a plakd copy they diff `plak_base()` to
 `@`. `PLAK_FAST_BASE` overrides either default. Listings never silently inspect
 an ancestor repository or fall back to an empty set. A source export uses a
 walk excluding `.git`, `.jj` and `target`; changed-package discovery requires a
@@ -1011,7 +1011,7 @@ lint, format or nextest config, `.cargo/`), or any path under `vendor/`
 (vendored members and the patched `monty-typeshed` source), selects every
 package. A file outside every package that a package's tests read selects that
 package: chapter 07, `docs/reference-config/` and
-`tests/fixtures/config-scenarios/` select `plak`. Its parallel
+`tests/fixtures/config-scenarios/` select `plakd`. Its parallel
 lane passes `-E 'rdeps(=<pkg>) | ...'`, which nextest intersects with the
 profile's own filter; an empty selection passes, and no touched package runs
 only static. Fast is worker evidence, not a substitute for the integration
@@ -1035,13 +1035,13 @@ a second copy of the dependency graph, while the whole workspace rebuilds only
 the touched packages and their dependents. The fast scope narrows the parallel
 lane, not Cargo feature resolution. The `builds` group additionally builds the
 workspace's default features, each supported package alone (chapter 06 §3:
-`plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`), and
-Plak's maintainer feature set. An all-features build cannot prove those
+`plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plakd`), and
+plakd's maintainer feature set. An all-features build cannot prove those
 smaller closures compile and link, and a workspace default build unifies
 features across members, so neither sees the closure a crates.io consumer or
-the release `cargo build -p plak` resolves (for example `plakous-workspace`
+the release `cargo build -p plakd` resolves (for example `plakous-workspace`
 without `jj-lib`); a feature-gated slip in any of them fails the gate. The
-per-package builds run before the maintainer build, whose `plak` the linkage
+per-package builds run before the maintainer build, whose `plakd` the linkage
 check reads. All of these builds deny rustc warnings. The same group then
 checks each portable crate's library for `wasm32-unknown-unknown`, warnings
 denied (chapter 06 §7.5). That step is a compile, so it lives in `builds`
@@ -1091,13 +1091,13 @@ the exception: it sets `CARGO_BUILD_TARGET` and `--target` to
 gate does not qualify the supported musl platform.
 
 `tools/gate/test-env.sh` is the one test environment. It exports `TMPDIR` from
-`tools/gate/test-tmpdir.sh`, `PLAK_HOME` (`$TMPDIR/plak-isolated-home`, mode
+`tools/gate/test-tmpdir.sh`, `PLAK_HOME` (`$TMPDIR/plakd-isolated-home`, mode
 0700), an empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. Its shell and
 command forms also unset the test-hook overrides `PLAK_TEST_SESSION_LEASE_SECONDS`,
 `PLAK_TEST_CELL_HELLO_MS` and `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` and the provider keys `OPENAI_API_KEY`,
 `XAI_API_KEY`, `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`, so an operator's
 exported key never reaches an offline test. Every form also puts
-`$TMPDIR/plak-test-jj`, which holds only a `jj` link to the jj the tools check
+`$TMPDIR/plakd-test-jj`, which holds only a `jj` link to the jj the tools check
 uses (chapter 06 §6), first on `PATH`: `PLAK_TEST_JJ` when set, else, with no
 `jj` on `PATH`, the newest pinned jj that `just dev-tools install` unpacked. Its `--json` form names only the variables it
 exports, `PATH` included when it changed; the live drivers keep their real keys. Its
@@ -1113,11 +1113,11 @@ the selector is a per-checkout
 directory under `/dev/shm`; on macOS a per-checkout directory under
 `/private/tmp`, so neither lies under the operator's `HOME`, where a spawned
 binary's project discovery could reach the real `~/.plak`. The directory is
-named `plak-test-<uid>-<cksum of the checkout path>`, must be owned by the
+named `plakd-test-<uid>-<cksum of the checkout path>`, must be owned by the
 caller and mode `0700`, and must resolve to itself with no symlinked
 component; `dev-check.sh` empties it at the start of each run. When the shared
 root or the directory fails those checks, or on another system, the selector
-falls back to `target/plak-test-tmp` in the checkout. Linux `fsync` is a real
+falls back to `target/plakd-test-tmp` in the checkout. Linux `fsync` is a real
 device flush that can exceed the stop, cancel and quit bounds under gate load.
 macOS `fsync` does not flush the device, so the two platforms only agree when
 the Linux scratch is RAM-backed. Maintainers may select another disposable
@@ -1133,7 +1133,7 @@ selects that physical, non-symlinked `TMPDIR` outside `HOME`.
 The gate applies `PLAK_HOME` on nextest lanes only, so other cargo commands do
 not inherit a product home. Offline tests must not create the operator's
 `~/.plak`. Product home resolution consults `PLAK_HOME` before `$HOME/.plak`,
-so a test, or a `plak` it spawns, that forgets to choose a home writes that
+so a test, or a `plakd` it spawns, that forgets to choose a home writes that
 scratch directory instead of the real one. `HOME` stays the operator's, because
 Cargo reads it.
 
@@ -1146,7 +1146,7 @@ that commits sets its identity on its own command (`-c user.name=...
 -c user.email=...`) or in its fixture repository's local config, never through
 the global config. The live drivers give their own fixture git and scratch the same isolation.
 `isolate_test_environment` snapshots the process environment, then exports the
-helper onto the driver. A `plak` child is built from that snapshot
+helper onto the driver. A `plakd` child is built from that snapshot
 (`Env.environ`'s `source`, and the other child launches), so it does not
 inherit the per-checkout `TMPDIR` (a `--fresh` gate empties that directory)
 or the empty git config. The child still sets its own `PLAK_HOME`. `just nextest`
@@ -1156,13 +1156,13 @@ exports all four for the test process.
 | --- | --- | --- |
 | Formatting | `cargo fmt --all --check` | The tree is byte-identical to `rustfmt` output under the pinned toolchain |
 | Lints | `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` | Every target of every package, all features on, no warnings. The workspace lint table denies `missing_docs`, `unwrap_used`, `expect_used`, `dbg_macro`, `todo`, `unimplemented`, and broken intra-doc links, and forbids `unsafe_code` |
-| Default feature builds | `cargo build --locked --workspace --lib --bins` and `cargo build --locked -p plak --features maintainer --bins`, each with `-D warnings` on the rustflags Cargo passes | Check, platform and full tiers, after clippy: default-feature libraries and binaries compile and link, as does the maintainer installer's Plak feature set, without test hooks or all-features unification hiding missing dependencies. Rustc warnings in those closures are errors; clippy remains the `--all-features` lint |
+| Default feature builds | `cargo build --locked --workspace --lib --bins` and `cargo build --locked -p plakd --features maintainer --bins`, each with `-D warnings` on the rustflags Cargo passes | Check, platform and full tiers, after clippy: default-feature libraries and binaries compile and link, as does the maintainer installer's plakd feature set, without test hooks or all-features unification hiding missing dependencies. Rustc warnings in those closures are errors; clippy remains the `--all-features` lint |
 | Portable wasm libraries | `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each name from `check_workspace.py --wasm-libraries`, with `-D warnings` | The portable set compiles as a library for `wasm32-unknown-unknown` (chapter 06 §7.5). Currently that set is `plakous-model`, `plakous-runner-protocol`, `plakous-tools` and `plakous-agent`, whose default features are portable, and the list adds the default library of `plakous-store`, whose `sqlite` feature keeps it off the fenced set. This is not a supported product target, and the check proves compilation, not run-time behavior. The musl qualification container skips the check while its preloaded image lacks the rustc target; the summary names the skip and the run records no gate evidence |
 | Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked`, then `cargo doc -p <package> --no-deps --locked` for each supported package in its own default resolution | Whenever the rustdoc group is selected outside `--fast`, including every integration batch and `just steps rustdoc`, both resolutions run with warnings denied (a default resolution can expose a link the all-features run hides): broken intra-doc links, links from public documentation into private items, and bare URLs are errors. Runs after clippy and before the tests |
 | Offline tests | `just steps tests-parallel,tests-serial,tests-durability` (the gate supplies the host-scaled durability configuration) | The whole workspace's deterministic behavior, with no network and no credentials |
 | Public compile contracts | `python3 tools/gate/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
-| Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plak`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. The same checker fences `PORTABLE_CRATES` (chapter 06 §7.5): each listed crate's normal closure, at default features and at `--all-features`, must not carry a reviewed native-only crate (including `libc`) or Tokio feature, resolved for `wasm32-unknown-unknown` rather than the host, and a failure names the crate, the dependency and the path that pulls it in |
-| Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of seven profiles (facade none, `full`, `composition`, `claude` and `openai`; hosted none and all-features), warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plak` and present under `test-hooks` |
+| Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plakd`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. The same checker fences `PORTABLE_CRATES` (chapter 06 section 7.5): each listed crate's normal closure, at default features and at `--all-features`, must not carry a reviewed native-only crate (including `libc`) or Tokio feature, resolved for `wasm32-unknown-unknown` rather than the host, and a failure names the crate, the dependency and the path that pulls it in |
+| Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of seven profiles (facade none, `full`, `composition`, `claude` and `openai`; hosted none and all-features), warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plakd` and present under `test-hooks` |
 | Tooling tests | `python3 tools/gate/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers, one `python3 -m unittest` process per `tests/tooling` module, four at a time |
 
 Nested-failure regressions cover exact successful string delivery, caught and
@@ -1528,7 +1528,7 @@ correctness.
 | `bash tools/perf/perf-smoke.sh --check` (`just perf smoke`) | A performance question is live. Six offline product measurements and four worker timings against this machine's seed row (§2.7); informational |
 | `cargo bench` for `perf_core`, `perf_project`, `perf_store`, and `tools/perf/perf_build.py` | A performance claim needs numbers. There is no portable numeric baseline; every claim carries its emitted host, feature, and toolchain metadata |
 | `cargo nextest run -p plakous-offline-crash-harness` | Process-crash matrices are wanted on demand. Unix only |
-| `just prompts native-compare` | Comparing Plak's prompts against installed vendor CLIs using isolated synthetic credentials and local mock responses |
+| `just prompts native-compare` | Comparing plakd's prompts against installed vendor CLIs using isolated synthetic credentials and local mock responses |
 | `eval/` Harbor two-rung bakeoff (Rung A weekly plumbing + TB 2.1 A/B; Rung B one-task TB 4.0 wire; `just harbor smoke` hard TB 4.0 slice) | Harness-comparison against vendor CLIs. Opt-in, paid, never a qualification row. `just harbor test` runs its adapter tests. See `eval/README.md` |
 | Live scenarios (§3.2); the pre-release bar (§3.4) | A claim needs live evidence. Paid and opt-in. The bar is not a gate tier |
 | `just live census` (`tools/dev/api_model_census.py`) | Before an install, to diff the bundled API model tables against the providers' lists and docs. Opt-in, networked, never a gate tier. See spec 01 §6.3 |
@@ -1640,7 +1640,7 @@ in their own unit tests and `test-clock` builds a clock that starts one minute
 after that crate's compiled review and advances with elapsed monotonic time.
 The facade enables `plakous-xai/test-clock` and `plakous-anthropic/test-clock`
 only as dev-dependencies. The feature checker proves that neither provider's
-default build enables its own `test-clock` and that no `plak` build (default,
+default build enables its own `test-clock` and that no `plakd` build (default,
 `maintainer`, `test-hooks`, or `test-hooks` with `maintainer`) resolves either
 one; an offline test build that unifies the facade's dev-dependencies does.
 SuperGrok id-token expiry is checked against that clock, not the JWT
@@ -1872,16 +1872,16 @@ The `tests/` tree holds the consumer packages:
 | Path | Package | Role |
 | --- | --- | --- |
 | `tests/support/plakous-test-support` | `plakous-test-support` | Scripted models and tools, scenario and barrier helpers, conformance drivers. Reachable only through the public `plakous-model` and `plakous-tools` contracts; never reexported by the facade |
-| `tests/harnesses/offline-crash` | `plakous-offline-crash-harness` | Public-facade SQLite `SIGKILL`/reopen matrices, and the declarative offline model script (§2.6). Depends on `plakous` with `sessions-sqlite` and exports narrow loopback builders to `plak` as a dev-dependency, and as a `test-hooks`-only optional dependency. Its finalization-debt fixture uses `plakous-agent` and `plakous-store` to commit a real debt-only checkpoint for hosted recovery tests without exposing checkpoint internals to the hosted crate |
+| `tests/harnesses/offline-crash` | `plakous-offline-crash-harness` | Public-facade SQLite `SIGKILL`/reopen matrices, and the declarative offline model script (section 2.6). Depends on `plakous` with `sessions-sqlite` and exports narrow loopback builders to `plakd` as a dev-dependency, and as a `test-hooks`-only optional dependency. Its finalization-debt fixture uses `plakous-agent` and `plakous-store` to commit a real debt-only checkpoint for hosted recovery tests without exposing checkpoint internals to the hosted crate |
 | `tests/fixtures/{agent,facade,model,tools}-consumer` | not workspace members for the first two | The supported external workflow inventories driven by `check_public_compile.py` |
 | `tests/fixtures/authority-negative` | — | The 28 compile-fail pins |
 | `tests/performance/baselines` | — | The perf-smoke seed rows and the allocation probe |
 | `tests/live` | — | The live drivers, the status page, and the pre-release bar (§3.2, §3.4) |
 
-The annotated reference Plak home lives in `docs/reference-config/`. Scenario
+The annotated reference plakd home lives in `docs/reference-config/`. Scenario
 homes live in `tests/fixtures/config-scenarios/` and are loaded by an offline
-`plak` test so they cannot rot (§4). Built-in provider homes live in
-`bin/plak/presets/`.
+`plakd` test so they cannot rot (section 4). Built-in provider homes live in
+`bin/plakd/presets/`.
 
 Every path above is repository-only. Test-support, crash-harness, and fixture
 packages are never publication candidates.
@@ -1899,8 +1899,8 @@ recovery authority. The public facade has no hook at the private checkpoint
 transition or compaction publication, so the provider-terminal to checkpoint
 interval is labeled split evidence, closed by `OpenedSession::release`
 returning its durable locator; the harness claims no direct injection at a
-private publication fence and no process cuts of composition. Plak's own
-product-journal and host `SIGKILL` matrices are private Plak tests.
+private publication fence and no process cuts of composition. plakd's own
+product-journal and host `SIGKILL` matrices are private plakd tests.
 
 ### Model fuzz targets
 
@@ -2024,7 +2024,7 @@ or forced joins.
 A prior LEAK observation under the runner's shorter passing default does not
 by itself establish whether that test leaked a process.
 
-The integration suites in `plak`, `plakous-agent`, `plakous-tools`,
+The integration suites in `plakd`, `plakous-agent`, `plakous-tools`,
 `plakous-store`, `plakous-openai` and `plakous-compose` each link one
 `integration` target rooted at `tests/integration/main.rs`. The former target
 files are sibling modules, so their test names have the former target name as
@@ -2071,7 +2071,7 @@ them relaxes an assertion to buy parallelism.
   in both managers, the facade's unit tests switch Codex to the seam through
   `plakous-openai/test-support`, and `tests/tooling/test_pinned_callback_ports.py`
   refuses a pinned-port bind or an unguarded browser login anywhere in the tree.
-- `cli-contract-serial` (`max-threads = 1`) covers `cli_contract::` in Plak's
+- `cli-contract-serial` (`max-threads = 1`) covers `cli_contract::` in plakd's
   `integration` binary, selected by package, binary and anchored module name,
   not the other modules sharing that binary.
 
@@ -2147,7 +2147,7 @@ no redispatch or abandonment), but remains explicitly ignored under
 `JSONL-APPROVAL-RESUME` until the production reopen hang is fixed. Its durability
 predicate enrolls the cell when it is enabled.
 The workspace/all-features prerequisite builds the
-test-hooks product and matching sidecars; the fixture locates `plak` beside the
+test-hooks product and matching sidecars; the fixture locates `plakd` beside the
 test executable's `deps` directory, or uses an explicit `PLAK_TEST_BINARY`.
 All five are excluded from the parallel lane. Fixture-owned hosts are reaped
 on failure.
@@ -2205,7 +2205,7 @@ assertions do not measure elapsed time and need no budget lane.
 
 | Kind | Predicates |
 | --- | --- |
-| Observation parity | `observation_parity_tests::` — the whole module: the parity scenarios (plain turn with a tool call, tool error, capacity block, clear then turn, interrupt then second prompt, escape then quit, context placeholders, compaction, spawn/wait/adopt), each comparing against its golden under `bin/plak/tests/parity/`, plus the normalization, wait-receipt, cancelled-tool terminal and JSONL terminal tool-line checks |
+| Observation parity | `observation_parity_tests::` -- the whole module: the parity scenarios (plain turn with a tool call, tool error, capacity block, clear then turn, interrupt then second prompt, escape then quit, context placeholders, compaction, spawn/wait/adopt), each comparing against its golden under `bin/plakd/tests/parity/`, plus the normalization, wait-receipt, cancelled-tool terminal and JSONL terminal tool-line checks |
 | Process spawn, drain and cancellation windows | `exec_command_with_zero_yield_returns_the_joined_output`, `host_process_bounds_live_output_and_enforces_timeout`, `joined_process_pty_cancellation_and_timeout_join_the_group`, `cancel_during_a_cell_running_a_real_process_command_joins_inside_the_settle_window` |
 | Python worker request deadline | `a_stuck_worker_request_is_killed_and_reported_as_session_loss` — isolates bundle setup from parallel load without weakening the stuck-request kill and fail-closed loss assertions |
 | Cleanup mutex admission | `terminate_contention_is_bounded_and_preserves_correlated_owner`, `join_all_handles_free_children_and_retains_contended_child_for_retry` — the two users of the two-second `assert_bounded` helper |
@@ -2377,7 +2377,7 @@ or containment descriptor is normalized.
 | Durable tool-descriptor golden | `crates/harness/compose/tests/integration/durable_descriptor_identity_golden.rs` | `PLAK_PRINT_DESCRIPTOR_PINS=1 cargo test -p plakous-compose --test integration durable_descriptor_identity_golden:: -- --nocapture` |
 | Pack prompt pins (each pack's `pins()`, checked by `drifted_pins`) | `crates/core/tools/src/prompt_digest.rs`, each pack's `crates/harness/tool-{files,search,process,plan}/src/text.rs`, `crates/harness/compose/src/text.rs`, and `crates/orchestration/recursive-subagents/src/tree/text/mod.rs` | the failing assertion prints each drifted id with its new digest |
 | Rendered route, lifecycle and wire pins | `crates/hosting/hosted/tests/common/{rendered_prompts,rendered_lifecycle,rendered_wire}.rs` | `PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_ -- --nocapture` (§2.5) |
-| Observation parity goldens (the host loop and the JSONL projection emit the same sequence) | `bin/plak/tests/parity/*.jsonl` | `PLAK_UPDATE_GOLDENS=1 cargo test -p plak --lib observation_parity` |
+| Observation parity goldens (the host loop and the JSONL projection emit the same sequence) | `bin/plakd/tests/parity/*.jsonl` | `PLAK_UPDATE_GOLDENS=1 cargo test -p plakd --lib observation_parity` |
 
 ### 2.5 Prompt renders are pinned in code, not in files
 
@@ -2386,7 +2386,7 @@ What a model sees on each product route — harness costume, identity, enrolled
 with synthetic roots), every tool name and description, the first-turn HTTP request
 body, and each wire's compaction summary request body — is pinned by sha256 tables in `crates/hosting/hosted/tests/common/rendered_prompts.rs`
 and `rendered_lifecycle.rs`, with the wire lowering in `rendered_wire.rs`.
-Review headers assert the Plak User-Agent shape `plak/<semver>` separately and
+Review headers assert the plakd User-Agent shape `plak/<semver>` separately and
 normalize its release version to `plak/<version>` before rendering and hashing;
 a workspace version bump alone does not change these pins. The suites
 are private fixtures compiled into the `plakous-hosted` unit-test target,
@@ -2460,7 +2460,7 @@ Explicit qualification/reference OAuth/API wire captures belong in gitignored
 §3.5 is the safe collection and sanitization procedure. Do not commit raw
 traffic or treat a local structural capture as live provider qualification.
 
-Plak's private exchange observer is available in `maintainer` or `test-hooks`
+plakd's private exchange observer is available in `maintainer` or `test-hooks`
 builds. Maintainer builds select fresh private capture automatically in the
 product home, including private scratch homes inside the checkout. Selection
 is lazy: the first inference or read-only model lookup exchange creates and logs
@@ -2593,8 +2593,8 @@ terminates the stream, and whether a session an earlier process wrote reopens.
 No in-process test reaches any of it, and each of those was found live rather
 than in the gate.
 
-`bin/plak/tests/integration/offline_e2e.rs` spawns the shipped executable through
-`env!("CARGO_BIN_EXE_plak")` and drives `plak run` and the `plak agent` JSONL
+`bin/plakd/tests/integration/offline_e2e.rs` spawns the shipped executable through
+`env!("CARGO_BIN_EXE_plakd")` and drives `plakd run` and the `plakd agent` JSONL
 stream against a deterministic in-process model. There is no provider, no credential
 and no network.
 
@@ -2614,7 +2614,7 @@ A hook that is requested and unusable refuses the launch; it never falls through
 to a provider, because a gate run that silently tested nothing is worse than a
 failing one.
 
-The same selector on a real `plak host` admits the exact
+The same selector on a real `plakd host` admits the exact
 `account = "codex"`, `model = "offline-loopback-v1"` route in its Ready
 catalog, with `low` and `medium` effort and no priority tier (Fast is refused
 by the ordinary tier admission). Other routes retain their real
@@ -2663,7 +2663,7 @@ These hooks and the scripted runtime factory are absent from the shipped
 default build; they add no persisted or wire vocabulary.
 
 Two explicit client-test producers also require `test-hooks`. The setup-only
-`plak --test-seed-abandoned-open without-submission|with-submission` command
+`plakd --test-seed-abandoned-open without-submission|with-submission` command
 requires the offline selector/script, an explicit absolute `PLAK_HOME`, an
 unused runtime store and an isolated workspace. It settles `seed terminal`
 through the ordinary offline worker, quits and joins that worker, then calls
@@ -2748,13 +2748,13 @@ durability module kills the host after an MCP call's
 write-ahead claim and checks that reopen settles it without a second
 dispatch.
 
-`bin/plak/tests/integration/offline_e2e.rs` module `durability` chains those gestures in one
+`bin/plakd/tests/integration/offline_e2e.rs` module `durability` chains those gestures in one
 spawned session. Its tool/cancel/compact/resume chain uses an accepted bounded
 summary: when retained tool output clips the next turn, it checks that turn
 ends without replay, compacts for subsequent work, and answers a new explicit
 prompt before quitting and reopening. A `tree` script may also set
 `durable_tree` (publish through the product `subagents.sqlite3` so
-`plak session show` reads the same rows),
+`plakd session show` reads the same rows),
 `disk_full_at_child_locator` (the first bound child locator publish and all
 later saves return the classified `disk_full` category and no backend text;
 the child row lands before the fault, independent of projector save counts),
@@ -2807,7 +2807,7 @@ edge cycling through the subagents crate's harness dev-dependency. All are
 pinned — `check_workspace.py` refuses any other contents for the feature, and
 `check_features.py` requires the forwarding edge, without which the scripted
 factory registration is unavailable. `check_features.py` also refuses a default
-or maintainer `plak` that enables `plakous-hosted/test-support`; only
+or maintainer `plakd` that enables `plakous-hosted/test-support`; only
 `test-hooks` may. The sealed production construction port
 remains available without test support. The default and release binaries
 contain none of the selector's strings. The harness also carries
@@ -2900,7 +2900,7 @@ crash-sweep --strict` runs every shape with the owner pruning between every
 pair of rounds (spec 01 §4 history retention). The minimum knob lowers the
 64-checkpoint batch; the margin knob lowers the 64-checkpoint recency floor,
 and 0 or 1 both leave the horizon at the head's parent so a short turn still
-prunes. The fixture forwards both variables to each spawned `plak`. Both knobs
+prunes. The fixture forwards both variables to each spawned `plakd`. Both knobs
 are for the crash sweep only, not the durability crash matrix or the offline
 lane, and the parity tests run at the default margin of 64. A traced
 build's SQLite actor drains deferred reclamation right after the job that
@@ -2916,9 +2916,9 @@ first; while the sweep runs they are refreshed at most every 30 seconds, and the
 final pair is written once every task is done. `timings.jsonl` beside them
 records each setup-and-pilot and each cut with its start and duration.
 The child-runner shapes `runner_job_survives_host_loss` and
-`runner_restart_unknown` run a session on a real runner daemon (`plak runner
+`runner_restart_unknown` run a session on a real runner daemon (`plakd runner
 serve`, started by the harness in its own process group over a runner home of its
-own) that the product reaches through `plak runner connect
+own) that the product reaches through `plakd runner connect
 --stdio`, the offline script's `child_runner` route (spec 01 §8.5). A fork
 keeps the seed's runner identity and owner floors, so its session reopens on
 the same runner, under a daemon of its own. The session promotes one job,
@@ -2934,7 +2934,7 @@ start it twice. A fixture reaps every daemon of its runner home (each
 process that has a socket's lock file open, found without taking the lock), checks that a marked job is still that job
 before it kills it, and fails if any daemon survives.
 The host variants `runner_job_survives_host_loss_host` and
-`runner_restart_unknown_host` use the control socket of a real `plak host`
+`runner_restart_unknown_host` use the control socket of a real `plakd host`
 and its home-local daemon, with the same one-start marker law. Their cuts
 restart the host through its startup sweep; the latter also kills the daemon,
 so durable old jobs become `OutcomeUnknown` and are never re-run. The shapes
@@ -3012,8 +3012,8 @@ after the offline one-CAS publication. Pilots require strategy
 dispatch. The durability lane repeats these three shapes through
 `image_residency_crash_cuts_recover_without_redispatch`; direct receipt tests
 independently materialize and validate v3 source/selection/successor evidence.
-The shape `residency_dormant_materialize` serves its session through `plak host
---web unix:<path> --idle-release 1` instead of `plak agent`: a wire v2 client
+The shape `residency_dormant_materialize` serves its session through `plakd host
+--web unix:<path> --idle-release 1` instead of `plakd agent`: a wire v2 client
 (`plakous_host_protocol::client::connect_to`, attaching the session's root)
 comes in through the endpoint's gate as `tailscale serve` would, prompts and
 reads the answer, and leaves; once the runtime store shows no live owner the
@@ -3022,10 +3022,10 @@ then `SIGINT` ends the host while that connection holds the session. Its
 pilot requires one answer, one provider dispatch, and the host's `opening
 session` and `opened session` lines twice each (the first attach's open and
 the wake's). Its cuts kill the endpoint at every indexed commit, the idle
-release's and the wake's included, and recover through the ordinary `plak
+release's and the wake's included, and recover through the ordinary `plakd
 agent` relaunch.
 
-`plak host`'s crash windows run against the real binary on its control
+`plakd host`'s crash windows run against the real binary on its control
 socket (`host_skeleton`, the durability lane for the `host_crash_` cases):
 `host_crash_cuts_of_create_materialize_and_release_recover` kills the host at
 every indexed commit of a `new_session`, the first attach that materializes
@@ -3060,7 +3060,7 @@ and missing-owner unknown outcomes, preserves read-only reopen and consumption,
 and rejects released terminals carrying an exit code or stopper.
 The durability fixture
 `released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority`
-SIGKILLs a real `plak run --leave-jobs-running` on each side of the terminal
+SIGKILLs a real `plakd run --leave-jobs-running` on each side of the terminal
 recording commit: reopen reports unknown before it and released after it,
 never signals the orphan, and the fixture independently releases the group.
 The enabled-ladder residency regression seeds a source over the token window
@@ -3072,7 +3072,7 @@ republished compaction. Image refusals after a server pause with steered
 images and at a provider-programmatic tool-batch fence finalize the open
 continuation and leave a Quiescent head.
 The entry point first prepares the whole workspace's all-features test build,
-including `plak`, `plakous-js-runtime`'s `plakous-js-host` and
+including `plakd`, `plakous-js-runtime`'s `plakous-js-host` and
 `plakous-py-worker`'s `plakous-py-host`, in the same Cargo
 profile and target directory used by the sweep. Build failure stops the sweep;
 an existing sibling worker is never treated as build evidence. This is the
@@ -3836,10 +3836,10 @@ provider-hosted ToolCall final requires an additional output/owner dial.
 feature explicitly forwards `plakous-agent/test-hooks` for its read-only,
 content-free checkpoint classification bridge. The classifier is absent from
 default production builds. The
-feature is enabled by the offline-crash harness; `plak/test-hooks` directly
+feature is enabled by the offline-crash harness; `plakd/test-hooks` directly
 forwards the tree store's own `commit-trace` feature and carries four pinned
 edges; default and maintainer/release product builds contain no commit tracer.
-Plak's harness dev-dependency also enables runtime-only tracing in test builds
+plakd's harness dev-dependency also enables runtime-only tracing in test builds
 without `test-hooks`; a sweep must require `cfg(feature="test-hooks")` to trace
 the product and tree as well. The
 runtime, product and tree install it on their writable WAL connections, not the
@@ -3962,7 +3962,7 @@ line per metric:
 | --- | --- | --- |
 | `cold_start_to_ready_ms` | process launch to the `ready` record on the JSONL face | no |
 | `jsonl_tool_round_trip_ms` | one tool row from `running` to `done`, median of five repeats | no |
-| `cli_two_tool_turn_ms` | a whole `plak run` process for a two-tool turn | yes |
+| `cli_two_tool_turn_ms` | a whole `plakd run` process for a two-tool turn | yes |
 | `jsonl_bulk_throughput_mb_per_s` | ten prompts, each answered with 100 kB, over the whole batch | yes |
 | `growth_turn_peak_rss_mb` | maximum resident set over a growth turn through the placeholder rung | yes |
 | `cell_quickjs_spawn_round_trip_ms`, `cell_monty_spawn_round_trip_ms` | worker spawn, checked hello/configure, one cell with a nested call and its acceptance, median of five | no |
@@ -4004,9 +4004,9 @@ Seeding a new machine waits for one run in which all five metrics measure
 successfully on an idle host, so a seed never records a contended number as the
 thing to beat.
 
-The recipe builds only `plak`, `plakous-js-runtime` and `plakous-py-worker` in
-the release profile, with the product's default features plus `plak/test-hooks`.
-It copies `plak` and its matching JavaScript/Python workers aside before
+The recipe builds only `plakd`, `plakous-js-runtime` and `plakous-py-worker` in
+the release profile, with the product's default features plus `plakd/test-hooks`.
+It copies `plakd` and its matching JavaScript/Python workers aside before
 measuring. Product and
 worker timings measure optimized binaries; the row profile is `release`.
 As in the product build helper, `CARGO_PROFILE_RELEASE_STRIP=debuginfo` retains
@@ -4074,7 +4074,7 @@ The opt-in hosted test
 `plakous.perf-child-observation.v1` rows for eight streaming children with
 0, 1 and 3 faces per child, 8,192 events per row and 64 text bytes per event.
 Every live child reduces even with no face attached, including headless
-`plak run`; zero-face reduction is not free. One Linux x86_64 debug/test run
+`plakd run`; zero-face reduction is not free. One Linux x86_64 debug/test run
 measured respectively 4,757, 4,879 and 5,045 ns/event, with 520,576, 520,832
 and 521,344 accounted retained bytes across all eight children. These are raw
 observations, not thresholds or a cross-host baseline. Timing includes source
@@ -4098,7 +4098,7 @@ do not read it.
 the network or a provider would, at the one place every provider's traffic
 passes: `Client::execute`. The classifiers above the transport then see the same
 `Failure` or response head they see in the field, so a fault exercises today's
-kernels rather than a parallel path. A `plak` built with `test-hooks` reads a
+kernels rather than a parallel path. A `plakd` built with `test-hooks` reads a
 plan from `PLAK_TEST_FAULTS` once per process and applies it to every client,
 against real providers or local peers alike; tests attach a plan to one client
 with `Client::with_faults`.
@@ -4239,9 +4239,9 @@ Responses in-band rate-limit and overload fixtures pin failed lifecycle,
 closed observations, fresh terminal facts and one physical request for session
 workflows (including compaction) and turns carrying `x-should-retry: false`.
 
-Product tests pin the `plak run` retry line, the JSONL `retry` frame and
+Product tests pin the `plakd run` retry line, the JSONL `retry` frame and
 (in `plakous-hosted`)
-that a discarded response's sealed reasoning never reaches the session. `check_features.py` requires that a default `plak`
+that a discarded response's sealed reasoning never reaches the session. `check_features.py` requires that a default `plakd`
 never enables the feature and that `test-hooks` does.
 
 ## 3. Evidence classes
@@ -4401,11 +4401,11 @@ remote legacy saves before product dispatch; confirmed operator paths keep
 their capability, consent and etag rules (current client protocol 10).
 Product DTO contract examples decode and re-encode unchanged before and after
 extraction, including temporary reload values. Schema extraction is checked
-against raw `plak wire schema` output with an uninstalled executable and an
+against raw `plakd wire schema` output with an uninstalled executable and an
 empty identity cache, so both captures consistently report no binary identity.
 
 Public control successors derive their action fixtures from complete real-client
-traffic and replay them through the actual `plak host connect --stdio`
+traffic and replay them through the actual `plakd host connect --stdio`
 executable. Qualification compares each direction's exact control sequence,
 not a byte-identical duplex schedule. Directory, attach, new, prompt, stop,
 bye and their acknowledgements, other pinned controls, connection lifetimes
@@ -4550,7 +4550,7 @@ with the runtime format epoch.
 
 Harbor's opt-in `plak-py-ptc`/`plak-py-sdk` A/B recipe declares composition
 per arm in a digest-bound campaign. Default arms do not admit overrides;
-observed composition must equal the declared value. Plak trials upload,
+observed composition must equal the declared value. plakd trials upload,
 digest-pin and verify both cell sidecars with the binary. The adapter's
 `rung-a-py.yaml` recipe fixes the eight-task slice, tuple, arms and three
 repeat blocks; private inventory generation records its digest and checks
@@ -4629,8 +4629,8 @@ explicit API-only Direct list; an OpenAI API `CodeModeOnly` row constructs,
 creates and reopens a durable native-ptc session (both `plakous-default` and
 explicit), while `native-ptc` on the Anthropic or xAI API fails construction
 and native-ptc without the JavaScript host fails naming the sidecar; and
-command parse, template load, the root rebind, `plak run`, `plak agent`, a
-seeded hosted session, `plak models`, `plak doctor` and an API child's pin admit
+command parse, template load, the root rebind, `plakd run`, `plakd agent`, a
+seeded hosted session, `plakd models`, `plakd doctor` and an API child's pin admit
 or refuse `native-ptc` by the same table, with `run` and `agent` saving the
 same record for the same arguments. One local-TLS wire contract dispatches an
 OpenAI API native-ptc turn: the request carries only the `exec` custom tool
@@ -4714,7 +4714,7 @@ publication before independent extension dispatch even in an idle host configure
 for one-shot execution, explicit `NoHandler`
 refusal without losing the admitted turn, and bounded replacement of extension
 observations. The generic interrupt tests retain deferred FIFO work and never
-turn a queued quit into cancellation of an admitted paid operation. Plak's
+turn a queued quit into cancellation of an admitted paid operation. plakd's
 settings dispatch matrix remains binary-owned evidence.
 
 Deterministic, hermetic, credential-free, and reproducible on any supported
@@ -4769,13 +4769,13 @@ evidence and absent models do not acquire provider classification.
 Transient first-attempt proof scenarios must still bind and complete a real
 turn; a retry message alone is not success evidence.
 
-A live scenario drives the real `plak` binary against a real provider account
+A live scenario drives the real `plakd` binary against a real provider account
 and checks its result independently of a clean protocol terminal. It is opt-in,
 may spend provider usage, and never runs in any gate tier. Three drivers exist
 in `tests/live/` (whose README lists every scenario and its oracle):
 
 - `just live smoke <route>` runs eleven short scenarios in a few minutes across
-  `plak run` and `plak agent`: a coding task with
+  `plakd run` and `plakd agent`: a coding task with
   a planted bug, resume, a manual compaction whose earlier fact must survive,
   cancel mid-tool, four transport faults injected with `PLAK_TEST_FAULTS`
   (section 2.8), and a two-child subagent wave with adoption.
@@ -4795,7 +4795,7 @@ in `tests/live/` (whose README lists every scenario and its oracle):
 - `just live soak <route> [--hours N]` keeps one session doing real tasks on a
   pinned open-source checkout, reopening it in a new process per task, with
   faults, SIGSTOP/SIGCONT sleeps, manual compactions and one mid-run rebuild to
-  a byte-distinct `plak`, and reports throughput, tokens, peak context,
+  a byte-distinct `plakd`, and reports throughput, tokens, peak context,
   compactions, errors and dead ends. It is headless. `just live soak <route>
   --long-session --only <names>` does not run that hour loop; it selects the
   named long-session scenarios below. `--all` in place of `--only` selects
@@ -4837,7 +4837,7 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   scenario does not use that split and does not read a child event log
   (there is none; JSONL v1 does not project child transcripts). After the
   root agent quits, child `cN` is taken from the root's JSONL `tree` frames
-  or spawn/wait receipts, or from `plak session show <root>`. `plak session
+  or spawn/wait receipts, or from `plakd session show <root>`. `plakd session
   log <root>.cN --json` is the child's committed canonical history. A
   committed compaction segment projects as `kind` `compaction` with display
   text `compacted N earlier segments (<pass>)` (or `compacted earlier
@@ -4872,7 +4872,7 @@ in `tests/live/` (whose README lists every scenario and its oracle):
 - `just live jobs <route> [--only NAME,...]` runs seven bounded background-job
   scenarios: promotion at `[jobs] foreground_seconds`, a steer during a
   foreground command and during an await, a completion notice while busy,
-  `plak run` waiting for a promoted job, crash reopen as outcome-unknown, a
+  `plakd run` waiting for a promoted job, crash reopen as outcome-unknown, a
   child submit refused with `live_work` while its job is live and then settled
   with that job terminal, plus a parent close that stops another live child
   job with `attempt ended`. It injects no transport faults. The
@@ -4885,16 +4885,16 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   official read-only GitHub server), hosted `web_search`, `web_fetch` and
   `x_search`, and an image-generation round trip into a vision route. Each
   run's private home lists exactly the optional tools it needs. Oracles are
-  `plak session log --json` tool calls, the raw capture (an image block in
+  `plakd session log --json` tool calls, the raw capture (an image block in
   the request), the MCP server's own records, and values the model cannot
   guess (a SHA-256 in a file at a public commit, random operands, a token only
   the server holds); a retrieval fact must appear on a cited page the driver
-  fetches itself. A route row that Plak refuses at bind or admission scores
+  fetches itself. A route row that plakd refuses at bind or admission scores
   `refused`, which is the product's statement rather than a failure.
 
-All three build `plak` with `test-hooks`; only the smoke and headless soak
+All three build `plakd` with `test-hooks`; only the smoke and headless soak
 inject faults. Each result is
-`pass`, `harness` (Plak's failure, including a dead end: a failed turn after
+`pass`, `harness` (plakd's failure, including a dead end: a failed turn after
 which a plain follow-up also fails), `model` (a completed turn whose work
 misses the oracle), `provider` (the real provider refusing without an injected
 fault) or `pending` (a failure a named in-flight change is expected to fix).
@@ -4917,7 +4917,7 @@ acceptance rate limits, ambiguous 5xx responses) are recorded as provider
 outcomes, never retried silently and never relabeled as product failures.
 
 The same `provider` class covers every surface the drivers score: a JSONL
-turn failure, a `plak run` exit, a manual compact operation
+turn failure, a `plakd run` exit, a manual compact operation
 refusal, and a child failure. A typed provider refusal or outage is
 `provider`: `RateLimited` or HTTP 429, `Unavailable` (including an OpenAI
 `server_is_overloaded` terminal), `QuotaExceeded`, a refusal
@@ -4970,21 +4970,21 @@ unfinished, or valid-argument captures stay `harness`. A model-selected job
 stop (`stop_reason` `model`) is `model`, not `harness`.
 Output-limit outcomes score alike on every surface. A tool-free `Length`
 answer with visible text is a completed turn (chapter 01, length
-classification): `plak run` prints it and exits 5 with
+classification): `plakd run` prints it and exits 5 with
 `turn_failed:output-limit`, and the drivers treat that exit as the completed,
 truncated turn JSONL, so the scenario's oracle judges the
 printed answer. A failed turn of typed kind `OutputLimit` (a second
 consecutive empty `Length`, or one that may not retry) is `model`: the model
 spent its output bound without an answer. JSONL lifecycle frames carry the
-kind; `plak run` stderr and child
+kind; `plakd run` stderr and child
 failure text carry only its rendered diagnostic (`response reached its output
 bound before completion`, or the Responses provider's `stopped at the output
-bound before` message), which identifies it there; on `plak run` only the
+bound before` message), which identifies it there; on `plakd run` only the
 final non-empty stderr line, the turn's own failure, is read for it. Like any first `model` it
 gets the single MODEL rerun (§3.4).
-A `plak run` launched by a driver has stdin closed, so a subscription
+A `plakd run` launched by a driver has stdin closed, so a subscription
 compatibility notice that still needs acceptance fails at once (exit 3); that
-is `harness`, and the reason names the remedy, `plak models <account>`.
+is `harness`, and the reason names the remedy, `plakd models <account>`.
 An injected fault the scenario required the product to absorb stays
 `harness` when the turn fails with that same fault; a different provider
 refusal during that scenario is still `provider`. An injected fault that was
@@ -5017,7 +5017,7 @@ a network-shaped transport failure in `ResponseHead` or `ResponseBody`: `Io`,
 `Protocol` failure are not provider failures: they earn no credited wait and
 no resend allowance.
 
-A driver's `plak run`, an awaited `plak agent` turn (the jobs driver's
+A driver's `plakd run`, an awaited `plakd agent` turn (the jobs driver's
 included), that outlives its
 scenario budget is `harness` (a product hang) unless the timed-out process's capture segment proves the
 provider used that budget. The driver accounts the window from the kill back
@@ -5101,7 +5101,7 @@ deliberate exception: they are XDG state at
 `${XDG_STATE_HOME:-$HOME/.local/state}/plak/subscriptions/<provider>/credential.json`,
 outside `PLAK_HOME`, with no per-run copy, so a refresh during a live run writes
 the real credential store. API-key routes instead copy the key installed by
-`plak key set` from the ordinary home into the disposable home and remove the
+`plakd key set` from the ordinary home into the disposable home and remove the
 corresponding environment variable from child processes, preventing a stale
 variable from shadowing the file without printing credential bytes.
 
@@ -5135,20 +5135,20 @@ what daily use does not exercise (routes the operator does not run, crash and
 kill timings, overflow, jobs) rather than repeating long soaks that daily use
 covers.
 
-A qualification run binds one tuple. The `test-hooks` `plak` named in the
+A qualification run binds one tuple. The `test-hooks` `plakd` named in the
 report was built from a clean checkout of one source revision, including the
 live drivers. The report names that revision, the host, and the target triple
 (`aarch64-apple-darwin` or `x86_64-unknown-linux-musl`). It names the SHA-256
-of that `plak` at the start of the run and at the end, and the SHA-256 of the
+of that `plakd` at the start of the run and at the end, and the SHA-256 of the
 `plakous-js-host` and `plakous-py-host` workers from the same build. It names the
 account, whether the account is a subscription login or an API key, and the
 exact model, effort, protocol and composition. The composition for this bar
 is `plakous-default`; the report names it as `composition_requested` and names
-`composition_bound`, every composition the run's `plak agent` hellos reported,
+`composition_bound`, every composition the run's `plakd agent` hellos reported,
 because a pack may bind the request to its own composition (Codex binds
 `plakous-default` as `native-ptc`). It names every scenario in the cell. A
 dirty tree, a digest that changes mid-run, or any other tuple is diagnostic
-only. The headless soak's intentional rebuild to a byte-distinct `plak` is part
+only. The headless soak's intentional rebuild to a byte-distinct `plakd` is part
 of that scenario: both digests are recorded, and any other digest change is not
 a qualification.
 
@@ -5211,7 +5211,7 @@ fixed before a higher rung spends.
 and at medium ended long growth turns early ("I can't finish paging ...
 within this turn", after 37 to 41 of 52 pages) and skipped a page after the
 child's compaction in every long-session cell of a qualification cycle, with
-Plak's requests verified against this chapter; `gpt-6.1-sol` paged all 69
+plakd's requests verified against this chapter; `gpt-6.1-sol` paged all 69
 growth pages through compaction under the derived round cap and passed
 in-turn compaction, the child (10 of 10 pages) and kill-reopen. Its overflow
 attempt in that diagnostic was a model runaway (one tool call's input
@@ -5225,12 +5225,12 @@ informational row; the row's other lanes keep its class. `deepseek` and
 long-session lane. The marking carries from the DeepSeek flash model these
 rows ran before (`deepseek/deepseek-v4.1-flash-1017`) until
 `deepseek/deepseek-v4-flash-0731` has its own long-session evidence. The
-earlier model's own compaction summary lost the earlier turn's fact: replaying Plak's
+earlier model's own compaction summary lost the earlier turn's fact: replaying plakd's
 captured summary request through OpenRouter, on Chat and on Messages, the
 summary dropped that fact once one or two large tool results followed it, at
 about 34k to 70k tokens as well as at about 826k (none of 18 kept it from 100k
 to 826k; three of three kept it with no bulk; with tool definitions present it
-kept the fact at about 38k and lost it at about 71k). Plak's summary input was
+kept the fact at about 38k and lost it at about 71k). plakd's summary input was
 complete and byte-equal to the request before the fold, and Grok and Claude
 pass the same lane. Deep into long tool loops, that model over OpenRouter
 Messages also sent `read` calls with only a path, even given an argument
@@ -5275,7 +5275,7 @@ python3 tests/live/qualification.py soak <route> --hours 1          # least-used
 On the OpenRouter `full` rows (`deepseek`, `deepseek-messages`) the
 long-session line runs with `PLAK_LIVE_INPUT_CEILING` set to the session's
 admitted input ceiling: run a short session on the same route and protocol
-and take `admitted_input_ceiling=N` from `plak usage --session <id>`, which
+and take `admitted_input_ceiling=N` from `plakd usage --session <id>`, which
 prints `context_status=... prepared_input=... total_context_window=...
 admitted_input_ceiling=N`. Chat and Messages are read separately. The cell
 driver refuses an OpenRouter long-session cell without a valid value before
@@ -5449,7 +5449,7 @@ For an explicit qualification capture outside the live drivers, create
 `tests/provider-authority/` with mode 0700, a private mode-0700 run directory
 under it, and a fresh private mode-0700 directory under the run for each
 process, and set `PLAK_TEST_EXCHANGE_CAPTURE_DIR` to that process directory's
-absolute path for `plak run` or `plak agent`. Never reuse a process
+absolute path for `plakd run` or `plakd agent`. Never reuse a process
 directory. The live drivers do this per launch and reopen and report capture
 integrity (`tests/live/README.md`). A successful turn with zero `.body` files
 is not wire evidence, and instrumented timing is not production performance.
@@ -5479,12 +5479,12 @@ provider behavior remains untested.
 
 ## 4. Reference product homes
 
-`docs/reference-config/` holds the annotated reference Plak home, and
+`docs/reference-config/` holds the annotated reference plakd home, and
 `tests/fixtures/config-scenarios/` holds complete scenario homes. Each is a
 `config.toml` plus one flat template file per agent under `agents/`. They are
 opt-in copies, never loaded automatically. To use one, run
-`plak config show | head -1` to learn the home, copy the scenario's
-`config.toml` and its `agents/*.toml` beside it, and `plak login` to the
+`plakd config show | head -1` to learn the home, copy the scenario's
+`config.toml` and its `agents/*.toml` beside it, and `plakd login` to the
 accounts it names — templates name accounts only, and no credential ever appears
 in these files. A project may also carry templates under
 `<project>/.plak/agents/`, where a project file wins over the user file of the
@@ -5492,7 +5492,7 @@ same name.
 
 The shipped default — an empty `[roster] working_set` and no `[root] agent` —
 remains in force when no config file exists, so these scenarios never change
-default behavior. `bin/plak/tests/integration/product_config_fixtures.rs` loads
+default behavior. `bin/plakd/tests/integration/product_config_fixtures.rs` loads
 every scenario directory offline, so a schema change breaks the examples rather
 than silently rotting them. Each scenario's `config.toml` opens with a comment
 that names it and describes the configuration; the same test requires that
@@ -5505,7 +5505,7 @@ the assertion. Open investigations name their current containment explicitly.
 
 | Class | Cause | Fix in force |
 | --- | --- | --- |
-| Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plak-test-*` on macOS) from `tools/gate/test-env.sh`, and required for `just nextest` |
+| Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plakd-test-*` on macOS) from `tools/gate/test-env.sh`, and required for `just nextest` |
 | Inherited git config | Fixture git read the host's global config; a global `commit.gpgsign` spawned `gpg` per fixture commit, which failed with ENOMEM under gate load | Test entry points export an empty `GIT_CONFIG_GLOBAL` under `TMPDIR` and `GIT_CONFIG_NOSYSTEM=1` (§1); fixtures set their own identity |
 | Fixed-port OAuth loopback | Login tests bound the pinned callback ports, which collide across parallel runs and with a live login | Tests bind an ephemeral port through the managers' loopback seam; the pinned ports are refused in tests (§2.3). The `native-auth-serial` group still serializes the shared process-local fixtures |
 | CLI contract interference | Process-level binary contracts collide when run in parallel | The `cli-contract-serial` group |
@@ -5539,7 +5539,7 @@ or fails the same test twice, is a defect.
 
 Automated gates do not replace judgment. A review asks:
 
-1. Does the change violate the Plakous/Plak layer or ownership boundary?
+1. Does the change violate the Plakous/plakd layer or ownership boundary?
 2. Does it add a peer vertical before the protocol kernels can host a plugin?
 3. Is the paid and auth fail-closed posture preserved, with tests updated?
 4. Do offline tests cover the behavior change?
@@ -5611,7 +5611,7 @@ lowering keeps tools but omits the redundant explicit choice parameter; hosted
 admission tests admit tools-capable Chat endpoints without explicit choice
 support and still reject endpoints missing tools. Messages explicit-choice
 admission remains covered separately. Three-wire TLS fixtures assert exact
-Plak URL/title/category headers for attributed routes and their complete absence
+plakd URL/title/category headers for attributed routes and their complete absence
 for unattributed routes.
 
 Deterministic OpenRouter Chat and Messages adapter tests complete a physical
@@ -5709,7 +5709,7 @@ terminal publication meets the settlement threshold ends `recovery_required`,
 the open that recovers it writes into the recovery reserve, repeat opens write
 nothing, and the store reopens under a limit below its usage. The pre-existing
 raised-limit rescue regression still holds for a terminal write larger than
-half the reserve. Plak covers `plak session delete` end to end (confirmation,
+half the reserve. plakd covers `plakd session delete` end to end (confirmation,
 removal from listing and inspection, refusal of an owned session as open
 with the lease held by a live owner process, and an open root refused before
 its finished child's history is touched
@@ -5743,8 +5743,8 @@ refusal stays typed through the tree rows a hub-less session writes: the root
 batch written ahead of admission and the projector's tree save both end with
 exit code 7 and the JSONL code and write nothing
 (`another_hosts_custody_stays_typed_through_the_ledger_and_the_projector`).
-A clean quit releases the custody it held on every face: after `plak run`,
-`plak agent` each quit, every custody record in the store reads
+A clean quit releases the custody it held on every face: after `plakd run`,
+`plakd agent` each quit, every custody record in the store reads
 released (`a_clean_run_releases_its_tree_custody`,
 `a_clean_agent_quit_releases_its_tree_custody`). A fork request withdrawn at
 reopen takes its seeded genesis tree, or a seed's row-less custody record,
@@ -5848,9 +5848,9 @@ record was deleted or whose source runtime was archived, and refuse deleting
 a source whose carry is still an intent. A host asked to open an intent record
 never creates its runtime
 (`an_interrupted_carry_record_is_never_created_empty`). The headless faces
-are pinned end to end in `offline_e2e::carried_sessions`: `plak run --session
+are pinned end to end in `offline_e2e::carried_sessions`: `plakd run --session
 <source>` over an interrupted carry finishes it, runs on the successor and
-prints the `carried forward as` note, and `plak agent --session <intent>`
+prints the `carried forward as` note, and `plakd agent --session <intent>`
 finishes the carry and attaches the successor. A store reopened under a limit below its usage
 prunes and then admits an ordinary commit
 (`sqlite_prune_over_the_absolute_limit_frees_ordinary_headroom`), and
@@ -5891,7 +5891,7 @@ A child recovery whose recorded checkpoint retention reclaimed applies the
 child's feed first and opens the head the feed names, and the create checkpoint
 stays loadable
 (`a_child_recovery_after_retention_opens_the_head_its_feed_names`).
-Plak covers `plak session gc` end to end (reclaimed counts, a repeat reclaiming
+plakd covers `plakd session gc` end to end (reclaimed counts, a repeat reclaiming
 nothing, a killed owner's Working head skipped as needing recovery after the
 projector applied its feed, and a delete
 cut short after archiving a root with a finished child finished through the
@@ -5899,12 +5899,12 @@ delete path:
 `gc_finishes_a_delete_cut_short_after_its_archive_through_the_delete_path`), the
 doctor's file size and last retention failure, the `retention_runs`
 telemetry row and `retention` span, and the capacity message naming
-`plak session gc` before `plak session delete`.
+`plakd session gc` before `plakd session delete`.
 `gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head`
 kills the real host right after a compaction's runtime commits, before a
 projector transaction applies them, runs `gc --all` (which applies the
 projector itself, skips the killed owner's Working head as needing recovery,
-and after `plak session recover` prunes at the head the views name, a
+and after `plakd session recover` prunes at the head the views name, a
 quiescent head), and requires the relaunch to show the compaction once, with
 no workflow request left pending.
 `a_workflow_request_without_a_fact_holds_gc_and_export` writes a workflow
@@ -6352,7 +6352,7 @@ interoperability lane, not a gate or a substitute for owner-account/provider
 qualification. Digest-pinned Compose images run Keycloak 26, strict
 node-oidc-provider RFC 8707 resource indicators, an official-SDK streamable
 HTTP MCP fixture, and pinned Playwright browser approval with disposable test
-users. Plak is built with `test-hooks` and driven by `PLAK_TEST_SCRIPT` in an
+users. plakd is built with `test-hooks` and driven by `PLAK_TEST_SCRIPT` in an
 isolated private home; no operator subscription store is inherited. The JSON
 report binds the binary hash and source revision to per-scenario CLI/session
 log assertions and independent AS dispatch/MCP audience and effect witnesses.

@@ -1,0 +1,6 @@
+plakd version — executable identity
+
+USAGE:
+  plakd version
+
+Prints the version, build flavor and binary ID used by build checks and host upgrades.

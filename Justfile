@@ -86,9 +86,9 @@ nextest *ARGS:
     tools/gate/dev-tools.sh check-nextest; \
     tools/gate/test-env.sh -- python3 tools/gate/test-processes.py -- cargo nextest "$@"
 
-# Build plak and its workers without installing a snapshot or touching PATH.
+# Build plakd and its workers without installing a snapshot or touching PATH.
 # profile: debug, release, maintainer, or profiling.
-# profiling builds only target/profiling/plak (no workers, no linkage check).
+# profiling builds only target/profiling/plakd (no workers, no linkage check).
 [doc("debug, release, maintainer or profiling; no snapshot and no PATH change")]
 build profile:
     tools/build/recipe-build.sh {{quote(profile)}}

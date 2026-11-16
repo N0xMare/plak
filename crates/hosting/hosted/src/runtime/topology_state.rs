@@ -644,7 +644,7 @@ pub(crate) async fn record_root_bind_view(
     .map(|_| ())
 }
 
-/// The no-hub half of [`install_successor_epoch`]: a headless `plak config
+/// The no-hub half of [`install_successor_epoch`]: a headless `plakd config
 /// set` in another process than the client. Its save is the store's
 /// compare-and-swap, so when a hub in that other process publishes first this
 /// refuses instead of overwriting, and when this publishes first the hub's

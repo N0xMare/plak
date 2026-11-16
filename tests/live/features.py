@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Opt-in live scenarios for the optional tools and image input.
 
-Each scenario is one `plak run` (two for the image-generation round trip) in
+Each scenario is one `plakd run` (two for the image-generation round trip) in
 its own small git repo, with a private `PLAK_HOME` whose root template lists
 exactly the optional tools the scenario needs. Oracles read the session log
-through `plak session log <id> --json`, the repository, the raw exchange
+through `plakd session log <id> --json`, the repository, the raw exchange
 capture and the MCP servers' own records; the model's claims are never the
 oracle. Selected with `just live smoke <route> --only <names>`; see README.md.
 
@@ -342,7 +342,7 @@ def capture_requests(segments: list[Path]) -> list[object]:
 
 
 def session_log(env: live.Env, home: Path, repo: Path, session: str) -> list[dict]:
-    """`plak session log <id> --json`: the session's narrative, unchanged."""
+    """`plakd session log <id> --json`: the session's narrative, unchanged."""
     child = {
         key: value
         for key, value in live.plak_child_source().items()
@@ -359,7 +359,7 @@ def session_log(env: live.Env, home: Path, repo: Path, session: str) -> list[dic
     )
     if result.returncode != 0:
         raise ScenarioFailure(
-            HARNESS, "plak session log --json failed: " + " ".join(result.stderr.split())[:200]
+            HARNESS, "plakd session log --json failed: " + " ".join(result.stderr.split())[:200]
         )
     records = []
     for line in result.stdout.splitlines():
@@ -476,7 +476,7 @@ class Features:
     def __init__(self, route: live.Route, env: live.Env):
         self.route, self.env = route, env
 
-    # One `plak run` on a private home whose root template lists `tools`.
+    # One `plakd run` on a private home whose root template lists `tools`.
     def run(
         self,
         name: str,
@@ -887,7 +887,7 @@ class Features:
         )
         if result.returncode != 0:
             raise ScenarioFailure(
-                HARNESS, f"plak secret set github failed (exit {result.returncode})"
+                HARNESS, f"plakd secret set github failed (exit {result.returncode})"
             )
 
     # --- hosted retrieval ---------------------------------------------------------------
@@ -1031,7 +1031,7 @@ class Features:
     # --- a 401 on a subscription side request ------------------------------------------
 
     def credential_generation(self) -> int:
-        """The stored login's generation, from `plak doctor`; a refresh bumps it."""
+        """The stored login's generation, from `plakd doctor`; a refresh bumps it."""
         child = {
             key: value
             for key, value in live.plak_child_source().items()
@@ -1047,7 +1047,7 @@ class Features:
             match = _GENERATION.search(line)
             if match and self.route.account in line.lower():
                 return int(match.group(1))
-        raise ScenarioFailure(HARNESS, f"plak doctor shows no {self.route.account} generation")
+        raise ScenarioFailure(HARNESS, f"plakd doctor shows no {self.route.account} generation")
 
     def _side_request_401(self, tool: str) -> tuple[str, list[dict], list[Path], Path, str, str]:
         plan = SIDE_REQUEST_401.get((self.route.account, tool))
@@ -1414,9 +1414,9 @@ PROFILE_ROLES = (
 
 def write_profile_home(home: Path, profile: str) -> None:
     """The home applying a built-in profile writes: `<profile>-<role>`
-    templates from `bin/plak/presets/<dir>` and the preset's `config.toml`
+    templates from `bin/plakd/presets/<dir>` and the preset's `config.toml`
     pointed at them."""
-    source = live.ROOT / "bin/plak/presets" / PROFILE_DIRS[profile]
+    source = live.ROOT / "bin/plakd/presets" / PROFILE_DIRS[profile]
     (home / "agents").mkdir(parents=True, exist_ok=True)
     home.chmod(0o700)
     for role, stem in PROFILE_ROLES:
@@ -1436,7 +1436,7 @@ def write_profile_home(home: Path, profile: str) -> None:
 
 
 def profile_root_flags(profile: str) -> list[str]:
-    path = live.ROOT / "bin/plak/presets" / PROFILE_DIRS[profile] / "agents/root-agent.toml"
+    path = live.ROOT / "bin/plakd/presets" / PROFILE_DIRS[profile] / "agents/root-agent.toml"
     root = tomllib.loads(path.read_text())
     flags = ["--account", root["account"], "--model", root["model"]]
     return flags + (["--effort", root["effort"]] if root.get("effort") else [])
@@ -1444,7 +1444,7 @@ def profile_root_flags(profile: str) -> list[str]:
 
 def profile_model(profile: str, role: str) -> str:
     stem = dict(PROFILE_ROLES)[role]
-    path = live.ROOT / "bin/plak/presets" / PROFILE_DIRS[profile] / "agents" / f"{stem}.toml"
+    path = live.ROOT / "bin/plakd/presets" / PROFILE_DIRS[profile] / "agents" / f"{stem}.toml"
     return tomllib.loads(path.read_text())["model"]
 
 

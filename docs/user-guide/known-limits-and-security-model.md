@@ -1,12 +1,12 @@
 # Known limits and security model
 
-Plak is an agent harness, not a sandbox. This page summarizes what it does and
+plakd is an agent harness, not a sandbox. This page summarizes what it does and
 does not protect; the [security specification](../spec/04-security-and-boundaries.md)
 is the authority.
 
 ## Process tools run with your host authority
 
-Shell and other process tools run as the user who started Plak, with that
+Shell and other process tools run as the user who started plakd, with that
 user's full authority, on Linux exactly as on macOS. A model-launched command
 can read every file you can read, write anywhere you can write, signal your
 processes, and use the network. There is no OS sandbox, no sandbox setting, and
@@ -18,7 +18,7 @@ files and captured process output outside it. That confinement does not extend t
 commands a process tool runs. Worker isolation for JavaScript and Python
 evaluators is not workspace isolation.
 
-If you need a real boundary around your machine, run Plak in a container or a
+If you need a real boundary around your machine, run plakd in a container or a
 VM.
 
 ## No approval gates
@@ -31,7 +31,7 @@ boundary, because a shell can still do anything you can.
 ## Credentials are plaintext files
 
 Subscription OAuth credentials live under `$XDG_STATE_HOME/plak/subscriptions/`
-and API key files under `<plak home>/secrets/`, as plaintext files, mode `0600`
+and API key files under `<plakd home>/secrets/`, as plaintext files, mode `0600`
 inside `0700` directories. There is no OS keychain integration, so any process
 running as you, including a process tool, can read them.
 
@@ -39,7 +39,7 @@ running as you, including a process tool, can read them.
 
 The `claude` route uses the Claude Code client ID and sends Messages requests
 identifying as Claude Code, including its client headers, system identity text,
-and billing attestation. Plak is not Claude Code or an official Anthropic
+and billing attestation. plakd is not Claude Code or an official Anthropic
 client. The separate `anthropic` API-key route does not use this OAuth
 identity.
 
@@ -56,7 +56,7 @@ this.
 
 A session keeps at most 4,096 history segments, and each short prompt adds
 about three, so a long session of small turns reaches the limit with very few
-tokens in use. With auto compaction on, Plak compacts once the session holds
+tokens in use. With auto compaction on, plakd compacts once the session holds
 3,072 segments, even far below the token trigger. Near the limit (4,032
 segments) a new prompt is refused with a context-capacity error. Run
 a wire compact operation to compact this session, fork then compact to keep
@@ -78,12 +78,12 @@ between. Grok and Claude summaries kept those details in the same tests. When
 earlier values matter in a long session, write them to a file the later steps
 read, or use a model that keeps them.
 
-## Plak's own git steps
+## plakd's own git steps
 
-When Plak mints, seals or adopts a copy, it runs `git` with inherited `GIT_*`
+When plakd mints, seals or adopts a copy, it runs `git` with inherited `GIT_*`
 steering variables removed, hooks and fsmonitor disabled, external diff drivers and
 textconv ignored, and scratch files private to you. This keeps repository
-configuration from running code inside Plak's own steps; it does not constrain
+configuration from running code inside plakd's own steps; it does not constrain
 what a model-launched shell does.
 
 ## Write reads the file before it overwrites it

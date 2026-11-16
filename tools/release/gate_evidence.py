@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = ("tests/live/STATUS.md", "CHANGELOG.md", "docs/spec/**", "docs/user-guide/**")
 # Allowlisted by pattern but read by a gate; a change to one invalidates.
 EXCLUDED = {
-    "docs/spec/07-config-reference.md": "bin/plak product_config tests compare the config key table and template schema with it",
+    "docs/spec/07-config-reference.md": "bin/plakd product_config tests compare the config key table and template schema with it",
     "docs/user-guide/integrating.md": "the tooling reference-client contract executes its wire transcript against a real host",
 }
 # Packaged into a published crate (`readme.workspace`) and read by no test.
@@ -49,14 +49,14 @@ SELF = ("tools/release/gate_evidence.py", "tests/tooling/test_gate_evidence.py")
 # the evidence rule treats as inert. Keys are exact matched texts; an entry
 # whose text no longer occurs is stale and fails.
 REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
-    "bin/plak/src/carry/history/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
-    "bin/plak/src/cli/tests.rs": (frozenset({'"docs"'}), "an MCP server id argument fixture"),
-    "bin/plak/src/cli_output/tests.rs": (frozenset({'"STATUS"'}), "a table header"),
-    "bin/plak/src/product_config/mcp_edit/tests.rs": (
+    "bin/plakd/src/carry/history/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
+    "bin/plakd/src/cli/tests.rs": (frozenset({'"docs"'}), "an MCP server id argument fixture"),
+    "bin/plakd/src/cli_output/tests.rs": (frozenset({'"STATUS"'}), "a table header"),
+    "bin/plakd/src/product_config/mcp_edit/tests.rs": (
         frozenset({'"docs"'}),
         "an MCP server id fixture",
     ),
-    "bin/plak/src/product_config/tool_sections_tests.rs": (
+    "bin/plakd/src/product_config/tool_sections_tests.rs": (
         frozenset({'"docs"'}),
         "an MCP server id fixture",
     ),
@@ -82,7 +82,7 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
         frozenset({"README.md"}),
         "a tool-call argument fixture",
     ),
-    "bin/plak/src/refusal_text/tests.rs": (
+    "bin/plakd/src/refusal_text/tests.rs": (
         frozenset({'"docs"'}),
         "an MCP server id fixture; these refusal scenarios read no documentation",
     ),
@@ -114,7 +114,7 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
     "tests/live/lookup_retry.py": (frozenset({"README.md"}), "a scenario repository file"),
     "tests/live/soak.py": (frozenset({'"docs"'}), "a soak task name"),
     "tests/tooling/test_api_model_census.py": (frozenset({"*.md"}), "census fixture pages"),
-    "tests/tooling/test_build_plak.py": (
+    "tests/tooling/test_build_plakd.py": (
         frozenset({'"docs"'}),
         "a temporary parent for the copied reference home, not spec or the user guide",
     ),
@@ -159,9 +159,9 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
 # Gate readers of an excluded path: the exact path each one reads.
 EXCLUDED_READERS = {
     "tests/tooling/test_host_client.py": "docs/user-guide/integrating.md",
-    "bin/plak/src/product_config/tests.rs": "docs/spec/07-config-reference.md",
-    "bin/plak/src/host/console/definitions/settings.rs": "docs/spec/07-config-reference.md",
-    "bin/plak/src/host/console/limits.rs": "docs/spec/07-config-reference.md",
+    "bin/plakd/src/product_config/tests.rs": "docs/spec/07-config-reference.md",
+    "bin/plakd/src/host/console/definitions/settings.rs": "docs/spec/07-config-reference.md",
+    "bin/plakd/src/host/console/limits.rs": "docs/spec/07-config-reference.md",
 }
 # Allowlisted paths, their path components and Markdown globs. Bare component
 # literals catch path joins such as `.join("docs").join("user-guide")` and

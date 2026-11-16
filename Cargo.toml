@@ -1,5 +1,5 @@
 [workspace]
-default-members = ["bin/plak"]
+default-members = ["bin/plakd"]
 exclude = [
     ".plak",
     "vendor/monty-typeshed",
@@ -7,7 +7,7 @@ exclude = [
     "tests/fixtures/facade-consumer",
 ]
 members = [
-    "bin/plak",
+    "bin/plakd",
     "crates/hosting/host-protocol",
     "crates/hosting/plakd-wire-types",
     "crates/hosting/hosted",
@@ -214,7 +214,7 @@ plakous-auth = ["plakous-model"]
 # The one image sniffer is portable and runtime-free, so the tool contracts
 # re-export it rather than own a second one.
 plakous-tools = ["plakous-image"]
-plak = [
+plakd = [
     "plakd-wire-types",
     "plakous-host-protocol",
     "plakous-hosted",
@@ -261,7 +261,7 @@ test = ["repository-only"]
 vendor = ["published-internal"]
 
 [workspace.metadata.plakous.production-dependencies]
-plak = [
+plakd = [
     "plakd-wire-types",
     "base64",
     # `web` only, with futures-util, http-body-util, hyper, hyper-util, ring
@@ -289,7 +289,7 @@ plak = [
     "ring",
     "rusqlite",
     "rustix",
-    # `plak wire schema`: the extension's JSON Schema.
+    # `plakd wire schema`: the extension's JSON Schema.
     "schemars",
     "serde",
     "serde_json",
@@ -354,7 +354,7 @@ plakous-hosted = [
 ]
 
 [workspace.metadata.plakous.facade-features]
-plak = ["sessions-sqlite"]
+plakd = ["sessions-sqlite"]
 plakous-recursive-subagents = ["store"]
 plakous-hosted = ["sessions-sqlite"]
 
@@ -367,7 +367,7 @@ rust_2018_idioms = { level = "deny", priority = -1 }
 unsafe_code = "forbid"
 unused_lifetimes = "deny"
 unused_qualifications = "warn"
-# `plak/test-hooks` is repository-only: the published `plak` manifest drops the
+# `plakd/test-hooks` is repository-only: the published `plakd` manifest drops the
 # feature (tools/release/publish_shape.py), and its cfg sites still name it.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("test-hooks"))'] }
 
@@ -426,7 +426,7 @@ lto = false
 
 # Placement debt is capped at the current inventory; reductions must lower ceilings.
 
-[workspace.metadata.plakous.cfg.plak]
+[workspace.metadata.plakous.cfg.plakd]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
 env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs", "src/commands/doctor.rs", "src/test_hooks.rs"]
 feature-ceiling = 116

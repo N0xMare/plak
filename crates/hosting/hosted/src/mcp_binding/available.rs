@@ -596,7 +596,7 @@ pub fn mcp_login_status(
         .map_err(|error| crate::CliFailure::new(format!("mcp server {server}: {error}")))
 }
 
-/// The definition `plak mcp login` and `logout` run against: one table with
+/// The definition `plakd mcp login` and `logout` run against: one table with
 /// `auth = "oauth"`, whose login need not exist yet. A configured client
 /// secret is resolved only when authentication needs it, never while
 /// building the definition for a local logout.
@@ -1016,9 +1016,9 @@ fn oauth_secret_resolver(
 /// Which of the product's secret shelves a host-side spawn reads.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Shelf {
-    /// The host's named secrets (`plak secret set`).
+    /// The host's named secrets (`plakd secret set`).
     Named,
-    /// This machine's runner secrets (`plak runner secret set`).
+    /// This machine's runner secrets (`plakd runner secret set`).
     Runner,
 }
 

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// The installed `plak` a reload would start, and the state key it answered;
+/// The installed `plakd` a reload would start, and the state key it answered;
 /// it crosses from the session's host to the face that asked (spec 02 §5.1).
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

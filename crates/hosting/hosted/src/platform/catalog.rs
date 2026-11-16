@@ -26,7 +26,7 @@ pub enum ApiModelStatus {
 }
 
 impl ApiModelStatus {
-    /// The `plak models` status word.
+    /// The `plakd models` status word.
     #[must_use]
     pub const fn label(&self) -> &'static str {
         match self {

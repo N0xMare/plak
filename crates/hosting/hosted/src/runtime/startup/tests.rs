@@ -388,7 +388,7 @@ fn exact_native_refresh_preserves_semantics_and_account_with_monotonic_generatio
     assert!(
         !old.refusal(&fresh, "Codex", "codex")
             .message()
-            .contains("plak login")
+            .contains("plakd login")
     );
     fresh.selection = old.selection;
     fresh.effective = effective(b"changed model semantics");
@@ -513,7 +513,7 @@ fn assert_remedy_stated_once(failure: &plakous_host_protocol::status::HostFailur
         "supply",
         "quit",
         "log in",
-        "plak login",
+        "plakd login",
         "address",
         "/rebind",
         "/attach",
@@ -583,7 +583,7 @@ fn a_detached_attach_failure_states_its_remedy_once() {
     let [diagnostic, repair] = attach_failure_notices(&held, "claude");
     assert!(matches!(diagnostic, TranscriptRow::Notice(notice) if notice.remedy.is_none()));
     assert!(matches!(repair, TranscriptRow::Notice(notice)
-        if notice.text.contains("quit that plak") && notice.text.contains("plak tree release --force")));
+        if notice.text.contains("quit that plak") && notice.text.contains("plakd tree release --force")));
 }
 
 #[test]
@@ -1089,7 +1089,9 @@ fn api_target_runtime_builds_run_inside_the_host_executor() {
 #[test]
 fn only_a_held_lease_refusal_names_its_holder() {
     let holder: LeaseHolder = Arc::new(|_| {
-        Some("tree_hosted_elsewhere: session s is open in another plak process (pid 7 on m)".into())
+        Some(
+            "tree_hosted_elsewhere: session s is open in another plakd process (pid 7 on m)".into(),
+        )
     });
     let head: plakous::sessions::SessionLocator = "00000000-0000-4000-8000-0000000000a1/00000000-0000-4000-8000-0000000000b1/00000000-0000-4000-8000-0000000000c1"
         .parse()

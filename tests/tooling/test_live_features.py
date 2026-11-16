@@ -265,16 +265,16 @@ class CaptureRootTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "checkout"
-            (root / "bin" / "plak").mkdir(parents=True)
+            (root / "bin" / "plakd").mkdir(parents=True)
             ours, theirs = Path(tmp) / "ours", Path(tmp) / "theirs"
-            ours.write_bytes(b"\0" + str(root.resolve() / "bin" / "plak").encode() + b"\0")
-            theirs.write_bytes(b"\0/elsewhere/bin/plak\0")
+            ours.write_bytes(b"\0" + str(root.resolve() / "bin" / "plakd").encode() + b"\0")
+            theirs.write_bytes(b"\0/elsewhere/bin/plakd\0")
             self.assertIsNone(live.capture_root_mismatch(ours, root))
             self.assertIn("not built from this checkout", live.capture_root_mismatch(theirs, root))
             alias = Path(tmp) / "alias"
             alias.symlink_to(root)
             via_link = Path(tmp) / "via-link"
-            via_link.write_bytes(b"\0" + str(alias / "bin" / "plak").encode() + b"\0")
+            via_link.write_bytes(b"\0" + str(alias / "bin" / "plakd").encode() + b"\0")
             self.assertIsNone(live.capture_root_mismatch(via_link, root))
 
     def test_symlinked_ancestors_are_resolved_but_a_symlinked_leaf_is_refused(self):

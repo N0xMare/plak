@@ -1,10 +1,10 @@
-# Plak / Plakous
+# plakd / Plakous
 
 This monorepo is **Plakous**, an embeddable single-agent multi-provider harness
-library, and **Plak**, the host server and operator/batch CLI that consumes only the public `plakous`
+library, and **plakd**, the host server and operator/batch CLI that consumes only the public `plakous`
 facade and the host-layer crates above it. Plakous owns the loop, providers,
-profiles, auth, and admit/revalidate; Plak owns product policy and wire UX. There is no second
-runtime in Plak and no multi-agent topology in Plakous L0 — L0 is exactly
+profiles, auth, and admit/revalidate; plakd owns product policy and wire UX. There is no second
+runtime in plakd and no multi-agent topology in Plakous L0 — L0 is exactly
 `plakous-model`, `plakous-tools`, `plakous-agent` and the `plakous` facade.
 The workspace version is 0.0.3. Supported and published-internal packages are
 publishable to crates.io as one exact cohort and repository-only packages are
@@ -12,7 +12,7 @@ not (spec 06 §1); uploading is a maintainer act, and a source checkout is a
 complete build.
 
 Host/web serving is supported in the default product. The public stdio bridge
-owns discovery and explicitly opted-in local startup. Bare `plak` prints help
+owns discovery and explicitly opted-in local startup. Bare `plakd` prints help
 without opening a session or starting a host; no public application client or
 terminal resume launch is shipped. Product wire
 DTOs belong in `plakd-wire-types`; handlers, credential resolution, settings
@@ -24,7 +24,7 @@ not depend on terminal adapters or their tests.
 
 `docs/spec/` is the authority for current behavior; `docs/user-guide/` is the
 authority for usage. Read `docs/spec/00-overview.md` first, then the chapter
-that owns what you are changing: `01` Plakous, `02` Plak, `03` orchestration,
+that owns what you are changing: `01` Plakous, `02` plakd, `03` orchestration,
 `04` security and boundaries, `05` testing and evidence, `06` build and support
 surface, `07` configuration reference.
 
@@ -136,7 +136,7 @@ There is no CI: the only workflow,
 `.github/workflows/release.yml`, builds, attests and releases a pushed `v*` tag, and a manual run on `main` is the pre-tag dry run that releases nothing
 (`tools/release/package-release.sh`, `install.sh`; spec 06 §6.6).
 
-Transport faults for smoke and soak runs: a `test-hooks` build of `plak` reads
+Transport faults for smoke and soak runs: a `test-hooks` build of `plakd` reads
 `PLAK_TEST_FAULTS`, e.g.
 `host=api.x.ai,path=/v1/responses,nth=2,fault=429,retry-after=5;host=openrouter.ai,fault=stall,seconds=40,after-events=3`,
 and injects statuses, connect failures, and mid-stream resets, clean EOFs and

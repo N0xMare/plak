@@ -60,7 +60,7 @@ LEGACY_BUILD_PROFILE_CONTRACTS = {
     "xai-platform": ("supported-public", "plakous", ["--lib"], ["xai"]),
     "openrouter": ("supported-public", "plakous", ["--lib"], ["openrouter"]),
     "anthropic": ("supported-public", "plakous", ["--lib"], ["anthropic"]),
-    "plak": ("supported-public", "plak", ["--bin", "plak"], []),
+    "plakd": ("supported-public", "plakd", ["--bin", "plakd"], []),
     "all-providers": (
         "supported-public",
         "plakous",
@@ -90,7 +90,7 @@ V5_BUILD_PROFILE_CONTRACTS = {
         ["codex", "grok", "claude"],
     ),
     "sessions-sqlite": ("supported-public", "plakous", ["--lib"], ["sessions-sqlite"]),
-    "plak": ("supported-public", "plak", ["--bin", "plak"], []),
+    "plakd": ("supported-public", "plakd", ["--bin", "plakd"], []),
     "agent-wrapper": ("supported-public", "plakous-agent", ["--lib"], []),
     "tools": ("supported-public", "plakous-tools", ["--lib"], []),
     "openai-platform": (
@@ -142,8 +142,8 @@ V5_BUILD_PROFILE_CONTRACTS = {
         [],
     ),
     "messages": ("internal-topology-baseline", "plakous-messages", ["--lib"], []),
-    "plak-app": ("product-topology-baseline", "plak-app", ["--lib"], []),
-    "plak-lib": ("product-topology-baseline", "plak", ["--lib"], []),
+    "plakd-app": ("product-topology-baseline", "plakd-app", ["--lib"], []),
+    "plakd-lib": ("product-topology-baseline", "plakd", ["--lib"], []),
     "paid-platform": (
         "repository-only-topology-baseline",
         "paid-platform",
@@ -160,7 +160,7 @@ V6_BUILD_PROFILE_CONTRACTS = {
         ["codex", "grok", "claude"],
     ),
     "sessions-sqlite": ("supported-public", "plakous", ["--lib"], ["sessions-sqlite"]),
-    "plak": ("supported-public", "plak", ["--bin", "plak"], []),
+    "plakd": ("supported-public", "plakd", ["--bin", "plakd"], []),
     "agent": ("supported-public", "plakous-agent", ["--lib"], []),
     "tools": ("supported-public", "plakous-tools", ["--lib"], []),
     "openai-platform": (
@@ -236,8 +236,8 @@ V6_BUILD_PROFILE_CONTRACTS = {
         ["--lib"],
         [],
     ),
-    "plak-app": ("product-topology-baseline", "plak-app", ["--lib"], []),
-    "plak-lib": ("product-topology-baseline", "plak", ["--lib"], []),
+    "plakd-app": ("product-topology-baseline", "plakd-app", ["--lib"], []),
+    "plakd-lib": ("product-topology-baseline", "plakd", ["--lib"], []),
     "paid-platform": (
         "repository-only-topology-baseline",
         "paid-platform",
@@ -253,7 +253,7 @@ V7_BUILD_PROFILE_CONTRACTS = {
 V8_BUILD_PROFILE_CONTRACTS = {
     profile: contract
     for profile, contract in V7_BUILD_PROFILE_CONTRACTS.items()
-    if profile != "plak-app"
+    if profile != "plakd-app"
 }
 V9_BUILD_PROFILE_CONTRACTS = {
     profile: contract
@@ -832,7 +832,7 @@ def expected_current_build_command(row: dict[str, Any], metadata: dict[str, Any]
     target_selection = field(cargo, "target_selection")
     if not isinstance(target_selection, list) or target_selection not in (
         ["--lib"],
-        ["--bin", "plak"],
+        ["--bin", "plakd"],
     ):
         fail(f"{schema} selected target is invalid")
     features = field(cargo, "requested_features")

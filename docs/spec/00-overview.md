@@ -1,4 +1,4 @@
-# Plakous and Plak: system overview
+# Plakous and plakd: system overview
 
 Plakous is an embeddable, multi-provider, **single-agent** harness library
 written in Rust. It runs one capable agent through one provider-neutral control
@@ -7,7 +7,7 @@ agent loop, canonical conversation, tools and effects, harness-plan
 compilation, provider integrations, authentication, admission and
 revalidation, durability, and semantic session recovery.
 
-Plak is the product built on it: a host server, operator/batch CLI, and long-lived
+plakd is the product built on it: a host server, operator/batch CLI, and long-lived
 JSONL transport that composes Plakous agents into a workspace-shaped coding tool
 with configuration, queues, presentation, and multi-agent topology.
 
@@ -28,7 +28,7 @@ chapter.
 Except for the product-owned `plakd-wire-types`, every other `crates/**`
 package is a Plakous library in one of two positions.
 **Below the facade** — transports, kernels, providers, the store, the engines,
-the harness packs and prompts — composed behind the facade. Plak and the
+the harness packs and prompts -- composed behind the facade. plakd and the
 host-layer libraries reach these through the facade, apart from the one
 recorded exception below; direct package nameability
 does not confer a support promise. **Above the facade** — `plakous-host-protocol`,
@@ -42,7 +42,7 @@ L0 complete-workflow surface.
 `plakous-host-protocol` for serialized product extension vocabulary. It owns
 no product handlers, configuration, persistence or runtime authority.
 
-The product is one binary crate, `bin/plak`. It composes the crates above the
+The product is one binary crate, `bin/plakd`. It composes the crates above the
 facade and owns product policy and execution; its serialized extension
 vocabulary is shared through `plakd-wire-types`.
 
@@ -54,11 +54,11 @@ consume the same product-owned catalog facts.
 | --- | --- | --- |
 | Plakous L0 (`plakous-model`, `plakous-tools`, `plakous-agent`, `plakous`) | the loop, canonical history, checkpoints, tools and effects, profiles and resolved plans, providers and dialects, credentials, admission, revalidation, durable store and its change feed, recovery | UI, product configuration and defaults, queues, workflow, live-test procedure, topology |
 | Plakous above the facade (`plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, `plakous-hosted`) | the neutral host wire vocabulary and its typed views, agent workspaces over `git`/`jj`, the durable agent tree and its store, and one hosted session -- build, open, resume, the host loop, the queue and the session intents, the one change-feed projector and its views, children, catalog, and binding | product configuration, the CLI grammar, application clients, the homes, and the product and telemetry stores |
-| Plak (`bin/plak`) | operator CLI, host and JSONL transport, product configuration and defaults, the Plak home, the product and telemetry stores, agent templates and the roster, account admission for children, the tree's presentation and its store location, live-test procedure | the agent loop, canonical history, provider dispatch, credentials, checkpoint authority, the hosted session loop |
+| plakd (`bin/plakd`) | operator CLI, host and JSONL transport, product configuration and defaults, the plakd home, the product and telemetry stores, agent templates and the roster, account admission for children, the tree's presentation and its store location, live-test procedure | the agent loop, canonical history, provider dispatch, credentials, checkpoint authority, the hosted session loop |
 
-Plak resolves its defaults, makes them visible, and passes a **complete**
+plakd resolves its defaults, makes them visible, and passes a **complete**
 configuration into the facade. Product defaults are never resume or
-revalidation authority. Plak never calls a provider directly, never keeps a
+revalidation authority. plakd never calls a provider directly, never keeps a
 second inference loop, and never reconstructs canonical history from displayed
 text. An account, model, or route change is a validated construction input that
 creates an explicit rebind or fork boundary, not an in-place mutation.
@@ -76,7 +76,7 @@ to crates.io as one exact cohort; the repository-only packages set
 `publish = false` (chapter 06 §1).
 
 - **Supported:** `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`,
-  `plak`. Each has an exact inventory pinned by a compile fixture or process
+  `plakd`. Each has an exact inventory pinned by a compile fixture or process
   test, not by whatever happens to be `pub`.
 - **Published internal:** the common, engine, protocol, provider, store,
   harness, host, and vendor crates listed in the crate map below.
@@ -106,7 +106,7 @@ Every workspace member declares its architectural `layer` and support class in
 `[package.metadata.plakous]`. The fuzz crate and `vendor/monty-typeshed` are
 not workspace members and carry no such table. Libraries are grouped by
 responsibility under `crates/`; the complete-workflow crate is
-`crates/plakous`, and the product is `bin/plak`. Directory groups do not
+`crates/plakous`, and the product is `bin/plakd`. Directory groups do not
 authorize dependency edges. Chapter 06 §3 owns the legal dependencies, support
 classes and directory policy.
 
@@ -149,7 +149,7 @@ classes and directory policy.
 | `plakous-recursive-subagents` | `crates/orchestration/recursive-subagents` | `host` | One durable agent tree per root session, its epoch, its tools and their model-visible text, and its hub |
 | `plakous-recursive-subagents-store` | `crates/orchestration/recursive-subagents-store` | `host` | That tree's durable store, over its own `subagents.sqlite3` |
 | `plakous-hosted` | `crates/hosting/hosted` | `host` | One hosted session: build, open and resume, the host loop and the detached shell loop, the one-shot drive, the queue and session intents, the change-feed projector, child binding, the ready catalog, and the session record and its ports |
-| `plak` | `bin/plak` | `bin` | The product: CLI grammar and the `plak` binary, the JSONL stdio transport, the Plak home, product configuration, the product and telemetry stores, and the composition root |
+| `plakd` | `bin/plakd` | `bin` | The product: CLI grammar and the `plakd` binary, the JSONL stdio transport, the plakd home, product configuration, the product and telemetry stores, and the composition root |
 
 `plakous-js-host` is not a package:
 it is a `[[bin]]` of `plakous-js-runtime`, and it is the rquickjs worker for Code Mode and js-ptc.
@@ -181,7 +181,7 @@ agent, application, construction, sessions, model, tools, profiles, `VERSION` �
 | --- | --- |
 | `openai`, `xai`, `anthropic`, `openrouter` | Re-export that provider crate as `plakous::<name>`. Provider internals, not a presentation surface |
 | `auth` | `plakous::auth` secret, credential-store, OAuth, pin, and account-binding foundations; enables no provider |
-| `web-fetch` | The independent Plak-run `fetch_url` HTTP tool and HTML-to-Markdown converter; enables no provider |
+| `web-fetch` | The independent plakd-run `fetch_url` HTTP tool and HTML-to-Markdown converter; enables no provider |
 | `composition` | The local composition attachment seam in `plakous::agent` (`LocalCompositionAttachment`, `attach_local_composition`): Code Mode and JavaScript through the engine-free cell client and explicit worker artifacts. It reaches no credential, HTTP, subscription, or interpreter machinery |
 | `composition-python` | Explicitly admits Python PTC and Python SDK profiles through the same cell client; implies `composition`, never an interpreter |
 | `codex`, `grok`, `claude` | Each selects exactly its native subscription implementation, without a provider re-export or evaluator. Subscription vocabulary remains readable without any route |
@@ -209,11 +209,11 @@ directly. Older native state remains untouched for its matching build.
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **28** (adds operation-bound runtime retirement and invisible semantic-install batches, with exact operation/session membership, immutable captured terminal sets in `runtime_move_members`, and imported-row inventories) |
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **38** (context codec **4** adds semantic imported-compaction selections and recorded strategy/count facts, with destination-native identities and no carried admission/cache grants) |
-| Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **38** (adds immutable semantic move seeds and permanent identity claims; terminal state is process-local) |
-| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **11** (adds immutable semantic move bases and imported custody floors) |
-| Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **22**, disposable, never recovery authority |
-| Session export document | Plak | version **13** (closed portable-session and reserved host-upgrade kinds), imports **13** and **12**; 0.0.3 v11 exports cannot be carried directly |
-| Host-upgrade ownership receipt | Plak | version **1**, outside state keys; operation identities, export digests, source archival intent, placement and per-successor Ready/abandoned disposition only |
+| Product store (`product.sqlite3`): intents and feed-derived views | plakd | schema **38** (adds immutable semantic move seeds and permanent identity claims; terminal state is process-local) |
+| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), plakd (location) | schema **11** (adds immutable semantic move bases and imported custody floors) |
+| Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | plakd | schema **22**, disposable, never recovery authority |
+| Session export document | plakd | version **13** (closed portable-session and reserved host-upgrade kinds), imports **13** and **12**; 0.0.3 v11 exports cannot be carried directly |
+| Host-upgrade ownership receipt | plakd | version **1**, outside state keys; operation identities, export digests, source archival intent, placement and per-successor Ready/abandoned disposition only |
 
 Tree schema 10 adds the node's line, epoch and runner placement, successor
 epochs, fork provenance, runner ancestors and the tree custody record (chapter
@@ -228,7 +228,7 @@ Submitted intents own exact child outputs; attempt outputs are derived on load
 and submit-result replay receipts keep a digest summary. Provisional wait
 receipts retain the exact views they returned.
 Product schema 37 and exports v12 and v13 retain closed notice-remedy codes
-and typed targets. Their frontend command spelling is rendered only by Plak.
+and typed targets. Their frontend command spelling is rendered only by plakd.
 
 The canonical `seal_outcome` payload includes the durable
 `history_left_base` boolean used by replayed result-mail notices. Builds open
@@ -281,7 +281,7 @@ supported version, and nothing is migrated. The session export document is the
 first cross-build exception: a build imports documents of its own version and
 of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
-per-component revision constants inside the checkpoint graph are frozen. Plak
+per-component revision constants inside the checkpoint graph are frozen. plakd
 keeps each build's stores in a state directory named by all four versions
 (chapter 02 §2.5), currently `r28.e38.p38.t11`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
@@ -325,7 +325,7 @@ Two directories are tracked, and together they are the documentation:
     lifecycle, kernel and checkpoint authority, store and recovery, providers
     and admission, auth, tools, Code Mode, compaction, telemetry, facade,
     errors.
-  - `02-plak-product.md` — the product: the Plak home and its stores, the CLI
+  - `02-plak-product.md` -- the product: the plakd home and its stores, the CLI
     grammar and exit codes, the JSONL host protocol, external client boundaries, prompts and the
     coding packs, usage, doctor, and the login surfaces.
   - `03-orchestration.md` — the agent tree: templates and roster, grants and
@@ -340,10 +340,10 @@ Two directories are tracked, and together they are the documentation:
   - `06-build-and-support-surface.md` — support classes and inventories, the
     crate map's rules, features, building and installing, dependency policy,
     and the maintainer surface.
-  - `07-config-reference.md` — every key `plak` reads from disk, with its type,
+  - `07-config-reference.md` -- every key `plakd` reads from disk, with its type,
     default, constraint, and meaning, plus the shipped presets.
 - **`docs/user-guide/`** — operator-facing material: installing and running
-  Plak, logging in, configuring agents and templates, the host and CLI/
+  plakd, logging in, configuring agents and templates, the host and CLI/
   JSONL surfaces.
 
 Decision history is not tracked in this repository. This specification, not any

@@ -205,7 +205,7 @@ class AuditTests(unittest.TestCase):
         )
 
     def test_the_excluded_reader_reads_exactly_its_excluded_path(self):
-        reader = "bin/plak/src/product_config/tests.rs"
+        reader = "bin/plakd/src/product_config/tests.rs"
         with mock.patch.dict(gate_evidence.REVIEWED_REFERENCES, {}, clear=True):
             self.assertEqual(
                 self.audit({reader: 'join("../../docs/spec/07-config-reference.md")\n'}), []

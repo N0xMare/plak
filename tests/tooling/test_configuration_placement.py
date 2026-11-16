@@ -72,8 +72,8 @@ class ConfigurationPlacementTests(unittest.TestCase):
 
     def test_product_seams_only_at_composition_root(self):
         source = '#[cfg(feature = "test-hooks")] fn install() {}'
-        self.assertFalse(self.debt(source, "src/lib.rs", "plak")["test-seam"])
-        self.assertEqual(len(self.debt(source, package="plak")["test-seam"]), 1)
+        self.assertFalse(self.debt(source, "src/lib.rs", "plakd")["test-seam"])
+        self.assertEqual(len(self.debt(source, package="plakd")["test-seam"]), 1)
 
     def test_registry_and_explicit_feature_sites(self):
         for entry in ("x::CAPABILITY", "CAPABILITY"):

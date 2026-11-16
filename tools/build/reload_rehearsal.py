@@ -43,22 +43,22 @@ USAGE = (
 CARRIED_LINE = re.compile(
     r"^session ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) linked from .+$"
 )
-# `plak session import` prints one of these stderr lines and exits 1 when
+# `plakd session import` prints one of these stderr lines and exits 1 when
 # attached_host_config cannot resolve the recorded route in a disposable home,
 # which holds no credentials and no native subscription state: an API route
 # finds an empty catalog, and a native subscription route stops at its missing
 # compatibility acceptance. Only these exact lines are the credential case; any
 # other import failure still refuses.
-IMPORT_CREDENTIAL_REFUSAL = "plak: session has no exact effort binding"
+IMPORT_CREDENTIAL_REFUSAL = "plakd: session has no exact effort binding"
 IMPORT_NATIVE_ACCEPTANCE_REFUSAL = re.compile(
-    r"^plak: resolve (claude|codex|grok)/[A-Za-z0-9][A-Za-z0-9._-]*: "
+    r"^plakd: resolve (claude|codex|grok)/[A-Za-z0-9][A-Za-z0-9._-]*: "
     r"exact native compatibility acceptance is required"
-    r" \u2014 check `plak login \1` and `plak models \1`$"
+    r" \u2014 check `plakd login \1` and `plakd models \1`$"
 )
 WAIT_IDLE_INTERVAL = 15.0
 IDLE_EXPORT_REFUSALS = (
     "a turn is running or parked with an unresolved operation; let it finish or run "
-    "`plak session recover` first",
+    "`plakd session recover` first",
     "the runtime advanced past the session record; resume the session once first",
     "background process outcomes are not settled; resume the session and send a prompt "
     "to deliver their notices before exporting",
@@ -356,7 +356,7 @@ def resolve_installed(explicit):
         if not candidate.is_absolute():
             candidate = Path.cwd() / candidate
     else:
-        found = shutil.which("plak")
+        found = shutil.which("plakd")
         if not found:
             return None
         candidate = Path(found)
@@ -473,7 +473,7 @@ def run_progress_command(argv, env, cwd, timeout, on_stdout):
 def idle_rehearsal_refusal(result):
     if (
         result.returncode != 1
-        or (result.stderr or "").strip() != "plak: offline reload rehearsal refused"
+        or (result.stderr or "").strip() != "plakd: offline reload rehearsal refused"
     ):
         return False
     lines = (result.stdout or "").splitlines()
@@ -642,7 +642,7 @@ def idle_export_refusal(result, session_id):
     if result.returncode != 1:
         return False
     lines = [line.strip() for line in (result.stderr or "").splitlines() if line.strip()]
-    prefix = f"plak: session {session_id} cannot be exported: "
+    prefix = f"plakd: session {session_id} cannot be exported: "
     return any(lines == [prefix + reason] for reason in IDLE_EXPORT_REFUSALS)
 
 
@@ -808,9 +808,9 @@ def rehearse(home, options):
     session_id = options.session_id
     for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, terminate)
-    # Same offline maintainer build as `build-plak.sh --maintainer`, plus --offline.
+    # Same offline maintainer build as `build-plakd.sh --maintainer`, plus --offline.
     subprocess.run(
-        [str(ROOT / "tools/build/build-plak.sh"), "--maintainer", "--offline"],
+        [str(ROOT / "tools/build/build-plakd.sh"), "--maintainer", "--offline"],
         cwd=ROOT,
         check=True,
     )
@@ -819,20 +819,20 @@ def rehearse(home, options):
         target = ROOT / target
     output = target / os.environ.get("CARGO_BUILD_TARGET", "") / "maintainer"
     with tempfile.TemporaryDirectory(
-        prefix="plak-reload-rehearsal-", dir=temporary_parent(home)
+        prefix="plakd-reload-rehearsal-", dir=temporary_parent(home)
     ) as directory:
         temporary = Path(directory).resolve()
         if temporary == home or home in temporary.parents:
             raise ValueError("disposable_home")
         stage = temporary / "stage"
         stage.mkdir(mode=0o700)
-        for name in ("plak", "plakous-js-host", "plakous-py-host"):
+        for name in ("plakd", "plakous-js-host", "plakous-py-host"):
             shutil.copyfile(output / name, stage / name)
             (stage / name).chmod(0o755)
         empty = temporary / "empty"
         empty.mkdir(mode=0o700)
         version = subprocess.run(
-            [str(stage / "plak"), "version"],
+            [str(stage / "plakd"), "version"],
             env=run_environment(empty),
             cwd=ROOT,
             check=True,
@@ -842,7 +842,7 @@ def rehearse(home, options):
         )
         print("staged_build=" + version.stdout.strip(), flush=True)
         probe = subprocess.run(
-            [str(stage / "plak"), "version", "--reload-probe"],
+            [str(stage / "plakd"), "version", "--reload-probe"],
             env=run_environment(empty),
             cwd=ROOT,
             check=True,
@@ -856,7 +856,7 @@ def rehearse(home, options):
             return rehearse_carry(
                 home,
                 temporary,
-                stage / "plak",
+                stage / "plakd",
                 session_id,
                 source_key,
                 key,
@@ -871,7 +871,7 @@ def rehearse(home, options):
             home,
             backup,
             key,
-            stage / "plak",
+            stage / "plakd",
             session_id,
             options.wait_idle,
             options.timeout,
@@ -879,7 +879,7 @@ def rehearse(home, options):
         )
         if status != 0:
             return status
-        return reopen_verdict(home, key, stage / "plak", session_id)
+        return reopen_verdict(home, key, stage / "plakd", session_id)
 
 
 if __name__ == "__main__":

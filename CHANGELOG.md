@@ -16,6 +16,11 @@ for one version bump, without native protocol compatibility.
   profile-default remedy to select materialized root and working-set templates
   instead of the nonexistent `root.profile` setting.
 
+- Rename the public host daemon, operator package and executable to `plakd`.
+  Keep `.plak`, `PLAK_`, credential/state locations and `~/.local/lib/plak`;
+  new images and generated user services use the daemon name. The old public
+  `plak` package is retired without a command shim or registry upload.
+
 - Fresh provider review dated 2026-11-15 on all seven surfaces. Subscription
   expiries (Codex, Grok, Claude) and API review-due dates (OpenAI Platform,
   Anthropic API, xAI Platform, OpenRouter Chat) are all 2027-02-13T00:00:00Z.
@@ -171,7 +176,7 @@ for one version bump, without native protocol compatibility.
 - Add an integration map and a stdlib Python socket client checked against
   a real offline host in the tooling gate.
 
-- Publish `plak wire schema` as a supported command and attach target-specific
+- Publish `plakd wire schema` as a supported command and attach target-specific
   JSON Schemas to releases.
 
 - Drain same-key host upgrades at runtime step boundaries with `--drain`
@@ -190,12 +195,12 @@ for one version bump, without native protocol compatibility.
   and revokes on coordinator drop without occupying command ingress. It does
   not yet enable live upgrade or change session and runner custody.
 
-- Add `plak runner connect --stdio --binary <id>` to select and verify an
+- Add `plakd runner connect --stdio --binary <id>` to select and verify an
   already installed immutable runner image without moving command links.
   Unsafe, missing or mismatched snapshots refuse with an install remedy;
   ordinary exact-triple and pairing admission remain unchanged.
 
-- Add macOS LaunchAgent installation for `plak host install`, with private
+- Add macOS LaunchAgent installation for `plakd host install`, with private
   log directories and explicit load, start and removal instructions. Installation
   never loads or starts the service.
 
@@ -336,7 +341,7 @@ for one version bump, without native protocol compatibility.
 
 - Keep settled remote upgrade retries on the serving registry connection, so
   importing another root cannot cancel live services. Retry with status-change
-  wakeups and capped exponential backoff. Add `plak host upgrade --abandon` for
+  wakeups and capped exponential backoff. Add `plakd host upgrade --abandon` for
   permanently lost pending remote successors; reservations remain unusable,
   while retained exports can be copied and normally imported elsewhere.
   Missing rollback records count as restored; archived heads are excluded from
@@ -416,7 +421,7 @@ for one version bump, without native protocol compatibility.
   Darwin retains an owned zombie's unreaped-child anchor without treating it as
   live session membership; fast-exiting children retain cleanup authority.
 
-- Add settled-root `plak host upgrade --expect-binary <id>`.
+- Add settled-root `plakd host upgrade --expect-binary <id>`.
   It preflights the destination, optionally waits with a bounded admission
   pause, and carries settled roots across state keys through unchanged export
   v12, with durable successor mappings and source-surrender/retry receipts.
@@ -589,11 +594,11 @@ an export.
   host-lifetime lock in `custody-hosts/`, beside `subagents.sqlite3`.
 - Session export version 12 adds the session's runner (today always the local
   runner) and its profile (root template and working set). It imports versions
-  12 and 11 and refuses 10; `plak session --help` names those versions from the
+  12 and 11 and refuses 10; `plakd session --help` names those versions from the
   build's own constants.
 - Telemetry store schema 21 (`telemetry-v21.sqlite3`, disposable).
 - Upgrading from 0.0.3: a 0.0.3 session carries forward through `/reload` from
-  a running 0.0.3 TUI, or through `plak session export` and `plak session
+  a running 0.0.3 TUI, or through `plakd session export` and `plakd session
   import`. Version 11 documents import onto the local runner under the home
   default profile with one notice and an identical conversation. Agent trees
   never cross a state-key change. A 0.0.3 build refuses a `config.toml` that
@@ -604,9 +609,9 @@ an export.
 - Configuration compatibility: `config.toml` accepts `[host]
   resume_after_loss` (`hold` or `continue`, default `hold`), `[mcp_servers.<id>]
   placement` (`host` or `runner`, default `host`), `[runners.<name>]` and
-  `[web] allow` / `[web] origin` (read by `plak host --web`, below);
+  `[web] allow` / `[web] origin` (read by `plakd host --web`, below);
   `resume_after_loss` applies to the root and sub-agents a lost host
-  interrupted. `plak` writes them only when you set them, and `plak doctor` warns `config uses
+  interrupted. `plak` writes them only when you set them, and `plakd doctor` warns `config uses
   0.0.4-only keys` while one is set.
 - Plakous embedder break (agent lines): a head-advancing rebind's source
   becomes read-only, a non-head branch; opening it for work, committing on
@@ -661,7 +666,7 @@ an export.
 
 - Host-mode attachment refusals preserve the previous attachment and name the holder's remedy. Discovery enforces same-user socket checks and waits through host start/stop windows. Requested reloads remain host-owned without a connected client.
 
-- `plak host` runs root and child process sessions on the home-local runner:
+- `plakd host` runs root and child process sessions on the home-local runner:
   jobs survive a host crash or signal handoff, the next host sweeps and
   re-adopts their lines before recovering its journal, and recorded stops
   finish before it serves. Starts carry that host's captured login-shell
@@ -678,7 +683,7 @@ an export.
   project's templates in its `[roster] working_set` are on the root's spawn
   menu. Before, the roster read the home alone, so a trusted project's
   templates never reached a tree.
-- `plak host` (hidden, maintainer builds): the per-user host process,
+- `plakd host` (hidden, maintainer builds): the per-user host process,
   serving every session of the home. One per home and state key
   (`state/<key>/host.lock`, a second one refuses naming the first); a control
   socket `host/run/<key>.sock` for this user only, whose clients use the wire
@@ -708,7 +713,7 @@ an export.
   is still taken over. A stopping host opens and creates nothing more.
   A session no face has opened yet (the host's `new_session`) opens in any
   working face first. Spec 02 §4.6 carries the systemd unit.
-- `plak host --web`: the host's sessions' wire v2 over
+- `plakd host --web`: the host's sessions' wire v2 over
   a WebSocket at `/wire`, and a web UI's static build, on a private unix
   socket that `tailscale serve --bg unix:<path>` publishes on the tailnet,
   from a tagged node. Access is the tailnet login Serve stamps, checked
@@ -722,8 +727,8 @@ an export.
   Spec 04 §2.10 states
   which check stops which attacker and the residual risks. A 0.0.3 build refuses a
   `config.toml` that sets `[web]`, so `plak` writes it only when you set it,
-  and `plak doctor` lists it with the other 0.0.4-only keys.
-- `plak wire schema` (hidden) prints this build's wire v2 JSON Schema with its
+  and `plakd doctor` lists it with the other 0.0.4-only keys.
+- `plakd wire schema` (hidden) prints this build's wire v2 JSON Schema with its
   protocol version.
 - Wire v2 is protocol 4: a welcome names its session as `session`, and a host
   of many sessions names none. The session directory's requests
@@ -736,8 +741,8 @@ an export.
   (`ConnectError::NoSession`), and `connect_to` attaches a root the caller
   names from the directory.
 - The wire v2 connection moved into `plakous-hosted`
-  (`host_service::wire::WireConnection`), shared by `plak agent --wire v2` and
-  `plak host`; `WireSession` serves one session to many connections. A switch
+  (`host_service::wire::WireConnection`), shared by `plakd agent --wire v2` and
+  `plakd host`; `WireSession` serves one session to many connections. A switch
   ends every attachment of a shared service (`HostService::move_attachments`,
   which queues the new `Outbound::Moved`). Embedder break: the new
   `Outbound` variant.
@@ -756,9 +761,9 @@ an export.
   naming that process's host, machine and instance: exit code 7, and in `plak
   agent` a JSONL `error` with `code: "tree_hosted_elsewhere"`. A holder whose
   exit cannot be proven (another machine sharing the home) is released only by
-  `plak tree release --force <tree-id>`, which refuses a holder still running
+  `plakd tree release --force <tree-id>`, which refuses a holder still running
   on this machine.
-- `plak runner`: a persistent runner daemon per machine user (`serve`,
+- `plakd runner`: a persistent runner daemon per machine user (`serve`,
   `connect --stdio`, which a host runs over ssh with fixed strict options and
   which starts the daemon when none answers), host pairing through an
   allowlist in `<home>/runner/runner.toml` (`allow`, `pair <name>`), and
@@ -775,10 +780,10 @@ an export.
 - MCP servers can run on the node's runner: `[mcp_servers.<id>] placement =
   "runner"` (stdio only) starts the server there, one per runner, workspace
   and definition, with its `secret_env` names resolved from the runner's own
-  secrets (`plak runner secret set|rm|list`); host secret values never cross
+  secrets (`plakd runner secret set|rm|list`); host secret values never cross
   to a runner. Without a remote runner the server runs here and reads this
   home's runner secrets. Sessions freeze the placement each server ran under.
-  `plak doctor` adds a `runner_ssh` row per `[runners.<name>]` from `ssh -G`.
+  `plakd doctor` adds a `runner_ssh` row per `[runners.<name>]` from `ssh -G`.
 - Claude `Read` returns PNG, JPEG, GIF and WebP as an image when the model
   accepts image input. Codex Direct adds `view_image` for one workspace image.
   Other packs stay text. A model that cannot accept the image is refused with
@@ -902,7 +907,7 @@ an export.
   order; the result used to overwrite the imported row and break the view's
   key order. A repaired presentation now keeps one error notice per cause in
   that transcript and logs the cause to `plak.log`.
-- A reload request (`plak session reload`) belongs to its session. An in-place
+- A reload request (`plakd session reload`) belongs to its session. An in-place
   switch to another session (`/new`, `/resume`, a fork or a rebind) settles
   the requests the host holds for the session it leaves as `not taken: the
   session switched` before it completes.
@@ -971,7 +976,7 @@ an export.
   attach snapshot of every state, the root baseline, pending approvals and
   the holding credential wait, and bounded per-attachment queues that drop
   a slow attachment with `resync_required` instead of blocking the session.
-  Typed host attachments and `plak agent` JSONL v1 share its loop
+  Typed host attachments and `plakd agent` JSONL v1 share its loop
   (`host_service::face`, `FaceReceiver`): their intents go out on the
   session's own mailbox sender tagged with their attachment, and their
   observations pass through the service, so they receive exactly what they
@@ -980,7 +985,7 @@ an export.
   around the answer. Embedder break: `IntentSender::tagged` and
   `IntentDelivery::correlated`; an intent's origin is part of the
   `IntentStarted` correlation, and only a client's own correlation makes an
-  intent a command reply. In `plak agent` JSONL v1, a late answer (a
+  intent a command reply. In `plakd agent` JSONL v1, a late answer (a
   profile apply's finish, a usage refresh) now carries the command id of
   the command it answers rather than the one running when it arrived.
 - Wire v2 node attach: a host service attachment may target a child node of
@@ -1044,7 +1049,7 @@ an export.
   `IntentSender::downgrade`, `WeakIntentSender`), so the session still ends when its last face sender
   goes, and it keeps the attach snapshot for later attachments. Embedder
   break: `face` returns a `FaceSender`, `IntentSendError::Refused` (an
-  intent the service refused for the attachment's role; `plak agent` JSONL
+  intent the service refused for the attachment's role; `plakd agent` JSONL
   v1 answers it as that command's `error` record), `HostService` is
   `Clone` (its clones are the same service), and the new types.
 - A wire v2 connection is a local or a remote face
@@ -1063,9 +1068,9 @@ an export.
   has since switched, is refused `moved` with the served session's root
   (`RequestRefusal::Moved`), not `unknown_node`: a connection welcomed
   before a switch learns where the session went.
-- Wire v2 quit and stop: a `quit` intent on a root attachment of `plak host`
+- Wire v2 quit and stop: a `quit` intent on a root attachment of `plakd host`
   (a host whose connections detach) detaches that attachment, answered
-  `detached`, and the session runs on; on `plak agent --wire v2` it still
+  `detached`, and the session runs on; on `plakd agent --wire v2` it still
   quits the session. A child attachment's quit-as-detach now answers
   `detached` too, not `accepted`. The new `stop_session {session}` op
   (`Op::StopSession`, answered `stopped`, `Answer::Stopped`) stops the
@@ -1149,7 +1154,7 @@ an export.
 
 - Wire v2 handshake: `welcome` names the session id, tree id and root node,
   and the session opens before it is sent, so a failure before dispatch
-  (`plak agent --wire v2` included) is a `refused` frame with the new
+  (`plakd agent --wire v2` included) is a `refused` frame with the new
   `unavailable` refusal, never a JSONL record. A host service never reuses
   an attachment id, each attachment's sequence starts at 1, and no event
   precedes its `attached` answer. A client that sends no hello within 10
@@ -1186,7 +1191,7 @@ an export.
   the candidate reference and commit it leaves. `VcsOps` gains the transfer
   calls; `vcs_runner_extension` takes a copies root. Embedder break:
   `vcs_runner_extension` takes a second argument and `StageLedger` adds the
-  stage record a carry runs through. `plak runner serve` registers the
+  stage record a carry runs through. `plakd runner serve` registers the
   extension, admitting paths under `roots` and the new `runner.toml` `copies`
   root and never the product home; `copies` may not lie inside or around a
   root. Mirrors are keyed by runner (`<copies>/<runner id>/<tree id>`). A
@@ -1203,7 +1208,7 @@ an export.
   exact-version handshake, requests with one typed response each, blob
   chunks for images and paged snapshots, with bounded blob and snapshot
   assembly and the event class derived at the receiver. The hidden
-  `plak agent --wire v2` speaks it on stdio over the session's mailbox (root
+  `plakd agent --wire v2` speaks it on stdio over the session's mailbox (root
   only, unsupported). Embedder break:
   `ObservationExtension` gains `wire_class` (with a default) and the
   protocol's view types serialize.

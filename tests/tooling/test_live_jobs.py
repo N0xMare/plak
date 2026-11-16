@@ -43,7 +43,7 @@ class JobSelectionTests(unittest.TestCase):
         lines = [
             "python3 hold.py 8 plakjobbudget",
             "/usr/bin/python3 hold.py 8 plakjobbudget",
-            "plak agent",
+            "plakd agent",
             "python3 other.py plakjobbudget",
         ]
         self.assertEqual(jobs.matching(lines, "plakjobbudget"), lines[:2])
@@ -322,7 +322,7 @@ class JobOracleTests(unittest.TestCase):
             self,
             lambda: jobs.judge_run(
                 code=5,
-                stderr="plak: agent turn failed: response reached its output bound "
+                stderr="plakd: agent turn failed: response reached its output bound "
                 "before completion\n",
                 finished=False,
             ),
@@ -331,18 +331,18 @@ class JobOracleTests(unittest.TestCase):
         with self.assertRaises(live.ScenarioFailure) as caught:
             jobs.judge_run(
                 code=3,
-                stderr="plak: the codex compatibility notice needs an answer "
+                stderr="plakd: the codex compatibility notice needs an answer "
                 "on stdin and none came\n",
                 finished=False,
             )
         self.assertEqual(caught.exception.outcome, live.HARNESS)
-        self.assertIn("`plak models codex`", str(caught.exception))
+        self.assertIn("`plakd models codex`", str(caught.exception))
         self.assertIn(
             "continued",
             jobs.judge_run(
                 code=0,
-                stderr="plak: waiting for p1 (hold); Ctrl-C to stop\n"
-                "plak: continuing (turn 2: p1 exited 0)\n",
+                stderr="plakd: waiting for p1 (hold); Ctrl-C to stop\n"
+                "plakd: continuing (turn 2: p1 exited 0)\n",
                 finished=True,
             ),
         )
@@ -368,7 +368,7 @@ class JobOracleTests(unittest.TestCase):
             self,
             lambda: jobs.judge_run(
                 code=0,
-                stderr="plak: waiting for p1\nplak: stopped p1\n",
+                stderr="plakd: waiting for p1\nplakd: stopped p1\n",
                 finished=False,
             ),
             live.HARNESS,
@@ -685,7 +685,7 @@ class JobEvidenceTests(unittest.TestCase):
         self.assertTrue(
             first.startswith("plakjobbudget") and len(first) == len("plakjobbudget") + 8
         )
-        lines = [f"python3 hold.py 8 {first}", f"python3 hold.py 8 {second}", "plak agent"]
+        lines = [f"python3 hold.py 8 {first}", f"python3 hold.py 8 {second}", "plakd agent"]
         self.assertEqual(jobs.matching(lines, first), [lines[0]])
         framework = f"/Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python hold.py 8 {first}"
         self.assertEqual(jobs.matching([framework, f"echo hold.py {first}"], first), [framework])

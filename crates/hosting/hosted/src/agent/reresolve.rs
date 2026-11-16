@@ -133,7 +133,7 @@ impl NativeModelReresolver {
 
 fn refusal(provider: NativeProvider, kind: NativeSubscriptionError) -> ModelReresolutionError {
     // Drift is a pinned-contract mismatch, not a missing login. A login
-    // remedy would send the operator through `plak login` for a condition
+    // remedy would send the operator through `plakd login` for a condition
     // that login cannot repair. The variant exists only with a native route.
     #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
     if let NativeSubscriptionError::CompatibilityDrift { .. } = &kind {

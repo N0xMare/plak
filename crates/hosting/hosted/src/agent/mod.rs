@@ -1,4 +1,4 @@
-//! Shared coding-agent construction for `plak run` and the client host.
+//! Shared coding-agent construction for `plakd run` and the client host.
 
 //!
 //! Split by responsibility: `build` constructs and opens sessions,

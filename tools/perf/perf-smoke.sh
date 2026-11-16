@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline performance smoke over the scripted model (`plak/test-hooks`).
+# Offline performance smoke over the scripted model (`plakd/test-hooks`).
 #
 # Six product measurements, four worker timings and long-lineage samples,
 # each emitted as a JSON line carrying a
@@ -74,15 +74,15 @@ chmod 600 "$root/home/config.toml" "$root/home/agents/lead.toml"
 
 echo "== building the release scripted binary and sidecars ==" >&2
 # Same entry point as the product build, including the linkage check.
-tools/build/build-plak.sh --release --features plak/test-hooks,plak/test-support >&2
+tools/build/build-plakd.sh --release --features plakd/test-hooks,plakd/test-support >&2
 # Keep the measured executable and its matching workers together, away from
 # later builds that could replace a configured target's artifacts.
 cargo_target_dir="${CARGO_TARGET_DIR:-$PWD/target}"
 release_dir="$cargo_target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}release"
-for binary in plak plakous-js-host plakous-py-host; do
+for binary in plakd plakous-js-host plakous-py-host; do
   cp "$release_dir/$binary" "$root/$binary"
 done
-plak_bin="$root/plak"
+plak_bin="$root/plakd"
 
 machine="$("$PY" - <<'PY'
 import hashlib, platform, subprocess
@@ -128,13 +128,13 @@ JSON
 printf '' >"$root/empty-frames"
 start_ms="$( (cd "$root/ws" && "$PY" - "$plak_bin" "$root" <<'PY'
 import json, os, subprocess, sys, time
-plak, root = sys.argv[1], sys.argv[2]
+plakd, root = sys.argv[1], sys.argv[2]
 env = {"PATH": os.environ["PATH"], "HOME": root + "/fake-home", "TMPDIR": root + "/tmp",
        "PLAK_HOME": root + "/home", "PLAK_TEST_MODEL": "offline-loopback-v1",
        "PLAK_TEST_SCRIPT": root + "/trivial.json",
        "PLAK_TEST_EVIDENCE": root + "/evidence.jsonl"}
 began = time.monotonic()
-child = subprocess.Popen([plak, "agent"], env=env, stdin=subprocess.PIPE,
+child = subprocess.Popen([plakd, "agent"], env=env, stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 ready = None
 for line in child.stdout:
@@ -159,7 +159,7 @@ cat >"$root/tools.json" <<'JSON'
 JSON
 round_trip="$( (cd "$root/ws" && "$PY" - "$plak_bin" "$root" <<'PY'
 import json, os, statistics, subprocess, sys, time
-plak, root = sys.argv[1], sys.argv[2]
+plakd, root = sys.argv[1], sys.argv[2]
 env = {"PATH": os.environ["PATH"], "HOME": root + "/fake-home", "TMPDIR": root + "/tmp",
        "PLAK_HOME": root + "/home", "PLAK_TEST_MODEL": "offline-loopback-v1",
        "PLAK_TEST_SCRIPT": root + "/tools.json",
@@ -173,7 +173,7 @@ REPEATS = 5
 
 
 def one_round_trip():
-    child = subprocess.Popen([plak, "agent"], env=env, stdin=subprocess.PIPE,
+    child = subprocess.Popen([plakd, "agent"], env=env, stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     for line in child.stdout:
         if json.loads(line).get("kind") == "ready":
@@ -206,13 +206,13 @@ emit jsonl_tool_round_trip_ms "$round_trip" ms  # median of five
 
 cli_turn="$( (cd "$root/ws" && "$PY" - "$plak_bin" "$root" <<'PY'
 import os, subprocess, sys, time
-plak, root = sys.argv[1], sys.argv[2]
+plakd, root = sys.argv[1], sys.argv[2]
 env = {"PATH": os.environ["PATH"], "HOME": root + "/fake-home", "TMPDIR": root + "/tmp",
        "PLAK_HOME": root + "/home", "PLAK_TEST_MODEL": "offline-loopback-v1",
        "PLAK_TEST_SCRIPT": root + "/tools.json",
        "PLAK_TEST_EVIDENCE": root + "/evidence.jsonl"}
 began = time.monotonic()
-subprocess.run([plak, "run", "--account", "codex", "--model", "offline-loopback-v1",
+subprocess.run([plakd, "run", "--account", "codex", "--model", "offline-loopback-v1",
                 "--effort", "medium", "--", "go"], env=env, input="y\n",
                capture_output=True, text=True, timeout=60)
 print(f"{(time.monotonic() - began) * 1000.0:.1f}")
@@ -239,13 +239,13 @@ json.dump({"version": 1, "repeat_last_step": True,
 PY
 throughput="$( (cd "$root/ws" && "$PY" - "$plak_bin" "$root" <<'PY'
 import json, os, subprocess, sys, time
-plak, root = sys.argv[1], sys.argv[2]
+plakd, root = sys.argv[1], sys.argv[2]
 PROMPTS = 10
 env = {"PATH": os.environ["PATH"], "HOME": root + "/fake-home", "TMPDIR": root + "/tmp",
        "PLAK_HOME": root + "/home", "PLAK_TEST_MODEL": "offline-loopback-v1",
        "PLAK_TEST_SCRIPT": root + "/bulk.json",
        "PLAK_TEST_EVIDENCE": root + "/evidence.jsonl"}
-child = subprocess.Popen([plak, "agent"], env=env, stdin=subprocess.PIPE,
+child = subprocess.Popen([plakd, "agent"], env=env, stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 for line in child.stdout:
     if json.loads(line).get("kind") == "ready":
@@ -296,7 +296,7 @@ PY
 rss_mode=""
 if /usr/bin/time -l true >/dev/null 2>&1; then
   rss_mode=bsd
-elif /usr/bin/time -f 'plak-rss %M' true >/dev/null 2>&1; then
+elif /usr/bin/time -f 'plakd-rss %M' true >/dev/null 2>&1; then
   rss_mode=gnu
 fi
 
@@ -323,8 +323,8 @@ case "$rss_mode" in
     # Kilobytes, on a tagged line. GNU `time` writes `%M` to stderr, which is
     # merged with the child's own stderr here, so a bare number matched by
     # position could pick up a diagnostic instead. The tag makes it exact.
-    raw="$(run_growth_turn /usr/bin/time -f 'plak-rss %M' "$plak_bin" agent \
-      | awk '/^plak-rss /{value=$2} END {print value}')"
+    raw="$(run_growth_turn /usr/bin/time -f 'plakd-rss %M' "$plak_bin" agent \
+      | awk '/^plakd-rss /{value=$2} END {print value}')"
     if [[ "$raw" =~ ^[0-9]+$ ]]; then
       rss_mb="$("$PY" -c "print(f'{$raw/1024:.1f}')")"
     fi

@@ -1,0 +1,75 @@
+plakd host — serve sessions and install a user service
+
+USAGE:
+  plakd host [--web <unix:path|127.0.0.1:port>] [--ui <dir>]
+  plakd host install --web unix:<absolute socket> --ui <absolute dir> [--dry-run]
+  plakd host connect --stdio [--auto-start]
+  plakd host upgrade --expect-binary <id> [--wait <seconds> | --drain <duration|idle>]
+  plakd host upgrade --abandon <successor-uuid-or-runner-id>
+  plakd host --help
+
+The supported default build includes the host and web endpoint. A private
+same-user control socket serves the session directory; disconnecting a client
+does not stop its sessions. Bare plakd prints help and exits 0 without
+starting a host or session.
+
+  connect --stdio relays bytes to an existing host after same-user and
+  all-state-key discovery. Its stdout is protocol-only; the client sends
+  the handshake. It never falls back to an embedded session. Only explicit
+  local --auto-start permits starting an absent host; an installed user unit
+  or LaunchAgent instead requires explicit service-manager startup. The
+  detached host receives a curated environment without caller API-key
+  variables, logs privately, and
+  exits after five minutes without connections or kept work. Unit hosts persist.
+  Closing stdin detaches this client without stopping host work. An active
+  other-key host requires an explicit stop/upgrade, not a second service.
+
+--web adds the web endpoint; loopback development also requires --dev-login.
+
+Upgrade is invoked using the destination build and its exact binary id.
+Same-key upgrades use planned handoff with a host-wide step drain (default
+60 seconds). --drain accepts 0, integer ms/s/m/h, bare seconds, or idle;
+finite durations are at most one hour. 0 skips natural model-call drain;
+idle waits naturally without a bound; Ctrl-C cancels preparation.
+Finite drain uses one absolute natural-drain deadline for all agents, not a
+fresh allowance per session. The draft-verdict barrier gets at least 10 seconds,
+including for 0. Effects and paid compaction must join;
+an unsuccessful preparation reopens the source's gates. Notice requests
+joined tool results, never permission to cancel paid compaction. Progress shows
+what remains running and waiting time on stderr. Mandatory freeze and
+planned-release acknowledgements retain their ordinary bounded joins.
+This does not add cross-build background-job retention: settle jobs before
+changing their runner's native build triple. Cross-key upgrade carries settled
+roots as new lines, with paused text queues and committed named state; live or
+held work and nonterminal jobs block it. Children carry only as inert facts.
+For paired remote roots, advance the runner's dedicated link to the matching
+revision/flavor/protocol snapshot first; qualification refuses before drain
+on mismatch. --wait closes admissions for at most 3600 seconds and
+restores them on timeout. Retry the same command after an unknown outcome;
+receipts select the old owner before surrender or the destination after it.
+After surrender the old roots cannot reopen; destination startup alone imports
+under host custody before Ready. Partial imports reuse the reserved successors.
+For a permanently lost runner, --abandon irreversibly closes pending remote
+reservations selected by exact successor UUID or runner ID. Ready and local
+roots refuse. Once every mapping is Ready or abandoned, the operation completes;
+copy a printed retained export and use normal session import elsewhere to
+recover a fresh line. The abandoned reservation and old source never reopen.
+Never remove the old snapshot until the destination has acknowledged success.
+--ui serves a validated static build with csp.json. SIGUSR1 reloads that build
+atomically; invalid replacements keep the old build. SIGHUP and SIGTERM mean
+planned handoff, not UI reload. A control-only host needs no --web.
+
+Service installation supports Linux systemd user units and macOS per-user
+LaunchAgents. Both paths are explicit and absolute; --dev-login is never
+accepted by install.
+
+On Linux, install writes ~/.config/systemd/user/plakd-host.service and reloads
+the user manager. On macOS, it writes
+~/Library/LaunchAgents/com.plakd.host.plist and prepares private stdout/stderr
+logs in ~/Library/Logs/Plak; it never invokes launchctl or loads the agent.
+Install never enables or starts a service. An identical service file stays
+unchanged; any other existing file or symlink is refused. --dry-run prints the
+service file without changes. The printed commands show how to start it,
+follow its logs and remove it.
+
+See docs/user-guide/host-service.md for setup, upgrades, logs and removal.

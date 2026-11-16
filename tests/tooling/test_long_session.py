@@ -130,11 +130,11 @@ for line in sys.stdin:
         continue
     text = message.get("text") or ""
     command_id = message["id"]
-    if "plak-long-kill-" in text:
+    if "plakd-long-kill-" in text:
         import re as _re
         import subprocess as _subprocess
-        matched = _re.search(r"plak-long-kill-[0-9a-f]+", text)
-        sleeper = matched.group(0) if matched else "plak-long-kill-offline"
+        matched = _re.search(r"plakd-long-kill-[0-9a-f]+", text)
+        sleeper = matched.group(0) if matched else "plakd-long-kill-offline"
         # The driver kills only after this argv is visible, so spawn first.
         _subprocess.Popen(["python3", "-c", "import time; time.sleep(45)", sleeper])
         (home / "killed").write_text("1\n")
@@ -546,7 +546,7 @@ class LongSessionOracleTests(unittest.TestCase):
     def test_report_names_the_route_and_counts_private_tokens(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            binary = root / "plak"
+            binary = root / "plakd"
             binary.write_bytes(b"synthetic executable; never launched")
 
             def fake_play(_route, env, name):
@@ -564,7 +564,7 @@ class LongSessionOracleTests(unittest.TestCase):
                     )
                     + "\n"
                 )
-                # What a Codex `plak agent` hello reports for plakous-default.
+                # What a Codex `plakd agent` hello reports for plakous-default.
                 env.bound_compositions.add("native-ptc")
                 return "synthetic pass"
 
@@ -595,7 +595,7 @@ class LongSessionOracleTests(unittest.TestCase):
         for ceiling in (None, "0"):
             with self.subTest(ceiling=ceiling), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                binary = root / "plak"
+                binary = root / "plakd"
                 binary.write_bytes(b"synthetic executable; never launched")
                 environ = {} if ceiling is None else {"PLAK_LIVE_INPUT_CEILING": ceiling}
                 with (
@@ -612,7 +612,7 @@ class LongSessionOracleTests(unittest.TestCase):
             self.assertEqual(code, 2)
             launch.assert_not_called()
             play.assert_not_called()
-            self.assertIn("plak usage --session", report["pre_attempt_error"])
+            self.assertIn("plakd usage --session", report["pre_attempt_error"])
             self.assertIn("admitted_input_ceiling=N", report["pre_attempt_error"])
             self.assertEqual(report["input_ceiling"], {"tokens": None, "source": None})
             self.assertEqual(report["protocol"], "messages")
@@ -621,7 +621,7 @@ class LongSessionOracleTests(unittest.TestCase):
     def test_report_records_the_input_ceiling_and_its_source(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            binary = root / "plak"
+            binary = root / "plakd"
             binary.write_bytes(b"synthetic executable; never launched")
             with (
                 patch.object(live, "ROOT", root),
@@ -645,7 +645,7 @@ class LongSessionOracleTests(unittest.TestCase):
     def test_bad_dial_is_a_scenario_result(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            binary = root / "plak"
+            binary = root / "plakd"
             binary.write_bytes(b"synthetic executable; never launched")
             with (
                 patch.object(live, "ROOT", root),
@@ -1460,7 +1460,7 @@ class LongSessionOracleTests(unittest.TestCase):
         )
 
     def test_marker_process_is_visible_only_after_exec(self):
-        marker = "plak-long-kill-" + os.urandom(4).hex()
+        marker = "plakd-long-kill-" + os.urandom(4).hex()
         self.assertFalse(long_session.marker_process_running(marker))
         proc = subprocess.Popen(
             ["python3", "-c", "import time; time.sleep(30)", marker],
@@ -1495,7 +1495,7 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
         root = patch.object(live, "ROOT", self.capture_workspace)
         root.start()
         self.addCleanup(root.stop)
-        binary = self.capture_workspace / "plak"
+        binary = self.capture_workspace / "plakd"
         binary.write_text(FAKE_PLAK)
         binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
         self.binary = binary

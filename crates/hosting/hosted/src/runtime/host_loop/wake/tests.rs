@@ -367,7 +367,7 @@ fn run_continuation_ignores_auto_continue_and_admits_its_own_terminal() {
             host.block(async |host| host.next_run_prompt(&mut state).await)
                 .unwrap(),
         );
-        assert!(observed.try_iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. })) if note == "plak: continuing (turn 2: c1 result)")));
+        assert!(observed.try_iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. })) if note == "plakd: continuing (turn 2: c1 result)")));
         assert!(matches!(
             host.block(async |host| host
                 .run_prompt(text, delivery, echoed, Some(&mut state))
@@ -501,7 +501,7 @@ fn run_wake_storage_full_exits_once_without_phantom_queue_items() {
             assert_eq!(
                 notices
                     .iter()
-                    .filter(|text| text.as_str() == "plak: run stopped at storage unavailable")
+                    .filter(|text| text.as_str() == "plakd: run stopped at storage unavailable")
                     .count(),
                 1
             );
@@ -536,7 +536,7 @@ fn run_max_turns_stops_before_admitting_a_continuation() {
             Some(Ok(crate::runtime::OneShotOutcome::Bounded { .. }))
         ));
         assert_eq!(host.role.config.session.root_turn_count, 0);
-        assert!(observed.try_iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. })) if note == "plak: run stopped at max-turns 1")));
+        assert!(observed.try_iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. })) if note == "plakd: run stopped at max-turns 1")));
     });
 }
 
@@ -584,7 +584,7 @@ fn run_waits_without_a_turn_and_timeout_interrupts_resumable_children() {
         assert!(
             notes
                 .iter()
-                .any(|note| note == "plak: run stopped at timeout; interrupted c1")
+                .any(|note| note == "plakd: run stopped at timeout; interrupted c1")
         );
         assert_eq!(host.role.config.session.root_turn_count, 0);
         assert!(

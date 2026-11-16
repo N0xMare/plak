@@ -9,7 +9,7 @@ process list, JSONL job events, the session log, or a captured request. The
 model's own reply is never the oracle. Nothing here is a gate, and the module
 does not call a provider by itself.
 
-`plak run` waits for a promoted job instead of stopping it when the first
+`plakd run` waits for a promoted job instead of stopping it when the first
 turn ends. Each scenario's process token is `prefix` plus eight hex
 characters from `os.urandom` (or a cell's replay seed), so concurrent cells
 never share a `ps` or `pkill` pattern.
@@ -94,7 +94,7 @@ def pin_jobs(home: Path, foreground_seconds: int) -> None:
     """Append `[jobs] foreground_seconds` to a home `write_home` just created.
 
     The bound is read when the session is created, so it has to be in the
-    scratch home before `plak` starts. Spec 07: 1..=600, and it is not a kill timer.
+    scratch home before `plakd` starts. Spec 07: 1..=600, and it is not a kill timer.
     """
     if not 1 <= foreground_seconds <= 600:
         raise ScenarioFailure(HARNESS, "foreground_seconds is outside 1..=600")
@@ -540,13 +540,13 @@ def judge_notice(
 
 
 def judge_run(*, code: int, stderr: str, finished: bool) -> str:
-    """`plak run` waits for a promoted job and continues when it exits.
+    """`plakd run` waits for a promoted job and continues when it exits.
 
-    A failed exit is classified like every `plak run` exit; `run_cli` already
+    A failed exit is classified like every `plakd run` exit; `run_cli` already
     returned a committed answer cut at its output limit as exit 0.
     """
     if code != 0:
-        live.classify_cli_failure(code, stderr, "plak run")
+        live.classify_cli_failure(code, stderr, "plakd run")
     if "waiting for p" not in stderr:
         if finished:
             raise ScenarioFailure(
@@ -560,7 +560,7 @@ def judge_run(*, code: int, stderr: str, finished: bool) -> str:
         or "exited" not in stderr
     ):
         raise ScenarioFailure(HARNESS, "run did not continue after the promoted job exited")
-    return "plak run waited for the promoted job and continued"
+    return "plakd run waited for the promoted job and continued"
 
 
 # submit_result accepted the output. `submitted` is not settled (spec 03 §5).
@@ -1284,7 +1284,7 @@ def run_turn(agent: live.Agent, text: str, timeout: float, tick, accept_eof) -> 
                 turn.phase = turn.phase or "killed"
                 turn.seconds = time.monotonic() - started
                 return turn
-            raise ScenarioFailure(HARNESS, "plak agent exited during a turn")
+            raise ScenarioFailure(HARNESS, "plakd agent exited during a turn")
         if kind == "assistant":
             turn.text += event.get("text", "")
         elif kind == "tool" and event.get("state") == "running":
@@ -2017,7 +2017,7 @@ def _capture_complete(segments: list[Path], pending: list[Path]) -> bool:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("route", nargs="?", default="grok", choices=sorted(live.ROUTES))
-    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plak")
+    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plakd")
     parser.add_argument("--fixture-seed", type=int, help="replay randomized scenario inputs")
     parser.add_argument("--artifacts", type=Path, help="fresh attempt artifact directory")
     parser.add_argument("--only", default="", help="comma-separated scenario names")
@@ -2040,7 +2040,7 @@ def main(argv: list[str]) -> int:
     env.route = route
     env.fixture_seed = args.fixture_seed
     if not env.binary.is_file():
-        print(f"jobs: plak binary not found: {env.binary}", file=sys.stderr)
+        print(f"jobs: plakd binary not found: {env.binary}", file=sys.stderr)
         return 2
     binary_start = live.binary_sha256(env.binary)
     live.write_home(env.home, route)

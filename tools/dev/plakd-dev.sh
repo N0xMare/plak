@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# Isolated maintainer playground: same server/operator CLI as product, wipeable PLAK_HOME,
+# login-user OAuth (not PLAK_HOME). Does not touch ~/.plak.
+#
+# Usage:
+#   just build release         # build release maintainer (target/release/plakd)
+#   just build debug           # debug maintainer (target/debug/plakd)
+#   PLAK_DEV_PROFILE=debug     # use target/debug/plakd instead
+#   PLAK_DEV_PROFILE=maintainer  # use target/maintainer/plakd (just build maintainer)
+#   just dev home-install      # symlink ~/.local/bin/plakd-dev
+#   just dev home-reset        # wipe sqlite/sessions; keep config.toml
+#   plakd-dev …                 # run like plakd (cwd is the session workspace)
+set -euo pipefail
+
+script_path="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${BASH_SOURCE[0]}")"
+repo_root="$(cd "$(dirname "$script_path")/../.." && pwd)"
+# The login user's passwd home, not an inherited HOME; a uid without a passwd
+# entry (e.g. a container user) falls back to HOME.
+operator_home="$(
+  python3 -c 'import os, pwd; print(pwd.getpwuid(os.getuid()).pw_dir)' 2>/dev/null ||
+    printf '%s\n' "${HOME:?plakd-dev: no passwd entry and no HOME}"
+)"
+product_home="${PLAK_DEV_PLAK_HOME:-$operator_home/plakd-dev-home}"
+profile="${PLAK_DEV_PROFILE:-release}"
+case "$profile" in
+  debug | release | maintainer) ;;
+  *)
+    echo "plakd-dev: PLAK_DEV_PROFILE must be debug, release or maintainer (got: $profile)" >&2
+    exit 2
+    ;;
+esac
+target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
+[[ "$target_dir" == /* ]] || target_dir="$repo_root/$target_dir"
+bin="$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}${profile}/plakd"
+
+case "$product_home" in
+  "$repo_root" | "$repo_root"/*)
+    echo "plakd-dev: PLAK_HOME must stay outside the git tree ($product_home)" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$product_home" != /* ]]; then
+  echo "plakd-dev: PLAK_HOME must be absolute" >&2
+  exit 2
+fi
+
+# Seed the playground config from the annotated reference preset; there is
+# no second copy of the schema here. `bin/plakd/src/product_config/load.rs`
+# (`ProductConfig::parse`) and `bin/plakd/src/product_config/templates.rs`
+# (`parse_template`) are the schema authority, and `docs/reference-config/` loads
+# under them in tests.
+seed_config() {
+  local dest="$1"
+  cp "$repo_root/docs/reference-config/config.toml" "$dest"
+  chmod 600 "$dest"
+}
+
+# The reference preset's four role templates: root-agent delegates,
+# worker/reviewer/scout are leaves.
+seed_templates() {
+  local dir="$1"
+  mkdir -m 700 -p "$dir"
+  cp "$repo_root"/docs/reference-config/agents/*.toml "$dir/"
+  chmod 600 "$dir"/*.toml
+}
+
+ensure_home() {
+  mkdir -m 700 -p "$product_home"
+  chmod 700 "$product_home"
+  if [[ ! -f "$product_home/config.toml" ]]; then
+    seed_config "$product_home/config.toml"
+  fi
+  if [[ ! -d "$product_home/agents" ]]; then
+    seed_templates "$product_home/agents"
+  fi
+}
+
+reset_home() {
+  ensure_home
+  # The whole state root plus the disposable telemetry/log roots; `state/`
+  # holds every build's keyed state directory (databases and sessions).
+  rm -rf "$product_home/state" "$product_home/telemetry" "$product_home/logs" \
+    "$product_home/secrets"
+  echo "plakd-dev: reset $product_home (kept config.toml and agents/; OAuth untouched)"
+}
+
+install_shim() {
+  local bindir="$operator_home/.local/bin"
+  local shim="$bindir/plakd-dev"
+  local target="$repo_root/tools/dev/plakd-dev.sh"
+  mkdir -p "$bindir"
+  # Repair, do not merely overwrite. An install from before this script existed
+  # left `plakd-dev` pointing at another script; `ln -sfn` cannot replace a
+  # symlink that resolves to a directory, and a stray regular file would be
+  # kept. Remove whatever is there, then verify what we created.
+  if [[ -e "$shim" || -L "$shim" ]]; then
+    local previous
+    previous="$(readlink "$shim" || echo "<not a symlink>")"
+    if [[ "$previous" != "$target" ]]; then
+      echo "plakd-dev: replacing stale $shim -> $previous"
+    fi
+    # Never recursive: a real directory at the shim path is an operator's, not
+    # ours to delete. Refuse and say so.
+    if [[ -d "$shim" && ! -L "$shim" ]]; then
+      echo "plakd-dev: $shim is a directory; refusing to remove it" >&2
+      exit 2
+    fi
+    rm -f "$shim"
+  fi
+  ln -s "$target" "$shim"
+  local resolved
+  resolved="$(readlink "$shim")"
+  if [[ "$resolved" != "$target" ]]; then
+    echo "plakd-dev: $shim resolves to $resolved, not $target" >&2
+    exit 2
+  fi
+  # The playground home is part of the install, not a side effect of the first
+  # launch: `just dev home-install` must leave a usable PLAK_HOME behind.
+  ensure_home
+  echo "plakd-dev: installed $shim -> $target"
+  echo "plakd-dev: PLAK_HOME is $product_home (config.toml seeded)"
+  case ":$PATH:" in
+    *":$bindir:"*) ;;
+    *)
+      echo "plakd-dev: add $bindir to PATH if \`plakd-dev\` is not found" >&2
+      ;;
+  esac
+}
+
+if [[ "${1:-}" == "--dev-reset-home" ]]; then
+  reset_home
+  exit 0
+fi
+if [[ "${1:-}" == "--dev-install" ]]; then
+  install_shim
+  exit 0
+fi
+
+ensure_home
+
+if [[ ! -x "$bin" ]]; then
+  echo "plakd-dev: missing $bin — run \`just build debug\` or \`just build release\` (profile=$profile) from the repo" >&2
+  exit 2
+fi
+
+export HOME="$operator_home"
+export PLAK_HOME="$product_home"
+unset OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
+# Ordinary development uses the maintainer binary's passive, home-local
+# capture, not the fail-closed qualification hook or the compiled checkout.
+# Do not change cwd or wrap the binary's signals.
+unset PLAK_TEST_EXCHANGE_CAPTURE_DIR
+exec "$bin" "$@"

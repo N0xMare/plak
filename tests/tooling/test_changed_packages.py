@@ -20,7 +20,7 @@ sys.modules[SPEC.name] = CHANGED
 SPEC.loader.exec_module(CHANGED)
 
 DIRS = {
-    "bin/plak": "plak",
+    "bin/plakd": "plakd",
     "crates/core/model": "plakous-model",
     "crates/runtimes/py-worker": "plakous-py-worker",
 }
@@ -82,10 +82,10 @@ class TouchedPackagesTests(unittest.TestCase):
         self.assertEqual(
             self.touched(
                 "crates/core/model/src/lib.rs",
-                "bin/plak/tests/goldens/a.frame",
+                "bin/plakd/tests/goldens/a.frame",
                 "crates/core/model/Cargo.toml",
             ),
-            ["plak", "plakous-model"],
+            ["plakd", "plakous-model"],
         )
 
     def test_sibling_directory_prefixes_do_not_match(self):
@@ -111,7 +111,7 @@ class TouchedPackagesTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertEqual(
-                    self.touched(path, "crates/core/model/src/lib.rs"), ["plak", "plakous-model"]
+                    self.touched(path, "crates/core/model/src/lib.rs"), ["plakd", "plakous-model"]
                 )
         self.assertEqual(
             self.touched(
@@ -133,14 +133,14 @@ class TouchedPackagesTests(unittest.TestCase):
             ".rustfmt.toml",
         ):
             with self.subTest(path=path):
-                self.assertEqual(self.touched("bin/plak/src/lib.rs", path), ["--workspace"])
+                self.assertEqual(self.touched("bin/plakd/src/lib.rs", path), ["--workspace"])
 
     def test_vendored_patch_sources_select_the_whole_workspace(self):
         self.assertEqual(self.touched("vendor/monty-typeshed/src/lib.rs"), ["--workspace"])
 
     def test_the_real_workspace_maps_every_manifest_to_its_package(self):
         dirs = CHANGED.package_dirs()
-        self.assertEqual(dirs["bin/plak"], "plak")
+        self.assertEqual(dirs["bin/plakd"], "plakd")
         for directory, name in dirs.items():
             expected = ["--workspace"] if directory.startswith("vendor/") else [name]
             self.assertEqual(self.touched_in(dirs, f"{directory}/Cargo.toml"), expected)

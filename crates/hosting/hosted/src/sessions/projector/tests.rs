@@ -1679,7 +1679,7 @@ fn an_abandoned_turn_derives_the_live_recovery_line() {
     assert!(rows(&views).iter().any(|row| matches!(
         row,
         TranscriptRow::Notice(notice)
-            if notice.scope == NoticeScope::Recovery && notice.text.starts_with("plak: recovered")
+            if notice.scope == NoticeScope::Recovery && notice.text.starts_with("plakd: recovered")
     )));
 }
 
@@ -1763,7 +1763,7 @@ fn fenced_closure_derives_its_line_once(refused_between: bool) {
             .filter(|row| {
                 matches!(row, TranscriptRow::Notice(notice)
                     if notice.scope == NoticeScope::Recovery
-                        && notice.text.starts_with("plak: recovered an interrupted turn"))
+                        && notice.text.starts_with("plakd: recovered an interrupted turn"))
             })
             .count()
     };

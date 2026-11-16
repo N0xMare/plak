@@ -118,6 +118,7 @@ def plak_artifact_record(
     binary: Path, js_host: Path, py_host: Path, *, arch: str = ""
 ) -> dict[str, Any]:
     """Identity of the frozen Plak binary and its uploaded worker cohort."""
+    # Project/arm roles stay stable; the installed product executable is plakd.
     items = [
         ("plak", Path(binary)),
         ("plakous-js-host", Path(js_host)),

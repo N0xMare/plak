@@ -145,7 +145,9 @@ def require_ready_oauth(account: str, *, xdg_state_home: Path | None = None) -> 
     directory = subscription_dir(account, xdg_state_home=xdg_state_home)
     credential = directory / "credential.json"
     if not credential.is_file():
-        raise CredentialError(f"missing {credential}; run `plak login {account}` on the host first")
+        raise CredentialError(
+            f"missing {credential}; run `plakd login {account}` on the host first"
+        )
     require_host_login(directory, account)
     return directory
 
@@ -186,7 +188,7 @@ def require_host_login(directory: Path, account: str) -> None:
         valid = False
     if not valid:
         raise CredentialError(
-            f"OAuth directory was not created by login on this host; run `plak login {account}` "
+            f"OAuth directory was not created by login on this host; run `plakd login {account}` "
             "here. One login per machine; never copy credential dirs between hosts"
         )
 
@@ -313,7 +315,7 @@ def trial_oauth(
                 env["XDG_STATE_HOME"] = str(xdg_state_home)
             try:
                 refreshed = subprocess.run(
-                    ["plak", "refresh", account],
+                    ["plakd", "refresh", account],
                     env=env,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -337,7 +339,7 @@ def remote_state_acl_command(user: str | int | None, *paths: str) -> str:
     `plak` refuses a PLAK_HOME that is not uid-owned mode 0700, and native
     subscription files must be uid-owned mode 0600 in a 0700 directory.
     Harbor uploads as root, so eval must chown and tighten modes before
-    `plak run`.
+    `plakd run`.
     """
     if not paths:
         raise CredentialError("remote state acl needs at least one path")

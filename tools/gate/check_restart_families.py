@@ -13,7 +13,7 @@ def check(inventory: dict) -> None:
     selected = {
         name
         for suite in inventory["rust-suites"].values()
-        if suite["package-name"] == "plak" and suite["binary-name"] == "integration"
+        if suite["package-name"] == "plakd" and suite["binary-name"] == "integration"
         for name, case in suite["testcases"].items()
         if case["filter-match"]["status"] == "matches" and not case["ignored"]
     }

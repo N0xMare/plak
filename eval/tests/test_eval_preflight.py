@@ -30,8 +30,8 @@ class _Cell:
 class PreflightTests(unittest.IsolatedAsyncioTestCase):
     async def test_version_runs_inside_cell_under_timeout(self):
         cell = _Cell()
-        await probe_executable(cell, "/installed-agent/plak")
-        self.assertIn("timeout -k 2s 15s /installed-agent/plak version", cell.commands[0])
+        await probe_executable(cell, "/installed-agent/plakd")
+        self.assertIn("timeout -k 2s 15s /installed-agent/plakd version", cell.commands[0])
 
     async def test_worker_starts_with_closed_stdin(self):
         cell = _Cell()
@@ -40,13 +40,13 @@ class PreflightTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failure_does_not_publish_child_output(self):
         with self.assertRaises(PreflightError) as found:
-            await probe_executable(_Cell(127, "secret"), "/installed-agent/plak")
+            await probe_executable(_Cell(127, "secret"), "/installed-agent/plakd")
         self.assertIn("returned 127", str(found.exception))
         self.assertNotIn("secret", str(found.exception))
 
     async def test_success_without_plak_version_is_refused(self):
         with self.assertRaises(PreflightError):
-            await probe_executable(_Cell(0, ""), "/installed-agent/plak")
+            await probe_executable(_Cell(0, ""), "/installed-agent/plakd")
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):
@@ -141,7 +141,7 @@ class VendorPreflightTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("secret")
 
         with self.assertRaises(PreflightError) as found:
-            await probe_executable(Broken(), "/installed-agent/plak")
+            await probe_executable(Broken(), "/installed-agent/plakd")
         self.assertNotIn("secret", str(found.exception))
 
 

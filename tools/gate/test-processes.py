@@ -25,7 +25,7 @@ class Process:
 
 
 def role(command: str) -> str | None:
-    match = re.match(r"^(?:\S*/)?plak (runner serve|host)(?:\s|$)", command)
+    match = re.match(r"^(?:\S*/)?plakd (runner serve|host)(?:\s|$)", command)
     return match[1] if match else None
 
 
@@ -224,7 +224,7 @@ def reap_previous(base: Path, table: ProcessTable) -> None:
 
 
 def run(args: list[str], root: Path, table: ProcessTable, lock_fd: int) -> int:
-    home = root / "plak-isolated-home"
+    home = root / "plakd-isolated-home"
     home.mkdir(mode=0o700)
     gitconfig = root / "gitconfig"
     gitconfig.touch()

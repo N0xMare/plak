@@ -808,7 +808,7 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
             // note a quit right after this request would never let through.
             crate::agent::TreeRecoveryStart::Started { pending: 0 } => take_nothing(&nothing),
             crate::agent::TreeRecoveryStart::Started { pending } => Some(format!(
-                "plak: recovering {pending} child agent(s) in the background; a note follows \
+                "plakd: recovering {pending} child agent(s) in the background; a note follows \
                  when that finishes"
             )),
             crate::agent::TreeRecoveryStart::NoTree => None,

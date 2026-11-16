@@ -181,7 +181,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 if storage_unavailable {
                     let _ = self.role.events.notice(TranscriptRow::info(
                         NoticeScope::Tree,
-                        "plak: run stopped at storage unavailable",
+                        "plakd: run stopped at storage unavailable",
                     ));
                 }
                 if let Some(bound) = bound.filter(|_| !storage_unavailable) {
@@ -222,7 +222,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     };
                     let _ = self.role.events.notice(TranscriptRow::info(
                         NoticeScope::Tree,
-                        format!("plak: run stopped at {bound}{suffix}"),
+                        format!("plakd: run stopped at {bound}{suffix}"),
                     ));
                     state.result = Some(Ok(OneShotOutcome::Bounded { assistant, bound }));
                 } else if (interrupted || storage_unavailable)
@@ -305,7 +305,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 let _ = self.role.events.notice(TranscriptRow::info(
                     NoticeScope::Tree,
                     format!(
-                        "plak: continuing (turn {}: {})",
+                        "plakd: continuing (turn {}: {})",
                         run.turns + 1,
                         triggers.join(", ")
                     ),
@@ -495,7 +495,7 @@ mod tests {
         assert_eq!(waiting_children(&tree), [] as [(String, String); 0]);
     }
 
-    /// `plak run` keeps waiting for a parked child and names what it waits on.
+    /// `plakd run` keeps waiting for a parked child and names what it waits on.
     #[test]
     fn a_parked_child_is_still_running_and_named_on_the_waiting_line() {
         let root = tempfile::tempdir().unwrap();

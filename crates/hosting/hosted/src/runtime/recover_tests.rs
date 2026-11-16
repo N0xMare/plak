@@ -294,7 +294,7 @@ fn a_fence_recovers_in_place_at_once_and_the_next_prompt_runs() {
         .iter()
         .filter(|event| {
             matches!(event, HostEvent::Row(plakous_host_protocol::views::transcript::TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: note, .. }))
-                if note.starts_with("plak: recovered an interrupted turn; its model request"))
+                if note.starts_with("plakd: recovered an interrupted turn; its model request"))
         })
         .count();
     assert_eq!(lines, 1, "the operator line is printed once");
@@ -316,7 +316,7 @@ fn a_fence_recovers_in_place_at_once_and_the_next_prompt_runs() {
             .values()
             .filter(|row| matches!(row,
                 plakous_host_protocol::views::transcript::TranscriptRow::Notice(notice)
-                    if notice.text.starts_with("plak: recovered an interrupted turn; its model request")))
+                    if notice.text.starts_with("plakd: recovered an interrupted turn; its model request")))
             .count(),
         1,
         "the saved transcript derives the line once: {:#?}",
@@ -477,7 +477,7 @@ fn the_explicit_recover_control_reports_the_child_it_settled() {
     let fixture = crate::agent::RecoveryFixture::new(&tree_id);
     let id = tokio.block_on(fixture.stuck_child());
     send_attached_action(&actions, UserAction::Recover);
-    let expected = format!("plak: recovered 1 child agent(s) ({id})");
+    let expected = format!("plakd: recovered 1 child agent(s) ({id})");
     wait_for(
         &events,
         &mut seen,

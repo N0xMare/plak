@@ -13,8 +13,8 @@ repo=N0xMare/plak
 base="${PLAK_RELEASE_BASE:-https://github.com/$repo}"
 source_doc="https://github.com/$repo/blob/main/docs/user-guide/getting-started.md"
 
-die() { echo "plak install: $*" >&2; exit 1; }
-say() { echo "plak install: $*" >&2; }
+die() { echo "plakd install: $*" >&2; exit 1; }
+say() { echo "plakd install: $*" >&2; }
 
 # "<uid> <mode>", with the sticky bit when $2 is "sticky". GNU `stat -f`
 # reports the file system instead; that output is discarded.
@@ -23,7 +23,7 @@ owner_mode() {
   facts="$(stat -f "%u $bsd" "$1" 2>/dev/null)" || facts="$(stat -c '%u %a' "$1")"
   echo "$facts"
 }
-# Same rules as tools/build/build-plak.sh: physical installation ancestors
+# Same rules as tools/build/build-plakd.sh: physical installation ancestors
 # are user/root-owned and not writable by others, except root-owned sticky roots.
 safe_dir() {
   [ -d "$1" ] && [ ! -L "$1" ] || die "unsafe or symlinked directory refused: $1"
@@ -78,10 +78,10 @@ case "${1:-}" in
     for name in release maintainer sidecars; do
       if [ -e "$lib/$name" ] || [ -L "$lib/$name" ]; then safe_dir "$lib/$name"; fi
     done
-    for name in plak plakous-js-host plakous-py-host monty; do
+    for name in plakd plakous-js-host plakous-py-host monty; do
       uninstall_link "$bindir/$name"
     done
-    for name in plak plakous-js-host plakous-py-host; do
+    for name in plakd plakous-js-host plakous-py-host; do
       uninstall_link "$cargo_bindir/$name"
     done
     for name in release maintainer sidecars; do
@@ -131,10 +131,10 @@ else
 fi
 case "$version" in *[!0-9A-Za-z.+-]*|'') die "invalid version: $version" ;; esac
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/plak-install.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/plakd-install.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 trap 'exit 1' HUP INT TERM
-stem="plak-$version-$triple"
+stem="plakd-$version-$triple"
 say "downloading $stem"
 fetch -o "$work/$stem.tar.gz" "$base/releases/download/v$version/$stem.tar.gz" \
   || die "could not download $stem.tar.gz"
@@ -153,7 +153,7 @@ else
   say "attestation not checked (needs a signed-in gh); checksum verified"
 fi
 tar -xzf "$work/$stem.tar.gz" -C "$work"
-for name in plak plakous-js-host plakous-py-host; do
+for name in plakd plakous-js-host plakous-py-host; do
   [ -f "$work/$stem/$name" ] && [ ! -L "$work/$stem/$name" ] || die "$stem.tar.gz lacks $name"
 done
 
@@ -185,24 +185,24 @@ installed_js="$dest/plakous-js-host"
 install_sidecar plakous-py-host
 installed_py="$dest/plakous-py-host"
 
-snapshot_id="$(printf 'plak %s\nplakous-js-host %s\nplakous-py-host %s\n' "$(sha256_of "$work/$stem/plak")" \
+snapshot_id="$(printf 'plakd %s\nplakous-js-host %s\nplakous-py-host %s\n' "$(sha256_of "$work/$stem/plakd")" \
   "$(sha256_of "$work/$stem/plakous-js-host")" "$(sha256_of "$work/$stem/plakous-py-host")" \
   | { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; } | cut -d' ' -f1)"
 snapshot="$snapshot_root/$snapshot_id"
 if [ ! -d "$snapshot" ]; then
   staging="$(mktemp -d "$snapshot_root/.staging.XXXXXX")"
-  cp "$work/$stem/plak" "$staging/plak" && chmod 0555 "$staging/plak"
+  cp "$work/$stem/plakd" "$staging/plakd" && chmod 0555 "$staging/plakd"
   ln -s "$installed_js" "$staging/plakous-js-host"
   ln -s "$installed_py" "$staging/plakous-py-host"
-  "$staging/plak" version --write-binary-manifest "$staging" 2>/dev/null \
+  "$staging/plakd" version --write-binary-manifest "$staging" 2>/dev/null \
     || rm -f "$staging/binary-id"
-  "$staging/plak" version --state-key >"$staging/state-key" 2>/dev/null || rm -f "$staging/state-key"
-  "$staging/plak" version --export-version >"$staging/export-version" 2>/dev/null \
+  "$staging/plakd" version --state-key >"$staging/state-key" 2>/dev/null || rm -f "$staging/state-key"
+  "$staging/plakd" version --export-version >"$staging/export-version" 2>/dev/null \
     || rm -f "$staging/export-version"
   mv "$staging" "$snapshot" 2>/dev/null || true
   rm -rf "${snapshot:?}/$(basename "$staging")" "$staging"
 fi
-[ -x "$snapshot/plak" ] || die "could not install $snapshot"
+[ -x "$snapshot/plakd" ] || die "could not install $snapshot"
 
 # Replace only links that already point into the Plak installation roots.
 link() {
@@ -226,14 +226,14 @@ remove_obsolete_worker_link() {
   esac
 }
 remove_obsolete_worker_link
-link "$HOME/.local/bin/plak" "$snapshot/plak"
+link "$HOME/.local/bin/plakd" "$snapshot/plakd"
 link "$HOME/.local/bin/plakous-js-host" "$installed_js"
 link "$HOME/.local/bin/plakous-py-host" "$installed_py"
-say "installed plak $version: $HOME/.local/bin/plak -> $snapshot/plak"
+say "installed plakd $version: $HOME/.local/bin/plakd -> $snapshot/plakd"
 case ":${PATH:-}:" in
   *":$HOME/.local/bin:"*) ;;
   *) say "add $HOME/.local/bin to PATH" ;;
 esac
-found="$(command -v plak 2>/dev/null || true)"
-[ -z "$found" ] || [ "$found" = "$HOME/.local/bin/plak" ] || say "note: plak on PATH is $found"
-say "next: plak doctor"
+found="$(command -v plakd 2>/dev/null || true)"
+[ -z "$found" ] || [ "$found" = "$HOME/.local/bin/plakd" ] || say "note: plakd on PATH is $found"
+say "next: plakd doctor"

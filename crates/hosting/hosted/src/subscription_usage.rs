@@ -1,6 +1,6 @@
 //! The single host-owned Usage projection.
 //!
-//! Every text Usage surface — `plak usage`, `plak usage --session`, and the
+//! Every text Usage surface — `plakd usage`, `plakd usage --session`, and the
 //! `UsageLimits` host event — is built from [`project_limits`](crate::subscription_usage::project_limits) and rendered
 //! from [`render_limits_text`](crate::subscription_usage::render_limits_text), so they can never disagree. `SubscriptionUsageView`
 //! is now only the disposition of that read — loading, unavailable with a
@@ -198,7 +198,7 @@ pub fn is_busy_reason(reason: &str) -> bool {
 ///
 /// A lock miss is contention, not a stable observation. Serving it as a
 /// fresh idle cache would paint Busy for a minute and make the operator
-/// bounce through `plak usage` to unstick the client.
+/// bounce through `plakd usage` to unstick the client.
 #[must_use]
 pub fn projection_is_lock_contention(view: &UsageLimitsView) -> bool {
     let mut any_busy = false;
@@ -898,7 +898,7 @@ const RESET_CLOCK_FORMAT: &str =
 
 /// Returns the one operator-facing sentence for a typed unavailability reason.
 ///
-/// `account` is the vertical's `plak login` account name, so a credential-state
+/// `account` is the vertical's `plakd login` account name, so a credential-state
 /// refusal can name its remedy. Only `Transport` says the HTTP exchange failed;
 /// a local lock, lease, or credential state is named as exactly that. Calling
 /// every local refusal "usage transport failed" is what hid the `SuperGrok`

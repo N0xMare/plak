@@ -34,7 +34,7 @@ writes nothing.
 | `target/prompt-renders/rendered/wire/<route>.request.json` | Strict, parseable first-turn body as the protocol kernel serializes it (Responses / Chat Completions / Messages) |
 | `target/prompt-renders/rendered/wire/<route>.headers.json` | Dialect-pinned headers and approximate body size |
 | `target/prompt-renders/rendered/lifecycle/*.md` | Post-first-turn surfaces: `tool-results`, `compaction`, `child-mail`, `mid-session` |
-| the gitignored local capture directory | Gitignored vendor CLI captures (`claude` / `codex` / `grok` / `opencode`) from `just prompts native-compare`; witnesses for comparison, not Plak runtime |
+| the gitignored local capture directory | Gitignored vendor CLI captures (`claude` / `codex` / `grok` / `opencode`) from `just prompts native-compare`; witnesses for comparison, not plakd runtime |
 
 95 routes: the existing 76 subscription and OpenRouter routes (providers × compositions ×
 topology, minus `native-ptc` where no native PTC is enrolled) and 10 direct API routes, rendered as
@@ -46,7 +46,7 @@ single-agent `py-sdk` roots: `codex`, `grok`, `claude`, `openrouter-chat`,
 `openrouter-responses`, `openrouter-messages`, `openai-api`, `xai-api` and
 `anthropic-api` (each named `<route>.py-sdk.root.single-agent`).
 `native-ptc` is the vertical's own PTC system; today only Codex Code Mode is
-enrolled, on Codex and on the OpenAI API, whose models Plak enrolls as
+enrolled, on Codex and on the OpenAI API, whose models plakd enrolls as
 `CodeModeOnly`. The Markdown `## Request`
 block and the matching `wire/*.request.json` describe the same kernel-lowered
 body; prefer the wire JSON when you need strict JSON.
@@ -121,7 +121,7 @@ just prompts native-compare codex grok
 
 Each vendor directory contains `hello.md`, the strict `hello.request.json`,
 redacted `hello.headers.json`, and `pin.json` identifying the installed binary
-version and capture conditions. Plak's matching render remains under
+version and capture conditions. plakd's matching render remains under
 `target/prompt-renders/rendered/`; run `just prompts render` to regenerate it.
 These are **private local request artifacts**, not shareable fixtures: even
 with secret and identifier redaction, they contain full prompt and tool content,

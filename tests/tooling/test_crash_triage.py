@@ -132,7 +132,7 @@ class CrashTriageTests(unittest.TestCase):
         self.assertNotIn("rehearsal=", result)
 
     def test_reopen_preserves_scoring_and_does_not_triage_unrelated_failures(self):
-        for message in ("plak agent did not become ready: {'kind': 'bye'}", "exit code 5"):
+        for message in ("plakd agent did not become ready: {'kind': 'bye'}", "exit code 5"):
             with patch.object(crash_triage, "inspect", return_value="bucket=unknown") as inspect:
 
                 def refused():
@@ -173,7 +173,7 @@ class CrashTriageTests(unittest.TestCase):
                 side_effect=[
                     agent,
                     live.ScenarioFailure(
-                        live.HARNESS, "plak agent did not become ready: {'kind': 'bye'}"
+                        live.HARNESS, "plakd agent did not become ready: {'kind': 'bye'}"
                     ),
                 ],
             ),
@@ -201,9 +201,9 @@ class CrashTriageTests(unittest.TestCase):
         agent = Mock(session_id="session")
 
         def killed(prompt, timeout, on_event):
-            marker = re.search(r"plak-long-kill-[0-9a-f]+", prompt)[0]
+            marker = re.search(r"plakd-long-kill-[0-9a-f]+", prompt)[0]
             on_event({"kind": "tool", "state": "running", "subject": marker})
-            raise live.ScenarioFailure(live.HARNESS, "plak agent exited during a turn")
+            raise live.ScenarioFailure(live.HARNESS, "plakd agent exited during a turn")
 
         agent.prompt.side_effect = killed
         with (
@@ -215,7 +215,7 @@ class CrashTriageTests(unittest.TestCase):
                 side_effect=[
                     agent,
                     live.ScenarioFailure(
-                        live.HARNESS, "plak agent did not become ready: {'kind': 'bye'}"
+                        live.HARNESS, "plakd agent did not become ready: {'kind': 'bye'}"
                     ),
                 ],
             ),

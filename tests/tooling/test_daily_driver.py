@@ -22,7 +22,7 @@ class DailyDriverTests(unittest.TestCase):
         logs = [
             line(
                 1,
-                'plak.reload: exec installed plak executable=/private/maintainer/abcdef123456/plak carried=true',
+                'plak.reload: exec installed plakd executable=/private/maintainer/abcdef123456/plakd carried=true',
             ),
             line(
                 2,
@@ -40,7 +40,7 @@ class DailyDriverTests(unittest.TestCase):
             line(3, 'plak.capture: PRIVATE PROMPT /private/token', "ERROR"),
             line(
                 3,
-                'plak.reload: exec installed plak executable=/private/maintainer/123456abcdef/plak carried=false',
+                'plak.reload: exec installed plakd executable=/private/maintainer/123456abcdef/plakd carried=false',
             ),
             line(4, 'plak::store: PRIVATE PROMPT', "ERROR"),
         ]
@@ -60,7 +60,7 @@ class DailyDriverTests(unittest.TestCase):
 
     def test_version_ids_turns_and_recovery_counts(self):
         logs = [
-            line(1, 'plak version: plak 0.1.0 (maintainer; binary abcdef123456)'),
+            line(1, 'plakd version: plakd 0.1.0 (maintainer; binary abcdef123456)'),
             line(1, 'plak::runtime: turn.lifecycle turn_id="t1" phase="admitted"'),
             line(1, 'plak::runtime: turn.lifecycle turn_id="t1" phase="completed"'),
             line(1, 'plak::runtime: turn.abandoned turn_id="t2"'),
@@ -99,7 +99,7 @@ class DailyDriverTests(unittest.TestCase):
                         'session_runtime_binding{provider="SECRET" model="SECRET" session_id="s"}: plak::store: hi',
                     ),
                     line(1, 'plak.retry: cause="SECRET"', "WARN"),
-                    line(1, 'plak.reload: exec installed plak executable=/PRIVATE/SECRET/plak'),
+                    line(1, 'plak.reload: exec installed plakd executable=/PRIVATE/SECRET/plakd'),
                 ]
             )
         )
@@ -110,7 +110,7 @@ class DailyDriverTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             snapshot = "abcdef123456"
-            binary = home / ".local/lib/plak/maintainer" / snapshot / "plak"
+            binary = home / ".local/lib/plak/maintainer" / snapshot / "plakd"
             binary.parent.mkdir(parents=True)
             binary.write_bytes(b"synthetic executable")
             expected = hashlib.sha256(binary.read_bytes()).hexdigest()[:12]
@@ -122,7 +122,7 @@ class DailyDriverTests(unittest.TestCase):
                     [
                         line(
                             1,
-                            f'plak.reload: exec installed plak executable=/PRIVATE/maintainer/{snapshot}/plak',
+                            f'plak.reload: exec installed plakd executable=/PRIVATE/maintainer/{snapshot}/plakd',
                         ),
                         line(2, f'plak.start: startup binary={expected} state_key=r22.e24.p30.t4'),
                     ]
@@ -136,7 +136,7 @@ class DailyDriverTests(unittest.TestCase):
                 [
                     line(
                         1,
-                        'plak.reload: exec installed plak executable=/PRIVATE/maintainer/123456abcdef/plak',
+                        'plak.reload: exec installed plakd executable=/PRIVATE/maintainer/123456abcdef/plakd',
                     ),
                     line(2, 'plak.start: binary=111111111111 state_key=r22.e24.p30.t4'),
                     line(2, 'plak::store: warning', "WARN"),

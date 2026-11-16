@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Long-session persistence measurement over the scripted model.
 
-Drives `plak agent` through TURNS prompts of CALLS loopback tool calls each
+Drives `plakd agent` through TURNS prompts of CALLS loopback tool calls each
 (two tool events per call: running, then done; the scripted binding allows 32
 model rounds per turn) and reports, as one JSON line:
 
@@ -11,7 +11,7 @@ model rounds per turn) and reports, as one JSON line:
 - product.sqlite3 size (with its WAL) after a clean quit;
 - when FSYNC_TRACE=1 on Linux, the fsync/fdatasync count under strace.
 
-Usage: perf_long_session.py <plak-binary> <scratch-root> [--turns N] [--calls N]
+Usage: perf_long_session.py <plakd-binary> <scratch-root> [--turns N] [--calls N]
 """
 
 import argparse
@@ -50,7 +50,7 @@ def write_home(root):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("plak")
+    parser.add_argument("plakd")
     parser.add_argument("root")
     parser.add_argument("--turns", type=int, default=34)
     parser.add_argument("--calls", type=int, default=30)
@@ -80,7 +80,7 @@ def main():
         "PLAK_TEST_MODEL": "offline-loopback-v1",
         "PLAK_TEST_SCRIPT": script,
     }
-    command = [args.plak, "agent"]
+    command = [args.plakd, "agent"]
     trace = os.path.join(root, "strace.txt")
     if os.environ.get("FSYNC_TRACE") == "1":
         command = [

@@ -11,13 +11,13 @@ pub(crate) const COMPACT_FAILED_DETAIL: &str =
 
 /// The one notice of an admitted compaction a closure abandoned with exact
 /// evidence that its summary request was never sent.
-pub(crate) const COMPACT_ABANDONED_UNSENT_NOTE: &str = "plak: interrupted compaction was not \
+pub(crate) const COMPACT_ABANDONED_UNSENT_NOTE: &str = "plakd: interrupted compaction was not \
      applied; its summary was not sent and will not be dispatched again; the conversation history \
      is unchanged";
 
 /// The one notice of an admitted compaction a closure abandoned without that
 /// evidence.
-pub(crate) const COMPACT_ABANDONED_BILLED_NOTE: &str = "plak: interrupted compaction was not \
+pub(crate) const COMPACT_ABANDONED_BILLED_NOTE: &str = "plakd: interrupted compaction was not \
      applied, may have been billed, and will not be dispatched again; the conversation history is \
      unchanged";
 

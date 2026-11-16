@@ -1,0 +1,61 @@
+plakd session — session utilities
+
+USAGE:
+  plakd session list [--include-archived]
+  plakd session rename <full-id> <title>
+  plakd session rename <full-id> --clear
+  plakd session archive <full-id> [--yes]
+  plakd session unarchive <full-id>
+  plakd session show <session>[.cN]
+  plakd session log <session>[.cN] [--kind kind] [--tail N (default 100)] [--json]
+  plakd session recover <session>
+  plakd session export <session> [--out <path>]
+  plakd session import <path>
+  plakd session delete <session> [--yes] [--abandon-children]
+  plakd session gc <session> | --all
+  plakd session reload <session> --expect-binary <binary-id>
+
+  show/log accept .cN to read only that child. Child log reads its canonical
+  history, not the root event log; --kind filters its actor (e.g. user).
+
+  recover reopens a session whose turn was interrupted, records once what that
+  turn left unobserved, and releases it; the next prompt does the same on its own.
+
+  export writes a portable session document (0600; default ~/.plak/carry/)
+  that carries the full conversation to another plakd build. import creates a
+  linked session that continues from it; live tools, processes and sub-agents
+  are not restored, and queued work stays paused. This build writes version 13
+  and imports versions 13 and 12. Both preserve named state. Version 11 and
+  older are refused.
+  Session IDs accept an unambiguous prefix of at least four characters.
+  rename/archive/unarchive require full session IDs. rename sets a title override;
+  --clear reveals the generated title again. archive hides a quiescent session
+  from ordinary lists and makes it read-only; unarchive starts no work.
+  --include-archived includes hidden sessions in the list. Archive requires
+  confirmation, and refuses live owners, children, processes or unknown activity.
+  --abandon-children explicitly retires recovery-required children before delete.
+
+  delete removes a session and all of its retained history, with its finished
+  sub-agents' history and its agent tree, and frees store space even when the
+  session store is full. It refuses a session that is open in a running plakd,
+  whose agent tree has running, resumable or recovery-required sub-agents, or
+  that other sessions continue from (forks, rebinds); it asks
+  first unless --yes is given. A delete that failed part way finishes on rerun.
+
+  gc reclaims checkpoint history a session no longer needs: every turn's
+  intermediate checkpoints. History, resume and forks are unaffected, and it
+  works even when the session store is full. It skips sessions open in a
+  running plakd, with an unfinished turn, or whose recorded head is stale (open
+  the session first). --all covers every plakd session (product record) in this
+  home and finishes deletes an earlier crash interrupted; sub-agent runtime
+  sessions are pruned by their own turns. Turns also reclaim their own history
+  automatically once enough of it builds up.
+
+  reload asks a running interactive plakd to reload that session onto the
+  installed build at its next idle boundary; it is refused unless the home
+  sets host.reload_requests = true and this plakd is build <binary-id> (the
+  session checks the installed build again). A full id or a unique prefix of
+  an announced session works under any state format. It prints the file the
+  outcome is written to and returns at once.
+
+  Event logs: ~/.plak/state/<format key>/sessions/<session>.events.jsonl (agent-readable).

@@ -809,13 +809,13 @@ class CapabilityTests(unittest.IsolatedAsyncioTestCase):
             exec=mock.AsyncMock(return_value=SimpleNamespace(return_code=0, stdout='plak run help'))
         )
         with self.assertRaisesRegex(PreflightError, 'amp-jobs'):
-            await probe_run_capabilities(environment, '/installed-agent/plak')
+            await probe_run_capabilities(environment, '/installed-agent/plakd')
         environment.exec.return_value.stdout = 'plak run --leave-jobs-running'
-        await probe_run_capabilities(environment, '/installed-agent/plak')
+        await probe_run_capabilities(environment, '/installed-agent/plakd')
         self.assertIn('run --help', environment.exec.call_args.kwargs['command'])
         environment.exec.return_value.return_code = 1
         with self.assertRaises(PreflightError):
-            await probe_run_capabilities(environment, '/installed-agent/plak')
+            await probe_run_capabilities(environment, '/installed-agent/plakd')
 
 
 class CaptureTerminalTests(unittest.TestCase):

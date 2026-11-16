@@ -1,0 +1,1132 @@
+#![allow(clippy::unwrap_used, reason = "offline deletion assertions")]
+
+use super::*;
+use crate::commands::session::lifecycle;
+use std::sync::Arc;
+
+use plakous::sessions::{
+    CreateSessionOutcome, CreateSessionRequest, OpenedSession, SessionBackend, SessionOperationId,
+};
+use plakous_hosted::agent_tree::turn_outcome::FailedTurnDisposition;
+use plakous_hosted::agent_tree::{ProductAgentTree, RecoveryNeed, TreeStore as _};
+use plakous_hosted::agent_tree_protocol::{NodeStatus, SpawnAgentRequest};
+use plakous_hosted::topology_runtime::test_support::bootstrap;
+use plakous_offline_crash_harness::protocol::CrashBoundary;
+use plakous_offline_crash_harness::{BoundaryController, runtime_binding};
+
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_keepalive_worker() {
+    let Ok(home) = std::env::var("PLAK_LIFECYCLE_CRASH_HOME") else {
+        return;
+    };
+    let paths = crate::home::paths::PlakPaths::explicit(home.into());
+    let id = std::env::var("PLAK_LIFECYCLE_CRASH_SESSION").unwrap();
+    let services = crate::shell::services::Services::for_home(paths.clone());
+    assert_eq!(
+        services
+            .state_roots()
+            .unwrap()
+            .runtime_sessions()
+            .unwrap()
+            .lease_period_seconds(),
+        1
+    );
+    let result = lifecycle::archive_offline(&services, &id);
+    let failure = std::env::var("PLAK_LIFECYCLE_FAIL_RENEWAL").as_deref() == Ok("1")
+        || std::env::var_os("PLAK_LIFECYCLE_RENEWAL_LOSS_AT").is_some();
+    if failure {
+        assert!(matches!(result, Err(LifecycleError::Failure(_))));
+    } else {
+        result.unwrap();
+    }
+    assert_eq!(
+        crate::store::ProductStore::inspect_session_read_only(&paths, &id)
+            .unwrap()
+            .archived,
+        !failure
+    );
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss() -> TestResult {
+    for failure in [false, true] {
+        let mut f = fixture(false).checked()?;
+        f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+        crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+        let output = std::process::Command::new(std::env::current_exe().checked()?)
+            .args([
+                "--exact",
+                "commands::session::delete::deletion_tests::lifecycle_keepalive_worker",
+                "--nocapture",
+            ])
+            .env("PLAK_LIFECYCLE_CRASH_HOME", f.paths.home())
+            .env("PLAK_LIFECYCLE_CRASH_SESSION", &f.record.id)
+            .env("PLAK_TEST_SESSION_LEASE_SECONDS", "1")
+            .env(
+                "PLAK_LIFECYCLE_SCAN_PAUSE_MS",
+                if failure { "400" } else { "2200" },
+            )
+            .env(
+                "PLAK_LIFECYCLE_COMMIT_PAUSE_MS",
+                if failure { "0" } else { "1200" },
+            )
+            .env(
+                "PLAK_LIFECYCLE_FAIL_RENEWAL",
+                if failure { "1" } else { "0" },
+            )
+            .output()
+            .checked()?;
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(f.product.load(&f.record.id).checked()?.archived, !failure);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_renewal_loss_before_metadata_write_and_during_commit_refuses() -> TestResult {
+    for phase in ["scan", "commit"] {
+        let mut f = fixture(false)?;
+        f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+        crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+        let mut worker = std::process::Command::new(std::env::current_exe()?);
+        worker
+            .args([
+                "--exact",
+                "commands::session::delete::deletion_tests::lifecycle_keepalive_worker",
+                "--nocapture",
+            ])
+            .env("PLAK_LIFECYCLE_CRASH_HOME", f.paths.home())
+            .env("PLAK_LIFECYCLE_CRASH_SESSION", &f.record.id)
+            .env("PLAK_TEST_SESSION_LEASE_SECONDS", "1")
+            .env("PLAK_LIFECYCLE_RENEWAL_LOSS_AT", phase)
+            .env(
+                "PLAK_LIFECYCLE_RENEWAL_LOSS_FILE",
+                f.paths.home().join("renewal-loss"),
+            )
+            .env(
+                "PLAK_LIFECYCLE_SCAN_PAUSE_MS",
+                if phase == "scan" { "600" } else { "0" },
+            )
+            .env("PLAK_LIFECYCLE_COMMIT_PAUSE_MS", "1200");
+        if phase == "scan" {
+            worker.env("PLAK_LIFECYCLE_CRASH_CUT", "metadata_before_commit");
+        }
+        let output = worker.output()?;
+        assert!(
+            output.status.success(),
+            "{phase}: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!f.product.load(&f.record.id).checked()?.archived);
+    }
+    Ok(())
+}
+
+#[test]
+fn offline_archive_fences_owners_and_live_children_without_archiving_runtime() -> TestResult {
+    let mut f = fixture(false).checked()?;
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    let locator = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let operation = SessionOperationId::new("archive:test-hold").checked()?;
+    let held = f
+        .runtime
+        .run(f.runtime.sessions.hold_branch(&operation, locator))
+        .checked()??;
+    assert!(matches!(
+        lifecycle::archive_offline(&services, &f.record.id),
+        Err(LifecycleError::Refused(LifecycleRefusal::Open))
+    ));
+    f.runtime.run(held.release()).checked()??;
+    assert!(
+        matches!(lifecycle::archive_offline(&services,&f.record.id),Err(LifecycleError::Refused(LifecycleRefusal::Busy{children,..})) if children.contains(&f.child_id))
+    );
+    assert!(!f.product.load(&f.record.id).checked()?.archived);
+    f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let child_hold = f
+        .runtime
+        .run(f.runtime.sessions.hold_branch(&operation, f.child_locator))
+        .checked()??;
+    assert!(matches!(
+        lifecycle::archive_offline(&services, &f.record.id),
+        Err(LifecycleError::Refused(LifecycleRefusal::Open))
+    ));
+    assert!(!f.product.load(&f.record.id).checked()?.archived);
+    f.runtime.run(child_hold.release()).checked()??;
+    lifecycle::archive_offline(&services, &f.record.id).checked()?;
+    assert!(f.product.load(&f.record.id).checked()?.archived);
+    AgentSessions::export_history_sqlite(f.paths.runtime_database(), locator).checked()?;
+    // Metadata archival releases every fence; unarchive can reopen the same runtime.
+    let held = f
+        .runtime
+        .run(f.runtime.sessions.hold_branch(&operation, locator))
+        .checked()??;
+    f.runtime.run(held.release()).checked()??;
+    Ok(())
+}
+
+#[test]
+fn lifecycle_archive_refuses_product_continuation_and_queued_work() -> TestResult {
+    use plakous_hosted::sessions::projector::{
+        RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
+    };
+    for queued in [false, true] {
+        let mut f = fixture(false)?;
+        f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+        crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+        let services = crate::shell::services::Services::for_home(f.paths.clone());
+        if queued {
+            f.record
+                .pending_queue
+                .push(product_sessions::QueueItem::new("queued prompt"));
+            f.product.commit(&mut f.record).checked()?;
+        } else {
+            services
+                .session_records()?
+                .write_root_loss(
+                    &f.record.id,
+                    RootLossIntent::Interrupt(RootInterrupt {
+                        anchor: RootStopAnchor::Turn {
+                            turn_id: "handoff-turn".to_owned(),
+                        },
+                        cause: RootInterruptCause::Handoff,
+                    }),
+                )
+                .checked()?;
+        }
+        assert!(matches!(
+            lifecycle::archive_offline(&services, &f.record.id),
+            Err(LifecycleError::Refused(LifecycleRefusal::Busy {
+                turn: true,
+                ..
+            }))
+        ));
+        assert!(!f.product.load(&f.record.id).checked()?.archived);
+    }
+    Ok(())
+}
+
+#[test]
+fn lifecycle_archive_refuses_an_archived_runtime_branch() -> TestResult {
+    let mut f = fixture(false)?;
+    f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    f.runtime
+        .archive(&f.record.id, f.record.plakous_locator.unwrap())
+        .checked()?;
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    assert!(matches!(
+        lifecycle::archive_offline(&services, &f.record.id),
+        Err(LifecycleError::Refused(LifecycleRefusal::Busy {
+            state_unknown: true,
+            ..
+        }))
+    ));
+    assert!(!f.product.load(&f.record.id).checked()?.archived);
+    Ok(())
+}
+
+#[test]
+fn lifecycle_gc_refuses_archived_before_opening_runtime() -> TestResult {
+    let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let services = crate::shell::services::Services::for_home(paths.for_workspace(paths.home()));
+    let mut record = product_sessions::SessionRecord::new(paths.home().to_owned());
+    record.archived = true;
+    services.session_records()?.save(&mut record).checked()?;
+    std::fs::write(paths.runtime_database(), b"not a runtime database")?;
+    let error = gc_sessions(&services, Some(&record.id), &mut Vec::new()).unwrap_err();
+    assert!(error.message().contains("unarchive"), "{error}");
+    assert_eq!(
+        std::fs::read(paths.runtime_database())?,
+        b"not a runtime database"
+    );
+    Ok(())
+}
+
+#[test]
+fn lifecycle_gc_all_reports_archived_sessions_as_skipped() -> TestResult {
+    let mut f = fixture(false)?;
+    f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    lifecycle::archive_offline(&services, &f.record.id)?;
+    let mut output = Vec::new();
+    gc_sessions(&services, None, &mut output)?;
+    let output = String::from_utf8(output)?;
+    assert!(
+        output.contains(&format!(
+            "skipped {}: archived; unarchive before gc",
+            f.record.id
+        )),
+        "{output}"
+    );
+    assert!(f.product.load(&f.record.id).checked()?.archived);
+    Ok(())
+}
+
+#[test]
+fn lifecycle_delete_refuses_root_and_finished_child_owners() -> TestResult {
+    for child in [false, true] {
+        let mut f = fixture(false)?;
+        f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+        crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+        let locator = if child {
+            f.child_locator
+        } else {
+            f.record.plakous_locator.unwrap()
+        };
+        let operation = SessionOperationId::new("delete:held-owner").checked()?;
+        let held = f
+            .runtime
+            .run(f.runtime.sessions.hold_branch(&operation, locator))
+            .checked()??;
+        let services = crate::shell::services::Services::for_home(f.paths.clone());
+        assert!(matches!(
+            lifecycle::delete_confirmed(&services, &f.record.id, false),
+            Err(LifecycleError::Refused(LifecycleRefusal::Open))
+        ));
+        assert_eq!(f.product.load(&f.record.id).checked()?.id, f.record.id);
+        f.runtime.run(held.release()).checked()??;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_working_worker() {
+    let Ok(home) = std::env::var("PLAK_LIFECYCLE_WORKING_HOME") else {
+        return;
+    };
+    let paths = crate::home::paths::PlakPaths::explicit(home.into());
+    let id = std::env::var("PLAK_LIFECYCLE_WORKING_ID").unwrap();
+    let services = crate::shell::services::Services::for_home(paths.clone());
+    let runtime = RuntimeDeletion::new(&services).unwrap();
+    let evidence = paths.home().join("working-evidence.jsonl");
+    let controller =
+        BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence).unwrap();
+    let plan = Arc::new(
+        serde_json::from_value(
+            serde_json::json!({"version":1,"steps":[{"stream":[{"stall":30000}]}]}),
+        )
+        .unwrap(),
+    );
+    let binding =
+        plakous_offline_crash_harness::scripted_runtime_binding(paths.home(), controller, plan)
+            .unwrap();
+    let mut product = crate::store::ProductStore::open(&paths).unwrap();
+    let mut record = product.load(&id).unwrap();
+    let CreateSessionOutcome::Created { session, .. } = runtime
+        .run(runtime.sessions.create(CreateSessionRequest::new(
+            SessionOperationId::new(&record.create_operation_id).unwrap(),
+            binding,
+        )))
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("created")
+    };
+    record.bind_plakous_locator(session.locator()).unwrap();
+    product.commit(&mut record).unwrap();
+    runtime.executor.block_on(async {
+        let _turn = session.agent().prompt("leave working").await.unwrap();
+        loop {
+            if plakous_offline_crash_harness::evidence::read_evidence(&evidence).unwrap().iter().any(|record|record.kind==plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched) {
+                std::process::exit(0);
+            }
+            tokio::task::yield_now().await;
+        }
+    }).unwrap();
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_archive_refuses_expired_working_root_and_finished_child() -> TestResult {
+    archive_expired_working(false)
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_archive_refuses_expired_working_finished_child() -> TestResult {
+    archive_expired_working(true)
+}
+
+#[cfg(feature = "test-hooks")]
+fn archive_expired_working(child: bool) -> TestResult {
+    let mut f = fixture(false)?;
+    f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let mut working = product_sessions::SessionRecord::new(f.paths.home().to_owned());
+    f.product.commit(&mut working).checked()?;
+    let output = std::process::Command::new(std::env::current_exe()?)
+        .args([
+            "--exact",
+            "commands::session::delete::deletion_tests::lifecycle_working_worker",
+            "--nocapture",
+        ])
+        .env("PLAK_LIFECYCLE_WORKING_HOME", f.paths.home())
+        .env("PLAK_LIFECYCLE_WORKING_ID", &working.id)
+        .env("PLAK_TEST_SESSION_LEASE_SECONDS", "1")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    working = f.product.load(&working.id).checked()?;
+    let mut locator = working.plakous_locator.unwrap();
+    let operation = SessionOperationId::new("archive:wait-expiry").checked()?;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match f
+            .runtime
+            .run(f.runtime.sessions.hold_branch(&operation, locator))
+            .checked()?
+        {
+            Ok(held) => {
+                f.runtime.run(held.release()).checked()??;
+                break;
+            }
+            Err(error) if error.kind() == AgentSessionsErrorKind::Ownership => {
+                assert!(std::time::Instant::now() < until);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) if error.kind() == AgentSessionsErrorKind::StaleLocator => {
+                locator = error.current_locator().ok_or("missing current locator")?;
+            }
+            Err(error) => return Err(format!("{error}").into()),
+        }
+    }
+    let target = if child {
+        let id = f
+            .tree
+            .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+            .checked()?
+            .agent_id;
+        f.tree
+            .bind_session_locator(&id, locator.to_string())
+            .checked()?;
+        f.tree
+            .record_turn_failure(
+                &id,
+                FailedTurnDisposition::RecoveryRequired,
+                "crashed child".into(),
+            )
+            .checked()?;
+        f.tree.abandon_recovery_for_delete(&id).checked()?;
+        crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+        f.record.id.clone()
+    } else {
+        working.id.clone()
+    };
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    let refusal = lifecycle::archive_offline(&services, &target);
+    assert!(
+        matches!(refusal,Err(LifecycleError::Refused(LifecycleRefusal::Busy {turn,ref children,..})) if (child && !children.is_empty()) || (!child && turn)),
+        "{refusal:?}"
+    );
+    assert!(!f.product.load(&target).checked()?.archived);
+    Ok(())
+}
+
+#[test]
+fn deletion_lifecycle_crash_worker() {
+    let Ok(home) = std::env::var("PLAK_LIFECYCLE_CRASH_HOME") else {
+        return;
+    };
+    let paths = crate::home::paths::PlakPaths::explicit(home.into());
+    let id = std::env::var("PLAK_LIFECYCLE_CRASH_SESSION").unwrap();
+    let services = crate::shell::services::Services::for_home(paths);
+    lifecycle::delete_confirmed(&services, &id, true).unwrap();
+    panic!("deletion did not reach crash cut");
+}
+
+#[test]
+fn lifecycle_deletion_crash_cuts_finish_without_recovery_or_cascade() -> TestResult {
+    for cut in [
+        "delete_root_archived",
+        "delete_abandon_committed",
+        "delete_child_deleted",
+        "delete_runtime_deleted",
+        "delete_tree_deleted",
+        "delete_before_commit",
+        "delete_after_commit",
+    ] {
+        let mut f = fixture(false).checked()?;
+        let mut unrelated = product_sessions::SessionRecord::new(f.paths.home().to_owned());
+        f.product.commit(&mut unrelated).checked()?;
+        let output = std::process::Command::new(std::env::current_exe().checked()?)
+            .args([
+                "--exact",
+                "commands::session::delete::deletion_tests::deletion_lifecycle_crash_worker",
+                "--nocapture",
+            ])
+            .env("PLAK_LIFECYCLE_CRASH_HOME", f.paths.home())
+            .env("PLAK_LIFECYCLE_CRASH_SESSION", &f.record.id)
+            .env("PLAK_LIFECYCLE_CRASH_CUT", cut)
+            .output()
+            .checked()?;
+        assert_eq!(
+            output.status.code(),
+            Some(91),
+            "cut {cut}: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let services = crate::shell::services::Services::for_home(f.paths.clone());
+        if cut == "delete_after_commit" {
+            assert!(matches!(
+                lifecycle::delete_confirmed(&services, &f.record.id, true),
+                Err(LifecycleError::Refused(LifecycleRefusal::NotFound))
+            ));
+        } else {
+            lifecycle::delete_confirmed(&services, &f.record.id, true).checked()?;
+        }
+        assert!(f.product.load(&f.record.id).is_err());
+        assert!(f.product.load(&unrelated.id).is_ok());
+    }
+    Ok(())
+}
+
+trait Checked<T> {
+    fn checked(self) -> TestResult<T>;
+}
+
+impl<T, E: std::fmt::Debug> Checked<T> for Result<T, E> {
+    fn checked(self) -> TestResult<T> {
+        self.map_err(|error| format!("{error:?}").into())
+    }
+}
+
+struct Fixture {
+    _tmp: tempfile::TempDir,
+    paths: crate::home::paths::PlakPaths,
+    product: crate::store::ProductStore,
+    runtime: RuntimeDeletion,
+    record: product_sessions::SessionRecord,
+    tree: ProductAgentTree,
+    child_id: String,
+    child_locator: SessionLocator,
+    held_child: Option<OpenedSession>,
+}
+
+fn create(
+    runtime: &RuntimeDeletion,
+    paths: &crate::home::paths::PlakPaths,
+    id: &str,
+) -> TestResult<OpenedSession> {
+    let controller = BoundaryController::quiet_from_evidence_path(
+        CrashBoundary::None,
+        paths.home().join("delete-physical.jsonl"),
+    )
+    .checked()?;
+    let created = runtime
+        .run(runtime.sessions.create(CreateSessionRequest::new(
+            SessionOperationId::new(id).checked()?,
+            runtime_binding(paths.home(), controller).checked()?,
+        )))
+        .checked()??;
+    let CreateSessionOutcome::Created { session, .. } = created else {
+        return Err("offline create did not return a session".into());
+    };
+    Ok(session)
+}
+
+#[test]
+fn deletion_reconciles_creation_before_locator_publication() -> TestResult {
+    let mut f = fixture(false)?;
+    let mut record = product_sessions::SessionRecord::new(f.paths.home().to_path_buf());
+    f.product.commit(&mut record).checked()?;
+    let created = create(&f.runtime, &f.paths, &record.create_operation_id)?;
+    let locator = f.runtime.run(created.release()).checked()??;
+    assert!(record.plakous_locator.is_none());
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    lifecycle::delete_confirmed(&services, &record.id, false)?;
+    assert_eq!(f.product.load(&record.id).unwrap_err(), "session not found");
+    let missing = f
+        .runtime
+        .run(f.runtime.sessions.head_is_quiescent(locator))
+        .checked()?
+        .unwrap_err();
+    assert_eq!(missing.kind(), AgentSessionsErrorKind::NotFound);
+    assert_eq!(f.product.load(&f.record.id).checked()?.id, f.record.id);
+    Ok(())
+}
+
+#[test]
+fn lifecycle_archive_refuses_running_process_without_a_turn() -> TestResult {
+    use plakous::tools::JobHost as _;
+    use plakous_offline_crash_harness::evidence::EvidenceKind;
+    let mut f = fixture(false)?;
+    let host = Arc::new(plakous::tools::LocalJobHost::new());
+    let evidence = f.paths.home().join("process-evidence.jsonl");
+    let controller =
+        BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence).checked()?;
+    let plan = Arc::new(serde_json::from_value(serde_json::json!({
+        "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
+        "process_tools": true,
+        "steps": [
+            {"output": {"tool": {"name": "process_session_start", "arguments": {
+                "command": "read line", "workdir": ".", "login": false,
+                "tty": false, "keep_stdin_open": true, "yield_time_ms": 0,
+                "max_output_bytes": 8192
+            }}}, "finish": "tool_calls"},
+            {"stream": [{"text": "waiting"}, {"stall": 30000}]}
+        ]
+    }))?);
+    let mut record = product_sessions::SessionRecord::new(f.paths.home().to_path_buf());
+    let binding =
+        plakous_offline_crash_harness::scripted_runtime_binding(f.paths.home(), controller, plan)
+            .checked()?
+            .with_job_host(host.clone());
+    let CreateSessionOutcome::Created { session, .. } = f
+        .runtime
+        .run(f.runtime.sessions.create(CreateSessionRequest::new(
+            SessionOperationId::new(&record.create_operation_id).checked()?,
+            binding,
+        )))
+        .checked()??
+    else {
+        return Err("expected created session".into());
+    };
+    let line = session.line();
+    let agent = session.agent().clone();
+    f.runtime
+        .executor
+        .block_on(async {
+            let turn = agent.prompt("start process").await?;
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let dispatched =
+                        plakous_offline_crash_harness::evidence::read_evidence(&evidence)
+                            .unwrap()
+                            .iter()
+                            .filter(|record| record.kind == EvidenceKind::ProviderDispatched)
+                            .count();
+                    if !agent.jobs().is_empty() && dispatched >= 2 {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await?;
+            turn.control().cancel().await?;
+            turn.result().await?;
+            TestResult::Ok(())
+        })
+        .checked()??;
+    assert_eq!(agent.jobs()[0].status, plakous::tools::JobStatus::Running);
+    let locator = f.runtime.run(session.release_for_transfer()).checked()??;
+    record.bind_plakous_locator(locator).checked()?;
+    f.product.commit(&mut record).checked()?;
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    let result = lifecycle::archive_offline(&services, &record.id);
+    host.service(line)
+        .ok_or("process service")?
+        .stop_jobs(
+            plakous::tools::JobStopReason::SessionExit,
+            std::time::Duration::from_millis(250),
+        )
+        .checked()?;
+    assert!(matches!(
+        result,
+        Err(LifecycleError::Refused(LifecycleRefusal::Busy {
+            state_unknown: true,
+            ..
+        }))
+    ));
+    assert!(!f.product.load(&record.id).checked()?.archived);
+    Ok(())
+}
+
+fn fixture(leased: bool) -> TestResult<Fixture> {
+    let (tmp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    paths.ensure_layout().checked()?;
+    let runtime = RuntimeDeletion {
+        sessions: Arc::new(
+            AgentSessions::new(SessionBackend::sqlite(paths.runtime_database()).checked()?)
+                .checked()?,
+        ),
+        executor: plakous::application::ApplicationExecutor::new().checked()?,
+    };
+    let root = create(&runtime, &paths, "delete:create-root").checked()?;
+    let root_locator = runtime.run(root.release()).checked()??;
+    let child = create(&runtime, &paths, "delete:create-child").checked()?;
+    let child_locator = child.locator();
+    let held_child = if leased {
+        Some(child)
+    } else {
+        runtime.run(child.release()).checked()??;
+        None
+    };
+    let mut record = product_sessions::SessionRecord::new(paths.home().to_path_buf());
+    record.bind_plakous_locator(root_locator).checked()?;
+    let mut product = crate::store::ProductStore::open(&paths).checked()?;
+    product.commit(&mut record).checked()?;
+    let mut tree = bootstrap(&record.id, paths.home().to_path_buf());
+    let child_id = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .checked()?
+        .agent_id;
+    tree.bind_session_locator(&child_id, child_locator.to_string())
+        .checked()?;
+    tree.record_turn_failure(
+        &child_id,
+        FailedTurnDisposition::RecoveryRequired,
+        "offline unresolved child obligation".into(),
+    )
+    .checked()?;
+    tree.settle_for_test();
+    crate::store::tree::save_tree(&paths, &mut tree).checked()?;
+    Ok(Fixture {
+        _tmp: tmp,
+        paths,
+        product,
+        runtime,
+        record,
+        tree,
+        child_id,
+        child_locator,
+        held_child,
+    })
+}
+
+#[test]
+fn delete_without_abandon_flag_still_refuses_recovery_required_tree() -> TestResult {
+    let mut f = fixture(false).checked()?;
+    let root = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let refusal = deletion_plan(&f.paths, &mut f.product, &f.record, root, false)
+        .err()
+        .ok_or("unflagged delete accepted recovery debt")
+        .checked()?;
+    assert!(refusal.message().contains("need recovery"));
+    assert!(refusal.message().contains("--abandon-children"));
+    assert!(
+        matches!(&refusal, LifecycleError::Refused(LifecycleRefusal::RecoveryRequiredTree {children,..}) if children.contains(&f.child_id))
+    );
+    assert!(
+        f.runtime
+            .run(f.runtime.sessions.head_is_quiescent(root))
+            .checked()??
+    );
+    let live = f
+        .tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let refusal = deletion_plan(&f.paths, &mut f.product, &f.record, root, true)
+        .err()
+        .ok_or("flagged delete accepted a live child")
+        .checked()?;
+    assert!(refusal.message().contains(&live.agent_id));
+    assert!(
+        matches!(&refusal, LifecycleError::Refused(LifecycleRefusal::LiveTree {children,..}) if children.contains(&live.agent_id))
+    );
+    assert_eq!(
+        f.tree.node(&f.child_id).checked()?.status,
+        NodeStatus::RecoveryRequired
+    );
+    Ok(())
+}
+
+#[test]
+fn delete_close_then_fault_refuses_or_explicitly_abandons_recovery() -> TestResult {
+    let mut f = fixture(false).checked()?;
+    let attempt = f
+        .tree
+        .attempt(&f.child_id)
+        .ok_or("child attempt")
+        .checked()?
+        .attempt_id
+        .clone();
+    f.tree
+        .recover_host_decision(
+            &f.child_id,
+            &attempt,
+            plakous_hosted::agent_tree::RecoveryResolution::RecoveredWithoutTurn {
+                message: "fixture is quiescent".into(),
+            },
+        )
+        .checked()?;
+    f.tree.settle_for_test();
+    f.child_id = f
+        .tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .checked()?
+        .agent_id;
+    f.tree
+        .bind_session_locator(&f.child_id, f.child_locator.to_string())
+        .checked()?;
+    let attempt = f
+        .tree
+        .attempt(&f.child_id)
+        .ok_or("new attempt")
+        .checked()?
+        .attempt_id
+        .clone();
+    f.tree.set_active_turn(&f.child_id, true).checked()?;
+    f.tree
+        .close_agent(
+            "root",
+            &plakous_hosted::agent_tree_protocol::AttemptScopedRequest {
+                agent_id: f.child_id.clone(),
+                expected_attempt_id: Some(attempt),
+            },
+            None,
+        )
+        .checked()?;
+    f.tree
+        .record_host_retirement(&f.child_id, "late release deadline".into())
+        .and_then(|value| f.tree.fold_due(&f.child_id).map(|_| value))
+        .checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let root = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let refusal = deletion_plan(&f.paths, &mut f.product, &f.record, root, false)
+        .err()
+        .ok_or("delete accepted closed recovery debt")
+        .checked()?;
+    assert!(refusal.message().contains("need recovery"));
+    assert!(refusal.message().contains("--abandon-children"));
+    let mut plan = deletion_plan(&f.paths, &mut f.product, &f.record, root, true).checked()?;
+    assert_eq!(plan.abandon, vec![f.child_id.clone()]);
+    publish_abandoned_children(&f.paths, &mut plan).checked()?;
+    let closed = crate::store::tree::load_tree(&f.paths, &f.record.id)
+        .checked()?
+        .ok_or("saved tree")
+        .checked()?;
+    assert_eq!(
+        closed.node(&f.child_id).checked()?.status,
+        NodeStatus::Closed
+    );
+    Ok(())
+}
+
+#[test]
+fn delete_abandoned_obligation_survives_sqlite_restart_before_cleanup() -> TestResult {
+    let mut f = fixture(false).checked()?;
+    let root = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let attempt = f
+        .tree
+        .attempt(&f.child_id)
+        .ok_or("attempt")
+        .checked()?
+        .attempt_id
+        .clone();
+    let mut plan = deletion_plan(&f.paths, &mut f.product, &f.record, root, true).checked()?;
+    assert_eq!(plan.abandon, [f.child_id.clone()]);
+    let before = SessionBackend::inspect_sqlite_usage(f.paths.runtime_database())
+        .checked()?
+        .ok_or("usage")
+        .checked()?;
+    f.runtime.archive(&f.record.id, root).checked()?;
+    f.runtime.archive(&f.record.id, f.child_locator).checked()?;
+    publish_abandoned_children(&f.paths, &mut plan).checked()?;
+    let store = crate::store::tree::open_tree_store(&f.paths).checked()?;
+    let persisted = store
+        .load(&f.record.id)
+        .checked()?
+        .ok_or("persisted tree")
+        .checked()?;
+    let failure = persisted
+        .rows()
+        .attempt(&f.child_id)
+        .ok_or("persisted attempt")
+        .checked()?
+        .failure
+        .as_ref()
+        .ok_or("persisted obligation")
+        .checked()?;
+    assert_eq!(failure.kind, "recovery_abandoned");
+    assert!(failure.message.contains("operator"));
+    assert!(failure.message.contains(attempt.as_str()));
+    assert!(failure.message.contains("recovery will not run"));
+    let reopened = ProductAgentTree::reopen(persisted);
+    assert_eq!(
+        reopened.recovery_need(&f.child_id).checked()?,
+        RecoveryNeed::NotRequired
+    );
+    assert_eq!(
+        reopened.node(&f.child_id).checked()?.status,
+        NodeStatus::Closed
+    );
+    assert_eq!(reopened.session_recovery_targets(), [] as [String; 0]);
+    let after = SessionBackend::inspect_sqlite_usage(f.paths.runtime_database())
+        .checked()?
+        .ok_or("usage")
+        .checked()?;
+    for (before, after) in before.bounds().iter().zip(after.bounds()) {
+        assert_eq!(before.limit(), after.limit());
+    }
+    drop(store);
+    f.runtime = RuntimeDeletion {
+        sessions: Arc::new(
+            AgentSessions::new(SessionBackend::sqlite(f.paths.runtime_database()).checked()?)
+                .checked()?,
+        ),
+        executor: plakous::application::ApplicationExecutor::new().checked()?,
+    };
+    // The durable abandonment is sufficient: an interrupted cleanup no longer
+    // needs the flag, and never reopens or recovers a child.
+    delete_confirmed_session(&f.paths, &mut f.product, &f.runtime, &f.record, root, false)
+        .checked()?;
+    assert!(product_sessions::load_session(&f.paths, &f.record.id).is_err());
+    assert!(
+        !crate::store::tree::open_tree_store(&f.paths)
+            .checked()?
+            .exists(&f.record.id)
+            .checked()?
+    );
+    assert_eq!(
+        f.runtime
+            .run(f.runtime.sessions.head_is_quiescent(f.child_locator))
+            .checked()?
+            .unwrap_err()
+            .kind(),
+        AgentSessionsErrorKind::NotFound
+    );
+    Ok(())
+}
+
+#[test]
+fn delete_abandon_flag_never_closes_a_leased_child_obligation() -> TestResult {
+    let mut f = fixture(true).checked()?;
+    let root = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let refusal =
+        delete_confirmed_session(&f.paths, &mut f.product, &f.runtime, &f.record, root, true)
+            .err()
+            .ok_or("a leased child was abandoned")
+            .checked()?;
+    assert!(refusal.message().contains("open in a running plakd"));
+    assert!(matches!(
+        refusal,
+        LifecycleError::Refused(LifecycleRefusal::Open)
+    ));
+    let persisted = crate::store::tree::open_tree_store(&f.paths)
+        .checked()?
+        .load(&f.record.id)
+        .checked()?
+        .ok_or("tree")
+        .checked()?;
+    assert_eq!(
+        persisted.rows().node(&f.child_id).checked()?.status,
+        NodeStatus::RecoveryRequired
+    );
+    assert_ne!(
+        persisted
+            .rows()
+            .attempt(&f.child_id)
+            .ok_or("attempt")
+            .checked()?
+            .failure
+            .as_ref()
+            .ok_or("failure")
+            .checked()?
+            .kind,
+        "recovery_abandoned"
+    );
+    let child = f.held_child.take().ok_or("held child").checked()?;
+    f.runtime.run(child.release()).checked()??;
+    delete_confirmed_session(&f.paths, &mut f.product, &f.runtime, &f.record, root, true)
+        .checked()?;
+    Ok(())
+}
+
+#[test]
+fn delete_abandons_recovery_required_child_without_locator() -> TestResult {
+    let mut f = fixture(false).checked()?;
+    let child = f
+        .tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .checked()?
+        .agent_id;
+    f.tree
+        .record_turn_failure(
+            &child,
+            FailedTurnDisposition::RecoveryRequired,
+            "unbound child".into(),
+        )
+        .checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let root = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let mut plan = deletion_plan(&f.paths, &mut f.product, &f.record, root, true).checked()?;
+    assert!(plan.abandon.contains(&child));
+    assert!(!plan.children.iter().any(|(id, _)| id == &child));
+    publish_abandoned_children(&f.paths, &mut plan).checked()?;
+    delete_confirmed_session(&f.paths, &mut f.product, &f.runtime, &f.record, root, false)
+        .checked()?;
+    Ok(())
+}
+
+#[test]
+fn delete_abandons_recovery_required_descendant() -> TestResult {
+    let mut f = fixture(false).checked()?;
+    f.tree.grants_mut_for_test("root").max_depth = 3;
+    let parent = f
+        .tree
+        .spawn_agent("root", &SpawnAgentRequest::test_orchestrate(), None)
+        .checked()?
+        .agent_id;
+    let child = f
+        .tree
+        .spawn_agent(&parent, &SpawnAgentRequest::test_review(), None)
+        .checked()?
+        .agent_id;
+    for id in [&parent, &child] {
+        f.tree
+            .record_turn_failure(
+                id,
+                FailedTurnDisposition::RecoveryRequired,
+                "descendant recovery".into(),
+            )
+            .checked()?;
+    }
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let root = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let plan = deletion_plan(&f.paths, &mut f.product, &f.record, root, true).checked()?;
+    assert!(plan.abandon.contains(&child));
+    delete_confirmed_session(&f.paths, &mut f.product, &f.runtime, &f.record, root, true)
+        .checked()?;
+    Ok(())
+}
+
+#[test]
+fn delete_abandon_flag_refuses_fork_source_recovery() -> TestResult {
+    let mut f = fixture(false).checked()?;
+    let fork = create(&f.runtime, &f.paths, "delete:create-fork").checked()?;
+    let locator = f.runtime.run(fork.release()).checked()??;
+    let mut record = product_sessions::SessionRecord::new(f.paths.home().to_path_buf());
+    record.source_product_session_id = Some(f.record.id.clone());
+    record.source_workflow_operation_id = Some("delete:test-fork-source".into());
+    // A successor that stayed on its source's tree (a rebind with no tree of
+    // its own) carries the source's node.
+    record.node = f.record.node.clone();
+    record.bind_plakous_locator(locator).checked()?;
+    f.product.commit(&mut record).checked()?;
+    let root = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let dependency = deletion_plan(&f.paths, &mut f.product, &f.record, root, true)
+        .err()
+        .ok_or("source with a dependent fork was accepted")
+        .checked()?;
+    assert!(dependency.message().contains("continue from it"));
+    assert!(
+        matches!(&dependency, LifecycleError::Refused(LifecycleRefusal::ForkDependency {dependents,..}) if dependents.contains(&record.id))
+    );
+    let refusal = deletion_plan(&f.paths, &mut f.product, &record, locator, true)
+        .err()
+        .ok_or("fork abandoned source tree")
+        .checked()?;
+    assert!(refusal.message().contains("need recovery"));
+    let persisted = crate::store::tree::open_tree_store(&f.paths)
+        .checked()?
+        .load(&f.record.id)
+        .checked()?
+        .ok_or("tree")
+        .checked()?;
+    assert_eq!(
+        persisted.rows().node(&f.child_id).checked()?.status,
+        NodeStatus::RecoveryRequired
+    );
+    Ok(())
+}
+
+#[test]
+fn publish_abandoned_children_refuses_stale_tree_revision() -> TestResult {
+    let mut f = fixture(false).checked()?;
+    let root = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let mut plan = deletion_plan(&f.paths, &mut f.product, &f.record, root, true).checked()?;
+    f.tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let refusal = publish_abandoned_children(&f.paths, &mut plan)
+        .err()
+        .ok_or("stale abandonment accepted")
+        .checked()?;
+    assert!(
+        refusal
+            .message()
+            .contains("changed before child abandonment")
+    );
+    let persisted = crate::store::tree::open_tree_store(&f.paths)
+        .checked()?
+        .load(&f.record.id)
+        .checked()?
+        .ok_or("tree")
+        .checked()?;
+    assert_eq!(
+        persisted.rows().node(&f.child_id).checked()?.status,
+        NodeStatus::RecoveryRequired
+    );
+    Ok(())
+}
+
+#[test]
+fn delete_removes_that_trees_acknowledgements_and_is_idempotent() -> TestResult {
+    let mut f = fixture(false).checked()?;
+    let root = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let ack = crate::surface_protocol::AgentAcknowledgement {
+        agent_id: f.child_id.clone(),
+        attempt_id: "child-a1".into(),
+        attention: "needs recovery".into(),
+        ended_at: Some(10),
+    };
+    f.product
+        .acknowledge_agent_attempt(&f.record.id, &ack, 11)
+        .checked()?;
+    f.product
+        .acknowledge_agent_attempt("other-tree", &ack, 12)
+        .checked()?;
+    delete_confirmed_session(&f.paths, &mut f.product, &f.runtime, &f.record, root, true)
+        .checked()?;
+    assert!(
+        f.product
+            .agent_acknowledgements(&f.record.id)
+            .checked()?
+            .is_empty(),
+        "the deleted session's tree acknowledgements go with it"
+    );
+    assert_eq!(
+        f.product
+            .agent_acknowledgements("other-tree")
+            .checked()?
+            .len(),
+        1,
+        "another tree's acknowledgements stay"
+    );
+    f.product
+        .delete_agent_acknowledgements(&f.record.id)
+        .checked()?;
+    Ok(())
+}
+
+#[test]
+fn delete_removes_every_deleted_runtime_sessions_job_output_files() -> TestResult {
+    let mut f = fixture(false).checked()?;
+    let root = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let jobs = f.paths.job_outputs();
+    let owned = [root.session_id(), f.child_locator.session_id()]
+        .map(|session| jobs.join(session.to_string()));
+    let unrelated = jobs.join("00000000-0000-0000-0000-0000000000ff");
+    for directory in owned.iter().chain([&unrelated]) {
+        std::fs::create_dir_all(directory).checked()?;
+        std::fs::write(directory.join("branch-p1.log"), b"output").checked()?;
+    }
+    delete_confirmed_session(&f.paths, &mut f.product, &f.runtime, &f.record, root, true)
+        .checked()?;
+    for directory in &owned {
+        assert!(!directory.exists(), "{}", directory.display());
+    }
+    assert!(unrelated.join("branch-p1.log").exists());
+    Ok(())
+}

@@ -147,10 +147,10 @@ class ListingTests(unittest.TestCase):
                 check=True,
             )
             (root / '.gitignore').write_text('proptest-regressions/\n')
-            seed = root / 'bin/plak/proptest-regressions/seed.txt'
+            seed = root / 'bin/plakd/proptest-regressions/seed.txt'
             seed.parent.mkdir(parents=True)
             seed.write_text('seed')
-            self.assertIn('bin/plak/proptest-regressions/seed.txt', vcs.changed_paths(root))
+            self.assertIn('bin/plakd/proptest-regressions/seed.txt', vcs.changed_paths(root))
 
     @unittest.skipUnless(shutil.which('jj'), 'jj is not installed')
     def test_jj_renames_include_both_package_paths_and_newlines(self):

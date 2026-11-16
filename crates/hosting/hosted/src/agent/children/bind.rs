@@ -1281,6 +1281,6 @@ mod lookup_failure_tests {
             &"claude/work".parse().unwrap(),
         );
         assert!(message.contains("claude/work"));
-        assert!(!message.contains("plak login claude"));
+        assert!(!message.contains("plakd login claude"));
     }
 }

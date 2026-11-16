@@ -42,7 +42,7 @@ SUPPORTED_PUBLIC_BUILD_PROFILES = {
         ),
     ),
     "sessions-sqlite": ("plakous", ("--lib",), ("sessions-sqlite",)),
-    "plak": ("plak", ("--bin", "plak"), ()),
+    "plakd": ("plakd", ("--bin", "plakd"), ()),
     "agent": ("plakous-agent", ("--lib",), ()),
     "tools": ("plakous-tools", ("--lib",), ()),
 }
@@ -84,7 +84,7 @@ INTERNAL_TOPOLOGY_BUILD_PROFILES = {
     "messages": ("plakous-messages", ("--lib",), ()),
 }
 PRODUCT_TOPOLOGY_BUILD_PROFILES = {
-    "plak-lib": ("plak", ("--lib",), ()),
+    "plakd-lib": ("plakd", ("--lib",), ()),
 }
 BUILD_PROFILES = {
     **SUPPORTED_PUBLIC_BUILD_PROFILES,

@@ -6,9 +6,9 @@ set working-directory := '../..'
 default:
     @just --justfile "{{justfile()}}" --list perf
 
-# Profiling binary: release codegen, full symbols, no LTO (target/profiling/plak).
+# Profiling binary: release codegen, full symbols, no LTO (target/profiling/plakd).
 _profiling:
-    tools/build/build-plak.sh --profiling
+    tools/build/build-plakd.sh --profiling
 
 # Offline performance smoke over the scripted model, not in any gate tier. It reports
 # six short product metrics, four worker timings and six long-lineage metrics.
@@ -18,25 +18,25 @@ _profiling:
 smoke *ARGS:
     tools/perf/perf-smoke.sh {{ARGS}}
 
-# Sample a plak invocation with samply (Linux/macOS). Usage: just perf samply agent --help
+# Sample a plakd invocation with samply (Linux/macOS). Usage: just perf samply agent --help
 samply *ARGS: _profiling
     command -v samply >/dev/null || { echo "install: cargo install samply" >&2; exit 1; }
-    samply record target/profiling/plak {{ARGS}}
+    samply record target/profiling/plakd {{ARGS}}
 
-# Flamegraph a plak invocation (perf on Linux, xctrace on macOS).
+# Flamegraph a plakd invocation (perf on Linux, xctrace on macOS).
 flamegraph *ARGS: _profiling
     command -v cargo-flamegraph >/dev/null || { echo "install: cargo install flamegraph" >&2; exit 1; }
-    cargo flamegraph --profile profiling --bin plak -- {{ARGS}}
+    cargo flamegraph --profile profiling --bin plakd -- {{ARGS}}
 
-# Hardware counters for a plak invocation (Linux only).
+# Hardware counters for a plakd invocation (Linux only).
 stat *ARGS: _profiling
     command -v perf >/dev/null || { echo "perf not installed" >&2; exit 1; }
-    perf stat -e cycles,instructions,branches,branch-misses,cache-misses,context-switches,page-faults target/profiling/plak {{ARGS}}
+    perf stat -e cycles,instructions,branches,branch-misses,cache-misses,context-switches,page-faults target/profiling/plakd {{ARGS}}
 
 # Binary size attribution for the default release build.
 bloat:
     command -v cargo-bloat >/dev/null || { echo "install: cargo install cargo-bloat" >&2; exit 1; }
-    cargo bloat --release -p plak --crates -n 40
+    cargo bloat --release -p plakd --crates -n 40
 
 # Production LOC density report (informational, not in any gate tier).
 density:

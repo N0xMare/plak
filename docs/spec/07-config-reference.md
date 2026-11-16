@@ -1,10 +1,10 @@
 # Configuration reference
 
-Every key `plak` reads from disk, its type, its default, its constraint, and
+Every key `plakd` reads from disk, its type, its default, its constraint, and
 what it does. Code is the authority: the tables below are transcribed from
 `CONFIG_KEYS` and `CONFIG_SECTION_DOCS` in
-`bin/plak/src/product_config/keys.rs`, and `TEMPLATE_FIELD_DOCS` in
-`bin/plak/src/product_config/templates.rs`, the same tables that render
+`bin/plakd/src/product_config/keys.rs`, and `TEMPLATE_FIELD_DOCS` in
+`bin/plakd/src/product_config/templates.rs`, the same tables that render
 `docs/reference-config/**` and the commentary in a saved `config.toml`. A key that
 is not in that table does not exist.
 
@@ -20,15 +20,15 @@ bodies: ordinary config saves and `config_patch` still refuse body changes.
 User-profile writes use root/working_set only; built-ins are read-only. No
 console operation accepts a filesystem destination or raw TOML.
 
-`plak host install --web unix:<absolute socket> --ui <absolute dir>
-[--dry-run]` writes `$HOME/.config/systemd/user/plak-host.service` on Linux,
-or `$HOME/Library/LaunchAgents/com.plak.host.plist` on macOS (chapter 02 §4.6).
+`plakd host install --web unix:<absolute socket> --ui <absolute dir>
+[--dry-run]` writes `$HOME/.config/systemd/user/plakd-host.service` on Linux,
+or `$HOME/Library/LaunchAgents/com.plakd.host.plist` on macOS (chapter 02 §4.6).
 Linux installation reloads the user manager without enabling or starting the
 service; macOS installation prepares private logs and prints the commands to
 load/start the LaunchAgent, never calling `launchctl` itself.
 The required socket and UI paths have no defaults;
 relative paths, TCP listeners and `--dev-login` are refused. This adds no
-configuration keys. The unit uses `$HOME/.local/bin/plak` and pins the
+configuration keys. The unit uses `$HOME/.local/bin/plakd` and pins the
 resolved `PLAK_HOME` selected at installation, independently of the invoking
 shell on later starts. On Linux, if XDG_CONFIG_HOME is set, it must resolve to
 `$HOME/.config`; a different unit search path is refused. HOME may contain
@@ -68,14 +68,14 @@ absence from a missing socket or a pid line. Only one state-key host may run
 per home, including direct and unit starts. These private process locks are
 not session authority or an export carrier and introduce no format version.
 
-`plak host connect --stdio` uses the selected public home, not the client's
+`plakd host connect --stdio` uses the selected public home, not the client's
 working directory, for host discovery. It is a transparent wire relay with no
 separate handshake and no implicit host start or embedded fallback. Its
 same-user checks are independent of web authentication and static-UI options.
-Bare `plak` prints help and starts no host or session.
+Bare `plakd` prints help and starts no host or session.
 
 The explicit local `--auto-start` flag permits a detached service only after
-absence is proved and no `plak-host.service` is installed in the user/runtime
+absence is proved and no `plakd-host.service` is installed in the user/runtime
 or standard system user-unit directories. The starter's fixed environment
 allowlist is `HOME`, `PATH` (default `/usr/bin:/bin` when unset), `SHELL`,
 `TMPDIR`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LC_MESSAGES`, `LC_TIME`, `LC_NUMERIC`,
@@ -115,19 +115,19 @@ is omitted, or the selected template's MCP tools when `mcp` is omitted
 (exit 2). Unused templates never block a session. It never silently drops tools or
 substitutes a composition. Doctor scans all templates for its config verdict.
 
-A Plak home holds one `config.toml` plus one file per agent template:
+A plakd home holds one `config.toml` plus one file per agent template:
 
 ```
 $PLAK_HOME/            # default ~/.plak
   config.toml          # preferences; never secrets
   agents/<name>.toml   # one template per file
   secrets/             # credentials; never in config.toml
-    named/<name>.secret  # `plak secret set`; config names these, never holds them
-    mcp-oauth/<id>/      # `plak mcp login`; the server's OAuth login (spec 04 §3.1)
+    named/<name>.secret  # `plakd secret set`; config names these, never holds them
+    mcp-oauth/<id>/      # `plakd mcp login`; the server's OAuth login (spec 04 section 3.1)
 ```
 
 `PLAK_HOME` MUST be absolute when set; otherwise the home is `$HOME/.plak`
-(`PlakPaths::resolve`). `plak config init` writes a commented reference template that pins no keys when
+(`PlakPaths::resolve`). `plakd config init` writes a commented reference template that pins no keys when
 `config.toml` is absent and reports the path either way; it never overwrites.
 
 Product config publications, including project-scoped settings and MCP edits,
@@ -152,9 +152,9 @@ the recorded workspace, not the invoking shell's cwd or the literal workspace
 directory as a project root.
 
 **Trust gate.** A discovered project applies nothing until it is trusted.
-`plak config trust` records the canonical project root in
+`plakd config trust` records the canonical project root in
 `$PLAK_HOME/trusted-projects.toml` — a non-secret global file published
-atomically — and `plak config untrust` removes it. A missing or malformed
+atomically -- and `plakd config untrust` removes it. A missing or malformed
 registry trusts nothing. An untrusted project's configuration is skipped
 entirely: the load still succeeds on the global files and reports the blocked
 source as a warning.
@@ -185,10 +185,10 @@ and files without a `.toml` extension are skipped. **The file stem is the
 template's name**; a stem that is not `[a-z][a-z0-9-]{0,31}`, or that collides
 with a reserved name, is a load error naming the file.
 
-A template is authored in its file. `plak config set` never writes a template
+A template is authored in its file. `plakd config set` never writes a template
 body; `agent.<name>.<field>` is refused with *templates are file-authored;
-edit ~/.plak/agents/<name>.toml*. The one exception is `plak mcp enable` and
-`plak mcp disable` (and `plak mcp remove --force`, which disables first): they
+edit ~/.plak/agents/<name>.toml*. The one exception is `plakd mcp enable` and
+`plakd mcp disable` (and `plakd mcp remove --force`, which disables first): they
 rewrite only the `tools` array of the one template file the name resolves to
 (the project's when a trusted project supplies it), adding or removing
 `mcp:<id>` or `mcp:<id>/<tool>` entries, keeping every other line and the
@@ -229,11 +229,11 @@ Four things fail the load, all of them named:
 - **a wrong TOML type**, reported with the key and the line and column of the
   value;
 - **an invalid semantic choice** — a value outside a key's range or outside its
-  closed value set — reported by the same rule set `plak config set` runs, with
+  closed value set -- reported by the same rule set `plakd config set` runs, with
   the line and column of the value.
 
 Nothing is skipped silently and there is no second, more forgiving reader:
-`plak` refuses to start rather than run on a file it did not fully understand.
+`plakd` refuses to start rather than run on a file it did not fully understand.
 A load error names the file it came from.
 
 Session policy and live topology admission distinguish admitted, disabled, and
@@ -245,7 +245,7 @@ The bare account spelling `xai` is refused as ambiguous: use `grok` for
 SuperGrok OAuth or `xai-api` for an API key. Other unambiguous aliases remain.
 
 The hosted capability registry owns route identity aliases and catalog-policy
-metadata; Plak's registry adds product presentation, doctor probes and bundled
+metadata; plakd's registry adds product presentation, doctor probes and bundled
 profiles. Those registries add no configuration keys and do not change account,
 model, composition or protocol admission. The template-account membership and
 no-native-protocol vocabularies stay complete and ungated, as do serialized
@@ -253,7 +253,7 @@ session binding enums. Recommendation aliases are presentation policy, never
 authority to admit an otherwise unknown or ambiguous account.
 
 Deleting a key restores its default. Deleting `config.toml` restores every
-default. `plak config show` prints the resolved file with its path; secrets are
+default. `plakd config show` prints the resolved file with its path; secrets are
 never in it.
 
 ## 3. `config.toml`
@@ -267,7 +267,7 @@ console switch is accepted ahead of its introducing protocol.
 
 A session-binding problem never edits configuration. An invalid stored
 account/model selection is refused with the remedy
-`plak config set root.agent <template>`; the configured pointer and file bytes
+`plakd config set root.agent <template>`; the configured pointer and file bytes
 remain unchanged. Only explicit configuration actions (including Settings and
 profile application) publish configuration changes; an incomplete bind cannot
 silently clear `[root] agent`.
@@ -276,8 +276,8 @@ Thirteen key sections, in render order: `[root] [roster] [orchestration] [turn]
 [jobs] [api] [compaction] [skills] [telemetry] [mcp] [host] [web]`, plus
 three families of named tables, `[tools.<name>]` (§3.4), `[mcp_servers.<id>]`
 (§3.5) and `[runners.<name>]` (§3.6), sixteen in all. Any other section is an error.
-The families are not `plak config set` keys: they are authored in the file, a
-save leaves them exactly as written, and `plak config show` prints the
+The families are not `plakd config set` keys: they are authored in the file, a
+save leaves them exactly as written, and `plakd config show` prints the
 canonical rendering of the tool and server tables after the keys.
 
 `[host] resume_after_loss` decides whether the root and the sub-agents a lost
@@ -285,15 +285,15 @@ host interrupted hold for the operator's Resume or continue once by themselves
 (chapter 03 §14.1); `[mcp_servers.<id>] placement` places a server (§3.5);
 `[runners.<name>]` configures the host's runner registry for placed-session
 creation, reopen and reconnect, as well as destination qualification during
-host upgrade. `plak runner pair` and `plak runner ps` dial the configured
-runner; `plak doctor` inspects its SSH resolution without connecting (§3.6).
+host upgrade. `plakd runner pair` and `plakd runner ps` dial the configured
+runner; `plakd doctor` inspects its SSH resolution without connecting (section 3.6).
 `[web] allow` and `[web] origin` are
-read by `plak host` when it serves its web endpoint (`--web`, chapter 02 §4.5,
+read by `plakd host` when it serves its web endpoint (`--web`, chapter 02 §4.5,
 chapter 04 §2.10) and by nothing else.
-`plak` writes these opt-in settings only when the operator sets them: `plak config
+`plakd` writes these opt-in settings only when the operator sets them: `plakd config
 init` and a fresh save write the `[host]` and `[web]` headers commented out, a
 save of another key never adds one, and a save that clears the last key of
-`[host]` or `[web]` removes the empty table. `plak doctor` names each one the
+`[host]` or `[web]` removes the empty table. `plakd doctor` names each one the
 home file or a trusted project file carries, and a `[host]`, `[runners]` or
 `[web]` table present even empty (chapter 02 §7.3). `[host]
 resume_after_loss`, `[runners.<name>]` and `[web]` are home-scoped: a project
@@ -322,16 +322,16 @@ repository can never grant web access.
 | `jobs.foreground_seconds` | integer | `30` | 1..=600 | Default process foreground budget before promotion. Bound at session construction and rebind; exact reopen keeps the stored value. |
 | `jobs.max_runtime_hours` | integer | `10` | 1..=24 | Hard runtime cap per background process. Bound at session construction and rebind; exact reopen keeps the stored value. |
 | `api.full_window` | bool | `false` | true or false | Admit direct API sessions (openai, anthropic, xai-api) under the model's full input window instead of the provider's price threshold. Bound at session construction and rebind; exact reopen keeps the stored value. |
-| `host.reload_requests` | bool | `false` | true or false; home-scoped | Permit this user's own processes to request a hosted-session reload (plak session reload <session> --expect-binary <id>). The serving host records the outcome and names the explicit host upgrade workflow; replacing a client does not upgrade its sessions. |
+| `host.reload_requests` | bool | `false` | true or false; home-scoped | Permit this user's own processes to request a hosted-session reload (plakd session reload <session> --expect-binary <id>). The serving host records the outcome and names the explicit host upgrade workflow; replacing a client does not upgrade its sessions. |
 | `compaction.enabled` | bool | `true` | — | Automatic transcript compaction when a session approaches its context bound. |
 | `skills.enabled` | bool | `true` | true or false | Discover Agent Skills (<workspace>/.agents/skills, then ~/.agents/skills; both on the selected runner for a remote session, using that runner process's home, never the host's) when a session is constructed, list them in its instructions, let its read tool read files under that user skill root on the same machine, and give Claude-vocabulary sessions the Skill tool. Bound when a new session or spawn is constructed; exact reopen keeps the listing and tools it froze, and a fork, rebind or switch keeps the source session's on or off. |
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
-| `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plak mcp login`. |
-| `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset holds; home-scoped | Whether the root and the sub-agents whose host was lost (a crash, a lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). Read when the root attaches and opens, and by plak host's start scan, which under continue opens a session whose root's loss is held. |
+| `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plakd mcp login`. |
+| `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset holds; home-scoped | Whether the root and the sub-agents whose host was lost (a crash, a lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). Read when the root attaches and opens, and by plakd host's start scan, which under continue opens a session whose root's loss is held. |
 
-| `web.allow` | array of string | `(unset)` | tailnet logins, no duplicates; unset admits no one; home-scoped | The tailnet logins (Tailscale-User-Login) plak host --web admits through tailscale serve. Read when plak host starts with --web. |
-| `web.origin` | string | `(unset)` | https://<host>[:port], nothing after it; home-scoped | The exact origin tailscale serve publishes plak host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plak host starts with --web. |
+| `web.allow` | array of string | `(unset)` | tailnet logins, no duplicates; unset admits no one; home-scoped | The tailnet logins (Tailscale-User-Login) plakd host --web admits through tailscale serve. Read when plakd host starts with --web. |
+| `web.origin` | string | `(unset)` | https://<host>[:port], nothing after it; home-scoped | The exact origin tailscale serve publishes plakd host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plakd host starts with --web. |
 | `web.accounts_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home account status and usage. Same-user sockets are trusted independently. Captured at host startup; restart to change it. |
 | `web.credentials_write` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed operator credential mutations. Requires accounts_read; home-only, default off and captured at host startup. Credentials replace this user's machine-wide selected account, not the browser's credentials. |
 | `web.config_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home profiles, templates and allowlisted configuration. Same-user sockets are trusted independently. Captured at host startup; restart to change it. |
@@ -374,7 +374,7 @@ A configured foreground budget is not a kill timer. Both `[jobs]` values are
 rendered numerically in every route's process tool descriptions, including
 nested Code Mode, JavaScript and Python presentations. Exact descriptor
 reconstruction uses the stored construction values, never a fresh config read.
-Config changes apply to new sessions and explicit rebind. On resume, Plak reads
+Config changes apply to new sessions and explicit rebind. On resume, plakd reads
 these bounds from the exact stored runtime facts before
 compiling tools or composition attachments. Editing `[jobs]` does not change
 an existing session's bounds or descriptions; invalid stored facts refuse
@@ -393,14 +393,14 @@ JSONL `background` is a one-shot action, not configuration or a future-call defa
 The four `[orchestration]` bounds — `max_depth`, `max_children`, `max_nodes`,
 `max_attempts` — take exactly `1..=` the built-in ceiling (4, 64, 65, 256). A
 value outside the range is a load error naming the key and its ceiling, and
-`plak config set` refuses it the same way; nothing is clamped at load or set.
+`plakd config set` refuses it the same way; nothing is clamped at load or set.
 The epoch finalize clamps in `OrchestrationSnapshot::from_config` remain as
 defense in depth for values that arrive already resolved. Raising a ceiling
 requires a change to this chapter and a code change, never a config edit.
 
 `max_concurrent_requests_per_account` takes `1..=64` the same way. It is
 home-scoped like the other `[orchestration]` keys but is not epoch state: it
-sizes the process-wide per-account request budgets when Plak launches
+sizes the process-wide per-account request budgets when plakd launches
 (chapter 03 §10.4), so an edit applies to the next launch, never to a running
 tree, and does not roll the epoch digest.
 
@@ -572,7 +572,7 @@ root, including foreground commands; clipping or withholding in L0 preserves
 that line. Small untruncated foreground commands create no output file.
 
 A root turn ends when the model answers, when the round cap's wrap-up round
-answers, when the operator interrupts it (wire interrupt, SIGINT for `plak
+answers, when the operator interrupts it (wire interrupt, SIGINT for `plakd
 run`), or when one bounded operation fails: a model operation has its own
 five-minute bound, and each tool call has its own execution bound. There is no
 turn-level deadline, so a turn that polls a long build runs as long as the
@@ -659,14 +659,14 @@ reach the server; it starts nothing until a template that lists it binds.
 | `bearer_secret` | string | `(unset)` | a secret name; http only | Sent as `Authorization: Bearer <secret>`. |
 | `headers` | table of string | `{}` | header names; never `Authorization` or `Proxy-Authorization`; no control characters; http only | Literal, non-secret headers. |
 | `secret_headers` | table of string | `{}` | header names, none also in `headers` (case-insensitive), no `Authorization` beside `bearer_secret`; values are secret names; http only | Headers whose values are named secrets. |
-| `auth` | string | `(unset)` | `oauth`; http only; not with `bearer_secret` | Authenticate with the server's OAuth authorization server through a `plak mcp login <id>` login instead of a static bearer secret. |
+| `auth` | string | `(unset)` | `oauth`; http only; not with `bearer_secret` | Authenticate with the server's OAuth authorization server through a `plakd mcp login <id>` login instead of a static bearer secret. |
 | `oauth_issuer` | string | `(unset)` | `https://` URL (or `http://` to a loopback literal when `url` is one), no query or fragment; requires `auth = "oauth"` | The authorization server to use; it must be one the server's resource metadata lists. Required with `oauth_client_id`. |
-| `oauth_client_id` | string | `(unset)` | 1 to 255 bytes of visible ASCII; requires `oauth_issuer` | A client registered with that authorization server in advance; without it Plak uses a Client ID Metadata Document (when `mcp.client_id_metadata_url` is set and the server supports one) or dynamic registration. |
+| `oauth_client_id` | string | `(unset)` | 1 to 255 bytes of visible ASCII; requires `oauth_issuer` | A client registered with that authorization server in advance; without it plakd uses a Client ID Metadata Document (when `mcp.client_id_metadata_url` is set and the server supports one) or dynamic registration. |
 | `oauth_client_secret` | string | `(unset)` | a secret name; requires `oauth_client_id` | The pre-registered client's secret, sent only to that issuer's token and revocation endpoints. |
 | `oauth_callback_port` | integer | `(ephemeral)` | 1024..=65535; requires `auth = "oauth"` | Fixed loopback port of the login callback `http://127.0.0.1:<port>/callback`, for a client registered with that exact redirect. |
 | `tools` | array of string | `(every listed tool)` | MCP tool names, 1 to 128 bytes without whitespace, none twice | Server-level allowlist; `mcp:<id>` means exactly these. |
 | `resources` | bool | `false` | either transport | Give templates that list the server its `mcp__<id>__read_resource` tool (spec 01 §8.5); the server must advertise resources. Without it a server's resources never reach a model. |
-| `placement` | string | `(unset)` | host\|runner; `runner` needs `transport = "stdio"`; unset is host | Where the server's process runs: on the host beside the agent, or on the node's runner. A runner-placed server runs on the node’s explicitly selected runner, as that runner's user, in the workspace as the runner names it, with its `secret_env` names resolved there from the runner's own secrets (`plak runner secret set`); no host secret value crosses. For a local node the host is the node’s runner: the server runs here and its `secret_env` names resolve from this home's runner secrets, never its named secrets. A session freezes the placement each server ran under in its MCP tool records. |
+| `placement` | string | `(unset)` | host\|runner; `runner` needs `transport = "stdio"`; unset is host | Where the server's process runs: on the host beside the agent, or on the node's runner. A runner-placed server runs on the node's explicitly selected runner, as that runner's user, in the workspace as the runner names it, with its `secret_env` names resolved there from the runner's own secrets (`plakd runner secret set`); no host secret value crosses. For a local node the host is the node's runner: the server runs here and its `secret_env` names resolve from this home's runner secrets, never its named secrets. A session freezes the placement each server ran under in its MCP tool records. |
 | `startup_seconds` | integer | `20` | 1..=120 | Budget to start the server and list its tools. |
 | `call_seconds` | integer | `120` | 1..=3600 | Hard per-call ceiling; progress does not extend it. |
 
@@ -684,10 +684,10 @@ way. Secrets are never values in
 TOML: a secret name matches `[a-z][a-z0-9-]{0,31}` and resolves from the home
 (spec 04 §3.1) when the server is started, from the runner's secrets for a
 server placed on a runner; whether it exists is a bind check (for a server on
-a selected runner, the runner's spawn check), not a load check. `plak mcp add` writes a table into the home or (with
+a selected runner, the runner's spawn check), not a load check. `plakd mcp add` writes a table into the home or (with
 `--scope project`) the trusted project's `config.toml` in place, keeping the
 rest of the file and spelling out only the keys given; `--replace` keeps the
-old table's place and comments. Every `plak mcp` edit (`add`, `remove`,
+old table's place and comments. Every `plakd mcp` edit (`add`, `remove`,
 `enable`, `disable`) is checked before any file is written against both layers
 it leaves: the home alone, as every load outside a project reads it, and the
 home with the current trusted project over it. A home template therefore
@@ -697,7 +697,7 @@ a template file would be left naming what its layer no longer serves;
 together, then writes the templates and then the config. Only the home's
 templates and the current trusted project's templates are checked: a
 template of another project that lists the server is not visible and is left
-as it is. A secret reference given to `plak mcp add` that is not a secret
+as it is. A secret reference given to `plakd mcp add` that is not a secret
 name is refused without repeating it. A written file keeps its permissions,
 and a symlinked `config.toml` is written at its target. A trusted project may add an `[mcp_servers.<id>]` or
 `[tools.<name>]` table or replace one of the home's by name, whole (a stdio
@@ -709,8 +709,8 @@ only from the home.
 One machine a host may run a node's tools on, reached over ssh as
 `ssh <strict options> -- <ssh> <command> runner connect --stdio` (chapter 04 §2.9).
 `<name>` matches `[a-z][a-z0-9-]{0,31}` and is never `local`, the name of the
-host's own runner, which needs no table. Home-scoped. `plak runner pair <name>`
-and `plak runner ps <name>` dial it. Saved sessions resolve pinned identity,
+host's own runner, which needs no table. Home-scoped. `plakd runner pair <name>`
+and `plakd runner ps <name>` dial it. Saved sessions resolve pinned identity,
 never a reused alias. Aliases of one identity share one client. A successful
 confirmation refreshes the root pins of every configured alias for that identity
 under the same home admission lock, including aliases not used for the dial.
@@ -728,17 +728,17 @@ its `runner.toml` on that machine, not here (§3.7).
 
 The runner home's configuration on a runner machine, `<home>/runner/runner.toml`
 (chapter 02 §2.1). It is read when the daemon starts, again at every host bind
-for `hosts`, and by `plak runner allow`, which edits `hosts` in place and keeps
+for `hosts`, and by `plakd runner allow`, which edits `hosts` in place and keeps
 the rest of the file as written. A missing file is the empty configuration,
-with which `plak runner serve` refuses to start. Any other key is a load error.
+with which `plakd runner serve` refuses to start. Any other key is a load error.
 
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
-| `roots` | array of strings | `[]` | absolute paths; at least one to serve; none inside or around the product home | The workspace roots a host may name. A requested workspace, the first root's default one included, is served only when it resolves under one of them and neither lies inside nor contains the runner machine's product home (`PLAK_HOME`, with the runner home and every secret and credential in it); `plak runner serve` refuses to start with a root inside or around it, or one that is not absolute. The tree's version control answers under the same roots and `copies`, outside the product home. Consent, not containment (chapter 04 §2.9). |
+| `roots` | array of strings | `[]` | absolute paths; at least one to serve; none inside or around the product home | The workspace roots a host may name. A requested workspace, the first root's default one included, is served only when it resolves under one of them and neither lies inside nor contains the runner machine's product home (`PLAK_HOME`, with the runner home and every secret and credential in it); `plakd runner serve` refuses to start with a root inside or around it, or one that is not absolute. The tree's version control answers under the same roots and `copies`, outside the product home. Consent, not containment (chapter 04 section 2.9). |
 | `copies` | string | `(unset)` | absolute path; not inside or around the product home or any root | Where copies carried from another runner are kept, one mirror repository per runner and tree (`<copies>/<runner id>/<tree id>`, chapter 03 §14). The tree's version control also answers under it. Unset, this runner takes no copies from other runners. |
 | `path` | string | `(unset)` | | The `PATH` the daemon and its processes start with. Unset, a login shell (`$SHELL -l`) is asked once, bounded at 5 s, when `connect` starts the daemon: it runs in a process group of its own, which is killed once it answered or at the deadline, so a startup file that leaves a job in the background neither delays the answer nor outlives it. |
 | `home` | string | `(unset)` | | The `HOME` the daemon and its processes start with. Unset, the user's. |
-| `hosts` | array of strings | `[]` | lowercase uuids | The host identities that may bind (`plak runner allow`). |
+| `hosts` | array of strings | `[]` | lowercase uuids | The host identities that may bind (`plakd runner allow`). |
 | `idle_exit_seconds` | integer | `300` | | How long the daemon stays up with no connection, job, orphan, service, live operator terminal or unacknowledged answer before it exits. Starting, closing and termination-unknown operator terminals count as live work, including on the home-local daemon. |
 
 Operator terminal limits are fixed policy, not new configuration keys: two live
@@ -845,7 +845,7 @@ Cross-field rules, all checked at load and again before any save:
 - `protocol` other than `auto` requires the OpenRouter vertical, bare or named.
 - `composition = "native-ptc"` selects the vertical's own programmatic tool calling system (spec 02 §6.5); today only Codex Code Mode is enrolled, on Codex `CodeModeOnly` rows and OpenAI API models enrolled as `CodeModeOnly`, and other verticals have none enrolled. It is refused for `openrouter`, `anthropic` and `xai-api`; on `openai` it is valid only for a model the API enrollment table marks `CodeModeOnly` (spec 02 §3.1), checked at load. On a subscription account it is checked at bind.
 - `composition = "py-sdk"` in any agent template is a load error: `py-sdk is root-only and has no child result channel`. Select it with `[root] composition = "py-sdk"`, the root settings picker or `--composition py-sdk`. It requires the core single-agent surface and a Direct-capable route; the root opens no topology, and optional tools are refused before inference. `plakous-default` never chooses it.
-- Direct API accounts require an enrolled model and an explicit effort on that model's published ladder (`plak models <account>`); the provider route fixes their wire protocol.
+- Direct API accounts require an enrolled model and an explicit effort on that model's published ladder (`plakd models <account>`); the provider route fixes their wire protocol.
 - `max_turns` must be 1 or more.
 - `tools` entries are parsed in order: a name outside the closed set, a
   malformed `mcp:` name, a duplicate, or an `mcp:<id>/<tool>` beside the
@@ -912,14 +912,14 @@ and a template message is prefixed `template <name>: `.
 | `spawns` with a duplicate or more than 5 names | `template <name> spawns names "<child>" more than once` / `template <name> spawns names <n> templates; the maximum is 5` |
 | `may_adopt` without `spawns` naming another template | `template <name> may_adopt requires spawns naming another template` |
 | `telemetry.*` of zero | `telemetry.<key> must be a positive integer` |
-| project-scope write to an untrusted root | ``project <root> is not trusted; run `plak config trust` before writing project configuration`` |
+| project-scope write to an untrusted root | ``project <root> is not trusted; run `plakd config trust` before writing project configuration`` |
 | project-scope save changing an on-disk project template | `template <name> is defined by the project (<path>); edit it there` |
 | project config clearing `root.agent` | `a project config cannot clear root.agent; override it with a template name or clear it globally` |
 | user-scope `config set` on a project-decided key | `<key> is set by the project config <path>; use --scope project to change it there` |
 
 An untrusted project is a warning, not an error: `project <home> is not
-trusted; its <config.toml and/or agents/> not applied (run `plak config trust`
-to enable it)`. `plak config show` prints it as `project=<home> (untrusted —
+trusted; its <config.toml and/or agents/> not applied (run `plakd config trust`
+to enable it)`. `plakd config show` prints it as `project=<home> (untrusted --
 ignored)` and still resolves the global configuration.
 
 The boolean spellings `1`, `yes`, `0` and `no` were accepted by the removed
@@ -932,7 +932,7 @@ Config publication has one commit point: the atomic replacement of
 the keys whose value actually changed rewritten, so an operator's comments, key
 order, alignment and blank lines survive a save of one other key, and a key the
 file leaves out stays out and keeps its default. A home with no `config.toml` yet is
-published with only changed preferences pinned. `plak config init` and
+published with only changed preferences pinned. `plakd config init` and
 `config edit` instead create a reference template with every key commented
 out and its section headers live, so uncommenting a key pins it in its own
 section; omitted keys continue to follow defaults. Every root binding edit copies its current template body into a
@@ -1027,7 +1027,7 @@ homes with byte-different but semantically identical templates produce the
 same digest, because the digest is taken over the canonical rendering, not the
 file bytes.
 
-`plak config set` on `root.agent`, any `roster.*`, or an epoch-scoped
+`plakd config set` on `root.agent`, any `roster.*`, or an epoch-scoped
 `orchestration.*` key (all except `turn.auto_continue`) is accepted only with
 quiescent persisted trees. Changes apply to new sessions and explicit profile
 switches; they do not modify an attached epoch.
@@ -1035,44 +1035,44 @@ switches; they do not modify an attached epoch.
 it saves without tree quiescence, and the attached interactive host re-reads
 it before waking. Every other immediate key saves immediately.
 
-## 7. `plak config` commands
+## 7. `plakd config` commands
 
 ```
-plak config show
-plak config init
-plak config edit
-plak config set <key> <value> [--scope user|project]
-plak config trust
-plak config untrust
+plakd config show
+plakd config init
+plakd config edit
+plakd config set <key> <value> [--scope user|project]
+plakd config trust
+plakd config untrust
 ```
 
 `--scope` defaults to `user` (`global` is an accepted spelling of the same
 scope) and chooses which file a trusted project context writes (§5). With no
 project resolved, or an untrusted one, only `user` exists: `project` fails
-with the trust message in §5's table. `plak config trust` records the
+with the trust message in section 5's table. `plakd config trust` records the
 discovered project root in `$PLAK_HOME/trusted-projects.toml` and fails when
-no project is resolved; `plak config untrust` revokes it. Trust is recorded
+no project is resolved; `plakd config untrust` revokes it. Trust is recorded
 per canonical root, never per `.plak` directory or session.
 
-`plak config edit` opens the raw user file without first loading it, so it
+`plakd config edit` opens the raw user file without first loading it, so it
 remains usable when strict parsing refuses startup. Doctor checks the effective
 configuration, including trusted project overlays and all template files; a
 refusal points at this editor for the user file or at the named project/template
-path, never at `plak config show`, which requires a valid configuration.
+path, never at `plakd config show`, which requires a valid configuration.
 
-`plak config show` prints the effective config with its provenance: the
+`plakd config show` prints the effective config with its provenance: the
 resolved `config_path`, the `project=` line naming the discovered project
 home and its trust state, each `warning=`, and an `origin.<key>` /
 `origin.template.<name>` line per value saying which file decided it —
 `default`, `user`, or `project`.
 
 `<key>` is the dotted `section.key` from §3. Values are unquoted on the command
-line (`plak config set compaction.trigger 0.8`); a bool key takes `true` or
+line (`plakd config set compaction.trigger 0.8`); a bool key takes `true` or
 `false` and nothing else. A rejected key or value leaves the file byte
 identical: the same rule set the file load runs is run on a candidate copy
 first, and nothing is written unless it validates. An accepted value rewrites
 its one key and leaves the rest of the file as the operator wrote it. An unknown key exits with the usage
-message *unknown config key: `<key>`; run `plak config show` for the valid
+message *unknown config key: `<key>`; run `plakd config show` for the valid
 keys*.
 
 Only dotted configuration keys are accepted. Invalid command-line values
@@ -1099,8 +1099,8 @@ Two keys take a value spelling the file grammar cannot:
 
 | path | what it is |
 | --- | --- |
-| `docs/reference-config/` | Every key and every template field, each with its meaning, type, default and constraint as a comment. It is the approved Codex provider preset annotated by the product's own renderer — regenerated by a test (`PLAK_REGENERATE_REFERENCE_CONFIGS=1 cargo test -p plak reference`), so it cannot describe a key the loader does not have or carry values the preset does not approve. It is a working home: `root-agent` bound as root, `worker`, `reviewer` and `researcher` in the working set. |
-| `bin/plak/presets/` | The default role set, one home per built-in profile: `codex`, `claude`, `grok`, and `multi` (root and reviewer on `claude`, worker on `codex`, researcher on `grok`). They live inside the `plak` package because the binary embeds their agent files; the host profile catalog exposes these four as `codex-default`, `claude-default`, `grok-default` and `multi-default`. |
+| `docs/reference-config/` | Every key and every template field, each with its meaning, type, default and constraint as a comment. It is the approved Codex provider preset annotated by the product's own renderer -- regenerated by a test (`PLAK_REGENERATE_REFERENCE_CONFIGS=1 cargo test -p plakd reference`), so it cannot describe a key the loader does not have or carry values the preset does not approve. It is a working home: `root-agent` bound as root, `worker`, `reviewer` and `researcher` in the working set. |
+| `bin/plakd/presets/` | The default role set, one home per built-in profile: `codex`, `claude`, `grok`, and `multi` (root and reviewer on `claude`, worker on `codex`, researcher on `grok`). They live inside the `plakd` package because the binary embeds their agent files; the host profile catalog exposes these four as `codex-default`, `claude-default`, `grok-default` and `multi-default`. |
 | `tests/fixtures/config-scenarios/` | Complete scenario homes — single-agent, mixed-account trees, direct and PTC compositions, OpenRouter-only. |
 
 Every built-in profile has the same four roles:
@@ -1125,8 +1125,8 @@ In a built-in profile each role is the template `<profile>-<role>`. No shipped p
 defaults. The reference `config.toml` ends with a fully commented example of
 both table families.
 
-Every preset under `docs/reference-config/`, `tests/fixtures/config-scenarios/` and `bin/plak/presets/` is loadable as a
-`PLAK_HOME`; `bin/plak/tests/integration/product_config_fixtures.rs` and the
-`plak` unit tests load them offline, so a schema change breaks them rather than letting them rot. They are
-ordinary TOML files: copy one, edit it by hand, and a `plak config set` later
+Every preset under `docs/reference-config/`, `tests/fixtures/config-scenarios/` and `bin/plakd/presets/` is loadable as a
+`PLAK_HOME`; `bin/plakd/tests/integration/product_config_fixtures.rs` and the
+`plakd` unit tests load them offline, so a schema change breaks them rather than letting them rot. They are
+ordinary TOML files: copy one, edit it by hand, and a `plakd config set` later
 keeps the comments you left in it.

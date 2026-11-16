@@ -79,7 +79,7 @@ STRIP_ENV = (
     "all_proxy",
 )
 
-REMOTE_BINARY = "/installed-agent/plak"
+REMOTE_BINARY = "/installed-agent/plakd"
 REMOTE_JS_HOST = "/installed-agent/plakous-js-host"
 REMOTE_PY_HOST = "/installed-agent/plakous-py-host"
 REMOTE_HOME = "/tmp/plak-cell/home"

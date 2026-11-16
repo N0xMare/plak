@@ -110,7 +110,7 @@ def redact(output):
 
 
 def remedy_scopes(output):
-    match = re.search(r"plak mcp login srv --scope '([A-Za-z0-9._:/+ \-]+)'", output)
+    match = re.search(r"plakd mcp login srv --scope '([A-Za-z0-9._:/+ \-]+)'", output)
     return set(match.group(1).split()) if match else set()
 
 
@@ -132,8 +132,8 @@ class Harness:
     def __init__(self, args):
         self.args = args
         self.binary = Path(args.binary).resolve()
-        self.root = Path(tempfile.mkdtemp(prefix="plak-mcp-oauth-"))
-        self.project = f"plak-oauth-{os.getpid()}"
+        self.root = Path(tempfile.mkdtemp(prefix="plakd-mcp-oauth-"))
+        self.project = f"plakd-oauth-{os.getpid()}"
         self.compose = [
             "docker",
             "compose",
@@ -833,7 +833,7 @@ class Harness:
                 not any(e.get("event") == "effect" for e in self.delta()),
                 "under-scoped call ran",
             )
-            require("plak mcp login srv" in result.stdout, "no login remedy")
+            require("plakd mcp login srv" in result.stdout, "no login remedy")
             require("$(touch" not in result.stdout, "hostile scope reached remedy")
             if name == "step_up":
                 require(
@@ -885,7 +885,7 @@ class Harness:
                 "revocation did not produce exactly one refresh",
             )
             require(
-                "invalid_grant" in output and output.count("remedy: plak mcp login srv") == 1,
+                "invalid_grant" in output and output.count("remedy: plakd mcp login srv") == 1,
                 "missing single invalid_grant remedy",
             )
             mark = len(self.events())
@@ -994,7 +994,7 @@ class Harness:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", default=str(ROOT / "target/release/plak"))
+    parser.add_argument("--binary", default=str(ROOT / "target/release/plakd"))
     parser.add_argument("--previous-binary")
     parser.add_argument("--only", help="comma-separated scenario names")
     parser.add_argument("--report", default=str(ROOT / "target/live/mcp-oauth/report.json"))
@@ -1021,7 +1021,7 @@ def main(argv=None):
     if set(selected) - set(SCENARIOS):
         parser.error("unknown scenario")
     # Fixed loopback ports, guarded across checkouts; never interfere with another lane.
-    lock = open(Path(tempfile.gettempdir()) / "plak-mcp-oauth.lock", "a")
+    lock = open(Path(tempfile.gettempdir()) / "plakd-mcp-oauth.lock", "a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     os.umask(0o077)
     binary = Path(args.binary).resolve()

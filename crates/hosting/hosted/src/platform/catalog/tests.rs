@@ -40,7 +40,7 @@ fn unknown_id_is_refused_with_up_to_three_closest_listed_ids() {
         text.contains("does not list model `claude-haiku-5.5`"),
         "{text}"
     );
-    assert!(!text.contains("plak models"), "{text}");
+    assert!(!text.contains("plakd models"), "{text}");
     let refusal = crate::CliFailure::from(error);
     assert!(
         matches!(refusal.advice(), Some(plakous_host_protocol::refusal::RefusalAdvice::UnknownModel {account, model, ..}) if account == "anthropic" && model == "claude-haiku-5.5")

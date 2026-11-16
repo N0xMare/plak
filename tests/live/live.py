@@ -1,11 +1,11 @@
 """Shared pieces of the live smoke, soak, and job drivers.
 
-Everything here drives the real `plak` binary: `plak run`, `plak agent` over
+Everything here drives the real `plakd` binary: `plakd run`, `plakd agent` over
 JSONL, with no presentation client. Nothing talks to a provider directly.
 A run gets a scratch `PLAK_HOME` under `target/live/`; OAuth logins are XDG
 state outside that home, so they are shared with the real ones (a token refresh
 during a run writes the real store). API-key routes copy the key installed by
-`plak key set` into the scratch home without exposing it in output.
+`plakd key set` into the scratch home without exposing it in output.
 """
 
 from __future__ import annotations
@@ -34,10 +34,10 @@ def capture_root_mismatch(binary: Path, root: Path = ROOT) -> str | None:
 
     A `test-hooks` build accepts capture directories only under the
     `tests/provider-authority` of the checkout that compiled it (its
-    `bin/plak` manifest directory is baked in), so a driver must run from that
+    `bin/plakd` manifest directory is baked in), so a driver must run from that
     checkout. Otherwise every launch fails before anything is sent.
     """
-    manifest = root.resolve() / "bin" / "plak"
+    manifest = root.resolve() / "bin" / "plakd"
     try:
         data = binary.read_bytes()
     except OSError as error:
@@ -45,7 +45,7 @@ def capture_root_mismatch(binary: Path, root: Path = ROOT) -> str | None:
     if str(manifest).encode() in data:
         return None
     # A build through a symlinked path bakes in the unresolved spelling.
-    for candidate in set(re.findall(rb"/[\x21-\x7e]{1,512}?/bin/plak(?=[^\x21-\x7e]|$)", data)):
+    for candidate in set(re.findall(rb"/[\x21-\x7e]{1,512}?/bin/plakd(?=[^\x21-\x7e]|$)", data)):
         try:
             if Path(os.fsdecode(candidate)).resolve() == manifest:
                 return None
@@ -321,7 +321,7 @@ class ScenarioFailure(Exception):
 
 
 class EventTimeout(ScenarioFailure):
-    """No expected `plak agent` event arrived within the wait's budget."""
+    """No expected `plakd agent` event arrived within the wait's budget."""
 
 
 # Typed provider refusals and outages. `QuotaExhausted` is the name some
@@ -675,7 +675,7 @@ def provider_reason_from(
 ) -> str | None:
     """Why this observation is a typed provider refusal, or None.
 
-    Covers JSONL turn failures, `plak run` stderr, durable session-log terminals,
+    Covers JSONL turn failures, `plakd run` stderr, durable session-log terminals,
     manual `/compact` refusals, and child job output. A kernel
     stream-validation failure is not decided here.
     """
@@ -892,10 +892,10 @@ def stream_validation_outcome(text: str, segments: list[Path] | None) -> str | N
 
 
 # Spec 01 Length classification. A tool-free Length answer with visible text
-# is committed: `plak run` prints it, then exits 5 with this last stderr line.
-TRUNCATED_ANSWER_LINE = "plak: turn_failed:output-limit"
+# is committed: `plakd run` prints it, then exits 5 with this last stderr line.
+TRUNCATED_ANSWER_LINE = "plakd: turn_failed:output-limit"
 # An empty Length that may not retry again is a failed turn of typed kind
-# OutputLimit. JSONL lifecycle frames carry the kind; `plak run` stderr and the
+# OutputLimit. JSONL lifecycle frames carry the kind; `plakd run` stderr and the
 # session log's `turn.failed` row carry only the rendered diagnostic, which
 # quotes one of these product messages.
 OUTPUT_LIMIT_KIND = "OutputLimit"
@@ -911,7 +911,7 @@ _COMPATIBILITY_NOTICE = re.compile(
 
 
 def last_line(text: str) -> str:
-    """The last non-empty line: `plak run`'s final status on stderr."""
+    """The last non-empty line: `plakd run`'s final status on stderr."""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return lines[-1] if lines else ""
 
@@ -937,7 +937,7 @@ def failure_lines(stderr: str) -> str:
 
 
 def truncated_answer(code: int, stderr: str) -> bool:
-    """`plak run` printed a committed answer cut at its output limit."""
+    """`plakd run` printed a committed answer cut at its output limit."""
     return code == 5 and last_line(stderr) == TRUNCATED_ANSWER_LINE
 
 
@@ -956,7 +956,7 @@ def compatibility_notice_refusal(text: str) -> str | None:
     account = match[1]
     return (
         f"the {account} compatibility notice is not accepted; accept it once with "
-        f"`plak models {account}` from a terminal before a live run"
+        f"`plakd models {account}` from a terminal before a live run"
     )
 
 
@@ -1101,7 +1101,7 @@ def classify_cli_failure(
     segments: list[Path] | None = None,
     lookup_faults: str | None = None,
 ) -> None:
-    """`plak run` exit. Exit 5 is the agent class; the text decides provider.
+    """`plakd run` exit. Exit 5 is the agent class; the text decides provider.
 
     An unaccepted compatibility notice (exit 3) is `harness` naming the
     remedy, and a typed OutputLimit diagnostic is `model` as on every surface
@@ -1163,7 +1163,7 @@ def route_report(
     `composition_requested` is what the home pins. A pack may bind it to
     another composition (Codex binds `plakous-default` as `native-ptc`), so a
     run report also names `composition_bound`: every composition the
-    `plak agent` hellos of that run reported, sorted, empty when none did.
+    `plakd agent` hellos of that run reported, sorted, empty when none did.
     """
     report: dict[str, object] = {
         "route": route.name,
@@ -2011,7 +2011,7 @@ def capture_integrity(segments: list[Path], pending: Collection[Path] = ()) -> b
 def write_home(home: Path, route: Route, source_home: Path | None = None) -> None:
     """A private Plak home whose root template is `route`, with one worker it may spawn.
 
-    An API-key route uses the key the real home stores (`plak key set`), copied
+    An API-key route uses the key the real home stores (`plakd key set`), copied
     into this home; `Env` then drops the environment variable, which would
     otherwise override the file.
     """
@@ -2069,7 +2069,7 @@ def pin_composition(home: Path, composition: str) -> None:
         path.write_text(text.replace(needle, f'composition = "{composition}"\n'))
 
 
-# Process environment from before `isolate_test_environment`. A `plak` child
+# Process environment from before `isolate_test_environment`. A `plakd` child
 # is built from this snapshot so it does not inherit the gate TMPDIR (a
 # `--fresh` gate empties it) or the empty git config. None until a driver
 # isolates; a second isolate keeps the first snapshot.
@@ -2089,7 +2089,7 @@ def test_environment() -> dict[str, str]:
 def isolate_test_environment() -> None:
     """Point this driver at the isolated test home, scratch and git config.
 
-    The helper stays on this process, for fixture git and scratch. A `plak`
+    The helper stays on this process, for fixture git and scratch. A `plakd`
     child keeps the environment from before the first call (`plak_child_source`).
     """
     global _plak_child_source
@@ -2099,7 +2099,7 @@ def isolate_test_environment() -> None:
 
 
 def plak_child_source() -> dict[str, str]:
-    """The environment a `plak` child inherits.
+    """The environment a `plakd` child inherits.
 
     After `isolate_test_environment`, this is the process environment from
     before that call. Otherwise it is a copy of the current environment.
@@ -2115,7 +2115,7 @@ def fixture_git_env() -> dict[str, str]:
     An operator's global `commit.gpgsign` or hooks would otherwise run inside
     fixture setup. Returned for git only; a driver that calls
     `isolate_test_environment` also applies it to the process. It is not the
-    `plak` child's environment.
+    `plakd` child's environment.
     """
     return test_environment()
 
@@ -2334,7 +2334,7 @@ class Env:
         self.capture_segments: list[Path] = []
         # Segments whose timed-out process was scored `provider` on a pending exchange.
         self.provider_pending: set[Path] = set()
-        # Compositions the `plak agent` hellos of this run reported.
+        # Compositions the `plakd agent` hellos of this run reported.
         self.bound_compositions: set[str] = set()
 
     @property
@@ -2404,7 +2404,7 @@ def run_cli(
     home: Path | None = None,
     faults: str | None = None,
 ) -> tuple[int, str]:
-    """`plak run …`; returns the exit status and stdout, keeping both streams.
+    """`plakd run …`; returns the exit status and stdout, keeping both streams.
 
     `home` overrides `PLAK_HOME` for this process only. Capture still belongs
     to `env`. Stdin is closed, so a prompt Plak cannot ask (a compatibility
@@ -2433,7 +2433,7 @@ def run_cli(
         raise timeout_failure(
             env,
             segment,
-            f"plak run did not finish in {timeout:.0f}s",
+            f"plakd run did not finish in {timeout:.0f}s",
             faults,
             timeout=timeout,
             killed_at=killed_at,
@@ -2517,13 +2517,13 @@ def _omitted_observation(event: dict) -> bool:
     return op.get("kind") in _STREAM_KINDS
 
 
-# How long a `plak agent` that said `bye` at startup gets to exit before its
+# How long a `plakd agent` that said `bye` at startup gets to exit before its
 # stderr is read; its final line is the failure the startup reports.
 STARTUP_EXIT_WAIT_S = 10.0
 
 
 class Agent:
-    """A `plak agent` process spoken to over JSONL."""
+    """A `plakd agent` process spoken to over JSONL."""
 
     def __init__(
         self,
@@ -2584,7 +2584,7 @@ class Agent:
             classify_cli_failure(
                 self.proc.poll() or 5,
                 detail + json.dumps(hello),
-                "plak agent startup",
+                "plakd agent startup",
                 segments=[self.capture_dir],
                 lookup_faults=faults,
             )
@@ -2682,7 +2682,7 @@ class Agent:
             if on_event:
                 on_event(event)
             if kind == "eof":
-                raise ScenarioFailure(HARNESS, "plak agent exited during a turn")
+                raise ScenarioFailure(HARNESS, "plakd agent exited during a turn")
             if kind == "assistant":
                 turn.text += event.get("text", "")
             elif kind == "tool" and (
@@ -2771,7 +2771,7 @@ class Agent:
         except subprocess.TimeoutExpired:
             os.killpg(self.proc.pid, signal.SIGKILL)
             self.proc.wait()
-            raise ScenarioFailure(HARNESS, "plak agent did not exit after quit")
+            raise ScenarioFailure(HARNESS, "plakd agent did not exit after quit")
         finally:
             self.transcript.close()
             self.stderr.close()

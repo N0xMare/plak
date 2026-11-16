@@ -1,4 +1,4 @@
-"""Pure argv/env construction for `plak run` inside a Harbor task."""
+"""Pure argv/env construction for `plakd run` inside a Harbor task."""
 
 from __future__ import annotations
 
@@ -136,7 +136,7 @@ def run_arguments(
 
 def host_binary_paths(repo_root: Path) -> tuple[Path, Path, Path]:
     installed = repo_root / ".plak" / "installed"
-    return installed / "plak", installed / "plakous-js-host", installed / "plakous-py-host"
+    return installed / "plakd", installed / "plakous-js-host", installed / "plakous-py-host"
 
 
 def workspace_cwd() -> str:

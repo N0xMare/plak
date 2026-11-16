@@ -337,7 +337,7 @@ class SafetyTests(unittest.TestCase):
             ["minimal", "none", "max", "xhigh"],
         )
         with self.assertRaises(census.CensusError):
-            census.effort_probe_body("gpt-6-luna", "plak-census")
+            census.effort_probe_body("gpt-6-luna", "plakd-census")
         with self.assertRaises(census.CensusError):
             census.effort_probe_body("gpt-6-luna", "ultra")
 

@@ -89,10 +89,10 @@ exit "${NATIVE_EXIT:-0}"
             CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=linker,
             CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS='-C opt-level=1',
         )
-        result = self.run_gate('--fast', 'plak')
+        result = self.run_gate('--fast', 'plakd')
         self.assertEqual(result.returncode, 0, result.stderr)
         call = json.loads(result.stdout)
-        self.assertEqual(call['args'], ['--fast', 'plak'])
+        self.assertEqual(call['args'], ['--fast', 'plakd'])
         self.assertEqual((call['cc'], call['linker']), (cc, linker))
         self.assertEqual(call['flags'], '-C opt-level=1')
 

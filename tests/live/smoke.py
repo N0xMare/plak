@@ -3,8 +3,8 @@
 
 Usage: smoke.py [route] [--binary PATH] [--only NAME,...]
 
-Each scenario builds its own small git repo, drives the real `plak` (CLI
-one-shot or `plak agent` JSONL) and checks product-level
+Each scenario builds its own small git repo, drives the real `plakd` (CLI
+one-shot or `plakd agent` JSONL) and checks product-level
 outcomes: files changed, tests pass, the session continues. A failure is
 classed as harness (Plak's), model (the turn completed but the work is
 wrong), provider (the real provider refused) or pending (a known gap that an
@@ -376,7 +376,7 @@ class Smoke:
             log / "second.log",
         )
         if code != 0:
-            _raise_cli_failure(code, log / "second.log", "plak run --session")
+            _raise_cli_failure(code, log / "second.log", "plakd run --session")
         if "MAGENTA" not in out.upper():
             raise ScenarioFailure(MODEL, "resumed turn lost the remembered word")
         return "second run continued the session"
@@ -502,7 +502,7 @@ class Smoke:
         require_completed(agent.prompt("Write the word OCTOPUS into notes.txt."), "first turn")
         session = agent.session_id
         if agent.quit() != 0:
-            raise ScenarioFailure(HARNESS, "plak agent exited non-zero after quit")
+            raise ScenarioFailure(HARNESS, "plakd agent exited non-zero after quit")
         agent = self.agent("jsonl_resume", repo, args=["--session", session])
         if agent.session_id != session:
             raise ScenarioFailure(HARNESS, "reopen attached a different session")
@@ -718,7 +718,7 @@ class Smoke:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("route", nargs="?", default="grok", choices=sorted(live.ROUTES))
-    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plak")
+    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plakd")
     parser.add_argument("--fixture-seed", type=int, help="replay randomized scenario inputs")
     parser.add_argument("--artifacts", type=Path, help="fresh attempt artifact directory")
     parser.add_argument(

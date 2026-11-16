@@ -2,12 +2,12 @@
 # Build and pack the release tarball for this host's supported target:
 # x86_64-unknown-linux-musl on Linux x86_64 (the native musl toolchain of
 # tools/musl/musl-toolchain.sh, static PIE), aarch64-apple-darwin on Apple Silicon.
-# Writes plak-<version>-<triple>.tar.gz, its wire-schema.json and SHA256SUMS into the output
+# Writes plakd-<version>-<triple>.tar.gz, its wire-schema.json and SHA256SUMS into the output
 # directory (default: <target dir>/release-dist).
 #
 # The tree must be clean and HEAD must carry the tag v<version>, or the tag
 # named by --tag: v<version> or a release candidate v<version>-rc.<n>, whose
-# tarball is named plak-<version>-rc.<n>-<triple> while the binaries still
+# tarball is named plakd-<version>-rc.<n>-<triple> while the binaries still
 # report <version>. --untagged drops only the tag requirement, for rehearsing
 # a release build.
 set -euo pipefail
@@ -31,7 +31,7 @@ if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
   exit 2
 fi
 version="$(cargo metadata --locked --no-deps --format-version 1 \
-  | python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "plak"))')"
+  | python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "plakd"))')"
 release="$version"
 if [[ -n "$tag" ]]; then
   if [[ -z "$tagged" ]]; then
@@ -84,7 +84,7 @@ target_dir="$(cd "$target_dir" && pwd -P)"
 cargo_home="${CARGO_HOME:-$HOME/.cargo}"
 mkdir -p "$cargo_home"
 cargo_home="$(cd "$cargo_home" && pwd -P)"
-maps=("$cargo_home=/cargo" "$repo_root=/plak" "$target_dir=/target")
+maps=("$cargo_home=/cargo" "$repo_root=/plakd" "$target_dir=/target")
 c_flags_var="CFLAGS_${triple//-/_}"
 cxx_flags_var="CXXFLAGS_${triple//-/_}"
 for map in "${maps[@]}"; do
@@ -94,10 +94,10 @@ for map in "${maps[@]}"; do
 done
 export CARGO_ENCODED_RUSTFLAGS "${c_flags_var?}" "${cxx_flags_var?}"
 
-artifacts="$(bash tools/build/build-plak.sh --artifacts)"
+artifacts="$(bash tools/build/build-plakd.sh --artifacts)"
 release_out="${out:-$target_dir/release-dist}"
 mkdir -p "$release_out"
-"$artifacts/plak" wire schema >"$release_out/plak-$release-$triple-wire-schema.json"
+"$artifacts/plakd" wire schema >"$release_out/plakd-$release-$triple-wire-schema.json"
 python3 tools/release/release_tarball.py --version "$release" --triple "$triple" \
   --artifacts "$artifacts" --out "$release_out" \
   --mtime "$(git log -1 --format=%ct HEAD)" ${static[@]+"${static[@]}"}

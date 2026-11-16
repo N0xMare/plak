@@ -70,7 +70,7 @@ def check(
     full_binary: str, reduced_binary: str, server_binary: str, maintainer: bool = False
 ) -> list[str]:
     errors = []
-    with tempfile.TemporaryDirectory(prefix="plak-feature-store-") as directory:
+    with tempfile.TemporaryDirectory(prefix="plakd-feature-store-") as directory:
         root = Path(directory)
         script = root / "script.json"
         script.write_text(
@@ -248,7 +248,7 @@ def check(
 def check_route(full_binary: str, reduced_binary: str) -> list[str]:
     """Read a genuine canonical native session; refuse attach without touching it."""
     errors = []
-    with tempfile.TemporaryDirectory(prefix="plak-feature-route-") as directory:
+    with tempfile.TemporaryDirectory(prefix="plakd-feature-route-") as directory:
         root = Path(directory)
         script = root / "script.json"
         script.write_text(
@@ -329,7 +329,7 @@ def check_route(full_binary: str, reduced_binary: str) -> list[str]:
 
 def image_diagnostic(binary: str) -> list[str]:
     """Refuse an image during a real held turn, then finish that same turn and keep serving."""
-    with tempfile.TemporaryDirectory(prefix="plak-feature-jsonl-") as directory:
+    with tempfile.TemporaryDirectory(prefix="plakd-feature-jsonl-") as directory:
         root = Path(directory)
         script = root / "script.json"
         script.write_text(

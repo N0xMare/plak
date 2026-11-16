@@ -446,7 +446,7 @@ class WorkspaceCheckCache(unittest.TestCase):
         self.assertNotEqual(observe(left)["files"], observe(right)["files"])
 
     def test_release_artifact_content_is_part_of_the_observation(self) -> None:
-        artifact = self.target / "release" / "plak"
+        artifact = self.target / "release" / "plakd"
         artifact.parent.mkdir(parents=True)
         artifact.write_bytes(b"one")
 
@@ -455,11 +455,11 @@ class WorkspaceCheckCache(unittest.TestCase):
                 path.read_bytes()
 
         self.assertEqual(self.drive(read), 0)
-        self.assertEqual(checker.built_product_artifacts(self.root)["plak"], artifact)
+        self.assertEqual(checker.built_product_artifacts(self.root)["plakd"], artifact)
         artifact.write_bytes(b"two")
         self.assertEqual(self.drive(read), 0)
         self.assertEqual(self.calls, 1)
-        ignored = self.root / "target" / "release" / "plak"
+        ignored = self.root / "target" / "release" / "plakd"
         ignored.parent.mkdir(parents=True)
         ignored.write_bytes(b"repo-local target is not the gate target")
         self.assertEqual(self.drive(read), 0)
@@ -467,7 +467,7 @@ class WorkspaceCheckCache(unittest.TestCase):
 
     def test_without_a_target_dir_the_repo_release_dir_is_the_product(self) -> None:
         with patch.dict(os.environ, {"CARGO_TARGET_DIR": ""}):
-            artifact = self.root / "target" / "release" / "plak"
+            artifact = self.root / "target" / "release" / "plakd"
 
             def read() -> None:
                 for path in checker.built_product_artifacts(self.root).values():
@@ -479,7 +479,7 @@ class WorkspaceCheckCache(unittest.TestCase):
             artifact.write_bytes(b"product")
             self.assertEqual(self.drive(read), 0)
             self.assertEqual(self.calls, 1)
-            self.assertEqual(checker.built_product_artifacts(self.root)["plak"], artifact)
+            self.assertEqual(checker.built_product_artifacts(self.root)["plakd"], artifact)
 
     def test_the_hygiene_names_file_is_in_the_global_digest(self) -> None:
         hygiene = self.root / checker.HYGIENE_PRIVATE_NAMES_FILE

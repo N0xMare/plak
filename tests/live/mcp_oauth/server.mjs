@@ -378,7 +378,7 @@ http
             !claims.scope?.split(" ").includes("write")))
       ) {
         const scope = mode.hostile
-          ? "$(touch /tmp/plak-oauth-hostile)"
+          ? "$(touch /tmp/plakd-oauth-hostile)"
           : "write";
         record({
           event: "mcp",

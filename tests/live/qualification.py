@@ -189,7 +189,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("lane", choices=LANES)
     parser.add_argument("route", choices=sorted(live.ROUTES))
-    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plak")
+    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plakd")
     parser.add_argument("--dry-run", action="store_true")
     args, forwarded = parser.parse_known_args(argv)
     live.isolate_test_environment()
@@ -238,7 +238,7 @@ def main(argv: list[str]) -> int:
     root = live.ROOT / "target/live"
     root.mkdir(parents=True, exist_ok=True)
     artifacts = Path(tempfile.mkdtemp(prefix=f"qualification-{args.lane}-{args.route}-", dir=root))
-    retained = artifacts / "starting-plak"
+    retained = artifacts / "starting-plakd"
     retained_error = None
     if args.lane == "soak":
         shutil.copy2(binary, retained)

@@ -303,7 +303,7 @@ impl SubagentsDatabase {
             .map_err(|_| OpenError::unavailable("could not inspect tree schema"))?;
         if version != SCHEMA_VERSION {
             return Err(OpenError::unsupported(format!(
-                "subagents schema {version}, expected {SCHEMA_VERSION}: created by an incompatible plak build"
+                "subagents schema {version}, expected {SCHEMA_VERSION}: created by an incompatible plakd build"
             )));
         }
         SCHEMA.validate(&tx).map_err(|error| {

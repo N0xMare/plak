@@ -11,23 +11,23 @@
 //! * framed wire v2 in [`wire`] and its typed [`client`], used by the supported
 //!   host socket, stdio bridge and authenticated web endpoint. The current
 //!   [`wire::WIRE_VERSION`] must match exactly, without negotiation. The
-//!   single-session `plak agent --wire v2` entrypoint is hidden and unsupported;
-//! * the `plak agent` JSONL wire: the v1 [`envelope`], the [`topology`]
+//!   single-session `plakd agent --wire v2` entrypoint is hidden and unsupported;
+//! * the `plakd agent` JSONL wire: the v1 [`envelope`], the [`topology`]
 //!   request/receipt shapes, and the [`jsonl`] projection of every
 //!   observation, an exhaustive match so a new variant is a wire decision.
 //!
 //! This crate holds every type that crosses those seams and nothing that
 //! decides what to do about one: dispatch, the tree runtime, the session
 //! store, and the presentation projection live above it. An external
-//! `plak agent` client depends on this crate, `serde` and `serde_json` —
+//! `plakd agent` client depends on this crate, `serde` and `serde_json` —
 //! never on the host. A driver with product traffic of its own (settings, an
 //! overlay) threads it through the [`ProtocolExtension`] slot; the protocol
 //! carries it and never reads it.
 //!
-//! JSONL v1 remains the default for `plak agent`, byte-identical until removal;
+//! JSONL v1 remains the default for `plakd agent`, byte-identical until removal;
 //! it is not wire v2 and its version is independent of the framed protocol.
 //! New wire integrations use the supported host transports and the schema
-//! printed by `plak wire schema`. The following sections describe JSONL v1.
+//! printed by `plakd wire schema`. The following sections describe JSONL v1.
 //!
 //! # JSONL v1 framing
 //!

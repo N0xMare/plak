@@ -5,9 +5,9 @@ Usage: soak.py [route] [--hours N] [--binary PATH] [--no-rebuild]
 
 The session works through a cycle of software tasks on more-itertools, pinned
 at one commit and cloned under target/live/. Every task reopens the session in
-a new `plak agent` process, so reopen is exercised throughout. Along the way
+a new `plakd agent` process, so reopen is exercised throughout. Along the way
 the driver injects transport faults, freezes the process group with SIGSTOP
-and SIGCONT to simulate a laptop sleeping, compacts, and once rebuilds `plak`
+and SIGCONT to simulate a laptop sleeping, compacts, and once rebuilds `plakd`
 and reopens the session on the new binary. It records per-task time, tokens,
 peak context, compactions, errors and dead ends: a failed turn after which a
 plain follow-up also fails. Artifacts land in target/live/soak-<route>-<stamp>/.
@@ -37,11 +37,11 @@ from live import ScenarioFailure  # noqa: E402
 REPO_URL = "https://github.com/more-itertools/more-itertools.git"
 REPO_COMMIT = "4998a257373f36e91edef7324572ed8df10f39d1"  # v10.5.0
 REBUILD = [
-    str(live.ROOT / "tools/build/build-plak.sh"),
+    str(live.ROOT / "tools/build/build-plakd.sh"),
     "--release",
     "--features",
-    "plak/test-hooks",
-    "--plak-only",
+    "plakd/test-hooks",
+    "--plakd-only",
 ]
 
 # Bugs the driver plants before asking for a fix: (file, function, correct
@@ -420,7 +420,7 @@ def rebuild(binary: Path, log: Path) -> bool:
     session crosses a changed build. The used marker changes the executable
     bytes without changing product behavior.
     """
-    source = live.ROOT / "bin/plak/src/main.rs"
+    source = live.ROOT / "bin/plakd/src/main.rs"
     original = source.read_bytes()
     before = hashlib.sha256(binary.read_bytes()).digest() if binary.is_file() else None
     marker = f'\n#[used]\nstatic LIVE_SOAK_REBUILD: &[u8] = b"{time.time_ns()}";\n'.encode()
@@ -438,7 +438,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("route", nargs="?", default="grok", choices=sorted(live.ROUTES))
     parser.add_argument("--hours", type=float, default=1.0)
-    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plak")
+    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plakd")
     parser.add_argument("--artifacts", type=Path, help="fresh attempt artifact directory")
     parser.add_argument("--no-rebuild", action="store_true")
     return parser

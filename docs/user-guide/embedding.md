@@ -1,6 +1,6 @@
 # Embedding Plakous in your own Rust program
 
-Plakous is an embeddable single-agent library. Plak is the host and operator CLI built
+Plakous is an embeddable single-agent library. plakd is the host and operator CLI built
 on it. Depend on `plakous` from crates.io, or on a source checkout by path.
 Use Rust **1.99.0** or later and edition **2024**. Supported platforms are Linux
 x86_64 musl and Apple Silicon macOS.
@@ -42,13 +42,13 @@ need `store`, which `sessions-sqlite` implies.
 
 The always-on `application::run_once_until_signal` takes your cancellation
 future. It does not install Ctrl-C handling, open browsers or read terminal
-secrets; those are Plak product adapters.
+secrets; those are plakd product adapters.
 
 ## Your manifest
 
 This complete manifest supports copying a scripted example and
 `examples/common/scripted.rs` into a consumer crate. For a source checkout,
-replace the version with `path = "../plak/crates/plakous"`:
+replace the version with `path = "../plakd/crates/plakous"`:
 
 ```toml
 [package]
@@ -98,7 +98,7 @@ cargo run --locked -p plakous --example provider_direct --features openrouter \
 `provider_direct` uses a caller-supplied key-file path and one exact model
 literal. With no arguments it prints what it needs and dispatches nothing. Its
 live path is opt-in, not an offline test. Other embedders must not use
-`with_plak_attribution`: those headers identify Plak product traffic.
+`with_plak_attribution`: those headers identify plakd product traffic.
 
 `worker_js_sidecar` canonicalizes its explicit argument before attachment. The
 facade itself requires an **absolute, canonical path without symlink
@@ -157,7 +157,7 @@ use that same builder and attach path but forbid product evidence.
 
 The SDK is an explicit embedding choice through `composition-python`. It uses the
 same `plakous-py-host` sidecar, but exposes only `run_py` and starts each cell
-with fresh globals. Plak selects it with `--composition py-sdk` or the root
+with fresh globals. plakd selects it with `--composition py-sdk` or the root
 settings picker, on a Direct-capable single-agent route.
 
 Register the coding packs and SDK extensions with the same process service:
@@ -215,7 +215,7 @@ Invalid state keys/values raise `ValueError`, capacity refusals raise
 by their encoded representation (1 MiB per result, 16 MiB per cell); the
 foreground budget is 300 seconds. There is no wait tool: use `proc.start` for
 long jobs. Processes have the user's full authority and are not sandboxed.
-Plak restricts its `py-sdk` selection to a single-agent root: product child
+plakd restricts its `py-sdk` selection to a single-agent root: product child
 tiers and optional tool namespaces cannot select it. The library has no tree
 or root/child distinction; an embedder can attach the SDK to any isolated
 single agent with the required fixed catalog and authority. Output over

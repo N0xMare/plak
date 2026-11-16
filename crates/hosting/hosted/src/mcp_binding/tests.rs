@@ -614,7 +614,7 @@ impl NamedSecrets for LoginSecrets {
 }
 
 /// An `auth = "oauth"` table binds the stored login: without one the bind
-/// refuses before connecting and names `plak mcp login`, and a product that
+/// refuses before connecting and names `plakd mcp login`, and a product that
 /// stores no logins refuses the table.
 #[test]
 fn an_oauth_table_without_a_login_refuses_before_connecting() -> TestResult {
@@ -676,7 +676,7 @@ fn oauth_refusals_preserve_server_and_secret_names_as_typed_facts() -> TestResul
             }
         )
     );
-    assert!(!missing.message().contains("plak secret"));
+    assert!(!missing.message().contains("plakd secret"));
     Ok(())
 }
 

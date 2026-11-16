@@ -83,7 +83,7 @@ def refresh_environment(start: Path) -> dict[str, str] | None:
 def refresh_index_entries(names: Sequence[str], runner: Runner, env: dict[str, str] | None) -> bool:
     """Read each crate's registry entry online from outside any workspace."""
     with tempfile.TemporaryDirectory(
-        prefix="plak-index-refresh.", dir=outside_workspace_base()
+        prefix="plakd-index-refresh.", dir=outside_workspace_base()
     ) as empty:
         return all(
             runner(

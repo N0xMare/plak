@@ -2,10 +2,10 @@
 
 ## Sanitized Codex Catalog
 
-The ignored maintainer capture uses Plak's own compatibility acceptance,
+The ignored maintainer capture uses plakd's own compatibility acceptance,
 credential loading and catalog admission. It makes no inference call. Supply
-the XDG state home used by the installed Plak (not a credential file), after
-accepting the current profile with `plak models codex`:
+the XDG state home used by the installed plakd (not a credential file), after
+accepting the current profile with `plakd models codex`:
 
 ```sh
 PLAK_CAPTURE_STATE_HOME="$HOME/.local/state" \
@@ -19,7 +19,7 @@ ETags, access-window expiry and all other account-scoped values are omitted.
 It never prints or exports credentials or the raw authenticated response.
 
 
-Three opt-in drivers that drive the real `plak` against real provider accounts.
+Three opt-in drivers that drive the real `plakd` against real provider accounts.
 They spend provider usage and never run in a gate. `STATUS.md` records what they
 last showed.
 
@@ -54,8 +54,8 @@ has a pinned local catalog and no catalog GET. It requires a retry status, a
 completed durable turn and an independently checked file, and reports its
 session id and binary hash. It does not alter inference retry budgets.
 
-The Python drivers default to `target/release/plak`. Build it with
-`cargo build --release --locked -p plak --features plak/test-hooks` before a
+The Python drivers default to `target/release/plakd`. Build it with
+`cargo build --release --locked -p plakd --features plakd/test-hooks` before a
 direct Python invocation; `--binary PATH` selects another capture-capable
 executable. A `test-hooks` binary only captures under the
 `tests/provider-authority` of the checkout that built it, so run the driver
@@ -67,12 +67,12 @@ agent worked in, every JSONL transcript and stderr, and a
 Smoke reports pin the executable's SHA-256 at start and end and
 fail if it changes mid-run. Headless soak reports both digests, allowing its
 intentional byte-distinct rebuild; with `--no-rebuild` a changed executable is
-an evidence failure. `task_repo_commit` names the task fixture, **not** Plak's
-source. Record the clean Plak source revision and build invocation separately
+an evidence failure. `task_repo_commit` names the task fixture, **not** plakd's
+source. Record the clean plakd source revision and build invocation separately
 before a publication run; a digest alone cannot prove how a binary was built.
 
 Raw exchange capture is automatic and required on **every** real launch:
-`plak run` and `plak agent`, in smoke, soak and the jobs driver.
+`plakd run` and `plakd agent`, in smoke, soak and the jobs driver.
 There is no capture opt-in flag. Each run gets a uniquely named private root
 under ignored `tests/provider-authority/`, with fresh owned mode-0700 process
 segments. Inherited capture paths are replaced, never reused; non-private,
@@ -110,7 +110,7 @@ these sensitive raw bytes; never attach them to a public report.
 
 **Accounts.** The scratch home reuses the real logins: OAuth credentials are
 XDG state outside `PLAK_HOME`, so a token refresh during a run writes the real
-store. For OpenRouter, first use `plak key set openrouter`; the harness copies
+store. For OpenRouter, first use `plakd key set openrouter`; the harness copies
 `~/.plak/secrets/openrouter.key` into its private home and removes
 `OPENROUTER_API_KEY` from child environments so a stale variable cannot shadow
 the working file. Direct API accounts are the same: `openai` copies
@@ -125,13 +125,13 @@ inference is `api.openai.com/v1/responses` and xAI API inference is
 `api.x.ai/v1/responses`.
 
 Subscription accounts need their current compatibility notice accepted before
-a live run: run `plak models <account>` from a terminal on first use or when
+a live run: run `plakd models <account>` from a terminal on first use or when
 the notice revision or consent identity changes. Consent binds the provider,
 profile id, primary and secondary source revisions, provenance and kill-switch
 revision. An existing valid acceptance survives a later review when those pins
 and the notice revision are unchanged: the stored `reviewed_at` and `expires_at`
 are not compared. The current compiled profile must still be active.
-The drivers start `plak run` with stdin
+The drivers start `plakd run` with stdin
 closed, so an unaccepted notice fails at once with exit 3 instead of waiting
 on a hidden prompt, and the scenario scores `harness` with that remedy.
 
@@ -140,10 +140,10 @@ small git repo:
 
 | Scenario | Surface | Passes when |
 | --- | --- | --- |
-| `cli_task` | `plak run` | a planted bug is fixed, a test is added, the suite passes |
-| `cli_resume` | `plak run --session` | the second run remembers the first |
-| `jsonl_task` | `plak agent` | the same coding task over JSONL |
-| `jsonl_resume` | `plak agent --session` | a reopened process continues the session |
+| `cli_task` | `plakd run` | a planted bug is fixed, a test is added, the suite passes |
+| `cli_resume` | `plakd run --session` | the second run remembers the first |
+| `jsonl_task` | `plakd agent` | the same coding task over JSONL |
+| `jsonl_resume` | `plakd agent --session` | a reopened process continues the session |
 | `compaction` | `compact` command or capacity recovery | the first turn reads `fold.txt` (10,000 tokens, bytes/4, and it does not contain the code word; on Code Mode routes the prompt names one `exec_command` that prints the whole file; a first turn that replies without any tool call is `model`, since nothing is then large enough to fold; a call the host rejected (`rejected:<reason>`) was still attempted, so it is not that skip); manual compaction commits, or on a catalog window unknown or at most 65,536, a first-turn `ContextLimit` has a failed lifecycle terminal followed by a capacity start and committed compact; the latter reports `capacity recovery compaction, context carried`. Known larger windows remain harness failures. The second turn and fact question complete, and `ZEBRA-42` survives without appearing in any repository file before the question |
 | `cancel` | `interrupt` | the turn ends `cancelled` mid-tool and the next prompt completes. When the interrupt was never sent, a failed turn is classified like any turn (a provider error is `provider`); only a completed turn that never started the command is `model` |
 | `fault_429`, `fault_529` | injected before dispatch | the turn still completes; the fault is one response, so a turn that fails after more than one HTTP retry was refused by the real provider and scores `provider` |
@@ -152,11 +152,11 @@ small git repo:
 | `subagents` | `spawn_agent` × 2 | two forked children, both candidates adopted |
 
 `wrap_up` is opt-in (`--only wrap_up`) and is not one of the eleven. It uses a
-private `PLAK_HOME` with `[turn] max_model_rounds = 2`, asks `plak run` to `ls`
+private `PLAK_HOME` with `[turn] max_model_rounds = 2`, asks `plakd run` to `ls`
 and then `cat` each file one at a time, and passes when that turn completes
 with assistant text, the session log records `turn.operation_budget_exhausted`,
 neither the CLI streams nor the session log contain `ProtectedHistory` or
-`stable-prefix binding differs`, and a second `plak run --session` prompt
+`stable-prefix binding differs`, and a second `plakd run --session` prompt
 `say continued` completes. `ModelArtifactPrefixDrift` is not persisted
 (spec 01 §11.2), so the scenario cannot see artifact reuse except by that
 binding error staying absent and the next turn completing. The default run
@@ -164,7 +164,7 @@ does not list it: `--only` selects it from the opt-in set.
 
 `py_ptc` is opt-in too (`--only py_ptc`, any route). It switches a private
 `PLAK_HOME`'s templates to `composition = "py-ptc"`, passes
-`--composition py-ptc`, and asks one `plak run` turn to read `token.txt` with a
+`--composition py-ptc`, and asks one `plakd run` turn to read `token.txt` with a
 nested tool inside an `exec_py` cell, print it, handle a `ValueError`, keep the
 token in a global, and return it reversed from a second cell. It passes when
 the turn completes, the captured exchanges show `exec_py`, the second cell's
@@ -172,10 +172,10 @@ the turn completes, the captured exchanges show `exec_py`, the second cell's
 reversed token, which exists only in the repository.
 
 **Feature scenarios** (`features.py`) are opt-in through `--only` and are
-not in the eleven. Each is one `plak run` (the image round trip is two) in a
+not in the eleven. Each is one `plakd run` (the image round trip is two) in a
 fresh repo with a private `PLAK_HOME` whose root template lists exactly the
 optional tools it needs (`tools = [...]`, spec 07 §3.4 and §3.5). Oracles read
-`plak session log <id> --json`, the repository, the raw exchange capture and
+`plakd session log <id> --json`, the repository, the raw exchange capture and
 the MCP servers' own records, never the model's claim alone. A bind or
 admission refusal of a route row (`<tool> is not yet qualified on <route>`,
 `is not available on`, `does not accept image input`) scores `refused:
@@ -195,15 +195,15 @@ PLAK_LIVE_VISION_ROUTE=claude-haiku55-low just live smoke api-openai --only imag
 | `image_input` | none | `--image` of a cat photo; the answer names a cat, and a captured request carries an image block (Messages `image`, Responses `input_image` or Chat `image_url`) that decodes to an image; the report says whether it is the exact file bytes |
 | `fetch_url` | `fetch_url` | the session log has a `fetch_url` call of the raw GitHub URL of `vendor/monty-typeshed/PLAK-PATCH.md` at a public commit, and the answer carries the one SHA-256 that file records |
 | `supergrok_tool_image` | `fetch_url` | opt-in SuperGrok probe: serve the committed `tests/live/assets/sample-01.png` unchanged at a neutral public URL, set `PLAK_LIVE_TOOL_IMAGE_URL`, and run the scenario. It verifies the PNG pin and exact captured tool-image bytes/shape, then requires the letters visible only in its pixels. Loopback URLs are intentionally refused by fetch_url; the expected answer never enters the prompt or metadata. |
-| `mcp_stdio`, `mcp_http` | `mcp:everything` | the reference server `@modelcontextprotocol/server-everything` (pinned, installed once under `target/live/assets/`) over stdio or streamable HTTP on loopback, allowlisted to `get-sum` and `get-env`; the log has both calls, the answer has the sum of two random operands and a token that only the server's environment holds; stdio also needs the server's stdin to show `tools/call get-sum` with those arguments. On Codex and the OpenAI API the prompt asks for the calls inside a Code Mode cell, and a captured `exec` cell source must call `mcp__everything__get-sum` (exact name) or its JavaScript identifier `mcp__everything__get_sum`. An allowlisted tool Plak leaves out of the model's catalog is `harness` |
-| `mcp_github_stdio`, `mcp_github_http` | `mcp:github` | the official GitHub MCP server (stdio: the digest-pinned `ghcr.io/github/github-mcp-server` image with `--read-only --tools get_file_contents,list_commits,search_repositories`; HTTP: `https://api.githubcopilot.com/mcp/x/repos/readonly`), Plak allowlisted to those read tools; Plak offers `mcp__github__get_file_contents` (else `harness`), the log has the call and the answer carries the same SHA-256 |
+| `mcp_stdio`, `mcp_http` | `mcp:everything` | the reference server `@modelcontextprotocol/server-everything` (pinned, installed once under `target/live/assets/`) over stdio or streamable HTTP on loopback, allowlisted to `get-sum` and `get-env`; the log has both calls, the answer has the sum of two random operands and a token that only the server's environment holds; stdio also needs the server's stdin to show `tools/call get-sum` with those arguments. On Codex and the OpenAI API the prompt asks for the calls inside a Code Mode cell, and a captured `exec` cell source must call `mcp__everything__get-sum` (exact name) or its JavaScript identifier `mcp__everything__get_sum`. An allowlisted tool plakd leaves out of the model's catalog is `harness` |
+| `mcp_github_stdio`, `mcp_github_http` | `mcp:github` | the official GitHub MCP server (stdio: the digest-pinned `ghcr.io/github/github-mcp-server` image with `--read-only --tools get_file_contents,list_commits,search_repositories`; HTTP: `https://api.githubcopilot.com/mcp/x/repos/readonly`), plakd allowlisted to those read tools; plakd offers `mcp__github__get_file_contents` (else `harness`), the log has the call and the answer carries the same SHA-256 |
 | `mcp_everything_all`, `mcp_github_all_stdio`, `mcp_github_all_http` | `mcp:everything`, `mcp:github` | the same oracles with no allowlist anywhere: every tool the reference server lists over stdio, the GitHub image's whole `--read-only` default tool set, and the remote `https://api.githubcopilot.com/mcp/readonly` endpoint; the session must open with the whole catalog |
 | `web_search` | `web_search` | the log has the search call, its result lists sources, the answer names a Rust version and that exact string is on a cited page the driver fetches itself |
 | `web_fetch` | `web_fetch` | the log has the fetch call and the answer carries the marker SHA-256 |
 | `x_search` | `x_search` | the log has the call, its sources include X post URLs, and the answer names one of those posts |
 | `image_gen_roundtrip` | `image_gen` | the log has an `image_gen` call, the workspace gains a PNG or JPEG, and a second run on `PLAK_LIVE_VISION_ROUTE` (default `claude-haiku55-low`) with that file as `--image` names a cat |
 | `child_own_tools` | `fetch_url` on the worker only | a root with no optional tools spawns a worker whose template lists `fetch_url`: the root's requests never offer `fetch_url`, the worker's do, and the answer carries the marker SHA-256 the worker fetched |
-| `profile_researcher` | the built-in profile's | a home laid out as applying the route's built-in profile writes (`<profile>-<role>` templates from `bin/plak/presets/`); the root spawns `<profile>-researcher`, whose requests offer `web_search` (the root's do not), its search result lists sources (Grok: including an X post from `x_search`), and the repo gains the `research/rust-release/report.md` its task asks for, citing URLs |
+| `profile_researcher` | the built-in profile's | a home laid out as applying the route's built-in profile writes (`<profile>-<role>` templates from `bin/plakd/presets/`); the root spawns `<profile>-researcher`, whose requests offer `web_search` (the root's do not), its search result lists sources (Grok: including an X post from `x_search`), and the repo gains the `research/rust-release/report.md` its task asks for, citing URLs |
 | `multi_roles` | `multi-default`'s | the `profile_researcher` oracle on `multi-default`, then a second run where the Claude root spawns the Codex worker (writes `hello.txt`) and the Claude reviewer; both roles' requests are captured on their own models |
 | `worker_spawns_researcher` | the built-in profile's | the route's built-in profile (`multi-default` on other routes) with `[orchestration] max_depth = 2` and a user-authored `<profile>-worker` whose `spawns` names `<profile>-researcher` (the built-in worker is a leaf): the worker, not the root, spawns the researcher, with the `profile_researcher` oracle |
 
@@ -213,7 +213,7 @@ unpushed lane commit uses the public commit it is built on. The cat photo is
 `Cat03.jpg` from Wikimedia Commons, downloaded once to
 `target/live/assets/` (`PLAK_LIVE_CAT_IMAGE` names another file). The GitHub
 scenarios need `gh` logged in and, for stdio, Docker: the driver pipes
-`gh auth token` into `plak secret set github` inside the scenario's private
+`gh auth token` into `plakd secret set github` inside the scenario's private
 home only; the token is never printed or written anywhere else. The server is
 read-only and allowlisted to read tools, so no write tool is ever offered.
 
@@ -290,12 +290,12 @@ every page's check word; overflow reports the count and names it in a `model`
 miss, since a placeholder shrink or a capacity stop can end paging early. The default page
 count follows the route's catalog window: 6 for the 256k–272k grok-4.7 and
 Codex/OpenAI rows, 8 for 500k `grok-4.6` and `gpt-6.1-sol` (`codex-sol`), 16 for the 1M Claude rows, and 6
-when this driver does not know the window. DeepSeek reports 1M, but Plak's
+when this driver does not know the window. DeepSeek reports 1M, but plakd's
 OpenRouter input admission uses the discovered window minus output and all
 endpoint limits. OpenRouter long-session runs therefore set
 `PLAK_LIVE_INPUT_CEILING` to the session's admitted input ceiling: run a short
 session on the same route and protocol, then read `admitted_input_ceiling=N`
-from `plak usage --session <id>` (it prints `context_status=... prepared_input=...
+from `plakd usage --session <id>` (it prints `context_status=... prepared_input=...
 total_context_window=... admitted_input_ceiling=N`). Without a valid value an
 OpenRouter long-session run starts no process and writes a report whose
 `pre_attempt_error` names this remedy; the cell driver records that error as
@@ -315,15 +315,15 @@ The pre-compaction fact is a neutral code word (`ZEBRA-` and six digits) that li
 the model's own claim that it compacted or remembered. Reports name
 `route_report` (class, account, effort, protocol, `composition_requested`, which
 the private home pins as `plakous-default`, and `composition_bound`, the
-compositions the run's `plak agent` hellos reported) plus `token_telemetry` from
+compositions the run's `plakd agent` hellos reported) plus `token_telemetry` from
 the shared home and the scenario private home.
 
 | Scenario | Surface | Passes when |
 | --- | --- | --- |
-| `in_turn_compaction` | `plak agent` | one turn pages `bulk.txt` until the session log shows `compact.started` reason `scheduled` and `compact.finished` outcome `committed` inside that turn's admitted..terminal bracket; prepared input shrinks when both figures are present; `recalled.txt` matches the fact file (`codeword.txt`, or `release_label.txt` on Codex); the fact files are not read again after that commit; on Codex every `pages/<k>.txt` holds page k's check word; a follow-up writes `followup.txt` with the same fact. Pages and `recalled.txt` are checked before the recall is compared, so an early stop reports how far it got (`growth turn ended after 37/52 pages without writing recalled.txt`, `model`) |
-| `overflow` | `plak agent` | rounds of parallel read batches, each under the round cap (sequential reads, one per response, on pi; one check-word page per exec on Codex), then the log shows a remedy: an in-turn `scheduled` compact, a `context.placeholders` shrink inside that turn, or a `failed` / `ContextLimit` turn followed by `compact.started` reason `capacity` and a committed finish; `acknowledged.txt` is unchanged, and a later turn writes `continuation.txt` containing `CONTINUED` |
-| `kill_reopen` | `plak agent` | SIGKILL after the marker process is observed running, or after 15s if it never appears (the marker is an argv token, not a shell comment); reopen emits JSONL `recovered` and the session log has `turn.abandoned` with `cause=process_lost` and `claim=running_tool`, `nothing_started` or `tool_round_completed` (spec 02 §2.4: Code Mode can abandon as `nothing_started` when exec was shown before the cell was durably prepared; a kill after a finalized tool round and before the next model request abandons as `tool_round_completed`; process restart does not log `session.recovered`); the follow-up writes `after_reopen.txt` containing `REOPENED` |
-| `child_compaction` | `plak agent` | after the root quits, `plak session log <root>.cN --json` contains a committed compaction segment and the adopted checkout has `acknowledged.txt` and `recalled.txt` matching the fact file and every `pages/<k>.txt` holding page k's check word. `cN` comes from the root JSONL `tree` frames or spawn/wait receipts, otherwise from `plak session show <root>`. The segment projects as `kind` `compaction` with text beginning `compacted ` (the summary is not display text; an empty assistant item is not the segment; the harness `compact` row is not on this log). `pending` only when that show/log channel fails. A child tool failure on a `tool` event (a root call the model retried successfully, such as an adopt refused as `target_changed` and then made with the current target, does not count), a topology node, or a wait receipt (`agents[].blocked` with `account`, `quota`, `resets_at`) is that failure. `blocked.quota` of `rate_limited` or a quota exhaustion, or provider-unavailable fault text, is `provider` (spec 05 §3.2); any other child failure is `harness`. The projection has no prepared-input row, so a missing segment is `model`, as is a missing or wrong page check word |
+| `in_turn_compaction` | `plakd agent` | one turn pages `bulk.txt` until the session log shows `compact.started` reason `scheduled` and `compact.finished` outcome `committed` inside that turn's admitted..terminal bracket; prepared input shrinks when both figures are present; `recalled.txt` matches the fact file (`codeword.txt`, or `release_label.txt` on Codex); the fact files are not read again after that commit; on Codex every `pages/<k>.txt` holds page k's check word; a follow-up writes `followup.txt` with the same fact. Pages and `recalled.txt` are checked before the recall is compared, so an early stop reports how far it got (`growth turn ended after 37/52 pages without writing recalled.txt`, `model`) |
+| `overflow` | `plakd agent` | rounds of parallel read batches, each under the round cap (sequential reads, one per response, on pi; one check-word page per exec on Codex), then the log shows a remedy: an in-turn `scheduled` compact, a `context.placeholders` shrink inside that turn, or a `failed` / `ContextLimit` turn followed by `compact.started` reason `capacity` and a committed finish; `acknowledged.txt` is unchanged, and a later turn writes `continuation.txt` containing `CONTINUED` |
+| `kill_reopen` | `plakd agent` | SIGKILL after the marker process is observed running, or after 15s if it never appears (the marker is an argv token, not a shell comment); reopen emits JSONL `recovered` and the session log has `turn.abandoned` with `cause=process_lost` and `claim=running_tool`, `nothing_started` or `tool_round_completed` (spec 02 section 2.4: Code Mode can abandon as `nothing_started` when exec was shown before the cell was durably prepared; a kill after a finalized tool round and before the next model request abandons as `tool_round_completed`; process restart does not log `session.recovered`); the follow-up writes `after_reopen.txt` containing `REOPENED` |
+| `child_compaction` | `plakd agent` | after the root quits, `plakd session log <root>.cN --json` contains a committed compaction segment and the adopted checkout has `acknowledged.txt` and `recalled.txt` matching the fact file and every `pages/<k>.txt` holding page k's check word. `cN` comes from the root JSONL `tree` frames or spawn/wait receipts, otherwise from `plakd session show <root>`. The segment projects as `kind` `compaction` with text beginning `compacted ` (the summary is not display text; an empty assistant item is not the segment; the harness `compact` row is not on this log). `pending` only when that show/log channel fails. A child tool failure on a `tool` event (a root call the model retried successfully, such as an adopt refused as `target_changed` and then made with the current target, does not count), a topology node, or a wait receipt (`agents[].blocked` with `account`, `quota`, `resets_at`) is that failure. `blocked.quota` of `rate_limited` or a quota exhaustion, or provider-unavailable fault text, is `provider` (spec 05 section 3.2); any other child failure is `harness`. The projection has no prepared-input row, so a missing segment is `model`, as is a missing or wrong page check word |
 
 A growth turn that finishes without that compaction is `harness` only when `model.operation_usage` shows prepared input at the lower of the compaction trigger and the catalog window minus one read page, and `model` otherwise. The trigger is spec 01 §10.3: 80% for `grok-4.6`, otherwise the window minus a tenth (about 90%) when that exceeds the semantic-summary headroom. A peak between that trigger and the window minus one page is harness, not a model miss. The same split applies to an overflow turn that completes without a remedy, so sequential reads that never reach the bar are not a harness failure. It does not apply to `child_compaction`: the child history projection has no `model.operation_usage` row, and a history without the compaction segment is `model`. A `ContextLimit` stop without a committed recovery is `harness`. Provider refusal is classified the same way as smoke.
 
@@ -337,7 +337,7 @@ a new process. Faults rotate across tasks, one task in four freezes the process
 group with SIGSTOP for 20 s mid-tool, every third task is followed by a manual
 compaction (a session still under 20,000 prepared tokens first reads `fold.txt`
 and a one-line tail, so the fold is older than the protected latest intent),
-and halfway through `plak` is rebuilt and the session reopens on the
+and halfway through `plakd` is rebuilt and the session reopens on the
 new, byte-distinct binary. It reports throughput, tokens, peak context,
 compactions, errors and dead ends. The exploration turn checks both the named
 module and test file in the answer; coding turns check the repository test suite
@@ -360,18 +360,18 @@ the requested seconds, then writes `job-finished`. Each scenario appends eight
 hex characters from `os.urandom` to its process token, so two routes running
 at once never `ps` or `pkill` each other's fixture. The model's reply is never
 the oracle.
-`plak run` waits for a promoted job and continues when it exits; it does not
+`plakd run` waits for a promoted job and continues when it exits; it does not
 stop the job at the end of the first turn.
 
 | Scenario | Surface | Passes when |
 | --- | --- | --- |
-| `promotion_budget` | `plak agent` | the fixture is promoted about 1 s after it starts, still running, with no immediate-background hint. On Code Mode the prompt asks for `exec_command` with only the `cmd` argument and names `yield_time_ms` as not to be passed; a call that carries a hint is still `model` |
-| `steer_command` | `plak agent` | a steer during a 45 s foreground command returns it within 8 s and leaves the process running. On Codex and OpenAI Code Mode the command is promoted by `yield_time_ms` 0 and the cell ends; the steer must reach `steer_ack` `applied` (a steer only queued is `harness`), and the job is judged when it is applied, not at turn end |
-| `steer_await` | `plak agent` | a steer returns a wait on an already promoted job within 8 s and leaves that process running. Code Mode uses the same hint promotion; the prompt asks for one nested `write_stdin` wait inside the cell and to follow a new instruction at once without waiting on the cell. The driver steers only while a nested wait (`process_session_write`, `_poll` or `_wait`; a start is not one) is in flight (a cell that already completed is not an outer-cell steer; never having one in flight is `model`). `steer_ack` `applied` must follow the send within 8 s (later is `harness`), and the job is read then: still running passes; finished is `model` when the nested wait returned while the job still ran or the steer went out with under 8 s of the hold left (a late nested wait) and `harness` when it returned only once the job finished (never yielded on the steer); stopped is `harness`. A `wait` on the cell first seen after the steer was applied is `model` |
-| `notice_while_busy` | `plak agent` | a short job exits during a later command, and some request of that turn, persisted before its terminal, contains `<process_notice id="pN">`: either the request carrying the driver's steer, which the driver sends once the short job has finished, or an earlier one after the open wait yielded on the job-terminal Notice (spec 01 §8.5). An idle-wake delivery fails, and a request carrying the product's idle wake prompt is the wake turn's even when it was persisted before the terminal was observed. The check parses the request JSON and reads message text, so a serialized `\"` still counts |
-| `run_promoted` | `plak run` | the prompt requests the pack's immediate background hint and ends without polling; stderr says `waiting for p` and then `continuing` with `exited`, and the fixture finishes |
-| `crash_jobs` | `plak agent` | SIGKILL only after the root turn's exchange info is `terminal=Complete` or `ProtocolComplete` and `incomplete=false`, while the promoted job is still live; reopen reports `outcome_unknown`, and the next request contains `Plak stopped unexpectedly while this command was running.` |
-| `child_settle` | `plak agent` | the child promotes with the pack's immediate hint and calls `submit_result` while that job is live. The first submit is refused `live_work` (spec 03 §4.6). The child then stops the job (or, on Codex, waits until it exits) and submits successfully, and the job is terminal when the attempt settles. A second worker promotes another job and does not submit; the driver `close_node`s it as soon as that job is promoted and running (a still-foreground start is not closed; the worker is the one child spawned for this half whose spawn prompt carries the command, since job owners are not tree ids; more than one new worker is `model`), during the root's turn when the root waits on the worker with `wait_agent` (as Plak's JSONL-root agreement asks; both root prompts allow it) or after the turn when the root replies first, and that job stops with `stop_reason=attempt_ended` (interrupt would keep the job). A job that finished before close is `model` only when the worker never left it promoted; when the driver never sent the close while the job ran, or a close sent in time did not stop it, it is `harness`. Model otherwise only when the child ignores those instructions. A provider refusal in the job output is provider |
+| `promotion_budget` | `plakd agent` | the fixture is promoted about 1 s after it starts, still running, with no immediate-background hint. On Code Mode the prompt asks for `exec_command` with only the `cmd` argument and names `yield_time_ms` as not to be passed; a call that carries a hint is still `model` |
+| `steer_command` | `plakd agent` | a steer during a 45 s foreground command returns it within 8 s and leaves the process running. On Codex and OpenAI Code Mode the command is promoted by `yield_time_ms` 0 and the cell ends; the steer must reach `steer_ack` `applied` (a steer only queued is `harness`), and the job is judged when it is applied, not at turn end |
+| `steer_await` | `plakd agent` | a steer returns a wait on an already promoted job within 8 s and leaves that process running. Code Mode uses the same hint promotion; the prompt asks for one nested `write_stdin` wait inside the cell and to follow a new instruction at once without waiting on the cell. The driver steers only while a nested wait (`process_session_write`, `_poll` or `_wait`; a start is not one) is in flight (a cell that already completed is not an outer-cell steer; never having one in flight is `model`). `steer_ack` `applied` must follow the send within 8 s (later is `harness`), and the job is read then: still running passes; finished is `model` when the nested wait returned while the job still ran or the steer went out with under 8 s of the hold left (a late nested wait) and `harness` when it returned only once the job finished (never yielded on the steer); stopped is `harness`. A `wait` on the cell first seen after the steer was applied is `model` |
+| `notice_while_busy` | `plakd agent` | a short job exits during a later command, and some request of that turn, persisted before its terminal, contains `<process_notice id="pN">`: either the request carrying the driver's steer, which the driver sends once the short job has finished, or an earlier one after the open wait yielded on the job-terminal Notice (spec 01 section 8.5). An idle-wake delivery fails, and a request carrying the product's idle wake prompt is the wake turn's even when it was persisted before the terminal was observed. The check parses the request JSON and reads message text, so a serialized `\"` still counts |
+| `run_promoted` | `plakd run` | the prompt requests the pack's immediate background hint and ends without polling; stderr says `waiting for p` and then `continuing` with `exited`, and the fixture finishes |
+| `crash_jobs` | `plakd agent` | SIGKILL only after the root turn's exchange info is `terminal=Complete` or `ProtocolComplete` and `incomplete=false`, while the promoted job is still live; reopen reports `outcome_unknown`, and the next request contains `Plak stopped unexpectedly while this command was running.` |
+| `child_settle` | `plakd agent` | the child promotes with the pack's immediate hint and calls `submit_result` while that job is live. The first submit is refused `live_work` (spec 03 section 4.6). The child then stops the job (or, on Codex, waits until it exits) and submits successfully, and the job is terminal when the attempt settles. A second worker promotes another job and does not submit; the driver `close_node`s it as soon as that job is promoted and running (a still-foreground start is not closed; the worker is the one child spawned for this half whose spawn prompt carries the command, since job owners are not tree ids; more than one new worker is `model`), during the root's turn when the root waits on the worker with `wait_agent` (as plakd's JSONL-root agreement asks; both root prompts allow it) or after the turn when the root replies first, and that job stops with `stop_reason=attempt_ended` (interrupt would keep the job). A job that finished before close is `model` only when the worker never left it promoted; when the driver never sent the close while the job ran, or a close sent in time did not stop it, it is `harness`. Model otherwise only when the child ignores those instructions. A provider refusal in the job output is provider |
 
 A missing telemetry row is not a failure: the writer drops a queued row on
 exit. When a row is present it corroborates the hint, the notice delivery
@@ -380,10 +380,10 @@ point, or the wake origin. Reports land in `target/live/jobs-<route>-<stamp>/`.
 ### Refused-reopen triage
 
 `crash_jobs` and long-session `kill_reopen` keep a refused reopen as `harness`.
-The detail adds a read-only `plak session show <session>` decode against the
+The detail adds a read-only `plakd session show <session>` decode against the
 crashed scenario's private home and cwd, using the selected `--binary`:
 status, phase and the ordered `(operation, action)` obligations. Request
-identities are omitted. If supported, `plak session rehearse <session>` adds
+identities are omitted. If supported, `plakd session rehearse <session>` adds
 its one-line offline root verdict; an unavailable rehearsal is silently skipped.
 Neither command opens a runtime, calls a provider or repairs the session.
 
@@ -397,7 +397,7 @@ finalized in-turn compaction or a live process at the final. In particular,
 failure is unknown, not a changed score. Precise shape tables belong to the
 offline crash-point sweep, not this live diagnostic.
 
-**Outcome classes.** `pass`; `harness`, Plak's failure (a crash, no terminal, a
+**Outcome classes.** `pass`; `harness`, plakd's failure (a crash, no terminal, a
 dead end, a refused reopen); `model`, a completed turn whose work misses the
 oracle, or invalid tool arguments proven by a finished capture (spec 05 §3.2);
 model-invalid argument evidence must be in the failing process's highest-numbered
@@ -406,7 +406,7 @@ counts), never an earlier scenario, process or exchange;
 `provider`, the real provider refusing with no injected fault; and
 `pending`, a failure a named in-flight slice is expected to fix
 (`EXPECTED_PENDING` in `smoke.py`).
-A `plak run` or an awaited `plak agent` turn (the jobs driver's included) that outlives its scenario budget is `harness` unless the
+A `plakd run` or an awaited `plakd agent` turn (the jobs driver's included) that outlives its scenario budget is `harness` unless the
 process's capture proves the provider used the budget (spec 05 §3.2). Over the
 window from the kill back over the budget, exchanges span `.request` to
 `.info` modification time (a pending one to the kill, children sharing the
@@ -438,11 +438,11 @@ exchange of the scenario's last segment) is `model`,
 `model output ran past the 8 MiB capture bound (runaway output in <item
 kind>)`. Any other failure keeps its class; the soaks keep their task outcome.
 Output limits score alike on every surface (spec 05 §3.2). A tool-free answer
-committed at its output limit completed its turn: `plak run` prints it and
+committed at its output limit completed its turn: `plakd run` prints it and
 exits 5 with `turn_failed:output-limit`, and the drivers judge that printed
 answer with the scenario's oracle. A failed turn of typed kind `OutputLimit`
 (an empty answer at the limit after its one retry) is `model`; JSONL reads the
-kind, while `plak run` stderr carries its
+kind, while `plakd run` stderr carries its
 diagnostic (`... output bound before ...`).
 For the headless soak, `dead_end` means the immediate follow-up in the same
 process also failed; it does not by itself prove a later, fault-free reopen
@@ -464,7 +464,7 @@ Only the least-used `full` row also runs the headless soak (default one hour).
 block, and a harness outcome does. A row may mark single lanes informational
 (`informational_lanes`): the lane runs at the row's depth and is scored like
 an informational row. `deepseek` and `deepseek-messages` mark long-session,
-so no OpenRouter row has a blocking long-session: given Plak's complete
+so no OpenRouter row has a blocking long-session: given plakd's complete
 summary request, the earlier DeepSeek flash model's own compaction summary
 dropped the earlier turn's fact once one or two large tool results followed
 it, on Chat and on Messages, from about 34k tokens up (Grok and Claude pass
@@ -531,7 +531,7 @@ just live soak <route> --hours 1            # least-used full row only
 
 On `deepseek` and `deepseek-messages` the long-session line runs as
 `PLAK_LIVE_INPUT_CEILING=<N> just live soak <route> --long-session --all`, with N
-the `admitted_input_ceiling` that `plak usage --session <id>` prints for a short
+the `admitted_input_ceiling` that `plakd usage --session <id>` prints for a short
 session on that row (Chat and Messages are read separately).
 
 Linux musl's cell is `just live smoke <route>` on each `full` row and on the four
@@ -597,10 +597,10 @@ observed recovered/abandoned turns. No prompts, paths, session IDs, request
 details, credentials or environment values are printed.
 
 Build attribution prefers `plak.start` startup binary IDs, then uses
-`plak.reload: exec installed plak` maintainer hashes and logged `plak version`
+`plak.reload: exec installed plakd` maintainer hashes and logged `plakd version`
 binary IDs. A snapshot directory hash identifies all three executables, not
-the Plak binary. If that snapshot still exists under
-`~/.local/lib/plak/maintainer`, its `plak` is hashed read-only for the 12-hex
+the plakd binary. If that snapshot still exists under
+`~/.local/lib/plak/maintainer`, its `plakd` is hashed read-only for the 12-hex
 binary ID; missing snapshots stay unknown. Pre-boundary use stays unknown;
 concurrent older processes cannot be separated without logged build IDs.
 Only registered provider/model names are printed; other bindings become
@@ -626,7 +626,7 @@ cached input and reasoning from that event. A missing field is zero. Reports
 also name `route_class`, account, effort, protocol, `composition_requested`
 (`plakous-default` unless the scenario passed another) and, for smoke, soak,
 jobs and long-session runs, `composition_bound`: the sorted compositions the
-run's `plak agent` hellos reported (Codex binds `plakous-default` as
+run's `plakd agent` hellos reported (Codex binds `plakous-default` as
 `native-ptc`).
 
 ## Dry-run estimate
@@ -635,7 +635,7 @@ run's `plak agent` hellos reported (Codex binds `plakous-default` as
 cell, the clean-attempt subtotal, an explicit one-extra-attempt rerun reserve,
 the OpenRouter subtotal, a contingency and the total. Both MODEL and PROVIDER
 share this one-attempt reserve; they do not chain. Contingency and the ceiling
-include the reserve. It does not build `plak`, talk to a provider, or read a default card:
+include the reserve. It does not build `plakd`, talk to a provider, or read a default card:
 pass `--rate-card`. The card's `unit` must be `USD per million tokens`. Per
 model it needs `input`, `output`, `cache_read` and `cache_write`. Input is an
 uncached share plus a cached share; cached tokens are billed at `cache_read`
@@ -695,7 +695,7 @@ report-only cross-check. Offline: `--fixture tests/tooling/fixtures/api_model_ce
 
 `just live mcp-oauth` runs the opt-in [MCP OAuth lane](mcp_oauth/README.md):
 Keycloak, strict node-oidc-provider resource indicators, an official-SDK MCP
-server and Playwright login. It uses a private disposable home and Plak's
+server and Playwright login. It uses a private disposable home and plakd's
 scripted model, never a provider account or paid inference. It is separate
 from smoke/soak and every gate tier. Run on a native Linux Docker host, or on
 Docker Desktop with host networking enabled. Only its parser self-tests enter tooling.

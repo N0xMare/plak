@@ -24,7 +24,7 @@ CUTS = (
     "move-after-tree-seed",
     "move-after-publish",
 )
-IMAGES = ("plak", "plakous-js-host", "plakous-py-host")
+IMAGES = ("plakd", "plakous-js-host", "plakous-py-host")
 
 
 class Refused(RuntimeError):
@@ -171,10 +171,10 @@ def build(args, root):
         environment.update(CARGO_TARGET_DIR=str(target), CARGO_BUILD_JOBS=str(args.jobs))
         command = [
             "bash",
-            "tools/build/build-plak.sh",
+            "tools/build/build-plakd.sh",
             "--maintainer",
             "--features",
-            "plak/maintainer,plak/test-hooks",
+            "plakd/maintainer,plakd/test-hooks",
         ]
         print(f"BUILD {name} {commit}: {' '.join(command)}", flush=True)
         with (root / f"build-{name}.log").open("w") as log:
@@ -186,12 +186,12 @@ def build(args, root):
         snapshot.mkdir(parents=True, exist_ok=True)
         for image in IMAGES:
             shutil.copy2(target / "maintainer" / image, snapshot / image)
-        digest = hashlib.sha256((snapshot / "plak").read_bytes()).hexdigest()
+        digest = hashlib.sha256((snapshot / "plakd").read_bytes()).hexdigest()
         manifest[name] = {
             "revision": commit,
             "sha256": digest,
             "binary_id": digest[:12],
-            "binary": str(snapshot / "plak"),
+            "binary": str(snapshot / "plakd"),
             "profile": "maintainer",
             "features": ["maintainer", "test-hooks"],
         }
@@ -246,7 +246,7 @@ def owned_processes(case):
             inside = cwd == case or case in cwd.parents
             if not inside:
                 executable = (entry / "cmdline").read_bytes().split(b"\0", 1)[0]
-                if Path(os.fsdecode(executable)).name == "plak":
+                if Path(os.fsdecode(executable)).name == "plakd":
                     for value in (entry / "environ").read_bytes().split(b"\0"):
                         if value.startswith(b"PLAK_HOME="):
                             home = Path(os.fsdecode(value.split(b"=", 1)[1])).resolve()

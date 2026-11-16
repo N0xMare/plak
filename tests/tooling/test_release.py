@@ -32,7 +32,7 @@ import release_tarball  # noqa: E402
 VERSION = "0.0.2"
 LINUX = "x86_64-unknown-linux-musl"
 DARWIN = "aarch64-apple-darwin"
-EXECUTABLES = ("plak", "plakous-js-host", "plakous-py-host")
+EXECUTABLES = ("plakd", "plakous-js-host", "plakous-py-host")
 
 
 def sha(data: bytes) -> str:
@@ -40,7 +40,7 @@ def sha(data: bytes) -> str:
 
 
 def executable_bytes(name: str, tag: str = "one") -> bytes:
-    # The snapshot install runs `plak version --state-key`.
+    # The snapshot install runs `plakd version --state-key`.
     return (
         f"#!/bin/sh\n# {name} {tag}\n"
         'case "$2" in --state-key) echo r1.e1.p1.t1 ;; --export-version) echo 7 ;; --write-binary-manifest) if [ -n "$REJECT_BINARY_MANIFEST" ]; then echo partial >"$3/binary-id"; exit 2; fi; echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;; esac\n'
@@ -55,7 +55,7 @@ def write_executables(directory: pathlib.Path, tag: str = "one") -> None:
 
 
 def fake_metadata(base: pathlib.Path) -> dict:
-    """plak -> (vendored protocol, registry `left`); `left` -> `deep`.
+    """plakd -> (vendored protocol, registry `left`); `left` -> `deep`.
 
     `testonly` is a dev edge and `buildonly` is a build edge; neither is linked.
     """
@@ -79,7 +79,7 @@ def fake_metadata(base: pathlib.Path) -> dict:
 
     registry = "registry+https://github.com/rust-lang/crates.io-index"
     packages = [
-        package("plak", base / "ws/bin/plak", None, "MIT", {"LICENSE": "ours"}),
+        package("plakd", base / "ws/bin/plakd", None, "MIT", {"LICENSE": "ours"}),
         package("plakous-js-runtime", base / "ws/crates/js", None, "MIT", {"LICENSE": "ours"}),
         package("plakous-py-worker", base / "ws/crates/py", None, "MIT", {"LICENSE": "ours"}),
         package(
@@ -107,7 +107,7 @@ def fake_metadata(base: pathlib.Path) -> dict:
 
     nodes = [
         node(
-            "plak-id",
+            "plakd-id",
             ("vendored-protocol-id", normal),
             ("left-id", normal),
             ("testonly-id", [{"kind": "dev", "target": None}]),
@@ -121,7 +121,7 @@ def fake_metadata(base: pathlib.Path) -> dict:
         node("testonly-id"),
         node("buildonly-id"),
     ]
-    members = ["plak-id", "plakous-js-runtime-id", "plakous-py-worker-id", "vendored-protocol-id"]
+    members = ["plakd-id", "plakous-js-runtime-id", "plakous-py-worker-id", "vendored-protocol-id"]
     return {
         "packages": packages,
         "resolve": {"nodes": nodes},
@@ -181,11 +181,11 @@ class ReleaseTarballTests(unittest.TestCase):
 
     def test_tarball_layout_licenses_and_determinism(self) -> None:
         out = make_release(self.base)
-        tarball = out / f"plak-{VERSION}-{LINUX}.tar.gz"
+        tarball = out / f"plakd-{VERSION}-{LINUX}.tar.gz"
         first = tarball.read_bytes()
         make_release(self.base)
         self.assertEqual(tarball.read_bytes(), first)
-        stem = f"plak-{VERSION}-{LINUX}"
+        stem = f"plakd-{VERSION}-{LINUX}"
         with tarfile.open(tarball) as archive:
             members = {member.name: member for member in archive.getmembers()}
             self.assertEqual(
@@ -196,7 +196,7 @@ class ReleaseTarballTests(unittest.TestCase):
                         f"{stem}/LICENSE",
                         f"{stem}/THIRD-PARTY",
                         f"{stem}/plakous-py-host",
-                        f"{stem}/plak",
+                        f"{stem}/plakd",
                         f"{stem}/plakous-js-host",
                         f"{stem}/licenses",
                         f"{stem}/licenses/deep-1.0.0",
@@ -227,7 +227,7 @@ class ReleaseTarballTests(unittest.TestCase):
         self.assertEqual(listed, ["deep", "left", "vendored-protocol"])
         self.assertIn("left 1.0.0  MIT OR Apache-2.0  https://example.invalid/left", third_party)
         self.assertEqual(
-            (out / "SHA256SUMS").read_text(), f"{sha(first)}  plak-{VERSION}-{LINUX}.tar.gz\n"
+            (out / "SHA256SUMS").read_text(), f"{sha(first)}  plakd-{VERSION}-{LINUX}.tar.gz\n"
         )
 
     def test_sums_cover_every_tarball_and_wire_schema_in_the_directory(self) -> None:
@@ -235,9 +235,10 @@ class ReleaseTarballTests(unittest.TestCase):
         out = make_release(self.base, "aarch64-apple-darwin")
         names = [line.split()[1] for line in (out / "SHA256SUMS").read_text().splitlines()]
         self.assertEqual(
-            names, [f"plak-{VERSION}-aarch64-apple-darwin.tar.gz", f"plak-{VERSION}-{LINUX}.tar.gz"]
+            names,
+            [f"plakd-{VERSION}-aarch64-apple-darwin.tar.gz", f"plakd-{VERSION}-{LINUX}.tar.gz"],
         )
-        schema = out / f"plak-{VERSION}-{LINUX}-wire-schema.json"
+        schema = out / f"plakd-{VERSION}-{LINUX}-wire-schema.json"
         schema.write_text('{"wire_version":9,"binary_id":"release-fixture"}\n')
         release_tarball.write_sums(out)
         sums = (out / "SHA256SUMS").read_text()
@@ -269,7 +270,7 @@ class ReleaseTarballTests(unittest.TestCase):
     def test_tree_lines_keep_name_and_version_and_drop_suffixes(self) -> None:
         text = "\n".join(
             [
-                "plak v0.0.2 (/tmp/plak)",
+                "plakd v0.0.2 (/tmp/plakd)",
                 "serde v1.0.229",
                 "serde v1.0.229 (*)",
                 "clap_derive v4.6.7 (proc-macro)",
@@ -281,7 +282,7 @@ class ReleaseTarballTests(unittest.TestCase):
         self.assertEqual(
             release_tarball.parse_tree_packages(text),
             {
-                ("plak", "0.0.2"),
+                ("plakd", "0.0.2"),
                 ("serde", "1.0.229"),
                 ("clap_derive", "4.6.7"),
                 ("toml", "1.1.8+spec-1.1.0"),
@@ -312,14 +313,14 @@ class ReleaseTarballTests(unittest.TestCase):
             )
             metadata["resolve"]["nodes"].append({"id": f"{name}-id", "deps": []})
             for node in metadata["resolve"]["nodes"]:
-                if node["id"] == "plak-id":
+                if node["id"] == "plakd-id":
                     node["deps"].append(
                         {"pkg": f"{name}-id", "dep_kinds": [{"kind": None, "target": None}]}
                     )
         unified = [package["name"] for package in release_tarball.third_party(metadata)]
         self.assertEqual(unified, ["deep", "gix", "jj-lib", "left", "vendored-protocol"])
         linked = {
-            ("plak", "1.0.0"),
+            ("plakd", "1.0.0"),
             ("plakous-js-runtime", "1.0.0"),
             ("plakous-py-worker", "1.0.0"),
             ("vendored-protocol", "1.0.0"),
@@ -358,7 +359,7 @@ class ReleaseTarballTests(unittest.TestCase):
                     "-f",
                     "{p}",
                     "-p",
-                    "plak",
+                    "plakd",
                 ],
                 [
                     "cargo",
@@ -487,7 +488,7 @@ class InstallScriptTests(unittest.TestCase):
         result = self.install(REJECT_BINARY_MANIFEST="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         snapshot = self.expected_snapshot()
-        self.assertTrue((snapshot / "plak").is_file())
+        self.assertTrue((snapshot / "plakd").is_file())
         self.assertFalse((snapshot / "binary-id").exists())
         self.assertEqual(list(snapshot.parent.glob(".staging.*")), [])
 
@@ -496,8 +497,8 @@ class InstallScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("attestation not checked", result.stderr)
         snapshot = self.expected_snapshot()
-        self.assertEqual(os.readlink(self.home / ".local/bin/plak"), str(snapshot / "plak"))
-        self.assertEqual((snapshot / "plak").stat().st_mode & 0o777, 0o555)
+        self.assertEqual(os.readlink(self.home / ".local/bin/plakd"), str(snapshot / "plakd"))
+        self.assertEqual((snapshot / "plakd").stat().st_mode & 0o777, 0o555)
         self.assertEqual((snapshot / "state-key").read_text(), "r1.e1.p1.t1\n")
         self.assertEqual((snapshot / "export-version").read_text(), "7\n")
         self.assertEqual((snapshot / "binary-id").read_text(), "fixture\n")
@@ -516,7 +517,7 @@ class InstallScriptTests(unittest.TestCase):
         self.assertEqual(sorted(str(path) for path in self.lib.rglob("*")), before)
 
     def test_same_bytes_share_the_build_plak_snapshot(self) -> None:
-        source = (ROOT / "tools/build/build-plak.sh").read_text()
+        source = (ROOT / "tools/build/build-plakd.sh").read_text()
         block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
         artifacts = self.base / "built"
         write_executables(artifacts)
@@ -563,7 +564,7 @@ class InstallScriptTests(unittest.TestCase):
         self.assertIn("attestation verified", result.stderr)
         verify = self.gh_log.read_text().splitlines()[-1].split()
         self.assertEqual(verify[:2], ["attestation", "verify"])
-        self.assertTrue(verify[2].endswith(f"plak-{VERSION}-{LINUX}.tar.gz"))
+        self.assertTrue(verify[2].endswith(f"plakd-{VERSION}-{LINUX}.tar.gz"))
         self.assertEqual(verify[3:], ["--repo", "N0xMare/plak"])
         self.gh_log.write_text("")
         result = self.install(FAKE_GH="1", PLAK_SKIP_ATTESTATION="1")
@@ -587,27 +588,28 @@ class InstallScriptTests(unittest.TestCase):
         result = self.install(FAKE_OS="Darwin", FAKE_ARCH="x86_64")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            os.readlink(self.home / ".local/bin/plak"), str(self.expected_snapshot("mac") / "plak")
+            os.readlink(self.home / ".local/bin/plakd"),
+            str(self.expected_snapshot("mac") / "plakd"),
         )
 
     def test_foreign_links_and_unsafe_directories_are_refused(self) -> None:
         bin_dir = self.home / ".local/bin"
         bin_dir.mkdir(parents=True)
-        (bin_dir / "plak").write_text("foreign")
+        (bin_dir / "plakd").write_text("foreign")
         result = self.install()
         self.assertEqual(result.returncode, 1)
         self.assertIn("refusing to replace non-Plak", result.stderr)
-        (bin_dir / "plak").unlink()
-        (bin_dir / "plak").symlink_to("/usr/bin/true")
+        (bin_dir / "plakd").unlink()
+        (bin_dir / "plakd").symlink_to("/usr/bin/true")
         result = self.install()
         self.assertIn("refusing to replace non-Plak", result.stderr)
-        self.assertEqual(os.readlink(bin_dir / "plak"), "/usr/bin/true")
-        (bin_dir / "plak").unlink()
+        self.assertEqual(os.readlink(bin_dir / "plakd"), "/usr/bin/true")
+        (bin_dir / "plakd").unlink()
         self.lib.chmod(0o777)
         result = self.install()
         self.assertEqual(result.returncode, 1)
         self.assertIn("writable installation ancestor refused", result.stderr)
-        self.assertFalse((bin_dir / "plak").exists())
+        self.assertFalse((bin_dir / "plakd").exists())
 
 
 class PackageReleaseTests(unittest.TestCase):
@@ -620,7 +622,7 @@ class PackageReleaseTests(unittest.TestCase):
         for path in (
             "tools/release/package-release.sh",
             "tools/release/release_tarball.py",
-            "tools/build/build-plak.sh",
+            "tools/build/build-plakd.sh",
             "tools/musl/musl-toolchain.sh",
             "LICENSE",
         ):
@@ -654,7 +656,7 @@ class PackageReleaseTests(unittest.TestCase):
         )
         metadata["resolve"]["nodes"].append({"id": "jj-lib-id", "deps": []})
         for node in metadata["resolve"]["nodes"]:
-            if node["id"] == "plak-id":
+            if node["id"] == "plakd-id":
                 node["deps"].append(
                     {"pkg": "jj-lib-id", "dep_kinds": [{"kind": None, "target": None}]}
                 )
@@ -676,7 +678,7 @@ class PackageReleaseTests(unittest.TestCase):
             + "echo '{\"wire_version\":9,\"binary_id\":\"release-fixture\"}'\n"
         )
         writer = "".join(
-            f"printf %s {shlex.quote(schema_script if name == 'plak' else '#!/bin/sh' + chr(10))} >\"$out/{name}\"; chmod 755 \"$out/{name}\"; "
+            f"printf %s {shlex.quote(schema_script if name == 'plakd' else '#!/bin/sh' + chr(10))} >\"$out/{name}\"; chmod 755 \"$out/{name}\"; "
             for name in EXECUTABLES
         )
         self.stub(
@@ -686,10 +688,10 @@ printf 'cargo %s target=%s flags=%s cflags=%s\\n' "$*" "$CARGO_BUILD_TARGET" \
 "$(printf '%s' "${{CARGO_ENCODED_RUSTFLAGS:-}}" | tr '\\037' ' ')" "${{!cflags:-}}" >>{self.log}
 case "$1" in
   metadata)
-    case "$*" in *--no-deps*) echo '{{"packages":[{{"name":"plak","version":"{VERSION}"}}]}}' ;;
+    case "$*" in *--no-deps*) echo '{{"packages":[{{"name":"plakd","version":"{VERSION}"}}]}}' ;;
       *) cat {self.metadata} ;; esac ;;
   tree)
-    printf '%s\\n' 'plak v1.0.0' 'plakous-js-runtime v1.0.0' 'plakous-py-worker v1.0.0' \\
+    printf '%s\\n' 'plakd v1.0.0' 'plakous-js-runtime v1.0.0' 'plakous-py-worker v1.0.0' \\
       'vendored-protocol v1.0.0' 'left v1.0.0' 'deep v1.0.0' ;;
   build) out="$CARGO_TARGET_DIR/$CARGO_BUILD_TARGET/release"; mkdir -p "$out"; {writer};;
 esac""",
@@ -745,9 +747,9 @@ esac""",
                 result = self.run_script(FAKE_TAG=f"v{VERSION}", FAKE_OS=os_name, FAKE_ARCH=arch)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 dist = self.base / "target/release-dist"
-                tarball = dist / f"plak-{VERSION}-{triple}.tar.gz"
+                tarball = dist / f"plakd-{VERSION}-{triple}.tar.gz"
                 self.assertEqual(result.stdout.strip(), str(tarball))
-                schema = dist / f"plak-{VERSION}-{triple}-wire-schema.json"
+                schema = dist / f"plakd-{VERSION}-{triple}-wire-schema.json"
                 self.assertEqual(json.loads(schema.read_text())["binary_id"], "release-fixture")
                 self.assertIn(
                     f"{hashlib.sha256(schema.read_bytes()).hexdigest()}  {schema.name}",
@@ -755,7 +757,7 @@ esac""",
                 )
                 with tarfile.open(tarball) as archive:
                     third_party = (
-                        archive.extractfile(f"plak-{VERSION}-{triple}/THIRD-PARTY").read().decode()
+                        archive.extractfile(f"plakd-{VERSION}-{triple}/THIRD-PARTY").read().decode()
                     )
                 listed = [line.split()[0] for line in third_party.splitlines()[3:]]
                 self.assertEqual(listed, ["deep", "left", "vendored-protocol"])
@@ -766,7 +768,7 @@ esac""",
                     if line.startswith("cargo build")
                 ]
                 self.assertEqual(len(builds), 2)
-                maps = (f"{self.base}=/cargo", f"{self.repo}=/plak", f"{self.base}/target=/target")
+                maps = (f"{self.base}=/cargo", f"{self.repo}=/plakd", f"{self.base}/target=/target")
                 rust = " ".join(f"--remap-path-prefix={m}" for m in maps)
                 c = " ".join(f"-ffile-prefix-map={m}" for m in maps)
                 for line in builds:
@@ -803,7 +805,7 @@ esac""",
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout.strip(),
-            str(self.base / f"target/release-dist/plak-{VERSION}-rc.2-{LINUX}.tar.gz"),
+            str(self.base / f"target/release-dist/plakd-{VERSION}-rc.2-{LINUX}.tar.gz"),
         )
         for tag, head_tag, message in (
             (f"v{VERSION}-rc.0", f"v{VERSION}-rc.0", "is neither"),

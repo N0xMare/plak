@@ -13,13 +13,13 @@ def read(path: str) -> str:
 
 class AgentKindDocumentationTests(unittest.TestCase):
     def test_inbound_kinds_match_parser_help_and_crate_docs(self):
-        parser = read("bin/plak/src/agent_jsonl.rs")
+        parser = read("bin/plakd/src/agent_jsonl.rs")
         arms = parser.split("match kind.as_str() {", 1)[1].split(
             "other => ParseOutcome::Diagnostic", 1
         )[0]
         expected = set(re.findall(r'^\s*"([a-z_]+)"\s*=>', arms, re.MULTILINE))
         self.assertTrue(expected)
-        help_text = read("bin/plak/help/agent.txt")
+        help_text = read("bin/plakd/help/agent.txt")
         commands = help_text.split("COMMANDS (stdin):", 1)[1].split("EVENTS (stdout):", 1)[0]
         self.assertEqual(set(re.findall(r"\b[a-z_]+\b", commands)), expected)
         docs = read("crates/hosting/host-protocol/src/lib.rs")
@@ -38,7 +38,7 @@ class AgentKindDocumentationTests(unittest.TestCase):
         for path in [
             "crates/hosting/host-protocol/src/jsonl.rs",
             "crates/hosting/host-protocol/src/envelope.rs",
-            "bin/plak/src/agent_jsonl.rs",
+            "bin/plakd/src/agent_jsonl.rs",
         ]:
             expected.update(
                 re.findall(
@@ -48,7 +48,7 @@ class AgentKindDocumentationTests(unittest.TestCase):
                 )
             )
         self.assertTrue(expected)
-        help_text = read("bin/plak/help/agent.txt")
+        help_text = read("bin/plakd/help/agent.txt")
         events = help_text.split("EVENTS (stdout):", 1)[1].split("NOTES:", 1)[0]
         self.assertEqual(set(re.findall(r"\b[a-z_]+\b", events)), expected)
         docs = read("crates/hosting/host-protocol/src/lib.rs")

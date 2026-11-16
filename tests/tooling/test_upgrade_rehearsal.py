@@ -218,7 +218,7 @@ class UpgradeRehearsalTests(unittest.TestCase):
             root = Path(temporary).resolve()
             images = {}
             for name in ["A", "B"]:
-                binary = root / "owned/images" / name / "plak"
+                binary = root / "owned/images" / name / "plakd"
                 binary.parent.mkdir(parents=True)
                 binary.write_bytes(b"not executed")
                 images[name] = {

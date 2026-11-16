@@ -201,7 +201,7 @@ mod tests {
         );
         assert!(message.contains("reclaim superseded history"));
         assert!(message.contains("remove unneeded sessions"));
-        assert!(!message.contains("plak session"));
+        assert!(!message.contains("plakd session"));
         assert!(message.contains("prompt was not admitted"));
         assert!(!message.contains("needs recovery"));
     }
@@ -211,7 +211,7 @@ mod tests {
         let message = super::storage_full_message("prompt was not admitted");
         assert!(message.contains("reclaim history"));
         assert!(message.contains("remove unused sessions"));
-        assert!(!message.contains("plak session"));
+        assert!(!message.contains("plakd session"));
         assert!(message.contains("free disk space"));
         assert!(message.contains("logical reserve does not reserve disk blocks"));
         assert!(message.contains("prompt was not admitted"));

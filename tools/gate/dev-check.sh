@@ -75,9 +75,9 @@ isolated_home=$PLAK_HOME
 unset PLAK_HOME
 
 # Supported packages (spec 06 §3). Each also builds alone in the builds group:
-# Cargo resolves features per selected package set, so `cargo build -p plak`
+# Cargo resolves features per selected package set, so `cargo build -p plakd`
 # (the release resolution) can compile a closure no workspace build sees.
-supported_packages=(plakous plakous-agent plakous-model plakous-tools plak)
+supported_packages=(plakous plakous-agent plakous-model plakous-tools plakd)
 
 # Fast narrows lint roots and the parallel lane to touched packages and their
 # reverse dependencies. Test compilation stays workspace all-features:
@@ -87,7 +87,7 @@ worker_clippy=()
 worker_features=()
 if [[ "$tier" == fast ]]; then
   if [[ ${#packages[@]} -eq 0 ]]; then
-    package_file="$(mktemp "$TMPDIR/plak-packages.XXXXXX")"
+    package_file="$(mktemp "$TMPDIR/plakd-packages.XXXXXX")"
     if ! python3 tools/gate/changed_packages.py >"$package_file"; then
       rm -f "$package_file"; exit 2
     fi
@@ -104,7 +104,7 @@ if [[ "$tier" == fast ]]; then
     worker_clippy=(--packages)
     worker_features=(--library-packages)
     if [[ ${#packages[@]} -gt 0 ]]; then
-      package_file="$(mktemp "$TMPDIR/plak-rdeps.XXXXXX")"
+      package_file="$(mktemp "$TMPDIR/plakd-rdeps.XXXXXX")"
       if ! python3 tools/gate/changed_packages.py --dependents "${packages[@]}" >"$package_file"; then
         rm -f "$package_file"; exit 2
       fi
@@ -135,7 +135,7 @@ prepare_tests() {
     prepare_tests
   fi
   if [[ -n "$py_host" && ( "${1:-}" != tooling || -n "$plak_host" ) ]]; then return; fi
-  worker_manifest="$(mktemp "$TMPDIR/plak-worker-build.XXXXXX")"
+  worker_manifest="$(mktemp "$TMPDIR/plakd-worker-build.XXXXXX")"
   trap 'rm -f "$worker_manifest"' EXIT
   if [[ "${PLAK_PY_HOST+x}" == x && "${PLAK_JS_HOST+x}" == x && "${1:-}" != tooling ]]; then
     worker_mode=explicit
@@ -159,7 +159,7 @@ records = ([json.loads(line) for line in Path(manifest).read_text().splitlines()
            if mode == "built" else [])
 executables = [("PLAK_PY_HOST", "plakous-py-host"), ("PLAK_JS_HOST", "plakous-js-host")]
 if mode == "built":
-    executables.append(("PLAK_TOOLING_BINARY", "plak"))
+    executables.append(("PLAK_TOOLING_BINARY", "plakd"))
 for variable, binary in executables:
     if variable in os.environ and variable != "PLAK_TOOLING_BINARY":
         value = os.environ[variable]
@@ -539,8 +539,8 @@ run_group() {
         # library checks build into a directory of their own, so neither
         # waits on the other's Cargo build lock. Their output follows
         # clippy's. No wall-clock assertion runs in this group.
-        structure_log="$(mktemp "$TMPDIR/plak-structure.XXXXXX")"
-        structure_status="$(mktemp "$TMPDIR/plak-structure-status.XXXXXX")"
+        structure_log="$(mktemp "$TMPDIR/plakd-structure.XXXXXX")"
+        structure_status="$(mktemp "$TMPDIR/plakd-structure-status.XXXXXX")"
         (
           failed=''
           echo "== structure: workspace =="
@@ -555,7 +555,7 @@ run_group() {
         structure_pid=$!
       fi
       # Workspace, then each supported package alone (tools/gate/clippy.sh).
-      clippy_status="$(mktemp "$TMPDIR/plak-clippy.XXXXXX")"
+      clippy_status="$(mktemp "$TMPDIR/plakd-clippy.XXXXXX")"
       clippy_failed=''
       if [[ "$static_scope" != shared ]] && ! tools/gate/clippy.sh --status-file "$clippy_status" ${worker_clippy[@]+"${worker_clippy[@]}"}; then
         s="$(cat "$clippy_status")"
@@ -577,13 +577,13 @@ run_group() {
     builds)
       echo "== default features =="
       run_build_denying_warnings cargo build --locked --workspace --lib --bins ${target_args[@]+"${target_args[@]}"}
-      # Before the maintainer build: the linkage check reads that build's plak.
+      # Before the maintainer build: the linkage check reads that build's plakd.
       for package in "${supported_packages[@]}"; do
         echo "== $package alone: its own default features =="
         run_build_denying_warnings cargo build --locked -p "$package" --lib --bins ${target_args[@]+"${target_args[@]}"}
       done
       echo "== maintainer features =="
-      run_build_denying_warnings cargo build --locked -p plak --features maintainer --bins ${target_args[@]+"${target_args[@]}"}
+      run_build_denying_warnings cargo build --locked -p plakd --features maintainer --bins ${target_args[@]+"${target_args[@]}"}
       python3 tools/build/check-artifact-linkage.py "$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug"
       run_wasm_portability_checks ;;
     variants)
@@ -732,8 +732,8 @@ overlapped=' '
 start_overlapping() {
   local group log state
   for group in "$@"; do
-    log="$(mktemp "$TMPDIR/plak-group-$group.XXXXXX")"
-    state="$(mktemp "$TMPDIR/plak-group-state-$group.XXXXXX")"
+    log="$(mktemp "$TMPDIR/plakd-group-$group.XXXXXX")"
+    state="$(mktemp "$TMPDIR/plakd-group-state-$group.XXXXXX")"
     (
       gate_status=0 failed_groups='' skipped_checks=''
       run_timed "$group"

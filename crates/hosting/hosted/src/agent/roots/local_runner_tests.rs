@@ -63,8 +63,8 @@ async fn an_unresolvable_child_refuses_embedded_daemon_inspection_with_a_remedy(
         for expected in [
             &child.agent_id,
             &recorded,
-            "open it through `plak host` (start `plak host`, then attach)",
-            "plak runner ps",
+            "open it through `plakd host` (start `plakd host`, then attach)",
+            "plakd runner ps",
             "only as a destructive last resort",
         ] {
             assert!(failure.message().contains(expected), "{failure}");

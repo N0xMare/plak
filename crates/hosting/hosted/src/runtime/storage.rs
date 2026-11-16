@@ -164,7 +164,7 @@ mod tests {
         );
         let mut warned = Vec::new();
         let mut shown = Vec::new();
-        // The last reading is after `plak session gc`: the HUD clears.
+        // The last reading is after `plakd session gc`: the HUD clears.
         for percent in [10, 71, 72, 86, 96, 97, 10] {
             used.store(percent * 10, Ordering::Release);
             tokio::time::advance(Duration::from_secs(5)).await;

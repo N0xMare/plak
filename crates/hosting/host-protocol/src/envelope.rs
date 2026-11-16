@@ -1,4 +1,4 @@
-//! v1 JSONL envelope: the frame every `plak agent` line carries and
+//! v1 JSONL envelope: the frame every `plakd agent` line carries and
 //! the outbound lines whose shape is fixed by the handshake rather than by a
 //! host observation.
 //!
@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 /// Presentation schema major. Independent of the product `SQLite` schema and of Plakous.
 pub const SCHEMA_V: u32 = 1;
 
-/// Same bound as `plak run` prompt admission.
+/// Same bound as `plakd run` prompt admission.
 pub const MAX_PROMPT_BYTES: usize = 64 * 1024;
 
 /// Outbound kinds a sink must never drop: the handshake, the tool and error

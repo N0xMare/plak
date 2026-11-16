@@ -339,7 +339,7 @@ impl ChildRecoveryReport {
                     .join(", ")
             ));
         }
-        Some(format!("plak: {}", parts.join("; ")))
+        Some(format!("plakd: {}", parts.join("; ")))
     }
 }
 
@@ -933,7 +933,7 @@ async fn release_reopened(
     let ChildReopened { session, recovered } = reopened;
     if let Some(turn) = recovered {
         let message = format!(
-            "plak: {agent_id} recovered a resumable turn and cancelled it; nothing from it is \
+            "plakd: {agent_id} recovered a resumable turn and cancelled it; nothing from it is \
              replayed"
         );
         let cancellation = crate::interrupt::settle_cancel(
@@ -984,7 +984,7 @@ async fn release_reopened(
         Some(message) => RecoveryResolution::TurnAbandoned { message },
         None => RecoveryResolution::RecoveredWithoutTurn {
             message: format!(
-                "plak: {agent_id}'s session reopened quiescent and no abandonment evidence \
+                "plakd: {agent_id}'s session reopened quiescent and no abandonment evidence \
                      is available; the attempt left no result"
             ),
         },

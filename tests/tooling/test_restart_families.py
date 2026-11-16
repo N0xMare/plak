@@ -15,7 +15,7 @@ class RestartFamilyTests(unittest.TestCase):
         return {
             "rust-suites": {
                 "plak::integration": {
-                    "package-name": "plak",
+                    "package-name": "plakd",
                     "binary-name": "integration",
                     "testcases": {
                         f"{family}::{role}_{group}": {

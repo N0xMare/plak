@@ -4,13 +4,13 @@
 
 | Account | How you connect | Notes |
 | --- | --- | --- |
-| `codex` | `plak login codex` | ChatGPT / Codex subscription |
-| `grok` | `plak login grok` | SuperGrok subscription. Also answers to `supergrok` |
-| `claude` | `plak login claude` | Claude subscription |
-| `openrouter` | `plak key set openrouter` | OpenRouter API key |
-| `openai` | `plak key set openai` | Direct OpenAI API |
-| `anthropic` | `plak key set anthropic` | Direct Anthropic API |
-| `xai-api` | `plak key set xai-api` | Direct xAI API; uses the `xai` key slot |
+| `codex` | `plakd login codex` | ChatGPT / Codex subscription |
+| `grok` | `plakd login grok` | SuperGrok subscription. Also answers to `supergrok` |
+| `claude` | `plakd login claude` | Claude subscription |
+| `openrouter` | `plakd key set openrouter` | OpenRouter API key |
+| `openai` | `plakd key set openai` | Direct OpenAI API |
+| `anthropic` | `plakd key set anthropic` | Direct Anthropic API |
+| `xai-api` | `plakd key set xai-api` | Direct xAI API; uses the `xai` key slot |
 
 Subscription and API accounts have separate credentials and billing.
 Use `grok` for the SuperGrok subscription and `xai-api` for separately billed
@@ -27,7 +27,7 @@ Usage stays separate even when two slots authenticate as the same upstream
 account; login warns that those upstream limits are shared. Provider-reported
 email remains a detail line, never the account selector.
 
-`plak accounts list` lists local selections. `plak accounts rm claude/work`
+`plakd accounts list` lists local selections. `plakd accounts rm claude/work`
 removes an already signed-out named slot; a signed-in or busy slot refuses,
 without logging out or revoking remotely. Log out explicitly first. API account
 removal clears that named key. Removal asks for the exact reference unless
@@ -42,8 +42,8 @@ cannot be continued faithfully; this does not enable additional hosted tools.
 
 Login and key entry use the operator CLI or the host's confirmed Accounts
 operations. Usage reads do not renew expired credentials. Run
-`plak refresh <account>` when a subscription token needs refresh, then
-`plak usage --account <account>`. Catalogs, readiness and credential writes
+`plakd refresh <account>` when a subscription token needs refresh, then
+`plakd usage --account <account>`. Catalogs, readiness and credential writes
 remain host-owned; clients do not resolve credentials locally.
 
 For a profile default, materialize its agent
@@ -68,7 +68,7 @@ API-key environment variables override stored key files. In particular,
 `OPENROUTER_API_KEY` wins over the OpenRouter key file even if the variable's
 key is invalid. Usage names that variable or the file's `sha256:` fingerprint,
 never a key prefix or suffix. To return to a stored key, run
-`unset OPENROUTER_API_KEY` and start Plak again. Remove the stale export from
+`unset OPENROUTER_API_KEY` and start plakd again. Remove the stale export from
 your shell startup configuration too. Restart the resolving process with the
 new environment; an unset in another shell does not change a running host.
 
@@ -98,7 +98,7 @@ sessions also have `view_image`, one workspace image and nothing else. The separ
 
 ## OAuth
 
-`plak login <account>` opens a browser on this machine.
+`plakd login <account>` opens a browser on this machine.
 
 - **Codex** waits for its loopback callback by itself. Do not paste the
   localhost URL back into the terminal. It reminds you at 30 seconds and times
@@ -109,47 +109,47 @@ sessions also have `view_image`, one workspace image and nothing else. The separ
 
 `--remote` is for a browser that is not on this host.
 
-- **Codex** uses a device code. Plak prints a verification URL and a one-time
+- **Codex** uses a device code. plakd prints a verification URL and a one-time
   code; open the URL in a browser on any device, sign in, and enter the code.
-  Plak completes by itself once you approve; nothing is pasted back. The code
+  plakd completes by itself once you approve; nothing is pasted back. The code
   expires after 15 minutes and Ctrl-C cancels; neither leaves anything stored.
-  Continue only if you started the login in plak; if someone gave you a code,
+  Continue only if you started the login in plakd; if someone gave you a code,
   cancel. If the provider says device-code login is not available for your
-  account, run `plak login codex` on a machine with a browser, or forward the
+  account, run `plakd login codex` on a machine with a browser, or forward the
   callback port with `ssh -L 1455:localhost:1455 <host>` and run
-  `plak login codex` on the host.
+  `plakd login codex` on the host.
 - **Grok** and **Claude** print the authorize URL and take the pasted code or
   callback URL; `c` then Enter re-copies.
 
 An SSH session refuses a local login outright and prints
-`plak login <account> --remote` rather than switching mode silently.
+`plakd login <account> --remote` rather than switching mode silently.
 
-`plak logout <account>` revokes a usable credential at the provider and retires
+`plakd logout <account>` revokes a usable credential at the provider and retires
 it; a credential this build cannot use is retired locally, and the output says
 the remote grant may remain active. `--local` never contacts the provider.
 Claude OAuth has no pinned remote revoke, so its logout is always local.
 
 Credentials live under `$XDG_STATE_HOME/plak/subscriptions/<provider>/`
 (falling back to `~/.local/state`), mode `0700`, with the credential file at
-`0600`. That is deliberately outside `~/.plak`, so wiping your Plak home does
+`0600`. That is deliberately outside `~/.plak`, so wiping your plakd home does
 not log you out.
 On macOS, subscription storage rejects symlinked ancestors including `/tmp`
 and `/var`; use a direct path such as one beneath `$HOME` for `XDG_STATE_HOME`.
 
 ## API keys
 
-`plak key set <account>` prompts for the key and writes
-`~/.plak/secrets/<account>.key` at mode `0600`. `plak key clear` removes it.
-`plak key status` reports presence without printing anything secret.
+`plakd key set <account>` prompts for the key and writes
+`~/.plak/secrets/<account>.key` at mode `0600`. `plakd key clear` removes it.
+`plakd key status` reports presence without printing anything secret.
 
 Environment variables win over files — `OPENAI_API_KEY`, `XAI_API_KEY`,
-`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` — and Plak never loads a `.env` file.
-While one of those is set, `plak key set` and `plak key clear` refuse to touch
+`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` -- and plakd never loads a `.env` file.
+While one of those is set, `plakd key set` and `plakd key clear` refuse to touch
 the file store rather than pretending to work:
 
 ```
 OPENROUTER_API_KEY is set in the process environment and still wins over the
-file store; unset OPENROUTER_API_KEY (Plak never loads .env); no file change
+file store; unset OPENROUTER_API_KEY (plakd never loads .env); no file change
 ```
 
 Codex OAuth enrolls `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
@@ -162,8 +162,8 @@ and `claude-opus-5-5`. Fable requires explicit selection and may consume usage
 credits instead of included subscription limits, depending on your plan.
 
 Direct API models come from each provider's own model list, cached for six
-hours under `~/.plak/cache/api-models/`. Offline, Plak uses the last cache,
-else the table built into Plak. Anthropic reads `GET /v1/models` and admits
+hours under `~/.plak/cache/api-models/`. Offline, plakd uses the last cache,
+else the table built into plakd. Anthropic reads `GET /v1/models` and admits
 the Claude 5.x models and Opus/Sonnet 4.6 and later, including
 `claude-haiku-5-5` and `claude-fable-5-2`; `claude-mythos-5-2` and Claude 4.5
 models are listed as `needs review`. OpenAI
@@ -185,15 +185,15 @@ is refused before anything is sent, with the closest listed ids. Each response
 may use the model's whole output limit (128k on the OpenAI and current Claude
 rows). xAI publishes no output limit, and input and output share the model's
 context (500k for `grok-4.7`/`grok-4.6`/`grok-4.5`, 1M for `grok-4.3`), so
-Plak reserves 128k of that context for each response (never more than half
+plakd reserves 128k of that context for each response (never more than half
 of it) and the rest is input. The input window is the provider's price
 threshold where it has one (Haiku 5.5: 100k tokens; the OpenAI profiles: 272k
 tokens; the xAI profiles: 200k tokens; longer prompts are billed at a higher
 rate), else the full window (1M for the other Claude rows, 922k for those
 OpenAI profiles, 372k for `grok-4.7`/`grok-4.6`/`grok-4.5`, 872k for
 `grok-4.3`). A live xAI list that publishes a smaller context, threshold or
-fewer efforts than Plak's reviewed table narrows the model to them. Windows are provider
-tokens, not request bytes: after the first reply Plak compacts against the
+fewer efforts than plakd's reviewed table narrows the model to them. Windows are provider
+tokens, not request bytes: after the first reply plakd compacts against the
 input count the provider reports, so a 100k-token Haiku window holds about
 100k tokens of conversation however many bytes that is. Set
 `[api] full_window = true` to admit new API sessions under the full window
@@ -211,12 +211,12 @@ start a new session.
 An edit to a price threshold alone does not. For example:
 
 ```sh
-plak run --account openai --model gpt-5.6-luna --effort low -- hello
-plak agent --account anthropic --model claude-haiku-5-5 --effort medium
-plak run --account xai-api --model grok-4.7 --effort low -- hello
+plakd run --account openai --model gpt-5.6-luna --effort low -- hello
+plakd agent --account anthropic --model claude-haiku-5-5 --effort medium
+plakd run --account xai-api --model grok-4.7 --effort low -- hello
 ```
 
-These commands spend API credits. `plak models <account>` lists every model
+These commands spend API credits. `plakd models <account>` lists every model
 the provider lists without making an inference request: its status (`usable`,
 `needs review` or `not a coding model`, with the reason), efforts, working
 and full window and output bound, and for a usable model its accepted
@@ -225,50 +225,50 @@ Mode) on the OpenAI API's `CodeModeOnly` models, `direct` on the Anthropic and
 xAI APIs. `--composition js-ptc` and
 `py-ptc` select the local workers. `py-sdk` selects the typed Python SDK on a
 Direct-capable route, for a single-agent root with core tools only.
-`plak run`, `plak agent` and a new hosted
+`plakd run`, `plakd agent` and a new hosted
 session from your root template all make the same choice for the same model.
 API sessions persist their exact credential binding. If you replace a key,
-Plak refuses to resume the old binding under it; select the new target explicitly.
+plakd refuses to resume the old binding under it; select the new target explicitly.
 
-When a Plak build changes what an API route shows the model (its tools, base
+When a plakd build changes what an API route shows the model (its tools, base
 instruction or default composition), sessions from the older build are not
 re-presented under the new tools. The new build keeps its state in a new
-directory; carry a session across with `plak session export` and import, or
+directory; carry a session across with `plakd session export` and import, or
 start a new one.
 
-## Reading `plak status`
+## Reading `plakd status`
 
-`plak status` reads local state only; it makes no provider request and prints no
+`plakd status` reads local state only; it makes no provider request and prints no
 secrets. Up to two tables, `Ready` and `Setup needed`, with four columns. A
 table with no rows is omitted.
 
 **CREDENTIAL**, for an OAuth account: `Ready`, `Missing` (signed out),
-`Refresh required`, `Unavailable`, `Revoked`, `Login required · plak login <account>`
+`Refresh required`, `Unavailable`, `Revoked`, `Login required - plakd login <account>`
 (an earlier-build login, or a payload this build cannot parse),
-`Profile changed · run plak login <account>` (a Grok or Claude login from an
+`Profile changed - run plakd login <account>` (a Grok or Claude login from an
 older build or another profile),
-`Written by a newer plak build · use that build, or plak login <account> to replace it`,
+`Written by a newer plakd build - use that build, or plakd login <account> to replace it`,
 `Unsupported`.
 When the local read itself fails, the cell is the state and the repair instead,
 for example `Unsafe storage · …` with the path and chmod. A repair too long for the
-column is `Unsafe storage · run plak status <account> for the fix`; that
+column is `Unsafe storage - run plakd status <account> for the fix`; that
 command prints the full path and chmod. The other rows still print, and
-bare `plak status` exits 0. For an API-key account: `Environment`, `Key file`,
+bare `plakd status` exits 0. For an API-key account: `Environment`, `Key file`,
 `Missing`.
 
 **PROFILE**, for an OAuth account: `Accepted`, `Action required`, `Inactive`,
 `Unsupported`.
 
-`plak doctor` adds the credential's refresh history per account, e.g.
+`plakd doctor` adds the credential's refresh history per account, e.g.
 `ready · generation 13 · record 22h old · last refresh completed none 2xx 22h
 ago`.
 
 ## Refresh and quarantine
 
-Ordinary commands refresh their own tokens; `plak refresh <account>` claims a
+Ordinary commands refresh their own tokens; `plakd refresh <account>` claims a
 new grant immediately and prints when the new access token expires.
 
-A refresh by one Plak process does not interrupt another: sessions and children
+A refresh by one plakd process does not interrupt another: sessions and children
 renew before their next model request while the account binding remains the
 same. A different account refuses exact reopen. Restore the original account
 or explicitly carry/rebind the conversation under the current configuration
@@ -279,7 +279,7 @@ The host never reuses the old login's receipt or switches accounts implicitly.
 
 If a running turn reaches an unavailable native credential before sending, it
 waits rather than failing. The status line says `waiting for login` and names
-the `plak login <provider>` command to run in another shell. A same-account
+the `plakd login <provider>` command to run in another shell. A same-account
 login resumes the captured request once; interrupt/stop cancels the waiting turn.
 Children already running can finish and their results stay queued while the
 root waits. A different-account login ends the wait with a refusal, not a send
@@ -288,33 +288,33 @@ on that account.
 Use **one login per machine; never copy credential dirs between hosts**.
 Refresh tokens rotate: refreshing a copied directory can invalidate the source
 machine's login. Harbor requires the host provenance marker written by a local
-`plak login <account>` and refuses copied or unmarked directories before refresh
+`plakd login <account>` and refuses copied or unmarked directories before refresh
 or upload. Log in again on that machine; do not manufacture or copy the marker.
-Pre-existing logins need one local `plak login <account>` before Harbor trials.
+Pre-existing logins need one local `plakd login <account>` before Harbor trials.
 If host identity is unavailable, normal login still succeeds with a warning;
-the missing marker only prevents Harbor trials, not ordinary Plak use.
+the missing marker only prevents Harbor trials, not ordinary plakd use.
 
-A Codex login made by an earlier Plak build must be redone once: run
-`plak login codex`, which replaces it locally. Until then `plak status` shows
-`Login required · plak login codex` and Codex commands refuse it. This build cannot
+A Codex login made by an earlier plakd build must be redone once: run
+`plakd login codex`, which replaces it locally. Until then `plakd status` shows
+`Login required - plakd login codex` and Codex commands refuse it. This build cannot
 remotely revoke such a login: to revoke it at the provider, run
-`plak logout codex` with the earlier build first.
+`plakd logout codex` with the earlier build first.
 
-The reverse also holds: a login a newer Plak build wrote is never used or
-rewritten by an older build. Use the newer build; `plak login <account>` in the
+The reverse also holds: a login a newer plakd build wrote is never used or
+rewritten by an older build. Use the newer build; `plakd login <account>` in the
 older build asks before replacing it (the newer build then logs in again).
 
-When a refresh comes back with a result Plak cannot interpret unambiguously, the
-credential is **quarantined** rather than used — Plak fails closed instead of
-guessing. `plak status` names the quarantined credential and its login remedy.
-`plak status` and `plak doctor` include sanitized OAuth error code and description,
+When a refresh comes back with a result plakd cannot interpret unambiguously, the
+credential is **quarantined** rather than used -- plakd fails closed instead of
+guessing. `plakd status` names the quarantined credential and its login remedy.
+`plakd status` and `plakd doctor` include sanitized OAuth error code and description,
 time and generation for the last refresh failure when telemetry is available.
 
 An ambiguous refresh is recorded **on disk**, so restarting the process does not
-clear it. Codex and Claude then need `plak login` again; SuperGrok retries under
+clear it. Codex and Claude then need `plakd login` again; SuperGrok retries under
 a new credential generation on your next ordinary command, so its quarantine
-usually clears itself. (Plak also keeps a separate, process-local publication
-quarantine that does go away on restart; the durable one is what `plak status`
+usually clears itself. (plakd also keeps a separate, process-local publication
+quarantine that does go away on restart; the durable one is what `plakd status`
 reports as `Unavailable`.)
 
 ## Compositions
@@ -328,17 +328,17 @@ that calls the tools.
 | `direct` | Direct-capable models/routes | Ordinary tool calls; refused for `CodeModeOnly` models |
 | `plakous-default` | every account | The per-model recommended composition (the default) |
 | `native-ptc` | where the vertical enrolls one: today **Codex and the OpenAI API** | The vertical's own PTC system; today only Codex Code Mode is enrolled |
-| `js-ptc` | every account | Plak's JavaScript harness PTC |
-| `py-ptc` | every account | Plak's Python harness PTC |
+| `js-ptc` | every account | plakd's JavaScript harness PTC |
+| `py-ptc` | every account | plakd's Python harness PTC |
 | `py-sdk` | every account | Typed Python SDK; single-agent root only, on a Direct-capable route |
 
 The default follows the catalog: Codex `CodeModeOnly` rows take `native-ptc`,
-and so does every OpenAI API model (Plak enrolls them as `CodeModeOnly`, as the
+and so does every OpenAI API model (plakd enrolls them as `CodeModeOnly`, as the
 Codex catalog lists the same models); Grok, Claude, OpenRouter and the
 Anthropic and xAI API accounts take `direct`. The OpenAI API shows the model the
 Codex tools and the xAI API the Grok tools, without the subscription client's
 identity. Override with `--composition` on
-`plak run` / `plak agent`, or `composition = "…"` in a template.
+`plakd run` / `plakd agent`, or `composition = "..."` in a template.
 
 Python cells use `exec_py {code, yield_time_ms?}` and may return while still
 running (default and maximum initial wait: 10 seconds). Resume observation with
@@ -352,17 +352,17 @@ awaits are allowed.
 This build runs Monty 1.2.0 in `plakous-py-host` on the cell protocol under
 adapter `plakous.monty-python-adapter.v9`. It refuses to reopen py-ptc roots
 and children recorded under any other engine contract, profile or presentation;
-there is no migration. Carry such a session with `plak session export` /
-`plak session import` when its export version is importable (13 or 12).
+there is no migration. Carry such a session with `plakd session export` /
+`plakd session import` when its export version is importable (13 or 12).
 
-`js-ptc` and `py-ptc` are one Plak-owned harness class: custom, non-default, one
+`js-ptc` and `py-ptc` are one plakd-owned harness class: custom, non-default, one
 engine per agent. `exec_js` takes a JSON field `source` (an async module; emit
 with `text(...)`); `exec_py` takes `code`. Neither is Codex-native Code Mode,
 and an unsupported tuple fails before inference.
 
 Both `native-ptc` and `js-ptc` need the `plakous-js-host` sidecar — `PLAK_JS_HOST`
-or a `plakous-js-host` beside the `plak` binary, which the separate worker build
-produces beside `plak`. `py-ptc` and `py-sdk` need `PLAK_PY_HOST` or a sibling `plakous-py-host`. The normal build
+or a `plakous-js-host` beside the `plakd` binary, which the separate worker build
+produces beside `plakd`. `py-ptc` and `py-sdk` need `PLAK_PY_HOST` or a sibling `plakous-py-host`. The normal build
 produces both workers, including the pinned upstream Monty runtime. A missing
 sidecar fails closed.
 
@@ -379,7 +379,7 @@ The ladder is `none`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`.
 still a missing effort, not `none`.
 
 There is no default effort. Each catalog row decides: `--effort` is **required**
-for a reasoning model and **refused** for everything else. `plak models
+for a reasoning model and **refused** for everything else. `plakd models
 <account>` is how you find out which is which before you run.
 
 Which levels a given model accepts comes from that model's catalog row, not from
@@ -389,11 +389,11 @@ never `ultra`. Codex also refuses an explicit `ultra` bind; OpenRouter keeps
 
 OpenRouter is the exception to the requirement: its model ids are literal
 dynamic selections, every model/wire tuple is custom and experimental, and it is
-not a subscription catalog or a qualification claim. `plak agent` on any other
+not a subscription catalog or a qualification claim. `plakd agent` on any other
 account refuses to start without one:
 
 ```
-plak agent requires --effort or an effort in the [root] agent template
+plakd agent requires --effort or an effort in the [root] agent template
 ```
 
 Put `effort = "low"` in the template `[root] agent` names and the flag stops

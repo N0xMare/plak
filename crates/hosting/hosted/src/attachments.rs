@@ -1,4 +1,4 @@
-//! Image files an operator attaches to a prompt (`plak run --image`, JSONL
+//! Image files an operator attaches to a prompt (`plakd run --image`, JSONL
 //! `prompt.images` and client-supplied paths) and clipboard
 //! pixels, as drafts: `plakous-image` reads, sniffs, budgets and normalizes;
 //! this module names the draft and renders its chip.

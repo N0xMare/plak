@@ -46,7 +46,7 @@ filter = 'test(native_auth::)'
 test-group = 'native-auth-serial'
 
 [[profile.default.overrides]]
-filter = 'package(=plak) & binary(=integration) & test(/^cli_contract::/)'
+filter = 'package(=plakd) & binary(=integration) & test(/^cli_contract::/)'
 test-group = 'cli-contract-serial'
 
 [[profile.default.overrides]]

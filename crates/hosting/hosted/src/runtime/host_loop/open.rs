@@ -64,7 +64,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                     .map_err(|error| CliFailure::new(error.to_string()))?
             {
                 let message = config.lease_holder.as_ref().and_then(|name| name(locator)).unwrap_or_else(|| format!(
-                    "this session is held by another plak process (pid {} on {}); release it there or stop that process",
+                    "this session is held by another plakd process (pid {} on {}); release it there or stop that process",
                     holder.instance.pid(), holder.host_name,
                 ));
                 return Err(CliFailure::hosted_elsewhere(message));
@@ -654,7 +654,7 @@ pub(super) async fn release_after_open_failure(
 }
 
 /// Sends each MCP tool the creation bind left out as a live row (the snapshot
-/// that follows already carries it for a transcript view; `plak run` and JSONL
+/// that follows already carries it for a transcript view; `plakd run` and JSONL
 /// read only rows) and records it in the session log.
 fn announce_omitted_tools<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,

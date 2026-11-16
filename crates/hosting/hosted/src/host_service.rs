@@ -36,7 +36,7 @@
 //! at its next take or observation: the root's from the kept baseline, any
 //! other by asking the session for a fresh snapshot of that scope.
 //!
-//! An in-process face (the client, `plak agent` JSONL, an attached command) is
+//! An in-process face (the client, `plakd agent` JSONL, an attached command) is
 //! an attachment of its session's service too ([`HostService::attach_face`]):
 //! its intents pass through the service as that attachment's
 //! ([`FaceSender`]) and it takes its observations through [`FaceReceiver`].

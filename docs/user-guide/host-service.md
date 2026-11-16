@@ -1,9 +1,9 @@
-# Run plak host as a service
+# Run plakd host as a service
 
 This setup uses a Linux systemd **user** service or a macOS per-user
 LaunchAgent, never a system-wide service. Use the default installed
 release product, which includes host/web serving, together with
-its matching sidecars. The service always runs the stable `~/.local/bin/plak`
+its matching sidecars. The service always runs the stable `~/.local/bin/plakd`
 link, so keep that installation current. Install the web UI build separately;
 its directory must contain `index.html` and `csp.json` as described in
 [the web endpoint spec](../spec/02-plak-product.md#45-the-web-endpoint).
@@ -22,9 +22,9 @@ loopback dev mode: service installation never accepts `--dev-login`.
 Choose explicit absolute socket and UI paths. For example:
 
 ```sh
-plak host install --web "unix:$HOME/.plak/host/web/web.sock" \
+plakd host install --web "unix:$HOME/.plak/host/web/web.sock" \
   --ui "$HOME/.plak/web-ui" --dry-run
-plak host install --web "unix:$HOME/.plak/host/web/web.sock" \
+plakd host install --web "unix:$HOME/.plak/host/web/web.sock" \
   --ui "$HOME/.plak/web-ui"
 ```
 
@@ -36,18 +36,18 @@ the old file first, as shown below.
 ### Linux
 
 Installation writes
-`~/.config/systemd/user/plak-host.service` atomically with mode 0644 and calls
+`~/.config/systemd/user/plakd-host.service` atomically with mode 0644 and calls
 `systemctl --user daemon-reload`. It does **not** enable, start or restart
 anything.
 
 Follow the printed commands:
 
 ```sh
-systemctl --user enable --now plak-host.service
+systemctl --user enable --now plakd-host.service
 # If the service must run without a login session:
 loginctl enable-linger "$USER"
 tailscale serve --bg "unix:$HOME/.plak/host/web/web.sock"
-journalctl --user -u plak-host.service -f
+journalctl --user -u plakd-host.service -f
 ```
 
 The installer prints the exact Serve command for your chosen socket but never
@@ -61,7 +61,7 @@ LOGNAME so the host can ask the login shell for the PATH its session tools
 need, including language-toolchain directories. Its fallback PATH is
 `$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin`. The startup journal line
 reports whether the login shell answered. Configure credentials through
-Plak's normal account commands. The unit pins the selected product home.
+plakd's normal account commands. The unit pins the selected product home.
 It runs without SSH_AUTH_SOCK and starts in the C locale (LANG and LC_*
 are not inherited). Configure remote runners with IdentityAgent or IdentityFile
 in ssh config rather than relying on an interactive shell's agent socket.
@@ -74,7 +74,7 @@ and only HOME and the user-manager runtime-directory and bus variables.
 
 ### macOS
 
-Installation writes `~/Library/LaunchAgents/com.plak.host.plist` atomically with
+Installation writes `~/Library/LaunchAgents/com.plakd.host.plist` atomically with
 mode 0644 and prepares the private directory `~/Library/Logs/Plak` (mode 0700)
 and its two private log files (mode 0600). Existing logs must be your private
 regular files, not symlinks or hard links; unsafe files are refused unchanged.
@@ -82,9 +82,9 @@ It never calls `launchctl`, loads the agent or starts the host. Follow the
 printed commands, which contain your actual user ID and chosen paths:
 
 ```sh
-launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.plak.host.plist"
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.plakd.host.plist"
 # If it is not already running:
-launchctl kickstart "gui/$(id -u)/com.plak.host"
+launchctl kickstart "gui/$(id -u)/com.plakd.host"
 tailscale serve --bg "unix:$HOME/.plak/host/web/web.sock"
 tail -F "$HOME/Library/Logs/Plak/host.stdout.log" \
   "$HOME/Library/Logs/Plak/host.stderr.log"
@@ -101,7 +101,7 @@ Linux unit. A fixed shell wrapper forwards only the manager's SHELL, USER and
 LOGNAME into `/usr/bin/env -i`, followed by HOME, PLAK_HOME and the same curated
 PATH. Paths are separate literal arguments, not shell source. No credentials,
 proxy settings or installer-shell variables are embedded or inherited by the
-host. Configure credentials through Plak's normal account commands. XDG_CONFIG_HOME
+host. Configure credentials through plakd's normal account commands. XDG_CONFIG_HOME
 does not select a LaunchAgent directory. An installed agent, even for another
 product home, prevents the stdio bridge's explicit auto-start from creating an
 unmanaged host; load the intended service yourself.
@@ -110,17 +110,17 @@ unmanaged host; load the intended service yourself.
 
 Install a tested matching snapshot. For a host already supporting the upgrade
 coordinator, invoke the destination build with its binary ID (shown by
-`plak version`):
+`plakd version`):
 
 ```sh
 just install maintainer
-plak version
-plak host upgrade --expect-binary <id>
-systemctl --user status plak-host.service
-journalctl --user -u plak-host.service -f
+plakd version
+plakd host upgrade --expect-binary <id>
+systemctl --user status plakd-host.service
+journalctl --user -u plakd-host.service -f
 ```
 
-On macOS, inspect the service with `launchctl print "gui/$(id -u)/com.plak.host"`
+On macOS, inspect the service with `launchctl print "gui/$(id -u)/com.plakd.host"`
 and follow the two log files shown above instead of using systemctl/journalctl.
 
 Use `just install release` instead for a qualified release-flavor source build.
@@ -187,8 +187,8 @@ The dormant identity-preserving group mover is an internal, capability-gated
 foundation only; normal builds do not advertise it. The public procedure below
 still creates settled successors, rather than moving a live tree or its jobs.
 For that internal mover, an uncertain surrender stops the paused source for
-receipt reconciliation instead of reopening admissions. `plak status` and
-`plak doctor` report groups whose guarded abandonment is still withheld;
+receipt reconciliation instead of reopening admissions. `plakd status` and
+`plakd doctor` report groups whose guarded abandonment is still withheld;
 automatic retries wait three minutes, while an explicit retry checks immediately.
 Let turns, children, workspace operations and daemon jobs finish; resolve held
 work first. `--wait 60` closes admissions while waiting up to 60 seconds and
@@ -220,7 +220,7 @@ No historical prompt or tool is replayed.
 
 If interrupted, retry the same destination command and expected binary ID.
 Before surrender, recovery withdraws the preparation and restores the retained
-old host; retry then starts a new attempt. Plain `plak host` startup does the
+old host; retry then starts a new attempt. Plain `plakd host` startup does the
 same withdrawal. An Aborted attempt never sends a later destination start back
 to the old key. If the retained source executable is unavailable, startup marks
 the preparation Aborted and can start under its own key; restoring the source
@@ -245,7 +245,7 @@ ambiguously accepted input.
 If a runner is permanently lost, invoke the serving destination executable:
 
 ```sh
-plak host upgrade --abandon <successor-uuid-or-runner-id>
+plakd host upgrade --abandon <successor-uuid-or-runner-id>
 ```
 
 An exact successor UUID abandons one pending remote successor; a runner ID
@@ -257,7 +257,7 @@ ordinary standalone session commands are no longer blocked by this operation.
 
 The command prints the retained export paths. To recover on another placement,
 copy the desired export, edit only the copy's `runner` and `workspace_root`
-fields to select the destination, then run `plak session import <copy>`. For
+fields to select the destination, then run `plakd session import <copy>`. For
 local recovery set `runner` to `{"name":"local","runner_id":"local"}` and
 `workspace_root` to an absolute local directory. Do not edit the retained
 original. Normal import admission still applies; stop the host before standalone remote import, and pair/admit the new
@@ -272,13 +272,13 @@ using an old build; those actions can bypass that legacy protection. Keep the
 source snapshots and state for reference until every successor is acknowledged.
 
 For a UI-only deployment, replace the UI files and use
-`systemctl --user reload plak-host.service`. Reload sends SIGUSR1 and keeps
+`systemctl --user reload plakd-host.service`. Reload sends SIGUSR1 and keeps
 sessions running; SIGTERM and SIGHUP instead perform a planned host handoff.
 There is no need to reinstall an unchanged unit after updating the stable
 binary link. Remote runners still need the host's matching protocol/revision/
 flavor; follow the runner upgrade rules rather than substituting another build.
 On macOS, the UI-only reload command is
-`launchctl kill SIGUSR1 "gui/$(id -u)/com.plak.host"`.
+`launchctl kill SIGUSR1 "gui/$(id -u)/com.plakd.host"`.
 
 Before an upgrade that changes the runner protocol, finish or stop all
 home-local background jobs using the old build. This build uses runner
@@ -311,16 +311,16 @@ a workspace or changes cwd to bypass startup checks.
 There is no uninstall command. On Linux, stop the service before removing its unit:
 
 ```sh
-systemctl --user disable --now plak-host.service
-rm "$HOME/.config/systemd/user/plak-host.service"
+systemctl --user disable --now plakd-host.service
+rm "$HOME/.config/systemd/user/plakd-host.service"
 systemctl --user daemon-reload
 ```
 
 On macOS, unload the agent before removing its plist:
 
 ```sh
-launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.plak.host.plist"
-rm "$HOME/Library/LaunchAgents/com.plak.host.plist"
+launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.plakd.host.plist"
+rm "$HOME/Library/LaunchAgents/com.plakd.host.plist"
 ```
 
 This removes neither your product home nor daemon-held jobs, credentials or

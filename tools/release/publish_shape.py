@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The published shape of the `plak` manifest, and a staged tree that carries it.
+"""The published shape of the `plakd` manifest, and a staged tree that carries it.
 
-`plak/test-hooks` binds the deterministic offline model from the
+`plakd/test-hooks` binds the deterministic offline model from the
 repository-only `plakous-offline-crash-harness`. Cargo cannot package a regular
 dependency that is not on the registry, optional or not, and it strips only
 version-less dev-dependencies. So the repository manifest keeps the feature
@@ -10,7 +10,7 @@ both removed: every `cfg(feature = "test-hooks")` site compiles out, and the
 workspace lints declare the feature name to `check-cfg` so the packaged crate
 builds without an unexpected-cfg warning.
 
-`stage DEST` copies the tracked tree into DEST with the published `plak`
+`stage DEST` copies the tracked tree into DEST with the published `plakd`
 manifest, which is where `cargo package` runs for publication.
 """
 
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/gate"))
 import vcs_listing  # noqa: E402
 
-PLAK_MANIFEST = Path("bin/plak/Cargo.toml")
+PLAK_MANIFEST = Path("bin/plakd/Cargo.toml")
 HARNESS = "plakous-offline-crash-harness"
 
 # Exact repository text the published shape drops. A manifest edit that moves
@@ -54,7 +54,7 @@ class ShapeError(Exception):
 
 
 def published_plak_manifest(text: str) -> str:
-    """Return the `plak` manifest without `test-hooks` and its harness edge."""
+    """Return the `plakd` manifest without `test-hooks` and its harness edge."""
     for block in (HARNESS_DEPENDENCY, TEST_HOOKS_FEATURE):
         count = text.count(block)
         if count != 1:
@@ -68,7 +68,7 @@ def tracked_files(root: Path) -> list[str]:
 
 
 def stage(root: Path, destination: Path) -> None:
-    """Copy the working tree's files into DEST with the published plak manifest."""
+    """Copy the working tree's files into DEST with the published plakd manifest."""
     if destination.exists():
         raise ShapeError(f"{destination}: already exists")
     for relative in tracked_files(root):
@@ -84,8 +84,8 @@ def stage(root: Path, destination: Path) -> None:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("manifest", help="print the published plak manifest")
-    staged = commands.add_parser("stage", help="copy the tree with the published plak manifest")
+    commands.add_parser("manifest", help="print the published plakd manifest")
+    staged = commands.add_parser("stage", help="copy the tree with the published plakd manifest")
     staged.add_argument("destination", type=Path)
     args = parser.parse_args(argv)
     try:

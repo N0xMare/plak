@@ -1,0 +1,6 @@
+plakd compatibility — local compatibility notice
+
+USAGE:
+  plakd compatibility <codex|grok|claude>
+
+  Prints the acknowledged notice for one account. Local only; no network.

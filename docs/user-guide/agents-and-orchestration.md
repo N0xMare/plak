@@ -1,6 +1,6 @@
 # Agents and orchestration
 
-A Plak session starts with one agent. If you give it a working set of templates
+A plakd session starts with one agent. If you give it a working set of templates
 and permission to spawn, it can hand pieces of the job to children. By default
 they share your checkout; pass `workspace=fork` to mint an isolated copy and
 later fold sealed edits back with `adopt_candidate`.
@@ -62,7 +62,7 @@ subagents = true
 
 `[root] agent` is the template a new session binds. With no `[root]`, a new
 session has no root template until you configure one or save a host profile default.
-`plak run` and `plak agent` take the tuple from their own flags when those
+`plakd run` and `plakd agent` take the tuple from their own flags when those
 flags are set.
 
 `[roster] working_set` is the list of templates **the root** may spawn — at
@@ -91,8 +91,8 @@ those processes exits, when its children report or write, or when its parent
 sends mail. Mail or a result that arrives just as a child's turn ends also
 wakes it instead of costing a submit reminder. Every wake turn counts against
 the template's `max_turns`; interrupt or close a parked child as any other.
-`plak run` keeps waiting for a parked child and names it on its waiting line
-(`c2 (parked on p1)`), `plak agent` tree rows carry `waiting_on` (`[]` when it
+`plakd run` keeps waiting for a parked child and names it on its waiting line
+(`c2 (parked on p1)`), `plakd agent` tree rows carry `waiting_on` (`[]` when it
 waits on nothing named yet). Mail to a child whose attempt already submitted, sent as its last
 turn ends, is refused `recipient_attempt_terminal` rather than left unread. Mail
 to a child you just interrupted, while its turn is still stopping, waits for the
@@ -117,7 +117,7 @@ When the session opens, one warning lists everything the lost host left held
 `resume` operation resumes all held work. A parent's `wait_agent` rows say why a child stopped
 (`cause`, for example `owner_lost`) and whether its continuation is `held`,
 `pending` or `running`, and the parent's next turn gets one `[harness]` note
-naming the children the loss interrupted (once per run of Plak; a handed-off
+naming the children the loss interrupted (once per run of plakd; a handed-off
 child is not named).
 With `[host] resume_after_loss = "continue"` such children continue once by
 themselves. One whose wake was still pending rejoins that wake instead. JSONL roots and roots with
@@ -249,7 +249,7 @@ including its candidate inputs, even after its workspace changes.
 Reopening reconciles the tree without replaying uncertain work. By default,
 lost work is held for your Resume; `[host] resume_after_loss = "continue"`
 instead admits one continuation instruction turn. A child the lost
-`plak` left parked between turns is marked `interrupted` (owner lost) when the
+`plakd` left parked between turns is marked `interrupted` (owner lost) when the
 tree reopens. A child that was mid-turn, or whose own turn ended recovery
 required, is recovered rather than stranded: its session is reopened exactly,
 the unfinished turn is recorded once as abandoned (never re-sent or re-run), and
@@ -265,7 +265,7 @@ no turn: mail for it waits and is kept. A child that still reads
 toward the tree's node budget until it is closed.
 
 Such a child is settled by reopening its session once more, without replaying
-anything it ran. Recovery is Plak's job, not the model's: no agent has a
+anything it ran. Recovery is plakd's job, not the model's: no agent has a
 recovery tool, and `list_agents` says the host is recovering that child. It
 runs:
 
@@ -307,7 +307,7 @@ incompatible build created, or `recovery_effect_evidence_refused`),
 refusal as its failure and frees its slot.
 
 A child whose seal or adopt was interrupted has its session settled the same
-way, but whether the VCS step landed is not something Plak can tell, so the
+way, but whether the VCS step landed is not something plakd can tell, so the
 child stays `recovery_required`: the one-child retry reports the blocker in
 `workspace_recovery` (or refuses `recovery_vcs_ambiguous` when the session was
 already settled), `list_agents` names `close_agent` as the remedy, and closing
@@ -389,7 +389,7 @@ and those candidates still work with adoption and spawn inputs.
 
 After its result is delivered, a finished child is dormant: it no longer uses
 the active-child or tree cap and remains revivable with follow-up mail.
-Plak automatically reclaims covered dormant git checkouts after ten minutes
+plakd automatically reclaims covered dormant git checkouts after ten minutes
 or when fork checkouts exceed the default 4 GiB soft budget. It seals work and
 keeps candidate refs first, and restores the same checkout on follow-up.
 Unknown ignored files, secrets, independent staged versions, shared/live
@@ -436,19 +436,19 @@ that answer does not claim the child has stopped.
 
 Release tarballs and default source builds use Git copies. In a colocated
 repository (`.jj` and `.git`), a Git-only build reports this choice in
-`plak doctor` and once in a new session. A JJ-only repository is refused with
+`plakd doctor` and once in a new session. A JJ-only repository is refused with
 `this build has no jj support; use a build with the jj feature`.
 
-Enable `plak/jj` for native JJ support (included in maintainer builds). When
+Enable `plakd/jj` for native JJ support (included in maintainer builds). When
 enabled, `.jj` takes precedence over `.git`. Workspace operations use `jj-lib`
 in process and do not require the `jj` executable. See
 [custom builds](getting-started.md#build).
 
 - Harmless operation changes can be reconciled automatically. If another
   workspace rewrites the child's base and safe recovery cannot be established,
-  Plak returns `workspace_recovery_required` and preserves the child's modified
+  plakd returns `workspace_recovery_required` and preserves the child's modified
   and untracked files. It does not reset the copy to make it usable.
-- Do not run `jj git init` inside a Plak-minted copy: that creates a separate
+- Do not run `jj git init` inside a plakd-minted copy: that creates a separate
   repository instead of a workspace of the launch repository.
 - Native operations are tested alongside external JJ CLIs in the 0.44-0.46 range (library 0.46.0). Human JJ
   commands remain usable; immutable candidate pins do not create JJ bookmarks
@@ -461,14 +461,14 @@ For JJ users, the recommended repository configuration is:
 "immutable_heads()" = "builtin_immutable_heads() | (working_copies() ~ @)"
 ```
 
-Plak never writes this owner setting. It protects running forks' ancestry from
+plakd never writes this owner setting. It protects running forks' ancestry from
 owner rewrites. Ordinary parent edits, `jj describe`, `jj commit` and `jj new`
 do not stale a running fork. In child copies, use `jj st`, `jj diff`, `jj log`
 and `jj commit`, not Git; repository-wide operations and protected configuration
-changes are refused. Inspect `plak doctor`'s `jj_cli` row for CLI version skew.
+changes are refused. Inspect `plakd doctor`'s `jj_cli` row for CLI version skew.
 Close or discard dormant JJ copies explicitly; JJ reclamation is not yet available.
 
-## `plak agent`: driving Plak as JSONL
+## `plakd agent`: driving plakd as JSONL
 
 Each input frame may contain at most 1 MiB, counting its newline. An oversized
 frame disconnects the host after bounded cleanup; it is not drained for
@@ -477,13 +477,13 @@ has a separate 64 KiB limit, and command ids have a 256-byte UTF-8 limit.
 Malformed JSON and ordinary command errors remain recoverable diagnostics.
 
 
-`plak agent` attaches the hosted session loop over newline-delimited
+`plakd agent` attaches the hosted session loop over newline-delimited
 JSON (`v=1`) on stdin and stdout. Every object carries `v` and `kind`; a
 command may also carry an `id` that the host echoes on its replies. Stdout is
-machine-only; diagnostics go to stderr. Flags match `plak run`.
+machine-only; diagnostics go to stderr. Flags match `plakd run`.
 
 ```
-$ plak agent --account grok --model grok-4.6 --effort low
+$ plakd agent --account grok --model grok-4.6 --effort low
 < {"v":1,"kind":"prompt","id":"1","text":"list the crates in this workspace"}
 > {"v":1,"kind":"hello",...}
 > {"v":1,"kind":"ready",...}
@@ -517,15 +517,15 @@ executor the model uses, with an optional `agent_id` to target a node. During a
 turn, models still call the topology tools themselves. `fork` explicitly
 branches the session.
 
-To attach to an existing session, `plak agent --session <uuid>`; its recorded
+To attach to an existing session, `plakd agent --session <uuid>`; its recorded
 binding wins over any flags.
 
 ## Trying it
 
 `docs/reference-config/` documents every key inline.
-`bin/plak/presets/` pins the same four roles to one account each, and
+`bin/plakd/presets/` pins the same four roles to one account each, and
 `tests/fixtures/config-scenarios/` has single-agent, mixed-account tree, direct and PTC variants. Copy a scenario's
-`config.toml` and its `agents/*.toml` into the directory `plak config show`
+`config.toml` and its `agents/*.toml` into the directory `plakd config show`
 reports on its first line, log in to the accounts it names, and start a session.
 Nothing there is loaded automatically.
 
@@ -533,13 +533,13 @@ Nothing there is loaded automatically.
 
 Use the annotated reference home, in a throwaway `PLAK_HOME` so nothing you
 already have is disturbed. Give it an absolute path without operator-placed
-symlink ancestors. Plak accepts macOS system aliases such as `/tmp` and `/var`;
+symlink ancestors. plakd accepts macOS system aliases such as `/tmp` and `/var`;
 using a directory directly under your home keeps the example portable.
 
 ```sh
 export PLAK_HOME="$HOME/plak-tree-demo"
 mkdir -p "$PLAK_HOME" && cp -r docs/reference-config/. "$PLAK_HOME/"
-plak config show | head -1      # confirms which home you are on
+plakd config show | head -1      # confirms which home you are on
 ```
 
 That home is already a tree: `[root] agent = "root-agent"` names
@@ -548,11 +548,11 @@ That home is already a tree: `[root] agent = "root-agent"` names
 three are leaves; to let the worker hand research on, add
 `spawns = ["researcher"]` to `agents/worker.toml` and raise
 `[orchestration] max_depth` to 2. Edit `account` and `model` in each of the four
-files to accounts you are actually logged in to (`plak status`), then:
+files to accounts you are actually logged in to (`plakd status`), then:
 
 ```sh
 cd ~/your-project     # a git or jj checkout; the tree needs one
-plak agent
+plakd agent
 ```
 
 Send a JSONL prompt asking the root to delegate (or use your wire client).

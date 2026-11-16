@@ -790,7 +790,7 @@ fn loopback_builder(
 ///
 /// This is the same model, tool, descriptor and workspace authority every
 /// other loopback binding uses; only the round-by-round shape comes from data
-/// instead of from a Rust constructor. It exists so a spawned `plak` process
+/// instead of from a Rust constructor. It exists so a spawned `plakd` process
 /// can select a scenario the gate names in a file.
 ///
 /// # Errors
@@ -1016,7 +1016,7 @@ impl plakous::tools::ImageNormalizer for ScriptImageNormalizer {
 /// Same scripted model; the registry is the one
 /// [`exited_child_process_runtime_binding`] builds, over a real POSIX shell, so
 /// a script can start, write to, poll and terminate genuine child processes.
-/// That is the only route from a spawned `plak` to the process backend's own
+/// That is the only route from a spawned `plakd` to the process backend's own
 /// spawn and teardown.
 fn scripted_process_runtime_binding(
     workspace: &Path,

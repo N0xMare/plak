@@ -21,7 +21,7 @@ fn product_wire_contract_examples_decode_without_local_preferences() {
         json!({"settings_view":{"product":product}}),
         json!({"workspace_chrome":{"path":"workspace","home":null,"branch":"main"}}),
         json!({"reload_requested":{"version":1,"request_id":"00000000-0000-0000-0000-000000000001","session_id":"00000000-0000-0000-0000-000000000002","expect_binary":"fixture-binary","nonce":"fixture-instance"}}),
-        json!({"reload_probed":{"target":{"executable":"plak","capacity":{"route":"fixture","total_window":1000,"admitted_input":900,"estimated_tokens":100,"messages":2},"capacity_error":null,"state_key":"fixture-key","probe":{"state_key":"fixture-key","export_versions":[12,11],"config_error":null,"binary_id":null},"reopen":{"verdict":"unknown","reason":"pending"},"request":null},"refusal":null}}),
+        json!({"reload_probed":{"target":{"executable":"plakd","capacity":{"route":"fixture","total_window":1000,"admitted_input":900,"estimated_tokens":100,"messages":2},"capacity_error":null,"state_key":"fixture-key","probe":{"state_key":"fixture-key","export_versions":[12,11],"config_error":null,"binary_id":null},"reopen":{"verdict":"unknown","reason":"pending"},"request":null},"refusal":null}}),
     ] {
         let decoded: SurfaceObservation = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), value);

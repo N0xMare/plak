@@ -94,7 +94,7 @@ fn tree_admission_refusals_are_exact() {
         refusal("version"),
         (
             super::OpenErrorKind::UnsupportedPersistence,
-            "subagents schema 99, expected 11: this subagents.sqlite3 was created by an incompatible plak build; move it aside to start fresh".to_owned()
+            "subagents schema 99, expected 11: this subagents.sqlite3 was created by an incompatible plakd build; move it aside to start fresh".to_owned()
         )
     );
 }

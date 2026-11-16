@@ -98,7 +98,7 @@ KEY_ENV = {
 }
 KEY_FILE = {"openai": "openai.key", "xai": "xai.key", "anthropic": "anthropic.key"}
 MAX_BODY = 4 * 1024 * 1024
-CENSUS_USER_AGENT = "plak-api-model-census/1"
+CENSUS_USER_AGENT = "plakd-api-model-census/1"
 DOC_BODY = 2 * 1024 * 1024
 
 SECRET_RE = re.compile(

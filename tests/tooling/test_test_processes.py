@@ -229,7 +229,7 @@ class TestProcessGuardTests(unittest.TestCase):
         triple = f'v{protocol}-' + 'f' * width
         # Read literal directory components from the production layout so an
         # added intermediate directory increases the computed budget too.
-        paths = (ROOT / 'bin/plak/src/commands/runner/home.rs').read_text()
+        paths = (ROOT / 'bin/plakd/src/commands/runner/home.rs').read_text()
         runner = paths.split('impl RunnerHome {', 1)[1]
 
         def joins(source, name):
@@ -242,7 +242,7 @@ class TestProcessGuardTests(unittest.TestCase):
         runner_root = joins(runner, 'of')
         builds = joins(runner, 'build_directory')
         run_directory = joins(runner, 'run_directory')
-        command = (ROOT / 'bin/plak/src/commands/runner.rs').read_text()
+        command = (ROOT / 'bin/plakd/src/commands/runner.rs').read_text()
         socket_file = joins(command, 'checked_socket')
         machine_socket = f'{runner_root}/{builds}/{triple}/{run_directory}/{socket_file}'
         suffixes = [
@@ -302,7 +302,7 @@ class TestProcessGuardTests(unittest.TestCase):
             (old / "guard.lock").touch()
             (old / "host").write_text("sleep 60 & wait\n")
             child = subprocess.Popen(
-                ["plak", "host"],
+                ["plakd", "host"],
                 executable="/bin/bash",
                 cwd=old,
                 start_new_session=True,
@@ -336,7 +336,7 @@ class TestProcessGuardTests(unittest.TestCase):
                         import os, pathlib, signal, subprocess, time
                         root = pathlib.Path(os.environ['TMPDIR'])
                         (root / 'host').write_text('sleep 60 & wait\\n')
-                        child = subprocess.Popen(['plak', 'host'], executable='/bin/bash',
+                        child = subprocess.Popen(['plakd', 'host'], executable='/bin/bash',
                             cwd=root, start_new_session=True, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
                         pathlib.Path({str(base / f'ready-{index}')!r}).write_text(str(root))
@@ -585,7 +585,7 @@ class TestProcessGuardTests(unittest.TestCase):
                 shutil.copy({str(root / 'runner')!r}, run / 'runner')
                 def stopping(signum, frame):
                     subprocess.Popen(
-                        ['plak', 'runner', 'serve', '--local'], executable='/bin/bash',
+                        ['plakd', 'runner', 'serve', '--local'], executable='/bin/bash',
                         cwd=run, start_new_session=True,
                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
@@ -593,7 +593,7 @@ class TestProcessGuardTests(unittest.TestCase):
                     raise SystemExit(0)
                 signal.signal(signal.SIGTERM, stopping)
                 child = subprocess.Popen(
-                    ['plak', 'host'], executable='/bin/bash', cwd=run,
+                    ['plakd', 'host'], executable='/bin/bash', cwd=run,
                     start_new_session=True, stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
@@ -632,7 +632,7 @@ class TestProcessGuardTests(unittest.TestCase):
                 workspace.mkdir(parents=True)
                 (workspace / 'host').write_text('echo ready > ready; sleep 60 & wait\\n')
                 child = subprocess.Popen(
-                    ['plak', 'host'], executable='/bin/bash', cwd=workspace,
+                    ['plakd', 'host'], executable='/bin/bash', cwd=workspace,
                     start_new_session=True, stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
@@ -666,7 +666,7 @@ class TestProcessGuardTests(unittest.TestCase):
             root = Path(temporary).resolve()
             (root / "host").write_text("sleep 60 & wait\n")
             child = subprocess.Popen(
-                ["plak", "host"],
+                ["plakd", "host"],
                 executable="/bin/bash",
                 cwd=root,
                 start_new_session=True,

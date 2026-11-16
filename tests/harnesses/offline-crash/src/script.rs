@@ -3,7 +3,7 @@
 //! The Rust `*_runtime_binding` constructors in `crate::fixture` each pin one
 //! closed scenario. A spawned process cannot select one of those by calling a
 //! function, so this module carries the same dials as data: one JSON document a
-//! real `plak` process reads before it attaches, naming the assistant steps the
+//! real `plakd` process reads before it attaches, naming the assistant steps the
 //! offline model replays and the faults it injects.
 //!
 //! The document is a fixture format, not a product contract. It exists so the
@@ -212,7 +212,7 @@ pub struct ScriptPlan {
     /// Publish the scripted tree through the product `subagents.sqlite3`
     /// instead of the in-memory store.
     ///
-    /// `plak session show` reads that file. A child that exists only in the
+    /// `plakd session show` reads that file. A child that exists only in the
     /// process hub is invisible after exit, so a recovery assertion against
     /// show would pass on an empty tree. Requires [`Self::tree`].
     #[serde(default)]

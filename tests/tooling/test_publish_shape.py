@@ -1,4 +1,4 @@
-"""The published `plak` manifest drops exactly `test-hooks` and its harness edge."""
+"""The published `plakd` manifest drops exactly `test-hooks` and its harness edge."""
 
 from __future__ import annotations
 
@@ -45,15 +45,15 @@ class PublishedPlakManifestTests(unittest.TestCase):
     def test_stage_writes_the_published_manifest_into_a_tree_copy(self) -> None:
         with tempfile.TemporaryDirectory() as scratch:
             source = Path(scratch) / "src"
-            (source / "bin/plak").mkdir(parents=True)
-            (source / "bin/plak/Cargo.toml").write_text(self.repository, encoding="utf-8")
+            (source / "bin/plakd").mkdir(parents=True)
+            (source / "bin/plakd/Cargo.toml").write_text(self.repository, encoding="utf-8")
             (source / "README.md").write_text("x\n", encoding="utf-8")
             subprocess.run(["git", "init", "-q", str(source)], check=True)
             subprocess.run(["git", "-C", str(source), "add", "-A"], check=True)
             destination = Path(scratch) / "staged"
             publish_shape.stage(source, destination)
             self.assertEqual((destination / "README.md").read_text(), "x\n")
-            staged = (destination / "bin/plak/Cargo.toml").read_text(encoding="utf-8")
+            staged = (destination / "bin/plakd/Cargo.toml").read_text(encoding="utf-8")
             self.assertEqual(staged, publish_shape.published_plak_manifest(self.repository))
             with self.assertRaises(publish_shape.ShapeError):
                 publish_shape.stage(source, destination)

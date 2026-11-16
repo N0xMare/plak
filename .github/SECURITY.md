@@ -15,7 +15,7 @@ before a fix is released.
 
 Include:
 
-- the affected version (`plak version`) or commit, and the platform;
+- the affected version (`plakd version`) or commit, and the platform;
 - the account route and configuration involved, if any;
 - the impact, and minimal steps to reproduce it.
 

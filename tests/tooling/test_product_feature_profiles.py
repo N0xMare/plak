@@ -53,7 +53,7 @@ class ProductFeatureProfilesTests(unittest.TestCase):
         ]
         with mock.patch.object(gate.subprocess, "run", side_effect=results) as run:
             errors = gate.check_product_profiles(
-                {"plak": self.manifest()}, operation="check", target="reviewed-triple"
+                {"plakd": self.manifest()}, operation="check", target="reviewed-triple"
             )
         self.assertEqual(len(errors), 1)
         self.assertIn("api", errors[0])

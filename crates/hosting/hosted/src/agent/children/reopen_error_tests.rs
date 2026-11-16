@@ -41,6 +41,6 @@ fn an_incompatible_store_reads_as_the_one_incompatible_build_refusal() {
     let error = SessionBackend::sqlite(&database).expect_err("an older schema opened");
     assert_eq!(
         format_session_reopen_error("exact session reopen failed", &error),
-        "this session was created by an incompatible plak build; start a new session"
+        "this session was created by an incompatible plakd build; start a new session"
     );
 }

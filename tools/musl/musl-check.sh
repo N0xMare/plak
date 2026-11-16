@@ -7,7 +7,7 @@ if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
   echo "musl qualification requires a Linux x86_64 Docker host" >&2
   exit 2
 fi
-tools="${PLAK_MUSL_TOOLS:-$HOME/plak-musl/bin}"
+tools="${PLAK_MUSL_TOOLS:-$HOME/plakd-musl/bin}"
 if [[ ! -x "$tools/cargo-nextest" || ! -x "$tools/ruff" ]]; then
   echo "musl cargo-nextest 0.9.100 and ruff 0.17.3 required in $tools" >&2
   exit 2
@@ -39,7 +39,7 @@ docker run --rm --platform linux/amd64 --pull never --network none \
   -e "CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}" \
   --entrypoint /bin/sh "$image" -c '
     set -eu
-    export HOME="$(mktemp -d /tmp/plak-musl-home.XXXXXX)"
+    export HOME="$(mktemp -d /tmp/plakd-musl-home.XXXXXX)"
     export CARGO_HOME=/qual/cargo-home RUSTUP_HOME=/usr/local/rustup
     # Seed the writable offline cache once, not once per qualification run.
     if [ ! -f "$CARGO_HOME/.seeded" ]; then

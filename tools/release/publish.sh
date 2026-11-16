@@ -50,8 +50,8 @@ if [[ "$mode" == execute && -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
   refuse "--execute needs CARGO_REGISTRY_TOKEN"
 fi
 
-# The published `plak` manifest exists only in a staged copy of the tree.
-scratch="$(mktemp -d "${TMPDIR:-/tmp}/plak-publish.XXXXXX")"
+# The published `plakd` manifest exists only in a staged copy of the tree.
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/plakd-publish.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 stage="$scratch/stage"
 python3 tools/release/publish_shape.py stage "$stage"

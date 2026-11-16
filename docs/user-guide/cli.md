@@ -1,23 +1,23 @@
 # CLI reference
 
-Everything below is what `plak help` and `plak <command> --help` print in the
+Everything below is what `plakd help` and `plakd <command> --help` print in the
 binary you just built. Run those first if anything here looks stale.
 
 ## Shape of the grammar
 
 ```
-plak                              print help and exit 0
-plak <command> [options]
-plak help                         the command list
-plak <command> --help             one command's help
+plakd                              print help and exit 0
+plakd <command> [options]
+plakd help                         the command list
+plakd <command> --help             one command's help
 ```
 
 A bare command that needs an argument prints that command's help instead of
-failing — `plak run`, `plak login`, `plak key set`, `plak session show` — and
-that is a successful exit, not an error. `plak version` prints, for example, `plak 0.0.3 (release; binary 0123456789ab)`.
+failing -- `plakd run`, `plakd login`, `plakd key set`, `plakd session show` -- and
+that is a successful exit, not an error. `plakd version` prints, for example, `plakd 0.0.3 (release; binary 0123456789ab)`.
 The binary ID identifies the executable in build checks and host upgrades.
 
-`plak wire schema` prints this build's wire v2 JSON Schema, including the exact
+`plakd wire schema` prints this build's wire v2 JSON Schema, including the exact
 protocol version and binary id. It is a supported release command; see the
 [integration guide](integrating.md) for transports and protocol frame examples.
 
@@ -26,43 +26,43 @@ flags. The host validates runner/workspace choices before session creation.
 
 ## A persistent host and the stdio bridge
 
-`plak host` serves the home's sessions in the foreground. Host/web serving is
+`plakd host` serves the home's sessions in the foreground. Host/web serving is
 part of the default build; `--web` adds the web endpoint and `--ui` its validated
 static build. Run the host under its user service or a multiplexer. Stop/restart
 it through that service, or send SIGTERM for planned handoff. Only one host may
 serve a home, even across different state keys; use an explicit stop or
 coordinated upgrade rather than silently replacing an older running build.
 
-Programmatic clients can use `plak host connect --stdio`. Stdout carries only
+Programmatic clients can use `plakd host connect --stdio`. Stdout carries only
 wire frames; stderr carries connection diagnostics. The client supplies the
-handshake (host-control wire version 10, reported by `plak wire schema` and
-distinct from `plak agent`'s JSONL
+handshake (host-control wire version 10, reported by `plakd wire schema` and
+distinct from `plakd agent`'s JSONL
 version 1). Closing stdin detaches that client without stopping host sessions.
 An absent or incompatible host refuses; there is no embedded fallback and no
 automatic replay after a broken connection.
 
 The explicit local `--auto-start` option may start an absent unmanaged host.
 It refuses a remote-shell start and an installed user service (Linux
-`plak-host.service` or macOS `com.plak.host.plist`), naming the service-start
+`plakd-host.service` or macOS `com.plakd.host.plist`), naming the service-start
 command instead. The detached host uses the public home as cwd,
 has no implicit startup workspace, and writes a private bounded
 `host/auto-start.log`. It exits after five minutes without connections or kept
 work; ordinary foreground and unit hosts persist. Auto-start uses a curated
 OS/tool environment, not the caller's API-key variables. Configure stored keys
-with `plak key set`, or set variables in the environment of an explicitly
+with `plakd key set`, or set variables in the environment of an explicitly
 started host/unit. Missing-key diagnostics name the resolving process.
 `key set`/`key clear` themselves still run locally and obey their own process's
 environment-first precedence; the bridge does not perform target-host writes.
 
-Bare `plak` prints help and exits 0 without starting a host or session.
+Bare `plakd` prints help and exits 0 without starting a host or session.
 
-`plak host install --web unix:<absolute-socket> --ui <absolute-directory>
+`plakd host install --web unix:<absolute-socket> --ui <absolute-directory>
 [--dry-run]` writes a Linux systemd user unit or a macOS per-user LaunchAgent.
 Linux installation reloads the user manager; macOS installation never invokes
 `launchctl`. Neither enables or starts the service. Follow the printed
 commands; see [service setup](host-service.md#install).
 
-`plak host upgrade --expect-binary <id> [--wait <seconds> | --drain <duration|idle>]`
+`plakd host upgrade --expect-binary <id> [--wait <seconds> | --drain <duration|idle>]`
 runs from the destination build. Same-key upgrades drain roots and children at
 joined runtime boundaries before handing off, with a 60-second natural-drain
 budget by default; `--drain` changes that budget. Cross-key upgrades carry
@@ -71,7 +71,7 @@ to 0 and accepts at most 3600 seconds; explicit `--drain` and `--wait` cannot
 be combined. Before surrender, a refusal leaves the old owner
 authoritative; after surrender, recover through the destination's receipts,
 never by reopening the old owner. Retry the same destination command after an
-unknown outcome. `plak host upgrade --abandon <successor-uuid-or-runner-id>`
+unknown outcome. `plakd host upgrade --abandon <successor-uuid-or-runner-id>`
 irreversibly abandons pending remote successors only. Read
 [upgrade, reload and logs](host-service.md#upgrade-reload-and-logs) before
 changing a host or its paired runners.
@@ -87,32 +87,32 @@ changing a host or its paired runners.
 | 4 | Interrupted before completion, or stopped by `SIGTERM`/`SIGHUP` |
 | 5 | Agent/runtime failure, an answer truncated at its output limit (`turn_failed:output-limit`; the answer is still printed), or explicit recovery required |
 | 6 | Run reached `--max-turns` or `--timeout` |
-| 7 | `tree_hosted_elsewhere`: another running `plak` holds the session's agent tree (see `plak tree release`) |
+| 7 | `tree_hosted_elsewhere`: another running `plakd` holds the session's agent tree (see `plakd tree release`) |
 | 130 | Quit escalated because the turn's terminal did not join and the host abandoned by lease only; clean idle or terminal-joined quit remains 0 |
 
 Every subscription failure ends with what to do about it, for example:
 
 ```
-$ plak run --account codex --model gpt-5.6-luna --effort low -- 'hi'
-plak: codex is signed out; run `plak login codex`
+$ plakd run --account codex --model gpt-5.6-luna --effort low -- 'hi'
+plakd: codex is signed out; run `plakd login codex`
 ```
 
-`plak doctor` exits 5 when any check fails. An unknown command exits 2:
+`plakd doctor` exits 5 when any check fails. An unknown command exits 2:
 
 ```
-$ plak nonesuch
-plak: unknown command; run `plak help` for the command list
+$ plakd nonesuch
+plakd: unknown command; run `plakd help` for the command list
 ```
 
 ## Pipe versus terminal output
 
 Table-shaped commands (`status`, `doctor`, `session list`, `key status`) render
 column-aligned to a terminal and tab-delimited to a pipe, so
-`plak status | cut -f4` is stable. There is no `--json` on those commands;
-`plak session log --json` and `plak telemetry sql --json` are the two with an
+`plakd status | cut -f4` is stable. There is no `--json` on those commands;
+`plakd session log --json` and `plakd telemetry sql --json` are the two with an
 explicit JSON mode.
 
-`plak agent` writes machine-only JSONL on stdout; its diagnostics go to stderr.
+`plakd agent` writes machine-only JSONL on stdout; its diagnostics go to stderr.
 Send `{"v":1,"kind":"background","id":"b1"}` to background foreground commands
 already running. It is a no-op otherwise, does not cancel or steer, and never
 affects later commands or nested code-cell calls. Unsolicited `job_started`,
@@ -121,17 +121,17 @@ affects later commands or nested code-cell calls. Unsolicited `job_started`,
 and the bounded output tail; they do not consume the model's completion notice.
 The protocol version remains 1.
 
-`plak run` never lets model or tool text drive your terminal: escape and other
+`plakd run` never lets model or tool text drive your terminal: escape and other
 control sequences in stderr lines, and in the answer when stdout is a
 terminal, are shown as `�`, while newlines and tabs are kept. Piped stdout is
-the answer byte for byte, so `plak run ... > answer.txt` keeps exactly what the
+the answer byte for byte, so `plakd run ... > answer.txt` keeps exactly what the
 model wrote.
 
 ---
 
 ## Accounts and credentials
 
-### `plak login <codex|grok|claude> [--remote]`
+### `plakd login <codex|grok|claude> [--remote]`
 
 Interactive browser OAuth for a subscription account. By default the browser
 opens on **this** machine. Codex waits for the loopback callback on its own — do
@@ -140,22 +140,22 @@ not paste the localhost URL back; it reminds at 30s and times out at 120s, and
 ask you to paste a code from the callback page.
 
 `--remote` is for SSH and headless hosts. For Codex it is a device-code login:
-Plak prints a verification URL and a one-time code, you open the URL in a
-browser on any device and enter the code, and Plak finishes on its own (nothing
+plakd prints a verification URL and a one-time code, you open the URL in a
+browser on any device and enter the code, and plakd finishes on its own (nothing
 is pasted back; Ctrl-C cancels; the code expires after 15 minutes). Continue
 only if you started that login yourself; if someone gave you a code, cancel.
 If the provider does not offer device-code login for your account, run
-`plak login codex` on a machine with a browser, or forward the callback port
-(`ssh -L 1455:localhost:1455 <host>`) and run `plak login codex` on the host.
-For Grok and Claude, Plak prints the URL and takes the pasted code or callback
+`plakd login codex` on a machine with a browser, or forward the callback port
+(`ssh -L 1455:localhost:1455 <host>`) and run `plakd login codex` on the host.
+For Grok and Claude, plakd prints the URL and takes the pasted code or callback
 URL. An SSH session refuses a local login outright and tells you to re-run
 with `--remote` rather than switching mode silently.
 
 The SuperGrok account answers to `grok` and `supergrok`; bare `xai` is refused
-as ambiguous. API keys use `plak key set` instead. Host clients can also
+as ambiguous. API keys use `plakd key set` instead. Host clients can also
 implement the confirmed Accounts login operations.
 
-### `plak logout <codex|grok|claude> [--local]`
+### `plakd logout <codex|grok|claude> [--local]`
 
 Retires the credential. A usable credential is revoked at the provider first.
 A stored credential this build cannot use — quarantined, login required, from a
@@ -166,16 +166,16 @@ contacts the provider: it retires the local copy without a remote revoke, for
 example when the provider cannot be reached. Claude OAuth has no pinned remote
 revoke, so its logout is always local.
 If a stored login was written by an older build or under another native
-profile, `plak status` says so and names `plak login <account>`. That login
+profile, `plakd status` says so and names `plakd login <account>`. That login
 replaces the old record itself, says so in one line, and authorizes a fresh
 grant (the old grant may remain active at the provider).
-If a newer plak build wrote the stored login, this build does not use or
-change it. `plak login <account>` first asks
-`This login was written by a newer plak build; replacing it means that build must log in again. Continue? [y/N]`;
+If a newer plakd build wrote the stored login, this build does not use or
+change it. `plakd login <account>` first asks
+`This login was written by a newer plakd build; replacing it means that build must log in again. Continue? [y/N]`;
 anything but `y` leaves it untouched, and without a terminal the command
 refuses without asking. Prefer running the newer build.
 
-### `plak refresh <codex|grok|claude>`
+### `plakd refresh <codex|grok|claude>`
 
 Claims a new refresh grant now, even when the access token is still fresh, and
 prints the new access-token expiry. Ordinary commands refresh on their own.
@@ -184,7 +184,7 @@ A subscription refresh that fails before sending names the network phase (DNS,
 connect or TLS) and leaves the credential unchanged. Retry when online; an
 unknown refresh outcome still requires credential recovery rather than replay.
 
-### `plak status [account]`
+### `plakd status [account]`
 
 Local credential readiness, with no provider request and no secrets. Both
 status forms warn within 14 days of a subscription profile's expiry, or after
@@ -192,10 +192,10 @@ it, and note within 14 days of an API route's review-due date, or after it,
 naming the surface and UTC date even if that account is not configured. An
 expired subscription profile refuses its route; an API route past its review
 date keeps working. Install a newly reviewed build before expiry; the warning
-does not extend a route's lifetime. Bare `plak status` groups every account:
+does not extend a route's lifetime. Bare `plakd status` groups every account:
 
 ```
-$ plak status
+$ plakd status
 Ready
 
 PROVIDER            KIND     PROFILE   CREDENTIAL
@@ -223,34 +223,34 @@ Local credential state only; no provider request was made.
 ```
 
 Naming an OAuth account prints one line with compatibility, credential state
-and a repair when needed. `plak status grok` reports the SuperGrok subscription;
-`plak status xai-api` reports the API key. Bare `xai` is ambiguous and refused.
+and a repair when needed. `plakd status grok` reports the SuperGrok subscription;
+`plakd status xai-api` reports the API key. Bare `xai` is ambiguous and refused.
 
 A section with no rows is omitted. When every account is ready there is no
 Setup needed heading, and when none are there is no Ready heading.
 
 A provider whose local credential cannot be read is still listed, under Setup
-needed, and bare `plak status` still exits 0. CREDENTIAL then names the state
+needed, and bare `plakd status` still exits 0. CREDENTIAL then names the state
 and the repair, for example `Unsafe storage · …` with the chmod to run. A
 login this build cannot use is a normal row naming its repair:
-`Profile changed · run plak login claude` for a Grok or Claude login from an
-older build or another profile, `Login required · plak login codex` for an
+`Profile changed - run plakd login claude` for a Grok or Claude login from an
+older build or another profile, `Login required - plakd login codex` for an
 earlier-build Codex login. A repair too long
-for the column is `Unsafe storage · run plak status <account> for the fix`;
+for the column is `Unsafe storage - run plakd status <account> for the fix`;
 that command prints the full path and chmod. The other accounts,
-including API keys, still print. `plak status <account>` still exits 3 when
+including API keys, still print. `plakd status <account>` still exits 3 when
 that one account cannot be read. The four columns stay put, so
-`plak status | cut -f4` is still the credential cell.
+`plakd status | cut -f4` is still the credential cell.
 
-### `plak key set|clear|status <openai|xai-api|anthropic|openrouter>`
+### `plakd key set|clear|status <openai|xai-api|anthropic|openrouter>`
 
 `set` prompts for the key and writes it to the secrets store; `clear` removes
 the file; `status` reports presence without printing the key. Environment
-variables override files, `plak key clear` cannot unset a process environment
-variable, and Plak never loads a `.env` file. Host clients can also implement
+variables override files, `plakd key clear` cannot unset a process environment
+variable, and plakd never loads a `.env` file. Host clients can also implement
 masked, confirmed key operations.
 
-### `plak secret set|rm <name>`, `plak secret list`
+### `plakd secret set|rm <name>`, `plakd secret list`
 
 Named secrets that `config.toml` refers to by name — an MCP server's
 `secret_env`, `bearer_secret` or `secret_headers`. `set` prompts with hidden
@@ -259,28 +259,28 @@ input (the value is never an argument) and writes
 prints names only. A name matches `[a-z][a-z0-9-]{0,31}`. There is no
 environment override.
 
-### `plak mcp add|list|show|test|login|logout|prompts|remove|enable|disable`
+### `plakd mcp add|list|show|test|login|logout|prompts|remove|enable|disable`
 
 MCP server setup without editing `config.toml` by hand.
 
 ```sh
-plak mcp add everything -- npx -y @modelcontextprotocol/server-everything
-plak secret set github                        # the token; never an argument
-plak mcp add github --url https://api.githubcopilot.com/mcp/readonly --bearer-secret github
-plak mcp add ghlocal --secret-env GITHUB_PERSONAL_ACCESS_TOKEN=github \
+plakd mcp add everything -- npx -y @modelcontextprotocol/server-everything
+plakd secret set github                        # the token; never an argument
+plakd mcp add github --url https://api.githubcopilot.com/mcp/readonly --bearer-secret github
+plakd mcp add ghlocal --secret-env GITHUB_PERSONAL_ACCESS_TOKEN=github \
   -- docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server stdio --read-only
-plak mcp list
-plak mcp show github
-plak mcp test github
-plak mcp add linear --url https://mcp.linear.app/mcp --oauth
-plak mcp login linear                                  # or --remote over SSH
-plak mcp logout linear
-plak mcp prompts github                                # the server's prompts
-plak mcp prompts github review --arg target=main       # what one expands to
-plak mcp enable github --template root-agent             # every allowed tool
-plak mcp enable github --template root-agent --tool get_me   # or one at a time
-plak mcp disable github --template root-agent
-plak mcp remove github
+plakd mcp list
+plakd mcp show github
+plakd mcp test github
+plakd mcp add linear --url https://mcp.linear.app/mcp --oauth
+plakd mcp login linear                                  # or --remote over SSH
+plakd mcp logout linear
+plakd mcp prompts github                                # the server's prompts
+plakd mcp prompts github review --arg target=main       # what one expands to
+plakd mcp enable github --template root-agent             # every allowed tool
+plakd mcp enable github --template root-agent --tool get_me   # or one at a time
+plakd mcp disable github --template root-agent
+plakd mcp remove github
 ```
 
 - `add <id> [options] -- <command> [args...]` adds a stdio server;
@@ -316,7 +316,7 @@ plak mcp remove github
   `oauth_callback_port`, else a free port). `--scope` requests these scopes
   instead of the discovered ones, which is how you grant more when a tool
   call says a scope is missing. `--remote` is for a browser on another
-  device, as with `plak login --remote`: when the authorization server offers
+  device, as with `plakd login --remote`: when the authorization server offers
   the device grant you enter a one-time code there, otherwise you paste back
   the URL the browser was sent to. A refused device request prints its HTTP
   status and says it is falling back to paste-back. An advertised device endpoint
@@ -326,7 +326,7 @@ plak mcp remove github
   `<PLAK_HOME>/secrets/mcp-oauth/<id>/` and used only for that server's URL.
   A session never starts a login: when the login expires and cannot be
   renewed, is revoked, or lacks a scope, the tool call fails and names the
-  `plak mcp login` command to run.
+  `plakd mcp login` command to run.
 - `logout <id> [--local]` revokes the login at the authorization server and
   removes it here. When a dispatched revocation fails (including HTTP 503), the login is
   quarantined because the server may already have changed the grant; calls
@@ -354,7 +354,7 @@ plak mcp remove github
 
 ---
 
-### `plak runner serve|connect|allow|ps|pair|secret`
+### `plakd runner serve|connect|allow|ps|pair|secret`
 
 Runners run a placed session's tools on another machine you can ssh to.
 These commands set one up and show what it holds. Local remains the explicit default.
@@ -373,12 +373,12 @@ On the host, name the machine in `config.toml` and pair with it:
 ```toml
 [runners.build]
 ssh = "build-box"          # a ~/.ssh/config alias or [user@]host
-command = "/opt/plak/bin/plak"  # absolute stable executable on the runner
+command = "/opt/plakd/bin/plakd"  # absolute stable executable on the runner
 ```
 
 ```sh
-plak runner pair build     # adds this host to the runner's allowlist over ssh
-plak runner ps build       # the lines and jobs it holds for this host
+plakd runner pair build     # adds this host to the runner's allowlist over ssh
+plakd runner ps build       # the lines and jobs it holds for this host
 ```
 
 Pairing needs a build that knows its source revision (a release or
@@ -390,14 +390,14 @@ The host always dials, with fixed strict ssh options,
 `BatchMode` and `StrictHostKeyChecking=yes`, so the ssh key must work without a
 prompt and the runner's host key must already be in `known_hosts` (connect
 once with plain `ssh` to accept it). On the runner machine,
-`plak runner connect --stdio` (what ssh runs) starts the daemon when none is
-running, `plak runner serve` runs it in the foreground, `plak runner allow
-<host-id>` pairs a host by hand and `plak runner ps` lists every host's lines,
-`held` or `orphaned`; a host's `plak runner ps <name>` sees only its own. The daemon exits after `idle_exit_seconds` (default
-300) with nothing to keep. `plak runner secret set|rm <name>` and `plak runner
+`plakd runner connect --stdio` (what ssh runs) starts the daemon when none is
+running, `plakd runner serve` runs it in the foreground, `plakd runner allow
+<host-id>` pairs a host by hand and `plakd runner ps` lists every host's lines,
+`held` or `orphaned`; a host's `plakd runner ps <name>` sees only its own. The daemon exits after `idle_exit_seconds` (default
+300) with nothing to keep. `plakd runner secret set|rm <name>` and `plakd runner
 secret list` manage the runner machine's own secrets, which an MCP server with
-`placement = "runner"` reads; they work like `plak secret`, on a separate store.
-`plak doctor` resolves each `[runners.<name>]` with `ssh -G` (no connection)
+`placement = "runner"` reads; they work like `plakd secret`, on a separate store.
+`plakd doctor` resolves each `[runners.<name>]` with `ssh -G` (no connection)
 and shows the user, host and port it would dial.
 
 A running session waits when its saved runner loses its link or is still
@@ -429,9 +429,9 @@ runner; these waits do not add a cross-runner spawn argument.
 
 ### Subscription compatibility review deadlines
 
-The first time you use a subscription account — `plak login`, `plak refresh`,
-`plak logout <account>`, `plak models` or `plak run` — and again when the notice
-revision or consent identity changes, Plak prints a notice on stderr and asks
+The first time you use a subscription account -- `plakd login`, `plakd refresh`,
+`plakd logout <account>`, `plakd models` or `plakd run` -- and again when the notice
+revision or consent identity changes, plakd prints a notice on stderr and asks
 once. Renewing only a profile's review and expiry dates does not ask again:
 
 ```
@@ -443,10 +443,10 @@ Continue? [y/N]
 ```
 
 Answer `y`. The answer is read from stdin, so a non-interactive
-`plak run` accepts it with `echo y | plak run --account codex ... -- '<prompt>'`
+`plakd run` accepts it with `echo y | plakd run --account codex ... -- '<prompt>'`
 (the prompt itself follows `--`), or you accept it once beforehand with
-`plak login <account>`. With stdin closed (`</dev/null`, a CI job) `plak run`
-refuses with exit 3 and names both ways (`plak login` itself asks for the
+`plakd login <account>`. With stdin closed (`</dev/null`, a CI job) `plakd run`
+refuses with exit 3 and names both ways (`plakd login` itself asks for the
 answer on a terminal or a pipe); any other answer declines, exits 3 and sends
 nothing.
 
@@ -456,10 +456,10 @@ existing valid acceptance survives a later review when those pins are unchanged:
 the stored `reviewed_at` and `expires_at` are not compared. The current compiled
 profile's active window and kill switch are still checked. If the notice
 revision or consent identity changes, reaccept it through, for example,
-`plak models <account>`; reacceptance does not itself replace or refresh the
+`plakd models <account>`; reacceptance does not itself replace or refresh the
 existing login credentials.
 
-`plak status` lists the UTC expiry of each compiled subscription compatibility
+`plakd status` lists the UTC expiry of each compiled subscription compatibility
 profile. These dates govern this build's integration review, independently of
 credential expiry. Once a profile expires, obtain a build whose profile was
 renewed after native client protocol review and regression testing. Logging in
@@ -469,18 +469,18 @@ fresh endpoint/model authority used for request admission.
 
 ## Running an agent
 
-### `plak run`
+### `plakd run`
 
 Run until the task is idle. Finished background processes and child results
 or questions trigger distinct continuation turns; running work alone waits
 without a turn. The prompt goes after `--`.
 
 ```
-plak run --account codex --model gpt-5.6-luna --effort low -- 'summarise src/'
-plak run --account grok --model grok-4.6 --effort low -- 'run the tests'
-plak run --account claude --model claude-sonnet-5 --effort low --composition js-ptc -- 'fix the lint'
-plak run --session 0f2c… -- 'and now update the changelog'
-plak run --account codex --model gpt-5.6-luna --effort low --image shot.png -- 'what is wrong here?'
+plakd run --account codex --model gpt-5.6-luna --effort low -- 'summarise src/'
+plakd run --account grok --model grok-4.6 --effort low -- 'run the tests'
+plakd run --account claude --model claude-sonnet-5 --effort low --composition js-ptc -- 'fix the lint'
+plakd run --session 0f2c... -- 'and now update the changelog'
+plakd run --account codex --model gpt-5.6-luna --effort low --image shot.png -- 'what is wrong here?'
 ```
 
 | Flag | Meaning |
@@ -495,11 +495,11 @@ plak run --account codex --model gpt-5.6-luna --effort low --image shot.png -- '
 | `--timeout <seconds>` | Whole-run wall clock, including authentication/catalog preparation and idle waiting; default none. |
 | `--leave-jobs-running` | Leave shell `&` leftover jobs alive and unowned at exit; the caller must clean them up. Budget-promoted jobs hold the run open while their leaders live. |
 | `--print-session-id` | Print `session_id=<uuid>` on stdout before the turn starts. |
-| `--image <path>` | Attach an image to the prompt; repeat for more (at most 8, and at most the 16 MiB per-message budget once encoded: three maximum-size images or eight typical screenshots; more is refused, exit 2, naming the budget). png, jpeg, gif or webp, detected from the bytes; an image over 2048 px on its long edge or 3.75 MiB is downscaled to fit (PNG when that fits, otherwise JPEG) and reported on stderr as `plak: attached [image: shot.png 2048x1324 1.9 MB, downscaled from 3456x2234]`; smaller ones are sent unchanged. With images, the prompt after `--` may be left out. A file that cannot be read, is not a decodable image or is over 64 MiB is refused (exit 2) naming the file. A model without image input refuses the run naming the route and model. |
+| `--image <path>` | Attach an image to the prompt; repeat for more (at most 8, and at most the 16 MiB per-message budget once encoded: three maximum-size images or eight typical screenshots; more is refused, exit 2, naming the budget). png, jpeg, gif or webp, detected from the bytes; an image over 2048 px on its long edge or 3.75 MiB is downscaled to fit (PNG when that fits, otherwise JPEG) and reported on stderr as `plakd: attached [image: shot.png 2048x1324 1.9 MB, downscaled from 3456x2234]`; smaller ones are sent unchanged. With images, the prompt after `--` may be left out. A file that cannot be read, is not a decodable image or is over 64 MiB is refused (exit 2) naming the file. A model without image input refuses the run naming the route and model. |
 
-`plak run` needs a ready OAuth login or key; an API account with no key exits 3
-naming `plak key set <account>` and its environment variable, and a signed-out
-subscription exits 3 naming `plak login <account>`. An invalid `config.toml`
+`plakd run` needs a ready OAuth login or key; an API account with no key exits 3
+naming `plakd key set <account>` and its environment variable, and a signed-out
+subscription exits 3 naming `plakd login <account>`. An invalid `config.toml`
 refuses the run (exit 1) before anything else happens. It uses full
 coding tools with no approval gates. `--session` reopens the recorded workspace locator, so your cwd
 must match the one the session was created in.
@@ -534,29 +534,29 @@ Linux x86_64 musl and macOS; there is no OS sandbox. See
 `native-ptc` and `js-ptc` locate `PLAK_JS_HOST` or a
 `plakous-js-host` beside the binary; `py-ptc` and `py-sdk` locate `PLAK_PY_HOST` or a
 sibling `plakous-py-host` worker. That is worker isolation, not workspace isolation, and
-it does not isolate Plak itself. Unsupported process-tool targets, including
+it does not isolate plakd itself. Unsupported process-tool targets, including
 Intel macOS, fail closed.
 
-### `plak agent`
+### `plakd agent`
 
 The hosted session loop, speaking newline-delimited JSON (`v=1`) on
-stdin and stdout. Stdio is the pipe; there is no `plak agent stdio` subcommand.
-Binding flags match `plak run` (`--account`, `--model`, `--effort`,
+stdin and stdout. Stdio is the pipe; there is no `plakd agent stdio` subcommand.
+Binding flags match `plakd run` (`--account`, `--model`, `--effort`,
 `--composition`, `--protocol`, `--session`); an omitted flag
-falls back to the `[root] agent` template's value, and `plak agent` refuses to
+falls back to the `[root] agent` template's value, and `plakd agent` refuses to
 start when neither supplies an account, a model, or a required effort. A model
 that is not a row of the account's catalog is refused before anything attaches,
-naming the account, the catalog and the `plak models` command that lists it
+naming the account, the catalog and the `plakd models` command that lists it
 (OpenRouter model ids are left to OpenRouter):
 
 ```
-model `gpt-5.6-luna` is not in the SuperGrok subscription catalog of account `grok`; run `plak models grok` to list the models it offers
+model `gpt-5.6-luna` is not in the SuperGrok subscription catalog of account `grok`; run `plakd models grok` to list the models it offers
 ```
 
 ```
-plak agent --account codex --model gpt-5.6-luna --effort low
-plak agent --session 0f2c…
-printf '{"v":1,"kind":"prompt","id":"1","text":"hi"}\n' | plak agent --account grok --model grok-4.6 --effort low
+plakd agent --account codex --model gpt-5.6-luna --effort low
+plakd agent --session 0f2c...
+printf '{"v":1,"kind":"prompt","id":"1","text":"hi"}\n' | plakd agent --account grok --model grok-4.6 --effort low
 ```
 
 Stdin commands: `prompt`, `interrupt`, `compact`, `resume_queue`, `resume`, `tree`,
@@ -568,7 +568,7 @@ all held work and the restored queue. It admits continuation instructions,
 not a replay of the interrupted turn. `resume_queue` only resumes queue delivery.
 A `prompt` may carry `"images": ["shot.png", "~/..."]`: paths to png, jpeg,
 gif or webp files (relative ones resolve against the agent's working
-directory; `~` is not expanded), read with the same limits as `plak run
+directory; `~` is not expanded), read with the same limits as `plakd run
 --image`. With images, `text` may be omitted.
 `quit` gives an active turn 300 ms to settle cancellation and another 100 ms
 to publish its result; a provider that ignores cancellation cannot hold the
@@ -596,7 +596,7 @@ pending; retry that handle after capacity is available. Acceptance consumes it.
 Ambiguous writes stay fenced and cannot be retried in place.
 After a crash, `--session` emits `hello` before re-offering a pending approval;
 answer the newly offered handle, not one retained from the old process.
-`plak run` still denies approvals because it has no inbound command channel.
+`plakd run` still denies approvals because it has no inbound command channel.
 
 Stdout events: `hello`, `ready`, `status`, `busy`, `assistant`,
 `assistant_done`, `tool`, `approval`, `approval_resolved`, `error`, `turn`, `tree`, `queue`, `bye`.
@@ -611,18 +611,18 @@ session.
 
 ## Inspecting things
 
-### `plak doctor`
+### `plakd doctor`
 
 Local health checks. Everything is offline except one OpenRouter probe: when a
-key and a default model are both set, Plak probes catalog keys with discovery
+key and a default model are both set, plakd probes catalog keys with discovery
 GETs only, never inference. Compiled provider reviews within 14 days of a
 subscription expiry or an API review-due date (or past it) produce local
 warnings naming the surface and UTC date. They count in the warning total;
 warnings alone do not change the exit code.
 
 ```
-$ plak doctor
-Plak doctor
+$ plakd doctor
+plakd doctor
 
 CHECK              RESULT   DETAIL                                        FIX
 Version            OK       available · 0.0.3                             —
@@ -650,14 +650,14 @@ OAuth grok         OK       signed_out · no record · no refresh telemetry   �
 OAuth claude       OK       signed_out · no record · no refresh telemetry   —
 
 Result: 23 passed · 0 warnings · 0 failures
-Provider credentials: run `plak status`
+Provider credentials: run `plakd status`
 ```
 
 The checks depend on the build, configuration and configured runners; the
 example is illustrative. Every failing row carries its own FIX column.
 `Runtime store` is an ERROR (`full`) once new work is refused for lack
 of space and a WARNING (`nearly_full`) shortly before; its fix is
-`plak session gc --all`, then `plak session delete <id>`. The row also shows
+`plakd session gc --all`, then `plakd session delete <id>`. The row also shows
 the database file size with its free bytes, and the change feed's retained
 rows and their bytes (informational: feed rows never count toward the store
 being full). `doctor` exits 5 when any row is ERROR; warnings alone do not
@@ -666,10 +666,10 @@ fail it.
 `Home free space` checks the volume containing the product home, not the
 workspace. It warns below 5 GiB and reports an error below 512 MiB, where new
 turns and spawns are refused. Existing work is not cancelled. The operator can
-inspect the volume and free space, then retry; Plak never deletes files to
+inspect the volume and free space, then retry; plakd never deletes files to
 make space. An unreadable probe warns without assuming zero free space.
 
-### `plak usage [--account codex|grok|claude|openrouter|supergrok] [--session <uuid>]`
+### `plakd usage [--account codex|grok|claude|openrouter|supergrok] [--session <uuid>]`
 
 Usage and status show the last failed credential
 refresh when telemetry has it, with its local `HH:MM`, cause, and repair action.
@@ -681,7 +681,7 @@ remains.
 
 Subscription plan limits and, with `--session`, the context status of that exact
 attached runtime. Without `--session` the plan limits come from the provider
-dashboard. Plak never estimates tokens or model capacity, so a fact it does not
+dashboard. plakd never estimates tokens or model capacity, so a fact it does not
 have is reported as absent rather than guessed. `--account` queries and prints
 only that account; other accounts are not falsely shown as disconnected.
 `--account` and `--session` conflict.
@@ -689,11 +689,11 @@ only that account; other accounts are not falsely shown as disconnected.
 For this command, `grok` and `supergrok` select the same SuperGrok
 subscription usage vertical. `openrouter` selects OpenRouter usage.
 
-### `plak models <codex|grok|claude>`
+### `plakd models <codex|grok|claude>`
 
 Reads the authenticated catalog for one account and lists its models. Requires a
 ready login; this is the command that tells you the exact `--model` ids
-`plak run` will accept. One tab-separated line per model:
+`plakd run` will accept. One tab-separated line per model:
 
 ```
 <id>	visibility=…	tool_mode=…	streaming=…	tools=…	reasoning=…	efforts=…	context_length=…
@@ -703,17 +703,17 @@ ready login; this is the command that tells you the exact `--model` ids
 `tool_mode` is `n/a` when the catalog reports none, and `context_length` is
 `unknown` when the provider did not report one.
 
-### `plak models openrouter`
+### `plakd models openrouter`
 
 Reads the OpenRouter catalog using your configured OpenRouter API key and
 prints one exact model ID per line. This only discovers identifiers: listing
 does not establish capabilities, admission, or qualification. It makes no
 inference request.
 
-### `plak models <openai|anthropic|xai-api>`
+### `plakd models <openai|anthropic|xai-api>`
 
 Lists the provider's own model list with the stored API key (cached six hours;
-offline, the last cache, else the table built into Plak; see
+offline, the last cache, else the table built into plakd; see
 [providers and accounts](providers-and-accounts.md)). It makes no inference
 request. A header line names the source (`live list`, `cached list, N min old`
 or `bundled table (reason)`), then one tab-separated line per model:
@@ -728,22 +728,22 @@ picks. Every other row ends in `reason=…` instead. `efforts` is that model's
 own ladder, `window` the working window, `full_window` the model's full input
 window and `max_output` its output bound.
 
-### `plak tree release --force <tree-id>`
+### `plakd tree release --force <tree-id>`
 
-Each session's agent tree is held by one running `plak` at a time. A second
-`plak` that opens the same session is refused with
+Each session's agent tree is held by one running `plakd` at a time. A second
+`plakd` that opens the same session is refused with
 `tree_hosted_elsewhere (<build>)` and exits 7; quit the other one first. When
-the holding `plak` on this machine has exited (even by a crash), the next open
+the holding `plakd` on this machine has exited (even by a crash), the next open
 takes the tree over by itself. Use this command only when the holder ran on
 another machine sharing this home, or its exit cannot be proven: it prints a
 warning naming the holder and releases the tree so the next open takes it. If
-that `plak` is in fact still running, every change it then makes to the tree is
+that `plakd` is in fact still running, every change it then makes to the tree is
 refused. A holder still running on this machine is never released: quit it.
 Without `--force` nothing changes.
 
-### `plak state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]`
+### `plakd state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]`
 
-`plak doctor` lists non-current state paths and sizes. Pruning lists the same
+`plakd doctor` lists non-current state paths and sizes. Pruning lists the same
 inventory and asks for confirmation; non-terminal stdin requires `--yes`.
 It refuses unsafe paths, in-use locks and inventory changes. Current state,
 carried-forward references, dirty copies and unadopted work are retained.
@@ -754,22 +754,22 @@ Safe independent entries may be removed while protected entries are kept.
 Review `kept:` reasons before manually removing anything. Export files under
 `carry/` are never selected. Implementation details live in spec 02 §2.5.
 
-### `plak session list|rename|archive|unarchive|show|log|recover|export|import|reload|delete|gc`
+### `plakd session list|rename|archive|unarchive|show|log|recover|export|import|reload|delete|gc`
 
 ```
-plak session list [--include-archived]
-plak session rename <full-id> <title>
-plak session rename <full-id> --clear
-plak session archive <full-id> [--yes]
-plak session unarchive <full-id>
-plak session show <uuid>[.cN]
-plak session log <uuid>[.cN] [--kind tool] [--tail N] [--json]
-plak session recover <uuid>
-plak session export <uuid> [--out <path>]
-plak session import <path>
-plak session reload <uuid> --expect-binary <binary-id>
-plak session delete <uuid> [--yes] [--abandon-children]
-plak session gc <uuid> | --all
+plakd session list [--include-archived]
+plakd session rename <full-id> <title>
+plakd session rename <full-id> --clear
+plakd session archive <full-id> [--yes]
+plakd session unarchive <full-id>
+plakd session show <uuid>[.cN]
+plakd session log <uuid>[.cN] [--kind tool] [--tail N] [--json]
+plakd session recover <uuid>
+plakd session export <uuid> [--out <path>]
+plakd session import <path>
+plakd session reload <uuid> --expect-binary <binary-id>
+plakd session delete <uuid> [--yes] [--abandon-children]
+plakd session gc <uuid> | --all
 ```
 
 Rename sets a home-local title override, even while busy; `--clear` restores the
@@ -780,7 +780,7 @@ Rename, archive and unarchive require full ids. Other session ids may be the
 full id or an unambiguous prefix of at least
 four characters among this workspace's sessions, as the other session commands and the
 exit line print it. For `show` and `log`, append `.cN` to select child `cN` in that root session's
-agent tree, for example `plak session log <uuid>.c1`. These are read-only child
+agent tree, for example `plakd session log <uuid>.c1`. These are read-only child
 views; other session commands do not accept child selectors. `log <uuid>.cN`
 is that child's committed history, not the root event log. A committed
 compaction is a row of kind `compaction` (`compacted N earlier segments
@@ -797,10 +797,10 @@ needs recovery. Ownership and the head are separately observed, read-only facts.
 killed process, or a turn that ended `recovery required` — records once what
 that turn left unobserved, and releases it again. It never re-sends a model
 request or re-runs a tool. It exits 0, printing the one line that says what was
-recovered, or `nothing to recover`. You rarely need it: the next `plak run
+recovered, or `nothing to recover`. You rarely need it: the next `plakd run
 --session` or explicit host attach does the same thing on its own.
 
-`export` and `import` link a session to another plak build, one whose
+`export` and `import` link a session to another plakd build, one whose
 stored format differs (each build keeps its state in its own
 `~/.plak/state/<format key>/`). `export` writes a portable JSON document
 (`"format": "plak-session-export"`), mode 0600, to `--out` or to
@@ -850,10 +850,10 @@ plus all of its retained history, together with the
 history of its finished sub-agents and its agent tree, and prints
 `deleted session <id>`. It is how you free space when the session store is
 full; a new session, compaction and recovery do not. It asks first unless `--yes`
-is given, and refuses while the session is open in a running plak (or its
+is given, and refuses while the session is open in a running plakd (or its
 process died less than half a minute ago), while its agent tree has a
 sub-agent that is still running or resumable, or one that needs recovery
-(let Plak recover it first, retry through explicit client operations, or abandon that obligation
+(let plakd recover it first, retry through explicit client operations, or abandon that obligation
 with `--abandon-children`), or while other sessions continue from
 it or share its history (forks, rebinds, new-session targets); the
 refusal names them. These checks run before the question and again after it,
@@ -867,7 +867,7 @@ If a delete fails part way, run it again: it finishes what is left. A session
 carried forward with `import` does not block deleting the one it came from.
 
 A physical disk-full error is separate from the store's retention limit:
-`plak session gc --all`, deleting unused sessions, or freeing disk space are
+`plakd session gc --all`, deleting unused sessions, or freeing disk space are
 the remedies. The retention reserve is logical, not reserved disk blocks;
 reclamation may need some disk space before it can commit. A prompt rejected
 before durable admission says `prompt was not admitted`, remains queued for
@@ -882,11 +882,11 @@ forks, export and `session show` are unchanged, and it works even when the
 session store is full. It prints `reclaimed <n> checkpoints, <n> objects, <n>
 bytes (<n> sessions pruned, <n> interrupted deletes finished)`, then one
 `skipped <id>: <reason>` line for each session it left alone: one open in a
-running plak, one with an unfinished turn (run `plak session recover` first),
+running plakd, one with an unfinished turn (run `plakd session recover` first),
 or one with a workflow (a compact operation, a fork operation, a model change) that a crash cut
-short before it started (`workflow pending`: open the session, or run `plak
+short before it started (`workflow pending`: open the session, or run `plakd
 session recover`, first). With `--all` it covers
-every plak session (product record) in this home, not just this workspace, and
+every plakd session (product record) in this home, not just this workspace, and
 also finishes deletes that a crash interrupted between archiving and deleting;
 sub-agent runtime sessions are pruned by their own turns. Turns reclaim their
 own history automatically once enough builds up, so `gc` matters mostly when
@@ -897,7 +897,7 @@ automatically.
 `list` is scoped to the current workspace:
 
 ```
-$ plak session list
+$ plakd session list
 Sessions in /home/you/project
 
 SESSION ID                            UPDATED               PROVIDER            MODEL          EVENTS  TITLE
@@ -922,11 +922,11 @@ recovery report still appears.
 `--json` emits raw JSONL with no headers. The files live at
 `~/.plak/state/<format key>/sessions/<uuid>.events.jsonl`.
 
-### `plak telemetry status|sql|prune`
+### `plakd telemetry status|sql|prune`
 
 A local analytics store; nothing leaves your machine.
 ```
-$ plak telemetry status
+$ plakd telemetry status
 Telemetry store
   Path           /home/you/.plak/telemetry/telemetry-v22.sqlite3
   Schema version 22
@@ -944,8 +944,8 @@ recording_evidence    1
 …
 ```
 
-`plak telemetry status --views` prints the recommended read-only SQL to paste
-into `plak telemetry sql "<query>"` (add `--json` for machine output). Those
+`plakd telemetry status --views` prints the recommended read-only SQL to paste
+into `plakd telemetry sql "<query>"` (add `--json` for machine output). Those
 queries include repeated reads in a session (a salted digest, never the path),
 the mix of programs started (a closed program label such as `cargo` or
 `other`, never arguments or paths), occupancy at compaction, wait outcomes, and
@@ -960,7 +960,7 @@ elapsed time and replay class, never the discarded content. The SQL
 is read-only and attaches `product.sqlite3` and `runtime.sqlite3` as `product`
 and `runtime`.
 
-`plak telemetry prune` deletes whole sessions, oldest first, so it refuses a
+`plakd telemetry prune` deletes whole sessions, oldest first, so it refuses a
 bare run: pass `--max-age-days N`, `--max-bytes N`, or `--yes` to prune to the
 configured retention. Defaults are 512 MiB and 90 days, both settable under
 `[telemetry]` in `config.toml`. The byte cap counts this schema's telemetry file
@@ -970,18 +970,18 @@ stops when a reader prevents reclamation and retains sessions with unfinished
 turns.
 
 Each telemetry schema has its own file. Older files and the legacy
-`telemetry.sqlite3` stay untouched; `plak doctor` reports them. Prune applies
+`telemetry.sqlite3` stay untouched; `plakd doctor` reports them. Prune applies
 only to the current schema. Removing older files remains an explicit action.
 
-### `plak config show|set|edit|init|trust|untrust`
+### `plakd config show|set|edit|init|trust|untrust`
 
 ```
-plak config show          # prints `config_path=<path>` on its first line
-plak config set <key> <value> [--scope user|project]
-plak config edit          # uses $VISUAL, then $EDITOR; quoted arguments, no shell
-plak config init          # creates a commented template that pins no defaults
-plak config trust         # admits the discovered project .plak
-plak config untrust       # revokes project trust
+plakd config show          # prints `config_path=<path>` on its first line
+plakd config set <key> <value> [--scope user|project]
+plakd config edit          # uses $VISUAL, then $EDITOR; quoted arguments, no shell
+plakd config init          # creates a commented template that pins no defaults
+plakd config trust         # admits the discovered project .plak
+plakd config untrust       # revokes project trust
 ```
 
 `[roster] working_set` and `[orchestration]` are configuration fields. Agent templates are one file each under
@@ -993,9 +993,9 @@ See [configuration](configuration.md).
 ## Maintainer commands
 
 `just build debug|release|maintainer` and `just install maintainer` compile with
-`--features maintainer`, so your binary also has `plak fork`, `plak compact` and
-`plak compatibility` under a `MAINTAINER:` heading in `plak help`. They are not
-part of the product surface; `plak <cmd> --help` documents each.
+`--features maintainer`, so your binary also has `plakd fork`, `plakd compact` and
+`plakd compatibility` under a `MAINTAINER:` heading in `plakd help`. They are not
+part of the product surface; `plakd <cmd> --help` documents each.
 
 Maintainer inference capture selects its private run only when inference starts.
 Read-only commands and state maintenance that send no inference create no empty

@@ -38,7 +38,7 @@ class ReloadRehearsalTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()) as report,
             ):
                 code = MODULE.rehearse_copy(
-                    base, base / "backup", "key", base / "plak", "session", True, 300, 0.01
+                    base, base / "backup", "key", base / "plakd", "session", True, 300, 0.01
                 )
             self.assertEqual(code, 1)
             self.assertEqual(
@@ -52,7 +52,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             def busy(*_args, on_stdout):
                 on_stdout("c2: busy: active_turn\n")
                 return subprocess.CompletedProcess(
-                    [], 1, "c2: busy: active_turn\n", "plak: offline reload rehearsal refused\n"
+                    [], 1, "c2: busy: active_turn\n", "plakd: offline reload rehearsal refused\n"
                 )
 
             with (
@@ -63,7 +63,7 @@ class ReloadRehearsalTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()) as report,
             ):
                 code = MODULE.rehearse_copy(
-                    base, base / "backup", "key", base / "plak", "session", True, 30, 0.01
+                    base, base / "backup", "key", base / "plakd", "session", True, 30, 0.01
                 )
             self.assertEqual(code, 1)
             self.assertEqual(run.call_count, 1)
@@ -75,7 +75,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             live, backup = base / "live", base / "backup"
             results = [
                 subprocess.CompletedProcess(
-                    [], 1, "c2: busy: active_turn\n", "plak: offline reload rehearsal refused\n"
+                    [], 1, "c2: busy: active_turn\n", "plakd: offline reload rehearsal refused\n"
                 ),
                 subprocess.CompletedProcess([], 0, "c2: offline=OpensQuiescent\n", ""),
             ]
@@ -99,7 +99,7 @@ class ReloadRehearsalTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()) as report,
             ):
                 code = MODULE.rehearse_copy(
-                    live, backup, "key", base / "plak", "session", True, 30, 0.01
+                    live, backup, "key", base / "plakd", "session", True, 30, 0.01
                 )
             self.assertEqual(code, 0)
             self.assertEqual(len(captures), 2)
@@ -115,7 +115,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             with self.subTest(stdout=stdout, wait=wait), tempfile.TemporaryDirectory() as directory:
                 base = Path(directory)
                 result = subprocess.CompletedProcess(
-                    [], 1, stdout, "plak: offline reload rehearsal refused\n"
+                    [], 1, stdout, "plakd: offline reload rehearsal refused\n"
                 )
 
                 def complete(*_args, on_stdout):
@@ -129,7 +129,7 @@ class ReloadRehearsalTests(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()) as report,
                 ):
                     code = MODULE.rehearse_copy(
-                        base, base / "backup", "key", base / "plak", "session", wait, 30, 0.01
+                        base, base / "backup", "key", base / "plakd", "session", wait, 30, 0.01
                     )
                 self.assertEqual(code, 1)
                 self.assertEqual(run.call_count, 1)
@@ -184,7 +184,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             connection.execute("CREATE TABLE sessions (id TEXT, workspace_root TEXT)")
             connection.execute("INSERT INTO sessions VALUES (?, ?)", ("session", str(workspace)))
             connection.commit()
-        binary = base / "plak"
+        binary = base / "plakd"
         binary.write_text(
             "#!/usr/bin/env python3\nimport os,sys\nfrom pathlib import Path\n"
             f"Path({str(base / 'probe-call')!r}).write_text(' '.join(sys.argv[1:]) + '\\n' + os.environ['PLAK_HOME'] + '\\n' + os.getcwd())\n"
@@ -203,10 +203,10 @@ class ReloadRehearsalTests(unittest.TestCase):
                 "reopen=carries: model adapter profile (recorded `a`, this build `b`)",
             ),
             (
-                '{"verdict":"refused","reason":"run `plak login claude`"}',
+                '{"verdict":"refused","reason":"run `plakd login claude`"}',
                 0,
                 1,
-                "reopen=refused: run `plak login claude`",
+                "reopen=refused: run `plakd login claude`",
             ),
             (
                 '{"verdict":"unknown","reason":"needs_refresh"}',
@@ -279,8 +279,8 @@ class ReloadRehearsalTests(unittest.TestCase):
 
             shutil.copy(ROOT / "tools/build/reload-rehearsal.sh", repo / "tools/build")
             shutil.copy(ROOT / "tools/build/reload_rehearsal.py", repo / "tools/build")
-            shutil.copy(ROOT / "tools/build/build-plak.sh", repo / "tools/build")
-            (repo / "tools/build/build-plak.sh").chmod(0o755)
+            shutil.copy(ROOT / "tools/build/build-plakd.sh", repo / "tools/build")
+            (repo / "tools/build/build-plakd.sh").chmod(0o755)
             (repo / "tools/build/check-artifact-linkage.py").write_text(
                 "import sys\nfrom pathlib import Path\n"
                 "Path('linkage-checked').write_text(sys.argv[1])\n"
@@ -301,16 +301,16 @@ class ReloadRehearsalTests(unittest.TestCase):
             for name in ("plakous-js-host", "plakous-py-host"):
                 (output / name).write_text("#!/bin/sh\nexit 0\n")
                 (output / name).chmod(0o700)
-            (output / "plak").write_text(
+            (output / "plakd").write_text(
                 "#!/usr/bin/env python3\nimport json,os,sys\n"
                 "from pathlib import Path\n"
                 "if '--reload-probe' in sys.argv: print(json.dumps({'state_key':'key'}))\n"
-                "elif sys.argv[1:] == ['version']: print('plak fixture (build fixture-id)')\n"
+                "elif sys.argv[1:] == ['version']: print('plakd fixture (build fixture-id)')\n"
                 "else:\n"
                 " Path(os.environ['HOME'],'observed').write_text(os.environ['PLAK_HOME'])\n"
                 " print('fixture refusal'); sys.exit(1)\n"
             )
-            (output / "plak").chmod(0o700)
+            (output / "plakd").chmod(0o700)
             home = base / "home"
             (home / "state/key").mkdir(parents=True)
             env = os.environ.copy()
@@ -342,7 +342,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             self.assertEqual(
                 arguments,
                 [
-                    "build --locked --offline -p plak --features plak/maintainer --profile maintainer",
+                    "build --locked --offline -p plakd --features plakd/maintainer --profile maintainer",
                     "build --locked --offline -p plakous-js-runtime -p plakous-py-worker --profile maintainer",
                 ],
             )
@@ -430,13 +430,13 @@ class ReloadRehearsalTests(unittest.TestCase):
         )
 
     def test_scrub_removes_absolute_paths_and_keeps_the_refusal_text(self):
-        text = "template worker: may_spawn was removed (/var/plak-rehearsal-private/token)"
-        scrubbed = MODULE.scrub(text, [Path("/tmp/plak-home")])
+        text = "template worker: may_spawn was removed (/var/plakd-rehearsal-private/token)"
+        scrubbed = MODULE.scrub(text, [Path("/tmp/plakd-home")])
         self.assertIn("may_spawn was removed", scrubbed)
-        self.assertNotIn("/var/plak-rehearsal-private", scrubbed)
+        self.assertNotIn("/var/plakd-rehearsal-private", scrubbed)
         self.assertNotIn(
-            "/tmp/plak-home",
-            MODULE.scrub("see /tmp/plak-home/secrets/token", [Path("/tmp/plak-home")]),
+            "/tmp/plakd-home",
+            MODULE.scrub("see /tmp/plakd-home/secrets/token", [Path("/tmp/plakd-home")]),
         )
 
     def write_carry_binary(
@@ -452,7 +452,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             f"IMPORT_FAILURE = {import_failure!r}\n"
             f"EXPORT_FAILURES = {list(export_failures)!r}\n"
             f"LIVE = {str(live)!r}\n"
-            "PRIVATE = '/var/plak-rehearsal-private/token'\n"
+            "PRIVATE = '/var/plakd-rehearsal-private/token'\n"
             "OLD = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'\n"
             "NEW = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'\n"
             "HOME = Path(os.environ['HOME'])\n"
@@ -481,7 +481,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             "    print(json.dumps({'state_key': 'key', 'export_versions': [4, 5], 'config_error': message}))\n"
             "    sys.exit(0)\n"
             "if argv == ['version']:\n"
-            "    print('plak fixture (build fixture-id)'); sys.exit(0)\n"
+            "    print('plakd fixture (build fixture-id)'); sys.exit(0)\n"
             "if argv[:2] == ['config', 'show']:\n"
             "    message = config_message(Path(os.environ['PLAK_HOME']))\n"
             "    if message: fail(message)\n"
@@ -493,7 +493,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             "    attempt = int(counter.read_text()) if counter.exists() else 0\n"
             "    counter.write_text(str(attempt + 1))\n"
             "    if attempt < len(EXPORT_FAILURES):\n"
-            "        fail('plak: session ' + OLD + ' cannot be exported: ' + EXPORT_FAILURES[attempt])\n"
+            "        fail('plakd: session ' + OLD + ' cannot be exported: ' + EXPORT_FAILURES[attempt])\n"
             "    out = Path(argv[argv.index('--out') + 1])\n"
             "    home = Path(os.environ['PLAK_HOME'])\n"
             "    if not (home / 'state' / 'r21.e19.p27.t3' / 'product.sqlite3').is_file():\n"
@@ -515,7 +515,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             "            message = 'already carried ' + LIVE + '/secrets/token ' + PRIVATE\n"
             "        fail(message)\n"
             "    print('session ' + NEW + ' linked from ' + OLD + ' (r21.e19.p27.t3, producer binary fixture)')\n"
-            "    print('resume with: plak run --session ' + NEW); sys.exit(0)\n"
+            "    print('resume with: plakd run --session ' + NEW); sys.exit(0)\n"
             "if argv[:2] == ['session', 'rehearse']:\n"
             "    if argv[2:] != [NEW]: fail('rehearse id')\n"
             "    print('root: config=valid')\n"
@@ -564,16 +564,16 @@ class ReloadRehearsalTests(unittest.TestCase):
         (home / "secrets" / "token").write_text("synthetic-secret")
         (base / "workspace").mkdir()
         if on_path:
-            installed = base / "bin" / "plak"
+            installed = base / "bin" / "plakd"
             extra = []
         else:
-            installed = base / "installed" / "plak"
+            installed = base / "installed" / "plakd"
             extra = ["--installed", str(installed)]
-            decoy = base / "bin" / "plak"
-            decoy.write_text("#!/bin/sh\necho path plak invoked >&2\nexit 9\n")
+            decoy = base / "bin" / "plakd"
+            decoy.write_text("#!/bin/sh\necho path plakd invoked >&2\nexit 9\n")
             decoy.chmod(0o700)
         self.write_carry_binary(installed, "installed", import_status, home, import_failure)
-        self.write_carry_binary(output / "plak", "staged", import_status, home, import_failure)
+        self.write_carry_binary(output / "plakd", "staged", import_status, home, import_failure)
         env = env.copy()
         env["OPENAI_API_KEY"] = "synthetic"
         env["ANTHROPIC_API_KEY"] = "synthetic"
@@ -597,9 +597,9 @@ class ReloadRehearsalTests(unittest.TestCase):
         self.assertNotIn(str(home), result.stderr)
         self.assertNotIn("synthetic-secret", result.stdout)
         self.assertNotIn("synthetic-secret", result.stderr)
-        self.assertNotIn("plak-reload-rehearsal-", result.stdout)
-        self.assertNotIn("/var/plak-rehearsal-private", result.stdout + result.stderr)
-        self.assertNotIn("path plak invoked", result.stderr)
+        self.assertNotIn("plakd-reload-rehearsal-", result.stdout)
+        self.assertNotIn("/var/plakd-rehearsal-private", result.stdout + result.stderr)
+        self.assertNotIn("path plakd invoked", result.stderr)
 
     def test_cross_key_happy_path_rehearses_carry_and_leaves_live_home_untouched(self):
         with self.wrapper_fixture() as (base, repo, home, env, output):
@@ -640,7 +640,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             self.assertTrue(shown["plak_home"].endswith("/destination"))
             self.assertNotEqual(export["plak_home"], shown["plak_home"])
             self.assertNotEqual(export["plak_home"], str(home))
-            self.assertEqual(Path(export["argv0"]), base / "installed" / "plak")
+            self.assertEqual(Path(export["argv0"]), base / "installed" / "plakd")
             out = Path(export["argv"][export["argv"].index("--out") + 1])
             self.assertTrue(out.is_absolute())
             self.assertFalse(str(out).startswith(str(home) + os.sep))
@@ -666,7 +666,7 @@ class ReloadRehearsalTests(unittest.TestCase):
                 call for call in self.calls(base) if call["argv"][:2] == ["session", "export"]
             )
             self.assertEqual(export["role"], "installed")
-            self.assertEqual(Path(export["argv0"]), base / "bin" / "plak")
+            self.assertEqual(Path(export["argv0"]), base / "bin" / "plakd")
             self.assert_live_untouched(home, before, result)
 
     def test_cross_key_config_refusal_is_scrubbed_and_skips_import(self):
@@ -700,17 +700,17 @@ class ReloadRehearsalTests(unittest.TestCase):
         def result(code, stderr):
             return subprocess.CompletedProcess([], code, "", stderr)
 
-        typed = "plak: session has no exact effort binding\n"
+        typed = "plakd: session has no exact effort binding\n"
         self.assertTrue(MODULE.import_lacks_credentials(result(1, typed)))
         self.assertFalse(
             MODULE.import_lacks_credentials(
-                result(1, "plak: session has no exact account binding\n")
+                result(1, "plakd: session has no exact account binding\n")
             )
         )
         self.assertFalse(
             MODULE.import_lacks_credentials(result(1, "session has no exact effort binding\n"))
         )
-        self.assertFalse(MODULE.import_lacks_credentials(result(1, typed + "plak: also this\n")))
+        self.assertFalse(MODULE.import_lacks_credentials(result(1, typed + "plakd: also this\n")))
         self.assertFalse(MODULE.import_lacks_credentials(result(3, typed)))
         self.assertFalse(
             MODULE.import_lacks_credentials(result(1, "already carried /tmp/home/secrets/token\n"))
@@ -719,7 +719,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             MODULE.import_lacks_credentials(
                 result(
                     1,
-                    "plak: session has no exact effort binding; see /tmp/plak-home/secrets/token\n",
+                    "plakd: session has no exact effort binding; see /tmp/plakd-home/secrets/token\n",
                 )
             )
         )
@@ -730,8 +730,8 @@ class ReloadRehearsalTests(unittest.TestCase):
 
         def line(account, model, cause="exact native compatibility acceptance is required"):
             return (
-                f"plak: resolve {account}/{model}: {cause} \u2014 check `plak login {account}` "
-                f"and `plak models {account}`\n"
+                f"plakd: resolve {account}/{model}: {cause} \u2014 check `plakd login {account}` "
+                f"and `plakd models {account}`\n"
             )
 
         for account, model in (
@@ -746,7 +746,7 @@ class ReloadRehearsalTests(unittest.TestCase):
         )
         self.assertFalse(
             MODULE.import_lacks_credentials(
-                result(1, line("claude", "claude-opus-5-5") + "plak: also this\n")
+                result(1, line("claude", "claude-opus-5-5") + "plakd: also this\n")
             )
         )
         self.assertFalse(MODULE.import_lacks_credentials(result(1, line("openai", "gpt-6-luna"))))
@@ -755,13 +755,13 @@ class ReloadRehearsalTests(unittest.TestCase):
                 result(
                     1,
                     line("claude", "claude-opus-5-5").replace(
-                        "plak login claude", "plak login grok"
+                        "plakd login claude", "plakd login grok"
                     ),
                 )
             )
         )
         self.assertFalse(
-            MODULE.import_lacks_credentials(result(1, line("claude", "/tmp/plak-home/secrets")))
+            MODULE.import_lacks_credentials(result(1, line("claude", "/tmp/plakd-home/secrets")))
         )
         for cause in (
             "native subscription storage is unsafe",
@@ -776,9 +776,9 @@ class ReloadRehearsalTests(unittest.TestCase):
 
     def test_cross_key_credential_binding_refusal_is_not_rehearsed(self):
         refusals = (
-            "plak: session has no exact effort binding",
-            "plak: resolve claude/claude-opus-5-5: exact native compatibility acceptance is required"
-            " \u2014 check `plak login claude` and `plak models claude`",
+            "plakd: session has no exact effort binding",
+            "plakd: resolve claude/claude-opus-5-5: exact native compatibility acceptance is required"
+            " \u2014 check `plakd login claude` and `plakd models claude`",
         )
         for refusal in refusals:
             with self.subTest(refusal=refusal):
@@ -817,7 +817,7 @@ class ReloadRehearsalTests(unittest.TestCase):
                 self.subTest(signal=signum),
                 self.wrapper_fixture() as (base, repo, _home, env, output),
             ):
-                binary = output / "plak"
+                binary = output / "plakd"
                 binary.write_text(
                     binary.read_text().replace(
                         "print('fixture refusal'); sys.exit(1)",
@@ -865,7 +865,7 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
 
     RUNNING = (
         "a turn is running or parked with an unresolved operation; let it finish or run "
-        "`plak session recover` first"
+        "`plakd session recover` first"
     )
     BEHIND = "the runtime advanced past the session record; resume the session once first"
     BACKGROUND = (
@@ -960,7 +960,7 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
             base = Path(directory)
             source = base / "source"
             exported = subprocess.CompletedProcess(
-                [], 1, "", "plak: session a cannot be exported: " + self.BEHIND
+                [], 1, "", "plakd: session a cannot be exported: " + self.BEHIND
             )
             ticks = [0.0]
 
@@ -983,7 +983,7 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
                     source,
                     "key",
                     "a",
-                    base / "plak",
+                    base / "plakd",
                     base / "export",
                     [],
                     True,
@@ -1013,7 +1013,7 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
                         "--log",
                         str(base / "rehearsal.log"),
                         "--installed",
-                        "relative-plak",
+                        "relative-plakd",
                         "--interval",
                         "2",
                         "--install",
@@ -1026,7 +1026,7 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
             self.assertEqual(kwargs["cwd"], repo)
             self.assertNotIn("--detach", args[0])
             self.assertNotIn("--log", args[0])
-            self.assertIn(str(Path.cwd() / "relative-plak"), args[0])
+            self.assertIn(str(Path.cwd() / "relative-plakd"), args[0])
             self.assertIn("--install", args[0])
             self.assertEqual(args[0][args[0].index("--interval") + 1], "2.0")
             self.assertEqual((base / "rehearsal.log").stat().st_mode & 0o777, 0o600)

@@ -26,7 +26,7 @@
 //!
 //! **Faces.** The in-process durable session (this file's child mode, which
 //! re-executes the test binary itself so a scenario can be selected by data),
-//! and the real `plak` binary on its JSONL face through the scripted model,
+//! and the real `plakd` binary on its JSONL face through the scripted model,
 //! where the harness can reach a cut deterministically.
 //!
 //! Every cell asserts the reopen outcome class, the canonical history
@@ -2215,7 +2215,7 @@ fn pi_edit_and_write_in_one_turn_commit_canonical_apply_patch_and_lower_by_expos
 // The real binary on its JSONL face
 // ---------------------------------------------------------------------------
 //
-// These cells drive `plak agent` through the scripted offline model (the
+// These cells drive `plakd agent` through the scripted offline model (the
 // `test-hooks` feature). The durability gate's workspace/all-features test
 // build prepares that binary and both sidecars. Standalone invocations must
 // build the same artifacts or point `PLAK_TEST_BINARY` at a matching build
@@ -2237,13 +2237,13 @@ struct FaceFixture {
     binary: PathBuf,
 }
 
-/// The `plak` binary carrying the test hooks, when one is available.
+/// The `plakd` binary carrying the test hooks, when one is available.
 fn plak_binary() -> Option<PathBuf> {
     if let Some(explicit) = std::env::var_os("PLAK_TEST_BINARY") {
         return Some(PathBuf::from(explicit));
     }
     let deps = std::env::current_exe().ok()?;
-    let candidate = deps.parent()?.parent()?.join("plak");
+    let candidate = deps.parent()?.parent()?.join("plakd");
     candidate.is_file().then_some(candidate)
 }
 
@@ -2251,7 +2251,7 @@ impl FaceFixture {
     fn new(script: &Value) -> TestResult<Self> {
         use std::os::unix::fs::PermissionsExt;
         let binary = plak_binary().ok_or(
-            "no plak binary with test hooks; build one with `cargo build --locked -p plak \
+            "no plakd binary with test hooks; build one with `cargo build --locked -p plakd \
              --features test-hooks -p plakous-js-runtime -p plakous-py-worker` or set PLAK_TEST_BINARY",
         )?;
         let root = tempfile::tempdir()?;
@@ -2467,7 +2467,7 @@ impl FaceAgent {
         self.child.kill()?;
         let status = self.child.wait()?;
         if status.signal() != Some(9) {
-            return Err(format!("plak agent was not cut by SIGKILL: {status:?}").into());
+            return Err(format!("plakd agent was not cut by SIGKILL: {status:?}").into());
         }
         Ok(())
     }
@@ -2481,7 +2481,7 @@ impl FaceAgent {
             }
             if Instant::now() >= deadline {
                 let _ = self.child.kill();
-                return Err("plak agent never exited".into());
+                return Err("plakd agent never exited".into());
             }
             std::thread::sleep(Duration::from_millis(25));
         }

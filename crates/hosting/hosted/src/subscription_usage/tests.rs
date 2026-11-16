@@ -902,7 +902,7 @@ fn local_refusals_are_never_called_a_transport_failure() {
         "{codex_quarantine}"
     );
     assert!(
-        !codex_quarantine.contains("plak refresh"),
+        !codex_quarantine.contains("plakd refresh"),
         "{codex_quarantine}"
     );
     let transport = unavailable_reason(SubscriptionUsageUnavailable::Transport(None), "grok");

@@ -25,7 +25,7 @@ GROUPS = (
 )
 CHECK_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'contracts', 'tooling')
 PLATFORM_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'tests-durability')
-SUPPORTED = ('plakous', 'plakous-agent', 'plakous-model', 'plakous-tools', 'plak')
+SUPPORTED = ('plakous', 'plakous-agent', 'plakous-model', 'plakous-tools', 'plakd')
 # The static group's clippy runs: the workspace, then each supported package alone.
 CLIPPIES = ['clippy'] * (1 + len(SUPPORTED))
 # The builds group, in order: workspace defaults, each supported package's own
@@ -40,7 +40,7 @@ BUILDS = [
         'build',
         '--locked',
         '-p',
-        'plak',
+        'plakd',
         '--features',
         'maintainer',
         '--bins',
@@ -208,7 +208,7 @@ if args[:2] == ['nextest', 'list']:
     if os.environ.get('GATE_MISSING_RESTART_GROUP'):
         tests.pop(next(iter(tests)))
     print(json.dumps({'rust-suites': {'plak::integration': {
-        'package-name': 'plak', 'binary-name': 'integration', 'testcases': tests}}}))
+        'package-name': 'plakd', 'binary-name': 'integration', 'testcases': tests}}}))
 if args[0] == 'test':
     if os.environ.get('GATE_BUILD_FAIL'):
         raise SystemExit(1)
@@ -226,7 +226,7 @@ if args[0] == 'test':
     print(json.dumps(dict(reason='compiler-artifact', executable=str(js_worker),
                          target=dict(name='plakous-js-host', kind=['bin']), profile=dict(test=False))))
     print(json.dumps(dict(reason='compiler-artifact', executable=str(worker),
-                         target=dict(name='plak', kind=['bin']), profile=dict(test=False))))
+                         target=dict(name='plakd', kind=['bin']), profile=dict(test=False))))
 ''',
         )
         self.executable(
@@ -389,7 +389,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         for lane in lanes:
             home = lane['plak_home']
             self.assertTrue(
-                home and home.endswith('/plak-isolated-home'),
+                home and home.endswith('/plakd-isolated-home'),
                 home,
             )
             mode = lane['home_mode']
@@ -1000,11 +1000,11 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertFalse(self.package_evidence.exists())
 
     def test_fast_tier_runs_the_parallel_lane_over_touched_packages_and_dependents(self):
-        self.env['GATE_CHANGED'] = 'plakous-model\nplak\n'
+        self.env['GATE_CHANGED'] = 'plakous-model\nplakd\n'
         result, calls, scripts = self.run_gate('--fast')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(['tools/gate/changed_packages.py'], scripts)
-        scope = 'rdeps(=plakous-model) | rdeps(=plak)'
+        scope = 'rdeps(=plakous-model) | rdeps(=plakd)'
         # The serial budget lane is left to the default tier.
         self.assertEqual(self.profiles(calls), ['offline'])
         self.assertEqual(self.filtersets(calls), [scope])
@@ -1034,7 +1034,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(self.lanes(calls), [])
 
     def test_unknown_argument_is_refused(self):
-        for args in (('--quick',), ('--changed',), ('--full', 'plak'), ('--platform', 'plak')):
+        for args in (('--quick',), ('--changed',), ('--full', 'plakd'), ('--platform', 'plakd')):
             with self.subTest(args=args):
                 result = subprocess.run(
                     ['bash', str(self.root / 'tools/gate/dev-check.sh'), *args],
@@ -1228,7 +1228,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                     self.assertIn('--static-scope requires --steps', result.stderr)
 
     def test_worker_scope_lints_reverse_dependencies_and_keeps_global_checkers(self):
-        self.env['GATE_DEPENDENTS'] = 'plak\nplakous-hosted\n'
+        self.env['GATE_DEPENDENTS'] = 'plakd\nplakous-hosted\n'
         result, calls, scripts = self.run_gate('--fast', 'plakous-hosted')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         lint = [call['args'] for call in calls if call['args'][0] == 'clippy']
@@ -1238,11 +1238,11 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertNotIn('--workspace', lint[0])
         self.assertEqual(
             [lint[0][i + 1] for i, arg in enumerate(lint[0]) if arg == '-p'],
-            ['plak', 'plakous-hosted'],
+            ['plakd', 'plakous-hosted'],
         )
         self.assertIn(['tools/gate/check_workspace.py'], scripts)
         self.assertIn(
-            ['tools/gate/check_features.py', '--library-packages', 'plak', 'plakous-hosted'],
+            ['tools/gate/check_features.py', '--library-packages', 'plakd', 'plakous-hosted'],
             scripts,
         )
 

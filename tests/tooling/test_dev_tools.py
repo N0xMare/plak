@@ -356,15 +356,15 @@ class ClippySupportedPackageTests(unittest.TestCase):
             timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("== clippy: plak alone ==", result.stdout)
+        self.assertIn("== clippy: plakd alone ==", result.stdout)
         gate = (ROOT / "tools/gate/dev-check.sh").read_text()
         clippy = (ROOT / "tools/gate/clippy.sh").read_text()
         self.assertIn(
-            "supported_packages=(plakous plakous-agent plakous-model plakous-tools plak)",
+            "supported_packages=(plakous plakous-agent plakous-model plakous-tools plakd)",
             gate,
         )
         self.assertIn(
-            "packages=(plakous plakous-agent plakous-model plakous-tools plak)",
+            "packages=(plakous plakous-agent plakous-model plakous-tools plakd)",
             clippy,
         )
 
@@ -374,7 +374,7 @@ class ClippySupportedPackageTests(unittest.TestCase):
         script.parent.mkdir(parents=True)
         text = (ROOT / "tools/gate/clippy.sh").read_text()
         text = text.replace(
-            "packages=(plakous plakous-agent plakous-model plakous-tools plak)",
+            "packages=(plakous plakous-agent plakous-model plakous-tools plakd)",
             "packages=(alpha)",
         )
         script.write_text(text)

@@ -316,7 +316,7 @@ pub enum SurfaceIntent {
         /// Tree id from the latest snapshot.
         tree_id: String,
     },
-    /// Ask the host whether a newer `plak` is installed, and for the reload
+    /// Ask the host whether a newer `plakd` is installed, and for the reload
     /// request waiting for the session it serves, which it announces as
     /// accepting them; answered by [`SurfaceObservation::BuildStatus`] and,
     /// while one is offered, [`SurfaceObservation::ReloadRequested`].
@@ -327,7 +327,7 @@ pub enum SurfaceIntent {
         /// The request taken.
         request_id: String,
     },
-    /// Ask the host which installed `plak` a reload of the session it serves
+    /// Ask the host which installed `plakd` a reload of the session it serves
     /// would start, and whether this build refuses it; answered by
     /// [`SurfaceObservation::ReloadProbed`], or
     /// [`SurfaceObservation::ReloadProbeFailed`] when the check could not
@@ -430,7 +430,7 @@ pub enum SurfaceObservation {
         /// Tree the failed read was for.
         tree_id: String,
     },
-    /// Whether a newer `plak` than the running one is installed on the host.
+    /// Whether a newer `plakd` than the running one is installed on the host.
     BuildStatus {
         /// A newer build is installed; `/reload` would start it.
         newer_installed: bool,
@@ -440,7 +440,7 @@ pub enum SurfaceObservation {
     /// ([`SurfaceIntent::AcceptReloadRequest`]); the face runs it at its next
     /// idle boundary or refuses it ([`SurfaceIntent::RefuseReloadRequest`]).
     ReloadRequested(ReloadRequest),
-    /// The installed build a reload would start (`None` when no `plak` is
+    /// The installed build a reload would start (`None` when no `plakd` is
     /// installed), and this build's refusal of it.
     ReloadProbed {
         /// The reload target.

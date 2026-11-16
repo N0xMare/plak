@@ -60,7 +60,7 @@ async def record_cell(agent: Any, environment: Any) -> None:
         raise PreflightError("Plak composition differs from the declared campaign arm")
     remotes = {
         "claude-policy-launcher": "/installed-agent/claude-no-web",
-        "plak": "/installed-agent/plak",
+        "plak": "/installed-agent/plakd",
         "plakous-js-host": "/installed-agent/plakous-js-host",
         "plakous-py-host": "/installed-agent/plakous-py-host",
         "node": "/installed-agent/vendor/node/bin/node",

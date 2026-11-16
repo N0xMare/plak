@@ -363,7 +363,7 @@ impl CliFailure {
     pub fn local_runner_processes() -> Self {
         Self::classified(
             CliFailureKind::LocalRunnerProcesses,
-            "this session's processes run in the local runner; start `plak host`, or see them with `plak runner ps`",
+            "this session's processes run in the local runner; start `plakd host`, or see them with `plakd runner ps`",
         )
     }
 
@@ -375,7 +375,7 @@ impl CliFailure {
         Self::classified(
             CliFailureKind::LocalRunnerInspection,
             format!(
-                "cannot inspect local-runner ownership for node {agent} (locator {locator}): {cause}; open it through `plak host` (start `plak host`, then attach), or inspect daemon jobs with `plak runner ps`; only as a destructive last resort, use `plak session delete` with `--abandon-children` when needed"
+                "cannot inspect local-runner ownership for node {agent} (locator {locator}): {cause}; open it through `plakd host` (start `plakd host`, then attach), or inspect daemon jobs with `plakd runner ps`; only as a destructive last resort, use `plakd session delete` with `--abandon-children` when needed"
             ),
         )
     }

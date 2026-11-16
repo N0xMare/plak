@@ -41,7 +41,7 @@ pub fn select(extension: Arc<dyn RunnerExtension>) -> Result<(), String> {
     }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
-        .thread_name("plak-loopback-runner")
+        .thread_name("plakd-loopback-runner")
         .enable_all()
         .build()
         .map_err(|error| format!("the loopback runner's runtime did not start: {error}"))?;

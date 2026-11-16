@@ -40,7 +40,7 @@ pub(crate) fn output_bound_rederived_note(
         bound.map_or_else(|| "none".to_owned(), |bound| bound.get().to_string())
     };
     format!(
-        "plak: this session keeps its output budget of {} tokens; the route now attests {}; \
+        "plakd: this session keeps its output budget of {} tokens; the route now attests {}; \
          start a new session to use it",
         render(previous),
         render(current)
@@ -99,38 +99,38 @@ pub(crate) const fn abandoned_turn_operator_detail(
     model_round_completed: bool,
 ) -> &'static str {
     if tool_round_completed && matches!(claim, plakous::agent::AbandonedTurnClaim::RunningTool) {
-        return "plak: recovered an interrupted turn; its tool round completed before the next \
+        return "plakd: recovered an interrupted turn; its tool round completed before the next \
                 model request, but a process it started has an unknown outcome; completed tool \
                 results were kept; check the workspace before carrying on";
     }
     match (claim, cause) {
         (plakous::agent::AbandonedTurnClaim::ToolRoundCompleted, _) if !model_round_completed => {
-            "plak: recovered an interrupted turn; its tool round completed, but the turn was \
+            "plakd: recovered an interrupted turn; its tool round completed, but the turn was \
              interrupted before the next model request; completed tool results were kept"
         }
         (plakous::agent::AbandonedTurnClaim::ToolRoundCompleted, _) => {
-            "plak: recovered an interrupted turn; its last round completed, but the turn was \
+            "plakd: recovered an interrupted turn; its last round completed, but the turn was \
              interrupted before the next model request; completed work was kept"
         }
         (plakous::agent::AbandonedTurnClaim::RunningTool, _) => {
-            "plak: recovered an interrupted turn; a tool may have changed this workspace; \
+            "plakd: recovered an interrupted turn; a tool may have changed this workspace; \
              its result was not added to the conversation and it is not retried - check \
              the workspace before carrying on"
         }
         (plakous::agent::AbandonedTurnClaim::ModelRequest, _) => {
-            "plak: recovered an interrupted turn; its model request may have been processed \
+            "plakd: recovered an interrupted turn; its model request may have been processed \
              and billed; nothing from it was kept"
         }
         (plakous::agent::AbandonedTurnClaim::CompactionNotApplied, _) => {
-            "plak: recovered an interrupted turn; compaction was not applied (it may have been \
+            "plakd: recovered an interrupted turn; compaction was not applied (it may have been \
              billed) and the conversation is unchanged"
         }
         (_, plakous::agent::AbandonmentCause::ProcessLost) => {
-            "plak: recovered an interrupted turn; exact evidence proves its pending work \
+            "plakd: recovered an interrupted turn; exact evidence proves its pending work \
              never started, so nothing after that boundary ran"
         }
         _ => {
-            "plak: recovered an interrupted turn; nothing it asked for had started, so nothing \
+            "plakd: recovered an interrupted turn; nothing it asked for had started, so nothing \
              ran and nothing was changed"
         }
     }

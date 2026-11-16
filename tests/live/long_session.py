@@ -200,7 +200,7 @@ def catalog_window(model: str) -> int | None:
 INPUT_CEILING_ENV = "PLAK_LIVE_INPUT_CEILING"
 INPUT_CEILING_REMEDY = (
     f"set {INPUT_CEILING_ENV} to the admitted input ceiling of a short session on this "
-    "route and protocol: `plak usage --session <id>` prints admitted_input_ceiling=N"
+    "route and protocol: `plakd usage --session <id>` prints admitted_input_ceiling=N"
 )
 
 
@@ -1364,7 +1364,7 @@ def child_ordinals(events: list[dict]) -> list[str]:
 
 
 def child_ordinals_from_show(text: str) -> list[str]:
-    """`Child          cN node=…` lines from `plak session show <root>`."""
+    """`Child          cN node=…` lines from `plakd session show <root>`."""
     found: list[str] = []
     for line in text.splitlines():
         parts = line.split()
@@ -1400,7 +1400,7 @@ def is_committed_compaction_projection(record: dict) -> bool:
 def _session_command(
     binary: Path, home: Path, args: list[str], timeout: float
 ) -> tuple[int, str, str]:
-    """`plak session …` against `home`. A dead binary or a timeout is the channel failing."""
+    """`plakd session …` against `home`. A dead binary or a timeout is the channel failing."""
     env = live.plak_child_source()
     env["PLAK_HOME"] = str(home)
     env.pop("PLAK_TEST_FAULTS", None)
@@ -1427,7 +1427,7 @@ def _channel_detail(code: int, stdout: str, stderr: str) -> str:
 def child_ordinals_from_session_show(
     binary: Path, home: Path, root_id: str, timeout: float = 120
 ) -> list[str]:
-    """Child ordinals from `plak session show <root>`. Non-zero with no child line is pending.
+    """Child ordinals from `plakd session show <root>`. Non-zero with no child line is pending.
 
     A recovery-required show still prints `Child` lines before it exits
     non-zero. Those ordinals are usable; a later log failure is its own channel
@@ -1445,7 +1445,7 @@ def child_ordinals_from_session_show(
 def read_child_history(
     binary: Path, home: Path, root_id: str, ordinal: str, timeout: float = 120
 ) -> list[dict]:
-    """`plak session log <root>.cN --json` items, including a Working `history_snapshot` header."""
+    """`plakd session log <root>.cN --json` items, including a Working `history_snapshot` header."""
     code, stdout, stderr = _session_command(
         binary,
         home,
@@ -1764,7 +1764,7 @@ class LongSession:
         )
 
     def kill_reopen(self) -> str:
-        marker = "plak-long-kill-" + self.random_bytes(4).hex()
+        marker = "plakd-long-kill-" + self.random_bytes(4).hex()
         # An argv token, not a `#` comment: the shell drops the comment before
         # exec, so `pkill -f` would not see it on the sleep process.
         command = f"python3 -c 'import time; time.sleep(45)' {marker}"
@@ -1805,7 +1805,7 @@ class LongSession:
             else:
                 if not started["tool"]:
                     raise ScenarioFailure(MODEL, "the model never started the command")
-                raise ScenarioFailure(HARNESS, "plak agent survived SIGKILL")
+                raise ScenarioFailure(HARNESS, "plakd agent survived SIGKILL")
             session = agent.session_id
             close_agent(agent)
             self._reap(marker, started["pid"])
@@ -1985,7 +1985,7 @@ def selected_catalog(only: str, run_all: bool) -> tuple[tuple[str, str], ...]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("route", nargs="?", default="grok", choices=sorted(live.ROUTES))
-    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plak")
+    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plakd")
     parser.add_argument("--fixture-seed", type=int, help="replay randomized scenario inputs")
     parser.add_argument("--artifacts", type=Path, help="fresh attempt artifact directory")
     select = parser.add_mutually_exclusive_group()

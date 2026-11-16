@@ -126,9 +126,9 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         )
 
     def test_requested_tier_is_forwarded(self):
-        result, call = self.run_gate('--fast', 'plak')
+        result, call = self.run_gate('--fast', 'plakd')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(call['args'][-3:], ['sh', '--fast', 'plak'])
+        self.assertEqual(call['args'][-3:], ['sh', '--fast', 'plakd'])
 
     def test_container_uses_host_identity_and_writable_offline_home(self):
         result, call = self.run_gate()
@@ -190,7 +190,7 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         seed = command.split('    cd /qual/src')[0]
         seed = seed.replace('/qual/cargo-home', str(cargo_home))
         seed = seed.replace('/usr/local/cargo', str(image_cargo))
-        seed = seed.replace('/tmp/plak-musl-home.XXXXXX', str(self.root / 'home.XXXXXX'))
+        seed = seed.replace('/tmp/plakd-musl-home.XXXXXX', str(self.root / 'home.XXXXXX'))
         for _ in range(2):
             result = subprocess.run(
                 ['/bin/sh', '-c', seed], env=self.env, text=True, capture_output=True, timeout=15

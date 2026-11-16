@@ -7,13 +7,13 @@ set working-directory := '../..'
 default:
     @just --justfile "{{justfile()}}" --list live
 
-# test-hooks plak plus the JavaScript and Monty workers, for PLAK_TEST_FAULTS.
+# test-hooks plakd plus the JavaScript and Monty workers, for PLAK_TEST_FAULTS.
 _test-hooks:
-    CARGO_INCREMENTAL=0 tools/build/build-plak.sh --release --features plak/test-hooks
+    CARGO_INCREMENTAL=0 tools/build/build-plakd.sh --release --features plakd/test-hooks
 
 # Parent only. The MCP OAuth driver does not start workers.
-_test-hooks-plak:
-    tools/build/build-plak.sh --release --features plak/test-hooks --plak-only
+_test-hooks-plakd:
+    tools/build/build-plakd.sh --release --features plakd/test-hooks --plakd-only
 
 # Live smoke: a few minutes of short scenarios (coding task, resume, compaction,
 # cancel, injected faults, a 2-child wave) on Grok, OpenRouter,
@@ -25,7 +25,7 @@ smoke *ARGS: _test-hooks
     tests/live/smoke.py {{ARGS}}
 
 # Live soak: one long session of real tasks on a pinned more-itertools checkout,
-# with faults, SIGSTOP/SIGCONT sleeps, compactions and one plak rebuild.
+# with faults, SIGSTOP/SIGCONT sleeps, compactions and one plakd rebuild.
 # Usage: just live soak grok --hours 2
 # `--long-session --only <names>` runs tests/live/long_session.py instead of
 # the hour loop. Paid, never in a gate.
@@ -40,10 +40,10 @@ soak *ARGS: _test-hooks
 jobs *ARGS: _test-hooks
     tests/live/jobs.py {{ARGS}}
 
-# Opt-in local authorization servers + browser. Builds plak only (no workers).
+# Opt-in local authorization servers + browser. Builds plakd only (no workers).
 # No accounts or inference; no gate.
 [doc("local MCP OAuth servers and a browser; no accounts or inference")]
-mcp-oauth *ARGS: _test-hooks-plak
+mcp-oauth *ARGS: _test-hooks-plakd
     tests/live/mcp_oauth/run.py {{ARGS}}
 
 # Opt-in census of the bundled API model tables. Networked, never a gate.

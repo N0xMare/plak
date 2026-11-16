@@ -1,7 +1,7 @@
 //! Ready-catalog rows: which accounts are ready and which exact models each
 //! one offers, plus the credential readiness the Providers view paints.
 
-/// One catalog row from `plak models <account>`.
+/// One catalog row from `plakd models <account>`.
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
 )]
@@ -83,9 +83,9 @@ impl From<Vec<ProviderSection>> for ReadyCatalog {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum AuthKind {
-    /// Subscription OAuth (`plak login`).
+    /// Subscription OAuth (`plakd login`).
     Oauth,
-    /// API key file / env (`plak key set`).
+    /// API key file / env (`plakd key set`).
     ApiKey,
 }
 

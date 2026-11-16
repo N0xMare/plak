@@ -36,7 +36,7 @@ fn key_usage_rejection_names_status_source_and_remedy_only() {
         assert!(file.contains("from sha256:1234abcd"));
         assert!(file.contains(status));
         assert!(file.contains("replace the rejected API key from the key file"));
-        assert!(!file.contains("plak key"));
+        assert!(!file.contains("plakd key"));
     }
 }
 use crate::agent::enroll_product_instructions;

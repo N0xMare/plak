@@ -6,15 +6,15 @@ set working-directory := '../..'
 default:
     @just --justfile "{{justfile()}}" --list dev
 
-# Symlink ~/.local/bin/plak-dev (repairing a stale one) and seed the isolated
-# ~/plak-dev-home playground.
-[doc("symlink ~/.local/bin/plak-dev and seed the isolated playground")]
+# Symlink ~/.local/bin/plakd-dev (repairing a stale one) and seed the isolated
+# ~/plakd-dev-home playground.
+[doc("symlink ~/.local/bin/plakd-dev and seed the isolated playground")]
 home-install:
-    tools/dev/plak-dev.sh --dev-install
+    tools/dev/plakd-dev.sh --dev-install
 
-# Wipe ~/plak-dev-home sqlite/sessions; keep config.toml.
+# Wipe ~/plakd-dev-home sqlite/sessions; keep config.toml.
 home-reset:
-    tools/dev/plak-dev.sh --dev-reset-home
+    tools/dev/plakd-dev.sh --dev-reset-home
 
 # Offline preflight on a private backup. A changed state key rehearses
 # carry-forward in disposable homes. --wait-idle retries three idle export refusals at

@@ -8,7 +8,7 @@ constrain them.
 
 ## 1. Distribution
 
-**Plak and Plakous release as one exact cohort.** Every workspace package has
+**plakd and Plakous release as one exact cohort.** Every workspace package has
 the workspace version `0.0.3`; internal dependencies are declared once in the
 root `[workspace.dependencies]` as `{ version = "0.0.3", path = ... }` and
 inherited with `.workspace = true`, so each packaged manifest requires exactly
@@ -28,7 +28,7 @@ export-document rule of chapter 02 §2.5.1.
 
 Each `v<version>` tag also has a GitHub Release carrying one tarball per
 supported target and `SHA256SUMS`, installed by the repository's `install.sh`
-(§6.6). There is no `plak update` verb and no self-update path. Updating means
+(section 6.6). There is no `plakd update` verb and no self-update path. Updating means
 rerunning the installer or pulling the source and rebuilding (§6.3).
 
 Support classes describe which surfaces a consumer is entitled to rely on, and
@@ -92,7 +92,11 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 **Supported (5)**
 
-`plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`.
+`plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plakd`.
+
+`plakd` is the supported product package; its library target and executable
+use the same name. The `plak` package is retired; this tree provides no
+package alias or executable shim.
 
 **Published internal (34)**
 
@@ -128,7 +132,7 @@ generic envelopes. It verifies accessibility, not an additional support claim.
 `plakous-runner` (layer `engine`) its host and runner ends, the runner daemon
 and the in-process loopback (chapter 01 §8.4). The facade reaches them only
 through its hidden `plakous::runner` module, which carries no support promise;
-`plak runner` is their product consumer (chapter 02 §1).
+`plakd runner` is their product consumer (chapter 02 section 1).
 
 Every one of these declares its `layer` and `class` in `[package.metadata.plakous]`,
 and `tools/gate/check_workspace.py` (via `tools/gate/plakous_policy.py`) checks each
@@ -152,7 +156,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | `crates/plakous/` | complete-workflow public entrypoint | facade |
 | `crates/hosting/` | host protocol and hosted runtime | host |
 | `crates/orchestration/` | workspace, recursive subagents and their store | host |
-| `bin/plak/` | Host server, operator CLI and JSONL product | bin |
+| `bin/plakd/` | Host server, operator CLI and JSONL product | bin |
 | `tests/` | repository support, fixtures and harnesses | test |
 | `vendor/` | the reviewed Code Mode protocol snapshot (`vendor/monty-typeshed` is a `[patch]` source, not a member) | vendor |
 | `eval/` | Opt-in, paid Harbor / Terminal-Bench harness bakeoff; linux/amd64 or linux/arm64 GNU agent packaging selected by `HARBOR_ARCH`, not musl qualification; ARM cells are rebuilt from task definitions rather than the published amd64 images; an eval lane is not product support; paid runs are not in the daily gate | (none) |
@@ -173,7 +177,7 @@ cohort packages together (§6.5), and it keeps its upstream edition,
 rust-version, Apache-2.0 license and `unsafe_code = "forbid"` lint table rather
 than the workspace's.
 
-`plak` names `plakous-host-protocol` under its recorded host-layer edge
+`plakd` names `plakous-host-protocol` under its recorded host-layer edge
 exception. The product ships no application-client module.
 
 The facade's optional native-route edge to `plakous-exchange` is an explicit
@@ -222,7 +226,7 @@ by whatever happens to be `pub`.
 | `plakous-agent` | The explicit construction, prompt/turn, control and acknowledgement, result, observation and atomic attach contract, context-source, profile and policy, usage, and telemetry reexports. Hosts own presentation; no raw checkpoint, store, or runtime authority | `crates/core/agent/src/lib.rs` and `tests/fixtures/agent-consumer` |
 | `plakous-model` | The Custom-model construction and registration seam: `LanguageModel`, validated preparation inputs and results, Custom descriptor and implementation identity, the identifiers and capability values needed to build them, and the typed preparation error | `tests/fixtures/model-consumer` |
 | `plakous-tools` | The Custom-tool construction and registration seam: executor, future and context, invocation and outcome, registry builder and frozen registry, registration and executor identifiers, the image-normalizer hook and its typed sourced refusal, plus the model-owned definition, schema, effect, and concurrency values | `tests/fixtures/tools-consumer` |
-| `plak` | The installed process behaviors of the binary: version, help and recursive help; `wire schema` (chapter 02 §4.4); `config init/set/show`; `doctor`, `session list`, key status; confirmation and no-guessed-context failures; non-TTY bare invocation; missing-auth exit 3; malformed-argv exit 2. There is no supported direct Rust library API | `bin/plak/tests/integration/cli_contract.rs` and the tooling real-host integration client. `cli.rs` is implementation grammar, not output or exit authority |
+| `plakd` | The installed process behaviors of the binary: version, help and recursive help; `wire schema` (chapter 02 §4.4); `config init/set/show`; `doctor`, `session list`, key status; confirmation and no-guessed-context failures; non-TTY bare invocation; missing-auth exit 3; malformed-argv exit 2. There is no supported direct Rust library API | `bin/plakd/tests/integration/cli_contract.rs` and the tooling real-host integration client. `cli.rs` is implementation grammar, not output or exit authority |
 
 A direct-package symbol outside the corresponding fixture is nameable, not
 supported — even when a facade reexport of the same name is separately
@@ -233,7 +237,7 @@ support are curated independently.
 
 The facade's always-on `application` executor and `run_once_until_signal` take
 caller-supplied cancellation and contain no terminal policy. Ctrl-C, secret
-reading and browser opening are Plak implementations. The neutral
+reading and browser opening are plakd implementations. The neutral
 `sessions::isolated_tool_scheduler` supports concurrent sessions in one
 process without exposing scheduler authority. Assignment prompt renderers
 and their unchanged digest pins live in `plakous-hosted::child_prompts`;
@@ -272,14 +276,14 @@ publication needs no file outside the package root:
 
 - Every `include_str!`/`include_bytes!` in a package's tracked Rust files,
   tests included, resolves inside that package. Embedded assets live in the
-  package that embeds them: the built-in profile homes in `bin/plak/presets/`,
+  package that embeds them: the built-in profile homes in `bin/plakd/presets/`,
   the vendored Codex instruction text in
   `crates/harness/prompts/vendor/codex-prompt/`, and test fixtures beside the
   tests that read them (a fixture two packages read is copied into each).
 - No packaged manifest names a repository-only package outside
   dev-dependencies, and a dev-dependency on one is path-only, so `cargo
   package` strips it.
-- `plak/test-hooks` is repository-only. Cargo packages no regular dependency
+- `plakd/test-hooks` is repository-only. Cargo packages no regular dependency
   that is not on the registry, optional or not, so the repository manifest
   keeps the feature with its optional `plakous-offline-crash-harness` edge and
   the published manifest is that manifest with both removed
@@ -288,7 +292,7 @@ publication needs no file outside the package root:
   compiles out of the published crate, and the workspace lints declare the
   feature name to `check-cfg`, so it builds without an unexpected-cfg warning.
   Repository builds, the gate, and the live drivers keep
-  `--features plak/test-hooks`.
+  `--features plakd/test-hooks`.
 - The Code Mode grammar snapshot under `vendor/codex-code-mode-protocol` is the
   package `plakous-codex-code-mode-protocol`: upstream `codex-code-mode-protocol`
   renamed, keeping the upstream version, `LICENSE`, `NOTICE` and
@@ -296,19 +300,19 @@ publication needs no file outside the package root:
 
 - A published package carries the registry metadata: its description,
   `license`, `repository` and `homepage` (both the repository URL),
-  `documentation` (`https://docs.rs/<name>` for a library; `plak` and the
+  `documentation` (`https://docs.rs/<name>` for a library; `plakd` and the
   binary-only `plakous-py-worker` point into the repository), a `readme`, one
   to five crates.io keywords and categories, and a `LICENSE` file in the
   package root. Members other than the vendor snapshot are MIT, and each
   `LICENSE` is a link to the root `LICENSE`, which Cargo packages as a regular
-  file; the vendor snapshot keeps its Apache-2.0 `LICENSE` and `NOTICE`. `plak` and `plakous` use the root
+  file; the vendor snapshot keeps its Apache-2.0 `LICENSE` and `NOTICE`. `plakd` and `plakous` use the root
   `README.md`; every other package has its own short `README.md`.
 - Members other than the vendor snapshot inherit `[workspace.package].exclude`: `/tests/`, `/benches/` and
   `/fixtures/` stay in the repository. A packaged crate builds its library and
   binaries; its integration tests, benches and test data, and the unit tests
   that read that data, run only from the repository.
 
-`tools/gate/check_workspace.py` enforces these rules and judges `plak` by its
+`tools/gate/check_workspace.py` enforces these rules and judges `plakd` by its
 published shape.
 
 ## 4. Product features
@@ -336,21 +340,21 @@ The workspace checker enforces configuration placement through
 (`&module::ENTRY` or `&ENTRY`), not arbitrary gated items or statements. Other feature
 predicates must gate a module declaration (including disabled-module swaps).
 `env-sites` defaults to
-empty and lists reviewed environment-reading boundary files. Plak's boundary
+empty and lists reviewed environment-reading boundary files. plakd's boundary
 files are `environment.rs`, `home/paths.rs` and `home/secrets.rs`; the tools
 child-environment builder and workspace VCS environment files are reviewed
 library exceptions. Test-hooks-only deadline overrides are the same kind of
 exception: `plakous` reads `PLAK_TEST_SESSION_LEASE_SECONDS` only in
 `test_session_lease.rs`, and `plakous-cell` reads `PLAK_TEST_CELL_HELLO_MS`
 only in `test_hooks.rs`. Only `test-hooks` builds compile those modules.
-`plak/test-hooks` enables `plakous/test-hooks`, which enables
+`plakd/test-hooks` enables `plakous/test-hooks`, which enables
 `plakous-cell/test-hooks` when the cell client is already linked, and
 `plakous-agent/test-hooks`, whose `test_hooks.rs` names on stderr a
 credential-wait clear the event hub refused (a production build drops it
 silently, as before). The hello
 override accepts 1 through 30 000 milliseconds and no more.
 Those three `test-hooks` features are hidden from the 2n+3 closure witnesses,
-the same way `test-clock` is. `plak/test-hooks` and
+the same way `test-clock` is. `plakd/test-hooks` and
 `plakous-py-worker/test-hooks` stay in their package witnesses.
 Imported environment readers, including aliases and
 function items, are inventoried as well as direct calls. The process working
@@ -366,7 +370,7 @@ composition root: `Services::from_env` is called only in `lib.rs` and
 
 Test-seam features (`test-support`, `test-hooks`, `commit-trace`,
 `fault-injection`, `perf-instrumentation`, `scripted-code-mode-enrolment`)
-belong only on test-support module declarations in libraries and in Plak's
+belong only on test-support module declarations in libraries and in plakd's
 `lib.rs`/`test_hooks.rs` composition root. Production control-flow seams are
 existing debt, not a precedent for new sites. The checker counts feature,
 test-seam and environment placement debt separately, with exact current
@@ -430,7 +434,7 @@ tracked Rust file of the package, tests included:
   raised without review.
 
 `plakous-hosted::capabilities` owns the complete current route metadata in
-per-route modules and one ordered registry. Plak's private product registry
+per-route modules and one ordered registry. plakd's private product registry
 adds its labels, recommendation aliases, doctor probe and bundled preset for
 each hosted identity. Every route stays registered, with its feature name and
 compiled flag; runtime construction and credential/catalog work live behind
@@ -449,29 +453,29 @@ called out explicitly.
 
 | Crate | Feature | Effect |
 | --- | --- | --- |
-| `plak`, `plakous-hosted` | `codex`, `grok`, `claude` | Independently forward the corresponding native facade route; `codex` additionally requires `js` |
-| `plak`, `plakous-hosted` | `openai`, `anthropic`, `xai-api`, `openrouter` | Independently forward the API route (`xai-api` forwards facade `xai`); `openai` additionally requires `js` |
-| `plak`, `plakous-hosted` | `images` | Default on; hosted image normalization, forwarding `plakous-image/normalize` and its optional `image` dependency; new attachments refuse without it, canonical history remains readable |
+| `plakd`, `plakous-hosted` | `codex`, `grok`, `claude` | Independently forward the corresponding native facade route; `codex` additionally requires `js` |
+| `plakd`, `plakous-hosted` | `openai`, `anthropic`, `xai-api`, `openrouter` | Independently forward the API route (`xai-api` forwards facade `xai`); `openai` additionally requires `js` |
+| `plakd`, `plakous-hosted` | `images` | Default on; hosted image normalization, forwarding `plakous-image/normalize` and its optional `image` dependency; new attachments refuse without it, canonical history remains readable |
 | `plakous-image` | `normalize` | Default on for direct use; decoding, downscaling and re-encoding through the `image` crate, and the image-file reader, in its `normalize` module. Without it sniffing, the bounds, the message budget, the dropped-path check and the error vocabulary remain; `plakous-tools` uses it that way |
-| `plak`, `plakous-hosted` | `js` | Default on; JavaScript/Code Mode admission, facade `composition`, and product JavaScript worker resolution |
-| `plak`, `plakous-hosted` | `python` | Default on; explicitly forwards facade `composition-python`, implies `js`, and selects Python worker resolution |
-| `plak`, `plakous-hosted` | `mcp` | Default on; forwards the facade client and selects active MCP commands/binding. Omission removes rmcp and the MCP transports while frozen records remain readable |
+| `plakd`, `plakous-hosted` | `js` | Default on; JavaScript/Code Mode admission, facade `composition`, and product JavaScript worker resolution |
+| `plakd`, `plakous-hosted` | `python` | Default on; explicitly forwards facade `composition-python`, implies `js`, and selects Python worker resolution |
+| `plakd`, `plakous-hosted` | `mcp` | Default on; forwards the facade client and selects active MCP commands/binding. Omission removes rmcp and the MCP transports while frozen records remain readable |
 | `plakous-mcp` | `client` | Internal runtime closure, default on for direct use. The facade disables this dependency's defaults and selects the client explicitly through `mcp`; without it only frozen record vocabulary, naming and errors remain |
-| `plak`, `plakous-hosted`, `plakous` | `web-fetch` | Explicit local `fetch_url` implementation and HTML converter; default on in the product, independent of providers in the facade. Omitted tool selections refuse with the typed capability error before attach or tool construction; frozen limits remain readable |
-| `plak` | `maintainer` | Empty feature gating only Plak's own cfg sites: maintainer verbs, the offline reload rehearsal and its test target, the explicit processing-tier selection, and automatic private inference capture (§6.2) |
-| `plak` | `otel` | OTLP export and the typed telemetry bridge. Default builds carry no `opentelemetry` dependency |
-| `plak` | `test-support` | Isolated product fixtures and the internal rendering benchmark entry; required by `telemetry_contract`, whose target is skipped without it |
+| `plakd`, `plakous-hosted`, `plakous` | `web-fetch` | Explicit local `fetch_url` implementation and HTML converter; default on in the product, independent of providers in the facade. Omitted tool selections refuse with the typed capability error before attach or tool construction; frozen limits remain readable |
+| `plakd` | `maintainer` | Empty feature gating only plakd's own cfg sites: maintainer verbs, the offline reload rehearsal and its test target, the explicit processing-tier selection, and automatic private inference capture (section 6.2) |
+| `plakd` | `otel` | OTLP export and the typed telemetry bridge. Default builds carry no `opentelemetry` dependency |
+| `plakd` | `test-support` | Isolated product fixtures and the internal rendering benchmark entry; required by `telemetry_contract`, whose target is skipped without it |
 | `plakous` | `composition`, `composition-python` | Code Mode and JavaScript through the engine-free cell client; Python profiles additionally require `composition-python`. Neither links credential, HTTP, subscription, or interpreter machinery |
 | `plakous-compose` | `scripted-code-mode-enrolment` | One extra enrolled local Code Mode target whose every field is a `scripted`/`offline` identifier, so the repository's offline harness can compile Code Mode against a scripted model. Off by default, reached only through the harness, and it leaves the enrolment gate's own conditions unchanged. See chapter 05 §2.6 |
-| `plakous`, `plakous-cell` | `test-hooks` | Deadline overrides for the repository gate: `PLAK_TEST_SESSION_LEASE_SECONDS` (1 through 30 seconds) and `PLAK_TEST_CELL_HELLO_MS` (1 through 30 000 milliseconds). Absent from `default` and `full`. `plak/test-hooks` enables the facade feature, which enables the cell feature only when the cell client is already linked. Other builds do not compile the environment reads |
-| `plakous-http` | `fault-injection` | `PLAK_TEST_FAULTS` transport fault injection (spec 05 §2.8). Enabled only by the repository harness crate, so `plak/test-hooks` is its one product edge; `check_features.py` refuses it in a default `plak` |
+| `plakous`, `plakous-cell` | `test-hooks` | Deadline overrides for the repository gate: `PLAK_TEST_SESSION_LEASE_SECONDS` (1 through 30 seconds) and `PLAK_TEST_CELL_HELLO_MS` (1 through 30 000 milliseconds). Absent from `default` and `full`. `plakd/test-hooks` enables the facade feature, which enables the cell feature only when the cell client is already linked. Other builds do not compile the environment reads |
+| `plakous-http` | `fault-injection` | `PLAK_TEST_FAULTS` transport fault injection (spec 05 section 2.8). Enabled only by the repository harness crate, so `plakd/test-hooks` is its one product edge; `check_features.py` refuses it in a default `plakd` |
 | `plakous-py-worker` | `test-hooks` | Real-worker result-delivery crash cuts for the durability tests (spec 05 §2). Never enabled by a product dependency or ordinary worker build; without it the worker reads no cut environment and writes no sentinel. The interpreter and type checker remain worker-only. |
-| `plakous-store` | `commit-trace` | Repository-only process-wide durable SQLite commit tracing and indexed `SIGKILL` cuts (spec 05 §2.6, commit trace contract). Enables `sqlite`, `rusqlite/hooks`, `nix/signal`, and optional JSON encoding. Inert without `PLAK_TEST_COMMIT_TRACE`; reached by Plak through the offline-crash harness under `test-hooks` and through its harness dev-dependency in test builds, never a default or maintainer/release product build. The dev edge gives runtime-only tracing without `test-hooks`; a sweep must require `cfg(feature="test-hooks")` for all three stores. |
-| `plakous-recursive-subagents-store` | `commit-trace` | Optional direct `plakous-store` edge solely to share that process-wide tracer. This explicit test-only host-to-store exception is pinned by the workspace checker; `plak/test-hooks` directly forwards it over the existing product-to-tree dependency, avoiding a harness-to-tree dev-dependency cycle. No facade feature or API is added. Feature checks and tooling tests prove the edge absent from the tree's default direct dependencies and both tracing features absent from default and maintainer/release Plak closures. |
+| `plakous-store` | `commit-trace` | Repository-only process-wide durable SQLite commit tracing and indexed `SIGKILL` cuts (spec 05 section 2.6, commit trace contract). Enables `sqlite`, `rusqlite/hooks`, `nix/signal`, and optional JSON encoding. Inert without `PLAK_TEST_COMMIT_TRACE`; reached by plakd through the offline-crash harness under `test-hooks` and through its harness dev-dependency in test builds, never a default or maintainer/release product build. The dev edge gives runtime-only tracing without `test-hooks`; a sweep must require `cfg(feature="test-hooks")` for all three stores. |
+| `plakous-recursive-subagents-store` | `commit-trace` | Optional direct `plakous-store` edge solely to share that process-wide tracer. This explicit test-only host-to-store exception is pinned by the workspace checker; `plakd/test-hooks` directly forwards it over the existing product-to-tree dependency, avoiding a harness-to-tree dev-dependency cycle. No facade feature or API is added. Feature checks and tooling tests prove the edge absent from the tree's default direct dependencies and both tracing features absent from default and maintainer/release plakd closures. |
 | `plakous-openai` | `test-support` | Implies `native-auth`; exposes the doc-hidden builder for ephemeral Codex browser-login callbacks and an explicit catalog fixture origin. A dev-dependency of `plakous`, never a production edge |
-| `plakous-hosted` | `test-support` | Test-only session doubles, host-loop drivers, scripted `RuntimeFactory` registrations, and the host crash cuts (`test_support_runner::HostCut`, spec 05 §2.6); the construction port itself is always available. A dev-dependency of `plak`, never a production edge |
-| `plakous-host-protocol` | `test-support` | Test-only view constructors; a dev-dependency of `plakous-hosted` and `plak`, never a production edge |
-| `plak` | `git-cli`, `jj` | Of the VCS features, defaults enable only `git-cli`. `jj` forwards the native `jj-lib` backend; `maintainer` enables `jj`. Release tarballs and `build-plak.sh --artifacts` use defaults, without JJ. A no-JJ build refuses JJ-only repositories with an instruction to use the `jj` feature; colocated repositories use Git copies, with a doctor row and one new-session notice. |
+| `plakous-hosted` | `test-support` | Test-only session doubles, host-loop drivers, scripted `RuntimeFactory` registrations, and the host crash cuts (`test_support_runner::HostCut`, spec 05 section 2.6); the construction port itself is always available. A dev-dependency of `plakd`, never a production edge |
+| `plakous-host-protocol` | `test-support` | Test-only view constructors; a dev-dependency of `plakous-hosted` and `plakd`, never a production edge |
+| `plakd` | `git-cli`, `jj` | Of the VCS features, defaults enable only `git-cli`. `jj` forwards the native `jj-lib` backend; `maintainer` enables `jj`. Release tarballs and `build-plakd.sh --artifacts` use defaults, without JJ. A no-JJ build refuses JJ-only repositories with an instruction to use the `jj` feature; colocated repositories use Git copies, with a doctor row and one new-session notice. |
 | `plakous-hosted`, `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, `plakous-workspace` | `git-cli`, `jj-lib` | Explicit backend forwarding; library defaults include both. With defaults disabled, either or neither backend may be selected. Without JJ, colocated repositories use Git when enabled; JJ-only repositories refuse. |
 | `plakous-workspace` | `test-support` | `FakeVcs` and the real-`git`/`jj` repository fixtures; a dev-dependency of `plakous-recursive-subagents`, never a production edge |
 | `plakous-recursive-subagents` | `test-support` | `MemoryTreeStore`, the tree's bootstrap and mutation fixtures, and the hub's; forwards `plakous-host-protocol/test-support` and `plakous-workspace/test-support`, never a production edge |
@@ -481,9 +485,9 @@ Neither `plakous` nor `plakous-hosted` exposes a `maintainer` feature.
 The facade's unsupported doc-hidden offline inspector compiles under
 `sessions-sqlite` (chapter 01 §12.1). Hosted root-restore and bounded child-page
 presentation helpers are doc-hidden repository seams without a feature gate,
-not supported embedder authority. Plak's maintainer feature enables its `jj` feature.
+not supported embedder authority. plakd's maintainer feature enables its `jj` feature.
 
-`plak` depends on exactly `plakous`, `plakous-hosted`,
+`plakd` depends on exactly `plakous`, `plakous-hosted`,
 `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, and
 `plakous-host-protocol` in production, and on no other package in the tree —
 `plakous-workspace` in particular is reached only through the tree crate. The
@@ -495,7 +499,7 @@ defaults include all seven routes, JS, Python, MCP, local web fetch, images,
 Git and the server capabilities. Hosted defaults additionally include the JJ backend.
 Every package must declare the dependency features its own Rust targets use;
 features enabled only by another workspace member are not evidence that the
-package builds on its own. Plak declares the signal feature used by same-user
+package builds on its own. plakd declares the signal feature used by same-user
 host discovery directly; shared console setup detection and MCP adapters
 are gated by their actual consuming surfaces, not the default feature set.
 The agent entry owns omitted-route admission so a reduced JSONL product still
@@ -503,7 +507,7 @@ terminates rejection with `error` then `bye`, before session or credential
 admission; wire clients retain their own refusal framing.
 The gate's `builds` group therefore also builds each
 supported package alone, `cargo build -p <package>` with its own default
-features, rustc warnings denied (chapter 05 §1); for `plak` that is the release
+features, rustc warnings denied (chapter 05 section 1); for `plakd` that is the release
 build's resolution. The `static` group runs clippy on the same per-package
 resolutions with all targets in batch and full gates. Worker `just fast`
 lints only the touched packages and their conservative reverse dependencies,
@@ -551,7 +555,7 @@ product default/maintainer release closures. The `plakous` and `plakous-cell`
 The one named-variant table is `NAMED_VARIANTS` in `check_features.py`:
 Default is headless. `api` is default minus `codex`, `grok` and `claude`;
 `minimal` is exactly `openrouter,git-cli`. There is no redundant headless variant.
-The supported and shipped Plak is **default only**. Named variants are built
+The supported and shipped plakd is **default only**. Named variants are built
 and contract-tested in full, not shipped. Other combinations may compile;
 compilation does not establish support. Named variants also get closure
 witnesses in the static checker, without adding reduced compilation to check.
@@ -597,7 +601,7 @@ profiles. Five are facade resolutions, each un-unified:
   paths in `responses_retrieval.rs`, without a native-auth route beside it.
 
 `plakous-hosted` is compiled with no features and with `--all-features`.
-Hosted defaults are compiled through the supported Plak default resolution,
+Hosted defaults are compiled through the supported plakd default resolution,
 not as another profile. A rustc warning or error in any workspace
 crate of that profile fails it. Cargo's
 fingerprints are its cache: an unchanged profile is a no-op, and a facade or
@@ -623,7 +627,7 @@ alongside the evaluator or the whole product closure, so without this check
 the minimal evaluator manifest would never be compiled.
 
 `tools/gate/check_workspace.py` checks the same split at the artifact level,
-not only in the manifests. It lists the symbols of the `plak`,
+not only in the manifests. It lists the symbols of the `plakd`,
 `plakous-js-host`, and `plakous-py-host` executables and requires that only the
 JavaScript worker contains QuickJS engine symbols, only the Python worker
 contains Monty interpreter or type-checking symbols, and that the three are
@@ -688,7 +692,7 @@ platforms: the Rust v0-mangled crate names are platform-independent, and the
 engine's C entry points are listed in both the Mach-O underscored and the ELF
 bare spelling.
 
-Plak forwards the server capabilities `images`, `js`, `python`, `mcp` and
+plakd forwards the server capabilities `images`, `js`, `python`, `mcp` and
 `web-fetch` to hosted, independently of provider routes. Terminal and clipboard
 features are absent from both packages. External clients own appearance; the
 server still admits image attachments and owns settings/catalog metadata.
@@ -740,13 +744,13 @@ fork   compact   compatibility
 session rehearse <full-session-uuid>  # hidden, offline, read-only
 ```
 
-The default product enables `web`, the supported `plak host` and its web endpoint
+The default product enables `web`, the supported `plakd host` and its web endpoint
 (chapter 02 §4.5, §4.6): `hyper` and `hyper-util` (HTTP/1.1 server and
 upgrades), `http-body-util`, `bytes`, `futures-util`, `ring` (the cookie
 HMAC, the WebSocket accept digest and `new_session`'s name-based ids) and
-`tokio-tungstenite`. A reduced product without `web` parses `plak host` and
+`tokio-tungstenite`. A reduced product without `web` parses `plakd host` and
 refuses with a typed capability error. `maintainer` also selects `web`. There is
-no `plak web`: the web endpoint is `plak host --web`.
+no `plakd web`: the web endpoint is `plakd host --web`.
 
 `models` is not gated — it is an ordinary product verb alongside `login`,
 `logout`, `status`, `refresh`, `key`, `run`, `agent`, `session`,
@@ -754,7 +758,7 @@ no `plak web`: the web endpoint is `plak host --web`.
 
 Without the feature the maintainer tokens do not parse: argv carrying one is
 rejected, they are absent from help, and the processing-tier selection is
-inert. `tools/build/build-plak.sh` builds with `--features plak/maintainer`, so the daily
+inert. `tools/build/build-plakd.sh` builds with `--features plakd/maintainer`, so the daily
 maintainer binary has them; an ordinary `cargo build --release` does not.
 
 `session rehearse` inspects the current `PLAK_HOME` without creating product
@@ -858,9 +862,9 @@ export-version manifest to refuse incompatible carry without running export.
 Absent, empty or unparseable export-version manifests leave the version
 unknown and retain the export-then-refuse fallback.
 
-The installed stable `$HOME/.local/bin/plak` link is also what
-`plak host install` records in an explicit per-user service file: a systemd user
-unit on Linux, or `$HOME/Library/LaunchAgents/com.plak.host.plist` on macOS.
+The installed stable `$HOME/.local/bin/plakd` link is also what
+`plakd host install` records in an explicit per-user service file: a systemd user
+unit on Linux, or `$HOME/Library/LaunchAgents/com.plakd.host.plist` on macOS.
 Both use the same explicit Unix-socket/UI arguments and cleared host environment;
 installation never enables or starts the service. The macOS installer never
 loads the agent or invokes launchctl; it prepares private stdout/stderr logs
@@ -880,23 +884,23 @@ just install release
 ```
 
 `just` is then a prerequisite (the getting-started guide states it).
-`just install release` runs `tools/build/build-plak.sh --install`: exactly the two
+`just install release` runs `tools/build/build-plakd.sh --install`: exactly the two
 plain (non-`maintainer`) release Cargo invocations below, the artifact linkage
 check, and the snapshot install described after the maintainer recipes, under
 the release snapshot root `~/.local/lib/plak/release/<id>/` instead of the
 maintainer root. Without `just`, the equivalent build is:
 
 ```sh
-cargo build --release --locked -p plak
+cargo build --release --locked -p plakd
 cargo build --release --locked -p plakous-js-runtime -p plakous-py-worker
 ```
 
-The workspace default member is only `plak`. The parent and evaluator workers
+The workspace default member is only `plakd`. The parent and evaluator workers
 MUST be built in separate Cargo invocations: Cargo's stable resolver unifies
 `monty-proto/worker` features when the Python worker is selected alongside the
-parent, linking interpreter/type-checking code into `plak`. Per-package feature
+parent, linking interpreter/type-checking code into `plakd`. Per-package feature
 unification remains an unstable Cargo option on the pinned toolchain. The two
-commands produce `plak`, `plakous-js-host`, and `plakous-py-host` in the same directory.
+commands produce `plakd`, `plakous-js-host`, and `plakous-py-host` in the same directory.
 Apply the same profile, target selection and target-directory settings to both
 invocations; apply product features only to the parent. Bare `cargo build`
 produces only the parent, not a complete install. The locked dependency graph
@@ -918,7 +922,7 @@ For complete native musl platform evidence on a Linux x86_64 host:
 ```sh
 rustup target add x86_64-unknown-linux-musl
 just musl native          # defaults to --platform
-just musl native --fast plak  # optional targeted iteration
+just musl native --fast plakd  # optional targeted iteration
 ```
 
 `tools/musl/musl-native.sh`, through `tools/musl/musl-toolchain.sh` (shared with
@@ -951,7 +955,7 @@ qualification on a Linux x86_64 Docker host:
 
 ```sh
 just musl container          # full tier, including default/maintainer checks
-just musl container --fast plak  # optional targeted iteration
+just musl container --fast plakd  # optional targeted iteration
 ```
 
 `just musl container` is a maintainer-only gate. `tools/musl/musl-check.sh` uses the
@@ -963,7 +967,7 @@ Rust 1.99.0 with a musl host toolchain, clippy, rustfmt, the
 curl, git, jj, just, and the registry sources for cargo-deny (not its executable),
 the workspace and compile-contract fixture lockfiles. It never pulls an image or installs tools.
 Provide the executable musl cargo-nextest 0.9.100 and ruff 0.17.3 in
-`~/plak-musl/bin` (override with `PLAK_MUSL_TOOLS`); GNU-host tools cannot
+`~/plakd-musl/bin` (override with `PLAK_MUSL_TOOLS`); GNU-host tools cannot
 substitute for them. The image's `nextest` target exports both binaries.
 The container has no network and sets `CARGO_NET_OFFLINE=true`. A dependency
 change requires refreshing the image's registry before qualification.
@@ -1008,7 +1012,7 @@ with the result; the image name alone is not evidence for the current tree.
 
 `plakous-cell` contains only the cell protocol, worker client and session.
 `plakous-js-runtime` owns QuickJS and the JavaScript worker. Selecting that
-package alongside Plak cannot enable an in-process runtime feature in Plak.
+package alongside plakd cannot enable an in-process runtime feature in plakd.
 The Python worker `plakous-py-host` speaks the cell protocol and drives
 `monty-proto`'s upstream `Child` (interpreter and type checker) in process,
 pinned at `1.2.0` together with `monty-types` and `monty-alloc`; no pool
@@ -1030,16 +1034,16 @@ just dev reload-rehearsal <full-session-uuid> --wait-idle --timeout 300 --detach
 
 `tools/build/reload-rehearsal.sh` builds the maintainer binary and both workers
 offline into Cargo output using the same separate parent/worker invocations and
-`plak/maintainer` feature selection as `tools/build/build-plak.sh --maintainer`,
+`plakd/maintainer` feature selection as `tools/build/build-plakd.sh --maintainer`,
 then copies them into a disposable staging directory,
 and by default never invokes the installer or changes installed links. SQLite's backup
 API reads committed WAL state through read-only source connections into a
 private temporary `PLAK_HOME`. The staged version/build ID is printed even if backup is refused; for the same
 source, toolchain, target, build environment and same checkout path it matches what
-`just install maintainer` installs (`build-plak.sh` refuses linked worktrees).
+`just install maintainer` installs (`build-plakd.sh` refuses linked worktrees).
 The requested session's source key is located
 by read-only sessions-table ID membership. When it matches the staged key, only
-that key's runtime, product and tree are backed up and `plak session rehearse`
+that key's runtime, product and tree are backed up and `plakd session rehearse`
 runs there; when that passes, the staged build then answers the exact-reopen
 binding verdict used by installed-build inspection (`version --reopen-probe <id>`,
 chapter 02 §2.5.1) against the live home, from the session's workspace, with
@@ -1049,24 +1053,24 @@ writes no session state. It prints `reopen=exact`, `reopen=carries: <change>`
 (carry is required, exit 0) or `reopen=refused: <reason>` (exit 1); this is
 the reopen check to run before an install handoff. When it differs, the report says `state key changed <old> -> <new>:
 rehearsing carry-forward` and the tool rehearses carry-forward in disposable
-homes: the installed `plak` on `PATH` (or `--installed <path>`) exports the
-session from a copy of the source key (`plak session export <id> --out <tmp>`);
+homes: the installed `plakd` on `PATH` (or `--installed <path>`) exports the
+session from a copy of the source key (`plakd session export <id> --out <tmp>`);
 export runs from the session record's `workspace_root`, read from the copied
 product database through a read-only connection, not from the build checkout.
 A missing record or missing/non-absolute workspace refuses with
 `export refused: session_workspace_unavailable`; there is no checkout fallback.
 A second home receives the non-secret allowlist and no state for the new key;
 `--config-overlay <dir>` replaces `config.toml`, `agents/` and `profiles/` with
-that directory. The staged build then runs `plak config show` and
+that directory. The staged build then runs `plakd config show` and
 `version --reload-probe`. A config error is printed verbatim with filesystem
 paths removed, and import does not run. Otherwise the staged build imports the
-document and runs `plak session rehearse <new-id>`. The report prints the new
+document and runs `plakd session rehearse <new-id>`. The report prints the new
 id, the carried-from line, and the root and child rehearse verdicts. Exit 0
 requires export, config validation, import and rehearse to succeed, except an
 import whose only refusal is the disposable home's missing credential state:
-`plak: session has no exact effort binding` (an API route: the home has no
+`plakd: session has no exact effort binding` (an API route: the home has no
 credentials, so the Ready catalog cannot admit the binding) or
-`plak: resolve <account>/<model>: exact native compatibility acceptance is
+`plakd: resolve <account>/<model>: exact native compatibility acceptance is
 required — check ...` for `claude`, `codex` or `grok` (a native subscription
 route: subscription state is never copied, so resolution stops at the missing
 acceptance). That reports `import=not rehearsed: credentials unavailable in the
@@ -1117,31 +1121,31 @@ Then, after the offline gate and ordinary checks:
 just build debug        # maintainer features into target/debug; no install
 just build release      # maintainer features into target/release; no install
 just build maintainer   # dogfood profile into target/maintainer; no install
-just build profiling    # target/profiling/plak; no install
+just build profiling    # target/profiling/plakd; no install
 just install release    # plain release snapshot under ~/.local/lib/plak/release
 just install maintainer # dogfood snapshot under ~/.local/lib/plak/maintainer
 ```
 
 `just build` writes Cargo output only. It does not install a snapshot or change
-`PATH`, and it may run from a linked worktree. `build-plak.sh` with no flag,
+`PATH`, and it may run from a linked worktree. `build-plakd.sh` with no flag,
 `--release` or `--maintainer` is that build: linkage check, no snapshot.
 `just install release`
-(`build-plak.sh --install`) and `just install maintainer`
-(`build-plak.sh --install-maintainer`) copy `plak` into an immutable snapshot directory
+(`build-plakd.sh --install`) and `just install maintainer`
+(`build-plakd.sh --install-maintainer`) copy `plakd` into an immutable snapshot directory
 `~/.local/lib/plak/release/<id>/` or `~/.local/lib/plak/maintainer/<id>/`.
 `just build debug`, `just build release`, `just build maintainer` and
-`just install maintainer` pass `--features plak/maintainer`. `just install release`
-does not, and `just build profiling` builds only `plak` at its default features.
+`just install maintainer` pass `--features plakd/maintainer`. `just install release`
+does not, and `just build profiling` builds only `plakd` at its default features.
 Live `test-hooks` builds, the offline performance smoke, a soak rebuild and the
 reload rehearsal's offline maintainer build call the same script. `--features`
-replaces the parent feature set, `--plak-only` skips workers and the linkage
-check, `--profiling` is the plak-only profiling profile, and `--offline` passes
+replaces the parent feature set, `--plakd-only` skips workers and the linkage
+check, `--profiling` is the plakd-only profiling profile, and `--offline` passes
 Cargo `--offline`.
 `<id>` is the SHA-256 of a manifest of all three executables' SHA-256 digests.
 Each worker is installed
 independently at `~/.local/lib/plak/sidecars/<name>/<sha256>/<name>`; the
 snapshot contains symlinks to those immutable mode-0555 artifacts. Their
-canonical paths depend on their own bytes, not the parent Plak build, so an
+canonical paths depend on their own bytes, not the parent plakd build, so an
 unchanged evaluator remains identical across parent-only rebuilds. Cached
 artifacts with changed bytes or permissions, or symlinked cache directories,
 are refused rather than overwritten. Workers and cache directories must belong
@@ -1157,18 +1161,18 @@ the existing snapshot root with `pwd -P` before composing snapshot paths, so
 linked home ancestors preserve canonical executable paths. A
 rebuild that changes only a sidecar is a new snapshot (staged then renamed into
 place; a concurrent build of the same bytes keeps one copy). The
-`~/.local/bin/plak` symlink points at the snapshot, while
+`~/.local/bin/plakd` symlink points at the snapshot, while
 `~/.local/bin/plakous-js-host` and `~/.local/bin/plakous-py-host` point at the worker artifacts;
 corresponding existing paths under `~/.cargo/bin` are repaired. An existing
 link is replaced only when it already resolves under the maintainer or release
 snapshot root, the shared sidecar cache, or the Cargo target directory; any
 other file or link is refused. A rebuild never
 rewrites a file a running session executes. Host upgrade remains an explicit
-operator workflow (chapter 02 section 4.6). A running `plak` finds its sidecars beside the
+operator workflow (chapter 02 section 4.6). A running `plakd` finds its sidecars beside the
 snapshot file it executes, not beside the `PATH` symlink. Each snapshot also
 holds a mode-0444 `binary-id` manifest (`id dev ino size mtime_ns`). After the
 executable's final chmod and before renaming the staging directory, the
-installer runs `plak version --write-binary-manifest <staging>` to hash and
+installer runs `plakd version --write-binary-manifest <staging>` to hash and
 stat the same open executable. Directory rename preserves those identity
 fields; a matching manifest avoids hashing on startup (chapter 02 §1). This
 manifest is trusted like the private installation directory, not as a signature.
@@ -1180,7 +1184,7 @@ product home's `binary-ids` identity cache keyed by the same fields plus the
 inode-change time, so later processes of the same build skip the hash; only
 commands that use product state write it (chapter 02 §1).
 Each snapshot also holds a `state-key` manifest, the output of the snapshot's
-own hidden `plak version --state-key` (absent if that fails), which is how a later build
+own hidden `plakd version --state-key` (absent if that fails), which is how a later build
 finds the build that can export an old key's sessions (chapter 02 §2.5.1).
 The matching snapshot, rather than the new build, creates the bounded restart
 checkpoint and readable archive; the new build never carries an unbounded set
@@ -1188,7 +1192,7 @@ of historical decoders or opens the old snapshot's state directly. If the
 matching snapshot is unavailable, reference creation and incompatible reload
 fail explicitly and leave the old state untouched.
 That discovery searches both the maintainer and release snapshot roots and
-only considers directories named by 64 lowercase hex digits whose directory and `plak` are owned by the current user and not group- or
+only considers directories named by 64 lowercase hex digits whose directory and `plakd` are owned by the current user and not group- or
 world-writable. All snapshots, parent binaries, manifests and worker artifacts
 are retained until explicit operator cleanup, including legacy snapshots with
 physical workers and snapshots without manifests. There is no automatic pruning
@@ -1204,7 +1208,7 @@ to start.
 At run time, js-ptc and Codex native-ptc locate `PLAK_JS_HOST` or a sibling
 `plakous-js-host`, and py-ptc/py-sdk locate `PLAK_PY_HOST` or a sibling `plakous-py-host`.
 Keep all three executables together when installing manually. Missing workers
-fail closed and `plak doctor` names the missing configuration. Official V8
+fail closed and `plakd doctor` names the missing configuration. Official V8
 and `@openai/codex` are not fetched and are not evaluators.
 
 The maintainer installer and reload-rehearsal staging require Python 3.11+ and
@@ -1329,7 +1333,7 @@ release without LTO, with 16 codegen units, incremental compilation and line
 tables, so dogfood rebuilds are fast and backtraces name source lines;
 `just build maintainer` builds it and `just install maintainer` installs it. `profiling` inherits
 release with full debug symbols, no stripping, and LTO off so frames stay
-attributable; `just build profiling` produces `target/profiling/plak`, and
+attributable; `just build profiling` produces `target/profiling/plakd`, and
 `just perf samply`, `just perf flamegraph`, `just perf stat`, and `just perf bloat` drive it.
 
 #### Release size and speed qualification
@@ -1345,7 +1349,7 @@ all symbols stripped. The tarball includes all three executables and licenses.
 
 | Artifact | Thin raw | Thin stripped | Fat raw | Fat stripped |
 | --- | ---: | ---: | ---: | ---: |
-| `plak` | 81,903,112 | 67,232,472 | 71,031,984 | 61,277,272 |
+| `plakd` | 81,903,112 | 67,232,472 | 71,031,984 | 61,277,272 |
 | `plakous-js-host` | 2,500,000 | 2,080,016 | 2,298,784 | 1,988,720 |
 | `plakous-py-host` (measured as `monty`, before the cell protocol) | 35,642,912 | 28,802,632 | 32,455,792 | 27,440,648 |
 | GNU rehearsal `.tar.gz` | - | 41,632,982 | - | 40,392,040 |
@@ -1358,7 +1362,7 @@ all symbols stripped. The tarball includes all three executables and licenses.
 | Tarball packing | 12s | 10s |
 | Complete build and packing | 824s | 938s |
 
-Fat LTO removes 5,955,200 bytes from stripped Plak for 13.8% more total
+Fat LTO removes 5,955,200 bytes from stripped plakd for 13.8% more total
 release-workflow wall time. These are sequential shared-host measurements with
 warm dependency caches, not a clean-build benchmark. The maintainer profile
 continues to override LTO off, so this tradeoff does not change its codegen.
@@ -1383,16 +1387,16 @@ fat-LTO offline-turn and session-show timings are not established by this table.
 just build release && just dev home-install
 ```
 
-`just dev home-install` points `~/.local/bin/plak-dev` at `tools/dev/plak-dev.sh`,
+`just dev home-install` points `~/.local/bin/plakd-dev` at `tools/dev/plakd-dev.sh`,
 repairing a stale symlink from an earlier layout, and seeds
-`~/plak-dev-home/config.toml`. The wrapper pins the login user's `HOME`, uses
-the isolated `~/plak-dev-home`, and unsets provider API keys so they cannot
-displace OAuth. Run `plak-dev` from a scratch working directory, never from the
+`~/plakd-dev-home/config.toml`. The wrapper pins the login user's `HOME`, uses
+the isolated `~/plakd-dev-home`, and unsets provider API keys so they cannot
+displace OAuth. Run `plakd-dev` from a scratch working directory, never from the
 git tree, and never point `PLAK_HOME` at the worktree. `just dev home-reset`
 wipes the `state/`, `telemetry/`, `logs/`, and `secrets/` roots in that home
 while keeping `config.toml` and `agents/`.
 
-The development wrapper defaults to `target/release/plak` (`PLAK_DEV_PROFILE=debug`
+The development wrapper defaults to `target/release/plakd` (`PLAK_DEV_PROFILE=debug`
 selects debug, `maintainer` the `just build maintainer` output) and clears `PLAK_TEST_EXCHANGE_CAPTURE_DIR`, so the binary
 uses its own passive capture. It retains argv and cwd and uses `exec` so
 signals reach the binary directly. A `maintainer` binary captures inference
@@ -1423,7 +1427,7 @@ Either installs a new snapshot and moves the symlinks from §6.1 to it, so
 new launches use the new binary once the install succeeds. Existing processes
 retain their immutable image until an explicit restart or host upgrade. There is no in-product updater.
 Installation removes an obsolete `monty` launch symlink only when it points
-into the Plak sidecar or snapshot roots; independent files and links remain.
+into the plakd sidecar or snapshot roots; independent files and links remain.
 
 Host upgrade uses the invoked destination image's binary identity, not the
 workspace revision or a stable link's name. Its private
@@ -1476,7 +1480,7 @@ replacing them, so the linker stays on every group that denies warnings
 ### 6.5 Publishing the cohort
 
 `tools/release/publish.sh` (`just publish`) is the only publication path. It stages
-the tracked tree with the published `plak` manifest (§3.3), derives the order
+the tracked tree with the published `plakd` manifest (section 3.3), derives the order
 from `cargo metadata` there (`tools/release/publish_plan.py`: every member
 whose `publish` is not `false`, dependencies first, where normal, build and
 versioned dev-dependencies order the cohort because crates.io resolves each at
@@ -1578,7 +1582,7 @@ no diff configuration can narrow) touches nothing but:
 
 - documentation no gate reads: `tests/live/STATUS.md`, `CHANGELOG.md`,
   `docs/spec/**` and `docs/user-guide/**`, except
-  `docs/spec/07-config-reference.md`, which `plak` configuration tests read,
+  `docs/spec/07-config-reference.md`, which `plakd` configuration tests read,
   and `docs/user-guide/integrating.md`, whose transcript the tooling client
   contract executes against a real host;
   and
@@ -1629,24 +1633,24 @@ with the compiler, linker and prerequisite checks of `just musl native`
 refuses a dirty tree and, unless `--untagged` (a rehearsal), a `HEAD` without
 the tag `v<version>` of the workspace version, or without the tag `--tag`
 names. `--tag` accepts `v<version>` or a release candidate `v<version>-rc.<n>`
-(`n` from 1); a candidate's tarball is named `plak-<version>-rc.<n>-<triple>`
+(`n` from 1); a candidate's tarball is named `plakd-<version>-rc.<n>-<triple>`
 while its executables still report `<version>`, so the final tag can name the
 same qualified commit. The build is
-`tools/build/build-plak.sh --artifacts`: the `just install release` Cargo invocations
+`tools/build/build-plakd.sh --artifacts`: the `just install release` Cargo invocations
 and artifact linkage check, without installing. It maps the Cargo home, the
-checkout and the target directory to `/cargo`, `/plak` and `/target` with
+checkout and the target directory to `/cargo`, `/plakd` and `/target` with
 `--remap-path-prefix` in `CARGO_ENCODED_RUSTFLAGS` and `-ffile-prefix-map` in
 the target's `CFLAGS_<triple>`/`CXXFLAGS_<triple>`, so neither Rust panic
 locations nor vendored C assertions carry build-host paths; caller rustc flags
 go in that variable too, and `RUSTFLAGS` is refused because Cargo would ignore
 it. `tools/release/release_tarball.py` then writes
-`plak-<version>-<triple>.tar.gz` and rewrites `SHA256SUMS` over every release
+`plakd-<version>-<triple>.tar.gz` and rewrites `SHA256SUMS` over every release
 tarball and wire schema in the output directory (default `<target dir>/release-dist`).
-The packaging script also runs the built target's supported `plak wire schema`
-and writes `plak-<version>-<triple>-wire-schema.json`. This standalone asset
+The packaging script also runs the built target's supported `plakd wire schema`
+and writes `plakd-<version>-<triple>-wire-schema.json`. This standalone asset
 names that binary and its exact wire version; target-qualified names avoid
 conflating different binary identities. No wire negotiation is introduced. The
-tarball holds one directory `plak-<version>-<triple>/` with `plak`,
+tarball holds one directory `plakd-<version>-<triple>/` with `plakd`,
 `plakous-js-host`, `plakous-py-host`, the repository `LICENSE`, `THIRD-PARTY` (each
 package outside this repository, vendored ones included, that the three
 executables reach through normal dependency edges for the target, with its
@@ -1670,7 +1674,7 @@ has no full-gate evidence for the tree (§6.5). Every action is pinned to a full
 commit SHA.
 
 `install.sh` at the repository root is a POSIX `sh` installer that never
-needs elevated privileges. `sh install.sh uninstall [--dry-run]` removes Plak-owned
+needs elevated privileges. `sh install.sh uninstall [--dry-run]` removes plakd-owned
 links in `~/.local/bin` and `${CARGO_HOME:-~/.cargo}/bin`, including Cargo entries
 relinked by `just install`, and the release, maintainer and shared sidecar roots
 after validating installation ancestors. Link ownership uses physically resolved
@@ -1691,7 +1695,7 @@ pointer to the source build. It resolves the latest release from the
 `releases/latest` redirect, downloads the tarball and `SHA256SUMS` over HTTPS
 only, and refuses a missing entry or checksum mismatch before writing
 anything under `~/.local`. When `gh` is installed and signed in it also runs
-`gh attestation verify --repo N0xMare/plak` and refuses on failure;
+`gh attestation verify --repo N0xMare/plakd` and refuses on failure;
 otherwise it reports that only the checksum was verified
 (`PLAK_SKIP_ATTESTATION=1` skips the step). `PLAK_RELEASE_BASE` replaces
 `https://github.com/N0xMare/plak` for mirrors and tests and lifts the HTTPS-only
@@ -1702,8 +1706,8 @@ restriction. The install is exactly the §6.1 layout: the snapshot
 installation directories and their physical ancestors, and `~/.local/bin`
 links that replace only links already pointing into the maintainer, release
 or sidecar roots. A release install and a `just install release` of the same bytes
-therefore share one snapshot, and `plak doctor`, carry discovery and host upgrade
-behave identically. `~/.cargo/bin` is not touched; the installer notes a `plak`
+therefore share one snapshot, and `plakd doctor`, carry discovery and host upgrade
+behave identically. `~/.cargo/bin` is not touched; the installer notes a `plakd`
 earlier on `PATH`. Downloads use `curl`, which sets no quarantine attribute on
 macOS.
 
@@ -1727,7 +1731,7 @@ refuse. An embedder needing another provider must explicitly call
 later installation and `jsonwebtoken` crate-feature defaults cannot replace it.
 No aws-lc or `rsa` crate
 is linked and no RUSTSEC-2023-0071 exception is needed. Closure exclusions pin
-aws-lc absent from default Plak and every subscription singleton; dependency
+aws-lc absent from default plakd and every subscription singleton; dependency
 bans additionally reject aws-lc-rs, aws-lc-sys and rsa anywhere in the graph.
 
 A dependency is taken only when it provides a clear correctness,
@@ -1793,7 +1797,7 @@ transport retains its 64 MiB response-body and 4 MiB SSE-event limits
 (chapter 01 §8.5). The SDK's stdio transport bounds each incoming JSON-RPC
 line to 16 MiB, discarding oversized lines without closing the connection.
 
-The Plak-run `fetch_url` (`plakous-tool-web`, feature `fetch`) converts HTML to
+The plakd-run `fetch_url` (`plakous-tool-web`, feature `fetch`) converts HTML to
 Markdown with crates.io `htmd` 0.5.6 (Apache-2.0, edition 2024, no stated MSRV;
 builds on the pinned toolchain). Markdown keeps the headings, links, lists and
 code blocks a model reads, which a text renderer such as `html2text` flattens.
@@ -1809,19 +1813,19 @@ already locked `url` crate. The facade selects it only through `web-fetch`
 (chapter 01 section 12.1), independently of providers, subscriptions, auth
 and MCP; no composition-only closure reaches the converter.
 
-The supported web endpoint (`plak` feature `web`, enabled by default) speaks
+The supported web endpoint (`plakd` feature `web`, enabled by default) speaks
 WebSocket with crates.io `tokio-tungstenite =0.29.0` over `tungstenite
 =0.29.0` (both MIT OR Apache-2.0, MSRV 1.63), default features off: no TLS
 (Tailscale Serve terminates it), no client connector and no handshake module,
 so neither `sha1` 0.10, `http`'s handshake glue nor `data-encoding` is linked;
 the upgrade itself is hyper's, and the accept digest is `ring`'s SHA-1. The
 two crates are the only additions to the lock graph (`bytes`, `log`, `rand`
-0.9, `thiserror` and `futures-util` were present). `plak`'s offline
+0.9, `thiserror` and `futures-util` were present). `plakd`'s offline
 integration test drives the endpoint with `tungstenite` as a dev-dependency.
 
 `plakous-host-protocol` derives `schemars =1.2.2` `JsonSchema` on every wire
 type unconditionally (default features off, `derive`, `std` and `uuid1`), so
-`plak wire schema` prints the exact build's schema (chapter 02 §4.4). It adds
+`plakd wire schema` prints the exact build's schema (chapter 02 section 4.4). It adds
 no crate to the lock graph (`schemars`, `schemars_derive`, `dyn-clone`,
 `ref-cast` and `serde_derive_internals` were already locked through `rmcp`),
 but it is now in every product closure, the minimal and headless variants
@@ -1883,7 +1887,7 @@ BSD-3-Clause, CDLA-Permissive-2.0, ISC, MIT, MIT-0, MPL-2.0, Unicode-3.0, and
 Zlib at a 0.8 confidence threshold. The reviewed transitive allowances are:
 
 - **Unicode-3.0** covers Unicode standard tables bundled by otherwise approved
-  crates; it does not broaden Plak's own source license.
+  crates; it does not broaden plakd's own source license.
 - **MIT-0** and **Zlib** cover the reviewed transitive graph of the Draft
   2020-12 JSON Schema validator — `borrow-or-share` through `fluent-uri`, and
   `foldhash` through `hashbrown`.

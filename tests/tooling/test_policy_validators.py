@@ -131,11 +131,11 @@ class PackageRustFilesTests(unittest.TestCase):
 
 
 class PackagedDependencyTests(unittest.TestCase):
-    CLASSES = {'plak': 'supported', 'lib': 'published-internal', 'harness': 'repository-only'}
+    CLASSES = {'plakd': 'supported', 'lib': 'published-internal', 'harness': 'repository-only'}
 
     def test_dev_only_path_edges_and_the_published_plak_shape_pass(self):
         manifests = {
-            'plak': {
+            'plakd': {
                 'dependencies': {'harness': {'path': 'h', 'version': '0.1.0', 'optional': True}}
             },
             'lib': {'dev-dependencies': {'harness': {'path': 'h'}}},
@@ -150,7 +150,7 @@ class PackagedDependencyTests(unittest.TestCase):
 
     def test_regular_and_versioned_dev_edges_are_reported(self):
         manifests = {
-            'plak': {},
+            'plakd': {},
             'lib': {
                 'target': {
                     'cfg(unix)': {'dependencies': {'h2': {'package': 'harness', 'path': 'h'}}}
@@ -166,7 +166,7 @@ class PackagedDependencyTests(unittest.TestCase):
             [
                 'lib: packaged manifest depends on repository-only harness',
                 'lib: dev-dependency on repository-only harness must be path-only',
-                'plak: packaged manifest depends on repository-only harness',
+                'plakd: packaged manifest depends on repository-only harness',
             ],
         )
 
@@ -325,7 +325,7 @@ class TrackedHygieneTests(unittest.TestCase):
     def test_absolute_home_paths_are_refused(self):
         # Split so this file does not itself contain an absolute home path.
         for text in (
-            "see /Use" + "rs/alice/dev/plak",
+            "see /Use" + "rs/alice/dev/plakd",
             "cd /ho" + "me/alice/src",
             "`/ho" + "me/alice`",
         ):
@@ -413,7 +413,7 @@ class TrackedHygieneTests(unittest.TestCase):
         self.assertIsNone(re.search(r'"[0-9a-f]{64}"', source))
 
     def test_validation_reports_line_in_every_candidate_file(self):
-        formerly_pending = "bin/plak/src/carry.rs"
+        formerly_pending = "bin/plakd/src/carry.rs"
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             for relative in ("clean.md", "leak.md", formerly_pending):
@@ -712,9 +712,9 @@ def small_tree() -> list[Package]:
             "plakous-hosted", "host", "crates/plak/hosted", dependencies=("plakous",)
         ),
         synthetic_package(
-            "plak",
+            "plakd",
             "bin",
-            "crates/plak/plak",
+            "crates/plak/plakd",
             package_class="supported",
             dependencies=("plakous", "plakous-hosted"),
         ),
@@ -759,7 +759,7 @@ class LayerPolicyTests(unittest.TestCase):
             packages[0],
             metadata={
                 **packages[0].metadata,
-                "dependencies": [{"name": "plak", "kind": "dev"}],
+                "dependencies": [{"name": "plakd", "kind": "dev"}],
             },
         )
         self.assertEqual(workspace_policy.validate_layer_edges(synthetic_workspace(*packages)), [])
@@ -857,7 +857,7 @@ class LayerPolicyTests(unittest.TestCase):
         workspace = synthetic_workspace(*small_tree())
         classes = workspace_policy.package_classifications(workspace)
         self.assertEqual(
-            classes["supported"], {"plakous-model", "plakous-agent", "plakous", "plak"}
+            classes["supported"], {"plakous-model", "plakous-agent", "plakous", "plakd"}
         )
         self.assertEqual(classes["published-internal"], {"plakous-http", "plakous-hosted"})
         self.assertEqual(classes["repository-only"], set())
@@ -898,7 +898,7 @@ class LayerPolicyTests(unittest.TestCase):
         policy = synthetic_policy(
             production_dependencies={
                 "plakous-hosted": ("plakous",),
-                "plak": ("plakous", "plakous-hosted"),
+                "plakd": ("plakous", "plakous-hosted"),
                 "plakous-http": (),
             }
         )
@@ -911,12 +911,12 @@ class LayerPolicyTests(unittest.TestCase):
                 "production-dependencies row for 'plakous-http' (layer 'common') is not a host/bin package"
             ],
         )
-        missing = synthetic_policy(production_dependencies={"plak": ("plakous",)})
+        missing = synthetic_policy(production_dependencies={"plakd": ("plakous",)})
         errors = workspace_policy.validate_production_dependencies(
             synthetic_workspace(*small_tree(), policy=missing)
         )
         self.assertTrue(any("plakous-hosted" in e and "need a" in e for e in errors), errors)
-        self.assertTrue(any("plak: direct dependencies" in e for e in errors), errors)
+        self.assertTrue(any("plakd: direct dependencies" in e for e in errors), errors)
 
     def test_facade_feature_pins_apply_to_every_host_bin_facade_edge(self) -> None:
         packages = small_tree()
@@ -927,7 +927,7 @@ class LayerPolicyTests(unittest.TestCase):
         )
         packages[4] = replace(host, metadata=host_metadata)
         policy = synthetic_policy(
-            facade_features={"plakous-hosted": ("sessions-sqlite",), "plak": ("sessions-sqlite",)}
+            facade_features={"plakous-hosted": ("sessions-sqlite",), "plakd": ("sessions-sqlite",)}
         )
         errors = workspace_policy.validate_facade_features(
             synthetic_workspace(*packages, policy=policy)
@@ -935,7 +935,7 @@ class LayerPolicyTests(unittest.TestCase):
         self.assertEqual(
             errors,
             [
-                "plak must enable exactly plakous/{sessions-sqlite} with dependency defaults disabled"
+                "plakd must enable exactly plakous/{sessions-sqlite} with dependency defaults disabled"
             ],
         )
         errors = workspace_policy.validate_facade_features(
@@ -977,7 +977,7 @@ class LayerPolicyTests(unittest.TestCase):
         errors = workspace_policy.validate_cli_security_sources("plakous-hosted", indirect)
         self.assertTrue(any("launch-directory readers" in e for e in errors), errors)
         launch = {"src/probe.rs": "fn f() { let l = crate::shell::home::launch_directory(); }"}
-        errors = workspace_policy.validate_cli_security_sources("plak", launch)
+        errors = workspace_policy.validate_cli_security_sources("plakd", launch)
         self.assertTrue(
             any("launch-directory readers ['launch_directory']" in e for e in errors), errors
         )
@@ -987,7 +987,7 @@ class LayerPolicyTests(unittest.TestCase):
             "use crate::shell::home::launch_directory as here;\nfn f() { here(); }",
         ):
             errors = workspace_policy.validate_cli_security_sources(
-                "plak", {"src/renamed.rs": renamed}
+                "plakd", {"src/renamed.rs": renamed}
             )
             self.assertTrue(any("imported under another name" in e for e in errors), errors)
 
@@ -1050,7 +1050,7 @@ class LayerPolicyTests(unittest.TestCase):
         )
 
     def test_module_rules_apply_per_file_once_the_module_exists(self) -> None:
-        package = synthetic_package("plak", "bin", "bin/plak", package_class="supported")
+        package = synthetic_package("plakd", "bin", "bin/plakd", package_class="supported")
         rules = {
             "tui": {
                 "forbid-crates": ("plakous", "plakous-*"),
@@ -1067,9 +1067,9 @@ class LayerPolicyTests(unittest.TestCase):
         self.assertEqual(
             errors,
             [
-                "plak:src/tui/bad.rs: module 'tui' may not use crate 'plakous'",
-                "plak:src/tui/bad.rs: module 'tui' may not use 'crate::runtime::Host'",
-                "plak:src/tui/bad.rs: module 'tui' names forbidden crate 'plakous-model'",
+                "plakd:src/tui/bad.rs: module 'tui' may not use crate 'plakous'",
+                "plakd:src/tui/bad.rs: module 'tui' may not use 'crate::runtime::Host'",
+                "plakd:src/tui/bad.rs: module 'tui' names forbidden crate 'plakous-model'",
             ],
         )
         self.assertEqual(
@@ -1081,7 +1081,7 @@ class LayerPolicyTests(unittest.TestCase):
 
     def test_module_rules_see_through_brace_groups_and_bare_paths(self) -> None:
         """A brace group is many paths, and a bare `plakous_hosted::` path is a use."""
-        package = synthetic_package("plak", "bin", "bin/plak", package_class="supported")
+        package = synthetic_package("plakd", "bin", "bin/plakd", package_class="supported")
         rules = {
             "tui": {
                 "forbid-crates": ("plakous", "plakous-*", "plakous-hosted"),
@@ -1104,14 +1104,14 @@ class LayerPolicyTests(unittest.TestCase):
         self.assertEqual(
             workspace_policy.validate_module_rules(package, sources, rules),
             [
-                "plak:src/tui/bare.rs: module 'tui' names forbidden crate 'plakous-hosted'",
-                "plak:src/tui/braces.rs: module 'tui' may not use 'crate::shell::Y'",
+                "plakd:src/tui/bare.rs: module 'tui' names forbidden crate 'plakous-hosted'",
+                "plakd:src/tui/braces.rs: module 'tui' may not use 'crate::shell::Y'",
             ],
         )
 
     def test_module_rules_refuse_an_inline_crate_path_outside_may_use(self) -> None:
         """`crate::a::b` written in code names what `use crate::a::b` would."""
-        package = synthetic_package("plak", "bin", "bin/plak", package_class="supported")
+        package = synthetic_package("plakd", "bin", "bin/plakd", package_class="supported")
         rules = {
             "tui": {
                 "forbid-crates": ("plakous", "plakous-*"),
@@ -1130,14 +1130,14 @@ class LayerPolicyTests(unittest.TestCase):
         self.assertEqual(
             workspace_policy.validate_module_rules(package, sources, rules),
             [
-                "plak:src/tui/inline.rs: module 'tui' may not name 'crate::carry::ReloadTarget::Fresh'",
-                "plak:src/tui/inline.rs: module 'tui' may not name 'crate::store::Row'",
+                "plakd:src/tui/inline.rs: module 'tui' may not name 'crate::carry::ReloadTarget::Fresh'",
+                "plakd:src/tui/inline.rs: module 'tui' may not name 'crate::store::Row'",
             ],
         )
 
     def test_module_rules_resolve_super_chains_by_the_files_module(self) -> None:
         """A `super::` chain that climbs out of the module is a `crate::` path."""
-        package = synthetic_package("plak", "bin", "bin/plak", package_class="supported")
+        package = synthetic_package("plakd", "bin", "bin/plakd", package_class="supported")
         rules = {
             "tui": {
                 "forbid-crates": ("plakous", "plakous-*"),
@@ -1159,22 +1159,22 @@ class LayerPolicyTests(unittest.TestCase):
         self.assertEqual(
             workspace_policy.validate_module_rules(package, sources, rules),
             [
-                "plak:src/tui/mod.rs: module 'tui' may not use 'crate::store::Row'",
-                "plak:src/tui/mod.rs: module 'tui' may not name 'crate::shell::x'",
-                "plak:src/tui/ui/reload.rs: module 'tui' may not use 'crate::carry::ReloadTarget'",
-                "plak:src/tui/ui/reload.rs: module 'tui' may not name 'crate::home::paths'",
+                "plakd:src/tui/mod.rs: module 'tui' may not use 'crate::store::Row'",
+                "plakd:src/tui/mod.rs: module 'tui' may not name 'crate::shell::x'",
+                "plakd:src/tui/ui/reload.rs: module 'tui' may not use 'crate::carry::ReloadTarget'",
+                "plakd:src/tui/ui/reload.rs: module 'tui' may not name 'crate::home::paths'",
             ],
         )
 
     def test_module_rules_hold_may_use_to_its_ceiling(self) -> None:
         """With a ceiling, `may-use` lists exactly that many paths."""
-        package = synthetic_package("plak", "bin", "bin/plak", package_class="supported")
+        package = synthetic_package("plakd", "bin", "bin/plakd", package_class="supported")
         sources = {"src/tui/mod.rs": "use crate::tui::theme::Theme;"}
         tail = ": the list only shrinks, and the ceiling follows it down"
         for ceiling, errors in (
             (2, []),
-            (1, [f"plak: module 'tui' may-use lists 2 paths, over its may-use-ceiling 1{tail}"]),
-            (3, [f"plak: module 'tui' may-use lists 2 paths, under its may-use-ceiling 3{tail}"]),
+            (1, [f"plakd: module 'tui' may-use lists 2 paths, over its may-use-ceiling 1{tail}"]),
+            (3, [f"plakd: module 'tui' may-use lists 2 paths, under its may-use-ceiling 3{tail}"]),
         ):
             rules = {
                 "tui": {
@@ -1190,7 +1190,7 @@ class LayerPolicyTests(unittest.TestCase):
 
     def test_module_rules_refuse_a_forbidden_crate_inside_a_use_brace_group(self) -> None:
         """`use {plakous_model::a, std::io}` names a forbidden crate once."""
-        package = synthetic_package("plak", "bin", "bin/plak", package_class="supported")
+        package = synthetic_package("plakd", "bin", "bin/plakd", package_class="supported")
         rules = {
             "tui": {
                 "forbid-crates": ("plakous", "plakous-*", "plakous-hosted"),
@@ -1203,7 +1203,7 @@ class LayerPolicyTests(unittest.TestCase):
         # so one import never produces two errors.
         self.assertEqual(
             workspace_policy.validate_module_rules(package, sources, rules),
-            ["plak:src/tui/mix.rs: module 'tui' may not use crate 'plakous_model'"],
+            ["plakd:src/tui/mix.rs: module 'tui' may not use crate 'plakous_model'"],
         )
 
     def test_policy_loader_rejects_malformed_tables(self) -> None:
@@ -1307,14 +1307,14 @@ class CargoTreeDiagnosticsTests(unittest.TestCase):
     def test_rquickjs_linkage_violations_are_still_rejected(self):
         linked = subprocess.CompletedProcess([], 0, 'rquickjs v0.11.0\n', '')
         absent = subprocess.CompletedProcess([], 0, '', '')
-        joint = subprocess.CompletedProcess([], 0, 'rquickjs v0.11.0\n  plak v0.1.0\n', '')
+        joint = subprocess.CompletedProcess([], 0, 'rquickjs v0.11.0\n  plakd v0.1.0\n', '')
         with patch.object(
             workspace_policy.subprocess, 'run', side_effect=[linked, linked, absent, joint]
         ):
             errors = workspace_policy.rquickjs_linkage_errors(ROOT)
         self.assertEqual(len(errors), 4)
         self.assertIn('plakous must not link', errors[0])
-        self.assertIn('plak must not link', errors[1])
+        self.assertIn('plakd must not link', errors[1])
         self.assertIn('plakous-js-runtime must link', errors[2])
         self.assertIn('building both workers', errors[3])
 
@@ -1322,10 +1322,10 @@ class CargoTreeDiagnosticsTests(unittest.TestCase):
         failed = subprocess.CompletedProcess([], 101, '', '')
         errors = []
         with patch.object(workspace_policy.subprocess, 'run', return_value=failed):
-            output = workspace_policy.cargo_tree_output(ROOT, ['-p', 'plak'], errors)
+            output = workspace_policy.cargo_tree_output(ROOT, ['-p', 'plakd'], errors)
         self.assertIsNone(output)
         self.assertEqual(len(errors), 1)
-        self.assertIn('cargo tree --offline -p plak', errors[0])
+        self.assertIn('cargo tree --offline -p plakd', errors[0])
         self.assertIn('exit 101', errors[0])
 
 
@@ -1380,9 +1380,9 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_product_does_not_hard_enable_provider_facade_features(self) -> None:
         expected = {"sessions-sqlite"}
-        self.assertEqual(set(self.workspace.policy.facade_features["plak"]), expected)
+        self.assertEqual(set(self.workspace.policy.facade_features["plakd"]), expected)
         self.assertEqual(workspace_policy.validate_facade_features(self.workspace), [])
-        product = self.workspace.packages["plak"]
+        product = self.workspace.packages["plakd"]
         for provider in ("openai", "anthropic", "xai"):
             with self.subTest(provider=provider):
                 metadata = copy.deepcopy(product.metadata)
@@ -1393,12 +1393,12 @@ class RepositoryPolicyTests(unittest.TestCase):
                 )
                 edge["features"].append(provider)
                 packages = dict(self.workspace.packages)
-                packages["plak"] = replace(product, metadata=metadata)
+                packages["plakd"] = replace(product, metadata=metadata)
                 errors = workspace_policy.validate_facade_features(
                     replace(self.workspace, packages=packages)
                 )
                 self.assertEqual(len(errors), 1)
-                self.assertTrue(errors[0].startswith("plak must enable exactly plakous/"), errors)
+                self.assertTrue(errors[0].startswith("plakd must enable exactly plakous/"), errors)
 
     def test_instruction_text_may_not_depend_on_a_harness_pack(self) -> None:
         # `harness -> harness` exists so a composition crate may compose packs;
@@ -1419,7 +1419,7 @@ class RepositoryPolicyTests(unittest.TestCase):
     def test_all_current_packages_have_one_accepted_classification(self) -> None:
         expected = {
             "supported": {
-                "plak",
+                "plakd",
                 "plakous",
                 "plakous-agent",
                 "plakous-model",
@@ -1546,7 +1546,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-recursive-subagents-store",
             },
         )
-        self.assertEqual(by_layer["bin"], {"plak"})
+        self.assertEqual(by_layer["bin"], {"plakd"})
         self.assertEqual(by_layer["vendor"], {"plakous-codex-code-mode-protocol"})
         self.assertEqual(
             by_layer["harness"],
@@ -1590,7 +1590,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                     offenders.append(f"{package.name}:{path}")
         self.assertEqual(
             sorted(offenders),
-            ["plak:src/shell/home.rs"],
+            ["plakd:src/shell/home.rs"],
             "the product home may be discovered only in the composition root, "
             "which since 3.4 step A holds the CLI too",
         )
@@ -1629,14 +1629,14 @@ class RepositoryPolicyTests(unittest.TestCase):
         ).stdout
         names = {line.split()[0] for line in closure.splitlines() if line.strip()}
         self.assertNotIn("ratatui", names)
-        self.assertNotIn("plak", names)
+        self.assertNotIn("plakd", names)
 
     def test_internal_edges_are_exact_where_the_design_pins_them(self) -> None:
         edges = workspace_policy.internal_production_edges(self.workspace)
         self.assertEqual(edges["plakous-agent"], {"plakous-model", "plakous-tools"})
         self.assertEqual(edges["plakous-store"], {"plakous-agent"})
         self.assertEqual(
-            edges["plak"],
+            edges["plakd"],
             {
                 "plakd-wire-types",
                 "plakous",
@@ -1678,12 +1678,12 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous": ("plakous-exchange", "plakous-responses"),
                 "plakous-auth": ("plakous-model",),
                 "plakous-tools": ("plakous-image",),
-                "plak": (
+                "plakd": (
                     "plakd-wire-types",
                     "plakous-host-protocol",
                     "plakous-hosted",
                     # The only `bin -> test` edge in the workspace, and it
-                    # resolves only under `plak/test-hooks`. See the comment on
+                    # resolves only under `plakd/test-hooks`. See the comment on
                     # the row in the root manifest.
                     "plakous-offline-crash-harness",
                     "plakous-recursive-subagents",
@@ -1883,7 +1883,7 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_application_rejects_an_extra_direct_dependency(self) -> None:
         errors = workspace_policy.validate_single_dependency(
-            "plak",
+            "plakd",
             {"plakous", "reqwest"},
             "plakous",
         )
@@ -2051,7 +2051,7 @@ fn production() {}
     def cli_security_fixture(*, main_extra: str = "") -> dict[str, dict[str, str]]:
         """Package -> package-relative path -> source, matching the pins exactly."""
         return {
-            "plak": {
+            "plakd": {
                 "src/lib.rs": f"""
 use std::process::ExitCode;
 fn run(launch: Option<&std::path::Path>) {{
@@ -2197,7 +2197,7 @@ fn fixtures() {
     def test_editor_process_pin_rejects_reintroducing_a_shell(self) -> None:
         sources = self.cli_security_fixture()
         path = "src/commands/support.rs"
-        sources["plak"][path] = sources["plak"][path].replace(
+        sources["plakd"][path] = sources["plakd"][path].replace(
             "Command::new(program)", 'Command::new("/bin/sh")'
         )
         self.assertTrue(
@@ -2258,7 +2258,7 @@ fn fixtures() {
                     )
                 )
                 self.assertTrue(
-                    workspace_policy.validate_cli_security_sources("plak", {path: source})
+                    workspace_policy.validate_cli_security_sources("plakd", {path: source})
                 )
         self.assertTrue(
             workspace_policy.validate_cli_security_sources(
@@ -2286,7 +2286,9 @@ define_observations!();
                 )
             )
         self.assertTrue(
-            workspace_policy.validate_cli_security_sources("plak", {"src/observation.rs": consumer})
+            workspace_policy.validate_cli_security_sources(
+                "plakd", {"src/observation.rs": consumer}
+            )
         )
         sources["src/observation/vocabulary.rs"] += "fn x() { std::env::vars(); }"
         self.assertTrue(
@@ -2300,9 +2302,9 @@ use plakous::model::{CanonicalHistory, CompactionReplayBinding, ToolResultUpdate
 fn decode() { tags!(); }
 """
         fixture = self.cli_security_fixture()
-        fixture["plak"]["src/carry/history.rs"] = codec
+        fixture["plakd"]["src/carry/history.rs"] = codec
         self.assertEqual(self.validate_fixture(fixture), [])
-        errors = workspace_policy.validate_cli_security_sources("plak", {"src/other.rs": codec})
+        errors = workspace_policy.validate_cli_security_sources("plakd", {"src/other.rs": codec})
         self.assertTrue(
             any("unapproved plakous facade symbols" in error for error in errors), errors
         )
@@ -2310,7 +2312,7 @@ fn decode() { tags!(); }
 
     def test_plakous_symbol_allowlist_is_per_package(self) -> None:
         errors = workspace_policy.validate_cli_security_sources(
-            "plak-tui", {"src/lib.rs": "use plakous::agent::Agent;"}
+            "plakd-tui", {"src/lib.rs": "use plakous::agent::Agent;"}
         )
         self.assertTrue(any("unapproved plakous facade symbols" in e for e in errors), errors)
 
@@ -2360,12 +2362,12 @@ fn decode() { tags!(); }
         source = "use plakous::sessions::rehearsal::{OfflineReopenOutcome, inspect_sqlite};"
         self.assertEqual(
             workspace_policy.validate_cli_security_sources(
-                "plak", {"src/commands/reload_rehearsal.rs": source}
+                "plakd", {"src/commands/reload_rehearsal.rs": source}
             ),
             [],
         )
         for package, path in (
-            ("plak", "src/commands/other.rs"),
+            ("plakd", "src/commands/other.rs"),
             ("plakous-hosted", "src/commands/reload_rehearsal.rs"),
         ):
             with self.subTest(package=package, path=path):
@@ -2374,7 +2376,7 @@ fn decode() { tags!(); }
                     any("unapproved plakous facade symbols" in error for error in errors), errors
                 )
         errors = workspace_policy.validate_cli_security_sources(
-            "plak",
+            "plakd",
             {"src/commands/reload_rehearsal.rs": "use plakous::sessions::OfflineReopenInspection;"},
         )
         self.assertTrue(
@@ -2392,7 +2394,7 @@ fn decode() { tags!(); }
                 ),
                 [],
             )
-            for package in ("plak", "plakous-host-protocol", "plakous-workspace"):
+            for package in ("plakd", "plakous-host-protocol", "plakous-workspace"):
                 with self.subTest(package=package, source=source):
                     errors = workspace_policy.validate_cli_security_sources(
                         package, {"src/x.rs": source}
@@ -2406,7 +2408,7 @@ fn decode() { tags!(); }
         self.assertTrue(any("unapproved plakous facade symbols" in e for e in errors), errors)
 
     def test_host_job_config_and_compaction_refusal_symbols_are_enrolled(self) -> None:
-        for package in ("plak", "plakous-hosted"):
+        for package in ("plakd", "plakous-hosted"):
             with self.subTest(package=package):
                 sources = {
                     "src/x.rs": (
@@ -2466,13 +2468,13 @@ fn decode() { tags!(); }
 
     def test_product_capabilities_are_exact_per_file(self) -> None:
         mutations = (
-            ("plak", "src/oauth_ui.rs", '\nfn extra() { let _ = Command::new("sh"); }'),
+            ("plakd", "src/oauth_ui.rs", '\nfn extra() { let _ = Command::new("sh"); }'),
             (
-                "plak",
+                "plakd",
                 "src/home/paths.rs",
                 '\nfn drift() { let _ = std::env::var_os("XDG_CONFIG_HOME"); }',
             ),
-            ("plak", "src/home/secrets.rs", '\nfn enumerate() { let _ = std::env::vars_os(); }'),
+            ("plakd", "src/home/secrets.rs", '\nfn enumerate() { let _ = std::env::vars_os(); }'),
         )
         for package, path, extra in mutations:
             with self.subTest(path=path):
@@ -2488,7 +2490,7 @@ fn decode() { tags!(); }
 
         def pinned_errors(text: str) -> list[str]:
             errors = workspace_policy.validate_cli_security_sources(
-                "plak", {"src/build_identity.rs": text}
+                "plakd", {"src/build_identity.rs": text}
             )
             return [error for error in errors if "compile-time environment" in error]
 
@@ -2498,9 +2500,9 @@ fn decode() { tags!(); }
 
     def test_pins_are_keyed_by_package_not_path(self) -> None:
         """The same relative path under another package carries no pin."""
-        product_paths = self.cli_security_fixture()["plak"]["src/home/paths.rs"]
+        product_paths = self.cli_security_fixture()["plakd"]["src/home/paths.rs"]
         errors = workspace_policy.validate_cli_security_sources(
-            "plak-tui", {"src/home/paths.rs": product_paths}
+            "plakd-tui", {"src/home/paths.rs": product_paths}
         )
         self.assertTrue(any("environment reader calls" in error for error in errors), errors)
 
@@ -2515,14 +2517,14 @@ fn render_transcript() {}
 """
         }
         self.assertEqual(
-            workspace_policy.validate_product_session_authority_sources("plak", harmless), []
+            workspace_policy.validate_product_session_authority_sources("plakd", harmless), []
         )
 
         for identifier in sorted(workspace_policy.FORBIDDEN_PRODUCT_SESSION_AUTHORITY_IDENTIFIERS):
             with self.subTest(identifier=identifier):
                 sources = {"src/authority.rs": f"fn {identifier}() {{}}"}
                 errors = workspace_policy.validate_product_session_authority_sources(
-                    "plak", sources
+                    "plakd", sources
                 )
                 self.assertTrue(errors)
 
@@ -2970,12 +2972,12 @@ class FeaturePolicyTests(unittest.TestCase):
 
     def test_host_bin_features_forward_only_to_the_facade_or_host(self) -> None:
         manifests = copy.deepcopy(self.manifests)
-        manifests["plak"]["dependencies"]["plakous-store"] = {"path": "x", "optional": True}
-        manifests["plak"]["features"]["otel"].append("plakous-store/sqlite")
+        manifests["plakd"]["dependencies"]["plakous-store"] = {"path": "x", "optional": True}
+        manifests["plakd"]["features"]["otel"].append("plakous-store/sqlite")
         errors = self.contracts(manifests)
         self.assertTrue(any("forwards below the facade" in error for error in errors), errors)
         manifests = copy.deepcopy(self.manifests)
-        manifests["plak"]["features"]["otel"].append("plakous/xai")
+        manifests["plakd"]["features"]["otel"].append("plakous/xai")
         errors = self.contracts(manifests)
         self.assertFalse(any("forwards below the facade" in error for error in errors), errors)
 
@@ -3043,12 +3045,12 @@ class FeaturePolicyTests(unittest.TestCase):
         packages = feature_policy.closure_packages(self.manifests)
         self.assertIn("plakous", packages)
         self.assertIn("plakous-store", packages)
-        self.assertIn("plak", packages)
+        self.assertIn("plakd", packages)
         self.assertNotIn("plakous-model", packages)
         profile_counts = {
             package: len(
                 feature_policy.product_feature_sets(self.manifests[package])
-                if package in {"plak", "plakous-hosted"}
+                if package in {"plakd", "plakous-hosted"}
                 else feature_policy.feature_sets(
                     feature_policy.optional_features(self.manifests[package]),
                     "full" in self.manifests[package]["features"],
@@ -3059,7 +3061,7 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(profile_counts["plakous"], 2 * 14 + 3)
         # sqlite, perf-instrumentation, repository-only commit-trace.
         self.assertEqual(profile_counts["plakous-store"], 2 * 3 + 3)
-        self.assertEqual(profile_counts["plak"], 2 * 19 + 3)
+        self.assertEqual(profile_counts["plakd"], 2 * 19 + 3)
         self.assertEqual(profile_counts["plakous-hosted"], 2 * 15 + 3)
         self.assertNotIn("plakous-cell", profile_counts)
         self.assertEqual(profile_counts["plakous-js-runtime"], 2 * 1 + 3)
@@ -3118,7 +3120,7 @@ class FeaturePolicyTests(unittest.TestCase):
         cell = feature_policy.expected_closure("plakous-cell", (), False, manifests)
         self.assertEqual(cell, {"plakous-cell"})
         self.assertIn(
-            "plakous-hosted", feature_policy.expected_closure("plak", (), True, manifests)
+            "plakous-hosted", feature_policy.expected_closure("plakd", (), True, manifests)
         )
 
 
@@ -3149,7 +3151,7 @@ class DensityScopeTests(unittest.TestCase):
         self.assertEqual(scopes["plakous-openai"], "below_facade")
         self.assertEqual(scopes["plakous-cell"], "below_facade")
         self.assertEqual(scopes["plakous-hosted"], "host")
-        self.assertEqual(scopes["plak"], "product")
+        self.assertEqual(scopes["plakd"], "product")
         self.assertEqual(scopes["plakous-test-support"], "test")
         self.assertEqual(scopes["plakous-codex-code-mode-protocol"], "vendor")
 

@@ -19,8 +19,8 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 LINE = re.compile(r"^(\d{4}-\d{2}-\d{2})T\S+\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(.*)$")
 TARGET = re.compile(r"\b((?:plak|plakous)[a-zA-Z0-9_:.]*):\s")
 FIELDS = re.compile(r'\b([a-z_]+)=(?:"([^"\n]*)"|([^\s}]+))')
-BUILD_PATH = re.compile(r"(?:^|/)maintainer/([0-9a-f]{12,64})/plak(?:\s|\"|$)")
-VERSION = re.compile(r"\bplak (?:version[: ]+)?[0-9][^\n]*?\bbinary ([0-9a-f]{12,64})\b")
+BUILD_PATH = re.compile(r"(?:^|/)maintainer/([0-9a-f]{12,64})/plakd(?:\s|\"|$)")
+VERSION = re.compile(r"\bplakd (?:version[: ]+)?[0-9][^\n]*?\bbinary ([0-9a-f]{12,64})\b")
 PROVIDERS = frozenset(
     {"codex", "xai", "grok", "claude", "native", "openrouter", "openai", "anthropic", "xai-api"}
 )
@@ -69,7 +69,7 @@ def fields(text: str) -> dict[str, str]:
 def snapshot_binary_id(snapshot: str) -> str | None:
     if not re.fullmatch(r"[0-9a-f]{12,64}", snapshot):
         return None
-    executable = Path.home() / ".local/lib/plak/maintainer" / snapshot / "plak"
+    executable = Path.home() / ".local/lib/plak/maintainer" / snapshot / "plakd"
     try:
         digest = hashlib.sha256()
         with executable.open("rb") as source:
@@ -98,7 +98,7 @@ def summarize(lines: Iterable[str], since: str | None = None) -> list[Build]:
         target_match = TARGET.search(body)
         target = target_match[1] if target_match else None
         message = body[target_match.end() :] if target_match else body
-        reload = target == "plak.reload" and "exec installed plak" in message
+        reload = target == "plak.reload" and "exec installed plakd" in message
         version = VERSION.search(message) if not reload else None
         startup = fields(message).get("binary") if target == "plak.start" else None
         if startup and re.fullmatch(r"[0-9a-f]{12}", startup):
@@ -212,7 +212,7 @@ def render(builds: list[Build]) -> str:
         "Build attribution prefers plak.start binary IDs, then chronological reload/version boundaries.",
         "Snapshot binaries still installed are hashed read-only for their 12-hex binary ID; missing snapshots",
         "and pre-boundary use stay unknown. Concurrent old processes cannot be separated without startup IDs,",
-        "and maintainer directory hashes identify three-executable snapshots, not plak binary IDs.",
+        "and maintainer directory hashes identify three-executable snapshots, not plakd binary IDs.",
         "Root routes are",
         "provider/model pairs, not proof of effort, protocol or composition. Bindings deduplicate",
         "session IDs within each build/route; repeated span lines are not additional sessions.",

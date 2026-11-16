@@ -66,7 +66,7 @@ class PerfBuildProfileTests(unittest.TestCase):
                     ("--lib",),
                     ("sessions-sqlite",),
                 ),
-                "plak": ("plak", ("--bin", "plak"), ()),
+                "plakd": ("plakd", ("--bin", "plakd"), ()),
                 "agent": ("plakous-agent", ("--lib",), ()),
                 "tools": ("plakous-tools", ("--lib",), ()),
             },
@@ -123,7 +123,7 @@ class PerfBuildProfileTests(unittest.TestCase):
         self.assertEqual(
             perf_build.PRODUCT_TOPOLOGY_BUILD_PROFILES,
             {
-                "plak-lib": ("plak", ("--lib",), ()),
+                "plakd-lib": ("plakd", ("--lib",), ()),
             },
         )
         self.assertEqual(
@@ -159,16 +159,16 @@ class PerfBuildProfileTests(unittest.TestCase):
             "cargo",
             "build",
             "release",
-            "plak",
-            ("--bin", "plak"),
+            "plakd",
+            ("--bin", "plakd"),
             (),
             "x86_64-unknown-linux-gnu",
             Path("/tmp/perf-build-test-target"),
             1,
         )
-        self.assertIn("plak", command)
-        self.assertEqual(command[command.index("--package") + 1], "plak")
-        self.assertEqual(command[command.index("--bin") + 1], "plak")
+        self.assertIn("plakd", command)
+        self.assertEqual(command[command.index("--package") + 1], "plakd")
+        self.assertEqual(command[command.index("--bin") + 1], "plakd")
         self.assertNotIn("--lib", command)
         self.assertIn("--no-default-features", command)
 
@@ -278,8 +278,8 @@ class PerfBuildProfileTests(unittest.TestCase):
                     self.assertIn("--lib", command)
                     self.assertNotIn("--bin", command)
                 else:
-                    self.assertEqual(package_target, ("--bin", "plak"))
-                    self.assertEqual(command[command.index("--bin") + 1], "plak")
+                    self.assertEqual(package_target, ("--bin", "plakd"))
+                    self.assertEqual(command[command.index("--bin") + 1], "plakd")
                     self.assertNotIn("--lib", command)
                 self.assertEqual(command.count("--features"), int(bool(features)))
                 if features:
@@ -675,7 +675,7 @@ class PerfBuildProfileTests(unittest.TestCase):
         self.assertEqual(perf_build.FIXTURE, perf_validator.V10_BUILD_FIXTURE)
         self.assertEqual(len(perf_validator.V10_BUILD_PROFILE_CONTRACTS), 18)
         self.assertNotIn("paid-platform", perf_validator.V10_BUILD_PROFILE_CONTRACTS)
-        self.assertNotIn("plak-app", perf_validator.V10_BUILD_PROFILE_CONTRACTS)
+        self.assertNotIn("plakd-app", perf_validator.V10_BUILD_PROFILE_CONTRACTS)
         self.assertEqual(len(perf_validator.V9_BUILD_PROFILE_CONTRACTS), 19)
         self.assertNotIn("responses", perf_validator.V9_BUILD_PROFILE_CONTRACTS)
         self.assertEqual(
@@ -704,9 +704,9 @@ class PerfBuildProfileTests(unittest.TestCase):
                 )
         self.assertEqual(len(perf_validator.V8_BUILD_PROFILE_CONTRACTS), 20)
         self.assertIn("paid-platform", perf_validator.V8_BUILD_PROFILE_CONTRACTS)
-        self.assertNotIn("plak-app", perf_validator.V8_BUILD_PROFILE_CONTRACTS)
+        self.assertNotIn("plakd-app", perf_validator.V8_BUILD_PROFILE_CONTRACTS)
         self.assertEqual(len(perf_validator.V7_BUILD_PROFILE_CONTRACTS), 21)
-        self.assertIn("plak-app", perf_validator.V7_BUILD_PROFILE_CONTRACTS)
+        self.assertIn("plakd-app", perf_validator.V7_BUILD_PROFILE_CONTRACTS)
         self.assertNotIn("dispatch", perf_validator.V7_BUILD_PROFILE_CONTRACTS)
         self.assertEqual(len(perf_validator.V6_BUILD_PROFILE_CONTRACTS), 22)
         self.assertIn("dispatch", perf_validator.V6_BUILD_PROFILE_CONTRACTS)

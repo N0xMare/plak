@@ -1,6 +1,6 @@
 # Settled bootstrap binding witness
 
-`bin/plak/tests/fixtures/bootstrap-v12.json` contains seventeen actual v12
+`bin/plakd/tests/fixtures/bootstrap-v12.json` contains seventeen actual v12
 exports produced with source `9e9785efe0c6549ee8d1c143b81db00472031dab`.
 That source alone decodes the checked-in r27/e37 predecessor fixture, whose
 seventeen synthetic heads have real native/API, root/child and composition

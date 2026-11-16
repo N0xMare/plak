@@ -1,0 +1,34 @@
+plakd runner — run tools on other machines
+
+USAGE:
+  plakd runner serve
+  plakd runner connect --stdio [--binary <id>]
+  plakd runner allow <host-id>
+  plakd runner ps [<name>]
+  plakd runner pair <name>
+  plakd runner secret set|rm <name>
+  plakd runner secret list
+
+  On a runner machine, serve runs the runner daemon in the foreground, and
+  connect --stdio bridges standard input and output to it, starting it
+  detached when none answers; a host runs that over ssh. allow pairs a host by
+  adding its id to <home>/runner/runner.toml. ps lists the lines and jobs the
+  daemon holds, for every host, with orphaned lines marked. secret set stores
+  a runner secret (read from a hidden prompt) in <home>/secrets/runner/: an MCP
+  server with placement = "runner" reads its secret_env names from there,
+  never from the host's plakd secret store.
+
+  --binary selects an already installed immutable snapshot by its exact
+  12-digit binary ID, verifies its owned, non-shared-writable paths and image,
+  then execs its ordinary connect. Missing or unsafe images refuse with an
+  install remedy; it never downloads, moves links, rewrites config, or relaxes
+  native runner version/pairing checks. It does not adopt old-daemon jobs.
+
+  On a host, pair <name> pairs this host with [runners.<name>] in config.toml:
+  it runs plakd runner allow there over ssh with strict options, binds to prove
+  it, and records the runner's identity. ps <name> lists what that runner
+  holds for this host. A runner never dials a host.
+
+  runner.toml keys: roots (the workspace roots a host may name, outside the
+  plakd home; required), path and home (the PATH and HOME its processes start
+  with), hosts (the paired host ids), idle_exit_seconds (default 300).

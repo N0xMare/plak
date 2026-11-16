@@ -62,7 +62,7 @@ def main() -> int:
     else:
         env["PLAK_CRASH_SWEEP_SHAPES"] = "final_only,direct_tool_then_final"
     # Use the gate's test build, including both cell workers. Building only
-    # plak can silently run stale sibling executables from another tree.
+    # plakd can silently run stale sibling executables from another tree.
     built = subprocess.call(
         [
             "cargo",
@@ -76,8 +76,8 @@ def main() -> int:
     )
     if built:
         return built
-    # `--workspace` keeps the feature resolution of the build above: `-p plak`
-    # resolves plak's features alone and recompiled about twenty crates (and
+    # `--workspace` keeps the feature resolution of the build above: `-p plakd`
+    # resolves plakd's features alone and recompiled about twenty crates (and
     # the product binary the sweep launches) into a second artifact set.
     command = [
         "cargo",

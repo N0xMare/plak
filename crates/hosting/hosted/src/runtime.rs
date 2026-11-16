@@ -6,7 +6,7 @@
 
 /// Recovery notice for a completed root whose accepted steering never reached history.
 pub const RECOVERED_COMPLETED_STEERING_NOTICE: &str =
-    "plak: recovered the completed turn; queued steering was not applied and is not retried";
+    "plakd: recovered the completed turn; queued steering was not applied and is not retried";
 
 /// The lead of every definite admission refusal's line, live and projected.
 pub(crate) const PROMPT_NOT_ADMITTED: &str = "prompt was not admitted";
@@ -836,7 +836,7 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     /// The product's `[root] agent` template, when one is configured; the
     /// Session projection names it only while this session runs that tuple.
     pub root_template: Option<crate::binding::RootTemplateFact>,
-    /// CLI one-shot attach (`plak compact --yes`) must not start a second paid turn.
+    /// CLI one-shot attach (`plakd compact --yes`) must not start a second paid turn.
     pub attached_one_shot: bool,
     /// Frozen launch workspace used to construct tool execution, not ambient cwd.
     pub cwd: PathBuf,
@@ -856,7 +856,7 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     pub ready_path: ReadyPathTiming,
     /// A carried conversation the session's runtime is created with. Taken by
     /// the first runtime construction and valid only for a record that has no
-    /// runtime yet (`plak session import`).
+    /// runtime yet (`plakd session import`).
     pub seed_history: Option<plakous::sessions::PortableSessionHistory>,
     /// Which agent line a seeded session joins: the carried source's line for
     /// a same-store carry, or a new line naming an imported document's
@@ -1048,7 +1048,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostConfig<P> {
     ///
     /// [`Self::topology_enabled`] is the answer this attach started with. A
     /// recompile that builds a fresh spec — `/new`, rebind, plan — asks
-    /// again, so a `plak config set orchestration.subagents …` from another
+    /// again, so a `plakd config set orchestration.subagents …` from another
     /// shell is in force for the next one, and a product that cannot answer
     /// refuses the recompile. The re-ask is [`HostConfig::topology_admission`], supplied
     /// by the binary: the loop must not know that the answer is a TOML file.

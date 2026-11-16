@@ -132,7 +132,7 @@ pub(super) fn await_host_startup<P: plakous_host_protocol::ProtocolExtension>(
             drop(action_tx);
             match handle
                 .join()
-                .map_err(|_| CliFailure::new("plak product host failed while joining startup"))?
+                .map_err(|_| CliFailure::new("plakd product host failed while joining startup"))?
             {
                 Ok(_) => Err(error),
                 Err(termination) => Err(termination),
@@ -142,10 +142,10 @@ pub(super) fn await_host_startup<P: plakous_host_protocol::ProtocolExtension>(
             drop(action_tx);
             match handle
                 .join()
-                .map_err(|_| CliFailure::new("plak product host panicked during startup"))?
+                .map_err(|_| CliFailure::new("plakd product host panicked during startup"))?
             {
                 Ok(_) => Err(CliFailure::new(
-                    "plak product host ended before completing startup",
+                    "plakd product host ended before completing startup",
                 )),
                 Err(termination) => Err(termination),
             }
@@ -259,7 +259,7 @@ pub fn spawn_deferred_host_with_clear_publication<P: plakous_host_protocol::Prot
 /// Creates the canonical runtime of a record that has none, seeded with the
 /// carried conversation in `config.seed_history`, then releases it, binds
 /// the record to the released head and saves the record. This is the whole of
-/// `plak session import`: the session is then resumable and promptable like
+/// `plakd session import`: the session is then resumable and promptable like
 /// any other.
 ///
 /// # Errors

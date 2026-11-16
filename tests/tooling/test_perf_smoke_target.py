@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class PerfSmokeTargetTests(unittest.TestCase):
     def test_explicit_build_target_selects_triple_subdirectory(self):
         source = (ROOT / "tools/perf/perf-smoke.sh").read_text()
-        prefix, marker, _ = source.partition('plak_bin="$root/plak"')
+        prefix, marker, _ = source.partition('plak_bin="$root/plakd"')
         self.assertTrue(marker, "perf script lost the executable-copy boundary")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -29,8 +29,8 @@ class PerfSmokeTargetTests(unittest.TestCase):
                 destination = root / "tools/gate" / name
                 destination.write_bytes((ROOT / "tools/gate" / name).read_bytes())
                 destination.chmod(0o755)
-            builder = root / "tools/build/build-plak.sh"
-            builder.write_bytes((ROOT / "tools/build/build-plak.sh").read_bytes())
+            builder = root / "tools/build/build-plakd.sh"
+            builder.write_bytes((ROOT / "tools/build/build-plakd.sh").read_bytes())
             builder.chmod(0o755)
             (root / "tools/build/check-artifact-linkage.py").write_text(
                 "import sys\nraise SystemExit(0)\n"
@@ -41,7 +41,7 @@ class PerfSmokeTargetTests(unittest.TestCase):
                 "import os, pathlib, sys\n"
                 "assert os.environ['CARGO_PROFILE_RELEASE_STRIP'] == 'debuginfo'\n"
                 "expected = [\n"
-                " ['build', '--locked', '-p', 'plak', '--features', 'plak/test-hooks,plak/test-support', '--profile', 'release'],\n"
+                " ['build', '--locked', '-p', 'plakd', '--features', 'plakd/test-hooks,plakd/test-support', '--profile', 'release'],\n"
                 " ['build', '--locked', '-p', 'plakous-js-runtime', '-p', 'plakous-py-worker', '--profile', 'release'],\n"
                 "]\n"
                 "log = pathlib.Path(os.environ['CARGO_LOG'])\n"
@@ -52,7 +52,7 @@ class PerfSmokeTargetTests(unittest.TestCase):
                 "target = os.environ.get('CARGO_BUILD_TARGET')\n"
                 "output = base / target / 'release' if target else base / 'release'\n"
                 "output.mkdir(parents=True, exist_ok=True)\n"
-                "for binary in ('plak', 'plakous-js-host', 'plakous-py-host'):\n"
+                "for binary in ('plakd', 'plakous-js-host', 'plakous-py-host'):\n"
                 "    path = output / binary\n"
                 "    path.write_bytes(binary.encode() + b' release executable')\n"
                 "    path.chmod(0o755)\n"
@@ -81,7 +81,7 @@ class PerfSmokeTargetTests(unittest.TestCase):
                         timeout=20,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    for binary in ("plak", "plakous-js-host", "plakous-py-host"):
+                    for binary in ("plakd", "plakous-js-host", "plakous-py-host"):
                         self.assertEqual(
                             (root / "tmp" / "perf-smoke" / binary).read_bytes(),
                             binary.encode() + b" release executable",

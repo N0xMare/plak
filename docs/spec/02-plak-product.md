@@ -1,15 +1,15 @@
-# The Plak product
+# The plakd product
 
-Plak is the host server and operator/batch CLI built on the Plakous library.
+plakd is the host server and operator/batch CLI built on the Plakous library.
 The public repository ships no application clients; independently maintained
 clients consume its wire protocol. This chapter is the
 normative behavior of that product — what it stores, what it accepts on the
 command line, what a model sees, what the interface does, and what it refuses.
 
-The interactive and detached session loops live in `plakous-hosted`. Plak
+The interactive and detached session loops live in `plakous-hosted`. plakd
 supplies configuration, credentials, session-record persistence, shell binding
 policy, and presentation through hosted ports. Product persistence remains in
-`bin/plak`.
+`bin/plakd`.
 
 Chapter 00 gives the crate-set rule, the crate map, and the persisted schema
 versions. Chapter 01 is the library beneath this one. Chapter 03 is the agent
@@ -31,17 +31,17 @@ application client.
 
 ## 1. Product shape
 
-One installed package, `plak`, with a library target and a `plak` binary. The
+One installed package, `plakd`, with a library target and a `plakd` binary. The
 binary exposes operator and machine interfaces over one runtime:
 
 | Face | Entry | Terminal | Stdout |
 | --- | --- | --- | --- |
-| CLI | `plak <command>` | not required | human text, tables, or JSON |
-| JSONL host | `plak agent` | not required | machine-only newline-delimited JSON |
+| CLI | `plakd <command>` | not required | human text, tables, or JSON |
+| JSONL host | `plakd agent` | not required | machine-only newline-delimited JSON |
 
 All session interfaces drive the same `plakous-hosted` runtime and product
 store. Machine transports are dispatched before standard-stream locks. Bare
-`plak` prints global help and exits 0 without home or runtime setup.
+`plakd` prints global help and exits 0 without home or runtime setup.
 `resume`, `--resume`, placement-only launch, `--host-resume`, `--import-resume`
 and `--reload-handoff` are absent. Continue recorded sessions with explicit
 `run --session`, `agent --session` or host wire operations.
@@ -49,11 +49,11 @@ and `--reload-handoff` are absent. Continue recorded sessions with explicit
 Build identity distinguishes `maintainer release`, `maintainer debug`,
 `release`, and `debug`, and shows a binary ID: the first twelve hexadecimal
 digits of SHA-256 over the executable. A `test-hooks` build is labeled separately.
-`plak version` and global help carry the same build identity alongside the
+`plakd version` and global help carry the same build identity alongside the
 package version. `0.0.3` alone is package metadata, not proof of build recency.
 The default build's version label is unchanged. A build omitting product
 features appends `; features -images,-python` (the omitted names, sorted) inside
-the build-identity parentheses. `plak doctor` reports a `build_features` row:
+the build-identity parentheses. `plakd doctor` reports a `build_features` row:
 `default` or `omitted <sorted names>`. An omitted Python worker has no doctor
 worker row and is never resolved as an installed sidecar.
 
@@ -69,7 +69,7 @@ Canonical image history still replays without a decoder. Without `python`,
 composition options and model capability listings omit both `py-ptc` and
 `py-sdk`, and Python config/session bindings refuse before session writes, with
 the selected composition as the refusal id. Without `mcp`,
-`plak mcp` commands and MCP-selecting templates
+`plakd mcp` commands and MCP-selecting templates
 refuse session admission (server definitions alone enable nothing). Read-only session
 show/log/export and carry export do not require the bound evaluator.
 
@@ -118,17 +118,17 @@ running sessions. The package version in telemetry and host protocols is unchang
 
 ### 1.1 The crate-set rule, from the product side
 
-Plak consumes `plakous` and the Plakous crates above it — `plakous-hosted`,
+plakd consumes `plakous` and the Plakous crates above it -- `plakous-hosted`,
 `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, and
 `plakous-host-protocol` — and nothing below the facade; those crates themselves
-consume `plakous` and other host-layer crates. Plak never calls a provider directly, never keeps a
+consume `plakous` and other host-layer crates. plakd never calls a provider directly, never keeps a
 second inference loop, and never reconstructs canonical history from displayed
 text. Plakous owns the agent loop, canonical history, checkpoints, provider
 resolution and admission, context capacity, compaction, cache affinity,
 effects, rebind, and the one terminal `TurnResult`.
 
-What Plak owns is everything those crates deliberately have no opinion about:
-CLI and host wire behavior, product configuration and its defaults, the Plak home,
+What plakd owns is everything those crates deliberately have no opinion about:
+CLI and host wire behavior, product configuration and its defaults, the plakd home,
 workspace and session presentation, prompt history, the durable prompt queue,
 the roster and the agent templates, account admission for
 children, the agent tree's presentation and its store location, and the product
@@ -208,7 +208,7 @@ anything else (§2.6).
 
 Three rules follow, and they are the ones a reviewer checks:
 
-- **Product defaults are never resume or revalidation authority.** Plak
+- **Product defaults are never resume or revalidation authority.** plakd
   resolves its defaults, makes them visible, and passes a *complete*
   configuration into the facade. A resume reconstructs the persisted binding;
   it never fills a missing field from today's config.
@@ -227,7 +227,7 @@ Three rules follow, and they are the ones a reviewer checks:
 Hosted route identities and catalog policy live in per-route capability
 modules and one registry: canonical accounts, accepted aliases, OAuth/API
 classification, fixed wire families, catalog labels, Usage verticals and
-native-PTC diagnostics. Plak's product registry attaches provider-row labels,
+native-PTC diagnostics. plakd's product registry attaches provider-row labels,
 recommendations, doctor probes and bundled agent profiles to those identities.
 Route-owned doctor checks include OAuth credential rows and the OpenRouter
 catalog row; home, storage and runtime-wide checks remain common checks.
@@ -260,7 +260,7 @@ canonical driver. A successful settings save returns only the durable root
 construction fact; the hosted loop applies that fact through its own rules.
 The handler requests usage facts for the usage pane, whose product observation
 follows the hosted usage/context projections. An idle attached-one-shot host
-still dispatches the extension after publishing usage; Plak suppresses the
+still dispatches the extension after publishing usage; plakd suppresses the
 settings and overlay observations in that case. Busy usage presentation is
 unchanged. Busy raw-config opening remains
 an idle-only refusal, while settings policy stays in the binary.
@@ -270,7 +270,7 @@ attached to keeps running its own loop in `plakous-hosted`, exactly as an
 attached one does; there is no second, product-side loop for the detached case.
 What is product is the configuration document that loop edits — the root binding
 the operator picked, the settings policy, and the catalog refresh it schedules —
-and the surfaces it publishes through. Those live in `bin/plak/src/shell/`, and
+and the surfaces it publishes through. Those live in `bin/plakd/src/shell/`, and
 they reach the loop as data and ports, never as a loop of their own.
 
 ## 2. Homes and files
@@ -287,7 +287,7 @@ never re-promotes its retention-only host/line; the remedy is to finish, consume
 or disown its jobs through a compatible retained build. Source foreground work
 must be settled before surrender, not converted to a retained job.
 
-### 2.1 The Plak home
+### 2.1 The plakd home
 
 `PLAK_HOME` names the home and MUST be absolute; otherwise the home is
 `$HOME/.plak` and `HOME` must be absolute too. The workspace root is the
@@ -296,7 +296,7 @@ Everything the product derives from a workspace (the project root and its
 `.plak/` overlay, project templates, the session lookup's workspace, a new
 session's workspace root) is a product context resolved from an explicit
 workspace path: the launch directory for the CLI's own faces, or the
-workspace a request names (`plak host`'s `new_session`, and the session a
+workspace a request names (`plakd host`'s `new_session`, and the session a
 host opens in its own workspace). Every context of the home the
 environment resolved comes from one discovery, so a workspace's project root
 is the same whichever path built its context: neither the product home nor
@@ -332,10 +332,10 @@ another session's jobs.
     r28.e38.p38.t11/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 28, epoch 38
-      product.sqlite3             Plak intents and feed-derived views, schema 38
+      product.sqlite3             plakd intents and feed-derived views, schema 38
       subagents.sqlite3           the agent tree, schema 11
       custody-hosts/<instance>.lock  each live host process's custody liveness lock (chapter 03 §14)
-      host.lock                   held by this build's `plak host` for its life, naming its pid and binary (§4.6); not state
+      host.lock                   held by this build's `plakd host` for its life, naming its pid and binary (section 4.6); not state
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
   references/<id>.json        obsolete archives, retained only for cleanup (§2.5)
@@ -343,7 +343,7 @@ another session's jobs.
   logs/plak.log               PLAK_LOG boundary spans
   binary-ids                  development-build identity cache, 0600 (§1), disposable
   host-id                     this home's host identity (runners, tree custody), 0600, made at first use
-  host/run/<state key>.sock   `plak host`'s control socket, 0600 in 0700 directories (§4.6, chapter 04 §4.7); not state
+  host/run/<state key>.sock   `plakd host`'s control socket, 0600 in 0700 directories (section 4.6, chapter 04 section 4.7); not state
   host/runner/v<N>/           this home's home-local runner for runner protocol N (chapter 01 §8.4), 0700:
                               runner-id, owners.json (its owner floors, as below), empty/ (where a
                               request naming no workspace is answered), run/ (0700: the 0600
@@ -369,24 +369,24 @@ A project may carry `<project root>/.plak/agents/<name>.toml`; a project
 template wins over a user template of the same name.
 
 **The home is a privacy boundary and it is checked, not assumed.** On every
-state-using start, Plak walks *every ancestor* of the home and refuses a
+state-using start, plakd walks *every ancestor* of the home and refuses a
 symlinked or non-directory ancestor, allowing only a small system allowlist for
 the macOS `/var`, `/tmp`, and `/etc` links. An absolute `PLAK_HOME` such as
-`/safe/link/plak` could otherwise redirect state outside the namespace the
+`/safe/link/plakd` could otherwise redirect state outside the namespace the
 operator chose, before the leaf was ever inspected.
 An existing home MUST already be mode `0700` and owned by the effective uid;
-Plak refuses rather than repairing it, on every command that writes to the home
+plakd refuses rather than repairing it, on every command that writes to the home
 (`config set`, `key set`, `session`, `run`, `agent`, `host`), and the
 refusal names the path and `chmod 700 <path>`. Read-only inspection (`status`,
 `config show`, `key status`) still reports, and `doctor` flags the home as an
 ERROR with the same fix; no command changes the mode of an existing home that
-has anything in it. A home Plak creates, or an empty directory the user owns
-(`mkdir h; PLAK_HOME=h plak …`), has its mode established, since nothing in it
+has anything in it. A home plakd creates, or an empty directory the user owns
+(`mkdir h; PLAK_HOME=h plakd ...`), has its mode established, since nothing in it
 can have been exposed yet; `secrets/` is created at `0700` and must stay private
 the same way.
 
 Three directories are deliberately *not* here. Subscription OAuth credentials
-live under XDG state, not in the Plak home (§2.3); MCP server logins are home
+live under XDG state, not in the plakd home (section 2.3); MCP server logins are home
 secrets and do live here. Rendered prompt artifacts are gitignored
 review output under `target/prompt-renders/` (chapter 05 §2.5). And the agent tree's
 worktrees and jj workspaces live under the launch checkout, not the home
@@ -428,7 +428,7 @@ New-work capacity is checked on the volume containing the product home, not
 the current workspace. Below 5 GiB available to the current user,
 doctor reports the home-volume location and free MiB; prompt preflight projects
 the typed capacity level to idle HUD chrome. Warnings show
-`storage warning · plak doctor`; refusal shows `storage low · new turns refused`.
+`storage warning - plakd doctor`; refusal shows `storage low - new turns refused`.
 Pending-continuation indicators outrank both labels. The level is probed at
 attach and rebind, root preflight, turn end, and ready child-wake attempts,
 once at each point. Immediate echo and preflight share the same sample;
@@ -458,16 +458,16 @@ filled aggregate bound as a whole percentage of the point where new work stops
 published; no file is opened or reverified). A session's host reads it every
 five seconds and posts one live operator-settings warning the first time the fill reaches each of 70%,
 85% and 95%; a step warns again only after the fill fell below it (for example
-after `plak session gc`). The warning names the store file, the fill, the bound
+after `plakd session gc`). The warning names the store file, the fill, the bound
 with where new work and child agents' new work stop, and carries the reclaim
-remedy, which every face renders as the store file, then `plak session gc
---all`, then `plak session delete <id>` on unneeded sessions, and that `plak
+remedy, which every face renders as the store file, then `plakd session gc
+--all`, then `plakd session delete <id>` on unneeded sessions, and that `plakd
 state prune-legacy` frees only other builds' stores; every storage-pressure
 remedy names the store file the same way. The session facts the host publishes carry the
 fill from 70% (`session_store_percent`, in-process chrome only), and the idle
-HUD then reads `session store <n>% full · plak session gc --all`, outranked
+HUD then reads `session store <n>% full - plakd session gc --all`, outranked
 only by the volume refusal label. Whenever the five-second reading changes the
-fill those facts show, including a drop below 70% after `plak session gc`, the
+fill those facts show, including a drop below 70% after `plakd session gc`, the
 host republishes its last session facts with the new fill, so the HUD follows
 the store between turns. Child agents' new work stops one store
 reserve before the root's (chapter 03 §10.1), so the root keeps that headroom
@@ -522,9 +522,9 @@ compression, not classification by prose or a change to recovery authority.
 | File | Owner | Authority |
 | --- | --- | --- |
 | `runtime.sqlite3` | Plakous | checkpoints, canonical history and the change feed (chapter 01 §5.11) — the only recovery authority, and the source every view below is derived from |
-| `product.sqlite3` | Plak | product intents (sessions, queue and submissions, prompt history, workflow requests, operator notices) and the views the projector derives from the feed (§2.6); never recovery authority |
-| `subagents.sqlite3` | `plakous-recursive-subagents-store` (schema), Plak (location) | the agent tree: intents keyed to runtime command and call ids, views derived from the tree's sessions' feeds, and external-effect records (seals, adoptions, copies), reopened under the reopen law (chapter 03 §14) |
-| `telemetry/telemetry-v<schema>.sqlite3` | Plak | numbers and the bounded OAuth refresh diagnostic only (§7.1), disposable, never recovery authority |
+| `product.sqlite3` | plakd | product intents (sessions, queue and submissions, prompt history, workflow requests, operator notices) and the views the projector derives from the feed (section 2.6); never recovery authority |
+| `subagents.sqlite3` | `plakous-recursive-subagents-store` (schema), plakd (location) | the agent tree: intents keyed to runtime command and call ids, views derived from the tree's sessions' feeds, and external-effect records (seals, adoptions, copies), reopened under the reopen law (chapter 03 section 14) |
+| `telemetry/telemetry-v<schema>.sqlite3` | plakd | numbers and the bounded OAuth refresh diagnostic only (section 7.1), disposable, never recovery authority |
 
 `runtime.sqlite3`, `product.sqlite3`, and `subagents.sqlite3` are a
 **triple**. They are admitted together, and none is opened without the other
@@ -742,7 +742,7 @@ observation; SQLite pairing and upserts, and OTel span identity, parentage and
 TTFT buffering, belong to the respective sinks. Each schema has
 its own `telemetry/telemetry-v<schema>.sqlite3`; writers never drop or rewrite
 another schema's data. Old schema files and the legacy `telemetry.sqlite3` are
-left alone and reported by `plak doctor`. Removal stays explicit; there is no
+left alone and reported by `plakd doctor`. Removal stays explicit; there is no
 migration or automatic old-file pruning. A mismatched schema in the current
 file refuses both reads and writes before WAL configuration.
 Doctor labels files from a newer schema as newer and leaves them untouched
@@ -757,20 +757,20 @@ Subscription credentials live in the Plakous private store under XDG state —
 lock files. A relative `XDG_STATE_HOME` is
 refused rather than resolved.
 
-The same hardened subscription metadata owner persists Plak's Claude client
+The same hardened subscription metadata owner persists plakd's Claude client
 installation identity in `plak/subscriptions/client-device-id` under that state
 root, with `.client-device-id.lock` serializing creation. It is 32 random bytes
 encoded in lowercase hex. It survives account changes and logout; malformed or
 unsafe identity files fail closed instead of silently rotating the identifier.
 
-**MCP server logins.** `plak mcp login <id>` stores the OAuth login of one
+**MCP server logins.** `plakd mcp login <id>` stores the OAuth login of one
 `[mcp_servers.<id>]` table with `auth = "oauth"` at
 `secrets/mcp-oauth/<id>/credential.json` in the home, through the same Plakous
 private store, refresh claims and quarantine as subscriptions (chapter 04 §3).
 It is a home secret, shared by every build that uses the home and versioned
 so that a build never uses or silently replaces another build's newer record.
 A login belongs to its server id and is used only while the server's canonical
-URI, issuer and client id still match; `plak mcp list` and `show` report each
+URI, issuer and client id still match; `plakd mcp list` and `show` report each
 OAuth server as logged in (with the access token's remaining lifetime and the
 granted scope), not logged in, refreshing, quarantined or bound to another
 server, without contacting it.
@@ -801,19 +801,19 @@ Each request revalidates its exact key generation. Replacing the key changes
 the durable target identity; an old session cannot silently replay under it.
 
 **One table per route.** Every model a route offers is a row in that route's
-provider crate, and nothing else in Plakous or Plak lists model ids:
+provider crate, and nothing else in Plakous or plakd lists model ids:
 presentation, coding selection, Code Mode eligibility, attach admission,
-`plak models` and the Ready catalog the host binds against all read the same
+`plakd models` and the Ready catalog the host binds against all read the same
 rows. A test in the hosted
 crate walks every row of every route through presentation, selection and
 admission, so a model enrolled in one place and missing from another fails
-offline. A new binding's account and model pair (`plak agent`, a hosted
+offline. A new binding's account and model pair (`plakd agent`, a hosted
 session's root template) is admitted the same way, before any attach: the model
 must be a row of that account's table, never a name that merely looks like the
 provider's. OpenRouter ids are dynamic gateway selections and are left to its
 authenticated discovery, which refuses an id the gateway catalog does not list
 in the same shape; an account with no table is refused. The refusal names the model,
-the account and its catalog, and the `plak models` listing that shows the rows.
+the account and its catalog, and the `plakd models` listing that shows the rows.
 
 Codex OAuth enrolls exactly `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
 `gpt-5.6-sol`, `gpt-5.6-terra`,
@@ -870,7 +870,7 @@ advertises reaches its route's wire: the xAI platform request policy admits
 the row's ladder), and one offline test constructs every (usable row, effort)
 pair on all three API routes. The two checks agree by one rule:
 a live list can only narrow the reviewed row. A live effort, window or output
-limit above the row makes the model `needs review` on every path (so `plak
+limit above the row makes the model `needs review` on every path (so `plakd
 models` never shows an effort the offline check refuses); a live list that
 drops an effort makes construction refuse that effort with the ladder it
 offers now, though the offline check accepted it. A live fact below the row
@@ -924,9 +924,9 @@ Anthropic and xAI rows are Direct. On a `CodeModeOnly` OpenAI row
 Codex nested catalog) and `direct` remains the second presentation;
 `native-ptc` on any other API row is refused before inference. One decision
 function owns this table's composition rule, and every path that binds an API
-composition uses it: `plak run`, `plak agent`, a new hosted session seeded from
+composition uses it: `plakd run`, `plakd agent`, a new hosted session seeded from
 the root template, a rebind or fork onto an API root, an API child's pin,
-template load, command parse, `plak models` and `plak doctor`. A selection the
+template load, command parse, `plakd models` and `plakd doctor`. A selection the
 table refuses is refused on every path, never substituted; a seed whose model
 is not yet chosen leaves `plakous-default` unresolved until it is.
 
@@ -969,7 +969,7 @@ before the first provider count (spec 01 §6.3).
 The API target and account are persisted together and checked on reopening,
 rebind, child admission and workflow submission. API roots and children
 use the same driver, session store and topology owner as the other accounts.
-Plak and Plakous implement no harness planning mode. Vendor plan tools record
+plakd and Plakous implement no harness planning mode. Vendor plan tools record
 model-owned intentions; they do not change session roles or tool authority.
 
 ### 2.4 Session logs
@@ -984,14 +984,14 @@ When next-round capacity replaces a committed tool result body, a separate
 `observation.replaced` record names the call and the canonical text byte counts
 before and after replacement. It is diagnostic evidence, distinct from
 `observation.clipped` raw-result counts; it adds no user-facing system note.
-`plak session log <id>` reads it; `--json` passes it through unchanged.
+`plakd session log <id>` reads it; `--json` passes it through unchanged.
 Terminal usage is keyed by its fact's turn id, never inferred from the most
 recent live lifecycle: open catch-up can publish usage without a live lifecycle.
 
 | Log record | Fields |
 | --- | --- |
 | `turn.usage` | authoritative `turn_id`; input, output, reasoning, cached-input and cache-write token counts; model-operation and reporting-operation counts; prepared-input peak when known |
-| `tool.omitted` | `text`: an MCP tool a wildcard `mcp:<id>` selection left out when the session was created (`mcp tool <server>/<tool>: input schema is not lowerable: <reason>; omitted`); the same line is a live settings notice, so `plak run` prints it on stderr |
+| `tool.omitted` | `text`: an MCP tool a wildcard `mcp:<id>` selection left out when the session was created (`mcp tool <server>/<tool>: input schema is not lowerable: <reason>; omitted`); the same line is a live settings notice, so `plakd run` prints it on stderr |
 
 An abandoned turn appends `turn.abandoned` with its `claim`
 (`running_tool`, `model_request`, `compaction_not_applied`, `nothing_started` or
@@ -999,7 +999,7 @@ An abandoned turn appends `turn.abandoned` with its `claim`
 its `cause` (`process_lost` or `interrupted`) and the operation identities; an
 in-place recovery also appends `session.recovered` (with the trigger, `eager`,
 `action` or `explicit`) or, when the reopen failed, `session.recover_failed`; an owner
-that finds on recovery that another `plak` took the session over appends
+that finds on recovery that another `plakd` took the session over appends
 `session.lease_taken_over`.
 For `nothing_started` after process loss, the notice says exact evidence proves
 the pending work never started and nothing after that boundary ran. This covers
@@ -1046,7 +1046,7 @@ recovery authority.
 
 ### 2.5 Versioned state
 
-Plak does not migrate state. Each build keeps its state in
+plakd does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
 schema>`, for example `r28.e38.p38.t11`. The key is derived from the stores'
@@ -1070,14 +1070,14 @@ the flat files of a build from before keyed directories — the first stateful
 command of a process prints one notice and starts fresh:
 
 ```text
-plak: <count> legacy state entries (<bytes> bytes) remain in <state root>; this build starts fresh in <state dir>; inspect with `plak doctor`, remove explicitly with `plak state prune-legacy`
+plakd: <count> legacy state entries (<bytes> bytes) remain in <state root>; this build starts fresh in <state dir>; inspect with `plakd doctor`, remove explicitly with `plakd state prune-legacy`
 ```
 
 Nothing is moved, rewritten or deleted automatically. Notice accounting is
 best-effort, runs once per process inside the notice guard, and stops recursive sizing
 when its 20 ms budget expires while still counting top-level entries. Vanished entries contribute zero bytes;
 unreadable entries or an exhausted budget report `size unknown`. Accounting
-and notice-output failures never fail state admission. `plak doctor` lists
+and notice-output failures never fail state admission. `plakd doctor` lists
 non-current state entries with retained file sizes or a
 `WARNING · size unavailable: <error>` row, then continues to its Result line.
 It also reports `unowned worktree` directories and their sizes, informationally,
@@ -1095,22 +1095,22 @@ opened, read or parsed, or state-root enumeration or metadata inspection fails
 other than ENOENT, one warning says the unowned list may be incomplete or
 overstated and ownership must be verified before manual removal.
 
-`plak tree release --force <tree-id>` is the agent tree custody break-glass
+`plakd tree release --force <tree-id>` is the agent tree custody break-glass
 (chapter 03 §14). It reads the tree's custody record in the current state's
 `subagents.sqlite3`: none, or an already released one, prints that there is
 nothing to release and exits 0. A holder proven to be running on this machine
 (this process, or one whose `custody-hosts` lock is held) is refused with the
 typed `tree_hosted_elsewhere (<binary id>)` refusal and exit 7: quitting it is
 the remedy. Otherwise (a holder on another machine, or one whose lock cannot
-prove it gone) it prints a `plak: warning:` naming the holder's host, machine,
+prove it gone) it prints a `plakd: warning:` naming the holder's host, machine,
 instance and build, releases the record keeping its fence and holder, and
 prints the released fence; the next attach takes the tree under the next
 fence, and every tree write the old holder still offers is refused. A holder
 on this machine that has exited needs no break-glass: the next attach proves it
 gone and takes the tree over. Without `--force` the command changes nothing and
-exits 2; a bare `plak tree` or `plak tree release` prints its help.
+exits 2; a bare `plakd tree` or `plakd tree release` prints its help.
 
-`plak state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` removes non-current directories and
+`plakd state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` removes non-current directories and
 regular files under `state/` after confirmation that lists their paths and
 sizes and names non-current state (older or newer builds). Non-terminal
 stdin requires `--yes`. It refuses linked or unsafe entries, unreadable databases,
@@ -1259,7 +1259,7 @@ under another build's directory, is refused with the one incompatible-session
 message instead of "not found":
 
 ```text
-session <id> was created by an incompatible plak build (state <key>); carry it forward with that build's `plak session export <id>` and then `plak session import <file>`, or start a new session
+session <id> was created by an incompatible plakd build (state <key>); carry it forward with that build's `plakd session export <id>` and then `plakd session import <file>`, or start a new session
 ```
 
 Startup may refuse for projection debt only when the recorded head is stale
@@ -1268,11 +1268,11 @@ recovery-required; a current head opens and per-action debt checks still apply.
 
 A store in this build's own directory at another schema version can only be a
 damaged or hand-placed file. It is refused with a message naming the file and
-saying it was created by an incompatible plak build; nothing is moved.
+saying it was created by an incompatible plakd build; nothing is moved.
 
 An exact reopen refused for incompatible recorded evaluator bytes, path or
-contract names the actual session id in the `plak session export <id>` recovery
-command, followed by `plak session import <file>`. The library refusal stays
+contract names the actual session id in the `plakd session export <id>` recovery
+command, followed by `plakd session import <file>`. The library refusal stays
 product-neutral; the hosted product renderer supplies the recovery commands.
 
 #### 2.5.1 Carry-forward
@@ -1296,11 +1296,11 @@ Import discovers the nearest project root from the document's workspace and
 validates its effective configuration before creating any successor; the
 workspace directory itself is not necessarily a project root, and the product
 home is never an overlay. A failure after commit names the successor:
-`session <new> was carried forward from <old>; fix the error and run: plak run --session <new>`.
+`session <new> was carried forward from <old>; fix the error and run: plakd run --session <new>`.
 Foreign resume validates effective configuration before running snapshot
 export. A config refusal says to fix the config and retry the same command;
 only version or unimportable-document refusals recommend this workspace's
-newest carried session from `plak session list`. Foreign resume skips export
+newest carried session from `plakd session list`. Foreign resume skips export
 when a snapshot manifest advertises an unsupported export version; absent,
 empty or unparseable manifests retain export-then-refuse. Its regenerable
 carry file is removed on every failure. Export publication is atomic and
@@ -1376,7 +1376,7 @@ versions name their saved runner and profile; there is no v11 fallback reader.
 This build writes v13, imports v13 and v12, and refuses v11 and older. The
 document bump is not an in-place database migration; product schema stays 37.
 
-`plak session export <id> [--out <path>]` writes one JSON document with
+`plakd session export <id> [--out <path>]` writes one JSON document with
 `"format": "plak-session-export", "version": 13` and prints its path. The
 exclusive 0600 file never overwrites an existing path. Without `--out`, it is
 `~/.plak/carry/<id>.<uuid>.json` in a private 0700 directory. Source session,
@@ -1522,7 +1522,7 @@ RecoveryRequired and Interrupted children are inert source facts, not resumed
 children. Process notices must be delivered by resuming and prompting the source
 before it can export; lease release alone is not terminal evidence.
 
-`plak session import <path>` creates a new id, seeds its new runtime, links it
+`plakd session import <path>` creates a new id, seeds its new runtime, links it
 to the source id/key and prints the provenance, carry summary and resume line.
 Lineage uses `plak:carry-forward:` and stops tree walks at the boundary. The new
 session starts a new tree: a virtual tree of one with no tree rows until it
@@ -1534,7 +1534,7 @@ instead continue the source's line: the new runtime session becomes the line's
 next head in its create transaction, takes the source head's process rows and
 pending notices, and the source's runtime branch becomes read-only history. The
 carry holds the source head's lease from reading its rows to that transaction,
-so it is refused while the source is open in any plak or held lease-only, and
+so it is refused while the source is open in any plakd or held lease-only, and
 while its head has an unfinished turn (chapter 01 §5.10). Its successor's
 record is written ahead of the runtime create and settled after a crash
 (section 2.6), and an open of the superseded source resumes the successor. A profile fork and a binding rebind instead start a new agent line, as a fork does
@@ -1570,7 +1570,7 @@ Inspection writes no session, tree or credential state and never renews a
 credential. It is evidence for the host's upgrade decision, not permission for
 a client to execute a new runtime or replay an effect.
 
-`plak run --session <id>` carries only when the id can name nothing in this build:
+`plakd run --session <id>` carries only when the id can name nothing in this build:
 at least the shortest accepted prefix, and no local session in this workspace
 matching it (a full id this store lacks, or a prefix matching none). An
 ambiguous or too-short id is this build's own refusal. The id must then match
@@ -1581,11 +1581,11 @@ across both the maintainer and the `just install release` snapshot roots,
 whose `state-key` manifest names that key exports it, within 120 seconds, and
 this build imports it, deletes the carry file and opens the new session with
 the note. Only installed snapshot directories (64 hex digits) owned by this
-user whose directory and `plak` are not group- or world-writable are used.
+user whose directory and `plakd` are not group- or world-writable are used.
 Without such a snapshot the incompatible-session refusal above stands. When no
 snapshot exists, a paid compaction fallback is not offered.
 
-**Host-owned settled carry.** `plak host upgrade --expect-binary <id>` uses
+**Host-owned settled carry.** `plakd host upgrade --expect-binary <id>` uses
 this same portable-session producer and importer, not a database copy or live-tree export
 (§4.6). Settled carry takes the newest unarchived record of
 each tree, across the whole home rather than the directory's row limit.
@@ -1650,10 +1650,10 @@ clears the operator's label without changing the generated `title`, history or
 binding. Non-null labels contain 1–128 Unicode scalars, at most 512 UTF-8 bytes,
 no control characters, and at least one non-whitespace character. They are never
 trimmed or truncated, and may change while the session is busy or archived.
-The CLI exposes `plak session rename <full-id> <title>` and
-`plak session rename <full-id> --clear`. `plak session unarchive <full-id>`
+The CLI exposes `plakd session rename <full-id> <title>` and
+`plakd session rename <full-id> --clear`. `plakd session unarchive <full-id>`
 clears only the archive flag and starts no work.
-`plak session archive <full-id> [--yes]` confirms before hiding the session.
+`plakd session archive <full-id> [--yes]` confirms before hiding the session.
 Lifecycle commands accept full ids home-wide without interpreting a remote
 workspace path on the host; deletion retains workspace-qualified short ids. If a live
 host answers, the CLI forwards lifecycle requests to it. Only confirmed host
@@ -1710,7 +1710,7 @@ and is never limited by directory or workspace-list row bounds.
 Archived attach reads only the root transcript and facts, without opening a
 runtime or running a continuation. Child-node attach refuses `UnknownNode`.
 `StopSession` on an archived session succeeds without opening or writing it.
-`plak session gc <id>` refuses an archived session with an unarchive remedy;
+`plakd session gc <id>` refuses an archived session with an unarchive remedy;
 `gc --all` skips archived sessions.
 
 When a session open fails, root attach serves the same stored transcript and
@@ -1736,7 +1736,7 @@ attachment. Stop still durably withdraws pending continuation through the
 normal stop path. Archive retains its separate read-only refusal and no-op
 Stop semantics.
 
-`plak session delete <id> [--yes] [--abandon-children]` removes one session and all of its retained
+`plakd session delete <id> [--yes] [--abandon-children]` removes one session and all of its retained
 runtime history. It is a remedy when logical retention bounds are full; physical
 disk exhaustion may first require freeing disk space: Plakous never
 refuses archive or delete for capacity (Plakous section 5.2), while a new-session operation,
@@ -1747,7 +1747,7 @@ before confirmation and again after it; **open** is found by archiving the
 session's own runtime session, the first change it makes. Nothing is deleted
 when any of them refuses:
 
-- **open**: the runtime branch lease is live, so a running plak owns the
+- **open**: the runtime branch lease is live, so a running plakd owns the
   session (or its owner died less than a lease ago); close it there first;
 - **live tree**: the session's agent tree has a child that is not finished
   (running, pending, paused, sealing or interrupted); the children are named;
@@ -1800,17 +1800,17 @@ than re-run. Deleting many sessions at once is not offered.
 
 #### 2.5.3 Reclaiming history
 
-`plak session gc <id> | --all` prunes superseded checkpoint history through the
+`plakd session gc <id> | --all` prunes superseded checkpoint history through the
 Plakous facade (Plakous section 4, history retention) without changing any
 session's conversation, resume, forks or export. It is the first remedy when the
 runtime store reaches its logical retention limits and is never refused for
 capacity. Physical disk exhaustion may first require freeing disk space. `<id>` resolves like
-every session command; `--all` covers every plak session (product record) in
+every session command; `--all` covers every plakd session (product record) in
 the home, not just this workspace, and first finishes interrupted deletes
 (below).
 Sub-agent runtime sessions no product record names are pruned only by their own
 turns. A session whose branch lease is live is skipped as open in a running
-plak; one whose head is Working is skipped as needing `plak session recover`; one
+plakd; one whose head is Working is skipped as needing `plakd session recover`; one
 whose runtime branch is a superseded predecessor of a live agent line is
 skipped as `superseded: its agent line continues in a later session; kept
 as read-only history`, and one whose line ended when the session holding its
@@ -1820,10 +1820,10 @@ its head was deleted; kept as read-only history until it is deleted` (chapter
 `gc` first applies the session's projector to the feed tail and prunes at the
 head that view names. A session with a workflow request that has no feed fact
 yet is skipped as `workflow pending`, because that request still names its
-source checkpoint, which a prune could reclaim; opening it (or `plak session
+source checkpoint, which a prune could reclaim; opening it (or `plakd session
 recover`) settles the request from the feed or withdraws it (§4.2).
 
-Archival is only ever the first half of a product deletion: Plak never archives
+Archival is only ever the first half of a product deletion: plakd never archives
 a runtime session for any other reason. A runtime session left archived is
 therefore a delete a crash cut short, and `gc --all` first lists the sessions
 archived in this home's runtime store through `AgentSessions::archived_sessions`
@@ -1834,7 +1834,7 @@ runtime session no record names (a child archived by a delete whose own
 record is gone) is deleted at its archived head revision
 (`AgentSessions::delete_archived`). A refused delete is reported as skipped. A
 record whose runtime session is already gone (a delete cut short after its
-runtime steps) is skipped with the remedy to run `plak session delete` again.
+runtime steps) is skipped with the remedy to run `plakd session delete` again.
 After pruning and finishing interrupted deletes, it synchronously drains the
 persistent object queue through `AgentSessions::reclaim`, using bounded crash-safe
 transactions until empty. Automatic pruning and ordinary deletion only enqueue.
@@ -1855,7 +1855,7 @@ the store's. The per-session walk reads the objects and edges in keyset pages of
 so a read mark lasts one page. On a 3.4 GB store of 472,000 objects and
 724,000 edges a cold walk took 8.7 to 16 seconds and a warm walk about 1.2
 seconds, with peak memory 112 to 138 MB. When another process
-holds a state key's runtime store open, it adds `note: a running plak on this
+holds a state key's runtime store open, it adds `note: a running plakd on this
 home uses state <key> of another build; this gc ran as build state <key> and
 did not touch that store; ...`: each build reclaims only its own state key's
 store. A process holding a store open holds an exclusive lock on its own lock
@@ -1933,21 +1933,21 @@ intent, only after it. A crash in between leaves a record that names exactly
 the create it was waiting for. No other path creates that runtime: a host
 asked to open a record that still has a `carry_intent` refuses to create an
 empty session under its operation. A record with neither a locator nor a
-`carry_intent` is a create that has not reached the runtime (`plak host`'s
+`carry_intent` is a create that has not reached the runtime (`plakd host`'s
 `new_session`, or a crash between a new session's product save and its
-runtime create): every working face's open (`plak agent --session`,
-`plak run --session`, `plak host`'s attach) creates its runtime session under its
+runtime create): every working face's open (`plakd agent --session`,
+`plakd run --session`, `plakd host`'s attach) creates its runtime session under its
 `plak:create:<id>`, which the runtime store creates once; a read refuses it
 as having no locator.
 
-Every startup of a working face (`plak run --session`, `plak agent --session`
+Every startup of a working face (`plakd run --session`, `plakd agent --session`
 and explicit host session operations) settles the
 workspace's pending intents, and every open of a record settles its own first.
 Settlement is owned: it takes the source branch's lease
 (`AgentSessions::hold_branch`), the same lease the carry itself holds from
 reading the source to its create, so a carry still running in another process
 leaves its intent pending, untouched, and an open of it answers `the carry into
-session <id> is pending: another plak holds its source; retry in <N> s` with
+session <id> is pending: another plakd holds its source; retry in <N> s` with
 the store's lease period (`AgentSessions::lease_period_seconds`). That is also
 the answer for up to one lease period after a crash, until the crashed
 process's lease lapses. The settlement releases its hold on every exit,
@@ -1971,7 +1971,7 @@ leaves the source leased. Under the held lease no carry can commit, and:
    note naming why; its create identity stays bound, so a replay is refused,
    and the open lands on the source when its record is left.
 
-`plak session delete` refuses a source whose carried successor is still an
+`plakd session delete` refuses a source whose carried successor is still an
 intent: resuming either one settles it first. The working faces accept an
 intent record's id, which has no locator yet, and land on the record its
 settlement leaves; read-only commands (`session show`, `session export`) read
@@ -2604,7 +2604,7 @@ never a recovery fence and never needs an exact reopen.
 
 ### 3.1 Grammar
 
-`plak runner connect --stdio --binary <id>` selects an already installed
+`plakd runner connect --stdio --binary <id>` selects an already installed
 immutable image before runner runtime or product-home setup. The ID is exactly
 twelve lowercase hexadecimal SHA-256 digits, not a source revision or state
 key. Search both installed maintainer/release roots (06 §6.1), only 64-hex
@@ -2631,9 +2631,9 @@ The parser is hand-driven over clap with clap's own help, version, subcommand
 inference, and short flags disabled, so every message the binary prints is
 product text. The grammar below is the complete shipped surface.
 
-**Top level.** Bare `plak` MUST print global help and exit 0 without opening
-product state, a session or a host. `plak help`, `plak --help` and `plak -h`
-print the same help. `plak version`, `plak --version` and `plak -V` print the
+**Top level.** Bare `plakd` MUST print global help and exit 0 without opening
+product state, a session or a host. `plakd help`, `plakd --help` and `plakd -h`
+print the same help. `plakd version`, `plakd --version` and `plakd -V` print the
 version. There is no top-level prompt positional or terminal resume command.
 
 | Command | Arguments and flags |
@@ -2660,7 +2660,7 @@ version. There is no top-level prompt positional or terminal resume command.
 | `state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` | Confirm and delete unused non-current state and older-schema telemetry (including its SQLite sidecars); retain current/newer telemetry and session references unless explicitly selected; refuse locks or unsafe paths (§2.5). |
 | `telemetry status [--views]`, `telemetry sql [<query>] [--json]`, `telemetry prune [--max-age-days <n>] [--max-bytes <n>] [--yes]` | the local analytics store |
 | `models [<account>]` | read-only catalog discovery, in every build |
-| `runner serve`, `runner connect --stdio`, `runner allow <host-id>`, `runner ps [<name>]`, `runner pair <name>` | Runners (chapter 01 §8.4, chapter 04 §2.9). On a runner machine, `serve` runs the runner daemon in the foreground until it is idle (07 §3.7), with the tree's version control registered as its extension: it answers only absolute paths without `..` that resolve under the roots or the `copies` root and outside the product home, and takes copies carried from another runner under `copies` (chapter 01 §8.5); the hidden `serve --local` runs this home's home-local runner in the foreground until it is idle (300 s), or its socket is removed or replaced (chapter 01 §8.4); startup creates runner directories only below an existing product home and refuses a deleted home rather than resurrecting it: it needs no `runner.toml`, binds only this home's `host-id` from any build of its runner protocol version, carries only process sessions, serves any workspace outside the product home, and its independently owned startup probe must reconcile before local sessions open; `connect --stdio` bridges standard input and output to the daemon of this build's version triple and, when none answers, starts `plak runner serve` detached in its own process group with a cleared environment (`PATH`, `HOME`, `PLAK_HOME`) and its stderr in `runner/builds/<triple-key>/serve.log`; a host's ssh runs it. `allow` pairs a host by adding its id, a lowercase uuid, to `runner.toml` `hosts`. `ps` lists the daemon's lines for every host through an inspecting connection bound under this machine's own host id (a remote inspection sees only its own host's lines, without job commands or output), each `held` or `orphaned` with its job count, or prints `no runner is running`. On a host, `pair <name>` refuses a build whose source revision is `unknown`, runs `plak runner allow <host-id>` on `[runners.<name>]` over ssh with the strict options, binds to prove it (an unpaired bind is reported at once) and records the runner's identity in `runners/<name>/runner.json`; `ps <name>` lists what that runner holds for this host. `secret set|rm|list <name>` manages this machine's runner secrets (`secrets/runner/`, chapter 04 §3.1), which an MCP server placed on this runner reads; `set` reads the value from a hidden prompt. Session placement resolves paired runner identity explicitly; no process-global runner is selected. |
+| `runner serve`, `runner connect --stdio`, `runner allow <host-id>`, `runner ps [<name>]`, `runner pair <name>` | Runners (chapter 01 section 8.4, chapter 04 section 2.9). On a runner machine, `serve` runs the runner daemon in the foreground until it is idle (07 section 3.7), with the tree's version control registered as its extension: it answers only absolute paths without `..` that resolve under the roots or the `copies` root and outside the product home, and takes copies carried from another runner under `copies` (chapter 01 section 8.5); the hidden `serve --local` runs this home's home-local runner in the foreground until it is idle (300 s), or its socket is removed or replaced (chapter 01 section 8.4); startup creates runner directories only below an existing product home and refuses a deleted home rather than resurrecting it: it needs no `runner.toml`, binds only this home's `host-id` from any build of its runner protocol version, carries only process sessions, serves any workspace outside the product home, and its independently owned startup probe must reconcile before local sessions open; `connect --stdio` bridges standard input and output to the daemon of this build's version triple and, when none answers, starts `plakd runner serve` detached in its own process group with a cleared environment (`PATH`, `HOME`, `PLAK_HOME`) and its stderr in `runner/builds/<triple-key>/serve.log`; a host's ssh runs it. `allow` pairs a host by adding its id, a lowercase uuid, to `runner.toml` `hosts`. `ps` lists the daemon's lines for every host through an inspecting connection bound under this machine's own host id (a remote inspection sees only its own host's lines, without job commands or output), each `held` or `orphaned` with its job count, or prints `no runner is running`. On a host, `pair <name>` refuses a build whose source revision is `unknown`, runs `plakd runner allow <host-id>` on `[runners.<name>]` over ssh with the strict options, binds to prove it (an unpaired bind is reported at once) and records the runner's identity in `runners/<name>/runner.json`; `ps <name>` lists what that runner holds for this host. `secret set|rm|list <name>` manages this machine's runner secrets (`secrets/runner/`, chapter 04 section 3.1), which an MCP server placed on this runner reads; `set` reads the value from a hidden prompt. Session placement resolves paired runner identity explicitly; no process-global runner is selected. |
 | `version`, `help [<command>]` | |
 
 `session show` also inspects the root session's canonical Plakous branch head
@@ -2699,7 +2699,7 @@ not an atomic cross-database state. Holder liveness is also a separately
 observed fact, not a promise that the owner will remain present.
 Adopted candidates also display `merged at <commit>` from their durable target
 snapshot commit. On Git this is an internal snapshot identity, not a
-Plak-authored commit on the user's branch.
+plakd-authored commit on the user's branch.
 
 `session show` and `session log` resolve `<id>` like every session command:
 the full id, or an unambiguous prefix of at least four characters among the
@@ -2751,8 +2751,8 @@ single-agent reasoning contract; an explicit bind refusal remains a backstop.
 `responses`, `messages`, is accepted **only** with `--account openrouter`, and
 resolves once at parse time, with `auto` landing on `chat`.
 
-There is no `plak auth`, no `plak config path`, no `plak telemetry views`, and
-no `plak update`. `auth` is not a hidden alias: it parses as an unknown
+There is no `plakd auth`, no `plakd config path`, no `plakd telemetry views`, and
+no `plakd update`. `auth` is not a hidden alias: it parses as an unknown
 command. `config show` prints `config_path=` as its first line, and
 `telemetry status --views` appends the recommended read-only SQL views. `models`
 is not gated by a build feature.
@@ -2766,28 +2766,28 @@ makes one bounded catalog GET, no endpoint or inference calls, and does not
 claim that listed models are admitted or qualified. OAuth account listings
 retain their compatibility gate and capability columns.
 
-`plak models <account>` checks offline credential usability before asking for
+`plakd models <account>` checks offline credential usability before asking for
 profile acceptance. Missing, revoked, quarantined and unsupported credentials
 fail without a consent prompt or catalog request; a refresh-required credential
 may proceed through acceptance and refresh.
 
 Contract-drift rows retain provider visibility: hidden rows do not become picker
 choices. Listed refused rows show their exact unavailable reason in the picker
-and an `unavailable=<reason>` column in `plak models`. `plak run --model <id>`
+and an `unavailable=<reason>` column in `plakd models`. `plakd run --model <id>`
 and continuation refuse a drifted row with Auth-class exit 3 and that reason
 before checking effort or composition, with the newer-build remedy rather than
 a re-login hint.
 
-`plak version --state-key` remains a machine inspection form.
-The hidden install-time machine form `plak version --write-binary-manifest <dir>`
+`plakd version --state-key` remains a machine inspection form.
+The hidden install-time machine form `plakd version --write-binary-manifest <dir>`
 writes binary identity metadata without creating product state (§1).
 
 `fork`, `compact`, and `compatibility` compile only under the `maintainer`
 feature and are absent from an ordinary build (chapter 06 §4.1). They are not
-hidden product verbs. `plak fork <session>` forks on the session's exact
+hidden product verbs. `plakd fork <session>` forks on the session's exact
 binding; there is no maintainer verb that rebinds a session.
 
-Maintainer `plak session rehearse` and `just dev reload-rehearsal` run what an open
+Maintainer `plakd session rehearse` and `just dev reload-rehearsal` run what an open
 would run, read-only: the runtime's one recovery predicate over each exact head
 (chapter 01 §5.5) and this product's projector over the feed records after the
 stored cursor (read through `inspect_feed_sqlite` and the
@@ -2819,7 +2819,7 @@ current branch heads on a behind-retention read), never authorized by a stop
 marker or a product delivery receipt. An unrelated product command id cannot
 prevent inspection of that head.
 
-`plak version --carry-probe <file>` is a hidden machine form: it validates a
+`plakd version --carry-probe <file>` is a hidden machine form: it validates a
 v13/v12 export and reports the destination route, optional total/admitted input
 windows, estimated history tokens and message count. It performs no inference
 or session creation and emits no startup event.
@@ -2827,9 +2827,9 @@ or session creation and emits no startup event.
 ### 3.2 Help
 
 Help is static product text, one page per command group, printed to stdout with
-exit 0. `plak <command> --help` and `plak help <command>` reach the same page,
-and only the first token names the page, so help is one level deep: `plak key set
---help` prints the `key` page. `plak help <unknown>` prints
+exit 0. `plakd <command> --help` and `plakd help <command>` reach the same page,
+and only the first token names the page, so help is one level deep: `plakd key set
+--help` prints the `key` page. `plakd help <unknown>` prints
 `No detailed help for <unknown>.` rather than failing.
 Help flags are recognized only before the first `--`; flags after it are
 prompt text. Every visible clap long flag is listed on its verb's rendered page.
@@ -2849,7 +2849,7 @@ default with no approval gates, and that process tools are worker-isolated,
 not workspace-isolated.
 
 Every command line the product prints as a remedy is drawn from one catalogue that
-a test walks through this parser, so no surface can name a command `plak` does
+a test walks through this parser, so no surface can name a command `plakd` does
 not have or a command that would only print help.
 
 ### 3.3 Exit codes
@@ -2858,45 +2858,45 @@ not have or a command that would only print help.
 | --- | --- |
 | 0 | success, including every help and version page |
 | 2 | usage: any parse error, bad or ambiguous session prefixes, confirmation-required refusals without `--yes`, invalid config-set values, an OAuth account given to `key status`, an invalid model id, a model, effort or composition the authenticated catalog or the provider's resolution does not offer, conflicting binding flags |
-| 3 | auth: login, logout, refresh, and `plak status <account>` failures, a credential that is not ready, a missing, declined or inactive subscription compatibility acceptance, and an unsafe credential store |
+| 3 | auth: login, logout, refresh, and `plakd status <account>` failures, a credential that is not ready, a missing, declined or inactive subscription compatibility acceptance, and an unsafe credential store |
 | 4 | the turn was interrupted, or `SIGTERM` or `SIGHUP` stopped the process |
-| 5 | agent or product failure, model refusal, a `plak run` answer committed truncated at its output limit (`turn_failed:output-limit`), or `RecoveryRequired` |
-| 6 | `plak run` reached its admitted-turn or wall-clock bound |
-| 7 | `tree_hosted_elsewhere`: the session's agent tree is in another live `plak` process's custody (chapter 03 §14), or its open was refused for a runtime lease another live `plak` process holds (§4.6); nothing was attached or written |
+| 5 | agent or product failure, model refusal, a `plakd run` answer committed truncated at its output limit (`turn_failed:output-limit`), or `RecoveryRequired` |
+| 6 | `plakd run` reached its admitted-turn or wall-clock bound |
+| 7 | `tree_hosted_elsewhere`: the session's agent tree is in another live `plakd` process's custody (chapter 03 section 14), or its open was refused for a runtime lease another live `plakd` process holds (section 4.6); nothing was attached or written |
 | 130 | quit exhausted its terminal join and selected lease-only abandonment, including when `SIGTERM`/`SIGHUP` requested the stop; an idle quit or a quit whose terminal joined still exits 0 |
 | 1 | anything else, including an invalid `config.toml` |
 
-Bare `plak status` exits 0 when it has printed the table. A provider whose
+Bare `plakd status` exits 0 when it has printed the table. A provider whose
 offline read fails, or whose credential is not ready, is a row in that table,
-not a command failure. `plak status <account>` still exits 3 when that one
+not a command failure. `plakd status <account>` still exits 3 when that one
 account cannot be read.
 
-Failures print to stderr prefixed `plak: `, passed through the multi-line
+Failures print to stderr prefixed `plakd: `, passed through the multi-line
 terminal sanitizer of §3.5. One-shot terminal failures are
 printed once by the CLI result path; operational notes remain immediate and
 JSONL retains its terminal error event. An explicitly attested Claude
 subscription quota notice is preserved without an additional unknown-cause rate-limit summary. Parse errors
 are deliberately payload-free — a fixed sentence naming the class of mistake and pointing at
-`plak help` or `plak <command> --help` — so that argv content, which may carry
+`plakd help` or `plakd <command> --help` -- so that argv content, which may carry
 a secret, is never echoed.
 
 Every native-subscription failure carries its repair in the same line, after
-`; `: the exact command (`plak login <account>`, `plak refresh <account>`,
-`plak logout <account>`, `plak models <account>`), the network, or a
+`; `: the exact command (`plakd login <account>`, `plakd refresh <account>`,
+`plakd logout <account>`, `plakd models <account>`), the network, or a
 newer build. A transport failure retains the typed network phase when known,
 and says `credential unchanged` only when no request bytes were sent. Refresh
 failure text names the account and advises retry when online, not signing in
 again. A credential that is not ready names its state — signed out,
 refresh required, quarantined, revoked — and its command. When the facade
-answers a refresh with only "no credential is available", `plak run`,
-`plak refresh` and `plak models` read the account's offline status and name
-that state, so a `plak run` on a signed-out subscription exits 3 with
-`` <account> is signed out; run `plak login <account>` ``. A failed login
+answers a refresh with only "no credential is available", `plakd run`,
+`plakd refresh` and `plakd models` read the account's offline status and name
+that state, so a `plakd run` on a signed-out subscription exits 3 with
+`` <account> is signed out; run `plakd login <account>` ``. A failed login
 completion names the account it was for. Credential, compatibility and storage
 failures are class 3. A model, effort or composition the provider refuses when
-`plak run` resolves its turn is class 2, like a model absent from the catalog;
+`plakd run` resolves its turn is class 2, like a model absent from the catalog;
 catalog-contract, resolution-evidence, transport and internal failures stay
-class 1 on every command but `plak login`, whose failures are all class 3. An inactive compiled compatibility profile names its
+class 1 on every command but `plakd login`, whose failures are all class 3. An inactive compiled compatibility profile names its
 review expiry date in UTC (or that it was withdrawn) and says that only a newer
 build repairs it.
 
@@ -2921,9 +2921,9 @@ Each rule carries its repair with the path shell-quoted: `chmod u+rwx`,
 so only the refused bits are cleared), `chmod 700` or `chmod 00700` on a store
 directory (the leading zero clears special bits under GNU `chmod`),
 `chmod 600`, removing the extra link, or moving the entry aside (a moved
-credential then needs `plak login <account>`); `chown` and replacement are
+credential then needs `plakd login <account>`); `chown` and replacement are
 recommended only inside `plak/subscriptions`. For the state root, its ancestors
-and `plak` the only remedy for a link, a foreign owner, an inaccessible
+and `plakd` the only remedy for a link, a foreign owner, an inaccessible
 ancestor or an unusable parent is to set `XDG_STATE_HOME` to a directory the
 user owns whose path has no symbolic links. When no inspected path breaks a
 rule the message names the refused root and asks the operator to check that it
@@ -2931,23 +2931,23 @@ and its parents are directories they own and can write.
 
 ### 3.4 Refusals worth knowing
 
-- **An invalid `config.toml` refuses every turn-running face.** `plak run`
-  (new or `--session`) and `plak agent` load the product configuration before
+- **An invalid `config.toml` refuses every turn-running face.** `plakd run`
+  (new or `--session`) and `plakd agent` load the product configuration before
   the compatibility prompt, any credential read or any session state, and exit
   1 with `invalid product config: <error>` (chapter 07 §2). The configuration
   they admit is the one the turn runs with; its warnings go to stderr through
   the multi-line sanitizer of §3.5.
 - **The subscription compatibility notice is answered on stdin.** Before an
-  account's first use (and again after a profile or notice revision), `plak
-  login`, `plak refresh`, `plak logout <account>`, `plak models` and `plak run`
+  account's first use (and again after a profile or notice revision), `plakd
+  login`, `plakd refresh`, `plakd logout <account>`, `plakd models` and `plakd run`
   print the account, the compiled profile id, its review date (UTC) and its
   exclusive expiry instant (RFC 3339, with the consequence of expiry) to stderr
   and read one line: `y`, `yes`
   or the exact notice revision accepts. When stdin is not a terminal, or no
   answer could be read, stderr ends the prompt line itself. A non-interactive
-  `plak run` accepts by piping `y` on stdin (the prompt itself follows `--`,
-  not stdin). A closed stdin refuses with exit 3 naming `plak login <account>`
-  and the piped answer (`plak login` itself names only the piped answer or a
+  `plakd run` accepts by piping `y` on stdin (the prompt itself follows `--`,
+  not stdin). A closed stdin refuses with exit 3 naming `plakd login <account>`
+  and the piped answer (`plakd login` itself names only the piped answer or a
   terminal); stdin that cannot be read as text refuses with exit 3 saying so;
   and a declined answer exits 3 before any network request. An inactive or
   withdrawn profile is refused without a prompt.
@@ -2969,19 +2969,19 @@ and its parents are directories they own and can write.
   (`js-ptc`, `py-ptc`, `direct`), as it is on the Anthropic and xAI API
   accounts and on an OpenAI API model the enrollment table does not mark
   `CodeModeOnly`.
-- **`plak key set` never takes the key on argv.** It prompts with masked
-  input, and it refuses an OAuth account, as `plak login` refuses an API-key
-  account. `plak secret set` likewise reads its value only from a masked
+- **`plakd key set` never takes the key on argv.** It prompts with masked
+  input, and it refuses an OAuth account, as `plakd login` refuses an API-key
+  account. `plakd secret set` likewise reads its value only from a masked
   prompt.
 
 ### 3.5 Output modes
 
 Terminal versus pipe is resolved once per process from whether stdout is a
 terminal, and it changes exactly two things: table framing, and whether
-`plak run`'s assistant stdout is sanitized (below). Interactive output
+`plakd run`'s assistant stdout is sanitized (below). Interactive output
 pads columns to terminal cell widths; piped output emits tab-delimited rows
 with the same headings. The shared table renderer emits no ANSI colour.
-Subscription meters in `plak usage` are an explicit exception: their unused
+Subscription meters in `plakd usage` are an explicit exception: their unused
 cells use grey SGR, including in piped output. `NO_COLOR` does not change
 these fixed meter styles.
 
@@ -2995,9 +2995,9 @@ text, not display width.
 The CLI output faces apply the multi-line form of the same rule to free text:
 newlines and tabs survive, `\r\n` becomes `\n`, and every other control
 character and bidirectional override becomes the replacement character, so no
-ESC, OSC or CSI sequence reaches the terminal. `plak run` passes every stderr
+ESC, OSC or CSI sequence reaches the terminal. `plakd run` passes every stderr
 line through it — tool failure reasons, host notes, configuration warnings,
-the closing line and the final `plak: ` failure — whatever stderr is attached
+the closing line and the final `plakd: ` failure -- whatever stderr is attached
 to. Its assistant stdout
 is sanitized only when stdout is a terminal; piped stdout stays byte-exact so
 scripts receive exactly what the model wrote.
@@ -3009,7 +3009,7 @@ Without those flags both print a table.
 Stream discipline elsewhere: `run --print-session-id` writes
 `session_id=<uuid>` to stdout before the turn begins, so a caller can bind to
 the session even if the turn later fails; login and refresh notices go to
-stderr; and `plak agent` keeps stdout machine-only with every diagnostic on
+stderr; and `plakd agent` keeps stdout machine-only with every diagnostic on
 stderr.
 
 Native subscription failures retain distinct content-free catalog and authentication
@@ -3025,7 +3025,7 @@ Installing the log creates the private home and `logs/` only. It does not create
 
 Workspace maintenance follows chapter 03 §6.6.
 
-Before anything else, every `plak` process raises its soft open-file limit
+Before anything else, every `plakd` process raises its soft open-file limit
 (`RLIMIT_NOFILE`) toward its hard limit, capped at 10 240 (macOS's `OPEN_MAX`,
 which `setrlimit` accepts there even with an unlimited hard limit). It never
 lowers it, a refused raise leaves it unchanged, and the processes it starts
@@ -3034,7 +3034,7 @@ limit with its wake pipes; library embedders keep their own limit, under which
 readers fall back to polling (chapter 01 §8.5).
 
 After diagnostics initialize, startup emits one `INFO` event at `plak.start`
-with only `binary` (the same 12-hex build id as `plak version`), `state_key`
+with only `binary` (the same 12-hex build id as `plakd version`), `state_key`
 and `command` (the normalized top-level verb), skipped if the build id is unavailable;
 only plain `version` obtains the id synchronously. Other commands use an already
 computed id or emit from the background identity reader without delaying startup.
@@ -3052,7 +3052,7 @@ a process opens it or writes past that size; a process whose log another process
 already rotated follows the path to the new file. A diagnostics failure prints one line to stderr and the
 command continues.
 
-`plak status` also prints the compiled subscription profile expiry timestamps
+`plakd status` also prints the compiled subscription profile expiry timestamps
 in UTC and explains that an expired profile requires a newly reviewed build.
 Credential readiness is independent of this deadline; reauthentication does
 not extend a compiled compatibility review.
@@ -3061,7 +3061,7 @@ not extend a compiled compatibility review.
 
 ### 4.1 Run until idle
 
-`plak run` opens or resumes a session and runs until idle. Every continuation
+`plakd run` opens or resumes a session and runs until idle. Every continuation
 is a distinct admitted root turn with its own terminal result. After a
 completed turn, pending process notices or child Result/Question mail trigger
 a continuation; running budget-promoted jobs or children alone cause turn-free
@@ -3084,7 +3084,7 @@ jobs still wait while their leaders live; when a leader exits with live group
 members, that job converts to leftover and no longer holds the run open. An
 unavailable group scan is not evidence of leftover members; a promoted job
 keeps the run waiting until membership or completion is observed. This is a CLI
-flag, not a configuration key. The host and JSONL `plak agent` keep leftover jobs
+flag, not a configuration key. The host and JSONL `plakd agent` keep leftover jobs
 owned until stop, session release, attempt end, or the hard runtime cap.
 There is no consecutive-wake limit; the explicit max-turns and timeout bounds
 below still apply. It exits with the last turn status. Refused, failed and
@@ -3099,7 +3099,7 @@ Repeated observations of the same offered approval id print and send its denial
 only once; a distinct id for the same tool is a new decision.
 
 If capacity refuses an automatic continuation and storage remains unavailable,
-the run emits `plak: run stopped at storage unavailable`, maps a completed or
+the run emits `plakd: run stopped at storage unavailable`, maps a completed or
 truncated last turn to interrupted (exit 4), and performs the same job
 stop/disown and child interruption cleanup as a bound. `--leave-jobs-running`
 still relinquishes leftover groups first. No unadmitted wake item is retained.
@@ -3109,10 +3109,10 @@ still relinquishes leftover groups first. No unadmitted wake item is retained.
 The CLI establishes one absolute deadline before authentication and catalog
 preparation; credential refresh, catalog discovery, and turn-scoped resolution
 share that deadline with hosted admission, turns, and idle waiting. Expiry
-during preparation cancels the pending request, writes `plak: run stopped at
+during preparation cancels the pending request, writes `plakd: run stopped at
 timeout`, and exits 6 without admitting a turn. Hosted drive never resets the clock;
 each job retains its own hard cap. A bound interrupts the current turn, stops
-owned background processes with `plak exit` (leftovers are first relinquished
+owned background processes with `plakd exit` (leftovers are first relinquished
 when `--leave-jobs-running` is set), interrupts running children resumably,
 and exits 6. Timeout is a bound only when work would continue or wait, or the
 current turn did not complete; a completed final answer with no pending work
@@ -3133,13 +3133,13 @@ reopens as `restored_paused`; an empty queue without a pause cause loads as
 does not apply. The root uses root-wake guidance: end its turn when only
 waiting remains.
 
-Stderr emits one waiting line per waiting phase, e.g. `plak: waiting for p3
+Stderr emits one waiting line per waiting phase, e.g. `plakd: waiting for p3
 (npm run dev), c1; Ctrl-C to stop`, and one line per continuation, e.g.
-`plak: continuing (turn 2: p3 exited 0, c1 result)`. A parked child (chapter
+`plakd: continuing (turn 2: p3 exited 0, c1 result)`. A parked child (chapter
 03 §5.2) is still running work the run waits for; its entry names what it waits
 on, e.g. `c2 (parked on p1, c4)`, or `c2 (parked)` when it waits only for its
 wake. A bound emits
-`plak: run stopped at <bound>; stopped p3; interrupted c2`. Stdout writes
+`plakd: run stopped at <bound>; stopped p3; interrupted c2`. Stdout writes
 the last turn authoritative answer exactly once after release.
 The prompt follows `--`, is trimmed, must be non-empty, and is bounded at
 64 KiB — the same admission bound the JSONL host applies, because they are the
@@ -3154,10 +3154,10 @@ before the catalog GET. `--print-session-id`
 writes `session_id=<uuid>` to stdout *before* the turn starts, so a caller can
 bind to the session even when the turn later fails or is interrupted.
 
-A turn has no wall clock in any face: `plak run`, `plak host` and the JSONL host
+A turn has no wall clock in any face: `plakd run`, `plakd host` and the JSONL host
 all build the agent with no turn deadline and the product's
 `turn.max_model_rounds` cap (spec 07 §3.2), and a turn that reaches that cap
-answers from a tool-free wrap-up round. SIGINT in `plak run` and explicit wire interrupt operations
+answers from a tool-free wrap-up round. SIGINT in `plakd run` and explicit wire interrupt operations
 are the operator's stops. The subscription request gate carries no elapsed
 clock either; a turn's auth and catalog refreshes are charged to that turn.
 
@@ -3166,21 +3166,21 @@ interrupted turn exits 4, and an agent or recovery-required outcome exits 5. A
 completed turn whose committed answer was truncated at its output limit
 (Plakous §5.5, length classification) prints that answer and exits 5
 (`turn_failed:output-limit`). A
-recovery-required startup refusal in `plak agent --session` emits one JSONL
+recovery-required startup refusal in `plakd agent --session` emits one JSONL
 `error` and one terminal `bye` and exits 5; the worker startup/join boundary
 preserves its typed failure rather than reconstructing an internal error from
-the diagnostic text. An attach refused because another live `plak` process
+the diagnostic text. An attach refused because another live `plakd` process
 holds the session's agent tree (chapter 03 §14) prints the typed
 `tree_hosted_elsewhere (<binary id>)` refusal naming that process's host,
-machine and instance, exits 7, and in `plak agent` emits one JSONL `error`
+machine and instance, exits 7, and in `plakd agent` emits one JSONL `error`
 with `code: "tree_hosted_elsewhere"` and one terminal `bye`. A session that runs
 without a hub keeps the refusal typed when a later tree write meets it (the
 root batch written ahead of a prompt, the prompt's tree pass, the wait-receipt
 settlement): the turn ends with the same exit 7 and JSONL `code`, and nothing
 is written. Before the host socket
 this refusal is the only behavior: nothing is routed to the holding process. For a supported recoverable unfinished turn, the session
-recovers automatically the next time it is used: `plak run --session` opens it, which abandons the unfinished
-turn once (Plakous §13.1) and then runs the prompt. `plak session recover
+recovers automatically the next time it is used: `plakd run --session` opens it, which abandons the unfinished
+turn once (Plakous section 13.1) and then runs the prompt. `plakd session recover
 <uuid>` does the same without running a turn and exits 0, printing the operator
 line, or `nothing to recover` when there was nothing to close.
 When a completed turn contains failed tool calls, stderr reports their count
@@ -3188,11 +3188,11 @@ and the turn's completion. It does not claim that the model worked around
 those failures or that the requested task succeeded.
 
 A model refusal is a settled canonical terminal, but it did not fulfill the
-request: `plak run` exits 5 after product publication and session release.
+request: `plakd run` exits 5 after product publication and session release.
 The hosted one-shot result distinguishes `Refused` from `Completed`. CLI stderr reports `model refused the request`; JSONL emits the typed, turn-correlated
 `model_refusal` observation after publication, including recovered refusals.
 An optional bounded, sanitized `detail` carries the provider-supplied diagnostic;
-Plak does not infer a refusal category when none was supplied.
+plakd does not infer a refusal category when none was supplied.
 Canonical assistant output stays exact and appears once; an empty refusal leaves
 stdout empty. Streamed previews are provisional and must not be treated as a
 completed response when the provider discards them at refusal. The hosted transcript drops only the assistant text and thinking of that
@@ -3217,7 +3217,7 @@ pass or open applies the debt.
 A completed result with no visible text still exits 0 and writes
 no assistant text; preview text does not change that outcome.
 
-`plak run` buffers assistant stdout until that boundary, then writes the complete
+`plakd run` buffers assistant stdout until that boundary, then writes the complete
 authoritative text exactly once. Preview events may contain only a prefix or
 diverge from the result; neither can replace canonical stdout or the durable
 transcript. Tool progress and diagnostics continue on stderr during execution.
@@ -3451,7 +3451,7 @@ submission cannot be saved, it stays and is resubmitted under its own identity;
 the runtime refuses or accepts it exactly once.
 A pre-queue refusal restores the draft through `DraftRejected`.
 Physical disk exhaustion is distinguished from logical storage pressure and
-names `plak session gc --all`, `plak session delete <id>`, or freeing disk
+names `plakd session gc --all`, `plakd session delete <id>`, or freeing disk
 space; the logical reserve cannot guarantee writes on a full disk.
 
 Drain state is process-local; no paused flag is stored. A process starts with
@@ -3554,7 +3554,7 @@ model, account or effort change, a queue action, a tool invocation — first
 **recovers in place** the same way and then performs the action; if that
 reopen fails too, the action is refused with the reason, the draft is handed
 back, and the next action tries again. A recovery operation retries at once. A one-shot
-`plak run` does not reopen in place: it exits 5 and the next `run --session`
+`plakd run` does not reopen in place: it exits 5 and the next `run --session`
 recovers at open. Children and the agent tree keep their own recovery (chapter
 03 §14.1). The shared hosted exact-reopen helpers also serve children
 (chapter 03 §14.1); it runs at startup and on `run --session` after a
@@ -3621,10 +3621,10 @@ JSONL attachment requests an initial tree snapshot only when topology is
 enabled for the host. A single-agent prompt does not issue an implicit
 navigator command. Explicit tree commands still report an unavailable hub.
 
-`plak agent` is a long-lived stdio face of the hosted session. It
+`plakd agent` is a long-lived stdio face of the hosted session. It
 is a **closed projection** of the same user actions and host events, not a
 second control plane, and it owns no session or tree authority of its own.
-Stdio is the only pipe; there is no `plak agent stdio` subcommand.
+Stdio is the only pipe; there is no `plakd agent stdio` subcommand.
 
 **Session boundary.** In the underlying host observation stream, a session
 switch's `binding` precedes the target's
@@ -3638,8 +3638,8 @@ projection. JSONL v1 encodings and event kinds are unchanged.
 
 The wire types — the envelope, the command and event kinds, and the topology
 tool request, receipt, and row shapes — live in the published-internal
-`plakous-host-protocol` crate, so a `plak agent` client can depend on them
-without the host; `bin/plak` keeps only the stdio transport. The
+`plakous-host-protocol` crate, so a `plakd agent` client can depend on them
+without the host; `bin/plakd` keeps only the stdio transport. The
 same crate holds the rest of the neutral host surface the product and the
 runtime share: `SessionIntent` and `SessionObservation`, the bounded intent and
 observation channels that carry them, the typed presentation views (including
@@ -3835,7 +3835,7 @@ Internal `SessionObservation::Status` carries typed `HostPhase` and optional
 transition stages with cumulative integer milliseconds, direct versus queued
 steering, and cancellation refusal versus settlement timeout remain typed
 facts. Hosted terminal-boundary decisions match those enums. Bounded external diagnostics are data, not remedy-selection authority.
-Plak renders Status and visible Notice observations before the neutral JSONL
+plakd renders Status and visible Notice observations before the neutral JSONL
 envelope projection; host-protocol does not format these product-owned cases.
 JSONL v1 keeps its phase/detail spellings, queue length, correlation and absent
 detail behavior. In particular direct `steering…` and queued `steering...`
@@ -3910,7 +3910,7 @@ Three product renderings change the text of an otherwise stable v1 envelope.
 A `tool` event whose `detail` is a closed structured refusal (an MCP login or
 named-secret payload, or a topology error that carries advice or a remedy)
 replaces that `detail` with the JSONL sentence for the typed repair, including
-`plak secret set <name>` when the call's server matches. Any other detail is
+`plakd secret set <name>` when the call's server matches. Any other detail is
 left as the host wrote it. A `tree` snapshot renders each node's `fault` and
 live progress in that same sentence before the neutral tree event is encoded;
 the fault stays a field of the snapshot and is not a separate event, so it
@@ -3946,13 +3946,13 @@ opening are buffered and flushed immediately after it. `hello` and `ready` are
 written together, both carrying the elapsed time from process start, so a
 client can measure a real open rather than a generic message.
 
-JSONL `ready` records runtime attachment. `plak agent` saves its product session
+JSONL `ready` records runtime attachment. `plakd agent` saves its product session
 record before opening the host and emitting `hello`/`ready`, so an idle JSONL
 session can be reopened even if killed before its first prompt. Its canonical
 Plakous conversation is initialized at first turn admission.
 
 The shared telemetry event `session.ready` is not a general durability claim:
-other entry paths, including a fresh `plak run`, can attach before publishing
+other entry paths, including a fresh `plakd run`, can attach before publishing
 their product session record. A kill in that interval may leave an events file
 without a resumable product session. `session.created` records first turn
 admission; an events file alone proves neither product publication nor an
@@ -3967,7 +3967,7 @@ state gates the handshake.
 
 Shutdown is a `quit` command, stdin EOF, `SIGINT`, the host detaching, or a
 transport or control failure. `SIGINT` (Ctrl-C) interrupts a running turn,
-writes `error` naming the interruption, and exits 4, like `plak run`; idle, it
+writes `error` naming the interruption, and exits 4, like `plakd run`; idle, it
 is an ordinary quit (exit 0). `SIGTERM` and `SIGHUP` keep their own
 announcement and deadline. Every exit from the driver attempts joined worker cleanup;
 a busy session is interrupted first, then quit. Control admission, draining and
@@ -4192,10 +4192,11 @@ bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
 
 The protocol-10 schema pin is SHA-256
-`45787a3b78da7e1923a12d2dbf9d1f8987a8d6816edebed10d5b8802c43cf9e2`:
+`af129ebed85758035fae95c4eb35256be69950c66d66652179a530478ff3ce5f`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
-checks this build-independent pin.
+checks this build-independent pin. The schema title is `plakd wire v2`;
+frame and protocol identifiers retain their exact protocol-10 spellings.
 
 Protocol 7 adds process-local `operator_prepare {action}` and
 `operator_confirm {nonce}` through that same attachment-free seam. Prepare
@@ -4316,9 +4317,9 @@ A console read never refreshes a token or retries a rejected token with a grant.
 Wire v2 is the framed host protocol. The closed JSONL projection in section
 4.3 remains a separate surface. Neutral frames, intent/observation types and
 views live in `plakous-host-protocol`; product extension traffic uses
-`plakd-wire-types`. The hidden, unsupported `plak agent --wire v2` form exposes
+`plakd-wire-types`. The hidden, unsupported `plakd agent --wire v2` form exposes
 a single-session stdio transport. Application clients SHOULD use the public
-`plak host connect --stdio` bridge, the host socket or authenticated WebSocket.
+`plakd host connect --stdio` bridge, the host socket or authenticated WebSocket.
 
 Settings views carry product fields, never client-local appearance preferences.
 Config publication serializes on the home's `config.lock`; host settings merge
@@ -4346,7 +4347,7 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   `refused` with `version_mismatch`, `malformed`, `busy` or `unavailable`
   (the session could not be opened, with why), and closes. The version must
   match exactly; it is 9 (`WIRE_VERSION`), with no negotiation. The session opens before the welcome is sent, so any
-  failure before dispatch, `plak agent --wire v2` included, is that
+  failure before dispatch, `plakd agent --wire v2` included, is that
   `unavailable` frame and never a JSONL record. Its detail is the failure's
   own text only for an authenticated peer (stdio's parent process, a web
   client past its gate); before authentication it is the fixed `the session
@@ -4376,7 +4377,7 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   gets the attach snapshot only. A switch whose new root cannot be read ends the connection as a
   leaving client's does.
 - **Local faces.** A connection's acceptor marks it a local face (stdio's
-  `plak agent --wire v2`) or a remote one (the web endpoint); a connection
+  `plakd agent --wire v2`) or a remote one (the web endpoint); a connection
   is remote unless marked. A remote face is refused, `refused_for_role` with row
   `local_face`, the intents that exec or hand off the host's own build or
   answer with the installed build's path and probe output: `check_build`,
@@ -4433,7 +4434,7 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   once the new one is made, so a refused one leaves it; the other session is
   opened first, as any attach of a dormant session opens it, so even a
   refused attach can leave it resident and running a continuation it owed. A
-  connection that serves one session (`plak agent --wire v2`, the embedded
+  connection that serves one session (`plakd agent --wire v2`, the embedded
   single-session host's) refuses every directory request `unsupported`. A host of many
   sessions is `plakous_hosted::host_service::wire::SessionHost` over its
   product's stores (`HostSessions`: the rows, the newest session of a
@@ -4587,8 +4588,8 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
 - **Quit and stop.** A `quit` intent never ends a session that outlives its
   clients. On a child attachment it is that attachment's detach, on any
   connection. On a root attachment of a host whose connections detach when
-  they leave (`plak host`) it is the
-  attachment's detach too, and the session runs on; only on `plak agent
+  they leave (`plakd host`) it is the
+  attachment's detach too, and the session runs on; only on `plakd agent
   --wire v2`, whose one connection is the session's only client, does it
   quit the session. Either detach answers `detached`. Stopping a session's
   work is its own request, `stop_session {session}`, which names the
@@ -4688,8 +4689,8 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   asks the actor to decide now rather than after the idle release
   (`AttachmentCount::request_release_now`); every other condition stands. An
   attach racing the timer therefore either comes first and keeps the
-  session, or finds it released. An in-process face's session (`plak agent`,
-  `plak run`) is never released for being idle. A host serves each session
+  session, or finds it released. An in-process face's session (`plakd agent`,
+  `plakd run`) is never released for being idle. A host serves each session
   through a slot (`host_service::wire::SessionSlot`), resident (the host
   worker and the wire service its connections share) or dormant (the
   session id): a released session's worker is joined, and the next trigger
@@ -4719,9 +4720,9 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   whose attachment asked, never another that used the same id. The session host serves `resume_session` as the
   session's own resume; `retry_attach` and `rebind` reopen the session,
   which only the owner of the session worker can do, so a host
-  that does not own its session workers (`plak agent --wire v2`)
+  that does not own its session workers (`plakd agent --wire v2`)
   refuses them `session_unavailable` and keeps its session.
-  `plak host` owns its session workers: an actor-side, process-local release fence
+  `plakd host` owns its session workers: an actor-side, process-local release fence
   refuses a running turn, child work or background processes without stopping
   them. Once admitted, the host joins that exact worker before re-resolution
   (`retry_attach`) or the existing durable history carry (`rebind`). No wire
@@ -4785,12 +4786,12 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   presentation byte bound.
 - **Host service.** `plakous_hosted::host_service::HostService` is one
   session's side of the wire, the only consumer of its observations and the
-  only sender of its attachments' intents; `plak agent --wire v2` speaks
+  only sender of its attachments' intents; `plakd agent --wire v2` speaks
   through it, and JSONL v1 is one of its faces (below). One wire
   connection's side (the handshake, its one attachment, the answers to a
   child's mail, the frames it writes) is
   `plakous_hosted::host_service::wire::WireConnection`, which carries
-  lines over any transport; `plak agent --wire v2` drives it on stdio. An attachment
+  lines over any transport; `plakd agent --wire v2` drives it on stdio. An attachment
   targets the session's root or a child of its tree (node attach, below);
   any other node is `unknown_node`.
   Every intent carries its attachment as its origin beside the client's own
@@ -4902,7 +4903,7 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   does not hold `unknown_node`; a `quit` still detaches. Every control but
   the interrupt goes through the root session's mailbox, so it is taken
   while the root runs a turn and waits while it runs a workflow.
-- **Faces.** `plak agent` JSONL v1 and an attached session command are
+- **Faces.** `plakd agent` JSONL v1 and an attached session command are
   in-process attachments of their session's service
   (`plakous_hosted::host_service::face`, `HostService::attach_face`). The
   faces' service (`HostService::for_faces`) holds the session's mailbox
@@ -4954,31 +4955,31 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   attachment gets none, and JSONL v1 never projects
   it. The root-only `promptable` intent gates passive maintenance and has no
   answer window. A child attachment is refused (`refused_for_role`, row
-  `readiness`); `plak agent` does not send it.
+  `readiness`); `plakd agent` does not send it.
 - **Serde.** Frames, intents and observations refuse unknown fields;
   intents and observations are tagged objects (`kind`, and `body` when
   they carry one), snake case. A
   snapshot or patch decodes only when it validates; a diagnostic is
   bounded as one made here; image bytes are base64.
-- **Schema.** `plak agent`'s build publishes its own wire v2 schema: the
-  supported `plak wire schema` command, available in ordinary release builds,
+- **Schema.** `plakd agent`'s build publishes its own wire v2 schema: the
+  supported `plakd wire schema` command, available in ordinary release builds,
   prints one JSON Schema (draft 2020-12) document
   with the build's `wire_version` and binary id, `client_frame` and
-  `host_frame` (Plak's extension traffic included) and their shared
+  `host_frame` (plakd's extension traffic included) and their shared
   `$defs`. It is derived from the serde types themselves (`schemars`), so it
   is exactly what this build encodes and decodes; a client checks its
   frames against the build it speaks to, not against a copy. Every integer
   a frame carries is 64-bit at most: a reader decodes a frame through
   serde's tagged content, which has no 128-bit integers.
   Each release attaches the schema generated by each target's exact binary as
-  `plak-<version>-<triple>-wire-schema.json`, with checksums and provenance
+  `plakd-<version>-<triple>-wire-schema.json`, with checksums and provenance
   (chapter 06 §6.6). Clients match versions exactly; the asset is not a
   compatibility or negotiation layer. The user guide's integration map and
   frame examples demonstrate hello, directory lookup and root attach;
   a test-only socket driver checks that transcript against an offline real host.
 - **Client.** `plakous-host-protocol`'s `client` is the typed wire v2
   helper over byte transports (the public stdio bridge, a socket pair,
-  the host's socket; Plak's
+  the host's socket; plakd's
   `wire_transport::host_socket` connects to that socket only in a
   directory private to the user, when it is the user's socket, and only
   to a peer of the user's own uid).
@@ -5087,7 +5088,7 @@ typed `rate_limited`. Consent quota is four outstanding grants/nonces per
 principal. Audit output caps each principal at 180 lines/minute and reports
 suppressed counts in the next window. The host-wide work cap remains 32.
 
-`plak host --web <unix:path|127.0.0.1:port> [--ui <dir>] [--dev-login
+`plakd host --web <unix:path|127.0.0.1:port> [--ui <dir>] [--dev-login
 <login>]` (§4.6) serves the host's sessions to browsers: wire v2 over a
 WebSocket at `/wire`, and the web UI's static build. Its security model is
 chapter 04 §2.10; its keys are `[web]` (chapter 07 §3).
@@ -5110,12 +5111,12 @@ does not inherit another connection's pending answers.
   refuses it explicitly), warns at start, and its origin is
   `http://127.0.0.1:<port>`. The host binds it after its control socket, and
   a listener that cannot be bound stops the host before it serves; it prints
-  `plak host: web on <listener>` before its start line, and stops serving
+  `plakd host: web on <listener>` before its start line, and stops serving
   when the host stops. A connection is a client of the host's session
   directory (§4.4), as one on the control socket is: its `welcome` names no
   session, it finds its sessions with `list_sessions` or `watch_sessions`,
   creates one with `new_session`, and attaches a row's node, which opens a
-  dormant session first (printing `plak host: opening session <id>`). One
+  dormant session first (printing `plakd host: opening session <id>`). One
   `/wire` serves every session, chosen in the protocol by id; the UI's own
   routes (`/s/<session>`, say) are the static fallback's, and the host never
   routes by path. A stop ends every hello wait and connection as a leaving
@@ -5187,7 +5188,7 @@ does not inherit another connection's pending answers.
   not allowed, bounded and printable), at most 60 refusal lines a minute
   with a count of the rest; never a cookie, the key, or a frame.
 
-The hidden `plak session check-binding --all` command inspects retained runtime
+The hidden `plakd session check-binding --all` command inspects retained runtime
 branch heads, including children, through one read-only SQLite snapshot for
 listing and loading. It opens no runtime, runner, credential source or
 diagnostics writer and acquires no custody or runtime lease. Product archival
@@ -5219,9 +5220,9 @@ catalog availability; ordinary reopen retains every live authority check.
 Live WAL reader coordination may update SQLite shared memory; no durable
 database or WAL bytes are written.
 
-### 4.6 `plak host`
+### 4.6 `plakd host`
 
-`plak host upgrade --expect-binary <id> [--wait <seconds> | --drain <duration|idle>]` is an explicit
+`plakd host upgrade --expect-binary <id> [--wait <seconds> | --drain <duration|idle>]` is an explicit
 same-user operator action, invoked using the destination executable and its own
 binary ID. It discovers exactly one live source host across keys, then echoes
 that host's key and instance on its private upgrade control socket. Missing or
@@ -5375,7 +5376,7 @@ the durable decision; it never replies with a precommit refusal or reopens
 admissions. A retirement failure after a known durable decision is deferred to
 the retained producer, not treated as rollback.
 The requesting command reports "decision pending startup reconciliation; check
-`plak status`" when publication is uncertain, even if startup later withdraws
+`plakd status`" when publication is uncertain, even if startup later withdraws
 an unpublished attempt and the command exits unsuccessfully.
 Target stages stay invisible until every product/tree seed commits. Publication
 alone is insufficient: receipt-aware execution, metadata mutation and ordinary
@@ -5394,8 +5395,8 @@ The guarded `--abandon <group-id>` path can dispose an unexecuted, never-Ready
 published group under exact holds and unchanged heads; an idle execution open
 already prevents it. Multi-tree groups require the explicit group ID, not a
 member ID. Abandoned reservations remain invisible forever. Failed abandonment
-retains its bounded guard error in the receipt, visible in `plak status` and
-`plak doctor`. Automatic retries back off for three minutes; an explicit retry
+retains its bounded guard error in the receipt, visible in `plakd status` and
+`plakd doctor`. Automatic retries back off for three minutes; an explicit retry
 still rechecks the same guards immediately. Retained ordinary
 portable-session backups can be copied and imported under new identities;
 `host_upgrade` capsules cannot be used as ordinary imports. Outgoing committed
@@ -5515,7 +5516,7 @@ changes and otherwise back off exponentially from five seconds to three minutes;
 they do not run a separate SSH dial loop. Completed imports are not
 re-probed or re-created. The command can report an unknown outcome while such
 work is pending; repair the destination/runner and retry the same command.
-For a permanently lost placement, `plak host upgrade --abandon <successor-or-runner>`
+For a permanently lost placement, `plakd host upgrade --abandon <successor-or-runner>`
 is an explicit same-user action on the serving destination. An exact reserved
 successor UUID selects one pending remote mapping; a pinned runner ID selects
 its pending mappings. Ready and local successors cannot be abandoned. The
@@ -5529,7 +5530,7 @@ ordinary standalone session commands.
 
 The action prints each retained source export path. To recover elsewhere, copy
 that v12 document, set its placement fields (`runner` and `workspace_root`) to
-the intended admitted placement, and use ordinary `plak session import` on the
+the intended admitted placement, and use ordinary `plakd session import` on the
 copy. For local recovery use `runner: {"name":"local","runner_id":"local"}`
 and an absolute local workspace.
 Leave the retained original unchanged; the import creates another fresh line,
@@ -5550,7 +5551,7 @@ requires repairing and retrying that destination, not reopening the source.
 root (or its full former session UUID) receives the existing `moved` refusal
 with its current root address. Children receive no revival alias.
 
-After acknowledgement, a receipt-aware old-key `plak host` start follows the
+After acknowledgement, a receipt-aware old-key `plakd host` start follows the
 recorded destination, and old source session addresses redirect to their
 recorded successors. Source records stay archived and fenced; old-key execution
 does not resume them. An Aborted attempt, by contrast, never redirects a later
@@ -5572,7 +5573,7 @@ channel, not process SIGINT; an exchange already admitted retains the facade's
 existing recovery/quarantine law. A missing completion answer requires a
 status reread, not a second exchange.
 
-The supported command `plak host` (feature `web`, enabled by default)
+The supported command `plakd host` (feature `web`, enabled by default)
 is the per-user host process, run in the foreground under a systemd
 user unit or a terminal multiplexer on the host machine. It serves every
 session of the home, across workspaces, to the clients of its control
@@ -5581,7 +5582,7 @@ directory (§4.4).
 
 The service refreshes native catalogs at startup without requiring a client.
 
-`plak host connect --stdio [--auto-start]` is the public byte bridge for independent clients.
+`plakd host connect --stdio [--auto-start]` is the public byte bridge for independent clients.
 It resolves the home and inspects all live state keys before connecting;
 another key or multiple keys is a refusal, not a silently selected service.
 Without explicit `--auto-start` it does not start a host. It never falls back
@@ -5595,7 +5596,7 @@ and no ambiguous input is replayed.
 
 Only proven absence and explicit local `--auto-start` permit an unmanaged
 start. SSH-session markers refuse such a start; the remote client does not
-supply the flag. An installed `plak-host.service` instead yields the unit-start
+supply the flag. An installed `plakd-host.service` instead yields the unit-start
 remedy, never an unmanaged sibling. Concurrent bridge, direct and unit starts
 use the same home guard; ordinary discovery has a ten-second deadline, while
 explicit startup allows thirty seconds for log-lock contention and readiness.
@@ -5708,16 +5709,16 @@ settles asynchronously after endpoint binding, before local admission.
   30 s deadline. Such a write has unknown outcome, not permission to mint
   another submission id. Other connections remain independent.
 - **Sessions.** A session opens in its own workspace's product context
-  (§1), as `plak agent` opens it with no overrides, when a client first
+  (section 1), as `plakd agent` opens it with no overrides, when a client first
   attaches it, and stays resident while anything keeps it (§4.4, residency
   in a host); it releases after the idle release, 300 s (the hidden
   `--idle-release <seconds>` sets it), and the next attach opens it again.
   An open refused because another live process holds the session is
   `tree_hosted_elsewhere` with that process's machine, binary (when it
   recorded one) and pid; any other failed open is `session_unavailable`
-  with why. A working face (`plak agent --session`, `plak run --session`) whose open is refused for a lease another live process
+  with why. A working face (`plakd agent --session`, `plakd run --session`) whose open is refused for a lease another live process
   holds is refused the same way, exit 7, naming that process, and a running
-  `plak host` as such with how to release the session there; the lease's
+  `plakd host` as such with how to release the session there; the lease's
   own refusal, with its retry time, follows. Only the open's refusal is
   named: a holder whose lease lapsed while it lives (a stopped process) is
   taken over under the lease law (§2.6), not refused. The directory's rows are the home's newest 256 sessions. A
@@ -5791,7 +5792,7 @@ settles asynchronously after endpoint binding, before local admission.
   not yet admitted (a crash left it pending), and, under `[host]
   resume_after_loss = "continue"`, a root whose lost turn waits for Resume.
   Once it serves, a thread of its own opens each, one at a time, printing
-  `plak host: continuing session <id>`; the open runs the continuation as
+  `plakd host: continuing session <id>`; the open runs the continuation as
   any open does (chapter 03 §14.1), once, and the session stays resident
   while anything keeps it. A stop ends the scan. A stopped root, or one
   holding for Resume under `hold`, is not opened for that root alone.
@@ -5803,7 +5804,7 @@ settles asynchronously after endpoint binding, before local admission.
   decide eligibility. Archived heads are not opened, and predecessor sessions
   are not substituted for them. The scan rechecks eligibility before every
   retry, so a later stop or settled handoff withdraws the open. It reports
-  `plak host: continuation scan complete` after this pass. A child without a
+  `plakd host: continuation scan complete` after this pass. A child without a
   recorded handoff does not itself cause an eager open; a crashed host's turn
   whose loss no open has recorded yet is still found only at the next open.
 Standalone remote import composes the same runner registry and recovery probes on
@@ -5896,19 +5897,19 @@ keeps its separate readiness path.
   them. Live work on any of those lines, including a held child's line after
   host loss, refuses with typed
   `local_runner_processes`: "this session's processes run in the local runner;
-  start `plak host`, or see them with `plak runner ps`". It changes no job
+  start `plakd host`, or see them with `plakd runner ps`". It changes no job
   outcome and stops nothing. A live runtime holder's name takes precedence
   over that process refusal; process-free opens retain canonical lease expiry.
   An unparseable recorded child locator or an unresolvable root or child head
   refuses with `local_runner_inspection` (exit 7), naming the node and locator.
-  Its remedy is to open it through `plak host` (start `plak host`, then attach),
-  or inspect daemon jobs with `plak runner ps`. `plak session delete` (with
+  Its remedy is to open it through `plakd host` (start `plakd host`, then attach),
+  or inspect daemon jobs with `plakd runner ps`. `plakd session delete` (with
   `--abandon-children` when needed) is only a destructive last resort.
   A live lease holder's name takes precedence over this inspection refusal. It
   never skips the child or opens the canonical session on incomplete inspection.
   When no daemon answers, the open proceeds.
 - **Tool environment.** It captures the login shell's `PATH` once at start,
-  bounded at 5 s however the shell's startup files behave, as `plak runner
+  bounded at 5 s however the shell's startup files behave, as `plakd runner
   serve` does when `runner.toml` sets no `path` (the shell runs in a process
   group of its own, killed once it answered or the deadline passed), falling back to its own `PATH` and then `/usr/bin:/bin`, with its
   own `HOME`; the start line names the source but never the directories.
@@ -5927,7 +5928,7 @@ keeps its separate readiness path.
   The stop is bounded: the process exits within 60 s of the signal however
   its work stands, under the unit's `TimeoutStopSec`; a session not
   released by then is left to the crash law (`owner_lost`). It prints
-  `plak host: serving on <socket> (host <host id>, instance <instance>);
+  `plakd host: serving on <socket> (host <host id>, instance <instance>);
   tools get <source>` once it accepts.
 
 `SIGUSR1` reloads UI assets only (§4.5). It deliberately differs from
@@ -5945,10 +5946,10 @@ started through the user manager, so a host stop or restart leaves its jobs
 running until they end or reach their caps; the daemon exits after its idle
 period. Embedded mode keeps direct process calls and exit = stop.
 
-**Service installation.** `plak host install --web unix:<absolute socket>
+**Service installation.** `plakd host install --web unix:<absolute socket>
 --ui <absolute dir> [--dry-run]` installs a systemd **user** unit on Linux at
-`$HOME/.config/systemd/user/plak-host.service`, or a per-user macOS LaunchAgent
-at `$HOME/Library/LaunchAgents/com.plak.host.plist`, mode 0644. Both arguments
+`$HOME/.config/systemd/user/plakd-host.service`, or a per-user macOS LaunchAgent
+at `$HOME/Library/LaunchAgents/com.plakd.host.plist`, mode 0644. Both arguments
 are required, absolute UTF-8 paths without control characters; there are no
 socket or UI defaults. Install never accepts or emits `--dev-login` or a
 TCP listener. Other platforms refuse as not yet supported. It runs before
@@ -5959,7 +5960,7 @@ writing, because the user manager
 would otherwise search a different unit directory. A missing or non-executable
 stable binary is warned about, without preventing installation or dry run.
 
-On Linux, the generated unit executes the installed stable `$HOME/.local/bin/plak`
+On Linux, the generated unit executes the installed stable `$HOME/.local/bin/plakd`
 link, not the invoking executable or a pinned snapshot, from `$HOME`.
 WorkingDirectory remains unset: systemd user services use `$HOME` by default.
 `/usr/bin/env -i` clears ambient variables. Only HOME, PLAK_HOME, a curated
@@ -5985,13 +5986,13 @@ and exact content identify an identical re-install, which is a no-op;
 symlinks, edited generated units and unrelated files are refused unchanged.
 A failed reload leaves the complete unit installed and reports the retry
 remedy. `--dry-run` prints the unit and creates no files or manager calls.
-After installation it prints `systemctl --user enable --now plak-host.service`,
+After installation it prints `systemctl --user enable --now plakd-host.service`,
 the `loginctl enable-linger "$USER"` note for running without a login session,
 `tailscale serve --bg unix:<socket>` (shell-quoted), and the journalctl command.
 There is no uninstall command: disable with `systemctl --user disable --now
-plak-host.service`, remove the file, and run `systemctl --user daemon-reload`.
+plakd-host.service`, remove the file, and run `systemctl --user daemon-reload`.
 
-On macOS, the plist uses label `com.plak.host`, `RunAtLoad=true` and
+On macOS, the plist uses label `com.plakd.host`, `RunAtLoad=true` and
 `KeepAlive.SuccessfulExit=false`: loading it starts the host, and only an
 unsuccessful exit restarts it. A clean planned handoff does not restart the
 source. `ExitTimeOut=90`, `AbandonProcessGroup=true` and `Umask=63` (0077) keep
@@ -6015,12 +6016,12 @@ a file that races it. Identical generated plists remain unchanged. Install
 never invokes launchctl, loads the agent or starts a host. `--dry-run` prints
 only the plist and creates no log directory or service file. The installer
 prints `launchctl bootstrap gui/<uid> <plist>`,
-`launchctl kickstart gui/<uid>/com.plak.host`, the chosen Tailscale Serve
+`launchctl kickstart gui/<uid>/com.plakd.host`, the chosen Tailscale Serve
 command, both log paths with `tail -F`, and removal instructions:
 `launchctl bootout gui/<uid> <plist>` then `rm -- <plist>`. Paths are shell-quoted
 and the UID is the invoking user's numeric ID. The GUI agent is also loaded
 at a later login, not as a system-wide or pre-login daemon. UI-only reload uses
-`launchctl kill SIGUSR1 gui/<uid>/com.plak.host`. Explicit bridge auto-start
+`launchctl kill SIGUSR1 gui/<uid>/com.plakd.host`. Explicit bridge auto-start
 refuses an installed LaunchAgent, including a foreign or symlinked plist,
 without inspecting its configured product home or starting an unmanaged host.
 
@@ -6028,7 +6029,7 @@ Example generated Linux service section for the paths shown in the golden:
 
 ```ini
 [Service]
-ExecStart=/usr/bin/env -i "HOME=/home/user" "PLAK_HOME=/home/user/.plak" "PATH=/home/user/.local/bin:/usr/local/bin:/usr/bin:/bin" "SHELL=${SHELL}" "USER=${USER}" "LOGNAME=${LOGNAME}" "XDG_RUNTIME_DIR=%t" "DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus" "INVOCATION_ID=${INVOCATION_ID}" "/home/user/.local/bin/plak" "host" "--web" "unix:/home/user/.plak/host/web/web.sock" "--ui" "/home/user/.plak/web-ui"
+ExecStart=/usr/bin/env -i "HOME=/home/user" "PLAK_HOME=/home/user/.plak" "PATH=/home/user/.local/bin:/usr/local/bin:/usr/bin:/bin" "SHELL=${SHELL}" "USER=${USER}" "LOGNAME=${LOGNAME}" "XDG_RUNTIME_DIR=%t" "DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus" "INVOCATION_ID=${INVOCATION_ID}" "/home/user/.local/bin/plakd" "host" "--web" "unix:/home/user/.plak/host/web/web.sock" "--ui" "/home/user/.plak/web-ui"
 ExecReload=/bin/kill -USR1 $MAINPID
 KillMode=mixed
 KillSignal=SIGTERM
@@ -6200,7 +6201,7 @@ clients and their source:
 | --- | --- | --- |
 | Codex (Codex OAuth, OpenAI API) | Codex CLI's `<skills_instructions>` catalog: `## Skills`, the host intro, `### Skill roots` (`` - `r0` = `<root>` ``), `### Available skills` (`- <name>: <description> (file: r0/<name>/SKILL.md)`) and the host `### How to use skills`, vendored from `codex-rs/ext/skills` | through the shell, as Codex CLI does |
 | Claude (Claude OAuth, Anthropic API) | Claude Code's `The following skills are available for use with the Skill tool:` then `- <name>: <description>` lines | the `Skill` tool (§6.3), then `Read` for the files it references |
-| Grok (SuperGrok OAuth, xAI API) | grok-build's `The following skills are available for use:` then `- <name>: <description>` and `  Absolute path: <path>`, plus one Plak sentence that `read_file` reads a listed skill's files | `read_file` at the absolute path |
+| Grok (SuperGrok OAuth, xAI API) | grok-build's `The following skills are available for use:` then `- <name>: <description>` and `  Absolute path: <path>`, plus one plakd sentence that `read_file` reads a listed skill's files | `read_file` at the absolute path |
 | pi (OpenRouter) | pi's `<skills>` section: its three sentences and the `<available_skills>` XML (`<name>`, `<description>`, `<location>`) | `read` |
 | Typed Python SDK | the pi section with pi's wording for a reader reached through another tool | `ctx.read` |
 
@@ -6275,7 +6276,7 @@ parallelism guidance. The Codex wake process paragraph says "Stop servers you
 no longer need before ending the turn" without "Never sleep-poll"; its wait
 variant is unchanged. All other agreements and the identity tail are unchanged.
 
-Neither paragraph names Plak, Plakous, or any integration. The product's own
+Neither paragraph names plakd, Plakous, or any integration. The product's own
 identity is chrome for the operator, not a claim made to the model.
 
 Agreement contributions are conditional on the tools the node actually compiled
@@ -6289,7 +6290,7 @@ and the attached host facts:
   rather than starting child work.
 - The **completion-channel paragraph** follows `PromptHostFacts.host_wakes`
   from `plakous-host-protocol`, a per-node fact: true for an attached
-  interactive or `plak run` root with child waking enabled, and for every
+  interactive or `plakd run` root with child waking enabled, and for every
   child of the tree host, which parks and wakes children (chapter 03 §5.2);
   false for JSONL roots and embedders without a wake loop. With it a root
   (`spawn_agent` without `submit_result`) may end its turn while children run,
@@ -6394,7 +6395,7 @@ edits (upstream line numbers), plus trimming line-end spaces:
 - L19: remove creating draft PRs from autonomous-work examples.
 - L23: unclear intent asks in final after independent work, stating assumptions.
 - L25: remove "and skill" from local markdown file exceptions.
-- L67: replace the async-question-tool paragraph with Plak's no-mid-turn-question
+- L67: replace the async-question-tool paragraph with plakd's no-mid-turn-question
   rule: finish independent work, then ask in final.
 - L81: remove the claim that the UI collapses commentary.
 - L89-L100: describe terminal Markdown, replace clickable file links with
@@ -6539,7 +6540,7 @@ switch between families keeps the session's tools; a skill added later never
 changes them. Its schema is Claude Code's (`skill`, required: "The name of a skill
 from the available-skills list. Do not guess names."; `args`, optional:
 "Optional arguments for the skill"); its description is Claude Code's,
-limited to what Plak does (no forked or background skills, no plugin,
+limited to what plakd does (no forked or background skills, no plugin,
 directory-scoped or slash names). A call loads only a skill the node's
 rendered listing names, from the directory discovery found it in (a skill the
 16 KiB bound cut is not loadable): an exact reopen keeps the skills whose
@@ -6574,7 +6575,7 @@ bound (Plakous spec 01 §10.2). A larger request does not relax Messages or Resp
 frame, stream, deadline, or terminal validation: a stream that ends before
 `message_stop`, even after a complete local `tool_use` block, fails the turn
 definitely and runs no tool. A Responses output-limit terminal with an
-unfinished function call likewise runs no tool; Plak retries it once with an
+unfinished function call likewise runs no tool; plakd retries it once with an
 explicit instruction to split the call (Plakous spec 01 §6.7 and §13.1). That
 instruction names the prepared wire output maximum when one was recorded, not
 a larger product ceiling.
@@ -6582,7 +6583,7 @@ a larger product ceiling.
 The names, argument shapes, and descriptions are aligned against byte-exact
 captures of each vendor's own client, so the model meets the vocabulary it
 knows. What it does not meet is a lie about behavior: the
-descriptions state Plak's real semantics. `exec_command` on Codex accepts
+descriptions state plakd's real semantics. `exec_command` on Codex accepts
 `sandbox_permissions`, `justification`, and `prefix_rule` and **says** that
 workspace policy ignores them; `shell` documents the `/bin/sh` pin and
 `workdir` the workspace-relative rule; Grok's `run_terminal_command` and
@@ -6637,10 +6638,10 @@ Claude's `TaskStop` state the numeric foreground budget and hard cap and do
 not repeat that sentence.
 
 OpenRouter wears the pi pack on every protocol (Chat, Messages, Responses):
-Plak declares the library's one generic presentation for every custom
+plakd declares the library's one generic presentation for every custom
 integration it attaches (an embedder chooses for its own routes). Its names and schemas follow pi 1.1.0: `read {path,
 offset?, limit?}`, `bash {command, timeout?}`, `edit {path, edits: [{oldText,
-newText}]}` and `write {path, content}`, plus Plak's `wait {ids?, timeout_ms?}`
+newText}]}` and `write {path, content}`, plus plakd's `wait {ids?, timeout_ms?}`
 and `stop {id}` over the background processes `bash` started. `bash.timeout`
 is seconds to wait for the result, not a kill timer: omitted is the bound
 foreground budget, stated in the description as that many seconds, it clamps to 600 seconds, and 0 starts the command in the
@@ -6672,7 +6673,7 @@ the same bytes as on a leaf. There is no search, plan or image tool: search goes
 
 Compiled guidance names only the process wait tool actually presented by the
 route (`write_stdin`, `get_command_or_subagent_output`, `wait`, or, for Claude,
-a `Bash` timeout). A node whose host wakes it — an interactive or `plak run`
+a `Bash` timeout). A node whose host wakes it -- an interactive or `plakd run`
 root with host continuation enabled, including a root without child-spawn
 tools, and every child of the tree host (chapter 03 §5.2) — ends its turn when
 only waiting remains, because completion notices start a new turn, and uses
@@ -6771,7 +6772,7 @@ working agreements, the earned paragraphs and the enrolled `AGENTS.md` follow
 as on every route.
 
 **Optional tools at bind.** A node's template may select optional tools
-(chapter 07: hosted retrieval `web_search`, `web_fetch`, `x_search`; Plak-run
+(chapter 07: hosted retrieval `web_search`, `web_fetch`, `x_search`; plakd-run
 `fetch_url`, `image_gen`; MCP `mcp:<id>` and `mcp:<id>/<tool>`).
 `plakous-hosted` resolves the selection when it binds the node's session, on
 the native and the API path alike, before any topology attach or surface
@@ -6789,7 +6790,7 @@ available on claude, anthropic and openrouter (`put image_gen on a codex,
 grok, openai or xai-api template and spawn it`), qualified on codex, grok,
 openai and xai-api; a qualified row binds only where the route has an image
 port (the OpenAI and xAI API routes and the Codex and grok subscriptions).
-`fetch_url` runs in Plak, needs no route support and binds on every route,
+`fetch_url` runs in plakd, needs no route support and binds on every route,
 under the node's frozen `[tools.fetch_url]` limits (chapter 01 section 8.5). A
 tool with no implementation in this build (a hosted retrieval tool or
 `image_gen` on a qualified route until its port ships) is refused
@@ -6800,7 +6801,7 @@ MCP entries bind on every route. The server definition is the node's frozen
 canonical `[mcp_servers.<id>]` table (a child's from its epoch snapshot, the
 root's from its `[root] agent` template's reached tables); every secret it
 names must be stored (`mcp server <id>: secret "<name>" is not set; remedy:
-plak secret set <name>`), and values are read again at each server spawn,
+plakd secret set <name>`), and values are read again at each server spawn,
 never retained. The server is started, or leased from the one process-wide
 pool keyed by definition and the node's workspace root, and its listing is
 frozen (chapter 01 MCP client); a startup, listing or selection failure
@@ -6814,7 +6815,7 @@ schema cannot be lowered is omitted and logged as a notice; one named
 its header, resolved by name at each connection start; an invalid URL or
 header refuses with the client's line. A table with `auth = "oauth"` binds the
 server's stored login instead of a bearer secret: no usable login refuses the
-bind before connecting (`mcp server <id> is not logged in; remedy: plak mcp
+bind before connecting (`mcp server <id> is not logged in; remedy: plakd mcp
 login <id>`), and so does a login stored for another URL, issuer or client.
 A table with `resources = true` adds `mcp__<id>__read_resource` to every
 selection that reaches the server; a server that does not advertise resources
@@ -6836,8 +6837,8 @@ own first-party client. The law is narrow and it is stated once:
 
 - A costume MAY shape the **inference** envelope of an enrolled subscription
   route — headers, attribution, and the provider's own leading system blocks.
-- **Login and token exchange stay truthful Plak** on every vertical, with a
-  `plak/<version>` user agent.
+- **Login and token exchange retain the project's truthful identity** on every
+  vertical, with a `plak/<version>` user agent.
 - A costume is never permission. It is observational compatibility, it carries
   no endorsement claim, it expires on unreviewed drift rather than drifting
   silently, and its kill-switch disables the whole route rather than falling
@@ -6848,7 +6849,7 @@ Concretely, per vertical:
 
 | Vertical | What the model and the edge see |
 | --- | --- |
-| Codex OAuth | No model-visible costume. The pinned native-client registration is used for authorization, and requests send `originator=plak` with a truthful Plak user agent and a Plak-owned `session-id` equal to the body `prompt_cache_key` on ordinary and remote-compaction requests |
+| Codex OAuth | No model-visible costume. The pinned native-client registration is used for authorization, and requests send `originator=plakd` with a truthful plakd user agent and a plakd-owned `session-id` equal to the body `prompt_cache_key` on ordinary and remote-compaction requests |
 | SuperGrok OAuth | No model-visible costume. Harness text lowers as the first `input` element with `role: system`; client identity headers name `plakous` |
 | Claude OAuth | Two leading Messages `system` blocks before any product text: a billing header block carrying `cc_version`, `cc_entrypoint=cli`, `cc_turn_origin=human` for direct customer prompts (neither it nor `cc_prompt_id` is sent when the newest root intent has harness `Instruction` provenance, even after user steering), and a computed `cch` attestation over the serialized body, then `You are Claude Code, Anthropic's official CLI for Claude.` The transport pins the Claude Code 2.1.325 `claude-cli/2.1.325 (external, cli)` user agent, Stainless package `0.128.0`, and the reviewed client attribution. The `anthropic-beta` header and Messages `max_tokens` are that model's enrollment row (captured order for every row under 2.1.325, including `per-turn-control` where the row sets it; Haiku puts `claude-code-20250219` fifth). An OAuth request sends `context_management` `{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}` when thinking is enabled or adaptive, and omits it when reasoning is disabled. A direct customer prompt also carries `cc_prompt_index` and `cc_turn_index`, the root turn's session position derived from canonical history (fixed per turn across tool rounds and retries, continued across reopen, fork and compaction; spec 01 §10.6), and every request sends `diagnostics` `{"previous_message_id": …}` naming the runtime-proven previous response (`null` on a session's first request) |
 | OpenRouter | No costume; the pi pack and its base instruction; no user agent. Chat and Responses send `authorization`, `accept`, `content-type` and `x-openrouter-metadata`; Messages sends those three without the metadata header. Discovery and key usage send `authorization` and `accept`. Optional attribution adds `http-referer`, `x-openrouter-title` and `x-openrouter-categories`. The HTTP client adds no user agent |
@@ -6857,7 +6858,7 @@ Concretely, per vertical:
 | Anthropic API | No costume. The Claude pack and its base instruction with none of the Claude OAuth client identity: no billing or identity system blocks and no Claude Code headers; only `x-api-key`, `anthropic-version`, `accept` and `content-type`, no user agent. Native Caching is admitted; prompt caching uses the same three `ttl: 1h` breakpoints as OAuth (last product system block, last customer tool, last message block), with no top-level `cache_control` or beta header |
 
 A Claude child spawned in a tree additionally sends the subagent marker, and
-child detection is the explicit session lineage Plak passes in -- a host root, a
+child detection is the explicit session lineage plakd passes in -- a host root, a
 rebind, an attach, and a qualification run are all roots, and only a spawned
 child spec produces a child.
 
@@ -6904,12 +6905,12 @@ core catalog.
   OpenAI API models not enrolled as `CodeModeOnly` — and the refusal names the
   vertical and the alternatives, e.g. `Claude has no native programmatic tool
   calling (native-ptc) enrolled; use js-ptc, py-ptc or direct`.
-- **`js-ptc`** — the Plak-owned JavaScript harness on the `plakous-js-host`
+- **`js-ptc`** -- the plakd-owned JavaScript harness on the `plakous-js-host`
   sidecar. Provider-visible set is `exec_js` and `wait_js`; `exec_js` takes a
   `source` string, the source is an async module with no top-level return,
   output is emitted with `text(...)`, and nested tools are called as
   `await tools.name({...})`.
-- **`py-ptc`** — the Plak-owned Python harness on the Monty worker.
+- **`py-ptc`** -- the plakd-owned Python harness on the Monty worker.
   Provider-visible set is `exec_py` and `wait_py`; `exec_py` takes a `code`
   string and optional `yield_time_ms` (default and maximum 10,000 ms), nested
   tools are injected async functions called as `await name({...})`, and both
@@ -7050,8 +7051,8 @@ turns. Those captures are witnesses, not a target and not a benchmark.
 
 ### 7.1 The telemetry store
 
-Plak attaches a telemetry sink to every runtime it constructs — `plak run`,
-`plak agent`, and hosted sessions -- and persists two families of typed, content-free
+plakd attaches a telemetry sink to every runtime it constructs -- `plakd run`,
+`plakd agent`, and hosted sessions -- and persists two families of typed, content-free
 observations into `telemetry/telemetry-v<schema>.sqlite3`. The one bounded
 provider-prose exception is the credential-filtered OAuth refresh
 `oauth_error_description`; it contains printable ASCII only, never raw bodies
@@ -7059,7 +7060,7 @@ or token fields. Each schema version
 has its own file; builds never destructively rebuild another schema. Old and
 legacy files remain untouched and doctor reports them for explicit removal.
 The library's sink and its lifecycle
-observation kinds are chapter 01 §11.2. What Plak adds is the product half:
+observation kinds are chapter 01 section 11.2. What plakd adds is the product half:
 tree spawn, attach, detach, rebind and epoch advance; JSONL command admission
 and completion latency; session open and resume duration; and process resource
 samples; and partial-response replay-loss observations per retry from host ModelRetry handling. Product observations fan into the **same** writer as the library's;
@@ -7145,7 +7146,7 @@ product store — root sessions from the sessions table, spawned children from
 node id is not a Plakous agent id and is never a join key. The tree is never duplicated into telemetry.
 
 Cost is recorded as tokens by class plus `cost_micros` and a `cost_status` of
-`reported` or `unknown`; USD is a Plak-side join against a versioned price
+`reported` or `unknown`; USD is a plakd-side join against a versioned price
 table, never a library field. A gateway that reports a cost fills both; every
 other route stays `unknown` with a null cost.
 `compactions` records its own token buckets and provider-reported cost,
@@ -7215,7 +7216,7 @@ The new string value requires no column of its own. The disposable store is
 schema 22. Request host, route and body size are log fields, not SQL columns.
 The bounded writer has the same best-effort drop behavior
 as other analytics; these rows are not recovery authority. `v_replay_loss` is
-the canned view printed by `plak telemetry status --views`, including declined
+the canned view printed by `plakd telemetry status --views`, including declined
 retries. Schema **14** adds the nullable `declined_reason` column with the
 closed set `deadline`, `budget`, `advice_beyond_budget`, `server_effect`,
 `retry_disabled`, and `workflow` in an unconstrained `TEXT` column. On a declined `ModelRetry`, delay is zero and
@@ -7245,11 +7246,11 @@ message or stopped-job text. Host job wakes retain `host_wake` origin on every
 admitting route, including non-interactive run continuations; they never acquire
 human billing attribution after steering.
 
-**Commands.** `plak telemetry status` prints the path, schema version, size on
+**Commands.** `plakd telemetry status` prints the path, schema version, size on
 disk (the main database plus `-wal` and `-shm` if they exist), the configured
 retention, the writer's write-error, drop, and WAL-checkpoint-busy counts, and a
 row count per table; `--views` appends the recommended read-only SQL, which is
-the whole content of the retired `telemetry views` verb. `plak telemetry sql`
+the whole content of the retired `telemetry views` verb. `plakd telemetry sql`
 opens the store **read-only and symlink-refusing**, attaches `product.sqlite3`
 as `product`, `runtime.sqlite3` as `runtime`, and `subagents.sqlite3` as
 `subagents`, all read-only, and builds the
@@ -7264,7 +7265,7 @@ measurement queries: repeated reads per session (by digest, never by path),
 program mix per model and template, occupancy at compaction, wait outcomes,
 and the first-attempt footprint with its idle gap.
 
-`plak telemetry prune` deletes **whole sessions, oldest first**, never rows
+`plakd telemetry prune` deletes **whole sessions, oldest first**, never rows
 within a session: sessions are ordered by their oldest activity across the
 tables that carry a timestamp. Age-expired sessions are removed first.
 The byte target counts the file lengths of the main file plus `-wal` and `-shm`.
@@ -7331,7 +7332,7 @@ I/O. Credential waits retain their existing scoped readiness recheck and
 admission behavior; a successful login never replays a paid turn. Private
 clients route the Login remedy to Accounts/Providers, retaining the CLI fallback.
 
-`plak usage` renders the host-owned usage projection. Clients consume the
+`plakd usage` renders the host-owned usage projection. Clients consume the
 typed usage facts rather than reconstructing provider policy.
 
 Until refresh telemetry attributes exact account references, a default account's
@@ -7363,7 +7364,7 @@ boundary; when the aggregate has no peak, that presentation value is unknown.
 A Messages cache-miss diagnosis is not one of these counters. It stays in
 telemetry (chapter 01 §7.2) and is not printed here.
 
-Plak makes no local allowance estimate, never subtracts cached input from
+plakd makes no local allowance estimate, never subtracts cached input from
 context admission, never uses an allowance API as a compaction gate, and
 **never prints `$0` for an unknown cost** — the honest string is `not
 available`, with its reason.
@@ -7378,7 +7379,7 @@ may perform an explicit credential refresh as described below.
 
 No usage read refreshes an expired token, on any account (chapter 01 §7.3): an
 expired access token is `RefreshRequired` without network I/O, and the next
-turn, `plak refresh <account>`, or a confirmed host credential-refresh operation
+turn, `plakd refresh <account>`, or a confirmed host credential-refresh operation
 refreshes it. A usage endpoint that rejects
 a fresh token (401/403) gets one forced claimed refresh and one more read; a
 failed grant shows the credential's resulting state, decorated with the
@@ -7410,21 +7411,21 @@ unavailable rather than presenting old numbers as fresh. OpenRouter's separate
 on-demand read is unchanged.
 `Stale` means only "provider reported a usage window that has already ended".
 Unsafe local storage remains a local-state refusal. A settled quarantine names
-`plak login <account>` as its remedy, except for Grok, whose next refresh
+`plakd login <account>` as its remedy, except for Grok, whose next refresh
 reclaims an ambiguous outcome: there the line names the next turn or
-`plak refresh grok` first and `plak login grok` only as the fallback.
+`plakd refresh grok` first and `plakd login grok` only as the fallback.
 
-The usage view and `plak usage` decorate only their display copy with the newest
+The usage view and `plakd usage` decorate only their display copy with the newest
 failed credential refresh recorded in telemetry. A newer `Began` row does not
 hide that failure; a later `Completed` clears it (equal timestamps use insertion
 order). Refresh-required and quarantine prose is replaced by the failure's local
 `HH:MM`, transport phase or non-network cause (a validation failure names its
 sub-reason, for example `refresh response could not be validated
 (id_token_exp)`; a retired-format record says it was written by an older build,
-no request was sent, and names `plak login <account>`), and remedy. A failure
+no request was sent, and names `plakd login <account>`), and remedy. A failure
 row whose claim generation is more than one behind the current credential
 record (a later login, logout, or refresh) is history and is not shown. Otherwise the failure
-is a separate note; valid allowance bars remain valid. `plak status` and the
+is a separate note; valid allowance bars remain valid. `plakd status` and the
 provider status view uses the same reader and wording without changing credential
 readiness. Only a `Restored` result says `credential unchanged`; unknown or
 quarantined outcomes name that uncertainty. Missing or unreadable telemetry
@@ -7434,7 +7435,7 @@ disposable database, refresh credentials, or drive admission or recovery.
 OpenRouter usage distinguishes HTTP 401 (invalid or revoked key) from HTTP 403
 (forbidden access). Its refusal names only the winning environment-variable
 name or key-file fingerprint and the remedy: unset or replace
-`OPENROUTER_API_KEY`, or run `plak key set openrouter` for a file key.
+`OPENROUTER_API_KEY`, or run `plakd key set openrouter` for a file key.
 
 Each meter is one row with a label column measured once across every vertical,
 so a bar starts in the same column under every provider and every amount is
@@ -7444,7 +7445,7 @@ that has been reached. Fill and unused cells are the same mid-cell black
 square so the track cannot sit taller than the fill and the bar sits on the
 same midline as `[` `]` in real terminal emulators (not on the cell baseline
 a lower-block occupies, and not as a hairline); unused cells recede by
-colour -- a grey SGR in `plak usage`. The percent is floored to match provider truncation, and the reset
+colour -- a grey SGR in `plakd usage`. The percent is floored to match provider truncation, and the reset
 clause is omitted rather than guessed when the provider reported none. Meters
 the provider groups render as an indented sub-block under the group name, so
 two windows can never be read as one. Balances close a block without a bar:
@@ -7483,25 +7484,25 @@ fresh: the next idle open retries, because a lock miss is contention, not a
 stable observation. A read during a turn is served with its age stated and does not re-query,
 without claiming a new provider read.
 
-`plak usage --account <id>` narrows both the network read and output to that
+`plakd usage --account <id>` narrows both the network read and output to that
 vertical; it accepts `codex`, `grok`, `claude`, `openrouter`, and `supergrok`,
 with that alias selecting the SuperGrok vertical. Unprobed
 accounts are not described as disconnected.
-`plak usage --session <uuid>` opens that exact
+`plakd usage --session <uuid>` opens that exact
 session and reports its descriptor-bound context status — the only variant that
 attaches a runtime. Without a session there is no turn ledger, and the command
 says so rather than showing an invented one.
 
-### 7.3 `plak doctor`
+### 7.3 `plakd doctor`
 
-`plak doctor` diagnoses local state. The analyzer itself is pure: it performs
+`plakd doctor` diagnoses local state. The analyzer itself is pure: it performs
 no writes, spawns no subprocess, creates no state, and prints no secret — the
 credential probe deserializes a status and a generation and nothing else. It is
-not a stateful command, so it does not create the Plak home, the subscription
+not a stateful command, so it does not create the plakd home, the subscription
 state, a log or the telemetry store. On a first run an absent config file,
 database, telemetry store or optional directory is normal: the row is `OK` with
 the result `missing` and the remedy that state is created by the first stateful
-command (for the config file, `plak config init`). Doctor reads the configured
+command (for the config file, `plakd config init`). Doctor reads the configured
 locations (`PLAK_HOME`, `XDG_STATE_HOME`) without creating them.
 
 The free-space row remains advisory during a storage outage: quotas and
@@ -7548,8 +7549,8 @@ and where new work stops, read-only against the default limits from the
 store's recorded counters in one row read, never a scan of retained history; the
 detail starts with the store file and its fill as a percentage of where new
 work stops, and each bound also names where child agents' new work stops; `full` is an
-error once new work is refused, `nearly_full` a warning from 70% of it (section 2.2), both with the remedy `plak session gc --all`, then
-`plak session delete <id>`; the detail also shows the database file size and
+error once new work is refused, `nearly_full` a warning from 70% of it (section 2.2), both with the remedy `plakd session gc --all`, then
+`plakd session delete <id>`; the detail also shows the database file size and
 free bytes, the change feed's retained rows and encoded bytes summed from the
 sessions rows' feed counters, never by scanning the feed (informational: feed
 rows never count against the aggregate bounds, chapter 01 §5.11), and how long
@@ -7557,13 +7558,13 @@ ago the latest automatic history prune failed when telemetry records a failure
 with no success since); the subagents and
 telemetry databases; the secrets and sessions directories; kept carry files
 (`carry_files`: a warning listing each session export left in `carry/` by a
-failed carry, with the remedy to import it with `plak session import <file>`
+failed carry, with the remedy to import it with `plakd session import <file>`
 or delete it); the working
 directory; the external `jj_cli`; stdin and stdout being terminals; the composition host; the
 OpenRouter catalog; the root template; the spawnable templates
 (`spawn_templates`: a warning naming each template the working set reaches,
 directly or through `spawns`, whose account or model is not ready, with the
-remedy `plak login <account>`; the config still loads and only that role's
+remedy `plakd login <account>`; the config still loads and only that role's
 spawn is refused); and the three OAuth verticals. One more row,
 `config_compat`, follows the config file only when the home file or a trusted
 project file carries something a 0.0.3 build refuses as unknown (`[host]
@@ -7571,7 +7572,7 @@ resume_after_loss`, `[mcp_servers.<id>] placement`, `[runners.<name>]`,
 `[web] allow`, `[web] origin`, or a `[host]`, `[runners]` or `[web]` table
 present even empty, chapter 07 §3): a warning
 `config uses 0.0.4-only keys` naming each (a project file's with its path),
-with the remedy to remove them before running a 0.0.3 build on the home. `plak` itself writes those keys only
+with the remedy to remove them before running a 0.0.3 build on the home. `plakd` itself writes those keys only
 when the operator sets them. The `runner_ssh` rows follow the spawnable
 templates, one per configured runner, in name order.
 
@@ -7603,9 +7604,9 @@ Doctor also lists non-current `state/` entries with their retained file sizes,
 without opening foreign databases or following links. Vanished entries contribute
 zero bytes; unreadable entries produce `size unavailable: <error>` warning rows
 and count as warnings, never blocking the remaining report. Removal is explicit
-through `plak state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]`, never automatic (§2.5).
+through `plakd state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]`, never automatic (section 2.5).
 
-The OAuth rows read the same offline credential classification as `plak status`
+The OAuth rows read the same offline credential classification as `plakd status`
 and model runs, so doctor never calls a record they refuse healthy. RESULT is
 `signed_out`, `ready`, `acceptance_required`, `refresh_required`,
 `refresh_outcome_unknown`, `revoked`, `retired_format`, `profile_changed`,
@@ -7619,7 +7620,7 @@ of configured accounts. These local warnings count in its summary and do not
 change credential classification or independently create a blocking failure.
 
 The report ends with a count of passes, warnings, and failures, and a pointer
-to `plak status` for provider credentials — doctor is not the credential
+to `plakd status` for provider credentials -- doctor is not the credential
 authority. Warnings alone exit 0; one or more failures exit 5.
 
 ## 8. Onboarding and credentials
@@ -7648,8 +7649,8 @@ account's host environment variable wins, without modifying any file. Named
 keys remain file-only. A changed direct-API fingerprint requires explicit rebind.
 No stored credential is returned.
 
-`plak key set|status|clear <vertical>/<name>` and
-`plak status <api-vertical>/<name>` operate on that exact home-local API key.
+`plakd key set|status|clear <vertical>/<name>` and
+`plakd status <api-vertical>/<name>` operate on that exact home-local API key.
 Set creates the named key file; clear removes it. Named keys are file-only,
 so an exported default key variable neither shadows nor blocks these commands.
 Creating a key does not by itself admit an inference route.
@@ -7673,12 +7674,12 @@ it before selecting credentials.
 
 Auth and catalog commands take a positional account reference; run, agent and
 usage retain `--account <ref>`. Bare forms retain default/all behavior.
-`plak accounts list` reports permanent defaults and local named selections without
+`plakd accounts list` reports permanent defaults and local named selections without
 reading secret values. Login and key set create selections; parsing, status and
-refresh never create a missing named native slot. `plak accounts rm <ref>` removes
+refresh never create a missing named native slot. `plakd accounts rm <ref>` removes
 only an already signed-out native slot with no live credential; it never logs out
 or revokes remotely. A signed-in slot refuses typed `account_signed_in` and names
-`plak logout <ref>` as its next step; a held lock refuses typed `account_busy`.
+`plakd logout <ref>` as its next step; a held lock refuses typed `account_busy`.
 API removal clears only its shelf entry. Defaults refuse typed
 `default_account_not_removable`. Without `--yes`, removal requires
 the full reference as confirmation and explains credential scope, absence of
@@ -7714,10 +7715,10 @@ labels; full-reference refresh telemetry attribution is a separate increment.
 
 **Auth selects one exact URL and API profile, and API-key and OAuth routes
 never cross or fall back.** A vertical is either a subscription (OAuth) or a
-key, and the two never share a command: `plak login` refuses an API-key
-account, and `plak key set` refuses an OAuth account.
+key, and the two never share a command: `plakd login` refuses an API-key
+account, and `plakd key set` refuses an OAuth account.
 
-Plak owns subscription auth end to end. It mints the PKCE, holds the
+plakd owns subscription auth end to end. It mints the PKCE, holds the
 credential, and never hands a login to another tool; no other CLI is a runtime
 dependency. Every subscription manager and route is constructed from one
 immutable, revision-pinned integration profile that binds the endpoints, client
@@ -7775,13 +7776,13 @@ process races settle through the existing credential-store generation CAS.
 Nothing here is a hosted service, so *local* and *remote* describe only where
 the browser is relative to this machine.
 
-- **Local** (`plak login <account>`) asks the platform to open the authorize
+- **Local** (`plakd login <account>`) asks the platform to open the authorize
   URL here. A loopback callback can only be received when a browser on this
   machine can reach localhost, which is what local buys.
-- **Remote** (`plak login <account> --remote`) binds no socket and opens no
+- **Remote** (`plakd login <account> --remote`) binds no socket and opens no
   browser. For Codex it is the provider's device-code flow: the CLI shows the
   verification URL, a one-time code, the code's lifetime and the rule
-  "continue only if you started this login in plak; if someone gave you this
+  "continue only if you started this login in plakd; if someone gave you this
   code, cancel", then waits for approval without reading the terminal; Ctrl-C
   cancels. SuperGrok and Claude carry the authorize URL to another machine and
   paste the code their page displays back. There is no pasted-callback path
@@ -7794,11 +7795,11 @@ A Codex device code lasts 15 minutes. Waiting for approval writes nothing
 locally: no credential and no login-recovery marker exist until the approved
 code is exchanged, so Ctrl-C or expiry while waiting leaves the account as it
 was. An expired code fails with "the device code expired before it was
-approved; run `plak login codex --remote` for a new code". When the provider
+approved; run `plakd login codex --remote` for a new code". When the provider
 answers the device-code request with 404, login fails with "device-code login
 is not available for this account/server" and names the remedies: run
-`plak login codex` on a machine with a browser, or forward port 1455
-(`ssh -L 1455:localhost:1455 <host>`) and run `plak login codex` there.
+`plakd login codex` on a machine with a browser, or forward port 1455
+(`ssh -L 1455:localhost:1455 <host>`) and run `plakd login codex` there.
 
 **Only one vertical has a loopback flow at all.** Codex binds the first free of
 its two pinned loopback ports and completes by itself with nothing pasted;
@@ -7823,7 +7824,7 @@ input before restoring echo. Both copy commands use the terminal UI effect
 port, so offline workflow tests never launch a clipboard process.
 
 **MCP server logins** use the same local and remote split through the same
-terminal effects. `plak mcp login <id>` opens the authorize URL here and
+terminal effects. `plakd mcp login <id>` opens the authorize URL here and
 completes on its loopback callback at `http://127.0.0.1:<port>/callback`
 (the table's `oauth_callback_port`, else an ephemeral port), with nothing
 pasted; it reminds at 30 s and times out at 120 s. `--remote` binds
@@ -7840,11 +7841,11 @@ is stored; a failed or cancelled login leaves the old one as it was.
 
 ### 8.4 Refresh, quarantine, and recovery
 
-Before any refresh network call, Plak writes an outcome-unknown marker to the
+Before any refresh network call, plakd writes an outcome-unknown marker to the
 credential slot, so a crash mid-refresh is a **quarantine** rather than a
 silently reused token. Quarantine is a safety property, not a fault.
 
-Codex and Claude stay fail-closed there and require a fresh `plak login`.
+Codex and Claude stay fail-closed there and require a fresh `plakd login`.
 SuperGrok is different, and deliberately so: a retryable unknown outcome is
 treated as a **new claimed generation** of the already-stored refresh token
 rather than a replay of the ambiguous POST. Transport failures, HTTP 429 and
@@ -7880,7 +7881,7 @@ stops with `OutcomeUnknown`. Standalone compaction retries only on typed proof
 of an unsent request, never on a refusal status or possible acceptance. Quota,
 billing and usage-limit bodies and `x-should-retry: false` are terminal even
 with Retry-After; `true` never widens replay. The kernel announces each
-replay as a typed `ModelEvent::Retry`, and Plak shows it on every face:
+replay as a typed `ModelEvent::Retry`, and plakd shows it on every face:
 
 - **JSONL.** One `retry` frame, which is in the required (never dropped) kind
   set: `attempt`, `max_attempts`, `delay_ms`, `cause_kind` (`http_status`,
@@ -7888,8 +7889,8 @@ replay as a typed `ModelEvent::Retry`, and Plak shows it on every face:
   text) and `output_discarded`. A client that accumulated `assistant` or
   `reasoning` frames for this model call drops them when `output_discarded`
   is true.
-- **`plak run`.** One stderr line,
-  `plak: retrying in 1.5s (2/4): <cause>`, with `; partial output discarded`
+- **`plakd run`.** One stderr line,
+  `plakd: retrying in 1.5s (2/4): <cause>`, with `; partial output discarded`
   appended when it applies.
 - **Log.** A `plak.retry` tracing record with session, branch, agent and turn ids, the next and maximum attempt,
   delay, cause kind, discard flag, `host`, `route` (path only, no query),
@@ -7903,7 +7904,7 @@ replay as a typed `ModelEvent::Retry`, and Plak shows it on every face:
   resend. This best-effort log queue is not telemetry or recovery authority.
 
 When the first hosted tool is enabled for live use, hosted unknown-outcome
-messaging on host wire views, `plak run`, JSONL and child status rows must name the tool,
+messaging on host wire views, `plakd run`, JSONL and child status rows must name the tool,
 its class, failure phase, that nothing was retried, and the remedy. Today the
 root waits for an explicit prompt or a recovery operation; children show
 `recovery_required`, which the host recovers, leaving the parent model to decide.
@@ -7931,7 +7932,7 @@ the build must be updated). **A quarantined credential is never painted as
 expired.**
 
 Claimed refreshes are recorded as telemetry through the ordinary sink, and
-`plak doctor` prints each vertical's status, generation, record age, and the
+`plakd doctor` prints each vertical's status, generation, record age, and the
 latest refresh phase, failure class, and nullable transport phase
 (`resolution`, `connect`, `tls`, `send`, or `response`) — or an explicit unavailable detail when
 the telemetry schema cannot be read.
@@ -7947,7 +7948,7 @@ code, description, time and claimed generation; absent fields are explicitly
 not recorded. Telemetry remains disposable and never authorizes recovery.
 
 Claude participates in the host's native freshness re-resolution. Quarantined
-credentials name `plak login claude`; a changed account refuses exact reopen
+credentials name `plakd login claude`; a changed account refuses exact reopen
 and names restoration of the original account or an explicit history carry.
 Attach guidance distinguishes a frozen binding mismatch, a missing login and
 quarantine; selecting a profile is not represented as repair for a binding
@@ -7961,7 +7962,7 @@ failed revoke never silently chooses local-only or reports success. Failure
 responses distinguish a proven no-effect refusal from an operation whose
 effect may be unknown. API clear never crosses into subscription logout.
 
-`plak logout <account>` first reads the local credential offline and never
+`plakd logout <account>` first reads the local credential offline and never
 asks the operator to log in in order to log out:
 
 | Local credential | Action | Output |
@@ -7976,11 +7977,11 @@ the state, for example when the provider is unreachable. A failed remote
 revoke of a usable credential stays a failure; it never falls back to local
 retirement. The one exception is a record the revoke path itself refuses as
 foreign or retired before sending anything: that is the unusable row, retired
-locally with the same output, so no logout failure names `plak logout` as its
+locally with the same output, so no logout failure names `plakd logout` as its
 repair. If a revision change makes a private selected-slot credential's
 profile foreign, status and login name the profile change and direct the
-operator to `plak logout <account>` followed by `plak login <account>`; login
-itself does not discard the old record (chapter 04 §3.6). On bare `plak status`
+operator to `plakd logout <account>` followed by `plakd login <account>`; login
+itself does not discard the old record (chapter 04 section 3.6). On bare `plakd status`
 that repair is the account's Setup needed row, and the other accounts are still
 listed. Local retirement replaces the old record with a token-free revoked
 tombstone; reauthorization
@@ -8011,11 +8012,11 @@ configured accounts and credentials, require no network call, and neither
 extend an expiry nor admit an expired subscription route. Product command tests
 inject a fixed clock; warning boundary tests supply time explicitly.
 
-`plak status` is offline and says so: it prints local credential state in
+`plakd status` is offline and says so: it prints local credential state in
 Ready and Setup needed, over the three OAuth verticals and the four API-key
 accounts, and closes with the sentence that no provider request was made. A
 section with no rows is omitted, heading and all. A row carries the account, whether it is OAuth or an API key, the
-compatibility acceptance, and the credential state. `plak status <account>`
+compatibility acceptance, and the credential state. `plakd status <account>`
 prints the same two facts for one account on one line.
 
 Recorded refresh outcomes follow §7.2's named-sibling attribution limitation.
@@ -8026,24 +8027,24 @@ same classification as other native-subscription failures: `Unsafe storage · �
 with the path and the mode repair the
 store inspection names, and that classification's repair text otherwise. When
 that unsafe-storage repair would exceed the 512-character cell cap, the cell is
-`Unsafe storage · run plak status <account> for the fix` instead of a path cut
-mid-remedy; `plak status <account>` prints the repair in full. A
+`Unsafe storage - run plakd status <account> for the fix` instead of a path cut
+mid-remedy; `plakd status <account>` prints the repair in full. A
 credential this build can read but not use stays a normal row; login-required
 (an earlier build's Codex login, or a payload this build cannot parse) reads
-`Login required · plak login <account>`. A Grok or Claude record written under
+`Login required - plakd login <account>`. A Grok or Claude record written under
 another compatibility profile, or by an older build whose format reads as one,
-reads `Profile changed · run plak login <account>` with its compatibility
-acceptance read on its own, and `plak status <account>` prints
-`credential=profile-changed` and exits 0; `plak login <account>` replaces it and
+reads `Profile changed - run plakd login <account>` with its compatibility
+acceptance read on its own, and `plakd status <account>` prints
+`credential=profile-changed` and exits 0; `plakd login <account>` replaces it and
 says so. A record a newer build wrote reads
-`Written by a newer plak build · use that build, or plak login <account> to
-replace it`, and `plak status <account>` prints `credential=written-by-newer-build`. The other OAuth accounts and the
+`Written by a newer plakd build - use that build, or plakd login <account> to
+replace it`, and `plakd status <account>` prints `credential=written-by-newer-build`. The other OAuth accounts and the
 API-key rows are printed either way, and one API-key read that fails is an
 `Unreadable` cell rather than an aborted table. The command stays offline and
-exits 0. `plak status <account>` still exits 3 when that one account cannot be
+exits 0. `plakd status <account>` still exits 3 when that one account cannot be
 read, with the repair on stderr.
 
-`plak key status` prints where a key came from — the environment or the file —
+`plakd key status` prints where a key came from -- the environment or the file --
 its fingerprint, the name of the variable that won, and the fingerprint of a
 file it is shadowing. It prints no key material in any form.
 
@@ -8051,7 +8052,7 @@ The SuperGrok subscription answers to `grok` and `supergrok`; `xai-api`
 names the direct API-key account. Bare `xai` is refused everywhere as
 ambiguous, with those two alternatives in the repair. Key status uses the
 ACCOUNT, SOURCE, FINGERPRINT and ENV table in terminal/tab-delimited form.
-Single-account OAuth status is one line and appends `run plak login <account>`
+Single-account OAuth status is one line and appends `run plakd login <account>`
 when the credential is not ready.
 
 ## 9. Known limits
@@ -8060,7 +8061,7 @@ These are shipped gaps, stated so that nothing above reads as a promise the
 product does not keep. The agent tree's own limits are chapter 03 §17, and the
 distribution and platform limits are chapter 06.
 
-MCP servers bind through template tools (section 6.3); `plak mcp` provides
+MCP servers bind through template tools (section 6.3); `plakd mcp` provides
 setup, login and prompt inspection. Clients can request the read-only session
 MCP view. MCP resource subscriptions, sampling and elicitation are not supported.
 
@@ -8099,7 +8100,7 @@ carries no tiktoken-compatible tokenizer, so the footprint table in §6.7 is a
 proportional comparison between routes, not a provider-accurate token count.
 
 **SuperGrok publishes no plan or tier on its billing route.** The reviewed
-vendor client splices that in from a second settings read that Plak does not
+vendor client splices that in from a second settings read that plakd does not
 make, so the SuperGrok block carries no account line unless the billing body
 itself happens to carry a tier.
 

@@ -1,0 +1,32 @@
+plakd {version}
+plakd host server and operator CLI on plakous
+
+USAGE:
+  plakd                              Global help (no host or session startup)
+  plakd <command> [options]
+  plakd help                         Global help (this message)
+  plakd <command> --help             Command-specific help
+
+COMMANDS:
+  accounts    List accounts; remove signed-out named slots or clear named API keys
+  login       OAuth/subscription login (codex, grok, claude)
+  logout      OAuth logout / local retirement
+  status      Credential readiness (no secrets)
+  refresh     Refresh OAuth credential
+  key         API key set/clear/status (openai, xai-api, anthropic, openrouter)
+  secret      Named secrets config.toml refers to (set/rm/list; values never printed)
+  mcp         MCP servers: add/list/show/test/remove, enable on templates
+  runner      Runner daemon on this machine; pair with and list remote runners
+  host        Serve the home's sessions on a private socket and optional web endpoint
+  run         Non-interactive one-shot agent run
+  agent       Long-lived JSONL agent loop (stdio)
+  wire        Export this build's wire v2 JSON Schema
+  config      Show/set/edit product config (~/.plak)
+  doctor      Local health diagnosis
+  usage       Subscription limits and context-status availability
+  session     List/show/log sessions (agent-readable events)
+  state       Prune unused legacy state (inspect with doctor)
+  tree        Agent tree custody break-glass (release --force)
+  telemetry   Local analytics store (status, SQL, prune)
+  models      List account catalog or enrolled API models (read-only)
+  version     Print version

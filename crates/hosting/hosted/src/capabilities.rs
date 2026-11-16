@@ -274,7 +274,7 @@ impl std::fmt::Display for AccountAdmissionError {
             ),
             Self::AccountSignedIn { account } => write!(
                 formatter,
-                "account_signed_in: `{account}`; log out first with `plak logout {account}`"
+                "account_signed_in: `{account}`; log out first with `plakd logout {account}`"
             ),
             Self::DefaultAccountNotRemovable { account } => write!(
                 formatter,

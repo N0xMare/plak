@@ -139,7 +139,7 @@ impl Schema {
         }
         if version != *expected {
             return Err(AdmissionError::Unsupported(format!(
-                "{stem} schema {version}, expected {expected}: this {stem}.sqlite3 was created by an incompatible plak build; move it aside to start fresh"
+                "{stem} schema {version}, expected {expected}: this {stem}.sqlite3 was created by an incompatible plakd build; move it aside to start fresh"
             )));
         }
         self.validate(connection).map_err(|error| {

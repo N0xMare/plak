@@ -1,0 +1,441 @@
+//! Operator-facing OAuth presentation: clean URL panel, clipboard copy, login waits.
+
+use std::io::{self, Write};
+use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
+
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
+
+/// Soft warning while still waiting for local loopback (product UX).
+pub const LOCAL_SOFT_WARN: Duration = Duration::from_secs(30);
+/// Product hard timeout for local browser login (library deadline is longer).
+pub const LOCAL_HARD_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Present an authorize URL for keyboard + mouse friendly copy.
+///
+/// Layout: short instruction, top/bottom rules on **separate** lines, bare URL
+/// alone (no side borders so mouse drag does not pick frame glyphs).
+/// Attempts clipboard copy once immediately. Local loopback wait never puts
+/// the TTY in raw mode (that swallowed Ctrl-C and made paste look like a hang).
+pub fn present_authorize_url(
+    out: &mut dyn Write,
+    url: &str,
+    account: &str,
+    remote: bool,
+) -> io::Result<()> {
+    writeln!(out)?;
+    writeln!(out, "Open this URL in a browser to sign in to {account}:")?;
+    writeln!(out)?;
+    if remote {
+        writeln!(
+            out,
+            "  re-copy: type c then Enter at the prompt  ·  mouse: drag the URL line only"
+        )?;
+    } else {
+        writeln!(out, "  mouse: drag the URL line only")?;
+    }
+    writeln!(out)?;
+    writeln!(
+        out,
+        "────────────────────────────────────────────────────────"
+    )?;
+    // Bare URL on its own line — no side borders (clean mouse select / triple-click).
+    writeln!(out, "{url}")?;
+    writeln!(
+        out,
+        "────────────────────────────────────────────────────────"
+    )?;
+    writeln!(out)?;
+    match try_copy_to_clipboard(url) {
+        CopyResult::Copied => {
+            writeln!(out, "URL copied to clipboard.")?;
+        }
+        CopyResult::Unavailable => {
+            if remote {
+                writeln!(
+                    out,
+                    "Clipboard unavailable — select the URL line above, or type c then Enter at the prompt."
+                )?;
+            } else {
+                writeln!(out, "Clipboard unavailable — select the URL line above.")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CopyResult {
+    Copied,
+    Unavailable,
+}
+
+/// Best-effort clipboard: OSC 52 (when stderr is a TTY), then platform tools.
+#[must_use]
+pub fn try_copy_to_clipboard(text: &str) -> CopyResult {
+    if try_osc52_copy(text) {
+        return CopyResult::Copied;
+    }
+    if try_external_clipboard(text) {
+        return CopyResult::Copied;
+    }
+    CopyResult::Unavailable
+}
+
+fn try_osc52_copy(text: &str) -> bool {
+    // OSC 52: ESC ] 52 ; c ; <base64> BEL  — many terminals support this over SSH.
+    if !rustix::termios::isatty(io::stderr()) {
+        return false;
+    }
+    let encoded = B64.encode(text.as_bytes());
+    if encoded.len() > 12 * 1024 {
+        return false;
+    }
+    let seq = format!("\x1b]52;c;{encoded}\x07");
+    let mut err = io::stderr().lock();
+    err.write_all(seq.as_bytes()).is_ok() && err.flush().is_ok()
+}
+
+fn try_external_clipboard(text: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        if pipe_to(&["pbcopy"], text) {
+            return true;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if pipe_to(&["wl-copy"], text) {
+            return true;
+        }
+        if pipe_to(&["xclip", "-selection", "clipboard"], text) {
+            return true;
+        }
+        if pipe_to(&["xsel", "--clipboard", "--input"], text) {
+            return true;
+        }
+    }
+    #[cfg(windows)]
+    {
+        if pipe_to(&["clip"], text) {
+            return true;
+        }
+    }
+    let _ = text;
+    false
+}
+
+fn pipe_to(cmd: &[&str], text: &str) -> bool {
+    let Some((prog, rest)) = cmd.split_first() else {
+        return false;
+    };
+    let Ok(mut child) = Command::new(prog)
+        .args(rest)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        return false;
+    };
+    if stdin.write_all(text.as_bytes()).is_err() {
+        let _ = child.kill();
+        return false;
+    }
+    drop(stdin);
+    child.wait().map(|s| s.success()).unwrap_or(false)
+}
+
+/// Decode the `redirect_uri` query value from an authorize URL, when present.
+#[must_use]
+pub fn loopback_wait_target(authorize_url: &str) -> String {
+    const KEY: &str = "redirect_uri=";
+    let Some(start) = authorize_url.find(KEY) else {
+        return "the loopback callback in the authorize URL".to_owned();
+    };
+    let rest = &authorize_url[start + KEY.len()..];
+    let encoded = rest.split('&').next().unwrap_or(rest);
+    percent_decode(encoded)
+}
+
+fn percent_decode(encoded: &str) -> String {
+    let bytes = encoded.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Some(hi) = from_hex(bytes[i + 1])
+            && let Some(lo) = from_hex(bytes[i + 2])
+        {
+            out.push((hi << 4) | lo);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn from_hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Account label for login CLI (`codex` / `grok` / `claude`).
+#[must_use]
+pub fn account_cli_name(provider: plakous::subscriptions::NativeProvider) -> &'static str {
+    match provider {
+        plakous::subscriptions::NativeProvider::Codex => "codex",
+        plakous::subscriptions::NativeProvider::Xai => "grok",
+        plakous::subscriptions::NativeProvider::Claude => "claude",
+        _ => provider.as_str(),
+    }
+}
+
+/// True when the process environment indicates an SSH session.
+///
+/// Used only for an **explicit** refuse-local-login path (not silent mode switch).
+/// Any of `SSH_CONNECTION`, `SSH_CLIENT`, or `SSH_TTY` counts.
+#[must_use]
+pub fn ssh_session_detected() -> bool {
+    ssh_session_from_env(
+        std::env::var_os("SSH_CONNECTION").as_deref(),
+        std::env::var_os("SSH_CLIENT").as_deref(),
+        std::env::var_os("SSH_TTY").as_deref(),
+    )
+}
+
+/// Pure env check for tests (non-empty values only).
+#[must_use]
+pub fn ssh_session_from_env(
+    ssh_connection: Option<&std::ffi::OsStr>,
+    ssh_client: Option<&std::ffi::OsStr>,
+    ssh_tty: Option<&std::ffi::OsStr>,
+) -> bool {
+    [ssh_connection, ssh_client, ssh_tty]
+        .into_iter()
+        .flatten()
+        .any(|v| !v.is_empty())
+}
+
+/// Explicit refusal when local browser login is requested under SSH.
+#[must_use]
+pub fn ssh_local_login_refusal_message(
+    account: &str,
+    provider: plakous::subscriptions::NativeProvider,
+) -> String {
+    format!(
+        "SSH session detected — local browser login is not available here.\n\
+         \n\
+         Re-run with the explicit remote flag:\n\
+         \n\
+           plakd login {account} --remote\n\
+         \n\
+         {}",
+        remote_follow_up(provider)
+    )
+}
+
+/// Remotely-oriented recovery lines for local-login failures.
+#[must_use]
+pub fn remote_login_hint(
+    account: &str,
+    provider: plakous::subscriptions::NativeProvider,
+) -> String {
+    format!(
+        "If you are on SSH, headless, or the browser is elsewhere, run:\n\
+         \n\
+           plakd login {account} --remote\n\
+         \n\
+         {}",
+        remote_follow_up(provider)
+    )
+}
+
+fn remote_follow_up(provider: plakous::subscriptions::NativeProvider) -> &'static str {
+    if provider == plakous::subscriptions::NativeProvider::Codex {
+        "Then open the verification URL in a browser on any device and enter\n\
+         the one-time code it shows."
+    } else {
+        "Then open the authorize URL in a browser on your machine and paste the\n\
+         authorization code or callback URL when prompted."
+    }
+}
+
+/// Format the hard-timeout operator error (static-friendly for tests).
+#[must_use]
+pub fn local_login_timeout_message(
+    account: &str,
+    provider: plakous::subscriptions::NativeProvider,
+    waited: Duration,
+) -> String {
+    format!(
+        "no browser callback within {}s\n\n{}",
+        waited.as_secs(),
+        remote_login_hint(account, provider)
+    )
+}
+
+/// Device-code login prompt: where to go, the one-time code, its lifetime,
+/// and the anti-phishing rule. Nothing is read from the terminal.
+pub fn write_device_code_prompt(
+    out: &mut dyn Write,
+    account: &str,
+    verification_url: &str,
+    user_code: &str,
+    expires_in: Duration,
+) -> io::Result<()> {
+    writeln!(out)?;
+    writeln!(out, "Sign in to {account} from a browser on any device:")?;
+    writeln!(out)?;
+    writeln!(out, "  1. Open:        {verification_url}")?;
+    writeln!(out, "  2. Enter code:  {user_code}")?;
+    writeln!(out)?;
+    writeln!(
+        out,
+        "The code expires in {} minutes.",
+        expires_in.as_secs().div_ceil(60)
+    )?;
+    writeln!(
+        out,
+        "Continue only if you started this login in plakd; if someone gave you this code, cancel."
+    )?;
+    writeln!(out, "Waiting for approval · Ctrl-C cancels")?;
+    out.flush()
+}
+
+/// Operator error when a device code ran out before approval.
+#[must_use]
+pub fn device_code_expired_message(account: &str) -> String {
+    format!(
+        "the device code expired before it was approved; run `plakd login {account} --remote` for a new code"
+    )
+}
+
+/// Paste-complete login instructions (Claude, Grok).
+pub fn write_authorization_paste_instructions(
+    out: &mut dyn Write,
+    provider: plakous::subscriptions::NativeProvider,
+    completion: plakous::subscriptions::NativeLoginCompletion,
+) -> io::Result<()> {
+    use plakous::subscriptions::{NativeLoginCompletion, NativeProvider};
+    match completion {
+        NativeLoginCompletion::AuthorizationCodeOrRedirectUrl
+            if provider == NativeProvider::Claude =>
+        {
+            writeln!(
+                out,
+                "After authorizing, the callback page shows an authorization code."
+            )?;
+            writeln!(out, "Paste either:")?;
+            writeln!(out, "  • the authorization code, or")?;
+            writeln!(
+                out,
+                "  • the full callback URL (https://platform.claude.com/oauth/code/callback?code=…)"
+            )?;
+        }
+        NativeLoginCompletion::AuthorizationCodeOrRedirectUrl
+            if provider == NativeProvider::Xai =>
+        {
+            writeln!(
+                out,
+                "After authorizing, the page says to copy a code into Grok Build."
+            )?;
+            writeln!(out, "Paste that authorization code here (then Enter).")?;
+            writeln!(
+                out,
+                "The full callback URL is also accepted if you have it."
+            )?;
+        }
+        NativeLoginCompletion::AuthorizationCodeOrRedirectUrl => {
+            writeln!(out, "After authorizing, paste either:")?;
+            writeln!(out, "  • the full callback URL from the address bar")?;
+            writeln!(
+                out,
+                "    (http://127.0.0.1:<port>/callback?code=…&state=…), or"
+            )?;
+            writeln!(out, "  • the bare authorization code alone (also accepted)")?;
+        }
+        NativeLoginCompletion::Automatic | NativeLoginCompletion::DeviceCode => {}
+    }
+    writeln!(out, "At the prompt:")?;
+    writeln!(out, "  • paste the callback URL or bare code, then Enter")?;
+    writeln!(
+        out,
+        "  • or type  c  then Enter to re-copy the authorize URL"
+    )?;
+    writeln!(out, "  • empty line cancels")?;
+    Ok(())
+}
+
+/// Soft progress lines while waiting for local loopback.
+pub fn write_local_wait_progress(
+    out: &mut dyn Write,
+    account: &str,
+    browser_opened: bool,
+    loopback_target: &str,
+) -> io::Result<()> {
+    if browser_opened {
+        writeln!(
+            out,
+            "Waiting for the browser to finish sign-in on this machine."
+        )?;
+    } else {
+        writeln!(
+            out,
+            "No local browser was opened. Open the URL above on this machine,"
+        )?;
+        writeln!(
+            out,
+            "or cancel (Ctrl-C) and use:  plakd login {account} --remote"
+        )?;
+    }
+    writeln!(out, "Plak is listening for: {loopback_target}")?;
+    writeln!(
+        out,
+        "Do not paste the localhost callback URL here — the CLI receives it automatically."
+    )?;
+    writeln!(
+        out,
+        "  reminder at {}s · timeout at {}s · Ctrl-C cancels",
+        LOCAL_SOFT_WARN.as_secs(),
+        LOCAL_HARD_TIMEOUT.as_secs()
+    )?;
+    out.flush()
+}
+
+/// Background soft-warning after [`LOCAL_SOFT_WARN`] if still waiting.
+pub fn spawn_soft_wait_reminder(account: String, waiting: Arc<AtomicBool>) {
+    thread::spawn(move || {
+        thread::sleep(LOCAL_SOFT_WARN);
+        if waiting.load(Ordering::Relaxed) {
+            let _ = writeln!(
+                io::stderr(),
+                "plakd: still waiting for the browser to finish ({account})."
+            );
+            let _ = writeln!(
+                io::stderr(),
+                "  Do not paste here. Finish in the browser, or Ctrl-C to cancel."
+            );
+            let _ = io::stderr().flush();
+        }
+    });
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod tests;

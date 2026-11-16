@@ -11,7 +11,7 @@ What the system is and how it behaves, as shipped. Present tense, stated once.
 | [`04-security-and-boundaries.md`](04-security-and-boundaries.md) | Trust boundaries and the threat register, what is enforced versus convention, credentials and refresh, effects and authority, redaction, panics, unsafe code and supply chain, vulnerability reporting, and residual risk |
 | [`05-testing-and-evidence.md`](05-testing-and-evidence.md) | The gate layers, offline test conventions, the evidence classes, live scenarios and the pre-release bar, the reference product homes, known flaky classes, and review focus |
 | [`06-build-and-support-surface.md`](06-build-and-support-surface.md) | Support classes and inventories, the crate map and its rules, features, unsafe policy, building and installing, dependency policy, and the maintainer surface |
-| [`07-config-reference.md`](07-config-reference.md) | Every key `plak` reads from disk: files and discovery, the grammar, `config.toml`, `agents/<name>.toml`, the named load and save errors, the epoch digest rule, the `plak config set` grammar, and the shipped presets |
+| [`07-config-reference.md`](07-config-reference.md) | Every key `plakd` reads from disk: files and discovery, the grammar, `config.toml`, `agents/<name>.toml`, the named load and save errors, the epoch digest rule, the `plakd config set` grammar, and the shipped presets |
 
 Operator-facing material lives in [`../user-guide/`](../user-guide/).
 
@@ -22,14 +22,14 @@ archive, states current behavior.
 
 - **Plakous L0** — the provider-neutral single-agent runtime and facade; see
   [the crate-set rule](00-overview.md#the-crate-set-rule).
-- **Plak** — the CLI, TUI and JSONL product built on Plakous; see
+- **plakd** — the host server and operator/JSONL product built on Plakous; see
   [the product specification](02-plak-product.md).
 - **route tuple** — the exact account, provider, model, effort, composition and
   protocol selected for a run; evidence is scoped to it as described in
   [Testing and evidence](05-testing-and-evidence.md).
 - **canonical history** — durable model-facing conversation authority, distinct
   from displayed text; see [Plakous](01-plakous-library.md).
-- **agent tree** — Plak's composition of isolated Plakous agents, including
+- **agent tree** — plakd's composition of isolated Plakous agents, including
   grants, workspaces and result delivery; see [Orchestration](03-orchestration.md).
 - **admission** — the final pre-dispatch capacity and authority decision; see
   [Plakous](01-plakous-library.md) and [Security](04-security-and-boundaries.md).

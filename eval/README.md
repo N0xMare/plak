@@ -1,6 +1,6 @@
 # Harness bakeoff (`eval/`)
 
-Maintainer tooling that runs the real `plak run` binary (one non-interactive
+Maintainer tooling that runs the real `plakd run` binary (one non-interactive
 root turn, full tools, no approval gates) against Codex CLI, Claude Code, Grok
 Build, Pi and OpenCode on Terminal-Bench tasks through
 [Harbor](https://github.com/harbor-framework/harbor), and compares capability,
@@ -16,12 +16,12 @@ they are not in any gate tier either.
 Use **one login per machine; never copy credential dirs between hosts**.
 Rotating a copied refresh token can invalidate the original machine's login.
 Plak OAuth trial arms require the `login-host` provenance marker written by a
-successful `plak login <account>` on this host. Harbor refuses an unmarked or
+successful `plakd login <account>` on this host. Harbor refuses an unmarked or
 foreign-host directory before any host refresh or upload. Log in locally to
 create it; do not copy or manufacture the marker. Native comparator stores must
 likewise come from their own login, not a copy of Plak's credentials.
 
-Pre-existing Plak logins lack this marker and need one local `plak login
+Pre-existing Plak logins lack this marker and need one local `plakd login
 <account>` before Harbor trials. If host identity is unavailable (for example
 an uninitialized container machine-id), normal login still succeeds and the
 credential is Ready, but Harbor refuses until a login can write provenance.
@@ -30,7 +30,7 @@ credential is Ready, but Harbor refuses until a login can write provenance.
   Harbor is pinned at 0.23.0 in `eval/pyproject.toml` and always runs through
   `uv run --project eval`, never a global `harbor`.
 - Host credentials for the arms you run:
-  - Plak OAuth: `plak login codex`, `plak login grok`, `plak login claude`;
+  - Plak OAuth: `plakd login codex`, `plakd login grok`, `plakd login claude`;
   - Codex CLI: `~/.codex/auth.json`; Grok Build: `~/.grok/auth.json`;
   - Pi and OpenCode: their own `auth.json` (`~/.pi/agent/auth.json`,
     `~/.local/share/opencode/auth.json`), or private copies named by
@@ -234,7 +234,7 @@ Linux host; Python-only adapter tests can use a local eval venv. None of the
 preparation commands below sends model requests.
 
 First integrate the current GPT-6 Codex prompt and the amp-jobs change, then
-build **that commit**. `plak run --leave-jobs-running` must appear in
+build **that commit**. `plakd run --leave-jobs-running` must appear in
 `run_arguments`; the in-cell `run --help` probe refuses older builds before
 credential upload. This eval change does not duplicate that product flag.
 An old Plak manifest, old CLI version, dirty source or replacement archive
@@ -254,7 +254,7 @@ just harbor pmux
 The preparation commands below export `terminal-bench/terminal-bench-2-1@6`
 to a private task directory (`TB21`, one version only). Refresh or
 log in to each selected subscription store serially on the host. A native
-host `plak` must be on PATH for `plak refresh ACCOUNT`. Codex, Pi, Grok and
+host `plak` must be on PATH for `plakd refresh ACCOUNT`. Codex, Pi, Grok and
 Claude stores must cover agent + verifier budgets + 300 seconds. Do not copy
 one arm's OAuth document into another arm's different native store format.
 No API key is needed for the Codex, Grok or Claude verticals. OpenRouter stays
@@ -459,11 +459,11 @@ Rung A arms:
 
 | Arm | Harness | Tuple |
 | --- | --- | --- |
-| `plak-codex` / `codex` | `plak run` / Codex CLI `codex exec` | gpt-6-luna, low |
+| `plak-codex` / `codex` | `plakd run` / Codex CLI `codex exec` | gpt-6-luna, low |
 | `pi-codex-oauth` | Pi CLI, its own OAuth store | openai-codex/gpt-6-luna, low |
-| `plak-grok` / `grok-build` | `plak run` / Grok Build | grok-4.6, low |
+| `plak-grok` / `grok-build` | `plakd run` / Grok Build | grok-4.6, low |
 | OpenRouter arms | disabled | no admitted explicit shared wire effort; `none`/omit is not parity |
-| `plak-claude` / `claude-code` | `plak run` / FrozenPmux `pmux run` | claude-opus-5-5, low |
+| `plak-claude` / `claude-code` | `plakd run` / FrozenPmux `pmux run` | claude-opus-5-5, low |
 | `all` | the reviewed campaign's arms, interleaved | one vertical/model/effort per campaign |
 
 Prompt ablation arms compare two prompt variants of the same `plak` binary:
@@ -540,7 +540,7 @@ Every trial carries a termination class beside its reward, from
 | --- | --- |
 | `completed` | The agent exited 0; the reward is a real score |
 | `turn_failed:<kind>` | The turn died with a typed diagnostic |
-| `agent_init_failed:<Kind>` | `plak run` refused before opening a session (`plak: agent could not be initialized (<Kind>): …`); no turn was dispatched |
+| `agent_init_failed:<Kind>` | `plakd run` refused before opening a session (`plak: agent could not be initialized (<Kind>): …`); no turn was dispatched |
 | `agent_exit_nonzero` | Nonzero exit with no recognised diagnostic |
 | `harness_exception:<Type>` | Harbor itself raised |
 | `result_unparseable` | The trial's `result.json` could not be read; nothing may be concluded |
@@ -574,7 +574,7 @@ A verifier timeout is unscored, not reward 0. On the TB 2.1 slices a reward with
   skip-permissions as root.
 - **Credentials.** Cells upload only their vertical's host credential and
   refuse `OPENAI_API_KEY`, `XAI_API_KEY` and `OPENROUTER_API_KEY` from the
-  Harbor environment. Cells never `plak refresh`: before each Plak trial the host checks access expiry
+  Harbor environment. Cells never `plakd refresh`: before each Plak trial the host checks access expiry
   under a lock and refreshes if it cannot cover the task agent timeout, verifier
   timeout and five-minute margin. Insufficient lifetime after refresh refuses dispatch. Never overlap two arms that share one OAuth
   refresh token.

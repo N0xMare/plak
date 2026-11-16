@@ -270,7 +270,7 @@ FORBIDDEN_NEUTRAL_DEPENDENCY_PARTS = (
 )
 
 # Retired packages that must never come back under any path.
-RETIRED_PACKAGES = ("plak-compose-host", "plakous-responses-dialect")
+RETIRED_PACKAGES = ("plak", "plak-compose-host", "plakous-responses-dialect")
 
 # OpenRouter is a Responses dialect, never a peer protocol stack.
 RETIRED_SOURCES = {
@@ -365,8 +365,8 @@ SourceKey = tuple[str, str]
 # Each compile-time environment macro the product may use, with the one
 # variable it names, in source order.
 EXPECTED_COMPILE_TIME_ENVIRONMENT: dict[SourceKey, list[tuple[str, str]]] = {
-    ("plak", "src/commands/exchange_capture.rs"): [("env", "CARGO_MANIFEST_DIR")],
-    ("plak", "src/build_identity.rs"): [("option_env", "PLAK_SOURCE_REVISION")],
+    ("plakd", "src/commands/exchange_capture.rs"): [("env", "CARGO_MANIFEST_DIR")],
+    ("plakd", "src/build_identity.rs"): [("option_env", "PLAK_SOURCE_REVISION")],
 }
 
 # The only reads of the process working directory in a host/bin package
@@ -374,9 +374,9 @@ EXPECTED_COMPILE_TIME_ENVIRONMENT: dict[SourceKey, list[tuple[str, str]]] = {
 # process can hold the product contexts of many workspaces. Nothing changes it.
 EXPECTED_WORKING_DIRECTORY_CALLS: dict[SourceKey, list[str]] = {
     # The CLI edge: the launch directory, read once into the product context.
-    ("plak", "src/shell/home.rs"): ["current_dir"],
+    ("plakd", "src/shell/home.rs"): ["current_dir"],
     # The running executable's own path for a relative argv[0], not a workspace.
-    ("plak", "src/build_identity.rs"): ["current_dir"],
+    ("plakd", "src/build_identity.rs"): ["current_dir"],
     # Normalizes a relative fence path; every caller passes an absolute one.
     ("plakous-workspace", "src/git_redirect_fence.rs"): ["current_dir"],
 }
@@ -384,14 +384,14 @@ EXPECTED_WORKING_DIRECTORY_CALLS: dict[SourceKey, list[str]] = {
 # `Home::from_env`) are reached only from the composition root; everything
 # below takes a context. None of the three may be imported under another name.
 EXPECTED_LAUNCH_DIRECTORY_READERS: dict[SourceKey, list[str]] = {
-    ("plak", "src/lib.rs"): ["launch_directory", "Services::from_env", "Services::from_env"],
-    ("plak", "src/shell/services.rs"): ["Home::from_env"],
+    ("plakd", "src/lib.rs"): ["launch_directory", "Services::from_env", "Services::from_env"],
+    ("plakd", "src/shell/services.rs"): ["Home::from_env"],
 }
 LAUNCH_DIRECTORY_NAMES = frozenset({"Services", "Home", "launch_directory"})
 EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
 ] = {
-    ("plak", "src/environment.rs"): [
+    ("plakd", "src/environment.rs"): [
         ("var_os", (("string", "INVOCATION_ID"),)),
         ("var_os", (("string", "PLAK_TEST_RUNNER_DETACHED"),)),
         # The runner daemon's PATH and HOME, and the login shell that answers
@@ -414,28 +414,28 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "SHELL"),)),
     ],
     # Maintainer/test-hooks private inference capture, explicitly selected per process.
-    ("plak", "src/commands/exchange_capture.rs"): [
+    ("plakd", "src/commands/exchange_capture.rs"): [
         ("var_os", (("string", "PLAK_TEST_EXCHANGE_CAPTURE_DIR"),)),
     ],
-    ("plak", "src/diagnostics.rs"): [
+    ("plakd", "src/diagnostics.rs"): [
         ("var_os", (("string", "PLAK_LOG"),)),
         ("var_os", (("string", "OTEL_EXPORTER_OTLP_ENDPOINT"),)),
     ],
-    ("plak", "src/commands/doctor.rs"): [
+    ("plakd", "src/commands/doctor.rs"): [
         ("var_os", (("string", "PATH"),)),
         ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
     ],
-    ("plak", "src/presentation.rs"): [
+    ("plakd", "src/presentation.rs"): [
         ("var_os", (("string", "NO_COLOR"),)),
     ],
     # Config edit selects the operator's VISUAL/EDITOR program and arguments.
-    ("plak", "src/commands/support.rs"): [
+    ("plakd", "src/commands/support.rs"): [
         ("var", (("identifier", "name"),)),
     ],
     # `test-hooks` only, and never in `default` or a release build: the
     # repository gate's offline model selector. Naming the model rather than a
     # bare flag keeps the selection an explicit binding fact.
-    ("plak", "src/test_hooks.rs"): [
+    ("plakd", "src/test_hooks.rs"): [
         ("var", (("string", "PLAK_TEST_STATE_KEY"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION"),)),
@@ -454,7 +454,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "PLAK_TEST_EVIDENCE"),)),
         ("var_os", (("string", "PLAK_TEST_PROVIDER_RELEASE"),)),
     ],
-    # `test-support` only, enabled by `plak`'s `test-hooks`: a file whose
+    # `test-support` only, enabled by `plakd`'s `test-hooks`: a file whose
     # existence collapses a configured whole-run deadline. Release builds do
     # not compile this module, so they do not read the variable.
     ("plakous-hosted", "src/runtime/oneshot/test_support_run_deadline.rs"): [
@@ -462,7 +462,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     ],
     # cfg(test)-only process-test seam: process latency budgets scale with an
     # explicit operator knob instead of flaking under nextest load.
-    ("plak", "src/test_support.rs"): [
+    ("plakd", "src/test_support.rs"): [
         ("var", (("string", "PLAK_TEST_TIME_SCALE"),)),
     ],
     ("plakous-hosted", "src/test_support_runner.rs"): [
@@ -471,22 +471,22 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     # The one-shot CLI face collapses a tool's lifecycle to one line on
     # completion. `PLAK_VERBOSE` restores the per-tool progress lines for a
     # reader who wants them; nothing else is read.
-    ("plak", "src/commands/run/face.rs"): [
+    ("plakd", "src/commands/run/face.rs"): [
         ("var_os", (("string", "PLAK_VERBOSE"),)),
     ],
     # Installed-build inspection resolves argv[0] on PATH as the shell did.
-    ("plak", "src/build_identity/interactive.rs"): [
+    ("plakd", "src/build_identity/interactive.rs"): [
         ("var_os", (("string", "PATH"),)),
     ],
-    ("plak", "src/oauth_ui.rs"): [
+    ("plakd", "src/oauth_ui.rs"): [
         ("var_os", (("string", "SSH_CONNECTION"),)),
         ("var_os", (("string", "SSH_CLIENT"),)),
         ("var_os", (("string", "SSH_TTY"),)),
     ],
-    ("plak", "src/sidecars/python_bundle.rs"): [
+    ("plakd", "src/sidecars/python_bundle.rs"): [
         ("var_os", (("identifier", "EXPLICIT_ENV"),)),
     ],
-    ("plak", "src/sidecars/js_host.rs"): [
+    ("plakd", "src/sidecars/js_host.rs"): [
         ("var_os", (("identifier", "EXPLICIT_ENV"),)),
     ],
     # an `on_mint` hook runs with `env_clear()`, so the only
@@ -502,7 +502,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "EMAIL"),)),
     ],
     # A pasted `~/` image path resolves against the operator's home.
-    ("plak", "src/home/paths.rs"): [
+    ("plakd", "src/home/paths.rs"): [
         ("var_os", (("string", "PLAK_HOME"),)),
         ("var_os", (("string", "HOME"),)),
         ("var_os", (("string", "XDG_STATE_HOME"),)),
@@ -510,7 +510,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "HOME"),)),
         ("var_os", (("string", "PLAK_TEST_TMPDIR"),)),
     ],
-    ("plak", "src/home/secrets.rs"): [
+    ("plakd", "src/home/secrets.rs"): [
         ("var_os", (("identifier", "name"),)),
         ("var", (("identifier", "name"),)),
         ("var_os", (("identifier", "name"),)),
@@ -530,23 +530,23 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # The closed content/received vocabulary shares variant definitions only.
     ("plakous-host-protocol", "src/observation/vocabulary.rs"): ("macro_rules",),
     # Export-v8's closed neutral tag mappings, never runtime code generation.
-    ("plak", "src/carry/history.rs"): ("macro_rules",),
+    ("plakd", "src/carry/history.rs"): ("macro_rules",),
     # Compile-time repository location restricts the private capture root.
-    ("plak", "src/commands/exchange_capture.rs"): ("env",),
+    ("plakd", "src/commands/exchange_capture.rs"): ("env",),
     # Spec 02 §3.2: the help pages are one-level static text, so they are static
-    # files under `bin/plak/help/` included at compile time — three global
+    # files under `bin/plakd/help/` included at compile time — three global
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
-    ("plak", "src/cli/render.rs"): ("include_str",) * 28,
+    ("plakd", "src/cli/render.rs"): ("include_str",) * 28,
     # The source revision the build recipe states, half of the version
     # triple a runner binds on (chapter 01 §8.4); `unknown` when unset.
-    ("plak", "src/build_identity.rs"): ("option_env",),
+    ("plakd", "src/build_identity.rs"): ("option_env",),
     # Each route owns its four bundled role files; the common multi-provider
     # profile remains in profiles.rs. The total stays sixteen documents.
-    ("plak", "src/profiles.rs"): ("include_str",) * 4,
-    ("plak", "src/capabilities/codex.rs"): ("include_str",) * 4,
-    ("plak", "src/capabilities/claude.rs"): ("include_str",) * 4,
-    ("plak", "src/capabilities/grok.rs"): ("include_str",) * 4,
+    ("plakd", "src/profiles.rs"): ("include_str",) * 4,
+    ("plakd", "src/capabilities/codex.rs"): ("include_str",) * 4,
+    ("plakd", "src/capabilities/claude.rs"): ("include_str",) * 4,
+    ("plakd", "src/capabilities/grok.rs"): ("include_str",) * 4,
     # Git and jj redirect shims are static text rendered into the copy.
     ("plakous-workspace", "src/git_redirect_fence.rs"): ("include_str",) * 3,
     # Pinned executor metadata is shared by inspection and contract qualification.
@@ -556,59 +556,59 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
 ] = {
     # Identity-verified, bounded destination probes in their own process group.
-    ("plak", "src/carry/upgrade/process.rs"): [
+    ("plakd", "src/carry/upgrade/process.rs"): [
         ("Command", (("identifier", "executable"),)),
     ],
     # Explicit user-unit publication reloads definitions, never starts a unit.
-    ("plak", "src/commands/host_install.rs"): [
+    ("plakd", "src/commands/host_install.rs"): [
         ("std::process::Command", (("identifier", "manager"),)),
     ],
     # Explicit opt-in host starter and its log/reaping supervisor, all stages
     # exec this build only; the launch clears and curates its environment.
-    ("plak", "src/host/starter.rs"): [
+    ("plakd", "src/host/starter.rs"): [
         ("Command", (("identifier", "executable"),)),
     ],
     # A separate process group survives host loss; the daemon clears its environment.
-    ("plak", "src/commands/runner/local/start.rs"): [
+    ("plakd", "src/commands/runner/local/start.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
     ],
     # Doctor's one cleared-env, five-second, own-group local version probe.
-    ("plak", "src/product_doctor/jj_cli.rs"): [
+    ("plakd", "src/product_doctor/jj_cli.rs"): [
         ("Command", (("identifier", "executable"),)),
     ],
     # Doctor's `ssh -G` resolution of each runner, bounded the same way; it
     # never connects (spec 02 §7.3).
-    ("plak", "src/product_doctor/runner_ssh.rs"): [
+    ("plakd", "src/product_doctor/runner_ssh.rs"): [
         ("Command", (("string", "ssh"),)),
     ],
-    ("plak", "src/terminal_application.rs"): [
+    ("plakd", "src/terminal_application.rs"): [
         ("std::process::Command", (("string", "open"),)),
         ("std::process::Command", (("string", "xdg-open"),)),
         ("std::process::Command", (("string", "rundll32"),)),
     ],
     # Explicit config editing launches the operator-selected editor.
-    ("plak", "src/commands/support.rs"): [
+    ("plakd", "src/commands/support.rs"): [
         ("std::process::Command", (("identifier", "program"),)),
     ],
-    # `plak runner connect` starts `plak runner serve` detached with a cleared
+    # `plakd runner connect` starts `plakd runner serve` detached with a cleared
     # environment, asks the login shell for PATH once, bounded, and reads the
     # macOS boot time for the daemon's boot id. Explicit --binary execs a
     # verified installed image before constructing that runner runtime.
-    ("plak", "src/commands/runner.rs"): [
+    ("plakd", "src/commands/runner.rs"): [
         ("std::process::Command", (("identifier", "executable"),)),
         ("std::process::Command", (("identifier", "executable"),)),
         ("std::process::Command", (("identifier", "shell"),)),
         ("std::process::Command", (("string", "sysctl"),)),
     ],
     # Product-only, best-effort local host provenance for Harbor login pins.
-    ("plak", "src/commands/login_host.rs"): [
+    ("plakd", "src/commands/login_host.rs"): [
         ("std::process::Command", (("string", "/usr/sbin/ioreg"),)),
     ],
-    # Carry-forward asks the installed `plak` for its reload verdict (the
+    # Carry-forward asks the installed `plakd` for its reload verdict (the
     # destination/config and carry-capacity probes, the exact-reopen verdict,
     # then the bare state-key fallback) and has a kept
     # maintainer snapshot export a session its own state holds.
-    ("plak", "src/carry/installed.rs"): [
+    ("plakd", "src/carry/installed.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
         (
             "std::process::Command",
@@ -622,7 +622,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
         ("std::process::Command", (("identifier", "executable"),)),
         ("std::process::Command", (("identifier", "executable"),)),
     ],
-    ("plak", "src/oauth_ui.rs"): [
+    ("plakd", "src/oauth_ui.rs"): [
         ("Command", (("identifier", "prog"),)),
     ],
     # Behind `test-support`: real-repository fixtures for the crates whose
@@ -650,15 +650,15 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ],
 }
 EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
-    ("plak", "src/carry/upgrade/process.rs"): {"Command", "Output", "Stdio"},
-    ("plak", "src/host/starter.rs"): {"Command", "Stdio"},
+    ("plakd", "src/carry/upgrade/process.rs"): {"Command", "Output", "Stdio"},
+    ("plakd", "src/host/starter.rs"): {"Command", "Stdio"},
     # The host's ssh dial to a runner pipes its link through stdin/stdout.
-    ("plak", "src/commands/runner/dial.rs"): {"Stdio"},
-    ("plak", "src/product_doctor/jj_cli.rs"): {"Command", "Stdio"},
-    ("plak", "src/product_doctor/runner_ssh.rs"): {"Command", "Stdio"},
-    ("plak", "src/main.rs"): {"ExitCode"},
-    ("plak", "src/lib.rs"): {"ExitCode"},
-    ("plak", "src/oauth_ui.rs"): {"Command", "Stdio"},
+    ("plakd", "src/commands/runner/dial.rs"): {"Stdio"},
+    ("plakd", "src/product_doctor/jj_cli.rs"): {"Command", "Stdio"},
+    ("plakd", "src/product_doctor/runner_ssh.rs"): {"Command", "Stdio"},
+    ("plakd", "src/main.rs"): {"ExitCode"},
+    ("plakd", "src/lib.rs"): {"ExitCode"},
+    ("plakd", "src/oauth_ui.rs"): {"Command", "Stdio"},
     ("plakous-workspace", "src/occupancy_vcs/git.rs"): {"Command", "Output"},
     ("plakous-workspace", "src/occupancy_vcs/mint.rs"): {"Command"},
     ("plakous-workspace", "src/vcs_fixtures.rs"): {"Command"},
@@ -677,19 +677,19 @@ ALLOWED_CLI_MACROS = {
 }
 # Per-source additions to ALLOWED_CLI_MACROS.
 ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
-    ("plak", "src/terminal_registry/control.rs"): {"select"},
-    ("plak", "src/host/console/terminals/stream.rs"): {"select"},
-    ("plak", "src/cli.rs"): {"value_parser"},
+    ("plakd", "src/terminal_registry/control.rs"): {"select"},
+    ("plakd", "src/host/console/terminals/stream.rs"): {"select"},
+    ("plakd", "src/cli.rs"): {"value_parser"},
     ("plakous-hosted", "src/agent/roots.rs"): {"warn"},
-    ("plak", "src/commands/runner/local.rs"): {"warn"},
-    ("plak", "src/host.rs"): {"select"},
-    ("plak", "src/host/send.rs"): {"pin", "select"},
-    ("plak", "src/host/upgrade/startup.rs"): {"select"},
-    ("plak", "src/host/sessions/options.rs"): {"pin", "select"},
-    ("plak", "src/host/console/files/resolve.rs"): {"select"},
-    ("plak", "src/commands/runner/services.rs"): {"info", "select", "warn"},
-    ("plak", "src/commands/runner/registry.rs"): {"info", "warn"},
-    ("plak", "src/commands/runner/services/host.rs"): {"warn"},
+    ("plakd", "src/commands/runner/local.rs"): {"warn"},
+    ("plakd", "src/host.rs"): {"select"},
+    ("plakd", "src/host/send.rs"): {"pin", "select"},
+    ("plakd", "src/host/upgrade/startup.rs"): {"select"},
+    ("plakd", "src/host/sessions/options.rs"): {"pin", "select"},
+    ("plakd", "src/host/console/files/resolve.rs"): {"select"},
+    ("plakd", "src/commands/runner/services.rs"): {"info", "select", "warn"},
+    ("plakd", "src/commands/runner/registry.rs"): {"info", "warn"},
+    ("plakd", "src/commands/runner/services/host.rs"): {"warn"},
     # Typed, output-free runner diagnostics and the recorded stop's fixed payload.
     ("plakous-hosted", "src/runner_adoption.rs"): {"info", "json", "warn"},
     # The tree stage a VCS effect runs as, read by a runner-backed port.
@@ -701,7 +701,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/runtime/projection/transcript.rs"): {"debug_assert", "warn"},
     ("plakous-hosted", "src/sessions/transcript.rs"): {"debug_assert"},
     # A reload request dropped or settled at a session switch logs its id.
-    ("plak", "src/reload_request.rs"): {"info", "warn"},
+    ("plakd", "src/reload_request.rs"): {"info", "warn"},
     # Fold integrity refusals: fixed diagnostics and the affected agent id only.
     # An effect run as neither a stage nor an unstaged scope is a defect.
     ("plakous-recursive-subagents", "src/remote_vcs.rs"): {"debug", "debug_assert"},
@@ -711,48 +711,48 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-recursive-subagents", "src/tree/workspaces.rs"): {"error"},
     ("plakous-recursive-subagents", "src/tree/reopen_law.rs"): {"error"},
     # Private capture diagnostics use closed metadata, never request bodies.
-    ("plak", "src/commands/exchange_capture.rs"): {"env", "warn"},
+    ("plakd", "src/commands/exchange_capture.rs"): {"env", "warn"},
     # A published export whose directory sync failed is kept and logged.
-    ("plak", "src/carry/document.rs"): {"warn"},
-    ("plak", "src/carry/history.rs"): {"tags", "stringify"},
+    ("plakd", "src/carry/document.rs"): {"warn"},
+    ("plakd", "src/carry/history.rs"): {"tags", "stringify"},
     ("plakous-hosted", "src/mcp_binding/available.rs"): {"warn"},
     # The instruction-read wire of the hidden runner seam (spec 01 §8.5).
     ("plakous-hosted", "src/runner_reader.rs"): {"json"},
     # `test-hooks` only: scripted offline model plans for child fixtures.
-    ("plak", "src/test_hooks.rs"): {"json"},
-    ("plak", "src/build_identity.rs"): {"cfg", "option_env"},
+    ("plakd", "src/test_hooks.rs"): {"json"},
+    ("plakd", "src/build_identity.rs"): {"cfg", "option_env"},
     # The `test-support`-only persistence benchmark checks that its final
     # reload retained every transcript line it timed.
-    ("plak", "src/store/benchmark.rs"): {"assert_eq"},
+    ("plakd", "src/store/benchmark.rs"): {"assert_eq"},
     # A `#[cfg(test)]`-only module of the host crate: it cannot be an
     # integration test because the projection it exercises is
     # `pub(crate)`. Nothing here ships in the CLI binary.
-    ("plak", "src/topology_resources_projection.rs"): {"assert_eq"},
-    ("plak", "src/commands/session_delete_tests.rs"): {"assert_eq", "assert_ne"},
+    ("plakd", "src/topology_resources_projection.rs"): {"assert_eq"},
+    ("plakd", "src/commands/session_delete_tests.rs"): {"assert_eq", "assert_ne"},
     # Read-only child history projects its bounded JSONL response at the CLI boundary.
-    ("plak", "src/commands/session/read_only.rs"): {"json"},
-    ("plak", "src/lib.rs"): {"eprint", "info", "join"},
+    ("plakd", "src/commands/session/read_only.rs"): {"json"},
+    ("plakd", "src/lib.rs"): {"eprint", "info", "join"},
     # The help pages; see EXPECTED_PRODUCT_GENERATED_MACROS.
-    ("plak", "src/cli/render.rs"): {"include_str"},
-    ("plak", "src/profiles.rs"): {"include_str"},
-    ("plak", "src/capabilities/codex.rs"): {"include_str"},
-    ("plak", "src/capabilities/claude.rs"): {"include_str"},
-    ("plak", "src/capabilities/grok.rs"): {"include_str"},
+    ("plakd", "src/cli/render.rs"): {"include_str"},
+    ("plakd", "src/profiles.rs"): {"include_str"},
+    ("plakd", "src/capabilities/codex.rs"): {"include_str"},
+    ("plakd", "src/capabilities/claude.rs"): {"include_str"},
+    ("plakd", "src/capabilities/grok.rs"): {"include_str"},
     ("plakous-workspace", "src/git_redirect_fence.rs"): {"include_str"},
     ("plakous-hosted", "src/agent/binding_inspection.rs"): {"include_str"},
-    ("plak", "src/commands/application.rs"): {"select"},
+    ("plakd", "src/commands/application.rs"): {"select"},
     # The web endpoint: logins, connections and refusals (no secret or frame),
     # and the accept loop and one connection's socket, session and pings.
-    ("plak", "src/web.rs"): {"info", "pin", "select"},
-    ("plak", "src/web/auth.rs"): {"info", "warn"},
-    ("plak", "src/web/listen.rs"): {"select"},
-    ("plak", "src/web/socket.rs"): {"info", "select"},
-    ("plak", "src/host/socket.rs"): {"select"},
+    ("plakd", "src/web.rs"): {"info", "pin", "select"},
+    ("plakd", "src/web/auth.rs"): {"info", "warn"},
+    ("plakd", "src/web/listen.rs"): {"select"},
+    ("plakd", "src/web/socket.rs"): {"info", "select"},
+    ("plakd", "src/host/socket.rs"): {"select"},
     # The wire schema document's envelope.
-    ("plak", "src/wire_schema.rs"): {"json"},
-    ("plak", "src/commands/secret_input.rs"): {"select"},
+    ("plakd", "src/wire_schema.rs"): {"json"},
+    ("plakd", "src/commands/secret_input.rs"): {"select"},
     # The SIGTERM/SIGHUP watcher thread waits on two signal streams at once.
-    ("plak", "src/signals.rs"): {"select"},
+    ("plakd", "src/signals.rs"): {"select"},
     ("plakous-hosted", "src/runtime/turn_drive/mod.rs"): {"pin", "select", "debug_assert"},
     ("plakous-hosted", "src/runtime/network_watch.rs"): {"select"},
     ("plakous-hosted", "src/host_service/wire/host.rs"): {"info", "select"},
@@ -769,7 +769,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # A child turn's drive takes its event source or its result, whichever first.
     ("plakous-hosted", "src/runtime/child_projection.rs"): {"pin", "select"},
     # The product half of the session record keeps the one-entry store cache.
-    ("plak", "src/store/sessions.rs"): {"thread_local"},
+    ("plakd", "src/store/sessions.rs"): {"thread_local"},
     # The highlighter cache is thread-local because syntect parse/highlight
     # state is mutable and host observation may occur on more than one thread.
     # cfg(test) counter of composer wrap calls. Production paint does not
@@ -781,10 +781,10 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # Explicit unreachable operation in the feature-gated hosted test fixture.
     ("plakous-hosted", "src/runtime/test_kit.rs"): {"panic"},
     ("plakous-hosted", "src/sessions.rs"): {"thread_local"},
-    ("plak", "src/store/mod.rs"): {"params"},
-    ("plak", "src/store/views.rs"): {"params", "debug_assert"},
-    ("plak", "src/store/host_move.rs"): {"params"},
-    ("plak", "src/store/tree.rs"): {"params", "warn"},
+    ("plakd", "src/store/mod.rs"): {"params"},
+    ("plakd", "src/store/views.rs"): {"params", "debug_assert"},
+    ("plakd", "src/store/host_move.rs"): {"params"},
+    ("plakd", "src/store/tree.rs"): {"params", "warn"},
     ("plakous-recursive-subagents-store", "src/admission.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/rows.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/move_seed.rs"): {"params"},
@@ -818,19 +818,19 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-recursive-subagents", "src/tree/mod.rs"): {"json"},
     ("plakous-recursive-subagents", "src/tree/projection.rs"): {"json"},
     # Static WAL-checkpoint contention warning; no SQL, paths, or session data.
-    ("plak", "src/telemetry_store.rs"): {"params", "warn"},
+    ("plakd", "src/telemetry_store.rs"): {"params", "warn"},
     # Typed SQLite binds only; neither projection admits or dispatches work.
-    ("plak", "src/telemetry_store/recorded_usage.rs"): {"params"},
-    ("plak", "src/host/console/recorded.rs"): {"params"},
+    ("plakd", "src/telemetry_store/recorded_usage.rs"): {"params"},
+    ("plakd", "src/host/console/recorded.rs"): {"params"},
     # Private login cancellation races only; no process signal handler.
-    ("plak", "src/host/console/account_writes/login.rs"): {"select"},
-    ("plak", "src/commands/application/host.rs"): {"select"},
+    ("plakd", "src/host/console/account_writes/login.rs"): {"select"},
+    ("plakd", "src/commands/application/host.rs"): {"select"},
     # Bounded categorical operator audit fields, never frames or secrets.
-    ("plak", "src/host/console/audit.rs"): {"json"},
+    ("plakd", "src/host/console/audit.rs"): {"json"},
     ("plakd-wire-types", "src/console/secret.rs"): {"json_schema"},
-    ("plak", "src/telemetry_sink.rs"): {"warn"},
+    ("plakd", "src/telemetry_sink.rs"): {"warn"},
     # Static panic notice; no payload, path or session data.
-    ("plak", "src/shell/chrome_refresh.rs"): {"warn"},
+    ("plakd", "src/shell/chrome_refresh.rs"): {"warn"},
     # A refused tree publish (the store's compare-and-swap found another
     # writer) is reported through the tracing boundary, like the
     # credential-refresh warning above; typed fields only.
@@ -860,7 +860,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/runtime/usage.rs"): {"join", "warn"},
     # Pending HUD diagnostics carry only source, counts and delivery status.
     ("plakous-hosted", "src/runtime/host_loop/pending.rs"): {"debug"},
-    ("plak", "src/sidecars/python_bundle.rs"): {"cfg"},
+    ("plakd", "src/sidecars/python_bundle.rs"): {"cfg"},
     # The sidecar's stdio loop multiplexes the client channel and the evaluator.
     # Presentation-only invariants and the per-frame tracing span.
     # Background panic: thread name and source location only, never payload.
@@ -1559,7 +1559,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
     },
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
-    "plak": _SHARED_PLAKOUS_SYMBOLS,
+    "plakd": _SHARED_PLAKOUS_SYMBOLS,
     # Wire DTOs only; the facade is not a dependency.
     "plakd-wire-types": {},
     "plakous-host-protocol": _SHARED_PLAKOUS_SYMBOLS,
@@ -1584,7 +1584,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # Unsupported host-only semantic reconstruction seams (spec 01 sec. 5).
-    ("plak", "src/carry/host_move.rs"): {
+    ("plakd", "src/carry/host_move.rs"): {
         'sessions': {
             'MoveDurability',
             'MoveOperation',
@@ -1593,11 +1593,11 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'host_move',
         }
     },
-    ("plak", "src/carry/host_move/admission.rs"): {'sessions': {'host_move'}},
-    ("plak", "src/carry/host_move/context.rs"): {
+    ("plakd", "src/carry/host_move/admission.rs"): {'sessions': {'host_move'}},
+    ("plakd", "src/carry/host_move/context.rs"): {
         'sessions': {'ImportedCompactionFacts', 'MoveCompactionStrategy', 'host_move'}
     },
-    ("plak", "src/carry/host_move/jobs.rs"): {
+    ("plakd", "src/carry/host_move/jobs.rs"): {
         'sessions': {
             'MoveJobCut',
             'MoveJobStatus',
@@ -1610,7 +1610,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'MoveLineTerminal',
         }
     },
-    ("plak", "src/carry/host_move/presentation.rs"): {
+    ("plakd", "src/carry/host_move/presentation.rs"): {
         'sessions': {
             'SemanticSessionPresentation',
             'MoveToolNesting',
@@ -1619,16 +1619,16 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         },
         'tools': {'SemanticToolRegistration'},
     },
-    ("plak", "src/carry/host_move/presentation/definition.rs"): {
+    ("plakd", "src/carry/host_move/presentation/definition.rs"): {
         'model': {'ToolResourceKey', 'McpServerId', 'ToolExecutionOwner'}
     },
-    ("plak", "src/carry/host_move/disposition.rs"): {
+    ("plakd", "src/carry/host_move/disposition.rs"): {
         'sessions': {'host_move', 'MoveDisposition', 'MoveOperation'},
     },
-    ("plak", "src/carry/host_move/installation.rs"): {
+    ("plakd", "src/carry/host_move/installation.rs"): {
         'sessions': {'host_move', 'MoveDisposition', 'MoveInstall', 'MoveOperation'},
     },
-    ("plak", "src/carry/host_move/producer.rs"): {
+    ("plakd", "src/carry/host_move/producer.rs"): {
         'sessions': {
             'host_move',
             'MoveDurability',
@@ -1637,15 +1637,15 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'MoveLineOrigin',
         },
     },
-    ("plak", "src/carry/host_move/reconciliation.rs"): {
+    ("plakd", "src/carry/host_move/reconciliation.rs"): {
         'runner': {'protocol', 'LineOwner', 'ExactOwnerTransfer'},
         'sessions': {'LeaseOnlyHead'},
         'tools': {'LineOwner'},
     },
-    ("plak", "src/carry/host_move/source.rs"): {
+    ("plakd", "src/carry/host_move/source.rs"): {
         'sessions': {'host_move', 'MoveDisposition', 'MoveInstall', 'MoveJobCut', 'MoveOperation'},
     },
-    ("plak", "src/carry/host_move/source/terminals.rs"): {
+    ("plakd", "src/carry/host_move/source/terminals.rs"): {
         'runner': {
             'protocol',
             'retention',
@@ -1666,21 +1666,21 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         },
         'tools': {'runner::hex', 'runner::unhex', 'JobStopReason'},
     },
-    ("plak", "src/carry/upgrade/receipt/groups.rs"): {
+    ("plakd", "src/carry/upgrade/receipt/groups.rs"): {
         'runner': {'protocol', 'LineOwner'},
     },
-    ("plak", "src/host/upgrade/moves.rs"): {
+    ("plakd", "src/host/upgrade/moves.rs"): {
         'sessions': {'host_move', 'MoveOperation'},
         'runner': {'RunnerConnectionHold'},
     },
-    ("plak", "src/host/upgrade/moves/source.rs"): {
+    ("plakd", "src/host/upgrade/moves/source.rs"): {
         'sessions': {'host_move', 'MoveJobCut'},
         'runner': {'RunnerConnectionHold'},
     },
-    ("plak", "src/carry/host_move/source/selection.rs"): {
+    ("plakd", "src/carry/host_move/source/selection.rs"): {
         'sessions': {'host_move', 'MoveJobCut'},
     },
-    ("plak", "src/carry/host_move/reconstruction.rs"): {
+    ("plakd", "src/carry/host_move/reconstruction.rs"): {
         'runner': {'protocol'},
         'tools': {'runner::decode_jobs_snapshot'},
         'sessions': {
@@ -1693,16 +1693,16 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'MoveLineOrigin',
         },
     },
-    ("plak", "src/carry/host_move/validation.rs"): {'tools': {'RunnerId'}},
+    ("plakd", "src/carry/host_move/validation.rs"): {'tools': {'RunnerId'}},
     # Frozen construction data and pure metadata checks, not runtime authority.
-    ("plak", "src/commands/session/check_binding.rs"): {"sessions": {"rehearsal"}},
-    ("plak", "src/commands/session/check_binding/inspection.rs"): {"sessions": {"rehearsal"}},
+    ("plakd", "src/commands/session/check_binding.rs"): {"sessions": {"rehearsal"}},
+    ("plakd", "src/commands/session/check_binding/inspection.rs"): {"sessions": {"rehearsal"}},
     ("plakous-hosted", "src/agent/binding_inspection.rs"): {
         "sessions": {"FrozenSessionPresentation"},
         "tools": {"RegisteredToolIdentity", "ToolBindingError"},
     },
     # Operator inspection uses only unkeyed, contained execution reads.
-    ("plak", "src/host/console/files.rs"): {
+    ("plakd", "src/host/console/files.rs"): {
         "tools": {
             "ExecutionBackendErrorKind",
             "OperationContext",
@@ -1714,13 +1714,13 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "WorkspaceReadSliceRequest",
         },
     },
-    ("plak", "src/host/console/files/changes.rs"): {
+    ("plakd", "src/host/console/files/changes.rs"): {
         "tools": {"OperationContext", "changes"},
     },
-    ("plak", "src/host/console/files/cursors.rs"): {
+    ("plakd", "src/host/console/files/cursors.rs"): {
         "tools": {"WorkspaceReadCursor"},
     },
-    ("plak", "src/host/console/files/resolve.rs"): {
+    ("plakd", "src/host/console/files/resolve.rs"): {
         "model": {"RunId"},
         "runner": {"RunnerRegistry"},
         "tools": {
@@ -1735,19 +1735,19 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "runner::RunnerLink",
         },
     },
-    ("plak", "src/carry/upgrade/remote.rs"): {
+    ("plakd", "src/carry/upgrade/remote.rs"): {
         "runner": {"RunnerServices", "PlacementFailure"},
         "tools": {"runner::RunnerBackend"},
     },
-    ("plak", "src/host/upgrade/startup.rs"): {"runner": {"WorkspaceCatalog", "RunnerStatus"}},
-    ("plak", "src/carry/upgrade.rs"): {"runner": {"protocol", "VersionTriple"}},
-    ("plak", "src/host/upgrade.rs"): {"runner": {"protocol", "VersionTriple"}},
-    ("plak", "src/host/upgrade/process_safety.rs"): {
+    ("plakd", "src/host/upgrade/startup.rs"): {"runner": {"WorkspaceCatalog", "RunnerStatus"}},
+    ("plakd", "src/carry/upgrade.rs"): {"runner": {"protocol", "VersionTriple"}},
+    ("plakd", "src/host/upgrade.rs"): {"runner": {"protocol", "VersionTriple"}},
+    ("plakd", "src/host/upgrade/process_safety.rs"): {
         "runner": {"protocol", "LineStatus", "VersionTriple"}
     },
-    ("plak", "src/host/sessions.rs"): {"runner": {"RunnerRow"}},
+    ("plakd", "src/host/sessions.rs"): {"runner": {"RunnerRow"}},
     ("plakous-hosted", "src/jobs.rs"): {"tools": {"LineOwner"}},
-    ("plak", "src/platform_product/anthropic.rs"): {
+    ("plakd", "src/platform_product/anthropic.rs"): {
         "anthropic": {"ANTHROPIC_PLATFORM_ORIGIN"},
     },
     # The tree's VCS port over the runner link, and the runner extension
@@ -1819,7 +1819,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/process_environment.rs"): {
         "runner": {"operator", "protocol", "OperatorRefusal"}
     },
-    ("plak", "src/commands/runner/operator.rs"): {
+    ("plakd", "src/commands/runner/operator.rs"): {
         "runner": {
             "operator",
             "protocol",
@@ -1828,7 +1828,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "OperatorRefusal",
         }
     },
-    ("plak", "src/host/console/terminals.rs"): {
+    ("plakd", "src/host/console/terminals.rs"): {
         "runner": {
             "protocol",
             "operator",
@@ -1842,7 +1842,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "OperatorRefusal",
         }
     },
-    ("plak", "src/terminal_registry.rs"): {
+    ("plakd", "src/terminal_registry.rs"): {
         "tools": {"runner", "RunnerFailure"},
         "runner": {
             "protocol",
@@ -1859,7 +1859,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "TerminalStatus",
         },
     },
-    ("plak", "src/terminal_registry/control.rs"): {
+    ("plakd", "src/terminal_registry/control.rs"): {
         "runner": {
             "protocol",
             "operator",
@@ -1869,17 +1869,17 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "TerminalEvent",
         }
     },
-    ("plak", "src/terminal_registry/placement.rs"): {
+    ("plakd", "src/terminal_registry/placement.rs"): {
         "runner": {"protocol", "operator", "OperatorNamespace", "TerminalKey"}
     },
-    ("plak", "src/commands/runner/operator/admission.rs"): {
+    ("plakd", "src/commands/runner/operator/admission.rs"): {
         "runner": {"ClientWindows", "RunnerClient"}
     },
     # The export document names its runner by the library's runner identity.
-    ("plak", "src/carry/document.rs"): {"tools": {"RunnerId"}},
-    # `plak runner`: the daemon over the hidden runner ends, its environment
+    ("plakd", "src/carry/document.rs"): {"tools": {"RunnerId"}},
+    # `plakd runner`: the daemon over the hidden runner ends, its environment
     # and identity, and the host's inspecting link (spec 02 §3.1).
-    ("plak", "src/commands/runner.rs"): {
+    ("plakd", "src/commands/runner.rs"): {
         'model': {'RunId'},
         'runner': {
             'Bind',
@@ -1911,7 +1911,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         },
     },
     # The host's strict ssh dial and journaled bind to a runner.
-    ("plak", "src/commands/runner/dial.rs"): {
+    ("plakd", "src/commands/runner/dial.rs"): {
         'runner': {
             'Bind',
             'CallJournal',
@@ -1927,7 +1927,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         }
     },
     # The host starts and journal-binds its home-local daemon before opening sessions.
-    ("plak", "src/commands/runner/local.rs"): {
+    ("plakd", "src/commands/runner/local.rs"): {
         "runner": {
             "ClientWindows",
             "ConnectError",
@@ -1938,7 +1938,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "daemon",
         },
     },
-    ("plak", "src/shell/services.rs"): {
+    ("plakd", "src/shell/services.rs"): {
         'runner': {
             'MachineOverlapGuard',
             'PlacementFailure',
@@ -1968,8 +1968,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # `test-hooks` only: the offline script's child runner, bound and journaled
     # as a host's dial is, then selected for the process (spec 01 §8.5).
-    ("plak", "src/test_hooks.rs"): {'runner': {'RunnerServices'}},
-    ("plak", "src/test_hooks/child_runner.rs"): {
+    ("plakd", "src/test_hooks.rs"): {'runner': {'RunnerServices'}},
+    ("plakd", "src/test_hooks/child_runner.rs"): {
         'runner': {
             'CallJournal',
             'FileCallJournal',
@@ -1994,7 +1994,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # Plak owns the export document, not a second runtime. This one codec
     # reconstructs validated public content data, never mutable authority.
-    ("plak", "src/carry/history.rs"): {
+    ("plakd", "src/carry/history.rs"): {
         "agent": {"MAX_USER_IMAGE_BYTES"},
         "model": {
             "AudioBlock",
@@ -2106,15 +2106,15 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'runner::runner_environment',
         },
     },
-    # `plak mcp list|show` report an OAuth server's stored login.
-    ("plak", "src/commands/mcp/available.rs"): {"mcp": {"McpOAuthStatus"}},
+    # `plakd mcp list|show` report an OAuth server's stored login.
+    ("plakd", "src/commands/mcp/available.rs"): {"mcp": {"McpOAuthStatus"}},
     ("plakous-hosted", "src/mcp_binding/secret_value.rs"): {
         "mcp": {"SensitiveBytes", "ServiceSecretValue"},
     },
     ("plakous-hosted", "src/mcp_binding/unavailable.rs"): {
         "mcp": {"McpToolRecord"},
     },
-    ("plak", "src/commands/mcp_login.rs"): {
+    ("plakd", "src/commands/mcp_login.rs"): {
         "mcp": {
             "McpError",
             "McpLocalRetirement",
@@ -2185,12 +2185,12 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # The compile-time check that the host release timeout covers the store deadline.
     ("plakous-hosted", "src/lib.rs"): {"agent": {"DEFAULT_STORE_OPERATION_TIMEOUT"}},
-    ("plak", "src/commands/reload_rehearsal.rs"): {
+    ("plakd", "src/commands/reload_rehearsal.rs"): {
         "sessions": {"rehearsal", "inspect_sqlite", "OfflineReopenOutcome"},
     },
     # A host names who holds a session another process has open (spec 02
     # §4.6): the runtime store's holder record, read-only.
-    ("plak", "src/store/holders.rs"): {
+    ("plakd", "src/store/holders.rs"): {
         "sessions": {"holder::BranchHolder", "holder::sqlite_branch_holder"},
     },
     ("plakous-hosted", "src/capabilities.rs"): {
@@ -2225,9 +2225,9 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/capabilities/route_unavailable.rs"): {
         "model": {"HostedRetrievalTable"},
     },
-    ('plak', 'src/host.rs'): {'runner': {'RunnerStatus'}},
-    ('plak', 'src/host/sessions/options.rs'): {'runner': {'RunnerRow', 'WorkspaceCatalog'}},
-    ('plak', 'src/host/sessions/runner_views.rs'): {
+    ('plakd', 'src/host.rs'): {'runner': {'RunnerStatus'}},
+    ('plakd', 'src/host/sessions/options.rs'): {'runner': {'RunnerRow', 'WorkspaceCatalog'}},
+    ('plakd', 'src/host/sessions/runner_views.rs'): {
         'runner': {
             'PlacementFailure',
             'ProbePhase',
@@ -2237,7 +2237,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'WorkspaceRefusal',
         },
     },
-    ('plak', 'src/lib.rs'): {
+    ('plakd', 'src/lib.rs'): {
         'runner': {
             'RunnerServices',
             'RunnerLeaseClock',
@@ -2247,7 +2247,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         },
         'tools': {'runner::RunnerLink'},
     },
-    ('plak', 'src/test_hooks/runner.rs'): {
+    ('plakd', 'src/test_hooks/runner.rs'): {
         'runner': {
             'RunnerLeaseClock',
             'ClientWindows',
@@ -2256,7 +2256,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'ProbePhase',
         },
     },
-    ('plak', 'src/test_hooks/runner/link.rs'): {
+    ('plakd', 'src/test_hooks/runner/link.rs'): {
         'runner': {'RunnerClient'},
         'tools': {
             'LineOwner',
@@ -2267,7 +2267,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'runner::RunnerOpenFuture',
         },
     },
-    ('plak', 'src/commands/runner/registry.rs'): {
+    ('plakd', 'src/commands/runner/registry.rs'): {
         'runner': {
             'AdmissionSnapshot',
             'ConfiguredRunner',
@@ -2281,8 +2281,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'protocol',
         }
     },
-    ('plak', 'src/commands/runner/home.rs'): {'runner': {'daemon', 'protocol'}},
-    ('plak', 'src/commands/runner/services.rs'): {
+    ('plakd', 'src/commands/runner/home.rs'): {'runner': {'daemon', 'protocol'}},
+    ('plakd', 'src/commands/runner/services.rs'): {
         'sessions': {
             'SessionLocator',
             'LeaseOnlyHead',
@@ -2301,11 +2301,11 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         },
         'tools': {'runner::RunnerBackend'},
     },
-    ('plak', 'src/commands/runner/environment.rs'): {
+    ('plakd', 'src/commands/runner/environment.rs'): {
         'runner': {'RunnerClient'},
         'tools': {'runner::LocalDaemonBackend'},
     },
-    ('plak', 'src/commands/runner/services/host.rs'): {
+    ('plakd', 'src/commands/runner/services/host.rs'): {
         'runner': {'PlacementFailure', 'ProbePhase', 'WorkspaceCatalog'}
     },
     ('plakous-hosted', 'src/openrouter.rs'): {'runner': {'RunnerServices'}},
@@ -3226,10 +3226,10 @@ def validate_product_session_authority_sources(package: str, sources: dict[str, 
 #
 # `PlakPaths::from_env()` reads `$PLAK_HOME`/XDG: it is a composition-root act,
 # and a library that performs it has decided for its caller which home the
-# session belongs to. Only `bin/plak`, the composition root, may discover
+# session belongs to. Only `bin/plakd`, the composition root, may discover
 # the product home; library callers must supply it explicitly.
 PRODUCT_HOME_DISCOVERY: str = "from_env"
-PRODUCT_HOME_DISCOVERY_ALLOWED_PREFIXES: tuple[tuple[str, str], ...] = (("plak", ""),)
+PRODUCT_HOME_DISCOVERY_ALLOWED_PREFIXES: tuple[tuple[str, str], ...] = (("plakd", ""),)
 
 
 def validate_product_home_discovery(package: str, sources: dict[str, str]) -> list[str]:
@@ -3264,7 +3264,7 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
     strings = set().union(*(_significant_strings(tokens) for tokens in tokens_by_file.values()))
 
     for symbol in sorted(FORBIDDEN_CLI_SYMBOLS & identifiers):
-        errors.append(f"plak CLI contains forbidden delegated-login symbol: {symbol}")
+        errors.append(f"plakd CLI contains forbidden delegated-login symbol: {symbol}")
     generated_names = {"include", "include_bytes", "include_str", "macro_rules"}
     for path, tokens in tokens_by_file.items():
         expected_pattern = EXPECTED_PRODUCT_GENERATED_MACROS.get((package, path), ())
@@ -3312,9 +3312,9 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
                 if names != ["std", "env"] or any(
                     token.value in {"*", "as"} for token in statement
                 ):
-                    errors.append("plak CLI must import std::env as a module, not ambient readers")
+                    errors.append("plakd CLI must import std::env as a module, not ambient readers")
             if "Command" in names and "plakous" in names:
-                errors.append("plak CLI imports a forbidden Command process capability")
+                errors.append("plakd CLI imports a forbidden Command process capability")
 
         process_calls = _process_command_calls(tokens)
         expected_calls = EXPECTED_PRODUCT_PROCESS_COMMANDS.get((package, path), [])
@@ -3325,14 +3325,14 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
             )
 
     for value in sorted(FORBIDDEN_CLI_STRINGS & strings):
-        errors.append(f"plak CLI contains forbidden delegated-login option: {value}")
+        errors.append(f"plakd CLI contains forbidden delegated-login option: {value}")
     for value in strings:
         lowered = value.lower().replace("\\", "/")
         if re.search(r"(?:^|/)\.(?:codex)(?:/|$)|(?:^|/)opencode(?:/|$)", lowered):
-            errors.append("plak CLI contains forbidden delegated-login storage/owner locator")
+            errors.append("plakd CLI contains forbidden delegated-login storage/owner locator")
             break
     if any(re.search(r"(?:^|/)proc/+self/+environ(?:$|/)", value.lower()) for value in strings):
-        errors.append("plak CLI contains forbidden /proc/self/environ access")
+        errors.append("plakd CLI contains forbidden /proc/self/environ access")
 
     for path, tokens in tokens_by_file.items():
         source_symbols = ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE.get((package, path), {})
@@ -3343,13 +3343,13 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
         unapproved_plakous = _unapproved_plakous_symbols(tokens, file_symbols)
         if unapproved_plakous:
             errors.append(
-                f"{package}:{path}: plak CLI uses unapproved plakous facade symbols: "
+                f"{package}:{path}: plakd CLI uses unapproved plakous facade symbols: "
                 f"{sorted(unapproved_plakous)!r}"
             )
         foreign = _foreign_function_names(tokens) & FORBIDDEN_CLI_FOREIGN_FUNCTIONS
         if foreign:
             errors.append(
-                f"{package}:{path}: plak CLI declares forbidden foreign environment/process functions: "
+                f"{package}:{path}: plakd CLI declares forbidden foreign environment/process functions: "
                 f"{sorted(foreign)!r}"
             )
         environment_calls = _environment_calls(tokens)
@@ -3357,11 +3357,11 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
         function_items = _uninvoiced_environment_readers(tokens)
         if function_items:
             errors.append(
-                f"{package}:{path}: plak CLI contains environment reader function items: "
+                f"{package}:{path}: plakd CLI contains environment reader function items: "
                 f"{sorted(function_items)!r}"
             )
         if environment_paths & {"vars", "vars_os"}:
-            errors.append(f"{package}:{path}: plak CLI contains ambient environment iteration")
+            errors.append(f"{package}:{path}: plakd CLI contains ambient environment iteration")
         expected_generated = EXPECTED_PRODUCT_GENERATED_MACROS.get((package, path), ())
         if any(
             token == RustToken("identifier", macro)
@@ -3371,7 +3371,7 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
             for macro in ("env", "option_env")
             if macro not in expected_generated
         ):
-            errors.append(f"{package}:{path}: plak CLI contains compile-time environment access")
+            errors.append(f"{package}:{path}: plakd CLI contains compile-time environment access")
         compile_time = [
             (
                 token.value,
@@ -4644,7 +4644,7 @@ def configuration_debt(
             if not is_module and not is_registration:
                 debt["feature"].append(label)
             if features & TEST_SEAM_FEATURES:
-                if package == "plak":
+                if package == "plakd":
                     allowed = path in {"src/lib.rs", "src/test_hooks.rs"}
                 else:
                     name = (
@@ -5258,7 +5258,7 @@ def cargo_tree_output(root: Path, spec: list[str], errors: list[str]) -> str | N
 
 
 def rquickjs_reaches_plak_jointly(root: Path, errors: list[str]) -> bool | None:
-    """Ask Cargo whether `plak` links rquickjs when built beside the sidecar."""
+    """Ask Cargo whether `plakd` links rquickjs when built beside the sidecar."""
     output = cargo_tree_output(
         root,
         [
@@ -5267,7 +5267,7 @@ def rquickjs_reaches_plak_jointly(root: Path, errors: list[str]) -> bool | None:
             "-i",
             "rquickjs",
             "-p",
-            "plak",
+            "plakd",
             "-p",
             "plakous-js-runtime",
             "-p",
@@ -5277,7 +5277,7 @@ def rquickjs_reaches_plak_jointly(root: Path, errors: list[str]) -> bool | None:
     )
     if output is None:
         return None
-    return re.search(r"(?m)^[\s│├└─]*plak v\d", output) is not None
+    return re.search(r"(?m)^[\s│├└─]*plakd v\d", output) is not None
 
 
 def rquickjs_linkage_errors(root: Path = ROOT) -> list[str]:
@@ -5288,7 +5288,7 @@ def rquickjs_linkage_errors(root: Path = ROOT) -> list[str]:
             False,
             "plakous must not link rquickjs under any feature; Code Mode uses the sidecar",
         ),
-        (["-p", "plak"], False, "plak must not link rquickjs; Code Mode uses plakous-js-host"),
+        (["-p", "plakd"], False, "plakd must not link rquickjs; Code Mode uses plakous-js-host"),
         (["-p", "plakous-js-runtime"], True, "plakous-js-runtime must link rquickjs"),
     ):
         # An inverse query errors when rquickjs is absent from a selected graph.
@@ -5296,7 +5296,7 @@ def rquickjs_linkage_errors(root: Path = ROOT) -> list[str]:
         if output is not None and bool(re.search(r"(?m)^rquickjs v", output)) != must_link:
             errors.append(message)
     if rquickjs_reaches_plak_jointly(root, errors):
-        errors.append("building both workers alongside plak must not link rquickjs into plak")
+        errors.append("building both workers alongside plakd must not link rquickjs into plakd")
     return errors
 
 
@@ -5317,7 +5317,7 @@ RQUICKJS_ENGINE_SYMBOL_MARKERS = (
     "JS_FreeRuntime",
 )
 # The three executables Plak's Cargo-native build produces.
-PRODUCT_EXECUTABLES = ("plak", "plakous-js-host", "plakous-py-host")
+PRODUCT_EXECUTABLES = ("plakd", "plakous-js-host", "plakous-py-host")
 
 # Length-prefixed crate identifiers in legacy and v0 Rust symbols. Adapter
 # names (json_to_monty, monty_proto's client) are not interpreter code.
@@ -5352,8 +5352,8 @@ def built_product_artifacts(root: Path) -> dict[str, Path]:
     Only `<target>/release` counts, where `<target>` is `CARGO_TARGET_DIR`
     or `root / "target"`. `target/debug` holds gate builds of a different
     feature selection (`--all-features`, including `test-hooks`).
-    The product parent is `cargo build --release --locked -p plak`, whose facade
-    features are the explicit set `bin/plak` declares.
+    The product parent is `cargo build --release --locked -p plakd`, whose facade
+    features are the explicit set `bin/plakd` declares.
     """
     release = cargo_target_dir(root) / "release"
     return {
@@ -5389,9 +5389,9 @@ def artifact_linkage_findings(
             errors.append(
                 "plakous-py-host does not link the Monty runtime; cannot verify isolation"
             )
-        if name == "plak" and found:
+        if name == "plakd" and found:
             errors.append(
-                f"plak links the QuickJS engine ({sorted(found)!r}); the product "
+                f"plakd links the QuickJS engine ({sorted(found)!r}); the product "
                 "evaluates JavaScript only in the plakous-js-host worker"
             )
         if name == "plakous-js-host" and not found:
@@ -5547,7 +5547,7 @@ def validate_packaged_dependencies(
 ) -> list[str]:
     """No packaged manifest names a repository-only package outside dev-dependencies.
 
-    `plak` is judged by its published shape, which drops `test-hooks` and the
+    `plakd` is judged by its published shape, which drops `test-hooks` and the
     offline harness edge; dev-dependencies on repository-only packages must be
     version-less so packaging strips them.
     """
@@ -5556,7 +5556,7 @@ def validate_packaged_dependencies(
     for name, manifest in sorted(manifests.items()):
         if name in repository_only:
             continue
-        shape = published_plak if name == "plak" else manifest
+        shape = published_plak if name == "plakd" else manifest
         for dependency in sorted(packaged_dependency_names(shape) & repository_only):
             errors.append(f"{name}: packaged manifest depends on repository-only {dependency}")
         tables = [manifest] + list(manifest.get("target", {}).values())
@@ -5588,7 +5588,7 @@ def validate_commit_trace_edge(manifests: dict[str, dict[str, Any]]) -> list[str
 
 COMMIT_TRACE_SOURCE_PREFIXES = {
     "plakous-store": "src/",
-    "plak": "src/store/",
+    "plakd": "src/store/",
     "plakous-recursive-subagents-store": "src/",
 }
 
@@ -5921,7 +5921,7 @@ def validate_publication(
             errors.append(f"{name}: {key} must be {WORKSPACE_REPOSITORY}")
     libraries = [target for target in metadata.get("targets", []) if "lib" in target["kind"]]
     documentation = metadata.get("documentation") or ""
-    if libraries and name != "plak":
+    if libraries and name != "plakd":
         if documentation != f"https://docs.rs/{name}":
             errors.append(f"{name}: a library's documentation is https://docs.rs/{name}")
     elif not documentation.startswith(f"{WORKSPACE_REPOSITORY}/"):
@@ -5972,7 +5972,7 @@ def package_rust_files(root: Path, package: Package, nested: set[str]) -> dict[s
 
 
 def load_publish_shape() -> Any:
-    """Import tools/release/publish_shape.py, the published plak manifest shape."""
+    """Import tools/release/publish_shape.py, the published plakd manifest shape."""
     import importlib.util
 
     path = ROOT / "tools/release/publish_shape.py"
@@ -6110,7 +6110,7 @@ def _check_workspace() -> int:
         )
 
     # Every supported library package has exactly one external consumer fixture;
-    # `plak` is pinned by cli_contract.rs instead.
+    # `plakd` is pinned by cli_contract.rs instead.
     for package in sorted(packages.values(), key=lambda item: item.name):
         if package.package_class != "supported" or package.layer in ABOVE_FACADE_LAYERS:
             continue
@@ -6133,21 +6133,21 @@ def _check_workspace() -> int:
         )
 
     # Package shape pins (name-keyed facts, no paths).
-    app = packages.get("plak")
+    app = packages.get("plakd")
     if app is not None:
         targets = app.metadata.get("targets", [])
         binaries = [target for target in targets if "bin" in target["kind"]]
-        if len(binaries) != 1 or binaries[0]["name"] != "plak":
-            errors.append("plak must expose exactly one binary named plak")
+        if len(binaries) != 1 or binaries[0]["name"] != "plakd":
+            errors.append("plakd must expose exactly one binary named plakd")
         libraries = [target for target in targets if "lib" in target["kind"]]
-        if len(libraries) != 1 or libraries[0]["name"] != "plak":
-            errors.append("plak must expose exactly one library named plak")
+        if len(libraries) != 1 or libraries[0]["name"] != "plakd":
+            errors.append("plakd must expose exactly one library named plakd")
         app_features = app.metadata.get("features", {})
         for section in ("dependencies", "dev-dependencies"):
             hosted = app.manifest.get(section, {}).get("plakous-hosted", {})
             if not isinstance(hosted, dict) or hosted.get("default-features") is not False:
                 errors.append(
-                    f"plak {section}: hosted defaults must be disabled for product selection"
+                    f"plakd {section}: hosted defaults must be disabled for product selection"
                 )
         for feature in (
             "images",
@@ -6167,7 +6167,7 @@ def _check_workspace() -> int:
                 errors.append(f"plak/{feature} must forward the matching hosted capability")
         for dependency in ("ratatui", "crossterm", "pulldown-cmark", "syntect", "arboard"):
             if dependency in app.manifest.get("dependencies", {}):
-                errors.append(f"plak: public terminal dependency {dependency} is not allowed")
+                errors.append(f"plakd: public terminal dependency {dependency} is not allowed")
         if set(app_features) != {
             "default",
             "maintainer",
@@ -6191,7 +6191,7 @@ def _check_workspace() -> int:
             "web",
         }:
             errors.append(
-                "plak may expose only default, maintainer, otel, test-hooks, test-support, web "
+                "plakd may expose only default, maintainer, otel, test-hooks, test-support, web "
                 "workspace backend features and product build capabilities"
             )
         elif set(app_features.get("default", [])) != {
@@ -6210,11 +6210,11 @@ def _check_workspace() -> int:
             "anthropic",
             "openrouter",
         }:
-            errors.append("plak default must enable git-cli and all product capabilities")
+            errors.append("plakd default must enable git-cli and all product capabilities")
         elif app_features.get("maintainer") != ["jj", "web"]:
-            errors.append("plak maintainer feature must enable jj and web")
+            errors.append("plakd maintainer feature must enable jj and web")
         elif "dep:opentelemetry" not in app_features.get("otel", []):
-            errors.append("plak otel feature must enable the opentelemetry dependency")
+            errors.append("plakd otel feature must enable the opentelemetry dependency")
         elif sorted(app_features.get("test-hooks", [])) != [
             "dep:plakous-offline-crash-harness",
             "plakous-hosted/test-support",
@@ -6228,7 +6228,7 @@ def _check_workspace() -> int:
             # recursive-subagents -> harness dev-dependency cycle. test-clock
             # and test-hooks are the facade seams that edge enables.
             errors.append(
-                "plak test-hooks must enable exactly the offline crash harness, "
+                "plakd test-hooks must enable exactly the offline crash harness, "
                 "plakous/test-clock, plakous/test-hooks, "
                 "plakous-hosted/test-support and tree-store/commit-trace"
             )
@@ -6389,14 +6389,14 @@ def _check_workspace() -> int:
         for forbidden in ("tracing", "opentelemetry"):
             if package_tree_linked(neutral, forbidden):
                 errors.append(f"{neutral} must not link {forbidden}")
-    if package_tree_linked("plak", "opentelemetry"):
+    if package_tree_linked("plakd", "opentelemetry"):
         default_plak = cargo_tree_output(
             ROOT,
-            ["-p", "plak", "--locked", "-e", "normal"],
+            ["-p", "plakd", "--locked", "-e", "normal"],
             errors,
         )
         if default_plak is not None and "opentelemetry" in default_plak:
-            errors.append("default plak build must not link opentelemetry")
+            errors.append("default plakd build must not link opentelemetry")
 
     adjacency: dict[str, set[str]] = {
         name: package.dependency_names() & set(packages) for name, package in packages.items()
@@ -6438,7 +6438,7 @@ def _check_workspace() -> int:
     populated = ", ".join(f"{layer}={count}" for layer, count in layers.items() if count)
     line = (
         f"validated {len(packages)} workspace packages across layers ({populated}), "
-        f"dependency boundaries, and the plak/plakous-js-host build split; {linkage_note}"
+        f"dependency boundaries, and the plakd/plakous-js-host build split; {linkage_note}"
     )
     global _success_line
     _success_line = line

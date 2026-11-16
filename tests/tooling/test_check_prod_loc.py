@@ -71,18 +71,18 @@ class ResponsibilityReportTests(unittest.TestCase):
         )
         self.assertEqual(report["library"], scopes["l0"] + scopes["below_facade"])
         self.assertNotIn("crates/plakous/src/test_model.rs", set(paths))
-        self.assertNotIn("bin/plak/src/test_support.rs", set(paths))
+        self.assertNotIn("bin/plakd/src/test_support.rs", set(paths))
 
     def test_registered_external_test_source_is_exactly_cfg_test_only(self):
         self.assertEqual(
             LOC.TEST_ONLY_EXTERNAL_SOURCES,
             {
-                ("plak", "src/product_crash_tests/actual_host.rs"),
-                ("plak", "src/product_crash_tests/fixture.rs"),
-                ("plak", "src/product_crash_tests/mod.rs"),
-                ("plak", "src/product_crash_tests/product_release.rs"),
-                ("plak", "src/product_crash_tests/protocol.rs"),
-                ("plak", "src/test_support.rs"),
+                ("plakd", "src/product_crash_tests/actual_host.rs"),
+                ("plakd", "src/product_crash_tests/fixture.rs"),
+                ("plakd", "src/product_crash_tests/mod.rs"),
+                ("plakd", "src/product_crash_tests/product_release.rs"),
+                ("plakd", "src/product_crash_tests/protocol.rs"),
+                ("plakd", "src/test_support.rs"),
                 ("plakous", "src/test_model.rs"),
             },
         )
@@ -90,9 +90,9 @@ class ResponsibilityReportTests(unittest.TestCase):
         declaration = (ROOT / facade.relative("src/lib.rs")).read_text(encoding="utf-8")
         self.assertEqual(declaration.count("mod test_model;"), 1)
         self.assertRegex(declaration, r"#\[cfg\(test\)\]\s*mod test_model;")
-        plak = (ROOT / self.package("plak").relative("src/lib.rs")).read_text(encoding="utf-8")
-        self.assertRegex(plak, r"#\[cfg\(test\)\]\s*mod product_crash_tests;")
-        self.assertRegex(plak, r"#\[cfg\(test\)\]\s*mod test_support;")
+        plakd = (ROOT / self.package("plakd").relative("src/lib.rs")).read_text(encoding="utf-8")
+        self.assertRegex(plakd, r"#\[cfg\(test\)\]\s*mod product_crash_tests;")
+        self.assertRegex(plakd, r"#\[cfg\(test\)\]\s*mod test_support;")
         for name, relative in LOC.TEST_ONLY_EXTERNAL_SOURCES:
             self.assertTrue((ROOT / self.package(name).relative(relative)).is_file(), relative)
 
@@ -112,7 +112,7 @@ class ResponsibilityReportTests(unittest.TestCase):
             ("plakous-openai", "src/native_auth/manager.rs"): "auth",
             ("plakous-anthropic", "src/native_auth/manager.rs"): "auth",
             ("plakous-xai", "src/native_auth/manager.rs"): "auth",
-            ("plak", "src/lib.rs"): "product",
+            ("plakd", "src/lib.rs"): "product",
             ("plakous-hosted", "src/runtime.rs"): "product",
             ("plakous-js-runtime", "src/bin/plakous-js-host.rs"): "runtime",
             ("plakous-host-protocol", "src/lib.rs"): "product",

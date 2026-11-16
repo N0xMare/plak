@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Pack built release executables into `plak-<version>-<triple>.tar.gz`.
+"""Pack built release executables into `plakd-<version>-<triple>.tar.gz`.
 
-The tarball holds one top-level directory `plak-<version>-<triple>/` with the
-three executables (`plak`, `plakous-js-host`, `plakous-py-host`), the repository
+The tarball holds one top-level directory `plakd-<version>-<triple>/` with the
+three executables (`plakd`, `plakous-js-host`, `plakous-py-host`), the repository
 `LICENSE`, `THIRD-PARTY` (every package outside this repository that the three
 executables reach through normal dependency edges for the target), and
 `licenses/<name>-<version>/` with the license and NOTICE files those packages
 ship, vendored code included. The closure is the release build's, not the
 workspace-unified resolve: the same two Cargo resolutions as
-`tools/build/build-plak.sh --artifacts` (`plak` at its default features, then
+`tools/build/build-plakd.sh --artifacts` (`plakd` at its default features, then
 `plakous-js-runtime` and `plakous-py-worker` together), from `cargo tree
 -e normal`, with each package's license and repository taken from `cargo
 metadata`. One workspace `cargo metadata` unifies member defaults and
@@ -39,12 +39,12 @@ import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-EXECUTABLES = ("plak", "plakous-js-host", "plakous-py-host")
-ROOT_PACKAGES = ("plak", "plakous-js-runtime", "plakous-py-worker")
-# Two resolutions, matching `build-plak.sh --artifacts`: sidecar features are
-# not unified into plak, and neither resolution is the whole workspace.
+EXECUTABLES = ("plakd", "plakous-js-host", "plakous-py-host")
+ROOT_PACKAGES = ("plakd", "plakous-js-runtime", "plakous-py-worker")
+# Two resolutions, matching `build-plakd.sh --artifacts`: sidecar features are
+# not unified into plakd, and neither resolution is the whole workspace.
 RELEASE_RESOLUTIONS = (
-    ("plak",),
+    ("plakd",),
     ("plakous-js-runtime", "plakous-py-worker"),
 )
 LICENSE_FILE = re.compile(r"(^|[-_.])(LICEN[CS]E|COPYING|COPYRIGHT|NOTICE|UNLICENSE)", re.I)
@@ -205,7 +205,7 @@ def license_files(package: dict) -> list[Path]:
 
 def third_party_text(triple: str, packages: list[dict]) -> str:
     lines = [
-        f"Packages outside this repository linked into plak, plakous-js-host and plakous-py-host for {triple}.",
+        f"Packages outside this repository linked into plakd, plakous-js-host and plakous-py-host for {triple}.",
         "License and NOTICE files each package ships are under licenses/<name>-<version>/.",
         "",
     ]
@@ -251,7 +251,7 @@ def pack(
         if static:
             require_static(path)
     packages = third_party(metadata, linked)
-    stem = f"plak-{version}-{triple}"
+    stem = f"plakd-{version}-{triple}"
     files: dict[str, tuple[bytes, int]] = {}
     for name in EXECUTABLES:
         files[name] = ((artifacts / name).read_bytes(), 0o755)
@@ -295,7 +295,7 @@ def pack(
 
 
 def write_sums(out: Path) -> None:
-    assets = sorted([*out.glob("plak-*.tar.gz"), *out.glob("plak-*-wire-schema.json")])
+    assets = sorted([*out.glob("plakd-*.tar.gz"), *out.glob("plakd-*-wire-schema.json")])
     (out / "SHA256SUMS").write_text("".join(f"{sha256(path)}  {path.name}\n" for path in assets))
 
 

@@ -45,14 +45,14 @@ class ParsingTests(unittest.TestCase):
 
     def test_step_up_scope_union_ignores_order_and_retains_offline_access(self):
         self.assertEqual(
-            lane.remedy_scopes("remedy: plak mcp login srv --scope 'offline_access read write'"),
+            lane.remedy_scopes("remedy: plakd mcp login srv --scope 'offline_access read write'"),
             {"read", "write", "offline_access"},
         )
         self.assertEqual(
-            lane.remedy_scopes("remedy: plak mcp login srv --scope 'write read offline_access'"),
+            lane.remedy_scopes("remedy: plakd mcp login srv --scope 'write read offline_access'"),
             {"read", "write", "offline_access"},
         )
-        self.assertEqual(lane.remedy_scopes("remedy: plak mcp login srv --scope '$(id)'"), set())
+        self.assertEqual(lane.remedy_scopes("remedy: plakd mcp login srv --scope '$(id)'"), set())
 
     def test_session_id_comes_from_cli_marker(self):
         sid = "12345678-1234-1234-1234-123456789abc"

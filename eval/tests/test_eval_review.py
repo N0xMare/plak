@@ -152,7 +152,7 @@ class CellTests(unittest.IsolatedAsyncioTestCase):
 
             async def execute(*, command):
                 if 'sha256sum -c' in command:
-                    self.assertIn('b' * 64 + '  /installed-agent/plak', command)
+                    self.assertIn('b' * 64 + '  /installed-agent/plakd', command)
                     return SimpleNamespace(return_code=state['pin'], stdout='')
                 if 'su -s /bin/bash' in command:
                     return SimpleNamespace(return_code=state['user_status'], stdout=state['user'])

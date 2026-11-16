@@ -32,7 +32,7 @@ def main() -> None:
             check=True,
         )
         try:
-            tests = source / 'bin/plak/src/carry/tests.rs'
+            tests = source / 'bin/plakd/src/carry/tests.rs'
             module = tests.with_suffix('') / 'bootstrap_exports.rs'
             module.parent.mkdir(exist_ok=True)
             shutil.copyfile(root / 'tools/dev/fixtures/bootstrap_exports.rs', module)
@@ -51,7 +51,7 @@ def main() -> None:
                     'run',
                     '--locked',
                     '-p',
-                    'plak',
+                    'plakd',
                     '--all-features',
                     '--profile',
                     'offline',

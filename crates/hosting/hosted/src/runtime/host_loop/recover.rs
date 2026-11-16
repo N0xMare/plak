@@ -118,9 +118,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         if report.is_none() && !restored_working {
             let _ = self.role.events.send(ContentEvent::Row(TranscriptRow::info(NoticeScope::Recovery,
                 if terminal_published {
-                    "plak: reopened the session and published the saved turn's result; the conversation continues from its saved state".to_owned()
+                    "plakd: reopened the session and published the saved turn's result; the conversation continues from its saved state".to_owned()
                 } else {
-                    "plak: reopened the session; the interrupted turn left nothing outstanding, and the conversation continues from its saved state".to_owned()
+                    "plakd: reopened the session; the interrupted turn left nothing outstanding, and the conversation continues from its saved state".to_owned()
                 },
             )));
         }

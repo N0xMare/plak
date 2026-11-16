@@ -6,11 +6,11 @@
 #     docker build --platform linux/amd64 -f tools/musl/image.Dockerfile -q -
 #   docker tag <image-id> plak-qual-base:<first 8 hex digits of the image id>
 #
-# The musl cargo-nextest and ruff for ~/plak-musl/bin come from the `nextest` target:
+# The musl cargo-nextest and ruff for ~/plakd-musl/bin come from the `nextest` target:
 #
 #   git archive --format=tar HEAD |
 #     docker build --platform linux/amd64 -f tools/musl/image.Dockerfile \
-#       --target nextest --output type=local,dest="$HOME/plak-musl/bin" -
+#       --target nextest --output type=local,dest="$HOME/plakd-musl/bin" -
 FROM rust:1.99.0-alpine AS base
 RUN apk add --no-cache bash bubblewrap clang22-dev coreutils curl findutils gcc git jujutsu \
       just lld make musl-dev musl-utils openssl-dev perl pkgconf procps python3 tar \

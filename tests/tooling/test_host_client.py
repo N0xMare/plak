@@ -84,8 +84,8 @@ class ReferenceClientTests(unittest.TestCase):
         while True:
             line = self.lines.get(timeout=15)
             self.assertIsNotNone(line, "host exited before serving")
-            if line.startswith("plak host: serving on "):
-                self.socket = line.removeprefix("plak host: serving on ").split(" (host ")[0]
+            if line.startswith("plakd host: serving on "):
+                self.socket = line.removeprefix("plakd host: serving on ").split(" (host ")[0]
                 break
 
     def stop_host(self):

@@ -628,7 +628,7 @@ pub(in crate::agent) fn format_session_reopen_error(
 pub(crate) fn incompatible_session_message(error: &AgentSessionsError) -> String {
     let message = error
         .to_string()
-        .replace("an incompatible build", "an incompatible plak build");
+        .replace("an incompatible build", "an incompatible plakd build");
     match error.incompatible_session() {
         Some(_) => {
             format!("{message}; export using the writing build, then import with this build")

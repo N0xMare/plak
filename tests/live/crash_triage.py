@@ -86,7 +86,7 @@ def detail(shape: RecoveryShape) -> str:
 
 
 def rehearsal_verdict(text: str) -> str | None:
-    """The root line of `plak session rehearse`, whose trailing fields are optional."""
+    """The root line of `plakd session rehearse`, whose trailing fields are optional."""
     for line in text.splitlines():
         if match := re.fullmatch(
             r"root: offline=(\w+) recovery_phase=(None|Some\(\w+\)) "

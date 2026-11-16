@@ -1,0 +1,7 @@
+plakd usage — subscription limits and context status
+
+USAGE:
+  plakd usage [--account codex|grok|claude|openrouter] [--session <session>]
+  Named selections, for example --account claude/work, read only that account.
+
+  --session opens the exact attached runtime and reports descriptor-bound context status. Without it, provider plan limits use the provider dashboard. plakd never estimates tokens or model capacity.

@@ -4,7 +4,7 @@
 //!
 //! Plain data and its rules. *Where* a record is persisted is the product's:
 //! the SQLite implementation of `SessionRecordStore` and the free functions
-//! that open `product.sqlite3` live in `bin/plak`, and
+//! that open `product.sqlite3` live in `bin/plakd`, and
 //! nothing here names a path.
 
 use std::collections::HashSet;
@@ -460,7 +460,7 @@ impl SessionRecord {
     }
 
     /// The `(session id, state key)` this session was carried forward from by
-    /// `plak session import`, when it was.
+    /// `plakd session import`, when it was.
     #[must_use]
     pub fn carried_forward_from(&self) -> Option<(&str, &str)> {
         let key = self

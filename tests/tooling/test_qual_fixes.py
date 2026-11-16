@@ -796,7 +796,7 @@ class NestedSteerAwaitTests(unittest.TestCase):
     """The Code Mode await steer is judged at the moment it is applied."""
 
     def replay(self, events, *, finished_after: int | None = None):
-        """Feed timed `plak agent` events through the scenario; the job ends after event N.
+        """Feed timed `plakd agent` events through the scenario; the job ends after event N.
 
         Each event is `(seconds, event)` on the driver's monotonic clock.
         """
@@ -1425,7 +1425,7 @@ class RunawayOutputTests(unittest.TestCase):
             for detail in (
                 "TUI exited 1 after Ctrl+Q",
                 "prepared input reached the compaction trigger without a committed remedy",
-                "plak agent exited during a turn",
+                "plakd agent exited during a turn",
             ):
                 with self.subTest(detail):
                     self.assertEqual(
@@ -1478,12 +1478,12 @@ class RunawayOutputTests(unittest.TestCase):
 class FailureLinesTests(unittest.TestCase):
     def test_the_final_line_keeps_the_error_before_it(self):
         stderr = (
-            "plak: composition Direct\nplak: agent turn failed: provider HTTP 500\n"
-            "plak: retry summary\nplak: turn_failed:provider\n"
+            "plakd: composition Direct\nplakd: agent turn failed: provider HTTP 500\n"
+            "plakd: retry summary\nplakd: turn_failed:provider\n"
         )
         self.assertEqual(
             live.failure_lines(stderr),
-            "plak: agent turn failed: provider HTTP 500 | plak: turn_failed:provider",
+            "plakd: agent turn failed: provider HTTP 500 | plakd: turn_failed:provider",
         )
-        self.assertEqual(live.failure_lines("plak: done\n"), "plak: done")
+        self.assertEqual(live.failure_lines("plakd: done\n"), "plakd: done")
         self.assertEqual(live.failure_lines(""), "")

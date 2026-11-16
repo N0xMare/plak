@@ -27,7 +27,7 @@ fi
 # Same five as dev-check.sh supported_packages (spec 06 §3). The manifest
 # class is the source of truth; a copied gate under test has no workspace
 # manifest, and the real tree does.
-packages=(plakous plakous-agent plakous-model plakous-tools plak)
+packages=(plakous plakous-agent plakous-model plakous-tools plakd)
 if [[ -f Cargo.toml ]]; then
   if ! python3 - "${packages[@]}" <<'PY'
 import sys

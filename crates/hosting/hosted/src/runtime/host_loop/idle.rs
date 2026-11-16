@@ -299,7 +299,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     {
                         // With a root a lost host interrupted, an attached
                         // face's `/recover` is the root's Resume (spec 03
-                        // §14.1); `plak session recover` only recovers.
+                        // §14.1); `plakd session recover` only recovers.
                         return Ok(match self.resume_after_loss_all().await {
                             Some((text, queued_delivery, user_echoed)) => HostStep::Prompt {
                                 text,

@@ -196,7 +196,7 @@ pub(in crate::agent) fn reopen_refusal(
         || CliFailure::recovery_required(reason.to_owned()),
         |seconds| {
             CliFailure::recovery_required(format!(
-                "{reason}: this session's branch is held by another plak process that \
+                "{reason}: this session's branch is held by another plakd process that \
                  could not be confirmed gone; retry in about {seconds} seconds"
             ))
         },
@@ -1479,7 +1479,7 @@ pub(in crate::agent) fn require_reconstructed_coding_projection(
         .is_none()
     {
         return Err(CliFailure::new(format!(
-            "session {} was created by an incompatible plak build; start a new session",
+            "session {} was created by an incompatible plakd build; start a new session",
             session.locator().session_id()
         ))
         .into());

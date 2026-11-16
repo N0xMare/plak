@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 case "${1:-}" in
-  release) exec tools/build/build-plak.sh --install ;;
-  maintainer) exec tools/build/build-plak.sh --install-maintainer ;;
+  release) exec tools/build/build-plakd.sh --install ;;
+  maintainer) exec tools/build/build-plakd.sh --install-maintainer ;;
   *) echo "usage: just install release|maintainer" >&2; exit 2 ;;
 esac

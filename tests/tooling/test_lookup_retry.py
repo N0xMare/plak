@@ -31,7 +31,7 @@ class LookupRetryTests(unittest.TestCase):
                 if cause == "HTTP 429"
                 else [3]
             ):
-                text = f"plak: model lookup failed after {attempts} attempts: {cause}"
+                text = f"plakd: model lookup failed after {attempts} attempts: {cause}"
                 self.assertIsNotNone(live.provider_reason_from(None, None, text), text)
                 with self.assertRaises(live.ScenarioFailure) as caught:
                     live.classify_cli_failure(5, text, "startup")
@@ -98,7 +98,7 @@ class LookupRetryTests(unittest.TestCase):
     def test_jsonl_startup_exhaustion_scores_provider_and_can_observe_the_cap(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            env = live.Env(root / "plak", root / "home", root)
+            env = live.Env(root / "plakd", root / "home", root)
             env.capture_segments.append(root / "capture")
             env.environ = Mock(return_value={})
             process = Mock()

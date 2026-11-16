@@ -64,7 +64,7 @@ TERMINATION_CLASSES = (
     CLASS_UNKNOWN,
 )
 
-# `plak run` refusing before it opens a session. This is not a turn that
+# `plakd run` refusing before it opens a session. This is not a turn that
 # failed: no session exists, the session JSONL is zero bytes, and no model
 # operation was dispatched. It is not an unexplained nonzero exit either --
 # plak names a typed session-creation kind in parentheses, which the class

@@ -1,6 +1,6 @@
 """tools/release/publish.sh against a fake workspace: preconditions, order, index wait.
 
-The fixture is a three-crate cohort (`plakous-zeta` <- `plakous-mid` <- `plak`,
+The fixture is a three-crate cohort (`plakous-zeta` <- `plakous-mid` <- `plakd`,
 alphabetical order differing from dependency order) plus a repository-only
 harness, in its own git repository. Real `cargo metadata` derives the order; a
 `cargo` shim records `package`, `fetch` and `publish` and plays the registry by writing
@@ -35,7 +35,7 @@ publish_shape = load("publish_shape")
 review_expiry = load("review_expiry")
 publish_retry = load("publish_retry")
 
-ORDER = ["plakous-zeta", "plakous-mid", "plak"]
+ORDER = ["plakous-zeta", "plakous-mid", "plakd"]
 
 CARGO_SHIM = r'''
 import io, json, os, sys, tarfile, tomllib
@@ -43,7 +43,7 @@ from pathlib import Path
 args = sys.argv[1:]
 if args[:1] == ["metadata"] or args == ["--version"]:
     os.execv(os.environ["REAL_CARGO"], [os.environ["REAL_CARGO"], *args])
-manifest = Path("bin/plak/Cargo.toml")
+manifest = Path("bin/plakd/Cargo.toml")
 if args[:1] == ["package"] and "--no-verify" not in args and os.environ.get("FAKE_VERIFY_FAIL") == "1":
     sys.exit(1)
 with open(os.environ["FAKE_CARGO_LOG"], "a") as log:
@@ -161,15 +161,15 @@ class PublishScriptTests(unittest.TestCase):
         files = {
             "Cargo.toml": (
                 "[workspace]\nresolver = \"2\"\nmembers = [\"crates/zeta\", \"crates/mid\", "
-                "\"bin/plak\", \"tests/harnesses/offline-crash\"]\n"
+                "\"bin/plakd\", \"tests/harnesses/offline-crash\"]\n"
             ),
             "crates/zeta/Cargo.toml": library("plakous-zeta"),
             "crates/mid/Cargo.toml": library(
                 "plakous-mid", 'plakous-zeta = { version = "0.0.2", path = "../zeta" }\n'
             ),
-            "bin/plak/Cargo.toml": (
+            "bin/plakd/Cargo.toml": (
                 library(
-                    "plak",
+                    "plakd",
                     'plakous-mid = { version = "0.0.2", path = "../../crates/mid" }\n'
                     + publish_shape.HARNESS_DEPENDENCY,
                 )
@@ -458,7 +458,7 @@ class PublishScriptTests(unittest.TestCase):
                 self.assertEqual([call["args"][-1] for call in info], ["monty-typeshed"])
                 self.assertIsNone(info[0]["offline"])
                 self.assertFalse(info[0]["cwd"].startswith(str(self.repo)))
-                self.assertNotIn("plak-publish", info[0]["cwd"])
+                self.assertNotIn("plakd-publish", info[0]["cwd"])
                 self.assertTrue(all("--offline" in call["args"] for call in stale[:2]))
                 self.assertTrue(
                     all(

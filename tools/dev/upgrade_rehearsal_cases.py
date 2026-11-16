@@ -269,7 +269,7 @@ class Case:
 
         def ready():
             self.s.require(self.host.poll() is None, f"source exited: {log.read_text()}")
-            return "plak host: serving on " in log.read_text()
+            return "plakd host: serving on " in log.read_text()
 
         self.s.wait_for(ready, "source host ready")
 
@@ -394,7 +394,7 @@ class Case:
     def seed(self):
         document = json.loads(
             (
-                self.images["checkout"] / "bin/plak/tests/fixtures/session-export-v12.json"
+                self.images["checkout"] / "bin/plakd/tests/fixtures/session-export-v12.json"
             ).read_text()
         )
         document["source"]["session_id"] = str(uuid.uuid4())

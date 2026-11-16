@@ -1,6 +1,6 @@
 # Configuration
 
-Plak keeps editable preferences in config.toml and agent templates under
+plakd keeps editable preferences in config.toml and agent templates under
 agents/. These are ordinary TOML files; credentials and durable session state
 are separate and must not be copied as configuration. Comments, multi-line
 strings and arrays are supported, and configuration saves preserve unrelated
@@ -11,7 +11,7 @@ For the exhaustive list of keys — type, default, constraint, meaning — see
 `docs/reference-config/config.toml` in this repo, which is the same list as a
 commented file you can copy.
 
-## Your Plak home
+## Your plakd home
 
 ```
 ~/.plak/
@@ -23,17 +23,17 @@ commented file you can copy.
 Optionally create a commented reference template (no defaults are pinned):
 
 ```sh
-plak config init          # writes a commented template; pins no defaults
-plak config show          # prints the resolved file, its path, and origins
-plak config edit          # opens it in $VISUAL, then $EDITOR
-plak config set <key> <value>
+plakd config init          # writes a commented template; pins no defaults
+plakd config show          # prints the resolved file, its path, and origins
+plakd config edit          # opens it in $VISUAL, then $EDITOR
+plakd config set <key> <value>
 ```
 
 `PLAK_HOME` overrides the location and must be absolute, with no operator-placed
 symlinked ancestor. macOS system aliases such as `/tmp` and `/var` are allowed. That is how you keep a throwaway home for experiments:
 
 ```sh
-PLAK_HOME="$HOME/plak-scratch" plak config init
+PLAK_HOME="$HOME/plak-scratch" plakd config init
 ```
 
 `config edit` chooses `VISUAL`, then `EDITOR`, as a program plus arguments (for example
@@ -46,27 +46,27 @@ Deleting a key from the file restores its default. Deleting `config.toml`
 restores all of them. A key you never wrote stays out of the file: saving one
 setting does not fill the rest of the schema in around it.
 
-Plak reads the file and refuses to start on anything it did not fully
+plakd reads the file and refuses to start on anything it did not fully
 understand. A typo, a duplicate key, a value of the wrong type and a key that
 does not exist are all errors that name the file, and the line and column
 wherever there is one to name.
 
 ## Environment variables
 
-Plak never loads a `.env` file. Set these in the process environment yourself.
+plakd never loads a `.env` file. Set these in the process environment yourself.
 Never commit, paste, log, or share a real key value. Provider base URLs are
 not environment variables: a custom route requires typed configuration with an
 explicit origin-bound credential policy.
 
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` and `XAI_API_KEY`
-are the only credential variables Plak reads. Each corresponds to one API-key
+are the only credential variables plakd reads. Each corresponds to one API-key
 account (`openai`, `anthropic`, `openrouter`, `xai-api`). The process
-environment wins over the key file written by `plak key set`. When the
-variable is set, the stored file is shadowed and `plak key clear` cannot unset
+environment wins over the key file written by `plakd key set`. When the
+variable is set, the stored file is shadowed and `plakd key clear` cannot unset
 it. Leave the variable unset to use the file store. A variable that is set but
-empty, larger than 16 KiB, or not valid UTF-8 is an error: Plak refuses the
+empty, larger than 16 KiB, or not valid UTF-8 is an error: plakd refuses the
 account and does not fall back to the file store. OAuth subscription sign-ins
-are not API keys. `plak login` stores them in Plak's own store; they must never
+are not API keys. `plakd login` stores them in plakd's own store; they must never
 be put in these variables.
 
 `PLAK_HOME` overrides the product home and defaults to `$HOME/.plak`. It must
@@ -74,7 +74,7 @@ be an absolute path; a relative value is rejected. It holds `config.toml`,
 `agents/`, the store and the logs.
 
 `PLAK_LOG` is a `tracing` filter directive, for example `info` or
-`plak=debug,info`. When it is set and non-empty, Plak writes
+`plakd=debug,info`. When it is set and non-empty, plakd writes
 `$PLAK_HOME/logs/plak.log`. When it is unset, no log file is written, except
 that a maintainer build always writes that log at `info`. An unparseable
 directive is an error, not a fallback.
@@ -82,8 +82,8 @@ directive is an error, not a fallback.
 `PLAK_JS_HOST` and `PLAK_PY_HOST` are absolute paths to the evaluator sidecars.
 `PLAK_JS_HOST` names `plakous-js-host`, the JavaScript evaluator used by Code
 Mode and js-ptc. `PLAK_PY_HOST` names `plakous-py-host`, the Python cell worker
-used by py-ptc and py-sdk. By default Plak looks only for a sibling of the
-running `plak` binary; there is no `PATH` search. Each must name an existing
+used by py-ptc and py-sdk. By default plakd looks only for a sibling of the
+running `plakd` binary; there is no `PATH` search. Each must name an existing
 regular file, or the lookup fails closed. Neither is a credential.
 
 ## Idle Auto-Continue
@@ -93,10 +93,10 @@ root continues when background processes finish or child results or questions ar
 window. User prompts take precedence; interrupt pauses auto-continue until your next
 prompt. There is no limit on consecutive wake turns; each needs a new completion
 or unread child result or question. Recovery and
-paused restored queues prevent waking. JSONL remains explicit-prompt only; `plak run` follows its own until-idle
-policy and ignores this key. A `plak run` wake that does not fit the window still
+paused restored queues prevent waking. JSONL remains explicit-prompt only; `plakd run` follows its own until-idle
+policy and ignores this key. A `plakd run` wake that does not fit the window still
 pauses auto-continue on the session, so opening it later through the host starts paused
-until the next prompt. Set `plak config set turn.auto_continue false`
+until the next prompt. Set `plakd config set turn.auto_continue false`
 to disable it immediately, including while children are running. The attached
 host re-reads this home-only flag; no tree quiescence or reattachment is needed.
 
@@ -114,8 +114,8 @@ max_runtime_hours = 10
 promotes the process to the background; it does not kill it.
 `max_runtime_hours` accepts 1..=24 hours (default 10) and is the hard runtime cap
 for a background process. Set them with
-`plak config set jobs.foreground_seconds 60` or
-`plak config set jobs.max_runtime_hours 12`.
+`plakd config set jobs.foreground_seconds 60` or
+`plakd config set jobs.max_runtime_hours 12`.
 
 These bounds bind when a session is created or explicitly rebound. An exact
 resume keeps its stored bounds; editing `[jobs]` does not change an existing
@@ -136,12 +136,12 @@ full_window = false
 By default (`false`) a model with a published price threshold runs under it
 (Claude Haiku 5.5: 100k tokens, above which input costs more); every other
 model runs under its full window. `true` admits the full window on every model.
-Both are provider input tokens: once a reply reports its input count, Plak
+Both are provider input tokens: once a reply reports its input count, plakd
 measures the conversation against the window with that count, not with request
 bytes.
-Set it with `plak config set api.full_window true`. Like `[jobs]`, it binds when
+Set it with `plakd config set api.full_window true`. Like `[jobs]`, it binds when
 a session is created or explicitly rebound; an exact resume keeps the window
-it was created under. `plak models <account>` shows both windows.
+it was created under. `plakd models <account>` shows both windows.
 
 Non-interactive commands receive null stdin, so a command such as `cat` without
 arguments receives EOF rather than waiting for input. Codex commands
@@ -181,7 +181,7 @@ also use. The project folder must stay inside the repository: a
 `.agents/skills` that links outside it, or a linked skill folder inside it, is
 skipped.
 
-When a session starts, Plak lists every valid skill's name and description in
+When a session starts, plakd lists every valid skill's name and description in
 the model's instructions, in the wording that model's own client uses: Codex's
 skills catalog, Claude Code's listing for its `Skill` tool, grok-build's
 listing with absolute paths, or pi's `<available_skills>`. The model reads a
@@ -201,14 +201,14 @@ once. Skills that are not valid are named in one notice when the session (or
 fork, or child) is created, and a notice already shown for the session is not
 repeated.
 
-Turn skills off with `plak config set skills.enabled false`: new sessions then
+Turn skills off with `plakd config set skills.enabled false`: new sessions then
 have no skills and no `Skill` tool. The setting is fixed into each session
 when it starts. Resuming a session keeps its tools whatever the setting is
 now. Forking it or switching it to another
 model or account through explicit host operations also keeps
 its skills on or off, including a switch between Claude and another provider
 and back: a session started with skills keeps them, and one started without
-them, or before Plak had skills, never gains them. Start a new session to use
+them, or before plakd had skills, never gains them. Start a new session to use
 the new setting.
 
 ## Choose a root
@@ -234,9 +234,9 @@ agent = "root-agent"
 
 Reading a template validates the account vocabulary and direct API model/effort
 against the bundled catalog; unknown accounts and invalid API selections can
-make `plak config show` fail before launch. This does not prove credential
+make `plakd config show` fail before launch. This does not prove credential
 readiness or live catalog availability. When the session binds, the selected
-account must be ready (`plak status`) and its current catalog must admit the
+account must be ready (`plakd status`) and its current catalog must admit the
 model, effort and composition.
 
 Host profile operations distinguish saving a default for new sessions from
@@ -245,7 +245,7 @@ recorded binding during resume. See [client integration](integrating.md) for
 the wire boundary and metadata.
 
 For the typed Python SDK, pass
-`--composition py-sdk` to `plak run` or `plak agent`. To save it for the root,
+`--composition py-sdk` to `plakd run` or `plakd agent`. To save it for the root,
 set `composition = "py-sdk"` in `[root]` beside the root `agent` name.
 The SDK is single-agent and core-tools-only; do not put `py-sdk` in an agent
 template. Cells have fresh globals; save JSON with `state.put` to retain it.
@@ -270,19 +270,19 @@ working_set = ["worker", "reviewer", "explorer"]
 or, from the shell:
 
 ```sh
-plak config set roster.working_set worker,reviewer,explorer
-plak config set roster.working_set ""      # clear it
+plakd config set roster.working_set worker,reviewer,explorer
+plakd config set roster.working_set ""      # clear it
 ```
 
 The array form the file uses works there too, quoted for the shell:
-`plak config set roster.working_set '["worker", "reviewer"]'`.
+`plakd config set roster.working_set '["worker", "reviewer"]'`.
 
 A change to `[root]`, `[roster]` or `[orchestration]` is accepted only when no
-tree is mid-run. Plak tells you which happened: `applied`, or `saved; applies
+tree is mid-run. plakd tells you which happened: `applied`, or `saved; applies
 at the next session genesis`.
 `orchestration.max_concurrent_requests_per_account` is the exception: it is
 not tree state, so a save never waits on a running tree, and it takes effect
-the next time Plak launches.
+the next time plakd launches.
 
 ## Write a template
 
@@ -311,7 +311,7 @@ The fields worth deciding on:
   working_set`, not its own `spawns`.
 - `effort` — `none|low|medium|high|xhigh|max|ultra`, as the model admits. `none` is an explicit effort, not an omitted one. A direct
   API account (`openai`, `anthropic`, `xai-api`) needs an effort on the
-  model's published ladder (`plak models <account>`); the template is refused
+  model's published ladder (`plakd models <account>`); the template is refused
   at load without it.
 - `cost_tier` — a 0–255 label *you* choose, shown on the spawn card. It is not
   measured; it is your hint about what this agent costs to run.
@@ -328,7 +328,7 @@ list adds more, by name:
 | Name | What it is |
 | --- | --- |
 | `web_search`, `web_fetch`, `x_search` | Search and fetch run by the provider of the route the agent binds. `web_search` works on every route; `web_fetch` on claude and anthropic; `x_search` on grok and xai-api. A route that cannot serve one refuses the session or spawn with a remedy (for example, put `x_search` on a grok template and spawn it). |
-| `fetch_url` | One HTTPS fetch Plak runs itself, on every route: HTML comes back as Markdown, text and JSON as text, small PNG/JPEG/WebP as images. Only public internet addresses are reachable; see *fetch_url* below. |
+| `fetch_url` | One HTTPS fetch plakd runs itself, on every route: HTML comes back as Markdown, text and JSON as text, small PNG/JPEG/WebP as images. Only public internet addresses are reachable; see *fetch_url* below. |
 | `image_gen` | Generates or edits one image through the route's provider and saves it as a new workspace file; it never overwrites a file or writes beneath a non-directory. Each call is a paid request (on Codex and Grok it draws on the subscription). It runs on Codex, the OpenAI API (`gpt-image-2`), the xAI API and the Grok subscription; Claude, Anthropic and OpenRouter refuse it because they have no image endpoint. |
 | `mcp:<id>` | Every tool an MCP server allows. |
 | `mcp:<id>/<tool>` | One tool of an MCP server. |
@@ -372,30 +372,30 @@ line. The model chooses the URL, so anything it has read can leave in a query
 string; leave `fetch_url` off templates that must not send workspace content
 out.
 
-`plak mcp` writes these tables and the template entries for you, keeping
+`plakd mcp` writes these tables and the template entries for you, keeping
 the rest of each file:
 
 ```sh
-plak mcp add github --url https://api.githubcopilot.com/mcp/readonly --bearer-secret github
-plak mcp test github                       # starts it, lists the tools a session gets
-plak mcp enable github --template root-agent
+plakd mcp add github --url https://api.githubcopilot.com/mcp/readonly --bearer-secret github
+plakd mcp test github                       # starts it, lists the tools a session gets
+plakd mcp enable github --template root-agent
 ```
 
-`plak mcp list` shows every server, the templates that enable it and any
+`plakd mcp list` shows every server, the templates that enable it and any
 secret it still needs. Host clients can request the current session's MCP view. See the CLI reference for every option.
 
 Secrets are never written in `config.toml`. Store one under a name and refer
 to the name:
 
 ```sh
-plak secret set github     # prompts; the value is never echoed or taken from argv
-plak secret list           # names only
-plak secret rm github
+plakd secret set github     # prompts; the value is never echoed or taken from argv
+plakd secret list           # names only
+plakd secret rm github
 ```
 
 A stdio server can run on the node's runner instead of beside the agent with
 `placement = "runner"`. Its `secret_env` names then come from that runner's
-own secrets, which you store on the runner machine; your `plak secret` values
+own secrets, which you store on the runner machine; your `plakd secret` values
 never leave this machine:
 
 ```toml
@@ -408,7 +408,7 @@ placement = "runner"
 ```
 
 ```sh
-plak runner secret set github   # on the runner machine
+plakd runner secret set github   # on the runner machine
 ```
 
 For a remote session, `placement = "runner"` runs the server in that runner's
@@ -426,8 +426,8 @@ table changes newly bound sessions, not an exact resume or a profile Switch now.
 A new hosted session binds the host's default profile afresh. A session keeps its tools when you switch models: a
 session started on the `[root] agent` template's account and model has the template's tools for its
 whole life, one started on any other model has none, and a switch to a model
-whose route cannot run one of the session's tools is refused (start a new session on that model). A tool listed through `mcp:<id>` whose input schema Plak cannot represent
-is left out with a notice in the transcript, on `plak run` stderr and as a
+whose route cannot run one of the session's tools is refused (start a new session on that model). A tool listed through `mcp:<id>` whose input schema plakd cannot represent
+is left out with a notice in the transcript, on `plakd run` stderr and as a
 `tool.omitted` record in the session log; naming it as `mcp:<id>/<tool>`
 refuses the session instead. MCP results reach the model marked as untrusted
 data. An `http` server is reached at its `url` (HTTPS, or plain HTTP only to
@@ -440,7 +440,7 @@ responses are limited to 64 MiB, with a 4 MiB limit per server-sent event.
 These are transport limits, before tool-result text spilling or prompt limits.
 
 An `http` server that uses OAuth takes `auth = "oauth"` instead of a bearer
-secret, and you log in to it once with `plak mcp login <id>`. The login is
+secret, and you log in to it once with `plakd mcp login <id>`. The login is
 stored in your home's secrets, never in `config.toml`, and is used only for
 that server's exact URL. A server whose authorization server needs a client
 registered in advance also names it:
@@ -506,7 +506,7 @@ tool commands, since hook `[env]` does not carry over.
 
 ## Per-project configuration
 
-A repository can carry its own Plak configuration. Launching anywhere inside a
+A repository can carry its own plakd configuration. Launching anywhere inside a
 project that has `.plak/config.toml` or `.plak/agents/` resolves the nearest
 such directory as the project root. Product homes are never projects: neither
 `$PLAK_HOME` nor, when `PLAK_HOME` points elsewhere, the default `~/.plak`. A project home holds:
@@ -519,24 +519,24 @@ such directory as the project root. Product homes are never projects: neither
 
 A repository's configuration can name models, efforts and an `on_mint` hook,
 so it does **not** apply just because you `cd` into the repo. The first time
-you see Plak report `project <path> is not trusted; … not applied`, decide
+you see plakd report `project <path> is not trusted; ... not applied`, decide
 whether you trust it:
 
 ```sh
-plak config trust       # admit this project's .plak configuration
-plak config untrust     # take it back
+plakd config trust       # admit this project's .plak configuration
+plakd config untrust     # take it back
 ```
 
 Trust is recorded once per project in `~/.plak/trusted-projects.toml` — a
 list you own, in your home, that a repository cannot edit for you. Until
-trusted, the project config is skipped entirely and `plak config show` marks
+trusted, the project config is skipped entirely and `plakd config show` marks
 it `untrusted — ignored`.
 
 Orchestration controls (`[orchestration]`), `turn.auto_continue`,
 `host.reload_requests`, `mcp.client_id_metadata_url`, `[host]`, `[runners]` and
 `[web]` always come from your home config. Project values for them are ignored
 with a warning, even after trust. Use
-`plak config set <key> <value> --scope user` for supported scalar keys;
+`plakd config set <key> <value> --scope user` for supported scalar keys;
 edit the home file for runner tables. See the
 [configuration reference](../spec/07-config-reference.md#3-configtoml).
 
@@ -546,9 +546,9 @@ project is even read), while the project's config may name global or project
 templates. A same-named project template replaces the global one wholesale —
 it is a whole file, not a field-level merge.
 
-Writes pick a side too. `plak config set` writes `~/.plak/config.toml`; add
+Writes pick a side too. `plakd config set` writes `~/.plak/config.toml`; add
 `--scope project` to write the override into `<project>/.plak/config.toml`
-instead — Plak stores only the keys that differ from your global file, so the
+instead -- plakd stores only the keys that differ from your global file, so the
 project config stays a readable delta. Setting a key the project already
 decides asks you for `--scope project` rather than silently absorbing the
 project's value into your global file. Confirmed host settings writes follow
@@ -564,7 +564,7 @@ databases, logs and cache all stay under `~/.plak`.
 cp -r docs/reference-config/. "$PLAK_HOME"
 
 # The same four roles pinned to one provider each, or mixed.
-cp -r bin/plak/presets/codex/. "$PLAK_HOME"    # or claude, grok, multi
+cp -r bin/plakd/presets/codex/. "$PLAK_HOME"    # or claude, grok, multi
 ```
 
 Every built-in has the same four roles:
@@ -607,7 +607,7 @@ and files written for an older grammar will fail the current loader.
 ## How long a turn may run
 
 A turn has no time limit. It runs until the model answers, until you interrupt
-it (a wire interrupt, or Ctrl-C for `plak run`), or until it reaches its round cap.
+it (a wire interrupt, or Ctrl-C for `plakd run`), or until it reaches its round cap.
 Every model call is one round, and polling a long build costs one round per
 poll. At the cap, the model gets one more round with no tools and is told to
 summarize what it did and what it could not finish. The default cap is 512
@@ -624,10 +624,10 @@ running keeps the cap it started with.
 
 ## When something is wrong
 
-Plak refuses to start on a config file it did not fully understand, and the
+plakd refuses to start on a config file it did not fully understand, and the
 message names the problem. The common ones:
 
-- **`unknown config key: <key>; run plak config show for the valid keys`** — a
+- **`unknown config key: <key>; run plakd config show for the valid keys`** -- a
   typo, or a key that moved into a template file.
 - **`[root] agent names no template file root-agent.toml`** — the pointer and
   the file disagree. Check `ls ~/.plak/agents/`; the file stem *is* the name.
@@ -639,7 +639,7 @@ message names the problem. The common ones:
 - **`template hub spawns helper, and no template file helper.toml exists`** —
   every name in `spawns` must be a template file with a `description`.
 - **`templates are file-authored; edit ~/.plak/agents/explorer.toml`** —
-  `plak config set` does not write template bodies, on purpose.
+  `plakd config set` does not write template bodies, on purpose.
 - **`[roster] working_set must be an array like ["a", "b"]`** — in the *file*,
   the working set is a TOML array of strings. The comma shorthand is a
   `config set` convenience only; a bare `working_set = a, b` in the file is not
@@ -649,9 +649,9 @@ message names the problem. The common ones:
   outside it is an error naming the key and the ceiling, not a quiet cap.
 - **`boolean config values must be true or false`** — booleans are TOML
   booleans. `1`, `yes`, `0` and `no` are not values, in the file or after
-  `plak config set`.
+  `plakd config set`.
 - **`duplicate key (line 9, column 1)`** — the same key twice in one section.
-  Plak will not guess which one you meant; delete the one you do not want.
+  plakd will not guess which one you meant; delete the one you do not want.
 
 Tool output also has a built-in per-round observation cap: about 8% of the
 model's effective input window at four text bytes per token, bounded to

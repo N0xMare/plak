@@ -1,4 +1,4 @@
-"""Harbor installed agent: frozen `plak run` in the task container.
+"""Harbor installed agent: frozen `plakd run` in the task container.
 
 Claude Code native-home is FrozenPmux (`pmux run`), not this class.
 Stock Harbor `claude-code` (`claude --print`) stays unused.
@@ -84,7 +84,7 @@ class PlakAgent(BaseInstalledAgent):
         extra_env = sanitize_extra_env(extra_env)
         self._arch = resolve_arch(kwargs.pop("arch", None))
         root = installed_root(self._arch)
-        self._binary_path = Path(kwargs.pop("binary_path", None) or root / "plak")
+        self._binary_path = Path(kwargs.pop("binary_path", None) or root / "plakd")
         self._js_host_path = Path(kwargs.pop("js_host_path", None) or root / "plakous-js-host")
         self._py_host_path = Path(kwargs.pop("py_host_path", None) or root / "plakous-py-host")
         self._account = str(kwargs.pop("account", "codex"))
@@ -125,7 +125,7 @@ class PlakAgent(BaseInstalledAgent):
         # Copy once: the digest and upload must refer to the same bytes even if
         # a local build replaces the installed binary during a trial.
         with tempfile.TemporaryDirectory(prefix="plak-harbor-upload-") as directory:
-            frozen = Path(directory) / "plak"
+            frozen = Path(directory) / "plakd"
             shutil.copyfile(self._binary_path, frozen)
             frozen_js = Path(directory) / "plakous-js-host"
             shutil.copyfile(self._js_host_path, frozen_js)
@@ -232,7 +232,7 @@ class PlakAgent(BaseInstalledAgent):
         stdout_path = "/logs/agent/plak-stdout.txt"
         stderr_path = "/logs/agent/plak-stderr.log"
         exit_path = "/logs/agent/plak-exit.txt"
-        # Do not `plak refresh` in the cell. Refresh rotates the provider
+        # Do not `plakd refresh` in the cell. Refresh rotates the provider
         # refresh token and invalidates every other copy (host, sibling
         # trials, vendor Codex/Grok). Host refreshes under the per-trial
         # upload lock; cells use the uploaded Ready credentials as-is.
@@ -292,7 +292,7 @@ class PlakAgent(BaseInstalledAgent):
         Reward alone cannot tell a model miss from a context admission
         refusal, an unavailable credential, or a rejected tool call. This
         record is the evidence that separates them, and it is written on
-        every path, including the one where `plak run` never started.
+        every path, including the one where `plakd run` never started.
         """
         try:
             stderr = await self._read_agent_file(environment, env, "/logs/agent/plak-stderr.log")

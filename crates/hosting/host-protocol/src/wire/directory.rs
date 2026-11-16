@@ -106,7 +106,7 @@ pub struct LiveWork {
 pub enum SessionEnvironment {
     /// The host process's own: a session it serves, or would open.
     Host,
-    /// Another process's: the shell a client or `plak agent` that holds the
+    /// Another process's: the shell a client or `plakd agent` that holds the
     /// session was started in.
     Cli,
 }

@@ -3,7 +3,7 @@
 //! root node or a child of its tree. Every observation reaches the
 //! attachment as the service routes it, with its class; a presentation
 //! snapshot goes as pages and image bytes as blobs. The transport only
-//! carries lines: stdio's `plak agent --wire v2` and the web endpoint's
+//! carries lines: stdio's `plakd agent --wire v2` and the web endpoint's
 //! WebSocket both drive this connection.
 //!
 //! The session opens before the handshake is answered, so the welcome names

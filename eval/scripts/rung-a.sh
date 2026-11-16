@@ -249,7 +249,7 @@ run_plak() {
     --agent-kwarg "model=$model" \
     --agent-kwarg "effort=$effort" \
     --agent-kwarg "arch=$arch" \
-    --agent-kwarg "binary_path=$installed/plak" \
+    --agent-kwarg "binary_path=$installed/plakd" \
     --agent-kwarg "js_host_path=$installed/plakous-js-host" \
     --agent-kwarg "py_host_path=$installed/plakous-py-host" \
     --n-attempts "1" --n-concurrent "$concurrent" \

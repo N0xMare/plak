@@ -30,7 +30,7 @@ fn a2_real_tool_round_keeps_original_operator_line() {
             true,
             false
         ),
-        "plak: recovered an interrupted turn; its tool round completed, but the turn was interrupted before the next model request; completed tool results were kept"
+        "plakd: recovered an interrupted turn; its tool round completed, but the turn was interrupted before the next model request; completed tool results were kept"
     );
 }
 
@@ -47,7 +47,7 @@ fn recovery_review_operator_line_distinguishes_ledger_from_conversation() {
                 false,
                 false
             ),
-            "plak: recovered an interrupted turn; a tool may have changed this workspace; \
+            "plakd: recovered an interrupted turn; a tool may have changed this workspace; \
                  its result was not added to the conversation and it is not retried - check \
                  the workspace before carrying on"
         );

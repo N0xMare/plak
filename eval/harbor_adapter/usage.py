@@ -330,7 +330,7 @@ def parse_session_id_lines(stdout: str) -> tuple[str, ...]:
 def parse_session_id_line(stdout: str) -> str:
     ids = parse_session_id_lines(stdout)
     if not ids:
-        raise UsageError("plak run stdout has no session_id= line")
+        raise UsageError("plakd run stdout has no session_id= line")
     return ids[0]
 
 

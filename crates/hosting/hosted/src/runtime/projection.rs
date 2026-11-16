@@ -128,7 +128,7 @@ pub struct ProjectedSession {
     pub pending_workflows: Vec<String>,
 }
 
-/// The lease-free projector pass `plak session export` and `plak session gc`
+/// The lease-free projector pass `plakd session export` and `plakd session gc`
 /// run first (spec 02 §2.5.1, §2.5.3): applies `session`'s feed to its tail
 /// and names the head the views now hold and the intents no fact settled.
 /// `None` for a session with no runtime yet or no stored record. Safe beside

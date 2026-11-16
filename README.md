@@ -1,12 +1,16 @@
-# Plak and Plakous
+# plakd and Plakous
 
-Plak is a host daemon/server and operator CLI for software-engineering agents.
+plakd is a host daemon/server and operator CLI for software-engineering agents.
 Plakous is the embeddable Rust harness library underneath it. The repository
 ships no terminal or web application client: integrators build and maintain
 their own against the host wire protocol.
 
+The supported product package is `plakd`; its library target and executable
+use the same name. This repository provides no `plak` executable shim or
+package alias.
+
 Plakous owns the single-agent loop, tools, providers, admission, persistence
-and recovery. Plak adds product configuration, hosted sessions, paired runners
+and recovery. plakd adds product configuration, hosted sessions, paired runners
 and recursive orchestration above the public facade. Responses, Messages and
 Chat Completions have separate protocol kernels so provider-specific behavior
 does not disappear behind a lowest-common-denominator interface.
@@ -32,20 +36,20 @@ use `just install release`. Detailed installation, Cargo alternatives and
 updates belong in [getting started](docs/user-guide/getting-started.md).
 
 ```sh
-plak help
-plak login codex
-plak models codex
-plak doctor
-plak host
+plakd help
+plakd login codex
+plakd models codex
+plakd doctor
+plakd host
 ```
 
-Bare `plak` prints help and exits successfully; it starts no host or session.
+Bare `plakd` prints help and exits successfully; it starts no host or session.
 The host serves sessions over its private control socket and can optionally
 serve an external web build. It owns accounts/auth, settings, catalogs,
 session operations, runner placement and upgrade authority.
 
-The operator CLI also provides `plak run` for bounded batch tasks and
-`plak agent` for the long-lived JSONL session projection. Resume is explicit
+The operator CLI also provides `plakd run` for bounded batch tasks and
+`plakd agent` for the long-lived JSONL session projection. Resume is explicit
 through run, agent or wire operations, not a terminal launcher.
 
 Subscription accounts are `codex`, `grok` and `claude`; API-key accounts
@@ -63,15 +67,15 @@ that subscription route until a newer build renews the review; see
 [troubleshooting](docs/user-guide/troubleshooting.md) ("native compatibility profile
 compiled into this build is inactive"). The documented API routes (OpenAI Platform,
 Anthropic API, xAI Platform and OpenRouter Chat) are due for review 90 days after theirs
-(2027-02-13 for every route in this build) but never refuse on the calendar. `plak
-doctor` and `plak status` warn within 14 days of either date; publication dry runs and
+(2027-02-13 for every route in this build) but never refuse on the calendar. `plakd
+doctor` and `plakd status` warn within 14 days of either date; publication dry runs and
 uploads require more than a third of every review window remaining. A re-review that
 changes no pinned contract does not ask you to accept the notice again.
 
 ## Build your own client
 
-Use `plak wire schema` to obtain the exact build's schema. Spawn
-`plak host connect --stdio` from your application and exchange wire frames on
+Use `plakd wire schema` to obtain the exact build's schema. Spawn
+`plakd host connect --stdio` from your application and exchange wire frames on
 its pipes, or connect to the host's control socket or authenticated WebSocket.
 The stdio bridge handles discovery; only explicit local `--auto-start`
 permits it to start a missing host. It has no embedded-session fallback.
@@ -111,7 +115,7 @@ the versioned export document, not another build's native stores.
 - [Changelog](CHANGELOG.md), [contributing](.github/CONTRIBUTING.md) and
   [security policy](.github/SECURITY.md).
 
-Product code lives in [`bin/plak/`](bin/plak/); libraries in
+Product code lives in [`bin/plakd/`](bin/plakd/); libraries in
 [`crates/`](crates/), with the public facade in
 [`crates/plakous/`](crates/plakous/). [`tests/`](tests/) contains offline
 integration and consumer contracts. [`tools/`](tools/) supplies build, gate,
@@ -127,7 +131,7 @@ Live tests are opt-in and may incur provider usage; see
 
 ## License
 
-Plak and Plakous are licensed under the [MIT License](LICENSE).
+plakd and Plakous are licensed under the [MIT License](LICENSE).
 
 Third-party material keeps its upstream license:
 

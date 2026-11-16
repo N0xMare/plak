@@ -49,7 +49,7 @@ impl McpBinding {
     }
 }
 
-/// The product's named secrets (`plak secret set <name>`).
+/// The product's named secrets (`plakd secret set <name>`).
 ///
 /// Hosting asks for a value by name at each server spawn and never reads the
 /// secret store itself.
@@ -61,7 +61,7 @@ pub trait NamedSecrets: Send + Sync + 'static {
     /// Returns a one-line reason when the store refuses the read.
     fn read(&self, name: &str) -> Result<Option<NamedSecretValue>, String>;
 
-    /// The value of this machine's runner secret `name` (`plak runner
+    /// The value of this machine's runner secret `name` (`plakd runner
     /// secret set`), which only a server placed on the runner reads: a
     /// shelf apart from [`Self::read`]'s. `None`, the default, is a product
     /// that stores no runner secrets.

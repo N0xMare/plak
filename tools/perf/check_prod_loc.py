@@ -172,12 +172,12 @@ ATTRIBUTE_LOOKBACK = 24
 # under-count production. Each entry is pinned by the repository test below.
 TEST_ONLY_EXTERNAL_SOURCES: frozenset[tuple[str, str]] = frozenset(
     {
-        ("plak", "src/product_crash_tests/actual_host.rs"),
-        ("plak", "src/product_crash_tests/fixture.rs"),
-        ("plak", "src/product_crash_tests/mod.rs"),
-        ("plak", "src/product_crash_tests/product_release.rs"),
-        ("plak", "src/product_crash_tests/protocol.rs"),
-        ("plak", "src/test_support.rs"),
+        ("plakd", "src/product_crash_tests/actual_host.rs"),
+        ("plakd", "src/product_crash_tests/fixture.rs"),
+        ("plakd", "src/product_crash_tests/mod.rs"),
+        ("plakd", "src/product_crash_tests/product_release.rs"),
+        ("plakd", "src/product_crash_tests/protocol.rs"),
+        ("plakd", "src/test_support.rs"),
         ("plakous", "src/test_model.rs"),
     }
 )

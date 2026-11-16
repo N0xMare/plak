@@ -31,7 +31,7 @@ A **template** is a user-authored named bind: one flat TOML object per file.
 The file stem is the name. It matches `[a-z][a-z0-9-]{0,31}` and is at most 32
 bytes. Seven names are reserved because they are `config.toml` section names:
 `root`, `roster`, `orchestration`, `tui`, `compaction`, `telemetry`, `agent`.
-Templates MUST NOT be authored through `plak config set`, which refuses
+Templates MUST NOT be authored through `plakd config set`, which refuses
 `agent.*`.
 
 | Field | Meaning |
@@ -1730,7 +1730,7 @@ unresolved session evidence. Inherited checkouts are never snapshotted by this
 failure path. No additional tree or wire fields are required.
 Rescue refs remain pinned until the operator explicitly deletes them, including
 after workspace removal or tree maintenance. They are never registered as
-candidates and are never adoptable. `plak state` inventories recorded artifacts,
+candidates and are never adoptable. `plakd state` inventories recorded artifacts,
 not these unregistered rescue refs. In the workspace's Git repository, list them
 with `git for-each-ref --format='%(refname)' 'refs/plak/*/candidates/failed-*'`;
 delete one with `git update-ref -d <exact-ref>` only after inspecting or retaining
@@ -1785,11 +1785,11 @@ TMP=$(mktemp -d)/index; cp "$(git rev-parse --git-path index)" "$TMP"  # 0700 di
 GIT_INDEX_FILE=$TMP git add -A
 GIT_INDEX_FILE=$TMP <secret unstage>
 T=$(GIT_INDEX_FILE=$TMP git write-tree)
-C=$(git commit-tree "$T" -p HEAD -m "plak snapshot <label>")
+C=$(git commit-tree "$T" -p HEAD -m "plakd snapshot <label>")
 ```
 
 `content` is the written tree id `T`; `commit` is the wrapper commit `C`. The
-`commit-tree` call pins `user.name=plak`, `user.email=plak@local`,
+`commit-tree` call pins `user.name=plakd`, `user.email=plakd@local`,
 `commit.gpgsign=false`, and both author and committer dates to `@0 +0000`, so
 the wrapper is a pure function of tree, parent, and label. The `-p` is omitted
 when HEAD does not resolve (an unborn branch). The working copy, the real
@@ -1807,7 +1807,7 @@ therefore cannot pin a secret the tool policy already excludes.
 **Mint.** The copy is `<launch>/.plak/worktrees/<copy_id>`, where `copy_id` is
 `<tree8>-<agent_id>` and `tree8 = sha256(tree_id)[..8]`. One shared naming
 function maps this identity to the `plak/<tree8>/<agent_id>` branch and
-`plak-<tree8>-<agent_id>` JJ workspace. Consequently two trees sharing a checkout may both
+`plakd-<tree8>-<agent_id>` JJ workspace. Consequently two trees sharing a checkout may both
 use the logical child id `c1`, and delayed cleanup from a crashed or partially
 pruned tree cannot address the other tree's path or branch. The base is the
 supplied candidate, or `snapshot(<parent cwd>)` — never the launch HEAD. The
@@ -1909,7 +1909,7 @@ inherited `GIT_*` steering variables, runs with `-c core.fsmonitor=false -c
 core.hooksPath=/dev/null` so no repository hook or fsmonitor command runs, and
 writes its scratch files privately (chapter 04 §2.6). It runs with
 `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS` and, when the environment has
-no `EMAIL`, the fallback `EMAIL=plak@local` (a configured `user.email` still
+no `EMAIL`, the fallback `EMAIL=plakd@local` (a configured `user.email` still
 wins): an unconfigured identity never makes a reflog write resolve the host
 name, which under musl without a network waits out the resolver timeout. It
 runs in its own process group, under a ceiling: 30 s for a read (status, rev-parse, counts, which also set
@@ -1929,7 +1929,7 @@ takes precedence over colocated Git.
 
 The optional `jj-lib` backend runs in process, with no JJ CLI fallback. It
 supports Git-backed JJ repositories and loads a fixed library configuration
-(`plak`, `plak@local`, signing disabled), without user configuration or aliases.
+(`plakd`, `plakd@local`, signing disabled), without user configuration or aliases.
 An installed JJ executable is needed only for a human/model that chooses to
 run JJ commands, not for host workspace operations.
 
@@ -1964,14 +1964,14 @@ native snapshots and the repository's Git `info/exclude` keeps it out of
 external JJ snapshots as well.
 
 **Mint.** The library creates `<launch>/.plak/workspaces/<copy_id>` with name
-`plak-<copy_id>`, using the same tree-scoped identity as Git, and a new empty
+`plakd-<copy_id>`, using the same tree-scoped identity as Git, and a new empty
 working-copy commit over an immutable mint base. With no candidate input, the
 parent is snapshotted and a frozen base F is written with the parent's tree
-and parent IDs, described `plak base <copy_id>`: F is a sibling of the parent's
+and parent IDs, described `plakd base <copy_id>`: F is a sibling of the parent's
 working-copy commit, not its descendant. With candidate input, that exact
 candidate is F. The child's empty working-copy commit has F as its parent,
 and the recorded base is F. F and the child are published together by
-`plak mint workspace`; F is pinned at `refs/plak/<namespace>/bases/<agent_id>`.
+`plakd mint workspace`; F is pinned at `refs/plak/<namespace>/bases/<agent_id>`.
 For JJ occupancy, ahead counts non-empty commits in `base..@`; behind counts
 `base-..parent@` excluding empty commits and commits whose tree equals F
 (the copied mint state is not new parent work). The frozen base and empty working-copy commit add no noise to
@@ -2275,7 +2275,7 @@ checkout. `files` lists at most 64 changed paths (`"M src/lib.rs"`,
 inside the stored receipt and replays verbatim, not a fresh observation.
 The candidate durably records `target_before` and `merged_at`, the commit component of
 `target_after`, alongside its adopter and evidence. `list_agents` exposes this
-field and `plak session show` says `merged at <after> (before <before>)`. On Git this is the
+field and `plakd session show` says `merged at <after> (before <before>)`. On Git this is the
 internal target snapshot, never a new commit on the root branch. A failed or
 conflicted adoption records no merged-at commit. Cleanup does not erase this
 provenance when its worktree or branch is removed; the record owns its pins
@@ -2623,8 +2623,8 @@ short fixed prompt is host-authored, never a transcript row, and stored as
 `User` with `Instruction` provenance in canonical history, never as user
 input. It asks the root to continue the current task or reply briefly if
 nothing remains. The turn otherwise behaves normally, including Esc cancel.
-`plak agent` JSONL keeps explicit-prompt behavior; no new JSONL line is
-introduced. `plak run` continues until idle independently of `turn.auto_continue`. Other interactive hosts sharing this loop use the
+`plakd agent` JSONL keeps explicit-prompt behavior; no new JSONL line is
+introduced. `plakd run` continues until idle independently of `turn.auto_continue`. Other interactive hosts sharing this loop use the
 same policy. An attached interactive root with waking enabled (it has
 `spawn_agent` and no `submit_result`) and every child of the tree host (which
 parks and wakes it, §5.2) may end a turn while children run. JSONL roots and
@@ -2670,7 +2670,7 @@ compactable or protected, pauses as a failed preflight: auto-continue stays
 suppressed (a product view of the turn's terminal fact, chapter 02 §2.6) until the next user prompt, so
 its returned batch never wakes the root again on its own, and the host's wake
 prompt is never restored into the operator's composer. That persisted
-suppression includes a `plak run` continuation (chapter 02 §5.2): a later
+suppression includes a `plakd run` continuation (chapter 02 §5.2): a later
 interactive open starts paused. An interactive withheld wake also leaves one
 `auto-continue paused until the next prompt` transcript warning. A wake that
 does not fit at preflight (`Sub-agent auto-continue preflight paused until the
@@ -2792,7 +2792,7 @@ cancel as a turn result whose outcome is `cancelled` as well as an error of
 kind `cancelled`, and the host treats both as the cancel signal.
 
 **A root interrupt also interrupts the running descendants.** When the root's
-cancel settles (`Esc`, `Ctrl-C`, JSONL `cancel`, a `plak run` SIGINT), every
+cancel settles (`Esc`, `Ctrl-C`, JSONL `cancel`, a `plakd run` SIGINT), every
 descendant with a running turn becomes `interrupted` exactly as `interrupt_agent`
 leaves it, and its live turn is cancelled so it stops spending. Nothing is
 closed and no attempt ends: mail resumes a child as below, and the next root
@@ -3060,7 +3060,7 @@ authority. The context-occupancy meter is untouched by any of this.
 ### 10.4 Per-account request budget
 
 A child waiting for a native credential remains running in the same attempt.
-The Agents activity says `waiting for login: run plak login <account>` (with
+The Agents activity says `waiting for login: run plakd login <account>` (with
 command formatting). The live transcript notice includes that command when
 the account is already known, or says `waiting for login` otherwise. No
 per-face reducer is created: the admission-owned hosted turn projection reduces
@@ -3173,7 +3173,7 @@ for their branch-creation option and attached name. Optional `--color` takes
 no following value.
 
 After that admission, and before exec, the same shim refuses a write to Plak
-coordination state. Exit 128, `plak: git-guard refused: <op> would change Plak
+coordination state. Exit 128, `plakd: git-guard refused: <op> would change Plak
 coordination state (<name>); <remedy>`. The copy's own branch is
 `plak/<tree8>/<agent_id>`, derived from `<tree8>-<agent_id>`, when that branch ref exists (a fork; the mint records
 it, and a later `switch` does not drop it) and empty for a detached snapshot.
@@ -3455,7 +3455,7 @@ quiet save writes no WAL commit, including while another resident tree works.
 
 All production writes of tree domain rows enter the fenced save or delete
 port. Recovery and feed-view repair, maintenance/GC/pruning, and imported
-trees use those same ports. `plak tree release --force` releases the custody
+trees use those same ports. `plakd tree release --force` releases the custody
 record, not domain rows; the old grant cannot write, and a new grant advances the fence and
 rebuilds its baseline. Schema admission initializes new files only; it does
 not migrate existing trees across cohorts. Raw row codecs are not an
@@ -3606,7 +3606,7 @@ waits for the break-glass. With that
 `HolderGone` the take supersedes the holder under the next fence. A holder on
 another machine, or one that cannot be proven gone, is never taken over by a
 clock: there is no time-based expiry. The operator's break-glass,
-`plak tree release --force <tree-id>` (chapter 02), releases such a record with
+`plakd tree release --force <tree-id>` (chapter 02), releases such a record with
 a warning: `break_custody` marks it released, keeping its fence and holder, so
 the next take supersedes that holder and every write it still offers is
 refused. It never releases a holder proven to be running on this machine (its
@@ -3665,7 +3665,7 @@ missing one as `tree store schema fingerprint is missing`, each followed by
 as unsupported persistence (`subagents schema <n>, expected <current>: ...`).
 
 Ordinary tree-store open validates version, exact shape and DDL
-fingerprint, without scanning page integrity or foreign keys. Plak doctor owns
+fingerprint, without scanning page integrity or foreign keys. `plakd doctor` owns
 the read-only integrity and foreign-key diagnostics (chapter 02 §7.3); writes
 still enforce foreign keys. The tree and product stores run the same writer
 configuration and admission steps from `plakous-recursive-subagents-store`'s
@@ -4064,7 +4064,7 @@ the first.
 
 The operator's one Resume (`ResumeLossContinuation` with no agent: JSONL
 `resume`, an external client's explicit continuation action, or JSONL
-`recover` on an attached face while the root holds one; `plak session recover`
+`recover` on an attached face while the root holds one; `plakd session recover`
 only recovers) resumes every held child, records the
 root's consent and runs its continuation, and lets the restored queue drain.
 Under `[host] resume_after_loss = "continue"` the root's open does the same
@@ -4288,7 +4288,7 @@ a completed or failed handle is consumed once, never polled again on retry.
 *Durable before and after:* a crash before the
 root record is an ordinary loss, held or continued under the loss policy.
 After it, with no root turn admitted since, the whole tree reads stopped
-and nothing continues it under either policy. In `plak host`, the returning
+and nothing continues it under either policy. In `plakd host`, the returning
 process finishes recorded stops of daemon-held lines after its re-adoption
 sweep and journal recovery, before serving. It takes a fresh head lease and
 transfers the line before stopping remaining jobs, keyed by the recorded
@@ -4460,7 +4460,7 @@ A retirement annotation joins in the same order as other host intents and is
 idempotent. Clearing it removes only its derived diagnostic and node obligation;
 it never clears an attempt's `closed` or completed outcome.
 
-Explicit `plak session delete --abandon-children` is a different transition.
+Explicit `plakd session delete --abandon-children` is a different transition.
 After confirmation and runtime archival fences, the product closes every
 recovery-required child obligation in its own tree, descendants included, by
 `ProductAgentTree::abandon_recovery_for_delete`. The existing attempt failure
@@ -5255,7 +5255,7 @@ unbound turn, a wait's acknowledgement, a batch's acknowledgement or return.
 
 ## 15. The JSONL host protocol
 
-`plak agent` is a long-lived stdio client of the host: newline-delimited JSON
+`plakd agent` is a long-lived stdio client of the host: newline-delimited JSON
 envelopes projecting a closed subset of user actions and host events. Same
 session, tree, queue, reopen, and effect laws as the attached host. Every line is
 `{ "v": 1, "kind": "<closed>", "id": "<correlation>", … }`. Unknown additive

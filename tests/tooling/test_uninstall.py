@@ -25,7 +25,7 @@ class UninstallTests(unittest.TestCase):
         for name in ("release", "maintainer", "sidecars"):
             (self.lib / name / "fixture").mkdir(parents=True)
             (self.lib / name / "fixture/artifact").write_text("installed")
-        for name in ("plak", "plakous-js-host", "plakous-py-host", "monty"):
+        for name in ("plakd", "plakous-js-host", "plakous-py-host", "monty"):
             (self.bin / name).symlink_to(self.lib / "release/fixture" / name)
         (self.home / ".plak").mkdir()
         (self.home / ".plak/keep").write_text("product state")
@@ -51,12 +51,12 @@ class UninstallTests(unittest.TestCase):
         self.assertEqual(self.uninstall().returncode, 0)
 
     def test_unrelated_links_and_files_are_retained(self):
-        (self.bin / "plak").unlink()
-        (self.bin / "plak").write_text("not installed by Plak")
+        (self.bin / "plakd").unlink()
+        (self.bin / "plakd").write_text("not installed by Plak")
         (self.bin / "monty").unlink()
         (self.bin / "monty").symlink_to("/unrelated/monty")
         self.assertEqual(self.uninstall().returncode, 0)
-        self.assertTrue((self.bin / "plak").is_file())
+        self.assertTrue((self.bin / "plakd").is_file())
         self.assertEqual(os.readlink(self.bin / "monty"), "/unrelated/monty")
 
     def test_symlinked_root_is_refused_before_any_removal(self):
@@ -65,7 +65,7 @@ class UninstallTests(unittest.TestCase):
         result = self.uninstall()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unsafe or symlinked", result.stderr)
-        self.assertTrue((self.bin / "plak").is_symlink())
+        self.assertTrue((self.bin / "plakd").is_symlink())
         self.assertTrue((self.lib / "release").exists())
         self.assertTrue((self.home / ".plak/keep").exists())
 
@@ -99,7 +99,7 @@ class UninstallTests(unittest.TestCase):
     def cargo_links(self, home):
         directory = home / "bin"
         directory.mkdir(parents=True)
-        for name in ("plak", "plakous-js-host", "plakous-py-host"):
+        for name in ("plakd", "plakous-js-host", "plakous-py-host"):
             (directory / name).symlink_to(self.lib / "maintainer/fixture" / name)
         return directory
 
@@ -112,13 +112,13 @@ class UninstallTests(unittest.TestCase):
     def test_custom_cargo_home_removes_only_plak_links(self):
         cargo_home = self.home / "custom-cargo"
         directory = self.cargo_links(cargo_home)
-        (directory / "plak").unlink()
-        (directory / "plak").symlink_to("/unrelated/plak")
+        (directory / "plakd").unlink()
+        (directory / "plakd").symlink_to("/unrelated/plakd")
         self.environment["CARGO_HOME"] = str(cargo_home)
         result = self.uninstall()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(list(directory.iterdir()), [directory / "plak"])
-        self.assertEqual(os.readlink(directory / "plak"), "/unrelated/plak")
+        self.assertEqual(list(directory.iterdir()), [directory / "plakd"])
+        self.assertEqual(os.readlink(directory / "plakd"), "/unrelated/plakd")
 
     def test_dry_run_lists_links_and_roots_without_removing_anything(self):
         cargo = self.cargo_links(self.home / ".cargo")

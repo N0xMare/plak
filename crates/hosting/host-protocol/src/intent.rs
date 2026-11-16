@@ -134,7 +134,7 @@ impl ProtocolExtension for Core {
 }
 
 /// Typed intents a driver sends to the hosted session (today the client, the
-/// JSONL face, and `plak run`).
+/// JSONL face, and `plakd run`).
 ///
 /// The closed protocol is every variant but [`Self::Extension`]; that slot
 /// carries the driver's own product traffic (settings, overlays) through the
@@ -364,7 +364,7 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
     /// The face painted its first interactive frame and takes input: the
     /// host may run passive maintenance. Idempotent; it never enters the
     /// session's queue and has no answer window. A frontend that never
-    /// paints (`plak agent`) never sends it.
+    /// paints (`plakd agent`) never sends it.
     Promptable,
     /// Maintainer JSONL: run one granted topology tool on the hub tree.
     ///

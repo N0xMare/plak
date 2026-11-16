@@ -1,0 +1,12 @@
+plakd key — API key management
+
+USAGE:
+  plakd key set <openai|xai-api|anthropic|openrouter>
+  plakd key clear <account>
+  plakd key status [account]
+
+  Key entry runs through this operator CLI; values are never printed.
+  Use xai-api for the direct API key; grok for the subscription.
+  Add /<name>, for example openai/work, for a separate file-only key.
+  Env vars override default files only; named keys never read them. plakd never loads .env.
+  `key clear` cannot unset process environment variables.

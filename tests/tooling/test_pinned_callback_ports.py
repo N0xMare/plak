@@ -76,11 +76,11 @@ class PinnedCallbackPortTests(unittest.TestCase):
         self.assertEqual(findings, [])
 
     def test_product_tests_never_spawn_a_local_codex_login(self) -> None:
-        # In-process argument parsing is fine; a spawned `plak` binds for real.
+        # In-process argument parsing is fine; a spawned `plakd` binds for real.
         findings = [
             str(path.relative_to(ROOT))
             for path in rust_sources()
-            if path.relative_to(ROOT).as_posix().startswith("bin/plak/tests/")
+            if path.relative_to(ROOT).as_posix().startswith("bin/plakd/tests/")
             for match in CODEX_LOCAL_LOGIN_ARGS.finditer(path.read_text(encoding="utf-8"))
             if '"--remote"' not in match.group("rest")
         ]
