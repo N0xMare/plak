@@ -14,7 +14,6 @@ fn lifecycle_is_a_closed_advisory_frame_with_a_bounded_retry_hint() {
     assert_eq!(WIRE_VERSION, 11);
     for phase in ["draining", "restarting", "stopping", "running"] {
         for reason in [
-            "operator_restart",
             "paired_upgrade",
             "cross_key_upgrade",
             "shutdown",

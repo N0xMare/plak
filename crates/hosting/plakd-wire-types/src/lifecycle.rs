@@ -17,7 +17,6 @@ pub enum HostLifecyclePhase {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HostLifecycleReason {
-    OperatorRestart,
     PairedUpgrade,
     CrossKeyUpgrade,
     Shutdown,

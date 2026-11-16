@@ -10,8 +10,6 @@ use crate::surface_protocol::PlakExtension;
 pub(super) fn draining(host: &SessionHost<PlakExtension>, binary: &str, key: &str) {
     let reason = if key != crate::home::state::state_key() {
         HostLifecycleReason::CrossKeyUpgrade
-    } else if binary == crate::build_identity::binary_id() {
-        HostLifecycleReason::OperatorRestart
     } else {
         HostLifecycleReason::PairedUpgrade
     };

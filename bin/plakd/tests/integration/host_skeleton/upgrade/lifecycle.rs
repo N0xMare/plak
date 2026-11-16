@@ -169,7 +169,7 @@ fn host_lifecycle_same_key_restart_precedes_eof_and_changes_generation() {
         HostLifecyclePhase::Restarting
     );
     assert!(notices.iter().all(
-        |notice| notice.reason == HostLifecycleReason::OperatorRestart
+        |notice| notice.reason == HostLifecycleReason::PairedUpgrade
             && notice.target.as_ref().unwrap().binary_id == id
     ));
     let (_, next_generation) = observe(&host);

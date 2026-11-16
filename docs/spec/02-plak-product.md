@@ -4004,16 +4004,14 @@ native state identity, alongside its binary id and process generation. An
 ephemeral extension-free session host uses an empty key. Protocol 11 adds the
 product advisory frame `host_lifecycle {host_generation, phase, reason,
 target?, retry_after_ms?}`. `phase` is `draining`, `restarting`, `stopping` or
-`running`; `reason` is `operator_restart`, `paired_upgrade`, `cross_key_upgrade`
-or `shutdown`. A target has exactly `binary_id` and `state_key`. An optional
+`running`; `reason` is `paired_upgrade`, `cross_key_upgrade` or `shutdown`. A target has exactly `binary_id` and `state_key`. An optional
 retry hint is a u32 bounded to 30000 ms. These DTOs belong to `plakd-wire-types`;
 the neutral envelope carries the product's lifecycle extension.
 
 A source announces `draining` only after admission of a planned upgrade and
 its admission pause, `restarting` after preparation commits, and `running`
 when reversible preparation aborts and source admission reopens. That `running`
-notice omits both target and retry hint. A forced
-same-image restart uses `operator_restart`, a same-key binary upgrade uses
+notice omits both target and retry hint. A same-key upgrade uses
 `paired_upgrade`, and a changed key uses `cross_key_upgrade`. A planned stop
 (including SIGTERM handoff) announces `stopping` / `shutdown`. Socket and web
 writers make a bounded final send attempt before closing. Connection joins and

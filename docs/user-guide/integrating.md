@@ -91,8 +91,7 @@ not replaying requests or inferring lost model/tool outcomes.
 
 An admitted planned restart or upgrade may send `host_lifecycle` before closing.
 Its phase is `draining`, `restarting`, `stopping`, or `running` (an aborted
-drain), with reason `operator_restart`, `paired_upgrade`, `cross_key_upgrade`,
-or `shutdown`. Optional `target` names the binary id and state key; optional
+drain), with reason `paired_upgrade`, `cross_key_upgrade`, or `shutdown`. Optional `target` names the binary id and state key; optional
 `retry_after_ms` is at most 30000. Treat these as advisory only: reconnect and
 attach afresh, and never replay a prompt because of a notice or a lost reply.
 Notices can be missed or repeated. Cross-key carried roots still redirect via
