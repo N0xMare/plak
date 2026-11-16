@@ -1240,9 +1240,7 @@ fn execute_command(
         Command::Mcp(command) => {
             commands::mcp::run(services.paths()?, command, stdin, stdout, stderr, login_ui)
         }
-        Command::Help | Command::Runner(_) => {
-            unreachable!("early commands dispatch before product state and stdio locks")
-        }
+        Command::Runner(_) => unreachable!("runner commands dispatch before the stdio locks"),
         Command::StatusAll => dispatch::execute_status_all(services, backend, stdout),
         Command::AccountsList => {
             for account in backend.accounts()? {

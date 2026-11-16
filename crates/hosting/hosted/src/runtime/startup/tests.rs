@@ -583,7 +583,7 @@ fn a_detached_attach_failure_states_its_remedy_once() {
     let [diagnostic, repair] = attach_failure_notices(&held, "claude");
     assert!(matches!(diagnostic, TranscriptRow::Notice(notice) if notice.remedy.is_none()));
     assert!(matches!(repair, TranscriptRow::Notice(notice)
-        if notice.text.contains("quit that plak") && notice.text.contains("plakd tree release --force")));
+        if notice.text.contains("stop that host") && notice.text.contains("plakd tree release --force")));
 }
 
 #[test]
