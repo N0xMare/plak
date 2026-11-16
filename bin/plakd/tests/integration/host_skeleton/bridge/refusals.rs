@@ -119,6 +119,20 @@ fn bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed() {
     let held = held_lock(&fixture, &key, "starting");
     refusal(&fixture, "starting");
     drop(held);
-    let _held = held_lock(&fixture, &key, "stopping");
+    let held = held_lock(&fixture, &key, "stopping");
     refusal(&fixture, "stopping");
+    let result = output_after_hello(fixture.command().args(["host", "connect", "--stdio", "--auto-start"]), WIRE_VERSION);
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap(),
+        json!({"frame":"refused","kind":"bridge_unavailable","reason":"stopping","retry_after_ms":500}));
+    assert!(!fixture.home().join("host/auto-start.log").exists());
+    drop(held);
+    let held = held_lock(&fixture, &key, "restarting");
+    let mut bridge = Bridge::start(&fixture);
+    bridge.hello(WIRE_VERSION);
+    assert!(bridge.lines.recv_timeout(Duration::from_millis(100)).is_err(), "restart was refused instead of awaited");
+    drop(held);
+    let mut host = start(&fixture);
+    assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
+    bridge.finish();
+    stop(&mut host);
 }

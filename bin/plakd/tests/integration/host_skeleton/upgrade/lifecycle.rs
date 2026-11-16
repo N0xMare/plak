@@ -107,7 +107,18 @@ fn host_lifecycle_stalled_peer_uses_the_same_total_stop_budget_as_handoff() {
     stalled.write_all(b"{\"frame\":\"hello\"").unwrap();
     let (_observer, _) = observe(&host);
     let began = Instant::now();
-    stop(&mut host);
+    let (stopped, finished) = mpsc::channel();
+    std::thread::spawn(move || { stop(&mut host); stopped.send(()).unwrap(); });
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let marker_deadline = Instant::now() + Duration::from_secs(1);
+    while !std::fs::read_to_string(paths.host_lock()).unwrap().contains(" stopping") {
+        assert!(Instant::now() < marker_deadline, "stop marker was deferred until after the connection join");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let result = super::super::bridge::output_after_hello(fixture.command().args(["host", "connect", "--stdio", "--auto-start"]), WIRE_VERSION);
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap(),
+        json!({"frame":"refused","kind":"bridge_unavailable","reason":"stopping","retry_after_ms":500}));
+    finished.recv_timeout(WAIT).unwrap();
     assert!(began.elapsed() < Duration::from_secs(60));
     let budget: serde_json::Value = serde_json::from_slice(&std::fs::read(budget).unwrap()).unwrap();
     let elapsed = budget["elapsed_ms"].as_u64().unwrap();

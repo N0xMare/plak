@@ -120,6 +120,7 @@ impl Bound {
         stopped: impl Fn() -> bool + Send + Sync + 'static,
         idle: Option<super::idle::IdleExit>,
         scanning: Arc<AtomicUsize>,
+        on_stop: impl FnOnce(),
     ) -> Instant {
         let stopped: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(stopped);
         let mut tick = tokio::time::interval(STOP_POLL);
@@ -192,6 +193,7 @@ impl Bound {
                 }
             }
         };
+        on_stop();
         // Healthy peers get their final advisory before runtime shutdown;
         // an unresponsive peer cannot hold the host's handoff deadline.
         let _ = tokio::time::timeout(Duration::from_secs(2), async {

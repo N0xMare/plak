@@ -206,15 +206,19 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         Arc::clone(&scanning),
     );
     let pending = upgrades.pending();
+    let marker_pending = Arc::clone(&pending);
     let stopping = runtime.block_on(bound.serve(
         &host,
         move || stop.stopped() || upgrade::has_ready(&pending),
         idle,
         scanning,
+        || {
+            let restarting = !stop.stopped() && upgrade::has_ready(&marker_pending);
+            let _ = lock.stopping(restarting);
+            let _ = home_lock.stopping(restarting);
+        },
     ));
     receipt_recovery.cancel();
-    let _ = lock.stopping();
-    let _ = home_lock.stopping();
     let ready = upgrades.stop(&runtime, services.paths()?);
     lifecycle::stopping(&host);
     runtime.block_on(host.wait_lifecycle_delivery(Duration::from_secs(1)));

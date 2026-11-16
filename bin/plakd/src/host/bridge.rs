@@ -95,7 +95,8 @@ type DiscoveryResult = Result<UnixStream, Box<(BridgeUnavailableReason, CliFailu
 
 fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
     let verify = |failure| Box::new((BridgeUnavailableReason::VerificationFailed, failure));
-    let deadline = Instant::now()
+    let began = Instant::now();
+    let mut deadline = began
         + if auto_start {
             Duration::from_secs(30)
         } else {
@@ -106,15 +107,13 @@ fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
             .map_err(verify)?;
     let socket = paths.host_run_dir().join(format!("{key}.sock"));
     let mut started = false;
+    let mut waiting_for_restart = false;
     loop {
         let live = hosts::live_until(paths, deadline).map_err(verify)?;
-        if live.len() > 1 || live.iter().any(|host| host.key != key) {
-            return Err(Box::new((
-                BridgeUnavailableReason::IncompatibleState,
-                hosts::conflict(&live),
-            )));
-        }
         let holder = hosts::lock_holder(&hosts::home_lock(paths)).map_err(verify)?;
+        let restarting = holder.as_deref().is_some_and(|holder| holder.split_whitespace().nth(2) == Some("restarting"))
+            || live.iter().any(|host| host.holder.as_deref().is_some_and(|holder| holder.split_whitespace().nth(2) == Some("restarting")));
+        waiting_for_restart |= restarting;
         let stopping = holder
             .as_deref()
             .is_some_and(|holder| holder.split_whitespace().nth(2) == Some("stopping"))
@@ -129,6 +128,17 @@ fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
                 CliFailure::new("the host is stopping; retry; no embedded session was started"),
             )));
         }
+        if restarting {
+            deadline = deadline.min(began + DISCOVERY_WINDOW);
+            if Instant::now() >= deadline {
+                return Err(Box::new((BridgeUnavailableReason::Starting, CliFailure::new("the planned host restart did not become ready before the discovery deadline"))));
+            }
+            std::thread::sleep(Duration::from_millis(25));
+            continue;
+        }
+        if live.len() > 1 || live.iter().any(|host| host.key != key) {
+            return Err(Box::new((BridgeUnavailableReason::IncompatibleState, hosts::conflict(&live))));
+        }
         match hosts::socket_until(&socket, deadline) {
             Ok(stream) => return Ok(stream),
             Err(error)
@@ -142,7 +152,7 @@ fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
                 ))));
             }
         }
-        if !started && live.is_empty() && holder.is_none() {
+        if !started && !waiting_for_restart && live.is_empty() && holder.is_none() {
             if auto_start {
                 started = super::starter::start(paths, deadline)
                     .map_err(|error| Box::new((error.reason, *error.failure)))?;

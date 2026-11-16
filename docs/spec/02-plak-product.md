@@ -4045,7 +4045,12 @@ budget. Layout, private-directory and permission failures are `verification_fail
 remote-shell and unit-managed startup policy refusals are `start_refused`, with no
 retry hint. Stopping is backed by a stopping
 diagnostic on a verified kernel-held private lock; stale file text grants no
-authority. Verification failures never become absence or auto-start permission.
+authority. The source marks its held locks as soon as stop is observed, before
+connection joins. A committed restart is marked `restarting`: the bridge waits
+within its existing ten-second discovery window for the successor, without
+starting another host during the gap. An operator stop is marked `stopping` and
+refuses a bridge even with `--auto-start`. Verification failures never become
+absence or auto-start permission.
 These are neutral transport handshake reasons; product lifecycle phase, reason
 and target DTOs remain in `plakd-wire-types` beneath the generic host envelope.
 

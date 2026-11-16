@@ -26,10 +26,11 @@ impl Drop for HostLock {
 
 impl HostLock {
     /// A private, kernel-lock-backed discovery hint during planned transport closure.
-    pub(super) fn stopping(&self) -> CliResult<()> {
+    pub(super) fn stopping(&self, restarting: bool) -> CliResult<()> {
         use std::os::unix::fs::FileExt as _;
         // A planned stop must never wait for a cold image hash.
-        let bytes = format!("{} stopping\n", self.diagnostic);
+        let phase = if restarting { "restarting" } else { "stopping" };
+        let bytes = format!("{} {phase}\n", self.diagnostic);
         self.file
             .write_all_at(bytes.as_bytes(), 0)
             .and_then(|()| self.file.set_len(bytes.len() as u64))
