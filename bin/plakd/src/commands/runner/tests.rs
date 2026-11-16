@@ -151,6 +151,24 @@ fn connect_never_reaches_the_home_local_runner() {
 }
 
 #[test]
+fn a_symlinked_home_admits_the_local_runners_empty_workspace() {
+    let directory = tempfile::tempdir().unwrap();
+    let real_parent = directory.path().join("real");
+    std::fs::create_dir_all(real_parent.join("product")).unwrap();
+    let alias = directory.path().join("alias");
+    std::os::unix::fs::symlink(&real_parent, &alias).unwrap();
+    let paths = PlakPaths::explicit(alias.join("product"));
+    let home = LocalRunnerHome::of(&paths);
+    home::private_below(paths.home(), home.root()).unwrap();
+    let empty = home.empty_directory();
+    home::private_below(paths.home(), &empty).unwrap();
+    let scope = ExecutionEnvironmentScope::Run(uuid::Uuid::new_v4().try_into().unwrap());
+    let environment = initial_environment(scope, &empty).unwrap();
+    assert_eq!(environment.root(), empty.canonicalize().unwrap());
+    assert_eq!(environment.cwd(), environment.root());
+}
+
+#[test]
 fn machine_build_identity_is_atomic_and_cannot_be_reinterpreted() {
     let directory = tempfile::tempdir().unwrap();
     let paths = PlakPaths::explicit(directory.path().to_path_buf());

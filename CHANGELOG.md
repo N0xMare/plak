@@ -18,6 +18,9 @@ for one version bump, without native protocol compatibility.
   Resolve offline MCP and product crash-fixture paths from Cargo artifact
   records rather than the intermediate test-binary layout, which Cargo 1.100 changes.
 
+- Accept symlinked absolute workspace cwd paths without weakening containment,
+  fixing home-local runner startup with homes under macOS `/tmp` or `/var`.
+
 - Classify Anthropic API HTTP 400 insufficient-credit responses as permanent
   `QuotaExceeded` failures with an API-credit repair remedy.
 

@@ -101,6 +101,52 @@ fn workspace_rejects_traversal_and_symlink_escape() -> Result<(), Box<dyn std::e
 }
 
 #[test]
+fn host_cwd_accepts_symlinked_workspace_spellings() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempdir()?;
+    let root = directory.path().join("workspace");
+    fs::create_dir_all(root.join("src"))?;
+    let alias = directory.path().join("alias");
+    std::os::unix::fs::symlink(&root, &alias)?;
+    let canonical = root.canonicalize()?;
+    for root in [&root, &alias, &canonical] {
+        for cwd in [&alias, &canonical, &alias.join("src")] {
+            let policy = WorkspacePolicy::host(root, cwd)?;
+            assert_eq!(policy.root(), canonical);
+            assert_eq!(policy.cwd(), cwd.canonicalize()?);
+        }
+        assert_eq!(
+            WorkspacePolicy::host(root, "src")?.cwd(),
+            canonical.join("src")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn host_cwd_refuses_symlink_escape_and_traversal() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempdir()?;
+    let root = directory.path().join("workspace");
+    let outside = directory.path().join("outside");
+    fs::create_dir(&root)?;
+    fs::create_dir(&outside)?;
+    let alias = directory.path().join("alias");
+    std::os::unix::fs::symlink(&root, &alias)?;
+    std::os::unix::fs::symlink(&outside, root.join("escape"))?;
+    for cwd in [
+        alias.join("escape"),
+        root.join("escape"),
+        outside,
+        root.join("../workspace"),
+        PathBuf::from("escape"),
+        PathBuf::from("../workspace"),
+    ] {
+        let error = WorkspacePolicy::host(&alias, cwd).expect_err("cwd must stay contained");
+        assert_eq!(error.kind(), ToolRuntimeErrorKind::WorkspacePolicy);
+    }
+    Ok(())
+}
+
+#[test]
 fn workspace_paths_resolve_from_root_not_cwd() -> Result<(), Box<dyn std::error::Error>> {
     let workspace = tempdir()?;
     fs::write(workspace.path().join("Cargo.toml"), b"[package]\n")?;

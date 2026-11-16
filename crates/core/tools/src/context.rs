@@ -66,7 +66,9 @@ impl WorkspacePolicy {
     }
     /// Creates a policy after canonicalizing an existing workspace root.
     ///
-    /// `cwd` must be a relative path beneath the root and must already exist.
+    /// `cwd` may be relative to the root or absolute, including through symlinked
+    /// ancestors. It must already exist and resolve beneath the canonical root.
+    /// Parent traversal is refused in either spelling.
     /// Host mode is reported by default; path containment does not confine process tools.
     ///
     /// # Errors
@@ -74,7 +76,18 @@ impl WorkspacePolicy {
     /// Returns a workspace-policy error for I/O failure, traversal, or escape.
     pub fn host(root: impl AsRef<Path>, cwd: impl AsRef<Path>) -> Result<Self, ToolRuntimeError> {
         let root = canonicalize_safe(root.as_ref(), "workspace root could not be resolved")?;
-        let relative_cwd = workspace_relative_suffix(&root, cwd.as_ref())?;
+        let cwd = cwd.as_ref();
+        if cwd.components().any(|part| part == Component::ParentDir) {
+            return Err(workspace_error(
+                "workspace current directory contains parent traversal",
+            ));
+        }
+        let absolute_cwd = cwd
+            .is_absolute()
+            .then(|| canonicalize_safe(cwd, "workspace current directory could not be resolved"))
+            .transpose()?;
+        let relative_cwd =
+            workspace_relative_suffix(&root, absolute_cwd.as_deref().unwrap_or(cwd))?;
         let cwd = canonicalize_safe(
             &root.join(relative_cwd),
             "workspace current directory could not be resolved",

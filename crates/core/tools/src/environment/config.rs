@@ -690,7 +690,9 @@ impl ExecutionEnvironment {
     ///
     /// The backend identity, semantic revision, OS/path tag, and physical
     /// containment descriptor are minted internally. `cwd` is relative to `root`
-    /// and must exist. Canonical paths must be UTF-8 for explicit identity bytes.
+    /// or absolute and must exist beneath the canonical root, including when
+    /// spelled through symlinked ancestors. Parent traversal is refused.
+    /// Canonical paths must be UTF-8 for explicit identity bytes.
     ///
     /// # Errors
     ///

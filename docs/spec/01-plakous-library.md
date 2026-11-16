@@ -7462,8 +7462,13 @@ rather than silently rewriting the session's tools.
 
 Filesystem, process, environment, and network effects require an explicit
 `ExecutionEnvironment` and `ToolPolicy`. Paths are workspace-relative and
-validated against traversal and symlink escape. Process-cwd resolution happens
-before spawn: an absolute or parent-traversing `workdir`, a symlink escape, or a
+validated against traversal and symlink escape. At host environment construction,
+`WorkspacePolicy::host` accepts an existing cwd relative to the root or absolute.
+The root and an absolute cwd are canonicalized before computing the relative
+suffix, so symlinked ancestor spellings are accepted only when the resolved cwd
+is beneath the canonical root. Parent traversal remains refused. This does not
+relax model-supplied tool-path or process-`workdir` rules. Process-cwd resolution
+happens before spawn: an absolute or parent-traversing `workdir`, a symlink escape, or a
 missing or inaccessible cwd that cannot be inspected or resolved is a no-effect
 workspace-policy rejection, returned as a model-visible tool failure. A parent
 component of the cwd that exists and is not a directory is `NotADirectory`
