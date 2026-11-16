@@ -5656,8 +5656,11 @@ and no ambiguous input is replayed.
 
 Only proven absence and explicit local `--auto-start` permit an unmanaged
 start. SSH-session markers refuse such a start; the remote client does not
-supply the flag. An installed `plakd-host.service` instead yields the unit-start
-remedy, never an unmanaged sibling. Concurrent bridge, direct and unit starts
+supply the flag. An installed `plakd-host.service` or legacy `plak-host.service`
+instead yields `start_refused` and the unit-start remedy, never an unmanaged
+sibling, including a managed restart window. This fail-closed presence check
+does not inspect the unit's home or provide a compatibility startup path.
+Concurrent bridge, direct and unit starts
 use the same home guard; ordinary discovery has a ten-second deadline, while
 explicit startup allows thirty seconds for log-lock contention and readiness.
 A log-lock loser returns a distinct private acknowledgement: the bridge repeats
@@ -6082,7 +6085,8 @@ command, both log paths with `tail -F`, and removal instructions:
 and the UID is the invoking user's numeric ID. The GUI agent is also loaded
 at a later login, not as a system-wide or pre-login daemon. UI-only reload uses
 `launchctl kill SIGUSR1 gui/<uid>/com.plakd.host`. Explicit bridge auto-start
-refuses an installed LaunchAgent, including a foreign or symlinked plist,
+refuses an installed `com.plakd.host.plist` or legacy `com.plak.host.plist`
+with `start_refused`, including a foreign or symlinked plist,
 without inspecting its configured product home or starting an unmanaged host.
 
 Example generated Linux service section for the paths shown in the golden:

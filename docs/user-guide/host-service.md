@@ -11,6 +11,13 @@ The installer warns, but does not refuse, if that stable link is missing or
 not executable. HOME cannot contain `=` or `:`. On Linux, if you set
 XDG_CONFIG_HOME, it must resolve to `$HOME/.config`, where the unit is installed.
 
+The stdio bridge's explicit `--auto-start` refuses an installed
+`plakd-host.service` or legacy `plak-host.service`, and on macOS refuses either
+`com.plakd.host.plist` or legacy `com.plak.host.plist`. It reports the typed,
+non-retryable `start_refused` without starting an unmanaged sibling, including
+during a managed restart. This is a fail-closed presence check, not a legacy
+service launcher; start the installed service explicitly.
+
 Configure `[web] origin` to the exact HTTPS origin Tailscale Serve will publish,
 and `[web] allow` for the permitted tailnet logins. Tag the serving node
 and permit the owner's devices in the tailnet ACL. Serve needs access to the

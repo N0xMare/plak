@@ -314,15 +314,17 @@ fn refuse_installed_unit(
             )
             .into());
         }
-        let path = directory.join("plakd-host.service");
-        match std::fs::symlink_metadata(&path) {
-            Ok(_) => {
-                return Err(policy_refused(
-                    "plakd-host.service is installed (its home was not inspected); check its configuration and use systemctl --user start plakd-host.service if appropriate, or run plakd host in the foreground for this home; no unmanaged host was started",
-                ));
+        for unit in ["plakd-host.service", "plak-host.service"] {
+            let path = directory.join(unit);
+            match std::fs::symlink_metadata(&path) {
+                Ok(_) => {
+                    return Err(policy_refused(&format!(
+                        "{unit} is installed (its home was not inspected); check its configuration and use systemctl --user start {unit} if appropriate, or run plakd host in the foreground for this home; no unmanaged host was started",
+                    )));
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(failed(error).into()),
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(failed(error).into()),
         }
     }
     Ok(())
@@ -330,17 +332,20 @@ fn refuse_installed_unit(
 
 #[cfg(any(target_os = "macos", test))]
 fn refuse_launch_agent(home: &std::path::Path) -> Result<(), StartFailure> {
-    let path = home.join("Library/LaunchAgents/com.plakd.host.plist");
-    match std::fs::symlink_metadata(&path) {
-        Ok(_) => Err(policy_refused(
-            "com.plakd.host.plist is installed (its home was not inspected); load and start the LaunchAgent explicitly, or run plakd host in the foreground for this home; no unmanaged host was started",
-        )),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(CliFailure::new(format!(
-            "could not inspect {}: {error}; LaunchAgent absence is unproven; no unmanaged host was started",
-            path.display()
-        )).into()),
+    for agent in ["com.plakd.host.plist", "com.plak.host.plist"] {
+        let path = home.join("Library/LaunchAgents").join(agent);
+        match std::fs::symlink_metadata(&path) {
+            Ok(_) => return Err(policy_refused(&format!(
+                "{agent} is installed (its home was not inspected); load and start the LaunchAgent explicitly, or run plakd host in the foreground for this home; no unmanaged host was started",
+            ))),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(CliFailure::new(format!(
+                "could not inspect {}: {error}; LaunchAgent absence is unproven; no unmanaged host was started",
+                path.display()
+            )).into()),
+        }
     }
+    Ok(())
 }
 
 fn failed(error: io::Error) -> CliFailure {
@@ -360,12 +365,21 @@ mod tests {
         assert!(refuse_launch_agent(root.path()).is_ok());
         let directory = root.path().join("Library/LaunchAgents");
         std::fs::create_dir_all(&directory).unwrap();
-        let path = directory.join("com.plakd.host.plist");
-        std::fs::write(&path, "its configured product home is not inspected").unwrap();
-        assert!(refuse_launch_agent(root.path()).is_err());
-        std::fs::remove_file(&path).unwrap();
-        std::os::unix::fs::symlink(root.path().join("missing.plist"), &path).unwrap();
-        assert!(refuse_launch_agent(root.path()).is_err());
+        for agent in ["com.plakd.host.plist", "com.plak.host.plist"] {
+            let path = directory.join(agent);
+            std::fs::write(&path, "its configured product home is not inspected").unwrap();
+            assert_eq!(
+                refuse_launch_agent(root.path()).unwrap_err().reason,
+                BridgeUnavailableReason::StartRefused
+            );
+            std::fs::remove_file(&path).unwrap();
+            std::os::unix::fs::symlink(root.path().join("missing.plist"), &path).unwrap();
+            assert_eq!(
+                refuse_launch_agent(root.path()).unwrap_err().reason,
+                BridgeUnavailableReason::StartRefused
+            );
+            std::fs::remove_file(&path).unwrap();
+        }
     }
 
     #[test]

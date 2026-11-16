@@ -368,22 +368,18 @@ fn concurrent_bridge_and_direct_starters_reach_one_host_generation() {
 #[test]
 fn a_remote_or_unit_managed_bridge_never_starts_an_unmanaged_host() {
     let Some(fixture) = fixture() else { return };
-    for unit in [false, true] {
+    for unit in [None, Some("plakd-host.service"), Some("plak-host.service")] {
         let config = fixture.root.join("unit-config");
-        if unit {
+        if let Some(unit) = unit {
             std::fs::create_dir_all(config.join("systemd/user")).unwrap();
-            std::fs::write(
-                config.join("systemd/user/plakd-host.service"),
-                "[Service]\n",
-            )
-            .unwrap();
+            std::fs::write(config.join("systemd/user").join(unit), "[Service]\n").unwrap();
         }
         let mut command = fixture.command();
         command
             .args(["host", "connect", "--stdio", "--auto-start"])
             .env("XDG_CONFIG_HOME", &config)
             .stdin(Stdio::null());
-        if !unit {
+        if unit.is_none() {
             command.env("SSH_CONNECTION", "fixture remote session");
         }
         let output = output_after_hello(&mut command, WIRE_VERSION);
@@ -394,7 +390,7 @@ fn a_remote_or_unit_managed_bridge_never_starts_an_unmanaged_host() {
         );
         let message = String::from_utf8_lossy(&output.stderr);
         assert!(
-            message.contains(if unit {
+            message.contains(if unit.is_some() {
                 "systemctl --user start"
             } else {
                 "local only"
@@ -402,6 +398,10 @@ fn a_remote_or_unit_managed_bridge_never_starts_an_unmanaged_host() {
             "{message}"
         );
         assert!(!fixture.home().join("host/host.lock").exists());
+        if let Some(unit) = unit {
+            assert!(message.contains(unit), "{message}");
+            std::fs::remove_file(config.join("systemd/user").join(unit)).unwrap();
+        }
     }
 }
 
