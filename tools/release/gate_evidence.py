@@ -14,7 +14,8 @@ passing package group records its tree in `<target>/gate-evidence/package`.
 Anything else, an unknown evidence tree, or a failing git command refuses.
 `audit` is the structure check that keeps the allowlist honest: no gate
 input (Rust, Python, shell, manifests, recipes) may name an allowlisted path
-unless it is a reviewed reference below.
+unless it is a reviewed reference below. The product instruction basename is
+exempt from token review; reads of the root file still fail.
 """
 
 from __future__ import annotations
@@ -31,7 +32,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 # Documentation no build, test, checker or packaged crate reads.
-ALLOWLIST = ("tests/live/STATUS.md", "CHANGELOG.md", "docs/spec/**", "docs/user-guide/**")
+ALLOWLIST = (
+    "AGENTS.md",
+    "tests/live/STATUS.md",
+    "CHANGELOG.md",
+    "docs/spec/**",
+    "docs/user-guide/**",
+)
 # Allowlisted by pattern but read by a gate; a change to one invalidates.
 EXCLUDED = {
     "docs/spec/07-config-reference.md": "bin/plakd product_config tests compare the config key table and template schema with it",
@@ -171,13 +178,10 @@ REFERENCE = re.compile(
     r"|\*\.md\b"
 )
 COMPONENT = re.compile(r"[\"'](?:[^\"'\s]*/)?(?:docs|spec|user-guide|STATUS)/?[\"']")
-# A root README reader in code: an include resolved from the source file, a
+# A root document reader in code: an include resolved from the source file, a
 # path joined to the crate directory, or the repository root joined with
-# README.md. Manifest `readme` keys are what packaging reads, which the
+# README.md or AGENTS.md. Manifest `readme` keys are what packaging reads, which the
 # package group covers.
-README_INCLUDE = re.compile(r"include_(?:str|bytes)!\(\s*\"([^\"]*README\.md)\"")
-README_MANIFEST_JOIN = re.compile(r"CARGO_MANIFEST_DIR[^\n]{0,160}?\"([^\"]*README\.md)\"")
-README_ROOT_JOIN = re.compile(r"\bROOT\s*/\s*[\"']README\.md")
 MANIFEST_README_KEY = re.compile(r"^\s*readme\s*=")
 OBJECT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 RUST_COMMENT = re.compile(r"^\s*(//|/\*|\*)")
@@ -372,10 +376,12 @@ def audit(root: Path, files: list[str]) -> list[str]:
                 )
         # Multi-line include_str!(concat!(...)) forms read across lines.
         joined = " ".join(text.split())
-        if reads_root_readme(relative, joined, files):
-            errors.append(
-                f"{relative}: reads the root README.md; PACKAGE_ONLY assumes no gate but packaging does"
-            )
+        for document, rule in (
+            ("README.md", "PACKAGE_ONLY assumes no gate but packaging does"),
+            ("AGENTS.md", "ALLOWLIST assumes no build, test or packaged crate reads it"),
+        ):
+            if reads_root_document(relative, joined, files, document):
+                errors.append(f"{relative}: reads the root {document}; {rule}")
     listed = set(files)
     for relative, (texts, _reason) in sorted(REVIEWED_REFERENCES.items()):
         if relative not in listed:
@@ -388,18 +394,19 @@ def audit(root: Path, files: list[str]) -> list[str]:
     return errors
 
 
-def reads_root_readme(relative: str, line: str, files: list[str]) -> bool:
-    if README_ROOT_JOIN.search(line):
+def reads_root_document(relative: str, line: str, files: list[str], document: str) -> bool:
+    name = re.escape(document)
+    if re.search(rf"\bROOT\s*/\s*[\"']{name}", line):
         return True
-    include = README_INCLUDE.search(line)
+    include = re.search(rf"include_(?:str|bytes)!\(\s*\"([^\"]*{name})\"", line)
     if include is not None:
-        return os.path.normpath(Path(relative).parent / include.group(1)) == "README.md"
-    joined = README_MANIFEST_JOIN.search(line)
+        return os.path.normpath(Path(relative).parent / include.group(1)) == document
+    joined = re.search(rf"CARGO_MANIFEST_DIR[^\n]{{0,160}}?\"([^\"]*{name})\"", line)
     if joined is not None:
         crate = Path(relative).parent
         while crate != Path(".") and (crate / "Cargo.toml").as_posix() not in files:
             crate = crate.parent
-        return os.path.normpath(crate / joined.group(1).lstrip("/")) == "README.md"
+        return os.path.normpath(crate / joined.group(1).lstrip("/")) == document
     return False
 
 

@@ -33,7 +33,8 @@ class ClassifyTests(unittest.TestCase):
             ("docs/local/notes.md", "other"),
             ("docs/specs.md", "other"),
             ("tests/live/live.py", "other"),
-            ("AGENTS.md", "other"),
+            ("AGENTS.md", "docs"),
+            ("crates/a/AGENTS.md", "other"),
             ("Cargo.toml", "other"),
         ):
             with self.subTest(path=path):
@@ -108,6 +109,17 @@ class VerifyTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("the trees differ but no delta was read", output)
 
+    def test_agent_instructions_keep_full_and_package_evidence(self):
+        (self.target / "gate-evidence/package").write_text(self.tree + "\n")
+        (self.root / "AGENTS.md").write_text("Agent instructions only.\n")
+        self.commit()
+        with mock.patch.object(gate_evidence, "hygiene_findings", return_value=[]):
+            ok, output = self.verify()
+        self.assertTrue(ok, output)
+        self.assertIn("delta docs: AGENTS.md", output)
+        self.assertEqual((self.target / "gate-evidence/full").read_text().strip(), self.tree)
+        self.assertEqual((self.target / "gate-evidence/package").read_text().strip(), self.tree)
+
 
 class AuditTests(unittest.TestCase):
     def audit(self, files: dict[str, str]) -> list[str]:
@@ -176,6 +188,36 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(len(self.audit(sources)), 1)
             sources["crates/a/src/lib.rs"] = '#![doc = include_str!("../README.md")]\n'
             self.assertEqual(self.audit(sources), [])
+
+    def test_root_agent_instruction_read_fails_even_when_reviewed(self):
+        reviewed = {"crates/a/src/lib.rs": (frozenset({"AGENTS.md"}), "fixture")}
+        sources = {"crates/a/Cargo.toml": "[package]\n"}
+        for text in (
+            'const A: &str = include_str!(\n    "../../../AGENTS.md"\n);',
+            'const A: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../AGENTS.md"));',
+            'let a = (ROOT / "AGENTS.md").read_text();',
+        ):
+            with (
+                self.subTest(text=text),
+                mock.patch.dict(gate_evidence.REVIEWED_REFERENCES, reviewed, clear=True),
+            ):
+                sources["crates/a/src/lib.rs"] = text
+                errors = self.audit(sources)
+                self.assertTrue(
+                    any("reads the root AGENTS.md" in error for error in errors), errors
+                )
+
+    def test_instruction_basename_vocabulary_needs_no_review(self):
+        self.assertEqual(
+            self.audit(
+                {
+                    "src/instructions.rs": 'const NAME: &str = "AGENTS.md";\n',
+                    "tools/instructions.py": '# The agent reads its workspace AGENTS.md.\n',
+                    "crates/a/Cargo.toml": 'description = "AGENTS.md discovery"\n',
+                }
+            ),
+            [],
+        )
 
     def test_comments_urls_documents_and_manifest_readme_keys_are_not_readers(self):
         self.assertEqual(

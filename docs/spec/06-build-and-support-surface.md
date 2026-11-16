@@ -1601,7 +1601,8 @@ HEAD when T is HEAD's tree, or when the plumbing delta
 (`git diff-tree -r --no-renames --ignore-submodules=none T HEAD^{tree}`, which
 no diff configuration can narrow) touches nothing but:
 
-- documentation no gate reads: `tests/live/STATUS.md`, `CHANGELOG.md`,
+- agent instructions and documentation no gate reads: `AGENTS.md`,
+  `tests/live/STATUS.md`, `CHANGELOG.md`,
   `docs/spec/**` and `docs/user-guide/**`, except
   `docs/spec/07-config-reference.md`, which `plakd` configuration tests read,
   and `docs/user-guide/integrating.md`, whose transcript the tooling client
@@ -1611,9 +1612,15 @@ no diff configuration can narrow) touches nothing but:
   `gate-evidence/package` also names HEAD's tree (rerun `just steps package`
   on HEAD).
 
-The changed documentation must still pass the tracked-file hygiene scan of
-the workspace checker, which `verify` reruns on the delta. Any other path, a
-symlink or submodule entry on either side, evidence that is not a 40- or
+The root agent-instruction file is guidance for repository agents, not a build,
+test or packaged-crate input. Instruction-discovery tests use in-memory or
+temporary workspaces; prompt-render tests enroll their own fixture instructions,
+not the checkout's instructions. Its content-only changes need no new full or
+package evidence.
+
+The changed instructions and documentation must still pass the tracked-file
+hygiene scan of the workspace checker, which `verify` reruns on the delta. Any
+other path, a symlink or submodule entry on either side, evidence that is not a 40- or
 64-hex tree id git knows, differing trees with no readable delta, or an
 unreadable state refuses. `verify` prints T, HEAD's tree and every changed
 path with its class, so the decision is auditable. On the `README.md` path the
@@ -1625,12 +1632,14 @@ audit`) keeps the allowlist honest as a best-effort lint. It flags, in every
 tracked Rust, Python, shell, manifest, recipe or workflow file outside a
 comment or URL: an allowlisted path, a bare path-component literal (`"docs"`,
 `"spec"`, `"user-guide"`, `"STATUS"`, including `"../../docs"`), `CHANGELOG`,
-`README`, and Markdown globs (`*.md`). Each hit must be listed by its exact
+`README`, and Markdown globs (`*.md`). `AGENTS.md` is exempt from token review
+because it is the product's instruction-file basename, not necessarily a
+reference to the repository file. Each other hit must be listed by its exact
 text for its file with a reason, or be the exact excluded path its reviewed
 reader reads; a listed text that no longer occurs fails as stale. It also
-fails on a root README read through `include_str!` (multi-line forms
-included), a `CARGO_MANIFEST_DIR` join or the repository root. A path built in
-a way the lint cannot see is still covered by the rule itself: only the listed
+fails on a root README or agent-instruction read through `include_str!`
+(multi-line forms included), a `CARGO_MANIFEST_DIR` join or the repository root.
+A path built in a way the lint cannot see is still covered by the rule itself: only the listed
 documentation is inert, and every other delta invalidates the evidence. So an
 upload always follows a full gate on bytes that differ from the packaged ones
 at most in inert documentation. Publishing is a maintainer act;

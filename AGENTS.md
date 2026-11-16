@@ -102,7 +102,7 @@ static without ruff or the platform-independent structure checkers (fmt and
 clippy still run), builds and the
 three lanes; full runs every group, and a full pass on a clean tree records that
 tree as the evidence `just publish` requires. Later commits that change only
-`CHANGELOG.md`, `tests/live/STATUS.md`, `docs/spec/**` (not spec 07) or
+`AGENTS.md`, `CHANGELOG.md`, `tests/live/STATUS.md`, `docs/spec/**` (not spec 07) or
 `docs/user-guide/**` keep that evidence; a `README.md` change also needs
 `just steps package` on the new tree (spec 06 §6.5).
 `just fast` keeps fmt/ruff and structural checks global, narrows clippy to the
