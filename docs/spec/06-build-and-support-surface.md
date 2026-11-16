@@ -965,7 +965,7 @@ just musl container --fast plakd  # optional targeted iteration
 ```
 
 `just musl container` is a maintainer-only gate. `tools/musl/musl-check.sh` uses the
-preloaded image `plak-qual-base:8ef1da25` (image ID `8ef1da25406d`), which is
+preloaded image `plak-qual-base:86ab9e67` (image ID `86ab9e67a545`), which is
 not published; without that image on a Linux x86_64 Docker host the gate cannot
 run, and the platform tiers above remain the public evidence. The image holds Alpine 3.24.4,
 Rust 1.100.0 with a musl host toolchain, clippy, rustfmt, the
@@ -2123,7 +2123,7 @@ whose rustc lacks the target fails and names that install, with one exception.
 The gate probes the target as the directory
 `$(rustc --print sysroot)/lib/rustlib/wasm32-unknown-unknown/lib`, so it needs
 no `rustup` on `PATH`. The pinned qualification image
-`plak-qual-base:8ef1da25` has no network and includes the target; an earlier
+`plak-qual-base:86ab9e67` has no network and includes the target; an earlier
 image without it may still run the gate. `tools/musl/musl-check.sh` passes the
 leading gate argument `--qual-container`, which nothing else passes; an
 environment variable cannot select it. With that argument and the target

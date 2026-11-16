@@ -45,7 +45,7 @@ agent VM installs them from `.agents/setup`. Worker branches iterate and finish
 with `just fast <packages>` plus the groups their change needs. The integration
 batch, install and publication gates are spec 06 §8.
 `just musl container` is a maintainer-only container gate: it needs the preloaded
-offline image `plak-qual-base:8ef1da25`, which is not published (spec 06).
+offline image `plak-qual-base:86ab9e67`, which is not published (spec 06).
 
 ```text
 just fast [PKG...]        # static checks, then the parallel lane for the diff's packages and dependents
