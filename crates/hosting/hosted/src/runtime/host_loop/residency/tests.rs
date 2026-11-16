@@ -23,7 +23,7 @@ fn with_actor(
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([{"output": {"text": "resident"}}])),
+        script(&serde_json::json!([{"output": {"text": "resident"}}])),
     );
     let attachments = AttachmentCount::default();
     config.idle_release = Some(IdleRelease {
@@ -427,7 +427,7 @@ fn a_slow_child_retirement_does_not_fail_a_recorded_stop() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([{"output": {"text": "resident"}}])),
+        script(&serde_json::json!([{"output": {"text": "resident"}}])),
     );
     let attachments = AttachmentCount::default();
     config.idle_release = Some(IdleRelease {

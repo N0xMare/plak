@@ -7,7 +7,7 @@ fn a_user_prompt_after_an_idle_interrupt_can_receive_notice_in_turn() {
     let root = tempfile::tempdir().unwrap();
     let config = process_host(
         root.path(),
-        serde_json::json!([
+        &serde_json::json!([
             {"output":{"text":"idle before the operator interrupt"}},
             {"output":{"tool": start_call("read line", 600_000, true)},"finish":"tool_calls"},
             {"output":{"text":"the new user turn received its notice"}}

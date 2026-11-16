@@ -90,11 +90,7 @@ fn retry_notice_names_the_network_phase() {
     assert_eq!(notice.cause_kind, "connect");
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-)]
-fn agent_event(kind: serde_json::Value) -> AgentEvent {
+fn agent_event(kind: &serde_json::Value) -> AgentEvent {
     let uuid = uuid::Uuid::from_u128(1);
     serde_json::from_value(serde_json::json!({
         "branch_sequence": 1, "event_id": uuid, "session_id": uuid, "branch_id": uuid,
@@ -109,7 +105,7 @@ fn agent_event(kind: serde_json::Value) -> AgentEvent {
 }
 
 fn apply_kind(
-    kind: serde_json::Value,
+    kind: &serde_json::Value,
     assistant: &mut String,
     projection: &mut TurnProjection<TestExtension>,
 ) -> Vec<HostEvent> {
@@ -160,7 +156,7 @@ fn uncommitted_tails_are_discarded_on_output_limit_settle_and_overflow_fold() {
             settled_assistant_len: 4,
             ..TurnProjection::default()
         };
-        let events = apply_kind(kind, &mut assistant, &mut projection);
+        let events = apply_kind(&kind, &mut assistant, &mut projection);
         assert_eq!(assistant, "kept");
         assert!(
             events
@@ -176,7 +172,7 @@ fn uncommitted_tails_are_discarded_on_output_limit_settle_and_overflow_fold() {
     };
     let workflow: Vec<u8> = std::iter::repeat_n(0x5a, 32).collect();
     let events = apply_kind(
-        serde_json::json!({"CompactionStarted": {"workflow_id": workflow, "reason": "manual"}}),
+        &serde_json::json!({"CompactionStarted": {"workflow_id": workflow, "reason": "manual"}}),
         &mut assistant,
         &mut projection,
     );
@@ -220,9 +216,9 @@ fn discardable_settle_drops_the_tail_a_completed_response_streamed() {
             settled_assistant_len: 4,
             ..TurnProjection::default()
         };
-        let _ = apply_kind(text_delta(" tail"), &mut assistant, &mut projection);
+        let _ = apply_kind(&text_delta(" tail"), &mut assistant, &mut projection);
         assert_eq!(assistant, "kept tail");
-        let completed = apply_kind(response_completed(), &mut assistant, &mut projection);
+        let completed = apply_kind(&response_completed(), &mut assistant, &mut projection);
         assert_eq!(projection.settled_assistant_len, 4);
         assert!(
             completed
@@ -230,7 +226,7 @@ fn discardable_settle_drops_the_tail_a_completed_response_streamed() {
                 .all(|event| !matches!(event, HostEvent::OutputDiscarded { .. }))
         );
         let settled = apply_kind(
-            serde_json::json!({"ResponseSettled": {"discardable": discardable}}),
+            &serde_json::json!({"ResponseSettled": {"discardable": discardable}}),
             &mut assistant,
             &mut projection,
         );
@@ -254,7 +250,7 @@ fn discardable_settle_drops_the_tail_a_completed_response_streamed() {
 }
 
 fn apply_with(
-    kind: serde_json::Value,
+    kind: &serde_json::Value,
     assistant: &mut String,
     delta_buf: &mut String,
     last_flush: &mut Instant,
@@ -308,7 +304,7 @@ fn scheduled_compaction_after_a_kept_response_sends_no_discard() {
     let mut last_flush = Instant::now();
     let mut projection = TurnProjection::<TestExtension>::default();
     apply_with(
-        text_delta("answer"),
+        &text_delta("answer"),
         &mut assistant,
         &mut delta_buf,
         &mut last_flush,
@@ -316,7 +312,7 @@ fn scheduled_compaction_after_a_kept_response_sends_no_discard() {
         &events,
     );
     apply_with(
-        serde_json::json!({"ResponseSettled": {"discardable": false}}),
+        &serde_json::json!({"ResponseSettled": {"discardable": false}}),
         &mut assistant,
         &mut delta_buf,
         &mut last_flush,
@@ -327,7 +323,7 @@ fn scheduled_compaction_after_a_kept_response_sends_no_discard() {
     assert_eq!(projection.settled_assistant_len, assistant.len());
     let workflow: Vec<u8> = std::iter::repeat_n(0x5a, 32).collect();
     apply_with(
-        serde_json::json!({"CompactionStarted": {"workflow_id": workflow, "reason": "scheduled"}}),
+        &serde_json::json!({"CompactionStarted": {"workflow_id": workflow, "reason": "scheduled"}}),
         &mut assistant,
         &mut delta_buf,
         &mut last_flush,

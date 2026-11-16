@@ -45,7 +45,7 @@ fn a_discarding_replay_keeps_earlier_rounds_thinking_in_order() {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {
                 "stream": [{"reasoning": "think one"}],
                 "output": {"tool": {"name": "loopback_effect", "arguments": {}}},
@@ -91,7 +91,7 @@ fn a_discard_then_cancel_keeps_earlier_rounds_text() {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {
                 "prefix": "round one. ",
                 "output": {"tool": {"name": "loopback_effect", "arguments": {}}},
@@ -204,42 +204,42 @@ fn a_quit_after_a_tool_round_is_bounded_and_keeps_uncommitted_thinking_live_only
 
 #[test]
 fn quit_grace_keeps_a_settled_interrupted_terminal_and_publishes_locator() {
-    quit_grace_fixture(false, QuitIntent::ProcessExit, false);
+    quit_grace_fixture(false, &QuitIntent::ProcessExit, false);
 }
 
 #[test]
 fn quit_grace_abandons_unsettled_cancel_and_reopens_the_projected_head() {
-    quit_grace_fixture(true, QuitIntent::ProcessExit, false);
+    quit_grace_fixture(true, &QuitIntent::ProcessExit, false);
 }
 
 #[test]
 fn ordinary_quit_keeps_a_settled_interrupted_terminal_and_publishes_locator() {
-    quit_grace_fixture(false, QuitIntent::Explicit, false);
+    quit_grace_fixture(false, &QuitIntent::Explicit, false);
 }
 
 #[test]
 fn ordinary_quit_abandons_unsettled_cancel_and_reopens_the_projected_head() {
-    quit_grace_fixture(true, QuitIntent::Explicit, false);
+    quit_grace_fixture(true, &QuitIntent::Explicit, false);
 }
 
 #[test]
 fn ordinary_quit_with_settled_cancel_reports_a_stuck_child_release() {
-    quit_grace_fixture(false, QuitIntent::Explicit, true);
+    quit_grace_fixture(false, &QuitIntent::Explicit, true);
 }
 
 #[test]
 fn process_exit_quit_with_settled_cancel_reports_a_stuck_child_release() {
-    quit_grace_fixture(false, QuitIntent::ProcessExit, true);
+    quit_grace_fixture(false, &QuitIntent::ProcessExit, true);
 }
 
 #[test]
 fn disconnected_control_plane_keeps_a_settled_interrupted_terminal() {
-    quit_grace_fixture(false, QuitIntent::Disconnected, false);
+    quit_grace_fixture(false, &QuitIntent::Disconnected, false);
 }
 
 #[test]
 fn disconnected_control_plane_abandons_unsettled_cancel_within_quit_budget() {
-    quit_grace_fixture(true, QuitIntent::Disconnected, false);
+    quit_grace_fixture(true, &QuitIntent::Disconnected, false);
 }
 
 /// A busy stop sends `Interrupt` and then `Quit`. Quit bounds the settlement
@@ -404,11 +404,7 @@ enum QuitIntent {
     Disconnected,
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-)]
-fn quit_grace_fixture(deaf: bool, quit: QuitIntent, stuck_child: bool) {
+fn quit_grace_fixture(deaf: bool, quit: &QuitIntent, stuck_child: bool) {
     let root = tempfile::tempdir().unwrap();
     let plan = serde_json::json!({
         "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
@@ -596,12 +592,12 @@ fn real_content_view_settles_thinking_before_tools_and_discards_terminal_length(
         let root = tempfile::tempdir().unwrap();
         let (mut config, _) = fresh_injected_attached_host(root.path());
         let plan = if length {
-            script(serde_json::json!([
+            script(&serde_json::json!([
                 {"stream": [{"reasoning": "discard one"}], "output": "reasoning_only", "finish": "length"},
                 {"stream": [{"reasoning": "discard two"}], "output": "reasoning_only", "finish": "length"}
             ]))
         } else {
-            script(serde_json::json!([
+            script(&serde_json::json!([
                 {"stream": [{"reasoning": "before tool"}], "output": {"tool": {"name": "loopback_effect", "arguments": {}}}, "finish": "tool_calls"},
                 {"output": {"text": "done"}}
             ]))

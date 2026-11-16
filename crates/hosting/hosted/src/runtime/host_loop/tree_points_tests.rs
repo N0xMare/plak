@@ -58,7 +58,7 @@ fn root_tree_passes_run_at_the_four_points_and_nowhere_else() {
         },
         {"output": {"text": "done"}}
     ]);
-    let (config, _) = scripted_host_with(root.path(), script(steps));
+    let (config, _) = scripted_host_with(root.path(), script(&steps));
     let id = config.session.id.clone();
     let _runtime = insert_tree(&config);
     let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
@@ -112,7 +112,7 @@ fn root_tree_passes_run_at_the_four_points_and_nowhere_else() {
 #[test]
 fn a_refused_idle_entry_pass_is_retried_by_the_next_tick() {
     let root = tempfile::tempdir().unwrap();
-    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
     let id = config.session.id.clone();
     let _runtime = insert_tree(&config);
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();

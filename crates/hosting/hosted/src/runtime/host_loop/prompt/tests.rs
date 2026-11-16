@@ -352,7 +352,7 @@ impl crate::runtime::fault_store::StoreFaults for CapacityProbe {
 fn low_storage_keeps_the_prompt_queued_without_admission_and_rechecks_on_retry() {
     use crate::session_store::StorageAdmission;
     let root = tempfile::tempdir().unwrap();
-    let plan = crate::runtime::recover_tests::script(serde_json::json!([
+    let plan = crate::runtime::recover_tests::script(&serde_json::json!([
         {"output": {"text": "only response"}}
     ]));
     let (config, _) = crate::runtime::recover_tests::scripted_host_with(root.path(), plan);
@@ -526,7 +526,7 @@ fn assert_busy_follow_up_storage_full(failed_root: bool) {
     } else {
         serde_json::json!({"gate": gate.script(), "output": {"text": "root response"}})
     };
-    let plan = crate::runtime::recover_tests::script(serde_json::json!([
+    let plan = crate::runtime::recover_tests::script(&serde_json::json!([
         first, {"output": {"text": "next response"}}, {"output": {"text": "queued response"}}
     ]));
     let (mut config, _) = crate::runtime::recover_tests::scripted_host_with(root.path(), plan);
@@ -697,7 +697,7 @@ fn busy_send_now_recovers_after_ack_projection_debt_without_waiting_for_idle() {
         )
         .unwrap();
     let tree = Arc::new(Mutex::new(tree));
-    let plan = crate::runtime::recover_tests::script(serde_json::json!([
+    let plan = crate::runtime::recover_tests::script(&serde_json::json!([
         {"output": {"tool": {"name": "wait_agent", "arguments": {"agent_ids": [child.agent_id], "timeout_ms": 2_400_000}}}, "finish": "tool_calls"},
         {"stream": [{"gate": gate.script()}], "output": {"text": "busy response"}},
         {"output": {"text": "steered response"}}

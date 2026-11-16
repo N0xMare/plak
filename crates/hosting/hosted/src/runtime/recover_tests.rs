@@ -31,17 +31,13 @@ type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 /// The first round's stream is accepted, streams two deltas, and then reports
 /// an outcome nobody can observe; every later round answers.
 fn fenced_then_answering() -> Arc<ScriptPlan> {
-    script(serde_json::json!([
+    script(&serde_json::json!([
         {"fault": {"at": "in_band", "kind": "outcome_unknown", "after_events": 2}},
         {"output": {"text": "the answer after recovery"}}
     ]))
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-)]
-pub(super) fn script(steps: serde_json::Value) -> Arc<ScriptPlan> {
+pub(super) fn script(steps: &serde_json::Value) -> Arc<ScriptPlan> {
     Arc::new(
         serde_json::from_value(serde_json::json!({"version": SCRIPT_VERSION, "steps": steps}))
             .unwrap(),
@@ -341,7 +337,7 @@ fn transport_uncertainty_then_context_limit_needs_another_explicit_prompt() {
     let root = tempfile::tempdir().unwrap();
     let (config, evidence) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {"fault": {"at": "in_band", "kind": "outcome_unknown", "after_events": 2}},
             {"fault": {"at": "in_band", "kind": "context_overflow"}},
             {"output": {"text": "the answer after explicit recovery"}}
@@ -505,7 +501,7 @@ fn recovery_names_the_paused_queue_and_its_resume_delivers_it() {
     let root = tempfile::tempdir().unwrap();
     let (config, evidence) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {"stall_ms": 400,
              "fault": {"at": "in_band", "kind": "outcome_unknown", "after_events": 2}},
             {"output": {"text": "the queued follow-up's answer"}}
@@ -550,7 +546,7 @@ fn recovery_names_the_paused_queue_and_its_resume_delivers_it() {
 fn an_unadmitted_fork_is_withdrawn_at_open_and_the_source_answers() {
     let root = tempfile::tempdir().unwrap();
     let answers = || {
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {"output": {"text": "one"}},
             {"output": {"text": "two"}}
         ]))
@@ -628,7 +624,7 @@ fn a_withdrawn_fork_leaves_no_seeded_tree_or_custody_record() {
     use crate::runtime::TreeRows as _;
     let root = tempfile::tempdir().unwrap();
     let answers = || {
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {"output": {"text": "one"}},
             {"output": {"text": "two"}}
         ]))
@@ -748,7 +744,7 @@ fn reopening_a_source_after_its_fork_published_keeps_the_forks_tree() {
     use crate::runtime::TreeRows as _;
     let root = tempfile::tempdir().unwrap();
     let answers = || {
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {"output": {"text": "one"}},
             {"output": {"text": "two"}},
             {"output": {"text": "three"}}

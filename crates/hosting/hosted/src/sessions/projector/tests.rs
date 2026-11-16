@@ -91,7 +91,7 @@ impl Feed {
         let genesis = feed.head;
         feed.push(
             feed.branch,
-            serde_json::json!({"created": {"genesis": genesis.to_string(), "revision": 1, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}),
+            &serde_json::json!({"created": {"genesis": genesis.to_string(), "revision": 1, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}),
             genesis,
             vec![FeedFact::SessionCreated {
                 operation_id: "plak:create:s1".to_owned(),
@@ -107,14 +107,10 @@ impl Feed {
         self.next_id
     }
 
-    #[allow(
-        clippy::needless_pass_by_value,
-        reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-    )]
     fn push(
         &mut self,
         branch: BranchId,
-        change: serde_json::Value,
+        change: &serde_json::Value,
         checkpoint: CheckpointId,
         facts: Vec<FeedFact>,
         reads: Reads,
@@ -227,7 +223,7 @@ impl Feed {
         let revision = self.seq + 1;
         self.push(
             branch,
-            serde_json::json!({"advanced": {
+            &serde_json::json!({"advanced": {
                 "parent": parent.to_string(),
                 "checkpoint": checkpoint.to_string(),
                 "revision": revision,
@@ -426,7 +422,7 @@ fn apply_step(feed: &mut Feed, step: &Step) {
             let branch = feed.branch;
             feed.push(
                 branch,
-                serde_json::json!({"lease_released": {"head": head.to_string(), "fence": 7}}),
+                &serde_json::json!({"lease_released": {"head": head.to_string(), "fence": 7}}),
                 head,
                 Vec::new(),
                 Reads::default(),
@@ -997,7 +993,7 @@ proptest! {
         };
         feed.push(
             target_branch,
-            serde_json::json!({"branched": {
+            &serde_json::json!({"branched": {
                 "source": {
                     "session_id": source.session_id().to_string(),
                     "branch_id": source.branch_id().to_string(),
@@ -1118,7 +1114,7 @@ fn append_test_branch(feed: &mut Feed, rebind: bool, operation: &str) {
     } else {
         FeedWorkflowKind::Fork
     };
-    feed.push(target_branch, serde_json::json!({"branched": {
+    feed.push(target_branch, &serde_json::json!({"branched": {
         "source": { "session_id": source.session_id().to_string(), "branch_id": source.branch_id().to_string(), "checkpoint_id": source.checkpoint_id().to_string() },
         "target": target.to_string(), "revision": 4, "transition": if rebind { "rebind" } else { "fork" }, "line": "00000000-0000-4000-8000-00000000c0de", "new_head": rebind, "generation": if rebind { 2 } else { 1 },
     }}), target, vec![

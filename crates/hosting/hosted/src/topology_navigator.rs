@@ -132,7 +132,7 @@ pub(crate) async fn dispatch_topology_navigator_action<
                 return;
             }
             spawn_operator_child_recover(
-                runtime,
+                &runtime,
                 session,
                 events,
                 *revision,
@@ -142,7 +142,7 @@ pub(crate) async fn dispatch_topology_navigator_action<
             );
         }
         UserAction::ResumeLossContinuation { agent_id } => {
-            spawn_loss_resume(runtime, session, events, agent_id.clone(), send);
+            spawn_loss_resume(&runtime, session, events, agent_id.clone(), send);
         }
         _ => {}
     }
@@ -304,12 +304,8 @@ pub(crate) fn spawn_operator_mail<P: plakous_host_protocol::ProtocolExtension>(
 
 /// Starts the operator's Resume of a held continuation on the host
 /// executor and returns. The hub tracks the task, and shutdown aborts it.
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "projection entry points own a runtime lease handle through snapshot construction"
-)]
 fn spawn_loss_resume<P: plakous_host_protocol::ProtocolExtension>(
-    runtime: std::sync::Arc<ProductTopologyRuntime>,
+    runtime: &std::sync::Arc<ProductTopologyRuntime>,
     session: &SessionRecord,
     events: &crate::runtime::Sender<P>,
     agent_id: Option<String>,
@@ -322,7 +318,7 @@ fn spawn_loss_resume<P: plakous_host_protocol::ProtocolExtension>(
         )));
         return;
     }
-    let task_runtime = std::sync::Arc::clone(&runtime);
+    let task_runtime = std::sync::Arc::clone(runtime);
     let task_session = session.clone();
     let task_events = events.clone();
     let task = runtime.driver().tasks().spawn(async move {
@@ -394,12 +390,8 @@ fn loss_resume_note(
 /// Starts one child recover on the host executor and returns. The hub keeps
 /// the task, and shutdown aborts it. The tree mutex is not held while the
 /// lease wait runs.
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "projection entry points own a runtime lease handle through snapshot construction"
-)]
 fn spawn_operator_child_recover<P: plakous_host_protocol::ProtocolExtension>(
-    runtime: std::sync::Arc<ProductTopologyRuntime>,
+    runtime: &std::sync::Arc<ProductTopologyRuntime>,
     session: &SessionRecord,
     events: &crate::runtime::Sender<P>,
     revision: u64,
@@ -414,7 +406,7 @@ fn spawn_operator_child_recover<P: plakous_host_protocol::ProtocolExtension>(
         )));
         return;
     }
-    let task_runtime = std::sync::Arc::clone(&runtime);
+    let task_runtime = std::sync::Arc::clone(runtime);
     let task_session = session.clone();
     let task_events = events.clone();
     let task = runtime.driver().tasks().spawn(async move {

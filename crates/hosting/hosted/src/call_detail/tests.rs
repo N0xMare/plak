@@ -308,11 +308,7 @@ fn a_child_request_without_an_attached_tree_is_refused() {
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-)]
-fn script(steps: serde_json::Value, identity_namespace: u128) -> Arc<ScriptPlan> {
+fn script(steps: &serde_json::Value, identity_namespace: u128) -> Arc<ScriptPlan> {
     Arc::new(
         serde_json::from_value(serde_json::json!({
             "version": SCRIPT_VERSION,
@@ -348,7 +344,7 @@ async fn session_with_turns(
         "child" => 2,
         other => return Err(format!("no scripted call namespace for {other}").into()),
     };
-    let plan = script(steps, identity_namespace);
+    let plan = script(&steps, identity_namespace);
     let binding = plakous_offline_crash_harness::scripted_runtime_binding_with_cursor(
         workspace,
         controller.clone(),

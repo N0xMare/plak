@@ -1256,11 +1256,7 @@ mod suite {
         md
     }
 
-    #[allow(
-        clippy::needless_pass_by_value,
-        reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-    )]
-    fn topology_failure(code: TopologyErrorCode, message: String) -> String {
+    fn topology_failure(code: TopologyErrorCode, message: &str) -> String {
         json!({ "code": code, "message": message }).to_string()
     }
 
@@ -1641,7 +1637,7 @@ mod suite {
             "wait: empty `agent_ids`",
             "From `topology_wait_request_invalid_message`.",
             "json",
-            &topology_failure(TopologyErrorCode::SchemaMismatch, wait_empty),
+            &topology_failure(TopologyErrorCode::SchemaMismatch, &wait_empty),
         ));
         let wait_cap = topology_wait_request_invalid_message(
             TopologyErrorCode::SchemaMismatch,
@@ -1654,7 +1650,7 @@ mod suite {
             "wait: too many ids",
             "From `topology_wait_request_invalid_message`.",
             "json",
-            &topology_failure(TopologyErrorCode::SchemaMismatch, wait_cap),
+            &topology_failure(TopologyErrorCode::SchemaMismatch, &wait_cap),
         ));
         let wait_dup = topology_wait_request_invalid_message(
             TopologyErrorCode::SchemaMismatch,
@@ -1667,7 +1663,7 @@ mod suite {
             "wait: duplicate ids",
             "From `topology_wait_request_invalid_message`.",
             "json",
-            &topology_failure(TopologyErrorCode::SchemaMismatch, wait_dup),
+            &topology_failure(TopologyErrorCode::SchemaMismatch, &wait_dup),
         ));
         let wait_timeout = topology_wait_request_invalid_message(
             TopologyErrorCode::BoundExceeded,
@@ -1680,7 +1676,7 @@ mod suite {
             "wait: `timeout_ms` < 1",
             "From `topology_wait_request_invalid_message`.",
             "json",
-            &topology_failure(TopologyErrorCode::BoundExceeded, wait_timeout),
+            &topology_failure(TopologyErrorCode::BoundExceeded, &wait_timeout),
         ));
 
         let mail_self = topology_mail_request_invalid_message(
@@ -1701,7 +1697,7 @@ mod suite {
             "mail: self-send",
             "From `topology_mail_request_invalid_message`.",
             "json",
-            &topology_failure(TopologyErrorCode::SelfSend, mail_self),
+            &topology_failure(TopologyErrorCode::SelfSend, &mail_self),
         ));
         let mail_bound = topology_mail_request_invalid_message(
             TopologyErrorCode::BoundExceeded,
@@ -1721,7 +1717,7 @@ mod suite {
             "mail: empty / oversized message",
             &format!("From `topology_mail_request_invalid_message` (limit {MAX_MESSAGE_BYTES})."),
             "json",
-            &topology_failure(TopologyErrorCode::BoundExceeded, mail_bound),
+            &topology_failure(TopologyErrorCode::BoundExceeded, &mail_bound),
         ));
         let mail_reply = topology_mail_request_invalid_message(
             TopologyErrorCode::ReplyInvalid,
@@ -1741,7 +1737,7 @@ mod suite {
             "mail: `purpose=reply` without `in_reply_to`",
             "From `topology_mail_request_invalid_message`.",
             "json",
-            &topology_failure(TopologyErrorCode::ReplyInvalid, mail_reply),
+            &topology_failure(TopologyErrorCode::ReplyInvalid, &mail_reply),
         ));
         let mail_in_reply = topology_mail_request_invalid_message(
             TopologyErrorCode::ReplyInvalid,
@@ -1761,7 +1757,7 @@ mod suite {
             "mail: `in_reply_to` without `purpose=reply`",
             "From `topology_mail_request_invalid_message`.",
             "json",
-            &topology_failure(TopologyErrorCode::ReplyInvalid, mail_in_reply),
+            &topology_failure(TopologyErrorCode::ReplyInvalid, &mail_in_reply),
         ));
 
         let submit_root = topology_submit_request_invalid_message(
@@ -1775,7 +1771,7 @@ mod suite {
             "submit: root forbidden",
             "From `topology_submit_request_invalid_message`.",
             "json",
-            &topology_failure(TopologyErrorCode::SubmitRootForbidden, submit_root),
+            &topology_failure(TopologyErrorCode::SubmitRootForbidden, &submit_root),
         ));
         let submit_token = topology_submit_request_invalid_message(
             TopologyErrorCode::SchemaMismatch,
@@ -1788,7 +1784,7 @@ mod suite {
             "submit: `turn_token` < 1",
             "From `topology_submit_request_invalid_message`.",
             "json",
-            &topology_failure(TopologyErrorCode::SchemaMismatch, submit_token),
+            &topology_failure(TopologyErrorCode::SchemaMismatch, &submit_token),
         ));
         let submit_bound = topology_submit_request_invalid_message(
             TopologyErrorCode::BoundExceeded,
@@ -1803,7 +1799,7 @@ mod suite {
                 "From `topology_submit_request_invalid_message` (limit {MAX_OUTPUT_JSON_BYTES})."
             ),
             "json",
-            &topology_failure(TopologyErrorCode::BoundExceeded, submit_bound),
+            &topology_failure(TopologyErrorCode::BoundExceeded, &submit_bound),
         ));
         let output_mismatch =
             topology_output_schema_mismatch_message("required property 'ok' is missing");
@@ -1811,7 +1807,7 @@ mod suite {
             "submit: frozen schema mismatch",
             "From `topology_output_schema_mismatch_message`.",
             "json",
-            &topology_failure(TopologyErrorCode::SchemaMismatch, output_mismatch),
+            &topology_failure(TopologyErrorCode::SchemaMismatch, &output_mismatch),
         ));
         md
     }

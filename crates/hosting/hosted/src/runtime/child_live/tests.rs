@@ -19,7 +19,7 @@ fn child_success_uses_the_root_done_vocabulary() {
         &uuid::Uuid::from_u128(1).to_string(),
         "ToolCompleted",
         &lineage,
-        serde_json::json!({"succeeded":true,"preview":"read result","subject":null}),
+        &serde_json::json!({"succeeded":true,"preview":"read result","subject":null}),
     );
     let ops = transcript_ops(&event, &mut TurnProjection::default());
     assert!(matches!(&ops[0], HostEvent::ToolLine {state,..} if state=="done"));
@@ -35,7 +35,7 @@ fn child_subject_capacity_evicts_the_oldest_started_call() {
             &uuid::Uuid::from_u128(index).to_string(),
             "ToolStarted",
             &lineage,
-            serde_json::json!({"arguments_preview":"{}","subject":"subject"}),
+            &serde_json::json!({"arguments_preview":"{}","subject":"subject"}),
         );
         transcript_ops(&event, &mut projection);
     }
@@ -189,16 +189,12 @@ async fn real_finished_cells_restore_nested_rows_and_failure_tally_from_the_ledg
     }
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-)]
 pub(in crate::runtime) fn tool_lifecycle_event(
     name: &str,
     call_id: &str,
     kind: &str,
     lineage: &plakous::agent::ToolCallerLineageView,
-    observation: serde_json::Value,
+    observation: &serde_json::Value,
 ) -> AgentEvent {
     use plakous::model::{Digest, DigestDomain};
     let digest = Digest::sha256(DigestDomain::ToolDefinition, 1, &[b"test"]).unwrap();
@@ -236,7 +232,7 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
             &parent,
             "ToolStarted",
             &starting,
-            serde_json::Value::Null,
+            &serde_json::Value::Null,
         ),
         &mut projection,
     );
@@ -246,7 +242,7 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
             &parent,
             "ToolCompleted",
             &marker,
-            serde_json::json!({"succeeded":true,"preview":"Script running with cell ID cell-7","subject":null}),
+            &serde_json::json!({"succeeded":true,"preview":"Script running with cell ID cell-7","subject":null}),
         ),
         &mut projection,
     );
@@ -256,7 +252,7 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
             &wait,
             "ToolStarted",
             &marker,
-            serde_json::Value::Null,
+            &serde_json::Value::Null,
         ),
         &mut projection,
     );
@@ -266,7 +262,7 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
             &wait,
             "ToolCompleted",
             &marker,
-            serde_json::json!({"succeeded":true,"preview":"Script completed","subject":null}),
+            &serde_json::json!({"succeeded":true,"preview":"Script completed","subject":null}),
         ),
         &mut projection,
     );
@@ -386,7 +382,7 @@ fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
                 &call_id,
                 "ToolStarted",
                 &lineage,
-                serde_json::to_value(&started).unwrap(),
+                &serde_json::to_value(&started).unwrap(),
             ),
             &mut projection,
         );
@@ -396,7 +392,7 @@ fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
                 &call_id,
                 "ToolCompleted",
                 &lineage,
-                completed.clone(),
+                &completed.clone(),
             ),
             &mut projection,
         );

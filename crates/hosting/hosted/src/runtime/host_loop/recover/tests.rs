@@ -217,7 +217,7 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
         let root = tempfile::tempdir().unwrap();
         let (config, evidence) = scripted_host_with(
             root.path(),
-            script(serde_json::json!([
+            script(&serde_json::json!([
                 {"fault": {"at": "in_band", "kind": "outcome_unknown", "after_events": 2}}
             ])),
         );
@@ -338,7 +338,7 @@ fn a_failed_eager_reopen_is_retried_by_the_next_action() {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([{"output": {"text": "after the retry"}}])),
+        script(&serde_json::json!([{"output": {"text": "after the retry"}}])),
     );
     let (controls, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sent, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
@@ -405,7 +405,7 @@ fn a_failed_eager_reopen_is_retried_by_the_next_action() {
 fn a_deferred_quit_skips_the_eager_reopen() {
     use crate::runtime::host_loop::RootRecovery;
     let root = tempfile::tempdir().unwrap();
-    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
     let (controls, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sent, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
@@ -471,7 +471,7 @@ impl crate::runtime::fault_store::StoreFaults for SendDuringReopen {
 fn an_interrupt_and_quit_sent_during_the_eager_reopen_are_answered_after_it() {
     use crate::runtime::host_loop::RootRecovery;
     let root = tempfile::tempdir().unwrap();
-    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
     let (controls, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (sent, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =

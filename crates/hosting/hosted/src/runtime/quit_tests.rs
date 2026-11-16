@@ -13,7 +13,7 @@ fn quit_observes_a_ready_terminal_before_an_expired_join_deadline() {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {"stream": [{"text": "ready to cancel"}, {"stall": 30000}]}
         ])),
     );

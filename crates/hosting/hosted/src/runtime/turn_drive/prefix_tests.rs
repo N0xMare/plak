@@ -84,7 +84,7 @@ fn observe_delayed_turn(rounds: usize) -> Observation {
         }));
     }
     steps.push(serde_json::json!({"gate": gate.script(), "output": {"text": "done"}}));
-    let (mut config, _) = scripted_host_with(root.path(), script(steps.into()));
+    let (mut config, _) = scripted_host_with(root.path(), script(&steps.into()));
     let id = config.session.id.clone();
     let store = config.store.clone();
     let sessions = config.state_roots.runtime_sessions().unwrap();

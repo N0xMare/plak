@@ -139,7 +139,7 @@ pub(super) fn release_a_running_root_turn(
 pub(super) fn next_host(
     root: &Path,
     lost: &Lost,
-    steps: serde_json::Value,
+    steps: &serde_json::Value,
     store: Arc<dyn SessionRecordStore>,
 ) -> crate::runtime::HostConfig<TestExtension> {
     let (mut config, _) = scripted_host_with(root, script(steps));
@@ -182,7 +182,7 @@ fn a_lost_root_turn_holds_until_the_one_resume_continues_it_once() {
     let config = next_host(
         root.path(),
         &lost,
-        serde_json::json!([{"output": {"text": "continued after the loss"}}]),
+        &serde_json::json!([{"output": {"text": "continued after the loss"}}]),
         Arc::clone(&lost.store),
     );
     let (actions, events, host) = spawn_host_worker(config).unwrap();
@@ -226,7 +226,7 @@ fn a_lost_root_turn_holds_until_the_one_resume_continues_it_once() {
     let seen = open_and_quit(next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     ));
     assert!(!seen.iter().any(held_notice), "{seen:#?}");
@@ -276,7 +276,7 @@ fn a_loss_left_unrecorded_after_the_projection_is_found_by_the_next_open() {
     let seen = open_and_quit(next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         refusing,
     ));
     assert!(!seen.iter().any(held_notice), "{seen:#?}");
@@ -298,7 +298,7 @@ fn a_loss_left_unrecorded_after_the_projection_is_found_by_the_next_open() {
     let seen = open_and_quit(next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     ));
     assert!(seen.iter().any(held_notice), "{seen:#?}");
@@ -319,7 +319,7 @@ fn a_consent_a_crash_left_unprepared_runs_once_at_the_next_open() {
     open_and_quit(next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     ));
     let record = lost.store.load(&lost.id).unwrap();
@@ -344,7 +344,7 @@ fn a_continuation_a_crash_left_prepared_runs_once_at_the_next_open() {
     open_and_quit(next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     ));
     let record = lost.store.load(&lost.id).unwrap();
@@ -388,7 +388,7 @@ fn run_pending_continuation(root: &Path, lost: &Lost, command: &str) {
     let config = next_host(
         root,
         lost,
-        serde_json::json!([{"output": {"text": "continued after the crash"}}]),
+        &serde_json::json!([{"output": {"text": "continued after the crash"}}]),
         Arc::clone(&lost.store),
     );
     let (actions, events, host) = spawn_host_worker(config).unwrap();
@@ -412,7 +412,7 @@ fn run_pending_continuation(root: &Path, lost: &Lost, command: &str) {
     open_and_quit(next_host(
         root,
         lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     ));
     assert_eq!(dispatches(&lost.evidence), 2, "nothing more runs");
@@ -426,7 +426,7 @@ fn a_fenced_root_turn_records_no_loss_and_holds_nothing() {
     let root = tempfile::tempdir().unwrap();
     let (config, evidence) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {"fault": {"at": "in_band", "kind": "outcome_unknown", "after_events": 2}},
             {"output": {"text": "the answer after recovery"}}
         ])),
@@ -457,7 +457,7 @@ fn a_fenced_root_turn_records_no_loss_and_holds_nothing() {
     let reopened = open_and_quit(next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     ));
     assert!(!reopened.iter().any(held_notice), "{reopened:#?}");
@@ -479,7 +479,7 @@ fn a_hosts_open_runs_the_custody_attach_scan() {
     use crate::runtime::test_kit::BlockOn as _;
 
     let root = tempfile::tempdir().unwrap();
-    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
     let tree_id = super::rebind::durable_tree_id(&config.topology_rows(), &config.session);
     // The scripted runtime attaches no tree of its own; the hub stands in
     // for the one a product open attaches.

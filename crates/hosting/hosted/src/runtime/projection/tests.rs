@@ -86,7 +86,7 @@ fn a_pruned_feed_reopen_consumes_historical_intents_without_withdrawing_clear() 
 
     for delete_views in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let script = crate::runtime::recover_tests::script(serde_json::json!([
+        let script = crate::runtime::recover_tests::script(&serde_json::json!([
             {"output": {"text": "historical answer"}}
         ]));
         let (mut config, _) =
@@ -496,7 +496,7 @@ fn a_direct_effect_reads_its_call_block_from_its_request_at_dispatch() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = crate::runtime::recover_tests::scripted_host_with(
         root.path(),
-        crate::runtime::recover_tests::script(serde_json::json!([
+        crate::runtime::recover_tests::script(&serde_json::json!([
             {"output": {"tool": {"name": "loopback_effect", "arguments": {}}}, "finish": "tool_calls"},
             {"output": {"text": "the effect ran"}}
         ])),

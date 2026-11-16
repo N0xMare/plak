@@ -12,7 +12,8 @@ fn same_key_restart_with_changed_binding_neither_carries_nor_consumes_handoff() 
                 config
             })
         } else {
-            let (config, evidence) = scripted_host_with(root.path(), script(serde_json::json!([])));
+            let (config, evidence) =
+                scripted_host_with(root.path(), script(&serde_json::json!([])));
             let mut lost = Lost {
                 release_error: None,
                 store: Arc::clone(&config.store),
@@ -40,7 +41,7 @@ fn same_key_restart_with_changed_binding_neither_carries_nor_consumes_handoff() 
         let mut config = next_host(
             root.path(),
             &lost,
-            serde_json::json!([]),
+            &serde_json::json!([]),
             Arc::clone(&lost.store),
         );
         // A real frozen adapter change is the control: unlike a per-request
@@ -69,7 +70,7 @@ fn same_key_restart_with_changed_binding_neither_carries_nor_consumes_handoff() 
         let config = next_host(
             root.path(),
             &lost,
-            serde_json::json!([{"output":{"text":"continued"}}]),
+            &serde_json::json!([{"output":{"text":"continued"}}]),
             Arc::clone(&lost.store),
         );
         let (actions, events, worker) = spawn_host_worker(config).unwrap();

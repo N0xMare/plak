@@ -195,7 +195,7 @@ impl Host {
     fn with(child: bool) -> Self {
         let root = tempfile::tempdir().unwrap();
         let gate = GateHandle::new();
-        let plan = script(json!([
+        let plan = script(&json!([
             {"stream": [{"gate": gate.script()}], "output": {"text": "held answer"}},
             {"output": {"text": "second answer"}},
             {"output": {"text": "third answer"}},

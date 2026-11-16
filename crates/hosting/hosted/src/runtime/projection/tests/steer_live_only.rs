@@ -10,7 +10,7 @@ fn an_accepted_steer_commits_no_revision_and_rebuilds_only_after_application() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {"stream": [{"stall": 1500}], "output": {"text": "the steered round"}},
             {"output": {"text": "the steered answer"}}
         ])),
@@ -103,7 +103,7 @@ fn an_accepted_steer_commits_no_revision_and_rebuilds_only_after_application() {
     assert_eq!(steers(&live), 1, "the projector derived the steer row");
     store.delete_views(&id);
     let mut config = reopened(root.path(), &store, &id);
-    let (fresh, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (fresh, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
     config.runtime_factory = fresh.runtime_factory;
     run_prompts(config, &[]);
     let rebuilt = caught_up(root.path(), &store, &id);

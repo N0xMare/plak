@@ -137,7 +137,7 @@ pub(super) fn event(turn: TurnId, kind: AgentEventKind) -> Arc<AgentEvent> {
         &uuid::Uuid::from_u128(2).to_string(),
         "ToolStarted",
         &ToolCallerLineageView::direct(),
-        serde_json::json!({"arguments_preview":"{}","subject":"first"}),
+        &serde_json::json!({"arguments_preview":"{}","subject":"first"}),
     );
     let mut value = serde_json::to_value(base).unwrap();
     value["turn_id"] = serde_json::to_value(turn).unwrap();
@@ -300,7 +300,7 @@ async fn a_late_in_flight_face_keeps_exact_counters_after_the_event_prefix_is_ev
         &uuid::Uuid::from_u128(2).to_string(),
         "ToolStarted",
         &ToolCallerLineageView::direct(),
-        serde_json::json!({"arguments_preview":"{}","subject":"first"}),
+        &serde_json::json!({"arguments_preview":"{}","subject":"first"}),
     );
     publish(&sender, observation, event(turn, started.kind().clone())).await;
     publish(&sender, observation, event(turn, started.kind().clone())).await;
@@ -422,7 +422,7 @@ async fn late_attach_keeps_a_running_call_after_its_event_prefix_is_evicted() {
         &uuid::Uuid::from_u128(2).to_string(),
         "ToolStarted",
         &ToolCallerLineageView::direct(),
-        serde_json::json!({"arguments_preview":"{}","subject":"held"}),
+        &serde_json::json!({"arguments_preview":"{}","subject":"held"}),
     );
     publish(&sender, observation, event(turn, started.kind().clone())).await;
     for id in 3..=516 {
@@ -431,7 +431,7 @@ async fn late_attach_keeps_a_running_call_after_its_event_prefix_is_evicted() {
             &uuid::Uuid::from_u128(id).to_string(),
             "ToolCompleted",
             &ToolCallerLineageView::direct(),
-            serde_json::json!({"succeeded":true,"preview":"done","subject":null}),
+            &serde_json::json!({"succeeded":true,"preview":"done","subject":null}),
         );
         let mut completed = serde_json::to_value(event(turn, completed.kind().clone())).unwrap();
         completed["call_id"] = serde_json::json!(uuid::Uuid::from_u128(id));

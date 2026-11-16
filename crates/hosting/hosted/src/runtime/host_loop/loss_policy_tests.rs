@@ -12,7 +12,7 @@ fn placement_hold_root_loss_resume_defers_then_runs_one_prepared_delivery() {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {"output": {"text": "continued once"}}
         ])),
     );
@@ -169,7 +169,7 @@ fn handed_off_child_tree(
 fn an_attached_root_forwards_its_loss_policy_to_its_tree() {
     for continues in [true, false] {
         let root = tempfile::tempdir().unwrap();
-        let (mut config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+        let (mut config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
         config.resume_after_loss = if continues {
             crate::runtime::ResumeAfterLoss::Continue
         } else {
@@ -229,7 +229,7 @@ fn after_loss(
     root_lost: bool,
     handoff: bool,
 ) -> (crate::runtime::HostConfig<TestExtension>, String, String) {
-    let (mut config, _) = scripted_host_with(root, script(serde_json::json!([])));
+    let (mut config, _) = scripted_host_with(root, script(&serde_json::json!([])));
     config.resume_after_loss = policy;
     let id = config.session.id.clone();
     let (tree, child) = if handoff {
@@ -331,7 +331,7 @@ fn the_continue_policy_sends_no_attention_notice() {
 #[test]
 fn the_one_resume_records_consent_then_posts_the_root_continuation() {
     let root = tempfile::tempdir().unwrap();
-    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host = super::RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
@@ -399,7 +399,7 @@ fn the_open_holds_or_continues_a_held_root_by_policy() {
         crate::runtime::ResumeAfterLoss::Continue,
     ] {
         let root = tempfile::tempdir().unwrap();
-        let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+        let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut host =
@@ -438,7 +438,7 @@ fn the_open_holds_or_continues_a_held_root_by_policy() {
 #[test]
 fn the_roots_continuation_names_the_child_a_lost_host_interrupted() {
     let root = tempfile::tempdir().unwrap();
-    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
     let id = config.session.id.clone();
     let (tree, child) = held_child_tree(&id, config.cwd.clone());
     let _runtime = crate::topology_runtime::insert_root(id.clone(), tree, None)

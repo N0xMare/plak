@@ -18,14 +18,14 @@ fn a_steer_over_a_reused_committed_call_id_publishes_only_valid_presentations() 
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([{"output": {"text": "first answer"}}])),
+        script(&serde_json::json!([{"output": {"text": "first answer"}}])),
     );
     let store = Arc::new(MemoryStore::new());
     config.store = store.clone();
     let id = config.session.id.clone();
     let reopen_with = |steps: serde_json::Value| {
         let mut config = reopened(root.path(), &store, &id);
-        let (fresh, _) = scripted_host_with(root.path(), script(steps));
+        let (fresh, _) = scripted_host_with(root.path(), script(&steps));
         config.runtime_factory = fresh.runtime_factory;
         config
     };

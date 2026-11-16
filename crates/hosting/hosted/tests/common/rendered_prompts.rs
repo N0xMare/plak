@@ -899,19 +899,15 @@ pub(crate) mod suite {
         }
     }
 
-    #[allow(
-        clippy::needless_pass_by_value,
-        reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-    )]
     fn enroll(
-        profile: HarnessProfileSpec,
+        profile: &HarnessProfileSpec,
         presentation: SkillsPresentation,
         home: &Path,
         root: &Path,
         cwd: &Path,
     ) -> (HarnessProfileSpec, Vec<ResolvedContextSourceFact>) {
         let listing = fixture_skills_listing(presentation, root);
-        enroll_product_instructions(&profile, Some(home), root, cwd, Some(&listing), None)
+        enroll_product_instructions(profile, Some(home), root, cwd, Some(&listing), None)
             .expect("enroll AGENTS.md and skills")
     }
 
@@ -988,7 +984,7 @@ pub(crate) mod suite {
             NativeProvider::Claude => SkillsPresentation::Claude,
             _ => SkillsPresentation::Grok,
         };
-        enroll(profile, presentation, home, root, cwd)
+        enroll(&profile, presentation, home, root, cwd)
     }
 
     pub(crate) fn openrouter_profile(
@@ -1019,7 +1015,7 @@ pub(crate) mod suite {
         } else {
             SkillsPresentation::Pi
         };
-        enroll(profile, presentation, home, root, cwd)
+        enroll(&profile, presentation, home, root, cwd)
     }
 
     pub(crate) fn registry(
@@ -1285,7 +1281,7 @@ pub(crate) mod suite {
             surface,
         )
         .expect("API profile");
-        enroll(profile, skills_presentation(spec), home, root, cwd)
+        enroll(&profile, skills_presentation(spec), home, root, cwd)
     }
 
     /// The harness profile one route assembles over `surface`.

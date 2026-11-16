@@ -276,7 +276,7 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
         })
         .collect::<Vec<_>>();
     for name in ["exec", "exec_js"] {
-        let observation = call_observation(serde_json::json!({"path": "src/main.rs"}));
+        let observation = call_observation(&serde_json::json!({"path": "src/main.rs"}));
         let mut calls = vec![TranscriptPart::Call {
             composition_owner: None,
             call_id: CALL.into(),
@@ -601,11 +601,7 @@ fn rows_past_the_bound_keep_the_newest_behind_one_truncated_row() {
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-)]
-fn script(steps: serde_json::Value) -> Arc<ScriptPlan> {
+fn script(steps: &serde_json::Value) -> Arc<ScriptPlan> {
     Arc::new(
         serde_json::from_value(serde_json::json!({"version": SCRIPT_VERSION, "steps": steps}))
             .unwrap(),
@@ -624,7 +620,7 @@ async fn a_finished_sessions_history_reads_as_root_rows() -> TestResult {
         CrashBoundary::None,
         workspace.join("evidence.jsonl"),
     )?;
-    let plan = script(serde_json::json!([
+    let plan = script(&serde_json::json!([
         {"output": {"tool": {"name": "loopback_effect", "arguments": {}}}, "finish": "tool_calls"},
         {"output": {"text": "child done"}},
         {"output": {"text": "second answer"}}
@@ -809,14 +805,10 @@ fn a_settled_process_wait_reads_like_the_live_row() {
     );
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-)]
-fn call_observation(args: serde_json::Value) -> plakous::agent::ToolCallObservation {
+fn call_observation(args: &serde_json::Value) -> plakous::agent::ToolCallObservation {
     serde_json::from_value(serde_json::json!({
         "subject": null,
-        "arguments_preview": serde_json::to_string_pretty(&args).unwrap(),
+        "arguments_preview": serde_json::to_string_pretty(args).unwrap(),
     }))
     .unwrap()
 }
@@ -826,8 +818,8 @@ fn call_observation(args: serde_json::Value) -> plakous::agent::ToolCallObservat
 #[test]
 fn a_process_wait_names_the_command_an_earlier_start_ran() {
     const WAIT: &str = "00000000-0000-4000-8000-0000000000cb";
-    let start = call_observation(serde_json::json!({"cmd": "cargo test"}));
-    let wait = call_observation(serde_json::json!({"session_id": 7, "timeout_ms": 1000}));
+    let start = call_observation(&serde_json::json!({"cmd": "cargo test"}));
+    let wait = call_observation(&serde_json::json!({"session_id": 7, "timeout_ms": 1000}));
     let started = serde_json::json!({"session_id": 7, "status": "running"}).to_string();
     let exited = serde_json::json!({"exit_code": 0}).to_string();
     let rows = rows_from_items(
@@ -949,7 +941,7 @@ async fn a_large_failed_process_result_reads_its_exit_code() -> TestResult {
         definition,
         Arc::new(LargeFailedProcess),
     )];
-    let plan = script(serde_json::json!([
+    let plan = script(&serde_json::json!([
         {"output": {"tool": {"name": "exec_command", "arguments": {"cmd": "make"}}}, "finish": "tool_calls"},
         {"output": {"text": "it failed"}}
     ]));
@@ -988,9 +980,9 @@ async fn a_large_failed_process_result_reads_its_exit_code() -> TestResult {
 fn grok_calls_naming_a_child_read_as_the_await_and_the_interrupt() {
     const KILL: &str = "00000000-0000-4000-8000-0000000000cc";
     const PROCESS: &str = "00000000-0000-4000-8000-0000000000cd";
-    let await_child = call_observation(serde_json::json!({"task_ids": ["c1", "p2"]}));
-    let kill_child = call_observation(serde_json::json!({"task_id": "c1"}));
-    let process_only = call_observation(serde_json::json!({"task_ids": ["p2"]}));
+    let await_child = call_observation(&serde_json::json!({"task_ids": ["c1", "p2"]}));
+    let kill_child = call_observation(&serde_json::json!({"task_id": "c1"}));
+    let process_only = call_observation(&serde_json::json!({"task_ids": ["p2"]}));
     let rows = rows_from_items(
         &[item(
             Actor::Assistant,
@@ -1094,10 +1086,10 @@ fn pi_wait_and_stop_history_rows_read_as_process_calls() {
     const BARE: &str = "00000000-0000-4000-8000-0000000000ce";
     const STOP: &str = "00000000-0000-4000-8000-0000000000cf";
     const CHILD: &str = "00000000-0000-4000-8000-0000000000d0";
-    let wait = call_observation(serde_json::json!({"ids": ["p7"], "timeout_ms": 5000}));
-    let bare = call_observation(serde_json::json!({}));
-    let stop = call_observation(serde_json::json!({"id": "p7"}));
-    let child = call_observation(serde_json::json!({"ids": ["c1"]}));
+    let wait = call_observation(&serde_json::json!({"ids": ["p7"], "timeout_ms": 5000}));
+    let bare = call_observation(&serde_json::json!({}));
+    let stop = call_observation(&serde_json::json!({"id": "p7"}));
+    let child = call_observation(&serde_json::json!({"ids": ["c1"]}));
     let rows = rows_from_items(
         &[item(
             Actor::Assistant,
@@ -1220,7 +1212,7 @@ fn a_bare_pi_wait_that_ran_the_await_restores_as_the_await() {
     let tasks =
         serde_json::json!({"tasks": [{"task_id": "p1", "status": "exited", "exit_code": 0}]})
             .to_string();
-    let bare = call_observation(serde_json::json!({}));
+    let bare = call_observation(&serde_json::json!({}));
     let history = |task_tools: bool| {
         let calls = [(CALL, &envelope), (RAW, &raw), (TASKS, &tasks)];
         let items = calls
@@ -1280,7 +1272,7 @@ fn a_bare_pi_wait_that_ran_the_await_restores_as_the_await() {
 /// parses, does not carry the children. The observation subject does.
 #[test]
 fn a_restored_bare_wait_keeps_the_observation_subject_when_the_preview_drops_it() {
-    let bare = call_observation(serde_json::json!({}));
+    let bare = call_observation(&serde_json::json!({}));
     let preview = serde_json::json!({"result": "{"}).to_string();
     assert!(
         serde_json::from_str::<serde_json::Value>(
@@ -1340,8 +1332,8 @@ fn a_restored_bare_wait_keeps_the_observation_subject_when_the_preview_drops_it(
 #[test]
 fn aliased_history_calls_are_labelled_by_exposed_name_and_classified_by_canonical() {
     const WRITE: &str = "00000000-0000-4000-8000-0000000000e1";
-    let edit = call_observation(serde_json::json!({"path": "src/main.rs"}));
-    let write = call_observation(serde_json::json!({"path": "src/lib.rs"}));
+    let edit = call_observation(&serde_json::json!({"path": "src/main.rs"}));
+    let write = call_observation(&serde_json::json!({"path": "src/lib.rs"}));
     let rows = rows_from_items(
         &[item(
             Actor::Assistant,
@@ -1412,7 +1404,7 @@ async fn committed_pi_aliases_read_back_labelled_by_exposed_name() -> TestResult
         CrashBoundary::None,
         workspace.join("evidence.jsonl"),
     )?;
-    let plan = script(serde_json::json!([
+    let plan = script(&serde_json::json!([
         {"output": {"tools": [
             {"name": "edit", "arguments": {
                 "path": "edited.txt",

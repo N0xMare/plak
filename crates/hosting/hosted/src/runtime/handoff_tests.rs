@@ -90,7 +90,7 @@ fn a_handed_off_root_turn_continues_once_by_itself() {
         let config = next_host(
             root.path(),
             &lost,
-            serde_json::json!([{"output": {"text": "continued after the handoff"}}]),
+            &serde_json::json!([{"output": {"text": "continued after the handoff"}}]),
             Arc::clone(&lost.store),
         );
         let (actions, events, host) = spawn_host_worker(config).unwrap();
@@ -128,7 +128,7 @@ fn a_handed_off_root_turn_continues_once_by_itself() {
         open_and_quit(next_host(
             root.path(),
             &lost,
-            serde_json::json!([]),
+            &serde_json::json!([]),
             Arc::clone(&lost.store),
         ));
         assert_eq!(dispatches(&lost.evidence), 2, "nothing more ({cancel:?})");
@@ -191,7 +191,7 @@ fn a_handoff_the_host_could_not_record_continues_nothing() {
     let seen = open_and_quit(next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     ));
     assert!(!seen.iter().any(held_notice), "{seen:#?}");
@@ -229,7 +229,7 @@ fn a_handoff_whose_turn_never_settles_holds_as_a_loss() {
     let opened = open_and_quit(next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     ));
     assert!(opened.iter().any(held_notice), "{opened:#?}");
@@ -264,7 +264,7 @@ fn a_handoff_whose_turn_never_settles_holds_as_a_loss() {
 #[test]
 fn a_handed_off_tree_continues_its_parked_child_once() {
     let root = tempfile::tempdir().unwrap();
-    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
     let tree_id = config.session.id.clone();
     let (actions, events, host) = spawn_host_worker(config).unwrap();
     let mut seen = Vec::new();
@@ -341,7 +341,7 @@ fn a_stop_the_host_lost_before_its_terminal_is_never_continued() {
     let mut config = next_host(
         root.path(),
         &lost,
-        serde_json::json!([{"output": {"text": "never"}}]),
+        &serde_json::json!([{"output": {"text": "never"}}]),
         Arc::clone(&lost.store),
     );
     config.resume_after_loss = crate::runtime::ResumeAfterLoss::Continue;
@@ -372,7 +372,7 @@ fn an_idle_interrupt_keeps_a_held_root_and_a_stop_of_everything_ends_it() {
     let config = next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     );
     let (actions, events, host) = spawn_host_worker(config).unwrap();

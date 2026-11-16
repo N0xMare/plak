@@ -76,7 +76,7 @@ fn coalescing_a_b_a_during_a_pass_preserves_new_settled_rows() {
     use crate::runtime::recover_tests::{script, scripted_host_with};
     let root = tempfile::tempdir().unwrap();
     let plan = || {
-        script(serde_json::json!([
+        script(&serde_json::json!([
             {"output": {"tool": {"name": "loopback_effect", "arguments": {}}}, "finish": "tool_calls"},
             {"output": {"text": "the effect ran"}}
         ]))
@@ -454,7 +454,7 @@ fn tool_turns_host(
         .collect();
     crate::runtime::recover_tests::scripted_host_with(
         root,
-        crate::runtime::recover_tests::script(serde_json::Value::Array(steps)),
+        crate::runtime::recover_tests::script(&serde_json::Value::Array(steps)),
     )
 }
 

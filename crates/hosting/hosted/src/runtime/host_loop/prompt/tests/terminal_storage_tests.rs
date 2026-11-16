@@ -60,7 +60,7 @@ fn assert_terminal_storage_full_recovers_without_merging(unknown: bool) {
     } else {
         "protocol"
     };
-    let plan = crate::runtime::recover_tests::script(serde_json::json!([
+    let plan = crate::runtime::recover_tests::script(&serde_json::json!([
         {"gate": gate.script(), "fault": {"at": "in_band", "kind": kind, "retryability": "Permanent"}},
         {"output": {"text": "next response"}},
         {"output": {"text": "queued response"}}

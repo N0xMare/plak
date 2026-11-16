@@ -90,7 +90,7 @@ fn a_launcher_release_fence_refuses_a_running_turn_without_cancelling_it() {
 #[test]
 fn a_stale_launcher_fence_never_releases_a_successor_session() {
     let root = tempfile::tempdir().unwrap();
-    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
     let session = config.session.id.clone();
     let (actions, _events, host) = spawn_host_worker(config).unwrap();
     let stale = actions
@@ -112,7 +112,7 @@ fn a_dormant_directory_stop_never_opens_or_dispatches_its_continuation() {
         let mut config = next_host(
             root.path(),
             &lost,
-            serde_json::json!([]),
+            &serde_json::json!([]),
             Arc::clone(&lost.store),
         );
         let mut record = lost.store.load(&lost.id).unwrap();
@@ -156,7 +156,7 @@ fn a_dormant_stop_retries_local_reconciliation_without_recording_cancellation() 
     let config = next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     );
     let mut record = lost.store.load(&lost.id).unwrap();
@@ -258,7 +258,7 @@ fn a_dormant_stop_records_cancellation_before_an_unavailable_runners_settlement(
     let mut next = next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     );
     next.session = lost.store.load(&lost.id).unwrap();
@@ -284,7 +284,7 @@ fn a_stop_ends_a_held_continuation_and_a_repeated_stop_records_nothing_more() {
     let config = next_host(
         root.path(),
         &lost,
-        serde_json::json!([]),
+        &serde_json::json!([]),
         Arc::clone(&lost.store),
     );
     let (actions, events, host) = spawn_host_worker(config).unwrap();
@@ -310,7 +310,7 @@ fn a_stop_ends_a_held_continuation_and_a_repeated_stop_records_nothing_more() {
     let mut config = next_host(
         root.path(),
         &lost,
-        serde_json::json!([{"output": {"text": "must not run"}}]),
+        &serde_json::json!([{"output": {"text": "must not run"}}]),
         Arc::clone(&lost.store),
     );
     config.resume_after_loss = ResumeAfterLoss::Continue;
@@ -503,7 +503,7 @@ fn a_stop_the_host_lost_before_the_turn_ended_is_never_continued() {
     let mut config = next_host(
         root.path(),
         &lost,
-        serde_json::json!([{"output": {"text": "must not run"}}]),
+        &serde_json::json!([{"output": {"text": "must not run"}}]),
         Arc::clone(&lost.store),
     );
     config.resume_after_loss = ResumeAfterLoss::Continue;
@@ -606,7 +606,7 @@ fn a_stop_never_races_the_idle_release_and_reaches_a_woken_session() {
     std::fs::create_dir_all(&workspace).unwrap();
     let (config, _) = scripted_host_with(
         &workspace,
-        script(serde_json::json!([{"output": {"text": "stored"}}])),
+        script(&serde_json::json!([{"output": {"text": "stored"}}])),
     );
     let store = Arc::clone(&config.store);
     let state_roots = config.state_roots.clone();
@@ -662,7 +662,7 @@ fn a_stop_of_a_dormant_session_ends_its_held_continuation() {
         let id = lost.id.clone();
         move |requested: &str| {
             assert_eq!(requested, id);
-            let (mut config, _) = scripted_host_with(&root, script(serde_json::json!([])));
+            let (mut config, _) = scripted_host_with(&root, script(&serde_json::json!([])));
             config.state_roots = state_roots.clone();
             config.store = Arc::clone(&store);
             config.session = store.load(requested).unwrap();
@@ -693,7 +693,7 @@ fn a_stop_of_a_dormant_session_ends_its_held_continuation() {
     let mut config = next_host(
         root.path(),
         &lost,
-        serde_json::json!([{"output": {"text": "must not run"}}]),
+        &serde_json::json!([{"output": {"text": "must not run"}}]),
         Arc::clone(&lost.store),
     );
     config.resume_after_loss = ResumeAfterLoss::Continue;
@@ -744,7 +744,7 @@ fn a_repeated_idle_stop_records_nothing_new() {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([{"output": {"text": "stored"}}])),
+        script(&serde_json::json!([{"output": {"text": "stored"}}])),
     );
     let id = config.session.id.clone();
     let store = Arc::clone(&config.store);
@@ -834,7 +834,7 @@ fn a_crash_around_the_root_stop_record() {
         let mut config = next_host(
             root.path(),
             &lost,
-            serde_json::json!([{"output": {"text": "continued"}}]),
+            &serde_json::json!([{"output": {"text": "continued"}}]),
             Arc::clone(&lost.store),
         );
         config.resume_after_loss = ResumeAfterLoss::Continue;
@@ -865,7 +865,7 @@ fn a_crash_around_the_root_stop_record() {
     let mut config = next_host(
         root.path(),
         &lost,
-        serde_json::json!([{"output": {"text": "must not run"}}]),
+        &serde_json::json!([{"output": {"text": "must not run"}}]),
         Arc::clone(&lost.store),
     );
     config.resume_after_loss = ResumeAfterLoss::Continue;
@@ -899,31 +899,23 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
         Cancel, CutExpect, Release, assert_cut, crash_busy, crash_idle, release_a_running_root_turn,
     };
 
-    #[allow(
-        clippy::needless_pass_by_value,
-        reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-    )]
-    fn idle(expect: CutExpect) {
+    fn idle(expect: &CutExpect) {
         let root = tempfile::tempdir().unwrap();
         let lost =
             release_a_running_root_turn(root.path(), Release::Lost, Cancel::Deaf, |config| config);
         let (running, held) = crash_idle(root.path(), &lost, expect.at);
-        assert_cut(root.path(), &lost, "idle", &expect, &running, &held);
+        assert_cut(root.path(), &lost, "idle", expect, &running, &held);
     }
 
-    #[allow(
-        clippy::needless_pass_by_value,
-        reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-    )]
-    fn busy(expect: CutExpect) {
+    fn busy(expect: &CutExpect) {
         let root = tempfile::tempdir().unwrap();
         let (lost, running, held) = crash_busy(root.path(), expect.at);
-        assert_cut(root.path(), &lost, "busy", &expect, &running, &held);
+        assert_cut(root.path(), &lost, "busy", expect, &running, &held);
     }
 
     #[test]
     fn idle_wake() {
-        idle(CutExpect {
+        idle(&CutExpect {
             at: "wake",
             suppression: false,
             children_stopped: false,
@@ -935,7 +927,7 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
 
     #[test]
     fn idle_tree() {
-        idle(CutExpect {
+        idle(&CutExpect {
             at: "tree",
             suppression: true,
             children_stopped: false,
@@ -947,7 +939,7 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
 
     #[test]
     fn idle_queue() {
-        idle(CutExpect {
+        idle(&CutExpect {
             at: "queue",
             suppression: true,
             children_stopped: true,
@@ -959,7 +951,7 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
 
     #[test]
     fn idle_process() {
-        idle(CutExpect {
+        idle(&CutExpect {
             at: "process",
             suppression: true,
             children_stopped: true,
@@ -971,7 +963,7 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
 
     #[test]
     fn idle_root() {
-        idle(CutExpect {
+        idle(&CutExpect {
             at: "root",
             suppression: true,
             children_stopped: true,
@@ -983,7 +975,7 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
 
     #[test]
     fn idle_after() {
-        idle(CutExpect {
+        idle(&CutExpect {
             at: "after",
             suppression: true,
             children_stopped: true,
@@ -995,7 +987,7 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
 
     #[test]
     fn busy_wake() {
-        busy(CutExpect {
+        busy(&CutExpect {
             at: "wake",
             suppression: false,
             children_stopped: false,
@@ -1007,7 +999,7 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
 
     #[test]
     fn busy_tree() {
-        busy(CutExpect {
+        busy(&CutExpect {
             at: "tree",
             suppression: true,
             children_stopped: false,
@@ -1019,7 +1011,7 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
 
     #[test]
     fn busy_root() {
-        busy(CutExpect {
+        busy(&CutExpect {
             at: "root",
             suppression: true,
             children_stopped: true,
@@ -1031,7 +1023,7 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
 
     #[test]
     fn busy_process() {
-        busy(CutExpect {
+        busy(&CutExpect {
             at: "process",
             suppression: true,
             children_stopped: true,
@@ -1045,7 +1037,7 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
 fn crash_idle(root: &std::path::Path, lost: &Lost, at: &str) -> (String, String) {
     let _guard = crate::runtime::test_seams::Guard;
     crate::runtime::test_seams::arm_stop_cut(&lost.id, at);
-    let config = next_host(root, lost, serde_json::json!([]), Arc::clone(&lost.store));
+    let config = next_host(root, lost, &serde_json::json!([]), Arc::clone(&lost.store));
     let _hub = crate::runtime::test_kit::install_idle_topology_hub(&lost.id, root);
     let (actions, events, host) = spawn_host_worker(config).unwrap();
     wait_for(&events, &mut Vec::new(), "the held notice", held_notice);
@@ -1419,7 +1411,7 @@ fn assert_cut(
     let mut config = next_host(
         root,
         lost,
-        serde_json::json!([{"output": {"text": "continued"}}]),
+        &serde_json::json!([{"output": {"text": "continued"}}]),
         Arc::clone(&lost.store),
     );
     wait_out_crashed_lease(lost);
@@ -1462,7 +1454,8 @@ fn assert_cut(
     // where the cut must refuse the wake: probing the cut that still wakes
     // would admit that wake and end the loss this check just read.
     if !expect.wakes {
-        let mut wake_config = next_host(root, lost, serde_json::json!([]), Arc::clone(&lost.store));
+        let mut wake_config =
+            next_host(root, lost, &serde_json::json!([]), Arc::clone(&lost.store));
         wake_config.resume_after_loss = ResumeAfterLoss::Hold;
         assert!(
             !crate::runtime::host_loop::wake::probe_child_wake(wake_config),
@@ -1623,7 +1616,7 @@ impl Drop for RunningSleep {
 #[test]
 fn a_stop_of_an_idle_session_stops_its_process() {
     let root = tempfile::tempdir().unwrap();
-    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
     let id = config.session.id.clone();
     let registry = Arc::clone(config.state_roots.job_registry());
     let (actions, events, host) = spawn_host_worker(config).unwrap();
@@ -1696,7 +1689,7 @@ fn a_stop_of_a_running_turn_stops_its_process_before_the_turn_ends() {
 fn crash_at(root: &std::path::Path, lost: &Lost, at: &str) {
     let _guard = crate::runtime::test_seams::Guard;
     crate::runtime::test_seams::arm_stop_cut(&lost.id, at);
-    let config = next_host(root, lost, serde_json::json!([]), Arc::clone(&lost.store));
+    let config = next_host(root, lost, &serde_json::json!([]), Arc::clone(&lost.store));
     let (actions, events, host) = spawn_host_worker(config).unwrap();
     let mut seen = Vec::new();
     wait_for(&events, &mut seen, "the held notice", held_notice);
@@ -1715,7 +1708,7 @@ fn a_delayed_settle_still_wakes_the_waiting_connection() {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([{"output": {"text": "stored"}}])),
+        script(&serde_json::json!([{"output": {"text": "stored"}}])),
     );
     let id = config.session.id.clone();
     let _guard = crate::runtime::test_seams::Guard;
@@ -1792,7 +1785,7 @@ fn an_attach_during_the_idle_decision_still_runs_its_prompt() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = scripted_host_with(
         root.path(),
-        script(serde_json::json!([{"output": {"text": "ran"}}])),
+        script(&serde_json::json!([{"output": {"text": "ran"}}])),
     );
     let attachments = AttachmentCount::default();
     config.idle_release = Some(IdleRelease {

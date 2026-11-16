@@ -16,7 +16,7 @@ async fn tool(
         &uuid::Uuid::from_u128(2).to_string(),
         label,
         &ToolCallerLineageView::direct(),
-        if label == "ToolStarted" {
+        &if label == "ToolStarted" {
             serde_json::json!({"arguments_preview":"{}","subject":"file"})
         } else {
             serde_json::json!({"succeeded":true,"preview":"done","subject":null})
@@ -60,18 +60,14 @@ fn apply(events: &crate::surface_protocol::HostEventReceiver, state: &mut Transc
     }
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
-)]
-fn assert_call(state: &TranscriptState, expected: ActivityState) -> RowKey {
+fn assert_call(state: &TranscriptState, expected: &ActivityState) -> RowKey {
     let rows: Vec<_> = state
         .items()
         .iter()
         .filter(|(_, row)| row.as_tool().is_some())
         .collect();
     assert_eq!(rows.len(), 1, "one retained call, not a second attach row");
-    assert_eq!(rows[0].1.as_tool().unwrap().activity_state(), expected);
+    assert_eq!(rows[0].1.as_tool().unwrap().activity_state(), *expected);
     *rows[0].0
 }
 
@@ -106,7 +102,7 @@ async fn interrupted_attach(result_during_history: bool) {
     emit_retained_tools(snapshot.tools, &covered, &emit);
     let mut state = TranscriptState::default();
     apply(&events, &mut state);
-    assert_eq!(assert_call(&state, ActivityState::Running), expected_key);
+    assert_eq!(assert_call(&state, &ActivityState::Running), expected_key);
     if !result_during_history {
         tool(&source, &owner.observation, turn, "ToolCompleted").await;
     }
@@ -122,7 +118,7 @@ async fn interrupted_attach(result_during_history: bool) {
     )
     .await;
     apply(&events, &mut state);
-    assert_eq!(assert_call(&state, ActivityState::Succeeded), expected_key);
+    assert_eq!(assert_call(&state, &ActivityState::Succeeded), expected_key);
 }
 
 #[tokio::test]
@@ -145,7 +141,7 @@ async fn settled_history_covers_a_stale_retained_running_call_at_the_same_key() 
     });
     let mut state = TranscriptState::default();
     apply(&events, &mut state);
-    assert_eq!(assert_call(&state, ActivityState::Succeeded), key);
+    assert_eq!(assert_call(&state, &ActivityState::Succeeded), key);
 }
 
 #[tokio::test]
@@ -164,7 +160,7 @@ async fn lagged_face_reattaches_running_call_then_settles_the_same_row_id() {
         publisher.observe_agent("child", &op)
     });
     apply(&events, &mut state);
-    let key = assert_call(&state, ActivityState::Running);
+    let key = assert_call(&state, &ActivityState::Running);
     for _ in 0..=RETAINED_UPDATES {
         publish(
             &source,
@@ -191,12 +187,12 @@ async fn lagged_face_reattaches_running_call_then_settles_the_same_row_id() {
         loop { if matches!(notifications.recv().await, Some(HostEvent::ToolLine {state, ..}) if state == "running") {break;} }
     }).await.expect("reattach re-emits retained running observation, not only the gap");
     apply(&events, &mut state);
-    assert_eq!(assert_call(&state, ActivityState::Running), key);
+    assert_eq!(assert_call(&state, &ActivityState::Running), key);
     tool(&source, &owner.observation, turn, "ToolCompleted").await;
     drop(source);
     task.await.unwrap();
     apply(&events, &mut state);
-    assert_eq!(assert_call(&state, ActivityState::Succeeded), key);
+    assert_eq!(assert_call(&state, &ActivityState::Succeeded), key);
 }
 
 #[tokio::test]
