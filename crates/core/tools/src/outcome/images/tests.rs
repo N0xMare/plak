@@ -18,10 +18,10 @@ impl ImageNormalizer for Normalizer {
     fn normalize(&self, bytes: &[u8]) -> Result<PreparedImage, crate::ImageNormalizationError> {
         self.calls
             .lock()
-            .map_err(|_| "recording lock")?
+            .map_err(|_| crate::ImageNormalizationError::new("recording lock"))?
             .push(bytes.to_vec());
         if self.fail {
-            return Err("invalid image data".into());
+            return Err(crate::ImageNormalizationError::new("invalid image data"));
         }
         Ok(PreparedImage::new("image/png", vec![9, 8, 7]))
     }
@@ -116,12 +116,14 @@ struct BlockingNormalizer {
 
 impl ImageNormalizer for BlockingNormalizer {
     fn normalize(&self, bytes: &[u8]) -> Result<PreparedImage, crate::ImageNormalizationError> {
-        self.started.send(()).map_err(|_| "started channel")?;
+        self.started
+            .send(())
+            .map_err(|_| crate::ImageNormalizationError::new("started channel"))?;
         self.release
             .lock()
-            .map_err(|_| "release lock")?
+            .map_err(|_| crate::ImageNormalizationError::new("release lock"))?
             .recv_timeout(std::time::Duration::from_secs(5))
-            .map_err(|_| "release timeout")?;
+            .map_err(|_| crate::ImageNormalizationError::new("release timeout"))?;
         Ok(PreparedImage::new("image/png", bytes.to_vec()))
     }
 }

@@ -44,10 +44,12 @@ impl ImageNormalizer for RecordingNormalizer {
     ) -> Result<PreparedImage, plakous_tools::ImageNormalizationError> {
         self.calls
             .lock()
-            .map_err(|_| "recording lock")?
+            .map_err(|_| plakous_tools::ImageNormalizationError::new("recording lock"))?
             .push(bytes.to_vec());
         if self.reject {
-            return Err("invalid image data".into());
+            return Err(plakous_tools::ImageNormalizationError::new(
+                "invalid image data",
+            ));
         }
         Ok(PreparedImage::new("image/png", png(1, 1)))
     }

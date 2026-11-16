@@ -244,9 +244,9 @@ impl plakous_tools::ImageNormalizer for CancellingNormalizer {
         self.cancellation.cancel();
         self.release
             .lock()
-            .map_err(|_| "release lock")?
+            .map_err(|_| plakous_tools::ImageNormalizationError::new("release lock"))?
             .recv_timeout(std::time::Duration::from_secs(5))
-            .map_err(|_| "release timeout")?;
+            .map_err(|_| plakous_tools::ImageNormalizationError::new("release timeout"))?;
         Ok(plakous_tools::PreparedImage::new(
             "image/png",
             bytes.to_vec(),

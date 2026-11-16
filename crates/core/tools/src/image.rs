@@ -44,18 +44,6 @@ impl std::error::Error for ImageNormalizationError {
     }
 }
 
-impl From<String> for ImageNormalizationError {
-    fn from(message: String) -> Self {
-        Self::new(message)
-    }
-}
-
-impl From<&str> for ImageNormalizationError {
-    fn from(message: &str) -> Self {
-        Self::new(message)
-    }
-}
-
 /// Pixels a tool-result image carries after normalization.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedImage {
