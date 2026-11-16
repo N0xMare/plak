@@ -24,7 +24,7 @@ CUTS = (
     "move-after-tree-seed",
     "move-after-publish",
 )
-IMAGES = ("plakd", "plakous-js-host", "plakous-py-host")
+SIDECAR_IMAGES = ("plakous-js-host", "plakous-py-host")
 
 
 class Refused(RuntimeError):
@@ -130,6 +130,19 @@ def prepare_root(path):
     return path
 
 
+def product_image(checkout):
+    """Historical rehearsal revisions own their package and build-script layout."""
+    products = [name for name in ("plak", "plakd") if (checkout / "bin" / name / "Cargo.toml").is_file()]
+    require(len(products) == 1, f"{checkout}: expected exactly one product package")
+    product = products[0]
+    require((checkout / f"tools/build/build-{product}.sh").is_file(), f"{checkout}: missing product build script")
+    return product
+
+
+def host_is_serving(text):
+    return any(f"{name} host: serving on " in text for name in ("plak", "plakd"))
+
+
 def build(args, root):
     """Never install, move PATH links, or build in the operator's checkout."""
     owned = root / "owned"
@@ -169,12 +182,13 @@ def build(args, root):
         target = owned / "targets" / commit
         environment = os.environ.copy()
         environment.update(CARGO_TARGET_DIR=str(target), CARGO_BUILD_JOBS=str(args.jobs))
+        product = product_image(checkout)
         command = [
             "bash",
-            "tools/build/build-plakd.sh",
+            f"tools/build/build-{product}.sh",
             "--maintainer",
             "--features",
-            "plakd/maintainer,plakd/test-hooks",
+            f"{product}/maintainer,{product}/test-hooks",
         ]
         print(f"BUILD {name} {commit}: {' '.join(command)}", flush=True)
         with (root / f"build-{name}.log").open("w") as log:
@@ -184,14 +198,14 @@ def build(args, root):
         require(result.returncode == 0, f"{name}: build failed; see build-{name}.log")
         snapshot = owned / "images" / name
         snapshot.mkdir(parents=True, exist_ok=True)
-        for image in IMAGES:
+        for image in (product, *SIDECAR_IMAGES):
             shutil.copy2(target / "maintainer" / image, snapshot / image)
-        digest = hashlib.sha256((snapshot / "plakd").read_bytes()).hexdigest()
+        digest = hashlib.sha256((snapshot / product).read_bytes()).hexdigest()
         manifest[name] = {
             "revision": commit,
             "sha256": digest,
             "binary_id": digest[:12],
-            "binary": str(snapshot / "plakd"),
+            "binary": str(snapshot / product),
             "profile": "maintainer",
             "features": ["maintainer", "test-hooks"],
         }
@@ -246,7 +260,7 @@ def owned_processes(case):
             inside = cwd == case or case in cwd.parents
             if not inside:
                 executable = (entry / "cmdline").read_bytes().split(b"\0", 1)[0]
-                if Path(os.fsdecode(executable)).name == "plakd":
+                if Path(os.fsdecode(executable)).name in {"plak", "plakd"}:
                     for value in (entry / "environ").read_bytes().split(b"\0"):
                         if value.startswith(b"PLAK_HOME="):
                             home = Path(os.fsdecode(value.split(b"=", 1)[1])).resolve()
@@ -307,8 +321,8 @@ def main():
     parser.add_argument("command", choices=["build", "run", "all", "cleanup"])
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--repository", type=Path, default=Path(__file__).resolve().parents[2])
-    parser.add_argument("--source", default="9e9785efe0c6549ee8d1c143b81db00472031dab")
-    parser.add_argument("--destination", default="56b9c53d8af0f6aa3d8418aa883725aeaff43682")
+    parser.add_argument("--source", default="9e9785efe0c6549ee8d1c143b81db00472031dab", help="literal pre-S4 r27 source revision")
+    parser.add_argument("--destination", default="887f754e1c1e5126b586531a573ebd6fb8bc0189", help="S4 r28 destination revision")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument(
         "--keep-builds",

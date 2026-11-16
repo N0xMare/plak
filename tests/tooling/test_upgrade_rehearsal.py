@@ -30,6 +30,49 @@ CASES = load("upgrade_rehearsal_cases_test", "tools/dev/upgrade_rehearsal_cases.
 
 
 class UpgradeRehearsalTests(unittest.TestCase):
+    def test_historical_and_daemon_layouts_build_and_snapshot_their_own_image(self):
+        for product in ("plak", "plakd"):
+            with self.subTest(product=product), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                owned = root / "owned"
+                (owned / "repository").mkdir(parents=True)
+                for name in ("A", "B"):
+                    checkout = owned / f"checkout-{name}"
+                    manifest = checkout / "bin" / product / "Cargo.toml"
+                    manifest.parent.mkdir(parents=True)
+                    manifest.touch()
+                    script = checkout / f"tools/build/build-{product}.sh"
+                    script.parent.mkdir(parents=True)
+                    script.touch()
+
+                def git(command, **_kwargs):
+                    return SimpleNamespace(stdout="" if command[-1] == "--porcelain" else "revision\n")
+
+                def compile_image(command, *, env, **_kwargs):
+                    self.assertEqual(command[1], f"tools/build/build-{product}.sh")
+                    self.assertEqual(command[-1], f"{product}/maintainer,{product}/test-hooks")
+                    destination = Path(env["CARGO_TARGET_DIR"]) / "maintainer"
+                    destination.mkdir(parents=True, exist_ok=True)
+                    for image in (product, *DRIVER.SIDECAR_IMAGES):
+                        (destination / image).write_bytes(b"synthetic build image")
+                    return SimpleNamespace(returncode=0)
+
+                args = SimpleNamespace(source="revision", destination="revision", jobs=4)
+                with patch.object(DRIVER, "run", side_effect=git), patch.object(
+                    DRIVER.subprocess, "run", side_effect=compile_image
+                ):
+                    manifest = DRIVER.build(args, root)
+                for name in ("A", "B"):
+                    self.assertEqual(Path(manifest[name]["binary"]).name, product)
+                    self.assertEqual(Path(manifest[name]["binary"]).read_bytes(), b"synthetic build image")
+                    for image in DRIVER.SIDECAR_IMAGES:
+                        self.assertTrue((owned / "images" / name / image).is_file())
+
+    def test_host_readiness_accepts_both_revision_banners_not_other_output(self):
+        for product in ("plak", "plakd"):
+            self.assertTrue(DRIVER.host_is_serving(f"{product} host: serving on /scratch/host.sock\n"))
+        self.assertFalse(DRIVER.host_is_serving("host process started"))
+
     def test_terminal_inventory_uses_only_readonly_lines_and_refuses_lost_or_consumed_jobs(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)

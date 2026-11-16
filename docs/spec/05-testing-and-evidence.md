@@ -493,7 +493,12 @@ Published abandonment.
 The opt-in Linux `tools/dev/upgrade_rehearsal.py` driver builds two exact
 maintainer images with `test-hooks`, including matching sidecars, without
 installing or moving any operator link. Cargo target directories are keyed by
-the exact source commit, never shared between revisions. Its explicit
+the exact source commit, never shared between revisions. Each revision's
+`bin/plak` or `bin/plakd` manifest selects its own build script, package feature
+prefix and image basename; readiness accepts that revision's host banner.
+The default source is the pinned pre-S4 r27 image, and the default destination
+is the S4 r28 daemon image. A pre-S4 r28 build cannot substitute for the literal
+r27 source in the cross-key bootstrap cases. Its explicit
 `build`, `run`, `all` and `cleanup` subcommands require a dedicated owner-only `--root`; nothing
 runs by default. `all` removes owned build artifacts on completion or refusal
 unless `--keep-builds` was explicit. Every case removes its runtime homes and

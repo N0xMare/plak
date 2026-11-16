@@ -269,7 +269,7 @@ class Case:
 
         def ready():
             self.s.require(self.host.poll() is None, f"source exited: {log.read_text()}")
-            return "plakd host: serving on " in log.read_text()
+            return self.s.host_is_serving(log.read_text())
 
         self.s.wait_for(ready, "source host ready")
 

@@ -8,11 +8,18 @@ Build the literal bootstrap images once on Linux, from this checkout:
 ```sh
 python3 tools/dev/upgrade_rehearsal.py build \
   --root "$PLAK_REHEARSAL_ROOT" \
-  --source 9e9785efe --destination 56b9c53d8 --jobs 4
+  --source 9e9785efe --destination 887f754e1 --jobs 4
 ```
 
-The root must be a dedicated owner-only directory. The recorded maintainer
-images, both built with `plak/maintainer,plak/test-hooks`, are:
+The root must be a dedicated owner-only directory. The defaults pair the
+literal r27 `plak` source with the S4 r28 `plakd` destination. The driver
+detects each revision's manifest and uses its matching build script, feature
+prefix (`plak/…` or `plakd/…`) and image basename, with matching sidecars.
+Both host-serving banners are recognized. Keep the literal r27 source for
+bootstrap cases: an already-r28 pre-S4 revision is not equivalent.
+
+The historical failure receipts below used these earlier maintainer images,
+both built with `plak/maintainer,plak/test-hooks`:
 
 | Image | Revision | Binary ID |
 | --- | --- | --- |
