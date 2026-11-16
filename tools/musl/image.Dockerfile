@@ -46,4 +46,10 @@ COPY --from=nextest-build /out/bin/ruff /ruff
 
 FROM base AS image
 COPY --from=sources /usr/local/cargo/registry /usr/local/cargo/registry
+# Qualification-only identity, stable for this image and unrelated to its host.
+# The lane hosts run the gate as UID/GID 1000, not as an unnamed numeric user.
+RUN tr -d '-' < /proc/sys/kernel/random/uuid > /etc/machine-id \
+ && printf '\n' >> /etc/machine-id \
+ && addgroup -g 1000 plak-qual \
+ && adduser -D -u 1000 -G plak-qual -h /home/plak-qual -s /bin/bash plak-qual
 WORKDIR /src

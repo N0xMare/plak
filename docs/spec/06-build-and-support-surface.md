@@ -990,6 +990,15 @@ dependency change rebuilds the image under a new tag and updates the tag in
 `tools/musl/musl-check.sh`.
 Image-build Cargo commands run at nice 19, with at most 16 jobs by default
 (`CARGO_BUILD_JOBS` is a build argument).
+The image generates its own synthetic `/etc/machine-id` at build time; this
+test-only identity stays stable across runs of the pinned image and is never
+copied from a lane host. Its `plak-qual` passwd/group entries use UID/GID 1000,
+with `/home/plak-qual` and executable `/bin/bash`, matching the qualification
+lane accounts. This supplies the OS identity/account prerequisites for remote
+pin admission and operator-console tests without weakening their separate
+missing-machine-id and missing-passwd fail-closed coverage. A different caller
+UID needs a corresponding image account; an unnamed numeric UID is not a
+complete qualification environment.
 
 The script exports tracked and nonignored untracked source, including the
 working-tree diff and excluding deleted files, into a fresh retained
