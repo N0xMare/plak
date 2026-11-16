@@ -12,13 +12,11 @@ not (spec 06 §1); uploading is a maintainer act, and a source checkout is a
 complete build.
 
 Host/web serving is supported in the default product. The public stdio bridge
-owns discovery and explicitly opted-in local startup. Bare `plakd` prints help
-without opening a session or starting a host; no public application client or
-terminal resume launch is shipped. Product wire
-DTOs belong in `plakd-wire-types`; handlers, credential resolution, settings
-metadata and runtime/store authority stay public and do not move into a client.
-Catalog construction, attachment eligibility and settings-default checks must
-not depend on terminal adapters or their tests.
+owns discovery and explicitly opted-in local startup; bare `plakd` prints help
+without opening a session or starting a host. There is no default plakd client
+or UI in this repository: bring and maintain your own client. Product wire DTOs
+belong in `plakd-wire-types`; handlers, credential resolution, settings
+metadata and runtime/store authority stay in plakd.
 
 ## First reading
 
@@ -213,12 +211,11 @@ in a change; amend the chapter that owns them.
 - Test externally meaningful behavior and failure modes, deterministically. The
   daily bar is unit → offline integration; live e2e is opt-in and paid.
 - Product host changes need the tested maintainer snapshot and matching
-  sidecars. Client review uses an independently maintained client, never a
-  bundled public TUI or a private-repository gate dependency. Keep a paired
-  host and runner on the same source revision; the runner uses a dedicated
-  command link that normal installation does not move. Settle work before
-  coordinated upgrade and report client, host and runner binary IDs. An agent
-  must not interrupt a running session or install merely to review a refactor.
+  sidecars. Keep a paired host and runner on the same source revision; the
+  runner uses a dedicated command link that normal installation does not move.
+  Settle work before a coordinated upgrade and report host and runner binary
+  IDs. An agent must not interrupt a running session or install merely to
+  review a refactor.
 - A change to public semantics, crate boundaries, persistence or wire formats,
   security boundaries, or supported platforms MUST update the owning
   `docs/spec/` section in the same change.
