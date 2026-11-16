@@ -692,10 +692,19 @@ pub(in crate::runtime) fn local_composition_nested_result_value(
     clippy::needless_pass_by_value,
     reason = "used directly as a map_err function"
 )]
-pub(in crate::runtime) fn local_composition_prestart_error(error: impl ToString) -> AgentError {
+pub(in crate::runtime) fn local_composition_prestart_error(
+    error: crate::local_composition::LocalCompositionError,
+) -> AgentError {
+    let mut detail = error.to_string();
+    let mut next = std::error::Error::source(&error);
+    while let Some(source) = next {
+        detail.push_str(": ");
+        detail.push_str(&source.to_string());
+        next = source.source();
+    }
     AgentError::new(
         AgentErrorKind::Tool,
-        format!("local composition admission failed: {}", error.to_string()),
+        format!("local composition admission failed: {detail}"),
     )
 }
 

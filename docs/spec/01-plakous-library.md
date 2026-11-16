@@ -9627,6 +9627,9 @@ implementation. Policy and input-refusal sentences keep their existing text.
 Sourced failures display a boundary-owned sentence and retain the original
 parser, compiler or worker failure only through `source()`, so an error-chain
 renderer does not repeat the cause. Policy refusals have no source.
+When a startup refusal becomes a content-only runtime diagnostic, the driver
+renders that boundary and its cause chain once, preserving the worker's
+operator remedy without attaching a second copy as a structured source.
 Evaluator session loss remains the separate
 closed `LocalCompositionSessionLoss` outcome. These process-local error types
 change no model-visible grammar, binding input or persisted encoding.
