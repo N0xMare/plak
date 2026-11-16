@@ -166,8 +166,7 @@ where
     let overlays = value
         .pointer("/body/items")
         .or_else(|| value.pointer("/body/upserts"))
-        .map(item_overlays)
-        .unwrap_or_default();
+        .map_or_default(item_overlays);
     observation(&mut value).map_err(serde::de::Error::custom)?;
     let mut decoded = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
     match &mut decoded {

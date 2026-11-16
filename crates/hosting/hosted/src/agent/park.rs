@@ -200,8 +200,7 @@ pub(super) async fn park_until_wake(
 ) -> ParkEnd {
     let processes = read_facts(driver, live, agent_id)
         .await
-        .map(|facts| facts.running)
-        .unwrap_or_default();
+        .map_or_default(|facts| facts.running);
     let parked = mutate_child(driver, agent_id, {
         let (identity, agent_id, driver) = (identity.clone(), agent_id.to_owned(), driver.clone());
         move |tree| {

@@ -3866,11 +3866,7 @@ fn enrolled_same_served_models_are_never_enrolled_labels() {
             assert!(!is_subscription_coding_model_id(served), "{served}");
         }
     }
-    let declared = |model| {
-        grok_enrollment(model)
-            .map(|row| row.same_served_models)
-            .unwrap_or_default()
-    };
+    let declared = |model| grok_enrollment(model).map_or_default(|row| row.same_served_models);
     assert_eq!(declared(XAI_GROK_47_CODING_MODEL), ["grok-4.7-build"]);
     for model in [
         XAI_GROK_47_FAST_CODING_MODEL,

@@ -1572,8 +1572,7 @@ fn a_web_endpoint_that_cannot_bind_leaves_no_control_socket() {
     assert!(!child.wait().unwrap().success());
     let run = fixture.home().join("host/run");
     let sockets: Vec<_> = std::fs::read_dir(&run)
-        .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
-        .unwrap_or_default();
+        .map_or_default(|entries| entries.flatten().map(|entry| entry.path()).collect());
     assert_eq!(sockets, Vec::<PathBuf>::new(), "a control socket was left");
 }
 

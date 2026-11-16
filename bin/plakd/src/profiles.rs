@@ -454,9 +454,7 @@ fn row(config: &ProductConfig, resolved: &Resolved, aliases: Vec<String>) -> Pro
         .filter_map(|(name, _)| TemplateName::parse(name).ok())
         .collect();
     let cards = crate::roster_input::nested_spawns(&working_set, |name| {
-        template(name.as_str())
-            .map(|template| template.spawns.clone())
-            .unwrap_or_default()
+        template(name.as_str()).map_or_default(|template| template.spawns.clone())
     })
     .into_iter()
     .filter_map(|(depth, name)| {

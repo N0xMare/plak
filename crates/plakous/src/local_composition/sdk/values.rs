@@ -154,11 +154,7 @@ fn file(v: plakous_tools::FileReadValue) -> V {
             ("eof", V::Bool(v.eof)),
             (
                 "revision",
-                text(
-                    v.revision
-                        .map(|v| v.digest().to_string())
-                        .unwrap_or_default(),
-                ),
+                text(v.revision.map_or_default(|v| v.digest().to_string())),
             ),
             ("image", V::Null),
             ("omitted", V::List(omitted)),

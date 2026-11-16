@@ -771,8 +771,7 @@ impl ProductAgentTree {
         let target = self
             .nodes
             .get(caller_id)
-            .map(|node| node.path.clone())
-            .unwrap_or_default();
+            .map_or_default(|node| node.path.clone());
         let Some(candidate) = self.candidates.get(&request.candidate_id) else {
             return AdoptProbe {
                 launch: self.launch_checkout.clone(),

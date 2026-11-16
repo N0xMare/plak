@@ -926,13 +926,12 @@ pub(super) fn opened_by(path: &Path) -> Vec<i32> {
         .args(["-t", "--"])
         .arg(path)
         .output()
-        .map(|output| {
+        .map_or_default(|output| {
             String::from_utf8_lossy(&output.stdout)
                 .lines()
                 .filter_map(|line| line.trim().parse().ok())
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// Kills each job a marker file names that is still that job: a process
@@ -951,8 +950,7 @@ fn kill_marked_jobs(marker: &Path) {
         let command = Command::new("ps")
             .args(["-o", "command=", "-p", &pid.to_string()])
             .output()
-            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
-            .unwrap_or_default();
+            .map_or_default(|output| String::from_utf8_lossy(&output.stdout).into_owned());
         if pid > 1 && command.contains(&marker_name) {
             let _ = nix::sys::signal::killpg(
                 nix::unistd::Pid::from_raw(pid),

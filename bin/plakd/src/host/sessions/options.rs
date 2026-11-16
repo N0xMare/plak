@@ -22,9 +22,8 @@ struct Choices {
 }
 
 fn choices(paths: &PlakPaths) -> Choices {
-    let models = crate::presentation::catalog_bundle(paths)
-        .map(|bundle| bundle.sections)
-        .unwrap_or_default();
+    let models =
+        crate::presentation::catalog_bundle(paths).map_or_default(|bundle| bundle.sections);
     let profiles = match crate::product_config::ProductConfig::load(paths) {
         Ok(config) => crate::profiles::list(&config, paths.home()),
         Err(error) => ProfilesView {

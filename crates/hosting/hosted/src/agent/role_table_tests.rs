@@ -289,8 +289,7 @@ async fn decided_once(fixture: &Fixture) {
                 let live = fixture.runtime.live.lock().await;
                 live.get(&fixture.child)
                     .and_then(crate::runtime::child_projection::of)
-                    .map(|observation| observation.pending_decisions())
-                    .unwrap_or_default()
+                    .map_or_default(|observation| observation.pending_decisions())
             };
             if let Some(approval_id) = pending.into_iter().next() {
                 break approval_id;

@@ -403,11 +403,7 @@ impl TopologyTool {
             )
             .map(JobsWaitPlan::Await);
         }
-        let caller = self
-            .caller_id
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let caller = self.caller_id.lock().map_or_default(|guard| guard.clone());
         let service = self.driver.job_service(&caller);
         if service
             .as_ref()

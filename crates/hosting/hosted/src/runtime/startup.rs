@@ -933,8 +933,7 @@ pub(super) fn root_tool_selection(session: &SessionRecord) -> crate::tool_plan::
     session
         .frozen_tools
         .as_ref()
-        .map(crate::frozen_tools::FrozenRootTools::selection)
-        .unwrap_or_default()
+        .map_or_default(crate::frozen_tools::FrozenRootTools::selection)
 }
 
 /// The profile `session`'s genesis freezes (spec 02 §2.6): the root

@@ -688,16 +688,13 @@ fn classify(
         .efforts
         .as_deref()
         .or(reviewed.map(|row| row.efforts.as_slice()))
-        .map(efforts_from)
-        .unwrap_or_default();
+        .map_or_default(efforts_from);
     let max_input_tokens = listed
         .max_input_tokens
-        .or(reviewed.map(|row| row.max_input_tokens))
-        .unwrap_or_default();
+        .or(reviewed.map_or_default(|row| row.max_input_tokens));
     let max_tokens = listed
         .max_tokens
-        .or(reviewed.map(|row| row.max_tokens))
-        .unwrap_or_default();
+        .or(reviewed.map_or_default(|row| row.max_tokens));
     let adaptive = listed
         .adaptive_thinking
         .or(reviewed.map(|row| row.adaptive_thinking))

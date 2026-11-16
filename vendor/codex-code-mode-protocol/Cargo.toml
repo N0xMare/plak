@@ -11,7 +11,6 @@ rust-version = "1.97.1"
 license = "Apache-2.0"
 # Where this snapshot is maintained; PROVENANCE.md names the upstream source.
 repository = "https://github.com/N0xMare/plak"
-homepage = "https://github.com/N0xMare/plak"
 documentation = "https://docs.rs/plakous-codex-code-mode-protocol"
 readme = "README.md"
 keywords = ["llm", "agent", "codex", "code-mode", "schema"]

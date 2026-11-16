@@ -620,8 +620,7 @@ async fn recovery_required_finish_parity(
             .items()
             .into_iter()
             .last()
-            .map(text_of)
-            .unwrap_or_default();
+            .map_or_default(text_of);
         closures.push((
             report,
             recovered.manifest().canonical().history().identity(),

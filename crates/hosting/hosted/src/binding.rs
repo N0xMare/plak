@@ -105,12 +105,11 @@ impl RootTemplateFact {
             .filter(|fact| {
                 account == Some(fact.account.as_str()) && model == Some(fact.model.as_str())
             })
-            .map(|fact| crate::tool_plan::NodeToolSelection {
+            .map_or_default(|fact| crate::tool_plan::NodeToolSelection {
                 selection: fact.tools.clone(),
                 tool_sections: fact.tool_sections.clone(),
                 mcp_tools: None,
             })
-            .unwrap_or_default()
     }
 }
 

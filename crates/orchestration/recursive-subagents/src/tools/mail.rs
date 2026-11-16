@@ -377,11 +377,7 @@ impl TopologyTool {
         value: &Value,
         cancelled: SendCancelled<'_>,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
-        let caller = self
-            .caller_id
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let caller = self.caller_id.lock().map_or_default(|guard| guard.clone());
         let recovered = if let Ok(request) = decode::<SendAgentMessageRequest>(value) {
             match self
                 .recover_followup(&caller, &request, &operation_id)

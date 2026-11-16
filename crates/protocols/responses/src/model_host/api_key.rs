@@ -165,8 +165,7 @@ where
         CanonicalIdSources::with_clock(Arc::clone(&clock)),
         replay
             .as_ref()
-            .map(|bridge| bridge.hosted_programs().clone())
-            .unwrap_or_default(),
+            .map_or_default(|bridge| bridge.hosted_programs().clone()),
         plan,
         artifact_binding,
         Arc::clone(&clock),

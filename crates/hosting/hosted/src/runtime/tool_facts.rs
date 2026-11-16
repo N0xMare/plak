@@ -128,8 +128,7 @@ fn agent_wake(result: &Value, facts: &mut WaitFacts) {
     let rows = result
         .get("agents")
         .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
+        .map_or_default(Vec::as_slice);
     match result.get("woke_by").and_then(Value::as_str) {
         Some("settled") => {
             // The result mail this wait delivered names the attempt that
@@ -211,8 +210,7 @@ pub(super) fn adopt_milestone(
         TopologyCallFacts::Wait(_) => return None,
     };
     let (agent_id, template) = producer(candidate)
-        .or_else(|| sealer_named_by(candidate).map(|agent| (agent, None)))
-        .unwrap_or_default();
+        .or_else(|| sealer_named_by(candidate).map_or_default(|agent| (agent, None)));
     Some(AgentMilestone {
         agent_id,
         event,

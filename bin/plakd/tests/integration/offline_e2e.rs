@@ -3283,8 +3283,7 @@ subprocess.run(["python3", "wait.py", "service.port"], check=True)
             std::fs::read_to_string(fixture.workspace().join("service.namespace"))
                 .expect("service namespace");
         let host_namespace = std::fs::read_link("/proc/self/ns/net")
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_default();
+            .map_or_default(|path| path.to_string_lossy().into_owned());
         let isolated = service_namespace != host_namespace;
         // A port in another namespace cannot identify a host listener. Only
         // the shared-network fixture may receive the cleanup request.
@@ -4262,7 +4261,7 @@ fn session_event_files(fixture: &Fixture) -> Vec<PathBuf> {
     let mut files = std::fs::read_dir(
         plakd::home::paths::PlakPaths::explicit(fixture.home().clone()).sessions_dir(),
     )
-    .map(|entries| {
+    .map_or_default(|entries| {
         entries
             .flatten()
             .map(|entry| entry.path())
@@ -4272,8 +4271,7 @@ fn session_event_files(fixture: &Fixture) -> Vec<PathBuf> {
                     .is_some_and(|name| name.ends_with(".events.jsonl"))
             })
             .collect::<Vec<_>>()
-    })
-    .unwrap_or_default();
+    });
     files.sort();
     files
 }

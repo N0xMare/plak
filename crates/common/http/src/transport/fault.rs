@@ -461,9 +461,7 @@ fn status_reply(status: u16, retry_after: Option<u64>) -> Vec<u8> {
         503 => "Service Unavailable",
         _ => "Overloaded",
     };
-    let retry_after = retry_after
-        .map(|seconds| format!("retry-after: {seconds}\r\n"))
-        .unwrap_or_default();
+    let retry_after = retry_after.map_or_default(|seconds| format!("retry-after: {seconds}\r\n"));
     format!(
         "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\n{retry_after}x-plak-injected-fault: {status}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()

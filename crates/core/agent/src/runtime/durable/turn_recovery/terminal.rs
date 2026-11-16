@@ -386,9 +386,7 @@ fn landed_terminal_recovery_fold(
         command_id,
         turn_id,
         operations,
-        output: response
-            .map(|response| response.output().to_vec())
-            .unwrap_or_default(),
+        output: response.map_or_default(|response| response.output().to_vec()),
         withhold_prompt: tail.0,
         tail: tail.1,
         family_artifact,

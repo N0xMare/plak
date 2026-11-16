@@ -99,11 +99,7 @@ impl TopologyTool {
     where
         R: serde::Serialize + Clone + Send + Sync + 'static,
     {
-        let caller = self
-            .caller_id
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let caller = self.caller_id.lock().map_or_default(|guard| guard.clone());
         let jobs = self.driver.job_service(&caller);
         // Process terminals count from the call itself, before its admission
         // waits its writer turn.

@@ -103,11 +103,7 @@ impl TopologyTool {
         if !self.consumes_cell_agent_budget_for(value) {
             return None;
         }
-        let caller = self
-            .caller_id
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let caller = self.caller_id.lock().map_or_default(|guard| guard.clone());
         let cell = CellIdentity::from_lineage(lineage, &caller)?;
         self.cell_budget
             .admit_agent(&cell)
@@ -147,11 +143,7 @@ impl TopologyTool {
         operation_id: &str,
         value: &Value,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
-        let caller = self
-            .caller_id
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let caller = self.caller_id.lock().map_or_default(|guard| guard.clone());
         let running = self.running_jobs(&caller);
         let warning = if running.is_empty() {
             String::new()
@@ -509,11 +501,7 @@ impl TopologyTool {
         operation_id: String,
         value: &Value,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
-        let caller = self
-            .caller_id
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let caller = self.caller_id.lock().map_or_default(|guard| guard.clone());
         let request = match decode::<SpawnAgentRequest>(value) {
             Ok(request) => request,
             Err(error) => {

@@ -301,7 +301,7 @@ publication needs no file outside the package root:
   `PROVENANCE.md`.
 
 - A published package carries the registry metadata: its description,
-  `license`, `repository` and `homepage` (both the repository URL),
+  `license`, `repository` (the repository URL; no redundant `homepage`),
   `documentation` (`https://docs.rs/<name>` for a library; `plakd` and the
   binary-only `plakous-py-worker` point into the repository), a `readme`, one
   to five crates.io keywords and categories, and a `LICENSE` file in the

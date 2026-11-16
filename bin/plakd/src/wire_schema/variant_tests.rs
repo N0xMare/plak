@@ -199,8 +199,7 @@ impl Schema {
         let filled = depth < FILLED_DEPTH;
         let required: Vec<&str> = schema["required"]
             .as_array()
-            .map(|names| names.iter().filter_map(Value::as_str).collect())
-            .unwrap_or_default();
+            .map_or_default(|names| names.iter().filter_map(Value::as_str).collect());
         let mut object = Map::new();
         if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
             for (name, property) in properties {

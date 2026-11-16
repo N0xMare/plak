@@ -460,8 +460,7 @@ impl ProductTopologyRuntime {
     pub fn take_recoveries(&self) -> Vec<crate::task_set::TaskHandle<()>> {
         self.recoveries
             .lock()
-            .map(|mut tasks| std::mem::take(&mut *tasks))
-            .unwrap_or_default()
+            .map_or_default(|mut tasks| std::mem::take(&mut *tasks))
     }
 
     /// Whether a `recover_node` run over this tree is still running.

@@ -989,8 +989,7 @@ pub(super) fn api_root_binding(
         TargetSelection::OpenRouter { .. } => None,
         TargetSelection::Platform { provider } => {
             let ladder = crate::platform::platform_model(*provider, model)
-                .map(|row| crate::platform::effort_names(&row.efforts))
-                .unwrap_or_default();
+                .map_or_default(|row| crate::platform::effort_names(&row.efforts));
             match effort.and_then(crate::effort::parse) {
                 Some(effort) if ladder.contains(&effort) => Some(effort.to_owned()),
                 _ => return Err("an API root takes an effort its model publishes"),
@@ -1145,10 +1144,7 @@ pub(super) fn handle_shell_set_model<P: plakous_host_protocol::ProtocolExtension
             .str("model", &model)
             .opt_str("effort", effort.as_deref()),
     );
-    let effort_note = effort
-        .as_deref()
-        .map(|e| format!(" effort={e}"))
-        .unwrap_or_default();
+    let effort_note = effort.as_deref().map_or_default(|e| format!(" effort={e}"));
     let _ = events.notice(TranscriptRow::info(
         NoticeScope::Settings,
         format!(

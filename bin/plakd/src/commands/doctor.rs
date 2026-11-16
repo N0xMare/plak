@@ -299,8 +299,7 @@ fn doctor_spawn_templates(
         config
             .templates
             .get(name.as_str())
-            .map(|template| template.spawns.clone())
-            .unwrap_or_default()
+            .map_or_default(|template| template.spawns.clone())
     });
     let mut spawnable: Vec<&str> = names.iter().map(|(_, name)| name.as_str()).collect();
     spawnable.sort_unstable();

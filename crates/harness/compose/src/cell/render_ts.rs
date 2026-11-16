@@ -102,13 +102,12 @@ fn render_inline_object_type(object: &serde_json::Map<String, Value>) -> String 
     let required = object
         .get("required")
         .and_then(Value::as_array)
-        .map(|items| {
+        .map_or_default(|items| {
             items
                 .iter()
                 .filter_map(Value::as_str)
                 .collect::<BTreeSet<_>>()
-        })
-        .unwrap_or_default();
+        });
     let mut properties = properties.iter().collect::<Vec<_>>();
     properties.sort_unstable_by_key(|(name, _)| *name);
     let fields = properties
@@ -143,13 +142,12 @@ fn render_commented_object_type(object: &serde_json::Map<String, Value>) -> Stri
     let required = object
         .get("required")
         .and_then(Value::as_array)
-        .map(|items| {
+        .map_or_default(|items| {
             items
                 .iter()
                 .filter_map(Value::as_str)
                 .collect::<BTreeSet<_>>()
-        })
-        .unwrap_or_default();
+        });
     let mut properties = properties.iter().collect::<Vec<_>>();
     properties.sort_unstable_by_key(|(name, _)| *name);
     let fields = properties

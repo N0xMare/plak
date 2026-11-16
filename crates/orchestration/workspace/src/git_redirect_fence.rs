@@ -494,11 +494,7 @@ fn discover_real_jj() -> Result<PathBuf, String> {
 fn jj_copy_git_shim(real_git: Option<&Path>) -> String {
     format!(
         include_str!("git_redirect_fence/jj_copy_git_shim.sh"),
-        real_git = sh_single_quote(
-            &real_git
-                .map(|path| path.display().to_string())
-                .unwrap_or_default()
-        )
+        real_git = sh_single_quote(&real_git.map_or_default(|path| path.display().to_string()))
     )
 }
 

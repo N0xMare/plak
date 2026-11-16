@@ -101,8 +101,7 @@ pub async fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
                 "clear projection failed: {error}{}",
                 release
                     .err()
-                    .map(|error| format!("; target release failed: {error}"))
-                    .unwrap_or_default(),
+                    .map_or_default(|error| format!("; target release failed: {error}")),
             )));
         }
     };

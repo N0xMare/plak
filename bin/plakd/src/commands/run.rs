@@ -701,8 +701,7 @@ pub(crate) fn run_config(
         // Every stderr line this face writes is decided in `face`, so the text
         // a user reads is pinned by tests rather than by a live provider.
         let written = event
-            .map(|event| face.borrow_mut().lines(event))
-            .unwrap_or_default()
+            .map_or_default(|event| face.borrow_mut().lines(event))
             .iter()
             .try_for_each(|line| write_stderr_line(stderr, line))
             .and_then(|()| stderr.flush());

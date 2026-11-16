@@ -101,10 +101,7 @@ impl OAuthHttp {
         let host = parsed.host_str().ok_or_else(refused)?;
         let origin = match parsed.scheme() {
             "https" => {
-                let port = parsed
-                    .port()
-                    .map(|port| format!(":{port}"))
-                    .unwrap_or_default();
+                let port = parsed.port().map_or_default(|port| format!(":{port}"));
                 Origin::parse(&format!("https://{host}{port}")).map_err(|_| refused())?
             }
             "http" if self.loopback => {

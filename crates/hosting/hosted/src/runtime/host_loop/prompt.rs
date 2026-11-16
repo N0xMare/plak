@@ -316,8 +316,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         // measurement, so the estimate counts them by the dialect's bound.
         let images = queued_delivery
             .as_ref()
-            .map(|item| std::sync::Arc::clone(&item.images))
-            .unwrap_or_default();
+            .map_or_default(|item| std::sync::Arc::clone(&item.images));
         let watch = InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.begin();
         let _ = self.role.events.send(ContentEvent::Status {

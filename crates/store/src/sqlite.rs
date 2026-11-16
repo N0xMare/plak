@@ -306,8 +306,7 @@ impl SqliteTraceCollector {
     pub fn take_commits(&self) -> Vec<SqliteCommitTrace> {
         self.commits
             .lock()
-            .map(|mut commits| std::mem::take(&mut *commits))
-            .unwrap_or_default()
+            .map_or_default(|mut commits| std::mem::take(&mut *commits))
     }
 
     fn record(&self, trace: SqliteCommitTrace) {

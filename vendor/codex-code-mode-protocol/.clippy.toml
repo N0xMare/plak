@@ -1,0 +1,2 @@
+# This snapshot retains its upstream MSRV instead of the workspace MSRV.
+msrv = "1.97.1"

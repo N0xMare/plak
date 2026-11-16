@@ -5918,9 +5918,8 @@ def validate_publication(
         errors.append(f"{name}: published packages need a description")
     if metadata.get("license") != license_expression:
         errors.append(f"{name}: license must be {license_expression}")
-    for key in ("repository", "homepage"):
-        if metadata.get(key) != WORKSPACE_REPOSITORY:
-            errors.append(f"{name}: {key} must be {WORKSPACE_REPOSITORY}")
+    if metadata.get("repository") != WORKSPACE_REPOSITORY:
+        errors.append(f"{name}: repository must be {WORKSPACE_REPOSITORY}")
     libraries = [target for target in metadata.get("targets", []) if "lib" in target["kind"]]
     documentation = metadata.get("documentation") or ""
     if libraries and name != "plakd":

@@ -585,11 +585,8 @@ pub(crate) fn tree_needs_operator(tree_id: &str) -> bool {
         .filter(|last| last.runtime.ptr_eq(&Arc::downgrade(&runtime)));
     let placement_attention =
         placement_attention.unwrap_or_else(|| previous.is_some_and(|last| last.value));
-    let observations = observations.unwrap_or_else(|| {
-        previous
-            .map(|last| last.observations.clone())
-            .unwrap_or_default()
-    });
+    let observations =
+        observations.unwrap_or_else(|| previous.map_or_default(|last| last.observations.clone()));
     last.retain(|_, last| last.runtime.strong_count() > 0);
     last.insert(
         tree_id.to_owned(),
@@ -662,8 +659,7 @@ impl ChildObservation {
             tools: state
                 .projection
                 .as_ref()
-                .map(|projection| projection.child_tools.iter().cloned().collect())
-                .unwrap_or_default(),
+                .map_or_default(|projection| projection.child_tools.iter().cloned().collect()),
         };
         let tail = Tail {
             observation: Arc::clone(self),
@@ -679,8 +675,7 @@ impl ChildObservation {
         self.lock()
             .projection
             .as_ref()
-            .map(|projection| projection.approvals.keys().cloned().collect())
-            .unwrap_or_default()
+            .map_or_default(|projection| projection.approvals.keys().cloned().collect())
     }
 
     /// Whether this turn waits on the decision `approval_id` names.

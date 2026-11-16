@@ -12,6 +12,7 @@
 #     docker build --platform linux/amd64 -f tools/musl/image.Dockerfile \
 #       --target nextest --output type=local,dest="$HOME/plak-musl/bin" -
 FROM rust:1.100.0-alpine AS base
+ARG CARGO_BUILD_JOBS=16
 RUN apk add --no-cache bash bubblewrap clang22-dev coreutils curl findutils gcc git jujutsu \
       just lld make musl-dev musl-utils openssl-dev perl pkgconf procps python3 tar \
       util-linux xz \
@@ -24,20 +25,20 @@ RUN apk add --no-cache bash bubblewrap clang22-dev coreutils curl findutils gcc 
 FROM base AS sources
 COPY . /src
 RUN set -eu; \
-    cd /src; cargo fetch --locked; \
+    cd /src; nice -n 19 cargo fetch --locked; \
     for lock in tests/fixtures/*/Cargo.lock; do \
-      cargo fetch --locked --manifest-path "${lock%.lock}.toml"; \
+      nice -n 19 cargo fetch --locked --manifest-path "${lock%.lock}.toml"; \
     done; \
     deny_version=$(awk '$1 == "cargo-deny" { print $2; exit }' tools/gate/dev-tools.pins); \
-    cargo install --locked --root /tmp/deny --version "$deny_version" cargo-deny; \
+    nice -n 19 cargo install --locked --root /tmp/deny --version "$deny_version" cargo-deny; \
     chmod -R a+rX /usr/local/cargo/registry
 
 FROM base AS nextest-build
 COPY tools/gate/dev-tools.pins /tmp/dev-tools.pins
 RUN nextest_version=$(awk '$1 == "cargo-nextest" { print $2; exit }' /tmp/dev-tools.pins) \
  && ruff_version=$(awk '$1 == "ruff" { print $2; exit }' /tmp/dev-tools.pins) \
- && cargo install --locked --root /out --version "$nextest_version" cargo-nextest \
- && cargo install --locked --root /out --version "$ruff_version" ruff
+ && nice -n 19 cargo install --locked --root /out --version "$nextest_version" cargo-nextest \
+ && nice -n 19 cargo install --locked --root /out --version "$ruff_version" ruff
 
 FROM scratch AS nextest
 COPY --from=nextest-build /out/bin/cargo-nextest /cargo-nextest

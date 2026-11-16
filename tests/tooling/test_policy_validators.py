@@ -237,7 +237,6 @@ class PublicationTests(unittest.TestCase):
             'description': 'A demo package',
             'license': 'MIT',
             'repository': workspace_policy.WORKSPACE_REPOSITORY,
-            'homepage': workspace_policy.WORKSPACE_REPOSITORY,
             'documentation': 'https://docs.rs/plakous-demo',
             'readme': 'README.md',
             'keywords': ['llm', 'agent'],
@@ -264,7 +263,7 @@ class PublicationTests(unittest.TestCase):
             metadata = self.published(
                 directory,
                 description='',
-                homepage=None,
+                repository=None,
                 documentation='https://example.com',
                 keywords=['LLM', 'a', 'b', 'c', 'd', 'e'],
                 categories=['ai'],
@@ -276,7 +275,7 @@ class PublicationTests(unittest.TestCase):
             findings,
             [
                 'plakous-demo: published packages need a description',
-                f'plakous-demo: homepage must be {workspace_policy.WORKSPACE_REPOSITORY}',
+                f'plakous-demo: repository must be {workspace_policy.WORKSPACE_REPOSITORY}',
                 'plakous-demo: a library\'s documentation is https://docs.rs/plakous-demo',
                 'plakous-demo: published packages need a readme file',
                 'plakous-demo: keywords must list 1 to 5 entries',

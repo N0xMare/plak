@@ -774,13 +774,12 @@ impl TopologyHub {
     fn runtimes(&self) -> Vec<Arc<ProductTopologyRuntime>> {
         self.entries
             .lock()
-            .map(|entries| {
+            .map_or_default(|entries| {
                 entries
                     .values()
                     .map(|entry| Arc::clone(&entry.runtime))
                     .collect()
             })
-            .unwrap_or_default()
     }
 
     /// Inserts a working copy over `store` and `vcs`, or returns the

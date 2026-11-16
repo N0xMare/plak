@@ -662,8 +662,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
     pub(crate) fn take_notice_intents(&self) -> Vec<PendingNoticeIntent> {
         self.notices
             .lock()
-            .map(|mut notices| notices.drain(..).collect())
-            .unwrap_or_default()
+            .map_or_default(|mut notices| notices.drain(..).collect())
     }
     fn resync_transcript_gaps(&self) {
         self.presentations

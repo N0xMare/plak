@@ -360,9 +360,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         });
         let wait = wait_started(&name, process_label, process_args.as_ref());
         let kind = crate::activity::tool_activity_kind(&name);
-        let processes = process_label
-            .map(|_| roots.job_registry().snapshot())
-            .unwrap_or_default();
+        let processes = process_label.map_or_default(|_| roots.job_registry().snapshot());
         if let (Some(args), Some(locator)) = (
             process_label.and(process_args.as_ref()),
             session.plakous_locator,

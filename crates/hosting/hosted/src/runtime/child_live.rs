@@ -516,11 +516,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> ServeContext<P> {
             .acquire_owned()
             .await
             .map_err(|_| "transcript unavailable: the host is closing".to_owned())?;
-        let processes = self
-            .jobs
-            .as_ref()
-            .map(|jobs| jobs.snapshot())
-            .unwrap_or_default();
+        let processes = self.jobs.as_ref().map_or_default(|jobs| jobs.snapshot());
         let task_tools = self.task_tools;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;

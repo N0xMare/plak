@@ -550,8 +550,7 @@ fn mid_stream_error(error: &Value) -> Broken {
     let message = error
         .get("message")
         .and_then(Value::as_str)
-        .map(|message| bounded_line(message, 300))
-        .unwrap_or_default();
+        .map_or_default(|message| bounded_line(message, 300));
     let text = format!("the provider failed the side request mid-stream ({message})");
     if matches!(code, Some(429 | 500..=599)) {
         Broken::Transient(ChatRetrievalError::new(

@@ -153,8 +153,7 @@ impl XaiResolvedModel {
             }
             .with_same_served_models(
                 crate::native_auth::grok_enrollment(model.remote_id().as_str())
-                    .map(|row| row.same_served_models)
-                    .unwrap_or_default()
+                    .map_or_default(|row| row.same_served_models)
                     .iter()
                     .map(|served| ModelId::new(*served))
                     .collect::<Result<Vec<_>, _>>()?,
@@ -1295,8 +1294,7 @@ mod shared_host_model {
                 CanonicalIdSources::with_clock(Arc::clone(&self.clock)),
                 replay_bridge
                     .as_ref()
-                    .map(|bridge| bridge.hosted_programs().clone())
-                    .unwrap_or_default(),
+                    .map_or_default(|bridge| bridge.hosted_programs().clone()),
                 plan,
                 artifact_binding,
                 Arc::clone(&self.clock),

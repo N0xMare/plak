@@ -440,11 +440,7 @@ impl TopologyTool {
         operation_id: &str,
         value: &Value,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
-        let caller = self
-            .caller_id
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let caller = self.caller_id.lock().map_or_default(|guard| guard.clone());
         if self.kind == TopologyKind::Submit {
             let running = self.running_jobs(&caller);
             let (children, remedies) = self

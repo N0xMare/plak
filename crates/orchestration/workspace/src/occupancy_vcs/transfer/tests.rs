@@ -3,8 +3,7 @@ use crate::vcs_fixtures::git_repo;
 
 fn uploads(repo: &std::path::Path) -> Vec<std::path::PathBuf> {
     std::fs::read_dir(repo.join(".git/plak-transfer/uploads"))
-        .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
-        .unwrap_or_default()
+        .map_or_default(|entries| entries.flatten().map(|entry| entry.path()).collect())
 }
 
 /// A failed apply leaves no upload behind: nothing reruns from it, and the

@@ -140,8 +140,7 @@ pub(super) fn process_subject_for_ids(
             let outcome = if label == "process_session_wait" {
                 wait_result
                     .and_then(|result| process_wait_outcome(result, id))
-                    .map(|outcome| format!(" · {outcome}"))
-                    .unwrap_or_default()
+                    .map_or_default(|outcome| format!(" · {outcome}"))
             } else {
                 String::new()
             };

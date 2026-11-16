@@ -819,14 +819,13 @@ impl NativeVertical for Vertical {
                             .entries()
                             .iter()
                             .find(|entry| entry.model_id() == selected_model.as_str())
-                            .map(|entry| {
+                            .map_or_default(|entry| {
                                 entry
                                     .service_tiers()
                                     .iter()
                                     .map(|tier| tier.id().to_owned())
                                     .collect()
-                            })
-                            .unwrap_or_default(),
+                            }),
                         selected_model,
                         descriptor,
                         model,

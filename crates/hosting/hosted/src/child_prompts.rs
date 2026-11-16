@@ -135,10 +135,9 @@ impl ChildAssignmentStart<'_> {
         } else {
             self.description
         };
-        let workspace_line = self
-            .workspace_path
-            .map(|path| PLAK_CHILD_ASSIGNMENT_WORKSPACE_LINE_TEMPLATE.replace("{path}", path))
-            .unwrap_or_default();
+        let workspace_line = self.workspace_path.map_or_default(|path| {
+            PLAK_CHILD_ASSIGNMENT_WORKSPACE_LINE_TEMPLATE.replace("{path}", path)
+        });
         let mut body = child_assignment_start_template(self.kind)
             .replace("{template}", self.template)
             .replace("{tier}", self.tier.as_str())

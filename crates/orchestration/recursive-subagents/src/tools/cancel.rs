@@ -40,11 +40,7 @@ impl TopologyTool {
         operation_id: String,
         value: &Value,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
-        let caller = self
-            .caller_id
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let caller = self.caller_id.lock().map_or_default(|guard| guard.clone());
         let request = match decode::<AttemptScopedRequest>(value) {
             Ok(request) => request,
             Err(error) => {
@@ -129,11 +125,7 @@ impl TopologyTool {
         operation_id: String,
         value: &Value,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
-        let caller = self
-            .caller_id
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let caller = self.caller_id.lock().map_or_default(|guard| guard.clone());
         let request = match decode::<AttemptScopedRequest>(value) {
             Ok(request) => request,
             Err(error) => {

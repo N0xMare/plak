@@ -58,7 +58,6 @@ edition = "2024"
 rust-version = "1.100.0"
 license = "MIT"
 repository = "https://github.com/N0xMare/plak"
-homepage = "https://github.com/N0xMare/plak"
 readme = "README.md"
 # Published packages carry their sources and embedded assets; tests, benches
 # and test data stay in the repository.
@@ -159,7 +158,6 @@ plakous-recursive-subagents-store = { version = "0.0.4", path = "crates/orchestr
 plakous-responses = { version = "0.0.4", path = "crates/protocols/responses", default-features = false }
 plakous-runner = { version = "0.0.4", path = "crates/runtimes/runner", default-features = false }
 plakous-runner-protocol = { version = "0.0.4", path = "crates/common/runner-protocol", default-features = false }
-plakous-runner-dial = { version = "0.0.4", path = "crates/common/runner-dial", default-features = false }
 plakous-store = { version = "0.0.4", path = "crates/store", default-features = false }
 plakous-tool-files = { version = "0.0.4", path = "crates/harness/tool-files", default-features = false }
 plakous-tool-plan = { version = "0.0.4", path = "crates/harness/tool-plan", default-features = false }

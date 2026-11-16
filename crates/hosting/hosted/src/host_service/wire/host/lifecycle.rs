@@ -106,11 +106,10 @@ where
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get_mut(&self.connection_id)
-            .map(|delivery| {
+            .map_or_default(|delivery| {
                 delivery.sending |= !delivery.pending.is_empty();
                 std::mem::take(&mut delivery.pending)
-            })
-            .unwrap_or_default();
+            });
         for notice in notices {
             write_frame(&mut self.out, &HostFrame::<P>::from(notice))?;
         }

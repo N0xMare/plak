@@ -966,8 +966,7 @@ fn an_mcp_owner_is_absent_from_every_other_tool_and_exact_when_present() -> Test
     let encoded = serde_json::to_value(&local)?;
     let keys = encoded
         .as_object()
-        .map(|object| object.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
+        .map_or_default(|object| object.keys().cloned().collect::<Vec<_>>());
     assert_eq!(keys, ["caller", "definition", "execution"]);
     assert_eq!(local.local_owner(), Some(ToolExecutionOwner::Local));
 

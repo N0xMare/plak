@@ -631,10 +631,9 @@ impl HostSessions<PlakExtension> for ProductSessions {
                     None => crate::product_config::ProductConfig::load_user(paths),
                 }
                 .ok();
-                let profiles = config
-                    .as_ref()
-                    .map(|config| crate::profiles::prepared_catalog(config, paths.home()))
-                    .unwrap_or_default();
+                let profiles = config.as_ref().map_or_default(|config| {
+                    crate::profiles::prepared_catalog(config, paths.home())
+                });
                 DirectoryProfiles { config, profiles }
             });
         }

@@ -217,8 +217,7 @@ pub fn spawn_closure(config: &ProductConfig) -> Vec<TemplateName> {
         config
             .templates
             .get(name.as_str())
-            .map(|template| template.spawns.clone())
-            .unwrap_or_default()
+            .map_or_default(|template| template.spawns.clone())
     })
     .into_iter()
     .filter_map(|(_, name)| seen.insert(name.clone()).then_some(name))

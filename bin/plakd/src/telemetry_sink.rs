@@ -817,9 +817,7 @@ pub(crate) fn log_telemetry_unavailable(paths: &PlakPaths, session_id: &str, rea
 /// Writer drop/error counters when a session has registered the telemetry writer.
 #[must_use]
 pub fn telemetry_writer_status(paths: &PlakPaths) -> TelemetryWriterStatus {
-    telemetry_writer_for_home(paths.home())
-        .map(|writer| writer.status())
-        .unwrap_or_default()
+    telemetry_writer_for_home(paths.home()).map_or_default(|writer| writer.status())
 }
 
 #[cfg(test)]

@@ -917,8 +917,7 @@ pub(in crate::agent) fn frozen_child_tool_selection(
             };
             let tool_sections = tree
                 .epoch_of(agent_id)
-                .map(|epoch| epoch.tool_sections.clone())
-                .unwrap_or_default();
+                .map_or_default(|epoch| epoch.tool_sections.clone());
             let selection = crate::tool_plan::TemplateToolSelection::parse(&binding.tools)
                 .map_err(|error| format!("child template {} tools: {error}", binding.template))?;
             Ok(crate::tool_plan::NodeToolSelection {

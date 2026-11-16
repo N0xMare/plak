@@ -6,7 +6,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 documentation = "https://github.com/N0xMare/plak/tree/main/docs/user-guide"
 readme.workspace = true
 keywords = ["llm", "agent", "cli", "coding-agent"]

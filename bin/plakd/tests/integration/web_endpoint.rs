@@ -872,11 +872,11 @@ fn an_idle_session_releases_and_the_next_connection_wakes_it() {
     let woke = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wake(&mut web)));
     if let Err(error) = woke {
         let lines: Vec<String> = web.lines.try_iter().collect();
-        let text = error
-            .downcast_ref::<String>()
-            .cloned()
-            .or_else(|| error.downcast_ref::<&str>().map(|text| (*text).to_owned()))
-            .unwrap_or_default();
+        let text = error.downcast_ref::<String>().cloned().or_else(|| {
+            error
+                .downcast_ref::<&str>()
+                .map_or_default(|text| (*text).to_owned())
+        });
         panic!("{text}; plakd host said: {lines:#?}");
     }
     interrupt_and_wait(&mut web);

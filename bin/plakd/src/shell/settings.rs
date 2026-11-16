@@ -183,8 +183,7 @@ fn session_profile_row(
         crate::roster_input::nested_spawns(&working_set, |name| {
             snapshot
                 .binding(name)
-                .map(|card| card.spawns.clone())
-                .unwrap_or_default()
+                .map_or_default(|card| card.spawns.clone())
         })
         .into_iter()
         .filter_map(|(depth, name)| snapshot.binding(&name).map(|card| (depth, card)))
@@ -970,8 +969,9 @@ impl ProductSurface {
             let accounts = state_home
                 .map_err(plakous_hosted::error::CliFailure::new)
                 .and_then(crate::commands::application::PlakousApplication::for_accounts)
-                .map(|mut backend| crate::commands::usage::usage_refresh_accounts(&mut backend))
-                .unwrap_or_default();
+                .map_or_default(|mut backend| {
+                    crate::commands::usage::usage_refresh_accounts(&mut backend)
+                });
             publish_usage_refresh_accounts(&generation, expected, accounts, &events);
         });
     }

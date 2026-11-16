@@ -331,8 +331,7 @@ impl ProductAgentTree {
     pub fn tree_runner_ancestors(&self, runner: &str) -> Vec<String> {
         self.runner_ancestors()
             .get(runner)
-            .map(|commits| commits.iter().cloned().collect())
-            .unwrap_or_default()
+            .map_or_default(|commits| commits.iter().cloned().collect())
     }
 
     /// Records that `runner` holds `commit`, the tip of a bundle applied

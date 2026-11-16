@@ -248,8 +248,7 @@ impl OAuthSession {
                 s.len() <= super::login::MAX_SCOPE_BYTES
                     && plakous_auth::oauth_workflow::valid_scope_list(s)
             })
-            .map(|s| s.split_ascii_whitespace().map(str::to_owned).collect())
-            .unwrap_or_default();
+            .map_or_default(|s| s.split_ascii_whitespace().map(str::to_owned).collect());
         AuthorizationFailure {
             message: format!(
                 "mcp server {} {reason}; authentication is required",

@@ -985,8 +985,7 @@ impl ProductAgentTree {
             .map(|row| row.workspace_id.clone());
         let candidate_ids = workspace_id
             .as_deref()
-            .map(|id| self.candidate_ids_of(id))
-            .unwrap_or_default();
+            .map_or_default(|id| self.candidate_ids_of(id));
         if let Some(id) = &workspace_id {
             self.removals_in_flight.insert(id.clone());
         }

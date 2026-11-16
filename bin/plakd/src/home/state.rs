@@ -809,8 +809,7 @@ fn probe_state_locks(
     {
         let name = path
             .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
+            .map_or_default(|name| name.to_string_lossy().into_owned());
         // A temporary record is published by a writer holding its process
         // lock, which this probe locks with every other lock file, so a
         // temporary record whose writer is gone is simply removable.

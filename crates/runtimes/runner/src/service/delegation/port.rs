@@ -78,8 +78,7 @@ impl RunnerService {
             let line = request
                 .owner
                 .as_ref()
-                .map(|owner| owner.line.clone())
-                .unwrap_or_default();
+                .map_or_default(|owner| owner.line.clone());
             let gate = service.inner.foreground.gate(&host, &line);
             let _guard = gate.lock().await;
             let Some(owner) = request.owner.as_ref() else {

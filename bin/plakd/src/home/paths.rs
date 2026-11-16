@@ -710,11 +710,10 @@ pub fn application_state_home() -> Result<PathBuf, String> {
 #[must_use]
 pub fn installed_snapshot_roots() -> Vec<PathBuf> {
     user_home()
-        .map(|home| {
+        .map_or_default(|home| {
             let lib = home.join(".local/lib/plak");
             vec![lib.join("maintainer"), lib.join("release")]
         })
-        .unwrap_or_default()
 }
 
 /// The operator's login home: display-path shortening and the user skills

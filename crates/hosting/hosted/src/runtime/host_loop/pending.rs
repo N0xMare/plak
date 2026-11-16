@@ -108,8 +108,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let jobs = self
             .opened
             .agent()
-            .map(plakous::agent::Agent::jobs)
-            .unwrap_or_default();
+            .map_or_default(plakous::agent::Agent::jobs);
         let process_exits = jobs
             .iter()
             .filter(|job| job.status != plakous::tools::JobStatus::Running)

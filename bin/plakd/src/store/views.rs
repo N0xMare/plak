@@ -714,8 +714,7 @@ pub(super) fn commit_views(
 ) -> Result<ProjectionCommit, RecordStoreError> {
     let runtime_session = views
         .runtime_session_id
-        .map(|session| session.to_string())
-        .unwrap_or_default();
+        .map_or_default(|session| session.to_string());
     let expected = to_i64(writes.expected_cursor.get())?;
     let next = to_i64(writes.cursor.get())?;
     let moved = if writes.expected_cursor == FeedSeq::ZERO {
