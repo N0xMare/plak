@@ -390,7 +390,7 @@ class Smoke:
         show up as.
         """
         repo = self.repo("wrap_up")
-        home = self.env.artifacts / "wrap_up" / "home"
+        home = live.scratch_home(self.env.artifacts, "wrap_up")
         live.write_home(home, self.route, self.env.home)
         live.pin_max_model_rounds(home, 2)
         log_dir = self.env.artifacts / "wrap_up"
@@ -450,7 +450,7 @@ class Smoke:
         repo = live.git_repo(
             self.env.artifacts / "py_ptc" / "repo", {"token.txt": PY_PTC_TOKEN + "\n"}
         )
-        home = self.env.artifacts / "py_ptc" / "home"
+        home = live.scratch_home(self.env.artifacts, "py_ptc")
         live.write_home(home, self.route, self.env.home)
         live.pin_composition(home, "py-ptc")
         log = self.env.artifacts / "py_ptc" / "turn.log"
@@ -738,7 +738,7 @@ def main(argv: list[str]) -> int:
     if mismatch:
         print(f"smoke: {mismatch}", file=sys.stderr)
         return 2
-    env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
+    env = live.Env(args.binary.resolve(), live.scratch_home(artifacts), artifacts)
     env.route = route
     env.fixture_seed = args.fixture_seed
     binary_start = live.binary_sha256(env.binary)
@@ -781,7 +781,9 @@ def main(argv: list[str]) -> int:
                 HARNESS,
                 ("raw exchange evidence missing or incomplete: " + ", ".join(problems)),
             )
-        usage = scenario_usage(env.home, artifacts / name / "home", usage_before)
+        usage = live.usage_delta(live.session_usage(env.home), usage_before).add(
+            live.scenario_home_usage(artifacts, name)
+        )
         result = live.Result(
             name,
             surface,
@@ -811,6 +813,7 @@ def main(argv: list[str]) -> int:
         json.dumps(
             {
                 **live.route_report(route, bound=env.bound_compositions),
+                "homes": live.scratch_homes(artifacts),
                 "binary": str(env.binary),
                 "binary_sha256_start": binary_start,
                 "binary_sha256_end": binary_end,
@@ -838,18 +841,6 @@ def main(argv: list[str]) -> int:
         )
         else 1
     )
-
-
-def scenario_usage(env_home: Path, private: Path, before: live.TokenUsage) -> live.TokenUsage:
-    """Token delta for one scenario, including a private home's session logs.
-
-    Long-session, wrap_up and py_ptc keep their logs off the shared smoke home.
-    """
-    usage = live.usage_delta(live.session_usage(env_home), before)
-    for home in sorted(private.parent.glob(private.name + "*")):
-        if home.is_dir():
-            usage = usage.add(live.session_usage(home))
-    return usage
 
 
 def run_named(runner: Smoke, name: str) -> str:

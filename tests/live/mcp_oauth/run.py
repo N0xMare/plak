@@ -26,6 +26,9 @@ import urllib.request
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
+sys.path.insert(0, str(HERE.parent))
+import live  # noqa: E402
+
 CONTROL = "http://127.0.0.1:18082/control"
 KC = "http://127.0.0.1:18081"
 RESOURCE = "http://127.0.0.1:18082/mcp/"
@@ -296,11 +299,13 @@ class Harness:
     def fixture(self, name, tenant="strict", confidential=False):
         self.output = []
         self.tenant = tenant
-        self.home = self.root / name / "home"
+        base = live.scratch_home(self.root, name)
+        self.home = base / "home"
+        live.check_socket_home(self.home)
         (self.home / "agents").mkdir(parents=True)
         self.home.chmod(0o700)
         self.workspace = self.root / name / "workspace"
-        self.workspace.mkdir()
+        self.workspace.mkdir(parents=True)
         self.script = self.root / name / "script.json"
         self.script.write_text(json.dumps({"version": 1, "steps": [{"output": {"text": "done"}}]}))
         (self.home / "agents" / "lead.toml").write_text(
@@ -989,6 +994,8 @@ class Harness:
             )
             require(not remaining.strip(), "owned containers remain after teardown")
         finally:
+            for home in live.scratch_homes(self.root).values():
+                shutil.rmtree(home)
             shutil.rmtree(self.root)
 
 
@@ -1054,8 +1061,7 @@ def main(argv=None):
 
     signal.signal(signal.SIGTERM, interrupted)
     try:
-        probe_home = harness.root / "version-home"
-        probe_home.mkdir(mode=0o700)
+        probe_home = live.scratch_home(harness.root, "version-home")
         version = subprocess.check_output(
             [str(harness.binary), "version"],
             text=True,
@@ -1096,6 +1102,7 @@ def main(argv=None):
         report["setup_error"] = type(error).__name__ + ": " + redact(str(error))
         print(report["setup_error"], file=sys.stderr)
     finally:
+        report["home_bases"] = live.scratch_homes(harness.root)
         try:
             harness.close()
             report["teardown"] = "complete"

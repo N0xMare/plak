@@ -238,7 +238,7 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_environment_removes_override(self):
         with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
+            base = Path(directory).resolve()
             env = live.Env(base / "plakd", base / "home", base)
             source = {
                 "PATH": "/bin",
@@ -272,7 +272,10 @@ class LiveOracleTests(unittest.TestCase):
             self.assertNotEqual(env.capture_root, other.capture_root)
 
     def test_explicit_capture_segment_must_be_fresh_owned_and_private(self):
-        env = live.Env(Path("plakd"), Path("home"), Path("artifacts"))
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        base = Path(directory.name).resolve()
+        env = live.Env(Path("plakd"), base / "home", base)
         segment = env.capture_root / "explicit"
         child = env.environ(capture_dir=segment, source={})
         self.assertEqual(child["PLAK_TEST_EXCHANGE_CAPTURE_DIR"], str(segment))
@@ -1524,7 +1527,7 @@ class AgentStartupFailureTests(unittest.TestCase):
         # `bye` reaches stdout before the exiting process writes its final
         # stderr line, here an exhausted lookup on a provider timeout.
         with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
+            base = Path(directory).resolve()
             binary = base / "plakd"
             binary.write_text(
                 "#!/bin/sh\n"

@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -517,7 +518,8 @@ class LongSessionOracleTests(unittest.TestCase):
     def test_smoke_counts_tokens_from_a_long_session_private_home(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
-            private = home / "private"
+            private = live.scratch_home(home, "in_turn_compaction")
+            self.addCleanup(shutil.rmtree, private)
             log = private / "state" / "r" / "sessions"
             log.mkdir(parents=True)
             (log / "s.events.jsonl").write_text(
@@ -532,7 +534,7 @@ class LongSessionOracleTests(unittest.TestCase):
                 )
                 + "\n"
             )
-            usage = smoke.scenario_usage(home / "missing", private, live.TokenUsage())
+            usage = live.scenario_home_usage(home, "in_turn_compaction")
         self.assertEqual(
             (
                 usage.input_tokens,
@@ -550,7 +552,9 @@ class LongSessionOracleTests(unittest.TestCase):
             binary.write_bytes(b"synthetic executable; never launched")
 
             def fake_play(_route, env, name):
-                private = env.artifacts / name / "home" / "state" / "r" / "sessions"
+                home = live.scratch_home(env.artifacts, name)
+                self.addCleanup(shutil.rmtree, home)
+                private = home / "state" / "r" / "sessions"
                 private.mkdir(parents=True)
                 (private / "s.events.jsonl").write_text(
                     json.dumps(
@@ -1513,8 +1517,9 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
         artifacts = self.capture_workspace / "artifacts" / route / name
         artifacts.mkdir(parents=True)
         if skip_pages:
-            (artifacts / name / "home").mkdir(parents=True)
-            (artifacts / name / "home" / "skip-pages").write_text("1\n")
+            home = live.scratch_home(artifacts, name)
+            self.addCleanup(shutil.rmtree, home)
+            (home / "skip-pages").write_text("1\n")
         env = live.Env(self.binary, artifacts / "shared-home", artifacts)
         return long_session.play(live.ROUTES[route], env, name)
 

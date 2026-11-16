@@ -460,7 +460,7 @@ def main(argv: list[str]) -> int:
         or live.ROOT / "target" / "live" / f"soak-{route.name}-{time.strftime('%Y%m%d-%H%M%S')}"
     )
     artifacts.mkdir(parents=True)
-    env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
+    env = live.Env(args.binary.resolve(), live.scratch_home(artifacts), artifacts)
     env.route = route
     binary_start = live.binary_sha256(env.binary)
     live.write_home(env.home, route)
@@ -555,6 +555,7 @@ def main(argv: list[str]) -> int:
     info = list(capture_root.glob("segment-*/*.info"))
     summary["captured_exchanges"] = len(info)
     segments = env.capture_segments
+    summary["homes"] = live.scratch_homes(artifacts)
     summary["capture_segments"] = [str(segment) for segment in segments]
     summary["capture_complete"] = (
         bool(info) and len(bodies) == len(info) and live.capture_integrity(segments)

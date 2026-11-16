@@ -2,7 +2,7 @@
 
 Everything here drives the real `plakd` binary: `plakd run`, `plakd agent` over
 JSONL, with no presentation client. Nothing talks to a provider directly.
-A run gets a scratch `PLAK_HOME` under `target/live/`; OAuth logins are XDG
+A run retains scratch `PLAK_HOME`s under the resolved system `/tmp`; OAuth logins are XDG
 state outside that home, so they are shared with the real ones (a token refresh
 during a run writes the real store). API-key routes copy the key installed by
 `plakd key set` into the scratch home without exposing it in output.
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import collections
+import functools
 import hashlib
 import json
 import os
@@ -27,6 +28,94 @@ from collections.abc import Collection
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@functools.cache
+def socket_layout() -> tuple[str, int, int]:
+    """Current source formats, also used by the capture-capable binary."""
+    root = Path(__file__).resolve().parents[2]
+
+    def version(path: str, name: str) -> int:
+        match = re.search(rf"const {name}: \w+ = (\d+);", (root / path).read_text())
+        if match is None:
+            raise ScenarioFailure(HARNESS, f"cannot determine {name}; update live socket preflight")
+        return int(match[1])
+
+    state = "r{}.e{}.p{}.t{}".format(
+        version("crates/store/src/sqlite.rs", "SQLITE_SCHEMA_VERSION"),
+        version("crates/core/agent/src/checkpoint_bundle.rs", "RUNTIME_FORMAT_EPOCH"),
+        version("bin/plakd/src/store/mod.rs", "SCHEMA_VERSION"),
+        version("crates/orchestration/recursive-subagents-store/src/database.rs", "SCHEMA_VERSION"),
+    )
+    protocol = version("crates/common/runner-protocol/src/lib.rs", "PROTOCOL_VERSION")
+    retention = version("crates/common/runner-protocol/src/retention.rs", "VERSION")
+    return state, protocol, retention
+
+
+def socket_paths(home: Path) -> list[Path]:
+    state, protocol, retention = socket_layout()
+    state = plak_child_source().get("PLAK_TEST_STATE_KEY", state)
+    triple = f"v{protocol}-" + "0" * 12
+    return [
+        home / "host/run" / f"{state}.sock",
+        home / f"host/runner/v{protocol}/run/runner.sock",
+        home / "builds" / triple / f"retention-v{retention}.sock",
+        home / "runner/builds" / triple / "run" / f"{triple}.sock",
+        home / "runner/builds" / triple / f"retention-v{retention}.sock",
+    ]
+
+
+def check_socket_home(home: Path) -> None:
+    """Reserve eight bytes beyond the NUL on both supported socket ABIs."""
+    if home.resolve() != home:
+        raise ScenarioFailure(HARNESS, "scratch home must have a physical, symlink-free path")
+    for socket in socket_paths(home):
+        length = len(os.fsencode(socket))
+        if length + 1 + 8 > 104:
+            raise ScenarioFailure(
+                HARNESS,
+                f"socket path needs {length + 1} bytes (SUN_LEN 104/108, eight-byte margin); "
+                "use a shorter physical system temp root or state key; no paid attempt",
+            )
+
+
+def scratch_homes(artifacts: Path) -> dict[str, str]:
+    manifest = artifacts / "homes.json"
+    return json.loads(manifest.read_text()) if manifest.exists() else {}
+
+
+def scratch_home(artifacts: Path, name: str = "main") -> Path:
+    """Retain private homes like artifacts, with an immediate evidence manifest."""
+    artifacts.mkdir(parents=True, exist_ok=True)
+    homes = scratch_homes(artifacts)
+    if name in homes:
+        home = Path(homes[name])
+        Env._private_directory(home)
+        check_socket_home(home)
+        return home
+    home = Path(tempfile.mkdtemp(prefix="pl-", dir=Path("/tmp").resolve(strict=True)))
+    try:
+        Env._private_directory(home)
+        check_socket_home(home)
+    except (OSError, ScenarioFailure) as error:
+        home.rmdir()
+        (artifacts / "report.json").write_text(
+            json.dumps({"pre_attempt_error": str(error), "outcome": HARNESS}) + "\n"
+        )
+        raise
+    homes[name] = str(home)
+    manifest = artifacts / "homes.json"
+    manifest.write_text(json.dumps(homes, indent=2) + "\n")
+    manifest.chmod(0o600)
+    return home
+
+
+def scenario_home_usage(artifacts: Path, name: str) -> TokenUsage:
+    total = TokenUsage()
+    for label, home in scratch_homes(artifacts).items():
+        if label == name or label.startswith(name + "/"):
+            total = total.add(session_usage(Path(home)))
+    return total
 
 
 def capture_root_mismatch(binary: Path, root: Path = ROOT) -> str | None:
@@ -2367,7 +2456,10 @@ class Env:
         faults: str | None = None,
         source: dict[str, str] | None = None,
         capture_dir: Path | None = None,
+        home: Path | None = None,
     ) -> dict[str, str]:
+        home = home or self.home
+        check_socket_home(home)
         self.lookup_faults = faults
         dropped = {"PLAK_TEST_FAULTS", "PLAK_HOME", "PLAK_TEST_EXCHANGE_CAPTURE_DIR"}
         # A stale environment key must never shadow a key copied from the
@@ -2376,7 +2468,7 @@ class Env:
         dropped |= set(API_KEY_ENV.values())
         source = plak_child_source() if source is None else source
         env = {key: value for key, value in source.items() if key not in dropped}
-        env["PLAK_HOME"] = str(self.home)
+        env["PLAK_HOME"] = str(home)
         capture_dir = (
             capture_dir or self.capture_root / f"segment-{len(self.capture_segments) + 1:03d}"
         )
@@ -2413,10 +2505,8 @@ def run_cli(
     is returned as exit 0, so the scenario's oracle judges the printed answer;
     the log keeps the real status.
     """
-    child = env.environ(faults=faults)
+    child = env.environ(faults=faults, home=home)
     segment = env.capture_segments[-1]
-    if home is not None:
-        child["PLAK_HOME"] = str(home)
     try:
         result = subprocess.run(
             [str(env.binary), "run", *args],
@@ -2538,11 +2628,9 @@ class Agent:
         observe: bool = False,
     ):
         self.lookup_faults = faults
-        child_env = env.environ(faults, capture_dir=capture_dir)
+        child_env = env.environ(faults, capture_dir=capture_dir, home=home)
         # A scenario that must pin `[turn]` uses a private home. Capture stays
         # on `env`, matching `run_cli`'s home override.
-        if home is not None:
-            child_env["PLAK_HOME"] = str(home)
         self.home = home or env.home
         self.env = env
         self.capture_dir = env.capture_segments[-1]

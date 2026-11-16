@@ -55,15 +55,28 @@ completed durable turn and an independently checked file, and reports its
 session id and binary hash. It does not alter inference retry budgets.
 
 The Python drivers default to `target/release/plakd`. Build it with
-`cargo build --release --locked -p plakd --features plakd/test-hooks` before a
+`tools/build/build-plakd.sh --release --features plakd/test-hooks` before a
 direct Python invocation; `--binary PATH` selects another capture-capable
 executable. A `test-hooks` binary only captures under the
 `tests/provider-authority` of the checkout that built it, so run the driver
 from that checkout: smoke refuses a binary built elsewhere before launching. `test-hooks` enables `PLAK_TEST_FAULTS` (spec 05 §2.8).
 The drivers put ordinary artifacts under
-`target/live/<kind>-<route>-<stamp>/`: a private `PLAK_HOME`, the repos the
-agent worked in, every JSONL transcript and stderr, and a
-`report.json`.
+`target/live/<kind>-<route>-<stamp>/`: the repos the agent worked in, every
+JSONL transcript and stderr, and a `report.json`. Qualification retains these
+under `target/live/qualification-<lane>-<route>-XXXXXXXX/attempt-N/`.
+Socket-bearing scratch homes instead use unique owned mode-0700 directories
+under the physical system `/tmp` (resolved first, so no symlinked parents),
+independent of checkout, route and lane depth. `homes.json` immediately records
+each logical home's location; completed reports also include `homes`. Homes
+are retained on success and failure, like artifacts: remove the directories
+listed in `homes.json` when deleting that attempt's artifacts. The preflight
+checks current host, runner and retention socket paths in filesystem bytes,
+including the state key, NUL and eight bytes of margin against both macOS's
+104-byte and Linux's 108-byte limits. An overlong path is `harness`, with a
+remedy and no paid attempt; private-directory and no-symlink checks still apply.
+The zero-inference MCP OAuth lane uses the same short bases, records
+`home_bases`, and removes them during its existing teardown rather than retaining
+them.
 Smoke reports pin the executable's SHA-256 at start and end and
 fail if it changes mid-run. Headless soak reports both digests, allowing its
 intentional byte-distinct rebuild; with `--no-rebuild` a changed executable is

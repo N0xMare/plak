@@ -498,7 +498,7 @@ class Features:
         repo = base / "repo"
         if not repo.exists():
             live.git_repo(repo, {"README.md": f"{name} scenario workspace\n"})
-        home = base / ("home" if stage == "turn" else f"home-{stage}")
+        home = live.scratch_home(self.env.artifacts, name if stage == "turn" else f"{name}/{stage}")
         if profile:
             write_profile_home(home, profile)
         else:
@@ -1037,7 +1037,7 @@ class Features:
             for key, value in live.plak_child_source().items()
             if key not in ("PLAK_TEST_EXCHANGE_CAPTURE_DIR", "PLAK_TEST_FAULTS")
         }
-        doctor_home = self.env.artifacts / "doctor-home"
+        doctor_home = live.scratch_home(self.env.artifacts, "doctor-home")
         doctor_home.mkdir(mode=0o700, exist_ok=True)
         child["PLAK_HOME"] = str(doctor_home)
         result = subprocess.run(
@@ -1064,7 +1064,7 @@ class Features:
         out, records, segments, repo, session = self.run(f"{tool}_401", prompt, [tool], faults=plan)
         after = self.credential_generation()
         self.refreshes = refresh_rows(
-            self.env.artifacts / f"{tool}_401" / "home", self.route.account
+            live.scratch_home(self.env.artifacts, f"{tool}_401"), self.route.account
         )
         if after <= before:
             raise ScenarioFailure(
@@ -1351,7 +1351,7 @@ class Features:
         missing = [name for name, _ in dirs if not (repo / "findings" / f"{name}.md").is_file()]
         if missing:
             raise ScenarioFailure(MODEL, f"{detail}: no findings file for {missing}")
-        home = base / "home"
+        home = live.scratch_home(self.env.artifacts, "wide_fanout")
         peak, attempts = peak_in_flight(home)
         if peak > budget:
             raise ScenarioFailure(

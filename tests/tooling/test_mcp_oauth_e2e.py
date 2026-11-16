@@ -2,7 +2,9 @@
 
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 PATH = Path(__file__).resolve().parents[1] / "live/mcp_oauth/run.py"
 spec = importlib.util.spec_from_file_location("mcp_oauth_e2e", PATH)
@@ -65,6 +67,31 @@ class ParsingTests(unittest.TestCase):
 
 
 class ComposeProcessTests(unittest.TestCase):
+    def test_short_fixture_homes_are_removed_even_when_compose_teardown_fails(self):
+        for failed in (False, True):
+            with self.subTest(failed=failed), tempfile.TemporaryDirectory() as directory:
+                harness = lane.Harness.__new__(lane.Harness)
+                harness.root = Path(directory).resolve()
+                harness.processes = []
+                harness.project = "fixture"
+                harness.events = Mock(return_value=[])
+                harness.compose_run = Mock(side_effect=RuntimeError("teardown") if failed else None)
+                with patch.object(lane, "request"):
+                    for name in lane.SCENARIOS:
+                        harness.fixture(name)
+                        lane.live.check_socket_home(harness.home)
+                        self.assertEqual(harness.home.parent.parent, Path("/tmp").resolve())
+                        self.assertTrue(harness.script.is_file())
+                bases = lane.live.scratch_homes(harness.root)
+                self.assertEqual(len(bases), len(lane.SCENARIOS))
+                with patch.object(lane.subprocess, "check_output", return_value=b""):
+                    if failed:
+                        with self.assertRaises(RuntimeError):
+                            harness.close()
+                    else:
+                        harness.close()
+                self.assertTrue(all(not Path(base).exists() for base in bases.values()))
+
     def test_browser_error_does_not_retain_playwright_input_values(self):
         from unittest import mock
         import subprocess

@@ -30,7 +30,9 @@ callback and pipes it to Plak; device login enters the printed code.
 fresh umask). It records source revision, binary hash/version, per-scenario
 results, redacted CLI output, session logs and safe AS/MCP events. It never
 records bearer/refresh tokens, authorization codes, device user codes, cookies,
-client secrets or full authorize URLs. Fresh scratch homes and Compose volumes
+client secrets or full authorize URLs. Socket-bearing homes use private short
+bases under resolved system `/tmp`, checked against both supported SUN_LEN
+limits before launch; the report records `home_bases`. Fresh homes and Compose volumes
 are removed in `finally`; no server is intentionally left running. Raw Docker
 logs are not evidence artifacts. Playwright stderr is omitted on failure because
 its locator diagnostics can contain entered device codes. Interrupt the driver with Ctrl-C, not SIGKILL.

@@ -1559,7 +1559,7 @@ class LongSession:
         return words
 
     def home(self, name: str) -> Path:
-        home = self.env.artifacts / name / "home"
+        home = live.scratch_home(self.env.artifacts, name)
         live.write_home(home, self.route, self.env.home)
         self.caps[name] = round_cap(self.route, name)
         live.pin_max_model_rounds(home, self.caps[name])
@@ -2025,7 +2025,7 @@ def main(argv: list[str]) -> int:
         )
         print(refused, file=sys.stderr)
         return 2
-    env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
+    env = live.Env(args.binary.resolve(), live.scratch_home(artifacts), artifacts)
     env.route = route
     env.fixture_seed = args.fixture_seed
     binary_start = live.binary_sha256(env.binary)
@@ -2068,9 +2068,7 @@ def main(argv: list[str]) -> int:
         if outcome == PASS and not complete:
             outcome, detail = HARNESS, "raw exchange evidence missing or incomplete"
         usage = live.usage_delta(live.session_usage(env.home), usage_before)
-        private = artifacts / name / "home"
-        if private.is_dir():
-            usage = usage.add(live.session_usage(private))
+        usage = usage.add(live.scenario_home_usage(artifacts, name))
         result = live.Result(
             name,
             surface,
@@ -2091,6 +2089,7 @@ def main(argv: list[str]) -> int:
         json.dumps(
             {
                 **header,
+                "homes": live.scratch_homes(artifacts),
                 "binary": str(env.binary),
                 "binary_sha256_start": binary_start,
                 "binary_sha256_end": binary_end,

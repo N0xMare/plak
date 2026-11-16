@@ -1342,7 +1342,7 @@ class Jobs:
         if extra:
             files.update(extra)
         repo = live.git_repo(self.env.artifacts / name / "repo", files)
-        home = self.env.artifacts / name / "home"
+        home = live.scratch_home(self.env.artifacts, name)
         live.write_home(home, self.route, self.env.home)
         pin_jobs(home, foreground)
         return repo, home
@@ -2036,7 +2036,7 @@ def main(argv: list[str]) -> int:
     route = live.ROUTES[args.route]
     stamp = time.strftime("%Y%m%d-%H%M%S")
     artifacts = args.artifacts or live.ROOT / "target" / "live" / f"jobs-{route.name}-{stamp}"
-    env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
+    env = live.Env(args.binary.resolve(), live.scratch_home(artifacts), artifacts)
     env.route = route
     env.fixture_seed = args.fixture_seed
     if not env.binary.is_file():
@@ -2079,9 +2079,7 @@ def main(argv: list[str]) -> int:
         # Private homes hold the scenario's own logs. Count those too.
         # JSONL `turn` events are the other projection; a jobs run whose
         # session log never received `turn.usage` was reported as all zeros.
-        private = artifacts / name / "home"
-        if private.is_dir():
-            usage = usage.add(live.usage_delta(live.session_usage(private), live.TokenUsage()))
+        usage = usage.add(live.scenario_home_usage(artifacts, name))
         usage = live.larger_usage(usage, live.transcript_usage(artifacts / name / "agent.jsonl"))
         result = live.Result(
             name,
@@ -2102,6 +2100,7 @@ def main(argv: list[str]) -> int:
         json.dumps(
             {
                 **live.route_report(route, bound=env.bound_compositions),
+                "homes": live.scratch_homes(artifacts),
                 "binary": str(env.binary),
                 "binary_sha256_start": binary_start,
                 "binary_sha256_end": binary_end,

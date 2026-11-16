@@ -40,7 +40,7 @@ def main() -> int:
         parser.error(mismatch)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     artifacts = live.ROOT / "target/live" / f"lookup-{args.route}-{args.fault}-{stamp}"
-    env = live.Env(binary, artifacts / "home", artifacts)
+    env = live.Env(binary, live.scratch_home(artifacts), artifacts)
     env.route = route
     live.write_home(env.home, route)
     repo = live.git_repo(artifacts / "repo", {"README.md": "Lookup retry proof.\n"})
@@ -92,6 +92,7 @@ def main() -> int:
     if live.binary_sha256(binary) != before:
         raise live.ScenarioFailure(live.HARNESS, "executable changed during the run")
     report = {
+        "homes": live.scratch_homes(artifacts),
         "route": args.route,
         "fault": faults,
         "outcome": live.PASS,

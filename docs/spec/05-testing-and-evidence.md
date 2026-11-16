@@ -4920,7 +4920,7 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   run is opt-in. The dry-run estimator prices that full-row cell (§3.4).
 
 - Opt-in feature scenarios in `tests/live/features.py`, selected with `just
-  smoke <route> --only <names>`, cover image input, `fetch_url`, MCP over
+  live smoke <route> --only <names>`, cover image input, `fetch_url`, MCP over
   stdio and streamable HTTP (the reference `server-everything` and the
   official read-only GitHub server), hosted `web_search`, `web_fetch` and
   `x_search`, and an image-generation round trip into a vision route. Each
@@ -5351,8 +5351,21 @@ Every independent oracle has to be `pass` on a blocking cell. Classes are
 `tests/live/qualification.py <lane> <route> [lane options]` drives a cell's
 attempts for `smoke`, `long-session`, `jobs` or `soak`. Each
 attempt runs the whole selected lane in a fresh artifact directory and home,
-with a new session and the same route, build and prompt. Randomized
-long-session and jobs fixture inputs use the same seed on both attempts. The
+with a new session and the same route, build and prompt. Reports and workspaces
+stay under `target/live/qualification-<lane>-<route>-XXXXXXXX/attempt-N/`.
+All socket-bearing live scratch homes, including scenario-specific homes,
+use unique owned mode-0700 directories under the resolved physical system
+`/tmp`, not below artifacts or a potentially deep inherited `TMPDIR`.
+`homes.json` records their locations as soon as allocated; completed reports
+include the same `homes` map. Homes are retained on success and failure like
+artifacts, and are removed with those artifacts by deleting the listed
+directories (the zero-inference MCP OAuth lane records `home_bases` and removes
+them in its existing teardown). Before launch, the harness refuses symlinked
+paths and checks the current state-key host socket, home-local runner socket and retention
+socket in filesystem bytes against both SUN_LEN limits (104 on macOS, 108 on
+Linux), including NUL and eight bytes of margin. A path that does not fit
+is `harness`, with a short-temp-root/state-key remedy and no paid attempt.
+Randomized long-session and jobs fixture inputs use the same seed on both attempts. The
 headless soak verifies its retained starting binary after copying and before
 restoring. It records `binary_sha256_rebuilt` immediately after its own rebuild
 and requires the end digest to equal that digest. Before a rerun it restores
