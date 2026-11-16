@@ -1828,7 +1828,7 @@ type unconditionally (default features off, `derive`, `std` and `uuid1`), so
 `plakd wire schema` prints the exact build's schema (chapter 02 section 4.4). It adds
 no crate to the lock graph (`schemars`, `schemars_derive`, `dyn-clone`,
 `ref-cast` and `serde_derive_internals` were already locked through `rmcp`),
-but it is now in every product closure, the minimal and headless variants
+but it is now in every product closure, the minimal and API variants
 included, which before reached it only through MCP. A feature-gated derive was
 not taken: each `cfg_attr` is a feature site, and the protocol crate carries
 about 160 wire types.

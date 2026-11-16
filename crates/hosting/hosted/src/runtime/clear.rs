@@ -330,7 +330,7 @@ pub(super) async fn delete_unpublished_runtime(
 /// Load a session by uuid and rebuild the live agent (same provider/model attach).
 ///
 /// Refuses when the saved session is bound to a different account than this
-/// host process (cross-account resume needs a fresh `plak resume <uuid>` launch).
+/// host process (cross-account resume needs a host with that account's binding).
 pub(super) async fn resume_session_switch<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     opened: &mut AttachedCodingSession,

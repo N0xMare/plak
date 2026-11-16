@@ -703,7 +703,7 @@ pub(super) fn attach_repair_notice(failure: &HostFailure, original_account: &str
             R::LoginThenAttach { account },
         ),
         A::TreeHostedElsewhere => (
-            "another plakd process holds this session's agent tree; quit that plak, or if it ran on another machine or is gone, `plakd tree release --force <tree-id>` releases it",
+            "another plakd process holds this session's agent tree; stop that host, or if it ran on another machine or is gone, `plakd tree release --force <tree-id>` releases it",
             R::RepairThenAttach {},
         ),
         A::Other => ("the agent could not attach", R::RepairThenAttach {}),

@@ -276,7 +276,7 @@ fn resolve_runner_secrets(
                     backend_error(
                         ExecutionBackendErrorKind::InvalidRequest,
                         format!(
-                            "runner secret {secret:?} is not available on the runner; set it there with `plak runner secret set {secret}`"
+                            "runner secret {secret:?} is not available on the runner; set it in the runner's secret store before retrying"
                         ),
                     )
                     .with_proven_no_effect(true)

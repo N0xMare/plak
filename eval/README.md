@@ -47,7 +47,7 @@ credential is Ready, but Harbor refuses until a login can write provenance.
 ```text
 just harbor bootstrap    # uv sync --project eval
 just harbor check        # zero-inference adapter tests (+ harbor --print-config)
-just harbor build-agent  # Linux plak + js-host into .plak/installed/<arch>
+just harbor build-agent  # Linux plakd + js-host into .plak/installed/<arch>
 just harbor vendor-clis  # versioned prefixes; review and freeze archive bytes below
 just harbor tools        # pinned public ripgrep release for every arm
 just harbor pmux         # Full-cell pmux companions from PMUX_SRC
@@ -57,8 +57,8 @@ just harbor pmux         # Full-cell pmux companions from PMUX_SRC
 architecture. Artifacts live under `.plak/installed/<arch>/`, one tree per
 architecture, and every frozen binary's ELF machine is checked against it.
 Build the agent and companions with these recipes (Debian bookworm images):
-host-built `plak`, `plakous-js-host` or `pmux*` binaries need a newer glibc
-and fail in Harbor cells. The `linux/aarch64` `plak` is an eval build target,
+host-built `plakd`, `plakous-js-host` or `pmux*` binaries need a newer glibc
+and fail in Harbor cells. The `linux/aarch64` `plakd` is an eval build target,
 not a supported product platform.
 
 Vendor CLIs are frozen per-architecture prefixes (Node 22.20.0, Codex 0.159.3,
@@ -100,7 +100,7 @@ records its explicit `composition`. Overrides are
 accepted only for the matching arm of a digest-bound campaign, never for
 default arms, and the observed stderr selection must match its declaration.
 The frozen Plak prefix and every Plak trial include and verify all three
-artifacts: `plak`, `plakous-js-host`, and `plakous-py-host`. Rebuild the cohort
+artifacts: `plakd`, `plakous-js-host`, and `plakous-py-host`. Rebuild the cohort
 before freezing a new campaign; a missing or changed Python worker is refused.
 `just harbor test` tests this adapter path without launching a trial. Paid
 calibration and A/B trials remain separate operator actions.
@@ -254,7 +254,7 @@ just harbor pmux
 The preparation commands below export `terminal-bench/terminal-bench-2-1@6`
 to a private task directory (`TB21`, one version only). Refresh or
 log in to each selected subscription store serially on the host. A native
-host `plak` must be on PATH for `plakd refresh ACCOUNT`. Codex, Pi, Grok and
+host `plakd` must be on PATH for `plakd refresh ACCOUNT`. Codex, Pi, Grok and
 Claude stores must cover agent + verifier budgets + 300 seconds. Do not copy
 one arm's OAuth document into another arm's different native store format.
 No API key is needed for the Codex, Grok or Claude verticals. OpenRouter stays
@@ -466,12 +466,12 @@ Rung A arms:
 | `plak-claude` / `claude-code` | `plakd run` / FrozenPmux `pmux run` | claude-opus-5-5, low |
 | `all` | the reviewed campaign's arms, interleaved | one vertical/model/effort per campaign |
 
-Prompt ablation arms compare two prompt variants of the same `plak` binary:
+Prompt ablation arms compare two prompt variants of the same `plakd` binary:
 `plak-codex-legacy` / `plak-codex-parity`, and the same pairs for `grok` and
 `claude`; `ablation` dispatches all six only when admitted by the reviewed
 campaign. The arm sets `PLAK_PROMPT_VARIANT`
 (`legacy` or `parity`; anything else fails before Harbor starts) for the
-`plak` binary only; an arm without a variant gets the shipped default,
+`plakd` binary only; an arm without a variant gets the shipped default,
 `parity`. Compare archived pairs with:
 
 ```sh

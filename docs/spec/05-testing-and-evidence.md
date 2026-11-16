@@ -20,7 +20,7 @@ remote compaction. The renewed Platform review needs the existing inexpensive
 `api-openai` row's listing, stateless multi-turn/tool and compaction checks.
 Terra, Cyber and Rosalind remain `NeedsReview`; no paid check of those models
 is needed to establish their fail-closed classification. Owner-approved live
-runs and a maintainer's TUI review remain separate from offline evidence.
+runs and a maintainer's human client review remain separate from offline evidence.
 
 Release-binding contracts are offline and data-only. The hosted route matrix
 pins canonical selected/effective configurations and IDs, model-binding facts,

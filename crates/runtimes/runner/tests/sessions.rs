@@ -664,7 +664,7 @@ async fn a_service_reads_its_runner_secrets_on_the_runner_and_nowhere_else() {
     };
     let absent = refusal("absent").await;
     assert!(
-        absent.1.contains("plak runner secret set <name>"),
+        absent.1.contains("runner secret \"<name>\" is not available on the runner; set it in the runner's secret store before retrying"),
         "{absent:?}"
     );
     assert_eq!(refusal("locked").await, absent);
