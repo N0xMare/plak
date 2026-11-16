@@ -299,6 +299,83 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.assertIn("::(root|child)_[0-7]$/)", profile["overrides"][3]["filter"])
         self.assertEqual(profile["overrides"][3]["threads-required"], 2)
 
+    def test_weighted_lanes_select_all_four_non_test_artifacts(self):
+        spec = importlib.util.spec_from_file_location(
+            "weighted_lanes", ROOT / "tools/dev/weighted-lanes.py"
+        )
+        lanes = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lanes)
+        records, expected = [], {}
+        for variable, binary in (
+            ("PLAK_PY_HOST", "plakous-py-host"),
+            ("PLAK_JS_HOST", "plakous-js-host"),
+            ("PLAK_MCP_SERVER", "mcp-fake-server"),
+            ("PLAK_TEST_BINARY", "plakd"),
+        ):
+            executable = self.base / binary
+            executable.touch()
+            expected[variable] = str(executable)
+            for is_test in (True, False):
+                records.append(
+                    json.dumps(
+                        {
+                            "reason": "compiler-artifact",
+                            "target": {"name": binary, "kind": ["bin"]},
+                            "profile": {"test": is_test},
+                            "executable": str(executable) + ("-harness" if is_test else ""),
+                        }
+                    )
+                )
+        self.assertEqual(lanes.worker_paths("\n".join(records)), expected)
+        with self.assertRaisesRegex(SystemExit, "plakd executable"):
+            lanes.worker_paths("\n".join(records[:-2]))
+
+    def test_coverage_requires_and_forwards_all_four_fixture_paths(self):
+        (self.checkout / "tools/dev").mkdir()
+        shutil.copyfile(ROOT / "tools/dev/coverage.sh", self.checkout / "tools/dev/coverage.sh")
+        (self.checkout / "tools/gate/dev-tools-prefix.sh").write_text(
+            'plak_dev_tools_prefix() { echo "$PWD/.dev-tools"; }\n'
+        )
+        check = self.checkout / "tools/gate/dev-tools.sh"
+        check.write_text("#!/bin/sh\nexit 0\n")
+        check.chmod(0o700)
+        bin_dir = self.checkout / ".dev-tools/bin"
+        bin_dir.mkdir(parents=True)
+        for binary in ("cargo-llvm-cov", "cargo"):
+            executable = bin_dir / binary
+            executable.write_text(
+                "#!" + sys.executable + "\n"
+                "import json, os, sys\n"
+                "with open(os.environ['COVERAGE_CALLS'], 'a') as log:\n"
+                "    log.write(json.dumps([sys.argv[1:], "
+                "{name: os.environ.get(name) for name in "
+                "('PLAK_PY_HOST', 'PLAK_JS_HOST', 'PLAK_MCP_SERVER', 'PLAK_TEST_BINARY')}]) + '\\n')\n"
+            )
+            executable.chmod(0o700)
+        calls = self.base / "coverage-calls.jsonl"
+        variables = ("PLAK_PY_HOST", "PLAK_JS_HOST", "PLAK_MCP_SERVER", "PLAK_TEST_BINARY")
+        env = {key: value for key, value in os.environ.items() if key not in variables}
+        env['COVERAGE_CALLS'] = str(calls)
+        command = ['bash', str(self.checkout / 'tools/dev/coverage.sh')]
+        result = subprocess.run(command, env=env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        for name in variables:
+            self.assertIn(name, result.stderr)
+        self.assertFalse(calls.exists())
+
+        shutil.copyfile(ROOT / "tools/gate/test-env.sh", self.checkout / "tools/gate/test-env.sh")
+        (self.checkout / "tools/gate/test-env.sh").chmod(0o700)
+        env.update({name: str(bin_dir / "cargo") for name in variables})
+        env['PLAK_TEST_TMPDIR'] = str(self.base / "coverage-tmp")
+        result = subprocess.run(command, env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lanes = [
+            row for row in map(json.loads, calls.read_text().splitlines()) if "nextest" in row[0]
+        ]
+        self.assertEqual(len(lanes), 2)
+        for _, fixtures in lanes:
+            self.assertEqual(fixtures, {name: env[name] for name in variables})
+
     def test_weighted_lanes_build_without_overrides_or_provider_keys(self):
         spec = importlib.util.spec_from_file_location(
             "weighted_lanes", ROOT / "tools/dev/weighted-lanes.py"

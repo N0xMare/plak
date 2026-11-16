@@ -38,6 +38,8 @@ module and its `#[path]` attachment; dropping it removes a
 build. `src/lib.rs` is written for this package: it declares the three modules,
 re-exports the same public names the upstream crate exported for them, and
 restates the two tool-name constants `description.rs` reads from its crate root.
+`.clippy.toml` is also package-authored: it retains the vendored package's
+upstream MSRV for lint suggestions instead of inheriting the workspace MSRV.
 
 Upstream `codex-code-mode-protocol` also ships gRPC, host, session, response,
 and runtime modules. Plakous calls none of them, and they are what pull

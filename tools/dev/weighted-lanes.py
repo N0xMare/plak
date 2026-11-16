@@ -84,12 +84,14 @@ def weighted_config(serial_threads: int, durability_threads: int) -> str:
 
 
 def worker_paths(manifest: str) -> dict[str, str]:
-    """The one non-test build of each cell worker in the test build."""
+    """The non-test workers and fixtures from the same workspace test build."""
     records = [json.loads(line) for line in manifest.splitlines() if line.strip()]
     found = {}
     for variable, binary in [
         ("PLAK_PY_HOST", "plakous-py-host"),
         ("PLAK_JS_HOST", "plakous-js-host"),
+        ("PLAK_MCP_SERVER", "mcp-fake-server"),
+        ("PLAK_TEST_BINARY", "plakd"),
     ]:
         paths = {
             row["executable"]

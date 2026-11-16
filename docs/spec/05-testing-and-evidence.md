@@ -1208,8 +1208,9 @@ their absolute paths, so real Monty tests
 cannot silently take their missing-worker early return. A worker that cannot
 run or speak the protocol fails those tests. Manually invoked Rust tests
 without a worker retain their existing limited, potentially skipped coverage.
-Manually invoked MCP fixture tests require `PLAK_MCP_SERVER` to name the built
-workspace fixture binary.
+`just nextest` only isolates the environment; manual full-suite runs must set
+all four executable paths themselves. Manually invoked MCP fixture tests
+require `PLAK_MCP_SERVER` to name the built workspace fixture binary.
 Standalone product crash-harness tests likewise require `PLAK_TEST_BINARY`;
 neither fixture lookup walks the intermediate test-binary directory tree.
 
@@ -2164,8 +2165,8 @@ no redispatch or abandonment), but remains explicitly ignored under
 `JSONL-APPROVAL-RESUME` until the production reopen hang is fixed. Its durability
 predicate enrolls the cell when it is enabled.
 The workspace/all-features prerequisite builds the
-test-hooks product and matching sidecars; the fixture locates `plakd` beside the
-test executable's `deps` directory, or uses an explicit `PLAK_TEST_BINARY`.
+test-hooks product and matching sidecars; the fixture uses `PLAK_TEST_BINARY`
+from that build's Cargo artifact records, or an explicit executable override.
 All five are excluded from the parallel lane. Fixture-owned hosts are reaped
 on failure.
 
@@ -6327,7 +6328,12 @@ to mutate a live home.
 
 `just dev coverage` runs the same two offline nextest lanes as `just check` under
 `cargo-llvm-cov` in a separate target directory and writes an HTML report and a
-JSON summary under `target/llvm-cov/`. It is informational: it does not gate,
+JSON summary under `target/llvm-cov/`. It requires the caller to provide
+`PLAK_PY_HOST`, `PLAK_JS_HOST`, `PLAK_MCP_SERVER` and `PLAK_TEST_BINARY` from a
+matching workspace test build, and refuses missing or non-executable fixture
+paths before starting coverage. Weighted-lane trials instead derive all four
+paths from their workspace test build's Cargo artifact records.
+Coverage is informational: it does not gate,
 and its purpose is to turn "paths the offline suite never executes" into a list
 rather than a guess. Product paths that only a spawned binary can reach are
 covered by the offline end-to-end harness; anything still uncovered there is a

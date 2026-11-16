@@ -76,9 +76,11 @@ clippy:
     tools/gate/clippy.sh
 
 # cargo nextest with the isolated test environment (spec 05 §1).
+# Manual runs must set PLAK_PY_HOST, PLAK_JS_HOST, PLAK_MCP_SERVER and
+# PLAK_TEST_BINARY to matching built executables; this recipe does not prepare them.
 # Positional arguments: an unquoted {{ARGS}} splice breaks on `-E 'package(x)'`.
 [positional-arguments]
-[doc("cargo nextest under the isolated test environment")]
+[doc("isolated cargo nextest; manually set PLAK_PY_HOST, PLAK_JS_HOST, PLAK_MCP_SERVER, PLAK_TEST_BINARY")]
 nextest *ARGS:
     root="$(pwd -P)"; \
     source tools/gate/dev-tools-prefix.sh; \

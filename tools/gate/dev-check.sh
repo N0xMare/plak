@@ -159,13 +159,9 @@ mode, manifest = sys.argv[1:]
 records = ([json.loads(line) for line in Path(manifest).read_text().splitlines() if line.strip()]
            if mode == "built" else [])
 executables = [("PLAK_PY_HOST", "plakous-py-host"), ("PLAK_JS_HOST", "plakous-js-host"),
-               ("PLAK_MCP_SERVER", "mcp-fake-server")]
-if mode == "built":
-    executables.append(("PLAK_TOOLING_BINARY", "plakd"))
-else:
-    executables.append(("PLAK_TEST_BINARY", "plakd"))
+               ("PLAK_MCP_SERVER", "mcp-fake-server"), ("PLAK_TEST_BINARY", "plakd")]
 for variable, binary in executables:
-    if variable in os.environ and variable != "PLAK_TOOLING_BINARY":
+    if variable in os.environ:
         value = os.environ[variable]
     else:
         paths = {row["executable"] for row in records
@@ -655,6 +651,7 @@ run_group() {
       echo "== structure: checker tests and real-host reference client =="
       prepare_tests tooling
       PLAK_TOOLING_BINARY="$plak_host" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" \
+        PLAK_MCP_SERVER="$mcp_server" PLAK_TEST_BINARY="$plak_host" \
         python3 tools/gate/run_tooling_tests.py -v ;;
     package)
       # Publication packages a git tree; the musl container mounts an export.

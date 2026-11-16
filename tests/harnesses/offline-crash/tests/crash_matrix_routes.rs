@@ -908,9 +908,8 @@ impl Fixture {
             .then(sidecar_path)
             .flatten();
         if scenario == Scenario::CodeMode && sidecar.is_none() {
-            return Err("plakous-js-host is not built beside this test binary; \
-                        run `cargo build --locked -p plakous-js-runtime --bin plakous-js-host \
-                        -p plakous-py-worker --bin plakous-py-host` first"
+            return Err("PLAK_JS_HOST must name the built plakous-js-host \
+                        for code-mode crash fixtures"
                 .into());
         }
         Ok(Self {

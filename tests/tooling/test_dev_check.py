@@ -251,6 +251,11 @@ if sys.argv[1] == '-' or sys.argv[1].endswith(('vcs_listing.py', 'test-processes
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
+                              worker=os.environ.get('PLAK_PY_HOST'),
+                              js_worker=os.environ.get('PLAK_JS_HOST'),
+                              mcp_server=os.environ.get('PLAK_MCP_SERVER'),
+                              test_binary=os.environ.get('PLAK_TEST_BINARY'),
+                              tooling_binary=os.environ.get('PLAK_TOOLING_BINARY'),
                               target_dir=os.environ.get('CARGO_TARGET_DIR'),
                               rustflags=os.environ.get('RUSTFLAGS'),
                               encoded_rustflags=os.environ.get('CARGO_ENCODED_RUSTFLAGS'),
@@ -473,6 +478,43 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual([c['js_worker'] for c in lanes], [str(self.worker.resolve())] * 2)
         self.assertEqual([c['mcp_server'] for c in lanes], [str(self.worker.resolve())] * 2)
         self.assertEqual([c['test_binary'] for c in lanes], [str(self.worker.resolve())] * 2)
+
+    def test_built_mode_honors_relative_product_override(self):
+        product = self.root / 'custom product'
+        product.write_text('#!/bin/sh\nexit 0\n')
+        product.chmod(0o700)
+        self.env['PLAK_TEST_BINARY'] = product.name
+        result, calls, _ = self.run_gate('--steps', 'tests-parallel')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(any(c['args'][0] == 'test' for c in calls))
+        self.assertEqual([c['test_binary'] for c in self.lanes(calls)], [str(product.resolve())])
+
+    def test_built_mode_rejects_invalid_product_override(self):
+        ordinary = self.root / 'non-executable'
+        ordinary.write_text('not executable')
+        for value in ('', 'missing', str(self.root), str(ordinary)):
+            with self.subTest(value=value):
+                self.env['PLAK_TEST_BINARY'] = value
+                self.log.unlink(missing_ok=True)
+                result, calls, _ = self.run_gate('--steps', 'tests-parallel')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('PLAK_TEST_BINARY', result.stderr)
+                self.assertTrue(any(c['args'][0] == 'test' for c in calls))
+                self.assertEqual(self.lanes(calls), [])
+
+    def test_tooling_with_four_overrides_skips_build_and_normalizes_paths(self):
+        product = self.root / 'custom product'
+        product.write_text('#!/bin/sh\nexit 0\n')
+        product.chmod(0o700)
+        for variable in ('PLAK_PY_HOST', 'PLAK_JS_HOST', 'PLAK_MCP_SERVER', 'PLAK_TEST_BINARY'):
+            self.env[variable] = product.name
+        result, calls, _ = self.run_gate('--steps', 'tooling')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(c['args'][0] == 'test' for c in calls))
+        tooling = [c for c in self.python_calls if c['python'][0].endswith('run_tooling_tests.py')]
+        self.assertEqual(len(tooling), 1)
+        for key in ('worker', 'js_worker', 'mcp_server', 'test_binary', 'tooling_binary'):
+            self.assertEqual(tooling[0][key], str(product.resolve()))
 
     def test_invalid_mcp_fixture_override_fails_before_any_test_lane(self):
         self.worker.parent.mkdir(parents=True)

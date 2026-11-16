@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Line/region/function coverage for the parallel and serial lanes, merged.
 # Needs: rustup component add llvm-tools-preview && cargo install cargo-llvm-cov
+# Set PLAK_PY_HOST, PLAK_JS_HOST, PLAK_MCP_SERVER and PLAK_TEST_BINARY to
+# matching workspace test-build executables before running this recipe.
 # Writes target/llvm-cov/html/html/index.html and target/llvm-cov/coverage.json.
 # Its nextest runs also overwrite target/nextest/{offline,serial}/junit.xml.
 # Uses its own CARGO_TARGET_DIR so it never invalidates the normal build.
@@ -10,6 +12,19 @@ source tools/gate/dev-tools-prefix.sh
 export PATH="$(plak_dev_tools_prefix "$PWD")/bin:$PATH"
 tools/gate/dev-tools.sh check-nextest
 command -v cargo-llvm-cov >/dev/null || { echo "install: cargo install cargo-llvm-cov" >&2; exit 1; }
+python3 - <<'PY_FIXTURES'
+import os
+from pathlib import Path
+
+variables = ("PLAK_PY_HOST", "PLAK_JS_HOST", "PLAK_MCP_SERVER", "PLAK_TEST_BINARY")
+invalid = [name for name in variables
+           if not os.environ.get(name) or not Path(os.environ[name]).is_file()
+           or not os.access(os.environ[name], os.X_OK)]
+if invalid:
+    raise SystemExit("coverage requires executable fixture paths in " + ", ".join(variables)
+                     + "; missing or invalid: " + ", ".join(invalid)
+                     + ". Set all four from the matching workspace test build.")
+PY_FIXTURES
 mkdir -p target/llvm-cov
 # Assign first. `eval "$(test-env.sh)"` ignores a failing helper under set -e.
 test_env="$(tools/gate/test-env.sh)"
