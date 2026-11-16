@@ -10,7 +10,7 @@
 # The shared directory must be owned by the caller, mode 0700, and reachable
 # without symlinks: the SQLite stores open with NOFOLLOW and the credential
 # walk refuses symlinked parents. When it is not, the checkout's
-# target/plakd-test-tmp is used instead.
+# target/plak-test-tmp is used instead.
 #
 # Usage: tools/gate/test-tmpdir.sh [--fresh] [--system NAME] [--shared-root DIR]
 #   --fresh        empty the shared per-checkout directory first
@@ -59,7 +59,7 @@ shared_dir() {
     checksum="$(printf '%s\n%s' "$(id -u)" "$root" | cksum | cut -d' ' -f1)"
     dir="$base/$(printf '%08x' "$checksum")"
   else
-    dir="$base/plakd-test-$(id -u)-$(printf '%s' "$root" | cksum | cut -d' ' -f1)"
+    dir="$base/plak-test-$(id -u)-$(printf '%s' "$root" | cksum | cut -d' ' -f1)"
   fi
   if ((fresh)) && [[ -d "$dir" && ! -L "$dir" ]]; then
     # Run directories are lock-owned; test-processes.py reaps only free ones.
@@ -74,7 +74,7 @@ shared_dir() {
 
 if [[ -n "$shared_root" ]]; then
   if shared_dir "$shared_root"; then exit 0; fi
-  echo "test-tmpdir: $shared_root is unusable; using target/plakd-test-tmp" >&2
+  echo "test-tmpdir: $shared_root is unusable; using target/plak-test-tmp" >&2
 fi
-mkdir -p "$root/target/plakd-test-tmp"
-physical "$root/target/plakd-test-tmp"
+mkdir -p "$root/target/plak-test-tmp"
+physical "$root/target/plak-test-tmp"

@@ -190,7 +190,7 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         seed = command.split('    cd /qual/src')[0]
         seed = seed.replace('/qual/cargo-home', str(cargo_home))
         seed = seed.replace('/usr/local/cargo', str(image_cargo))
-        seed = seed.replace('/tmp/plakd-musl-home.XXXXXX', str(self.root / 'home.XXXXXX'))
+        seed = seed.replace('/tmp/plak-musl-home.XXXXXX', str(self.root / 'home.XXXXXX'))
         for _ in range(2):
             result = subprocess.run(
                 ['/bin/sh', '-c', seed], env=self.env, text=True, capture_output=True, timeout=15

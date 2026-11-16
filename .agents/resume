@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd -P)"
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
-mkdir -p "$repo_root/target/plakd-test-tmp"
+mkdir -p "$repo_root/target/plak-test-tmp"
 rustc --version >/dev/null
 bash "$repo_root/tools/gate/dev-tools.sh" check \
   || { echo "error: development tools are missing or not pinned; run .agents/setup again" >&2; exit 1; }

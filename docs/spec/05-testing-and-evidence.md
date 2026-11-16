@@ -1096,13 +1096,13 @@ the exception: it sets `CARGO_BUILD_TARGET` and `--target` to
 gate does not qualify the supported musl platform.
 
 `tools/gate/test-env.sh` is the one test environment. It exports `TMPDIR` from
-`tools/gate/test-tmpdir.sh`, `PLAK_HOME` (`$TMPDIR/plakd-isolated-home`, mode
+`tools/gate/test-tmpdir.sh`, `PLAK_HOME` (`$TMPDIR/plak-isolated-home`, mode
 0700), an empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. Its shell and
 command forms also unset the test-hook overrides `PLAK_TEST_SESSION_LEASE_SECONDS`,
 `PLAK_TEST_CELL_HELLO_MS` and `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` and the provider keys `OPENAI_API_KEY`,
 `XAI_API_KEY`, `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`, so an operator's
 exported key never reaches an offline test. Every form also puts
-`$TMPDIR/plakd-test-jj`, which holds only a `jj` link to the jj the tools check
+`$TMPDIR/plak-test-jj`, which holds only a `jj` link to the jj the tools check
 uses (chapter 06 §6), first on `PATH`: `PLAK_TEST_JJ` when set, else, with no
 `jj` on `PATH`, the newest pinned jj that `just dev-tools install` unpacked. Its `--json` form names only the variables it
 exports, `PATH` included when it changed; the live drivers keep their real keys. Its
@@ -1118,11 +1118,11 @@ the selector is a per-checkout
 directory under `/dev/shm`; on macOS a per-checkout directory under
 `/private/tmp`, so neither lies under the operator's `HOME`, where a spawned
 binary's project discovery could reach the real `~/.plak`. The directory is
-named `plakd-test-<uid>-<cksum of the checkout path>`, must be owned by the
+named `plak-test-<uid>-<cksum of the checkout path>`, must be owned by the
 caller and mode `0700`, and must resolve to itself with no symlinked
 component; `dev-check.sh` empties it at the start of each run. When the shared
 root or the directory fails those checks, or on another system, the selector
-falls back to `target/plakd-test-tmp` in the checkout. Linux `fsync` is a real
+falls back to `target/plak-test-tmp` in the checkout. Linux `fsync` is a real
 device flush that can exceed the stop, cancel and quit bounds under gate load.
 macOS `fsync` does not flush the device, so the two platforms only agree when
 the Linux scratch is RAM-backed. Maintainers may select another disposable
@@ -5510,7 +5510,7 @@ the assertion. Open investigations name their current containment explicitly.
 
 | Class | Cause | Fix in force |
 | --- | --- | --- |
-| Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plakd-test-*` on macOS) from `tools/gate/test-env.sh`, and required for `just nextest` |
+| Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plak-test-*` on macOS) from `tools/gate/test-env.sh`, and required for `just nextest` |
 | Inherited git config | Fixture git read the host's global config; a global `commit.gpgsign` spawned `gpg` per fixture commit, which failed with ENOMEM under gate load | Test entry points export an empty `GIT_CONFIG_GLOBAL` under `TMPDIR` and `GIT_CONFIG_NOSYSTEM=1` (§1); fixtures set their own identity |
 | Fixed-port OAuth loopback | Login tests bound the pinned callback ports, which collide across parallel runs and with a live login | Tests bind an ephemeral port through the managers' loopback seam; the pinned ports are refused in tests (§2.3). The `native-auth-serial` group still serializes the shared process-local fixtures |
 | CLI contract interference | Process-level binary contracts collide when run in parallel | The `cli-contract-serial` group |

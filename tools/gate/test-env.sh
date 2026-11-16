@@ -7,7 +7,7 @@
 #   tools/gate/test-env.sh --unset-names         # what the other forms unset, one per line
 #
 # --fresh empties the shared per-checkout directory first (the gate). PLAK_HOME is
-# $TMPDIR/plakd-isolated-home, mode 0700. GIT_CONFIG_GLOBAL is an empty file in
+# $TMPDIR/plak-isolated-home, mode 0700. GIT_CONFIG_GLOBAL is an empty file in
 # TMPDIR, truncated on every call, and GIT_CONFIG_NOSYSTEM is 1. HOME is untouched.
 # Tests also run jj by name, through the product's shims, so every form puts a
 # directory holding only a jj link first on PATH. The link names the jj the tests
@@ -45,7 +45,7 @@ if [[ ${#fresh[@]} -gt 0 && -f "$here/test-processes.py" ]]; then
 fi
 TMPDIR="$(bash "$here/test-tmpdir.sh" ${fresh[@]+"${fresh[@]}"})"
 export TMPDIR
-isolated="$TMPDIR/plakd-isolated-home"
+isolated="$TMPDIR/plak-isolated-home"
 mkdir -p "$isolated"
 chmod 700 "$isolated"
 : >"$TMPDIR/gitconfig"
@@ -57,7 +57,7 @@ if [[ -n "${PLAK_TEST_JJ+set}" ]] || ! command -v jj >/dev/null 2>&1; then
   jj="$(command -v -- "$(plak_test_jj "$(cd "$here/../.." && pwd -P)")" || true)"
   if [[ "$jj" == */* && -f "$jj" && -x "$jj" ]]; then
     [[ "$jj" == /* ]] || jj="$PWD/$jj"
-    jj_dir="$TMPDIR/plakd-test-jj"
+    jj_dir="$TMPDIR/plak-test-jj"
     mkdir -p "$jj_dir"
     # A nested call finds this link as the jj on PATH; relinking would loop it.
     [[ "$jj" -ef "$jj_dir/jj" ]] || ln -sfn "$jj" "$jj_dir/jj"

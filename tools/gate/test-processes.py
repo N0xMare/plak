@@ -224,7 +224,7 @@ def reap_previous(base: Path, table: ProcessTable) -> None:
 
 
 def run(args: list[str], root: Path, table: ProcessTable, lock_fd: int) -> int:
-    home = root / "plakd-isolated-home"
+    home = root / "plak-isolated-home"
     home.mkdir(mode=0o700)
     gitconfig = root / "gitconfig"
     gitconfig.touch()

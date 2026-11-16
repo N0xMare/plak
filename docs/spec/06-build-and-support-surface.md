@@ -967,7 +967,7 @@ Rust 1.99.0 with a musl host toolchain, clippy, rustfmt, the
 curl, git, jj, just, and the registry sources for cargo-deny (not its executable),
 the workspace and compile-contract fixture lockfiles. It never pulls an image or installs tools.
 Provide the executable musl cargo-nextest 0.9.100 and ruff 0.17.3 in
-`~/plakd-musl/bin` (override with `PLAK_MUSL_TOOLS`); GNU-host tools cannot
+`~/plak-musl/bin` (override with `PLAK_MUSL_TOOLS`); GNU-host tools cannot
 substitute for them. The image's `nextest` target exports both binaries.
 The container has no network and sets `CARGO_NET_OFFLINE=true`. A dependency
 change requires refreshing the image's registry before qualification.

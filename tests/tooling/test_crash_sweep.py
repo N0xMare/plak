@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 TEST_ENV = json.dumps(
     {
-        "TMPDIR": "/tmp/plakd-test",
-        "PLAK_HOME": "/tmp/plakd-test/home",
-        "GIT_CONFIG_GLOBAL": "/tmp/plakd-test/gitconfig",
+        "TMPDIR": "/tmp/plak-test",
+        "PLAK_HOME": "/tmp/plak-test/home",
+        "GIT_CONFIG_GLOBAL": "/tmp/plak-test/gitconfig",
         "GIT_CONFIG_NOSYSTEM": "1",
     }
 )

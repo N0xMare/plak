@@ -29,7 +29,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         )
         self.shared = self.base / "shared"
         self.shared.mkdir()
-        self.fallback = self.checkout / "target/plakd-test-tmp"
+        self.fallback = self.checkout / "target/plak-test-tmp"
         self.env = dict(os.environ)
         self.env.pop("PLAK_TEST_TMPDIR", None)
 
@@ -58,7 +58,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         digest = subprocess.run(
             ["cksum"], input=str(self.checkout), capture_output=True, text=True, check=True
         ).stdout.split()[0]
-        return f"plakd-test-{os.getuid()}-{digest}"
+        return f"plak-test-{os.getuid()}-{digest}"
 
     def test_linux_and_darwin_use_a_private_per_checkout_shared_directory(self):
         for system in ("Linux", "Darwin"):
@@ -114,7 +114,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
                     "--system", "Darwin", "--shared-root", str(shared_root)
                 )
                 self.assertEqual(selected, self.fallback)
-                self.assertIn("unusable; using target/plakd-test-tmp", stderr)
+                self.assertIn("unusable; using target/plak-test-tmp", stderr)
         self.assertEqual(list(self.shared.iterdir()), [])
 
     def test_unknown_system_uses_the_checkout_quietly(self):
@@ -153,9 +153,9 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             "tools/gate/test-env.sh -- python3 tools/gate/test-processes.py -- tools/dev/crash-sweep.py",
             dev,
         )
-        self.assertNotIn('TMPDIR="$PWD/target/plakd-test-tmp"', dev)
+        self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', dev)
         justfile = (ROOT / "Justfile").read_text()
-        self.assertNotIn('TMPDIR="$PWD/target/plakd-test-tmp"', justfile)
+        self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', justfile)
         self.assertIn("[positional-arguments]", justfile)
         self.assertIn(
             'tools/gate/test-env.sh -- python3 tools/gate/test-processes.py -- cargo nextest "$@"',
@@ -179,7 +179,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         scratch = (self.base / "explicit-tmp").resolve()
         self.assertEqual(Path(values["TMPDIR"]), scratch)
         home = Path(values["PLAK_HOME"])
-        self.assertEqual(home, scratch / "plakd-isolated-home")
+        self.assertEqual(home, scratch / "plak-isolated-home")
         self.assertEqual(stat.S_IMODE(home.stat().st_mode), 0o700)
         gitconfig = Path(values["GIT_CONFIG_GLOBAL"])
         self.assertEqual(gitconfig, scratch / "gitconfig")
@@ -257,7 +257,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             timeout=20,
         )
         self.assertEqual(nested.returncode, 0, nested.stderr)
-        link = self.base / "jj-tmp/plakd-test-jj/jj"
+        link = self.base / "jj-tmp/plak-test-jj/jj"
         self.assertEqual(os.path.realpath(link), newest)
         for form in ("json", "command", "snippet"):
             for search in (path, f"{on_path}{os.pathsep}{path}"):

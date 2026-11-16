@@ -76,13 +76,13 @@ rustup toolchain install 1.99.0 \
   --component clippy,rustfmt \
   --target x86_64-unknown-linux-musl,wasm32-unknown-unknown
 
-profile_marker="# plakd orb tool paths"
+profile_marker="# plak orb tool paths"
 if grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
-  sed -i '/^# plakd orb tool paths$/{n;s|^export PATH=.*$|export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"|;}' "$HOME/.bash_profile"
+  sed -i '/^# plak orb tool paths$/{n;s|^export PATH=.*$|export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"|;}' "$HOME/.bash_profile"
 else
   cat >> "$HOME/.bash_profile" <<'EOF'
 
-# plakd orb tool paths
+# plak orb tool paths
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 EOF
 fi
@@ -103,6 +103,6 @@ cargo fetch --locked
 for manifest in tests/fixtures/*/Cargo.toml; do
   cargo fetch --locked --manifest-path "$manifest"
 done
-mkdir -p target/plakd-test-tmp
+mkdir -p target/plak-test-tmp
 
 printf '\nOrb setup completed in %ss.\n' "$((SECONDS - started_at))"

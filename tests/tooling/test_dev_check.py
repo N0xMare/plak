@@ -389,7 +389,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         for lane in lanes:
             home = lane['plak_home']
             self.assertTrue(
-                home and home.endswith('/plakd-isolated-home'),
+                home and home.endswith('/plak-isolated-home'),
                 home,
             )
             mode = lane['home_mode']

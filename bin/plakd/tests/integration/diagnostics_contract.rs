@@ -28,7 +28,7 @@ fn plak_command(home: &std::path::Path) -> Command {
 
 fn isolated_home() -> (tempfile::TempDir, std::path::PathBuf) {
     let base =
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/plakd-test-homes");
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/plak-test-homes");
     std::fs::create_dir_all(&base).expect("plakd test home base");
     let temporary = tempfile::tempdir_in(&base).expect("isolated tempdir");
     let home = temporary.path().join("home");

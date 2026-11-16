@@ -1593,12 +1593,12 @@ fn retained_group_does_not_block_a_safe_group() {
     let db = rusqlite::Connection::open(old.join("subagents.sqlite3")).unwrap();
     db.execute(
         "INSERT INTO agent_trees VALUES('missing', ?1)",
-        ["/missing/plakd-test-launch"],
+        ["/missing/plak-test-launch"],
     )
     .unwrap();
     db.execute(
         "INSERT INTO agent_workspaces VALUES('missing', ?1, 'fork')",
-        ["/missing/plakd-test-launch/.plak/worktrees/missing"],
+        ["/missing/plak-test-launch/.plak/worktrees/missing"],
     )
     .unwrap();
     drop(db);

@@ -215,7 +215,7 @@ class LiveOracleTests(unittest.TestCase):
             live._plak_child_source = None
             gate = {
                 "TMPDIR": "/gate/tmp",
-                "PLAK_HOME": "/gate/tmp/plakd-isolated-home",
+                "PLAK_HOME": "/gate/tmp/plak-isolated-home",
                 "GIT_CONFIG_GLOBAL": "/gate/tmp/gitconfig",
                 "GIT_CONFIG_NOSYSTEM": "1",
             }
