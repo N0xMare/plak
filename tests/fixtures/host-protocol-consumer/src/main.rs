@@ -24,6 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _: fn(&WireSender<Product>) = WireSender::goodbye;
     let _: fn(&WireReceiver<Product>) = WireReceiver::goodbye;
     let _: fn(&WireReceiver<Product>) -> Option<HostFrame<Product>> = WireReceiver::try_host_stream;
+    let _: fn(&WireReceiver<Product>) -> Option<plakous_host_protocol::wire::HostLifecycle<Product>> = WireReceiver::try_host_lifecycle;
     let _transport =
         Transport::new(std::io::empty(), std::io::sink()).with_write_shutdown(|| Ok(()));
     let request = ClientFrame::<Product>::Request {

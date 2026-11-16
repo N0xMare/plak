@@ -4018,7 +4018,9 @@ writers make a bounded final send attempt before closing. Connection joins and
 advisory delivery spend the same host-wide stop budget: handoff receives only
 the time remaining since stop was observed, less the existing stop margin; slow or lost peers
 can miss notices, and duplicate final notices are allowed. Notices never
-acknowledge a prompt, authorize replay, or alter admission. Failure without a
+acknowledge a prompt, authorize replay, or alter admission. The native client
+keeps lifecycle in a separate latest-only slot (`try_host_lifecycle`), never in
+the bounded operator-stream queue; unread aborted-drain notices coalesce. Failure without a
 notice remains possible. A destination serves ordinary Welcome; committed,
 ready carried-root aliases use the existing `RequestRefusal::Moved`, not a new
 successor field. Versions still match exactly: a wire-10 hello gets only

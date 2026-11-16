@@ -62,7 +62,7 @@ use serde::de::DeserializeOwned;
 use crate::channel::transcript_observation;
 use crate::views::transcript::{NoticeScope, TranscriptRow, TranscriptScope};
 use crate::wire::{
-    Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, Hello, HostFrame,
+    Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, Hello, HostFrame, HostLifecycle,
     LineReader, NodeAddress, Op, Outcome, RequestId, RequestRefusal, SnapshotAssembler, Welcome,
     WireError, decode_host_line, encode_line, take_images,
 };
@@ -332,6 +332,7 @@ struct State<P: ProtocolExtension> {
     selections: BTreeMap<RequestId, NodeAddress>,
     responses: VecDeque<(RequestId, Outcome<P>)>,
     host_streams: VecDeque<HostFrame<P>>,
+    host_lifecycle: Option<HostLifecycle<P>>,
     /// Intents sent on an attachment, by request id, until their verdict.
     sent: BTreeMap<RequestId, Sent<P>>,
     /// Intents waiting for the next attachment, in the order sent.
@@ -622,6 +623,7 @@ impl<P: ProtocolExtension> Inner<P> {
                 selections: BTreeMap::new(),
                 responses: VecDeque::new(),
                 host_streams: VecDeque::new(),
+                host_lifecycle: None,
                 sent: BTreeMap::new(),
                 unsent: VecDeque::new(),
                 unsent_bytes: 0,
@@ -956,6 +958,13 @@ impl<P: ProtocolExtension> WireReceiver<P> {
     #[must_use]
     pub fn try_host_stream(&self) -> Option<HostFrame<P>> {
         lock(&self.connection.inner.state).host_streams.pop_front()
+    }
+
+    /// Takes the newest advisory lifecycle, replacing unread older notices.
+    /// Independent of operator stream credit; never admission or replay authority.
+    #[must_use]
+    pub fn try_host_lifecycle(&self) -> Option<HostLifecycle<P>> {
+        lock(&self.connection.inner.state).host_lifecycle.take()
     }
 
     /// A deferred internal control write hit the full control budget.
@@ -1401,8 +1410,12 @@ impl<P: ProtocolExtension> Inner<P> {
         P::Intent: Serialize,
     {
         match frame {
-            frame @ (HostFrame::TerminalStream { .. } | HostFrame::HostLifecycle { .. }) => {
+            frame @ HostFrame::TerminalStream { .. } => {
                 state.host_stream(frame)
+            }
+            HostFrame::HostLifecycle { host_generation, phase, reason, target, retry_after_ms } => {
+                state.host_lifecycle = Some(HostLifecycle { host_generation, phase, reason, target, retry_after_ms });
+                Ok(true)
             }
             HostFrame::Response { id, outcome } => {
                 if let Some(root) = state.selections.remove(&id) {

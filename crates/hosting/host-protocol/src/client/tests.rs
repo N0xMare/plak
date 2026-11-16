@@ -6,6 +6,7 @@ use crate::Core;
 use crate::wire::{WIRE_VERSION, WelcomeSession, decode_line};
 
 mod goodbye_drop;
+mod lifecycle;
 mod slow_link;
 
 #[test]
