@@ -1,4 +1,4 @@
-//! Observation-parity oracle for one-shot, JSONL and TUI hosted sessions.
+//! Observation-parity oracle for one-shot, JSONL and typed hosted sessions.
 //!
 //! For a fixed set of scripted, fully offline scenarios the three drivers of
 //! the one hosted session
@@ -6,7 +6,7 @@
 //!   1. `plak run` one-shot (`plakous_hosted::runtime::OneShot::run`),
 //!   2. the host loop as `plak agent` drives it (`agent_stdio` + the v1 JSONL
 //!      projection in `plakous_host_protocol::jsonl`), and
-//!   3. the host loop as the TUI drives it (`SessionIntent` in,
+//!   3. the host loop through typed intents (`SessionIntent` in,
 //!      `SessionObservation` out, nothing rendered)
 //!
 //! must produce the same observation sequence once normalized. The recorded
@@ -561,7 +561,7 @@ fn fold_assistant(records: Vec<Record>) -> Vec<Record> {
 
 /// What driver 2 (`plak agent`) keeps of the observation sequence.
 ///
-/// Two differences from the TUI driver are legitimate and named here rather
+/// Two differences from the typed-intent driver are legitimate and named here rather
 /// than compared loosely:
 ///
 /// 1. *The v1 JSONL wire is lossy by contract.* `crates/hosting/host-protocol/src/
@@ -576,7 +576,7 @@ fn fold_assistant(records: Vec<Record>) -> Vec<Record> {
 /// 2. *The JSONL face opens the navigator itself at attach.* `agent_stdio::
 ///     actions_on_successful_attach` sends `OpenTopologyNavigator` as soon as
 ///    `AgentAttached(true)` is observed, so a `tree` / `tree_unavailable`
-///    observation appears in driver 2's stream that no TUI script asked for.
+///    observation appears in driver 2's stream that no typed-intent script asked for.
 ///    Those are dropped here; a scenario that *scripts* the navigator would
 ///    have to compare them, and none does.
 fn jsonl_projection(records: &[Record]) -> Vec<Record> {
@@ -1162,7 +1162,7 @@ fn queue_normalization_matches_unread_supersession_across_receipts() {
 // Drivers
 // ---------------------------------------------------------------------------
 
-/// Driver 3: the host loop as the TUI drives it — typed intents in, typed
+/// Driver 3: the host loop through typed intents — typed intents in, typed
 /// observations out, nothing rendered.
 fn drive_loop(fixture: &Fixture, steps: Vec<Step>, jsonl_face: bool) -> Vec<HostEvent> {
     drive_config(fixture.host_config(), steps, jsonl_face)
@@ -1589,9 +1589,9 @@ fn drop_cancelled_tool_detail(record: Record) -> Record {
 }
 
 fn run_parity(scenario: &str, script: Script, one_shot: OneShot, steps: impl Fn() -> Vec<Step>) {
-    let tui_fixture = Fixture::new(script);
-    let tui_events = drive_loop(&tui_fixture, steps(), false);
-    let golden = normalize(&tui_events, tui_fixture.path(), script);
+    let host_fixture = Fixture::new(script);
+    let host_events = drive_loop(&host_fixture, steps(), false);
+    let golden = normalize(&host_events, host_fixture.path(), script);
     assert_golden(scenario, &golden);
 
     let jsonl_fixture = Fixture::new(script);
@@ -1624,7 +1624,7 @@ fn run_parity(scenario: &str, script: Script, one_shot: OneShot, steps: impl Fn(
     assert_eq!(
         oneshot_projection(&golden),
         oneshot_projection(&jsonl_records),
-        "{scenario}: the TUI and JSONL drivers disagree on the turn's core observations"
+        "{scenario}: the typed-intent and JSONL drivers disagree on the turn's core observations"
     );
 }
 

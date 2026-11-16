@@ -1,7 +1,5 @@
 """Offline regressions for the qualification drivers; no provider or binary."""
 
-import io
-import itertools
 import json
 import os
 import sqlite3
@@ -424,7 +422,7 @@ class QualificationFixTests(unittest.TestCase):
                 driver.subagents()
             self.assertEqual(raised.exception.outcome, live.PROVIDER)
 
-    def test_smoke_tui_classifies_only_exhausted_provider_retries(self):
+    def test_durable_terminal_classifies_only_exhausted_provider_retries(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             telemetry = home / "telemetry"
@@ -459,67 +457,11 @@ class QualificationFixTests(unittest.TestCase):
                 with self.subTest(turn_id=turn_id):
                     with self.assertRaises(live.ScenarioFailure) as raised:
                         smoke.require_durable_completed(
-                            {"phase": "failed", "turn_id": turn_id}, "TUI", home=home
+                            {"phase": "failed", "turn_id": turn_id}, "durable turn", home=home
                         )
                     self.assertEqual(raised.exception.outcome, outcome)
             with self.assertRaises(sqlite3.ProgrammingError):
                 connection.execute("SELECT 1")
-
-    def test_tui_quit_sees_a_split_dialog_after_screen_rollover(self):
-        tui = live.Tui.__new__(live.Tui)
-        tui.screen = b"old Quit plak?" + b"x" * (200_000 - 14)
-        tui.log = io.BytesIO()
-        tui.fd, tui.pid = 42, 123
-        tui._quit_output = None
-        chunks = iter([b"z" * 65536, b"Quit pla", b"k?", *([b"z" * 65536] * 4)])
-        writes = []
-        clock = itertools.count()
-
-        def exited(pid, flags):
-            return (pid, 0) if b"\r" in writes else (0, 0)
-
-        with (
-            patch.object(live.time, "monotonic", side_effect=lambda: next(clock) * 0.01),
-            patch.object(live.time, "sleep"),
-            patch.object(live.select, "select", return_value=([42], [], [])),
-            patch.object(live.os, "read", side_effect=lambda fd, size: next(chunks, b"")),
-            patch.object(live.os, "write", side_effect=lambda fd, data: writes.append(data)),
-            patch.object(live.os, "waitpid", side_effect=exited),
-            patch.object(live.os, "kill") as kill,
-        ):
-            self.assertEqual(tui.quit(timeout=1), 0)
-        self.assertIn(b"\r", writes)
-        kill.assert_not_called()
-        self.assertIsNone(tui._quit_output)
-
-    def test_tui_quit_does_not_confirm_a_stale_dialog_and_releases_its_buffer(self):
-        tui = live.Tui.__new__(live.Tui)
-        tui.screen = b"Quit plak?"
-        tui._quit_output = None
-        tui.log = io.BytesIO()
-        tui.fd, tui.pid = 42, 123
-        writes = []
-        clock = itertools.count()
-        with (
-            patch.object(live.time, "monotonic", side_effect=lambda: next(clock) * 0.01),
-            patch.object(live.select, "select", return_value=([42], [], [])),
-            patch.object(live.os, "read", return_value=b"still running"),
-            patch.object(live.os, "write", side_effect=lambda fd, data: writes.append(data)),
-            patch.object(live.os, "waitpid", return_value=(0, 0)),
-            patch.object(live.os, "kill") as kill,
-        ):
-            self.assertIsNone(tui.quit(timeout=1))
-        self.assertEqual(writes, [b"\x11"])
-        kill.assert_called_once_with(123, live.signal.SIGKILL)
-        self.assertIsNone(tui._quit_output)
-
-    def test_tui_quit_releases_its_buffer_when_ctrl_q_fails(self):
-        tui = live.Tui.__new__(live.Tui)
-        tui._quit_output = None
-        with patch.object(tui, "key", side_effect=OSError("synthetic PTY failure")):
-            with self.assertRaises(OSError):
-                tui.quit()
-        self.assertIsNone(tui._quit_output)
 
     def test_codex_growth_uses_neutral_digits_and_explicit_child_paging(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1152,7 +1094,7 @@ class IncompleteCaptureNamingTests(unittest.TestCase):
                         "capture_complete": False,
                         "provider_pending": [],
                     },
-                    "tui": {
+                    "agent": {
                         "segments": [str(empty)],
                         "capture_complete": False,
                         "provider_pending": [],
@@ -1166,7 +1108,7 @@ class IncompleteCaptureNamingTests(unittest.TestCase):
                 (
                     live.HARNESS,
                     "raw exchange evidence missing or incomplete: cli_task: segment-001 "
-                    "exchange-0001 pending; tui: segment-002 has no exchange; "
+                    "exchange-0001 pending; agent: segment-002 has no exchange; "
                     "cancel: no capture segment",
                 ),
             )
@@ -1175,7 +1117,7 @@ class IncompleteCaptureNamingTests(unittest.TestCase):
             report["capture_complete"] = True
             self.assertEqual(
                 qualification.score_report(1, report)[1],
-                "scenario capture missing or incomplete: tui: segment-002 has no "
+                "scenario capture missing or incomplete: agent: segment-002 has no "
                 "exchange; cancel: no capture segment",
             )
 
@@ -1545,74 +1487,3 @@ class FailureLinesTests(unittest.TestCase):
         )
         self.assertEqual(live.failure_lines("plak: done\n"), "plak: done")
         self.assertEqual(live.failure_lines(""), "")
-
-
-class NestedCtrlBPromotionTests(unittest.TestCase):
-    """Code Mode Ctrl+B is judged only on a start the hint actually promoted."""
-
-    class FakeTui:
-        lookup_faults = None
-        screen = b""
-
-        def type(self, _text):
-            pass
-
-        def key(self, _sequence):
-            pass
-
-        def pump(self, _seconds):
-            pass
-
-        def wait_until(self, predicate, _timeout):
-            return predicate()
-
-        def quit(self):
-            return 0
-
-    def play(self, *, records_promoted, telemetry):
-        driver = jobs.Jobs(live.ROUTES["codex"], Mock(fixture_seed=1))
-        driver.prepare = Mock(return_value=(Path("repo"), Path("home")))
-        driver.open_tui = Mock(return_value=self.FakeTui())
-        with (
-            patch.object(jobs, "_discover", return_value="session"),
-            patch.object(jobs, "marker", side_effect=lambda _repo, name: name == "job-started"),
-            patch.object(jobs, "matching", return_value=["hold"]),
-            patch.object(jobs, "command_lines", return_value=[]),
-            patch.object(jobs, "tool_completed_count", return_value=1),
-            patch.object(jobs, "all_session_records", return_value=[]),
-            patch.object(jobs, "command_promoted", return_value=records_promoted),
-            patch.object(jobs, "read_telemetry", return_value=(telemetry, [])),
-            patch.object(jobs, "require_script"),
-            patch.object(jobs, "stop_token"),
-        ):
-            try:
-                return driver.ctrl_b()
-            except live.ScenarioFailure as failure:
-                return failure
-
-    def test_a_promoted_start_passes_from_the_session_log_or_telemetry(self):
-        passed = "hint promoted the nested command; Ctrl+B left it running"
-        self.assertEqual(self.play(records_promoted=True, telemetry=[]), passed)
-        self.assertEqual(
-            self.play(
-                records_promoted=None,
-                telemetry=[
-                    {
-                        "kind": "promoted",
-                        "tool": "start",
-                        "hint_source": "model_hint",
-                        "hint_ms": 250,
-                    }
-                ],
-            ),
-            passed,
-        )
-
-    def test_a_start_the_hint_never_promoted_is_model(self):
-        for records_promoted in (False, None):
-            with self.subTest(records_promoted=records_promoted):
-                failure = self.play(records_promoted=records_promoted, telemetry=[])
-                self.assertEqual(
-                    (failure.outcome, str(failure)),
-                    (live.MODEL, "nested command was not promoted by its hint"),
-                )

@@ -20,15 +20,15 @@ fn native_failure_status_spelling_is_restored_from_binding_facts_not_diagnostic(
         ),
         (
             AttachFailure::LoginSelectionChanged,
-            "exact reopen refused: Native login selection changed; use /reload or /rebind to carry the history under the current login; Fork now is available only while attached",
+            "exact reopen refused: Native login selection changed; use reload or rebind to carry the history under the current login; fork is available only while attached",
         ),
         (
             AttachFailure::AccountChanged,
-            "Native provider account changed; log in to the original account with `plak login grok` to reopen exactly, or use /rebind to carry the history into a new session under the newly logged-in account",
+            "Native provider account changed; log in to the original account with `plak login grok` to reopen exactly, or use rebind to carry the history into a new session under the newly logged-in account",
         ),
         (
             AttachFailure::BindingChanged,
-            "exact reopen refused: Native is bound to a different account or model; restore the original account and configuration with `plak login grok`, or use /rebind to carry the history into a new session",
+            "exact reopen refused: Native is bound to a different account or model; restore the original account and configuration with `plak login grok`, or use rebind to carry the history into a new session",
         ),
     ] {
         failure.cause = cause;
@@ -103,7 +103,7 @@ fn every_unit_status_detail_keeps_its_jsonl_spelling() {
     for (detail, expected) in [
         (
             HostStatusDetail::ChooseProfile,
-            "choose a profile with /agents",
+            "choose a profile with profile actions",
         ),
         (
             HostStatusDetail::CreatingFreshConversation,
@@ -153,7 +153,7 @@ fn every_unit_status_detail_keeps_its_jsonl_spelling() {
         ),
         (HostStatusDetail::TurnComplete, "turn complete"),
     ] {
-        assert_eq!(status_detail(&detail, Frontend::Tui), expected);
+        assert_eq!(status_detail(&detail, Frontend::Wire), expected);
         assert_eq!(wire(detail, HostPhase::Idle)["detail"], expected);
     }
 }
@@ -164,7 +164,7 @@ fn structured_status_facts_preserve_pause_and_steer_projection() {
         (HostPause { queue: false }, ""),
         (
             HostPause { queue: true },
-            " · queue paused, not draining · Tab then r",
+            " · queue paused, not draining · resume_queue",
         ),
     ] {
         assert_eq!(
@@ -269,7 +269,7 @@ fn every_transition_stage_keeps_its_cumulative_elapsed_label() {
     }
 }
 
-/// The TUI's detached status shows another host's custody of the tree as the
+/// An external client's detached status shows another host's custody of the tree as the
 /// typed refusal itself, naming the holder's build and machine.
 #[test]
 fn a_tree_hosted_elsewhere_attach_shows_the_refusal() {

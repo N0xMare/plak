@@ -4,8 +4,6 @@ import json
 import sys
 
 FAMILIES = (
-    "host_skeleton::crash::tui::tui_host_restart",
-    "host_skeleton::crash::tui::review_tui_host_restart_switch",
     "host_skeleton::crash::wire::cuts::wire_host_restart",
     "host_skeleton::crash::wire::cuts::wire_host_restart_switch",
 )
@@ -27,7 +25,7 @@ def check(inventory: dict) -> None:
                 f"{family}: expected all 16 restart groups; "
                 f"missing={sorted(expected - found)}, unexpected={sorted(found - expected)}"
             )
-    print("durability selection: all four restart families contain all 16 groups")
+    print("durability selection: both wire restart families contain all 16 groups")
 
 
 if __name__ == "__main__":

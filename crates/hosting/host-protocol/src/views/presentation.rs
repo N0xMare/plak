@@ -1,4 +1,4 @@
-//! Typed, bounded presentation data shared by the Plak host and TUI.
+//! Typed, bounded presentation data shared by the Plak host and client.
 //!
 //! This is an observational read model. It is safe to drop, coalesce, replace,
 //! or rebuild from authoritative product/runtime state. A

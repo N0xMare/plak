@@ -1,5 +1,5 @@
 //! Image files an operator attaches to a prompt (`plak run --image`, JSONL
-//! `prompt.images`, the TUI's `/image` and a dropped path) and clipboard
+//! `prompt.images` and client-supplied paths) and clipboard
 //! pixels, as drafts: `plakous-image` reads, sniffs, budgets and normalizes;
 //! this module names the draft and renders its chip.
 

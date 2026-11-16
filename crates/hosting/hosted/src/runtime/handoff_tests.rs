@@ -259,7 +259,7 @@ fn a_handoff_whose_turn_never_settles_holds_as_a_loss() {
 /// it, and its recovery takes it. The next host's custody take continues
 /// the parked child once by itself, under hold; a second take continues
 /// nothing. (A truly running child is handed off and continued through
-/// the product's child route by the offline TUI test and the
+/// the product's child route by the offline client test and the
 /// `handoff_resume_child` sweep shape.)
 #[test]
 fn a_handed_off_tree_continues_its_parked_child_once() {

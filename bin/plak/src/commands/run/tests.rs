@@ -943,7 +943,7 @@ fn run_refuses_an_invalid_config_before_any_account_or_session_work() {
     let home = tempfile::tempdir().unwrap();
     let paths = crate::home::paths::PlakPaths::explicit(home.path().join("product"));
     paths.ensure_layout().unwrap();
-    std::fs::write(paths.config_file(), "[tui]\nshow_timestamps = true\n").unwrap();
+    std::fs::write(paths.config_file(), "[turn]\nunknown_control = true\n").unwrap();
     let services = crate::shell::services::Services::for_home(paths.clone());
     let commands = [
         crate::command::Command::Run {
@@ -983,7 +983,7 @@ fn run_refuses_an_invalid_config_before_any_account_or_session_work() {
             failure.message()
         );
         assert!(
-            failure.message().contains("show_timestamps"),
+            failure.message().contains("unknown_control"),
             "{}",
             failure.message()
         );

@@ -53,7 +53,7 @@ USAGE:
 
   reload asks a running interactive plak to reload that session onto the
   installed build at its next idle boundary; it is refused unless the home
-  sets tui.reload_requests = true and this plak is build <binary-id> (the
+  sets host.reload_requests = true and this plak is build <binary-id> (the
   session checks the installed build again). A full id or a unique prefix of
   an announced session works under any state format. It prints the file the
   outcome is written to and returns at once.

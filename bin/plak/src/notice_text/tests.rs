@@ -12,7 +12,7 @@ fn named_credential_refusals_never_render_a_default_account_remedy() {
             account: AccountTarget::Named(named)
         }) if named.as_str() == "claude/work"
     ));
-    for frontend in [Frontend::Run, Frontend::Jsonl, Frontend::Tui] {
+    for frontend in [Frontend::Run, Frontend::Jsonl, Frontend::Wire] {
         let text = remedy_text(
             failure.remedy().unwrap(),
             RemedyContext {
@@ -101,7 +101,7 @@ fn every_remedy_has_each_existing_frontend_route_and_strict_encoding() {
         let mut extra = value;
         extra["unexpected"] = true.into();
         assert!(serde_json::from_value::<NoticeRemedy>(extra).is_err());
-        for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+        for frontend in [Frontend::Wire, Frontend::Run, Frontend::Jsonl] {
             let rendered = with_remedy(
                 "neutral facts",
                 Some(&remedy),
@@ -156,12 +156,12 @@ fn action_help_uses_the_exact_target_and_valid_frontend_commands() {
         render(&NoticeRemedy::ResumeQueueOrStartFresh {}, Frontend::Jsonl).contains("resume_queue")
     );
     assert!(
-        render(&NoticeRemedy::ResumeQueueOrStartFresh {}, Frontend::Tui).contains("Tab then r")
+        render(&NoticeRemedy::ResumeQueueOrStartFresh {}, Frontend::Wire).contains("resume_queue")
     );
     let saved = NoticeRemedy::ResumeSavedSession {
         session_id: "00112233-4455-6677-8899-aabbccddeeff".parse().unwrap(),
     };
-    for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+    for frontend in [Frontend::Wire, Frontend::Run, Frontend::Jsonl] {
         let text = render(&saved, frontend);
         assert!(text.contains("00112233-4455-6677-8899-aabbccddeeff"));
         assert!(!text.contains("current-id"));
@@ -169,15 +169,15 @@ fn action_help_uses_the_exact_target_and_valid_frontend_commands() {
     let original = NoticeRemedy::RestoreAccountOrRebind {
         account: AccountTarget::Grok,
     };
-    assert!(render(&original, Frontend::Tui).contains("plak login grok"));
+    assert!(render(&original, Frontend::Wire).contains("plak login grok"));
     let binding = NoticeRemedy::RestoreBindingOrCarry {
         account: AccountTarget::Claude,
     };
-    let tui = render(&binding, Frontend::Tui);
-    assert!(tui.starts_with("carry the full history into a new session with /rebind"));
-    assert!(tui.contains("plak login claude"));
+    let wire = render(&binding, Frontend::Wire);
+    assert!(wire.starts_with("carry the full history into a new session with rebind"));
+    assert!(wire.contains("plak login claude"));
     for frontend in [Frontend::Run, Frontend::Jsonl] {
-        assert!(render(&binding, frontend).contains("/rebind to carry the full history"));
+        assert!(render(&binding, frontend).contains("rebind to carry the full history"));
     }
     let newer = NoticeRemedy::RepairCredentialOrChooseProfile {
         account: AccountTarget::Claude,
@@ -189,17 +189,17 @@ fn action_help_uses_the_exact_target_and_valid_frontend_commands() {
 
 #[test]
 fn absent_remedy_is_verbatim_and_never_inferred_from_text() {
-    for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+    for frontend in [Frontend::Wire, Frontend::Run, Frontend::Jsonl] {
         assert_eq!(
             with_remedy(
-                "legacy /recover text",
+                "legacy recover text",
                 None,
                 RemedyContext {
                     frontend,
                     session_id: None
                 }
             ),
-            "legacy /recover text"
+            "legacy recover text"
         );
     }
 }
@@ -207,7 +207,7 @@ fn absent_remedy_is_verbatim_and_never_inferred_from_text() {
 #[test]
 fn live_restored_pause_names_the_queue_action_in_every_existing_face() {
     use plakous_host_protocol::status::HostPause;
-    for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+    for frontend in [Frontend::Wire, Frontend::Run, Frontend::Jsonl] {
         let text = restored_pause(
             HostPause { queue: true },
             RemedyContext {
@@ -216,8 +216,8 @@ fn live_restored_pause_names_the_queue_action_in_every_existing_face() {
             },
         );
         let queue_action = match frontend {
-            Frontend::Tui => "Tab",
-            Frontend::Run => "plak --resume exact-root",
+            Frontend::Wire => "resume_queue",
+            Frontend::Run => "plak agent --session exact-root",
             Frontend::Jsonl => "resume_queue",
         };
         assert!(text.contains(queue_action), "{text}");
@@ -383,7 +383,7 @@ fn every_account_and_credential_renders_a_command_the_parser_accepts() {
     }
     for remedy in &remedies {
         remedies_are_exhaustive(remedy);
-        for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+        for frontend in [Frontend::Wire, Frontend::Run, Frontend::Jsonl] {
             let text = remedy_text(
                 remedy,
                 RemedyContext {
@@ -500,7 +500,7 @@ fn store_capacity_remedies_name_the_store_file_and_the_reclaim_commands_in_order
         NoticeRemedy::ReclaimRetainedHistory {},
         NoticeRemedy::ReclaimThenRecover {},
     ] {
-        for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+        for frontend in [Frontend::Wire, Frontend::Run, Frontend::Jsonl] {
             let text = remedy_text(
                 &remedy,
                 RemedyContext {

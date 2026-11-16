@@ -173,7 +173,7 @@ fn invalid_plak_log_warns_without_failing_commands() {
     assert!(output.status.success(), "doctor must succeed: {output:?}");
     let output = plak_command(&home)
         .env("PLAK_LOG", "info=not_a_real_level")
-        .args(["config", "set", "tui.mouse", "true"])
+        .args(["config", "set", "skills.enabled", "true"])
         .output()
         .expect("spawn plak config set");
     assert!(

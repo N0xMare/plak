@@ -51,10 +51,6 @@ SELF = ("tools/release/gate_evidence.py", "tests/tooling/test_gate_evidence.py")
 REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
     "bin/plak/src/carry/history/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
     "bin/plak/src/cli/tests.rs": (frozenset({'"docs"'}), "an MCP server id argument fixture"),
-    "bin/plak/src/tui/surface_views/tests.rs": (
-        frozenset({'"docs"'}),
-        "an MCP server id in help text",
-    ),
     "bin/plak/src/cli_output/tests.rs": (frozenset({'"STATUS"'}), "a table header"),
     "bin/plak/src/product_config/mcp_edit/tests.rs": (
         frozenset({'"docs"'}),
@@ -64,9 +60,6 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
         frozenset({'"docs"'}),
         "an MCP server id fixture",
     ),
-    "bin/plak/src/tui/markdown_tests.rs": (frozenset({"README.md"}), "rendered transcript text"),
-    "bin/plak/src/tui/ui/pilot_tests.rs": (frozenset({"README.md"}), "a tool-call path fixture"),
-    "bin/plak/src/tui/ui/test_support.rs": (frozenset({"README.md"}), "rendered tool output"),
     "crates/core/agent/src/manifest/tests.rs": (
         frozenset({"README.md"}),
         "a tool-call path fixture",

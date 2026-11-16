@@ -4,8 +4,8 @@
 //! default feature set, it is not enabled by any release build, and nothing in
 //! the shipped product references it. Its whole job is to let a spawned `plak`
 //! process bind a deterministic in-process model instead of a provider, so the
-//! gate can drive complete lifecycles of the CLI face, the agent JSONL face and
-//! the terminal application without a network or a credential.
+//! gate can drive complete CLI, JSONL and host lifecycles without a network
+//! or a credential.
 //!
 //! Two environment variables select it, and both must be present:
 //!
@@ -15,8 +15,7 @@
 //!   (`plakous_offline_crash_harness::script`) the model replays.
 //!
 //! `PLAK_TEST_EVIDENCE` optionally names the fsynced provider/effect evidence
-//! log; it defaults to a file beside the script. `PLAK_TEST_TUI_PILOT`
-//! independently names the owner-only semantic TUI pilot directory.
+//! log; it defaults to a file beside the script.
 //!
 //! Anything wrong with either variable is a hard refusal. A test hook that
 //! silently falls back to the real provider would let a gate run pass while
@@ -1318,15 +1317,6 @@ fn selector() -> Option<std::ffi::OsString> {
 
 fn hook_environment(name: &str) -> Option<std::ffi::OsString> {
     std::env::var_os(name)
-}
-
-/// The terminal application's hooks.
-#[cfg(feature = "tui")]
-pub(crate) mod tui {
-    /// The pilot sidecar's root.
-    pub(crate) fn pilot_root() -> Option<std::ffi::OsString> {
-        std::env::var_os("PLAK_TEST_TUI_PILOT")
-    }
 }
 
 fn resolve(model: &std::ffi::OsStr) -> Result<OfflineSelection, String> {

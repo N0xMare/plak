@@ -87,14 +87,15 @@ fn picker_filters_are_not_evidence_that_the_catalog_removed_a_model() {
         "filtered-model",
     )
     .unwrap();
-    assert!(
-        !crate::commands::host_config::attached_target_accepts_effort(
+    assert_ne!(
+        attach_eligibility(
             &product_config::ProductTargetSelection::Native,
             &catalog,
-            "codex",
-            "filtered-model",
+            Some("codex"),
+            Some("filtered-model"),
             true
-        )
+        ),
+        AttachEligibility::Ready
     );
 }
 

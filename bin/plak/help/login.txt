@@ -15,7 +15,7 @@ DESCRIPTION:
   Use <vertical>/<name>, such as claude/work, for a separate named slot.
   A same-upstream login warns about shared limits; it never merges slots.
   The SuperGrok account answers to `grok` and `supergrok`.
-  Login is CLI-only: the TUI Providers tab shows status and names this command.
+  Login runs through this operator CLI, including browser and remote callback flows.
 
 EXAMPLES:
   plak login claude

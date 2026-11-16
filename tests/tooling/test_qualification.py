@@ -19,7 +19,6 @@ import jobs
 import long_session
 import smoke
 import soak
-import tui_soak
 
 
 class QualificationTests(unittest.TestCase):
@@ -361,7 +360,7 @@ class QualificationReviewTests(unittest.TestCase):
         report["summary"]["model_misses"] = 1
         self.assertEqual(qualification.score_report(0, report)[0], live.HARNESS)
 
-    def test_tui_model_miss_names_its_task_capture(self):
+    def test_model_miss_names_its_task_capture(self):
         report = self.report()
         report["summary"]["model_misses"] = 1
         report["records"][0].update(phase="completed", oracle=False)
@@ -824,65 +823,6 @@ class QualificationReviewTests(unittest.TestCase):
                 self.assertEqual(starts, [])
                 self.assertEqual(report["outcome"], live.HARNESS)
                 self.assertIn("owned by this driver", report["attempts"][0]["reason"])
-
-    def test_tui_recovered_failed_turn_is_not_harness(self):
-        for recovered in (True, False):
-            with self.subTest(recovered=recovered), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                (root / "tests").mkdir()
-                binary = root / "plak"
-                binary.write_bytes(b"synthetic")
-                phases = ["failed", "completed" if recovered else "failed", "completed"]
-                clock = iter(range(0, 100000, 10000))
-
-                def write_home(home, route):
-                    log = home / "logs/plak.log"
-                    log.parent.mkdir(parents=True)
-                    log.write_text("synthetic diagnostics")
-                    log.chmod(0o600)
-
-                def repo(path, seed):
-                    path.mkdir(parents=True)
-                    (path / "followup.txt").write_text("sleep and reopen verified\n")
-                    return path
-
-                def tui(env, repo, path, **kwargs):
-                    segment = kwargs["capture_dir"]
-                    env.capture_segments.append(segment)
-                    (segment / "1.info").write_text("synthetic")
-                    (segment / "1.body").write_text("synthetic")
-                    return Mock(pid=1, capture_dir=segment, quit=Mock(return_value=0))
-
-                with (
-                    patch.object(live, "ROOT", root),
-                    patch("live.write_home", side_effect=write_home),
-                    patch("live.git_repo", side_effect=repo),
-                    patch("live.Tui", side_effect=tui),
-                    patch("live.capture_integrity", return_value=True),
-                    patch("tui_soak.discover_session", return_value="session"),
-                    patch("tui_soak.time.monotonic", side_effect=lambda: next(clock)),
-                    patch("tui_soak.send_and_wait", side_effect=phases),
-                    patch("tui_soak.check_task", return_value=True),
-                    patch("tui_soak.raise_if_provider_terminal"),
-                    patch("builtins.print"),
-                ):
-                    code = tui_soak.main(
-                        [
-                            "codex",
-                            "--binary",
-                            str(binary),
-                            "--artifacts",
-                            str(root / "attempt"),
-                            "--hours",
-                            "1",
-                        ]
-                    )
-                report = json.loads((root / "attempt/report.json").read_text())
-                self.assertEqual(report["summary"]["turn_failures"], 0 if recovered else 2)
-                self.assertEqual(
-                    qualification.score_report(code, report)[0],
-                    live.PASS if recovered else live.HARNESS,
-                )
 
     def test_soak_records_digest_immediately_after_own_rebuild(self):
         with tempfile.TemporaryDirectory() as directory:

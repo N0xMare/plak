@@ -448,7 +448,7 @@ fn executable(path: &Path, bytes: &[u8]) {
     std::fs::set_permissions(path, permissions).unwrap();
 }
 
-/// A TUI launched by its snapshot's own path reloads onto its flavor's current
+/// A product launched by its snapshot's own path reloads onto its flavor's current
 /// install, the file `plak` on `PATH` resolves to; anything else keeps the
 /// path it was launched by.
 #[test]

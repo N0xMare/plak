@@ -128,7 +128,6 @@ tower-service = "0.3"
 unicode-general-category = "1.1"
 url = "2"
 uuid = "1"
-vt100 = { version = "=0.15.2", default-features = false }
 webpki-roots = "1"
 zeroize = "1"
 
@@ -264,13 +263,11 @@ vendor = ["published-internal"]
 [workspace.metadata.plakous.production-dependencies]
 plak = [
     "plakd-wire-types",
-    "arboard",
     "base64",
     # `web` only, with futures-util, http-body-util, hyper, hyper-util, ring
     # and tokio-tungstenite: the maintainer web endpoint (spec 02 sec. 4.5).
     "bytes",
     "clap",
-    "crossterm",
     "futures-util",
     "http-body-util",
     "hyper",
@@ -279,9 +276,6 @@ plak = [
     "opentelemetry",
     "opentelemetry-otlp",
     "nix",
-    "objc2",
-    "objc2-app-kit",
-    "objc2-foundation",
     "opentelemetry_sdk",
     "plakous",
     "plakous-host-protocol",
@@ -292,8 +286,6 @@ plak = [
     "plakous-offline-crash-harness",
     "plakous-recursive-subagents",
     "plakous-recursive-subagents-store",
-    "pulldown-cmark",
-    "ratatui",
     "ring",
     "rusqlite",
     "rustix",
@@ -303,7 +295,6 @@ plak = [
     "serde_json",
     "sha2",
     "shell-words",
-    "syntect",
     "tempfile",
     "time",
     "toml",
@@ -313,7 +304,6 @@ plak = [
     "tracing",
     "tracing-opentelemetry",
     "tracing-subscriber",
-    "unicode-segmentation",
     "unicode-width",
     "url",
     "uuid",
@@ -367,66 +357,6 @@ plakous-hosted = [
 plak = ["sessions-sqlite"]
 plakous-recursive-subagents = ["store"]
 plakous-hosted = ["sessions-sqlite"]
-
-[workspace.metadata.plakous.modules.plak.tui]
-forbid-crates = ["plakous", "plakous-*"]
-allow-crates = ["plakous-host-protocol"]
-may-use = [
-    "crate::tui",
-    "crate::product_config::settings",
-    "crate::config::AgentAcknowledgement",
-    "crate::config::HostEvent",
-    "crate::config::HostEventReceiver",
-    "crate::config::McpOverview",
-    "crate::config::McpSessionBinding",
-    "crate::config::ProfileApply",
-    "crate::config::ProfileDifference",
-    "crate::config::ProfileOutcome",
-    "crate::config::ProfileRole",
-    "crate::config::ProfileRow",
-    "crate::config::ProfilesView",
-    "crate::config::SettingsView",
-    "crate::config::SettingsTheme",
-    "crate::config::SurfaceIntent",
-    "crate::config::SurfaceObservation",
-    "crate::config::TuiPreferences",
-    "crate::config::UserAction",
-    "crate::config::UserActionSendError",
-    "crate::config::FaceActionSender",
-    "crate::config::UsageDecorationReader",
-    "crate::config::WorkspaceChrome",
-    "crate::config::usage_verticals",
-    "crate::config::image_attachments",
-    # Product paths the TUI still names inline. The wire face removes them;
-    # this list only shrinks, and may-use-ceiling follows it down.
-    "crate::build_features::require_account",
-    "crate::build_identity::FLAVOR",
-    "crate::build_identity::installed_executable",
-    "crate::build_identity::ready_binary_id",
-    "crate::carry::ReloadTarget",
-    "crate::cli_output::safe_terminal_text",
-    "crate::home::paths::PlakPaths",
-    "crate::host_status_text::status_detail",
-    "crate::notice_text::Frontend",
-    "crate::notice_text::RemedyContext",
-    "crate::notice_text::restored_pause",
-    "crate::notice_text::storage_admission",
-    "crate::notice_text::with_remedy",
-    "crate::refusal_text::child_progress",
-    "crate::refusal_text::node_fault",
-    "crate::refusal_text::tool_error_text",
-    "crate::reload_request::ReloadOutcome",
-    "crate::reload_request::ReloadRequest",
-    "crate::reload_request::record",
-    "crate::signals::signalled_stops",
-    "crate::store::sessions::TranscriptRow",
-    "crate::test_hooks::tui::pilot_root",
-    "crate::tui_timing::first_frame",
-    "crate::tui_timing::host_ready",
-    "crate::tui_timing::quit_requested",
-    "crate::usage_remedy::unavailable_reason",
-]
-may-use-ceiling = 51
 
 [patch.crates-io]
 monty-typeshed = { path = "vendor/monty-typeshed" }
@@ -499,9 +429,9 @@ lto = false
 [workspace.metadata.plakous.cfg.plak]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
 env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs", "src/commands/doctor.rs", "src/test_hooks.rs"]
-feature-ceiling = 160
-test-seam-ceiling = 76
-env-ceiling = 18
+feature-ceiling = 116
+test-seam-ceiling = 41
+env-ceiling = 17
 reason = "Capability registry, grouped interactive identity/carry helpers and host-upgrade ownership/probe guards preserve reduced products. Upgrade crash, capacity and state-key hooks are isolated at the composition root; native contract-drift errors exist only with their compiled route."
 
 [workspace.metadata.plakous.cfg.plakous]

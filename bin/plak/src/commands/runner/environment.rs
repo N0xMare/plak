@@ -1,7 +1,7 @@
 //! The tool environment a host's sessions get: the login shell's `PATH`
 //! and the user's `HOME`, captured once at start, as `plak runner serve`
 //! does when `runner.toml` sets no `path` (spec 02 §4.6). Not a session's
-//! own: a host never sees the shell a TUI was started in.
+//! own: a host never sees the shell a client was started in.
 
 /// Where the host's `PATH` came from.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

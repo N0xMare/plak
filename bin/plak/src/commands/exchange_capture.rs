@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock};
 pub(super) fn from_environment(
     home: &std::path::Path,
 ) -> Result<Option<Arc<dyn ExchangeObserver>>, String> {
-    // CLI services and TUI reattachments construct roots separately. They must
+    // CLI services and host reattachments construct roots separately. They must
     // share one process sequence rather than collide with earlier file names.
     static CAPTURE: OnceLock<Result<Option<Arc<dyn ExchangeObserver>>, String>> = OnceLock::new();
     let capture = CAPTURE

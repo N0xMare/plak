@@ -5,19 +5,10 @@ Usage: jobs.py [route] [--binary PATH] [--only NAME,...]
 
 Each scenario is one short turn on a real route. The model is told to run a
 script in the scratch repo; the oracle is that script's marker files, the
-process list, JSONL job events, the session log, a captured request, or the
-TUI screen. The model's own reply is never the oracle. Nothing here is a
-gate, and the module does not call a provider by itself.
+process list, JSONL job events, the session log, or a captured request. The
+model's own reply is never the oracle. Nothing here is a gate, and the module
+does not call a provider by itself.
 
-`/stop` is not a slash command. `stop_jobs` confirms Processes `S`
-(`Stop all processes?`), which stops background processes and not children.
-A user stop is still a process notice, so the idle root wakes
-(`crates/hosting/hosted/src/runtime/host_loop/wake.rs` lines 156-158;
-`[turn] auto_continue` defaults true). The idle HUD reads `1 agent` and
-`1 process` from the composer row of a PTY frame taken while that job is
-live. A cursor move that repaints one counter does not drop the other.
-A child command that never left the foreground is model: the HUD counts
-promoted jobs only.
 `plak run` waits for a promoted job instead of stopping it when the first
 turn ends. Each scenario's process token is `prefix` plus eight hex
 characters from `os.urandom` (or a cell's replay seed), so concurrent cells
@@ -30,7 +21,6 @@ import argparse
 import json
 import os
 import queue
-import re
 import signal
 import sqlite3
 import subprocess
@@ -55,8 +45,6 @@ PROMOTION_SOON_S = 0.5
 PROMOTION_LATE_S = 6.0
 # spawn_agent is async. Wait for the child's job, then for its terminal.
 CHILD_WAIT_S = 120.0
-# Quiet window is 2 s (spec 02). Leave room for the stop and the admission.
-WAKE_AFTER_STOP_S = 30.0
 # model_retries.cause_kind values that mean the provider, not the harness.
 PROVIDER_RETRY_CAUSES = frozenset(
     {
@@ -67,32 +55,6 @@ PROVIDER_RETRY_CAUSES = frozenset(
         "stream_interrupted",
     }
 )
-AGENT_BADGE = "1 agent"
-PROCESS_BADGE = "1 process"
-# Session-log names for a shell start. Wait and poll tools are absent on
-# purpose: an open poll must not look like a foreground command.
-SHELL_STARTS = frozenset(
-    {
-        "run_terminal_command",
-        "Bash",
-        "bash",
-        "exec_command",
-        "shell",
-        "Shell",
-        "process_session_start",
-        "process-session-start",
-        "plakous.process-session-start.v2",
-        "plakous.process-session-start.v3",
-        "run_process",
-    }
-)
-# Composer border segment: middle dot, a glyph, then "1 agent" / "1 process".
-# A transcript quote has no glyph between the dot and the count.
-_HUD_PAINT = re.compile(
-    "\u00b7[ \t]+\\S[ \t]+1 agent(?:[ \t]+\u00b7[ \t]+\\S[ \t]+1 process)?"
-    "|\u00b7[ \t]+\\S[ \t]+1 process"
-)
-STOP_TITLE = "Stop all processes?"
 WARNING = "Plak stopped unexpectedly while this command was running."
 STEER_TEXT = "Reply with the single word steered."
 # Nested Code Mode calls that wait on a promoted process; a start is not one.
@@ -115,7 +77,6 @@ SHORT_PY = (
     "time.sleep(2)\n"
     "pathlib.Path('short-finished').write_text('1\\n')\n"
 )
-_ANSI = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 
 # Name, surface. All of them are opt-in relative to smoke; this module is the set.
 SCENARIOS = (
@@ -126,10 +87,6 @@ SCENARIOS = (
     ("run_promoted", "cli"),
     ("crash_jobs", "jsonl"),
     ("child_settle", "jsonl"),
-    ("ctrl_b", "tui"),
-    ("stop_jobs", "tui"),
-    ("wake_while_idle", "tui"),
-    ("idle_badge", "tui"),
 )
 
 
@@ -148,11 +105,6 @@ def pin_jobs(home: Path, foreground_seconds: int) -> None:
     if not text.endswith("\n"):
         text += "\n"
     path.write_text(f"{text}\n[jobs]\nforeground_seconds = {foreground_seconds}\n")
-
-
-def visible(data: bytes) -> str:
-    """PTY bytes with ANSI sequences removed, so a HUD count is searchable."""
-    return _ANSI.sub("", data.decode("utf-8", errors="replace"))
 
 
 def selected(only: set[str]) -> tuple[tuple[str, str], ...]:
@@ -206,56 +158,6 @@ def immediate_hint(route: live.Route) -> str:
     if pack == "pi":
         return "Pass timeout 0 on that command so it is promoted immediately."
     return "Pass block_until_ms 0 on that command so it is promoted immediately."
-
-
-def wait_hint(route: live.Route) -> str:
-    """How this pack waits out a job that `immediate_hint` already promoted.
-
-    The child blocks in this wait until the command exits, then submits.
-    A long start hint would keep the command in the foreground, and the HUD
-    does not count that (spec 02 §5.7). The hold is 25 s, so 60 s covers it.
-    """
-    pack = pack_of(route)
-    if pack == "codex":
-        return (
-            "When that call returns a session id while the command is still running, "
-            "wait until the command exits by calling write_stdin with empty chars and "
-            "yield_time_ms of at least 60000 on that session id, then submit_result. "
-            "Do not stop the command and do not submit_result before it exits."
-        )
-    if pack == "claude":
-        return (
-            "When that call returns while the command is still running, "
-            "wait until the command exits by reading the output file it named with Read, "
-            "repeating that Read until the command has exited "
-            "(the script writes job-finished when it does), then submit_result. "
-            "Do not stop the command and do not submit_result before it exits."
-        )
-    if pack == "pi":
-        return (
-            "When that call returns an id while the command is still running, "
-            "wait until the command exits by calling wait on that id with timeout_ms "
-            "of at least 60000, then submit_result. "
-            "Do not stop the command and do not submit_result before it exits."
-        )
-    return (
-        "When that call returns a task id while the command is still running, "
-        "wait until the command exits by calling get_command_or_subagent_output "
-        "on that task id with timeout_ms of at least 60000, then submit_result. "
-        "Do not stop the command and do not submit_result before it exits."
-    )
-
-
-def idle_child_task(route: live.Route, command: str) -> str:
-    """Root prompt for `idle_badge`: one promoted child job, root goes idle."""
-    return (
-        "Spawn exactly one worker. Its entire task is to run:\n"
-        f"{command}\n"
-        f"{immediate_hint(route)} "
-        f"{wait_hint(route)}\n"
-        "After you spawn it, end your own turn without waiting for the worker.\n"
-        "Reply with the single word done."
-    )
 
 
 def stop_hint(route: live.Route) -> str:
@@ -450,22 +352,6 @@ def judge_nested_await(
     )
 
 
-def judge_nested_ctrl_b(*, promoted: bool, sent: bool, finished: bool, still_running: bool) -> str:
-    """Ctrl+B at the outer cell does not preempt or kill a hint-promoted job.
-
-    `promoted` is session or telemetry evidence that the hint promoted the
-    nested start; without it the model did not pass the hint, as in the other
-    Code Mode judges.
-    """
-    if not promoted:
-        raise ScenarioFailure(MODEL, "nested command was not promoted by its hint")
-    if not sent:
-        raise ScenarioFailure(HARNESS, "Ctrl+B was not sent at the outer-cell boundary")
-    if not still_running or finished:
-        raise ScenarioFailure(HARNESS, "Ctrl+B stopped the nested job")
-    return "hint promoted the nested command; Ctrl+B left it running"
-
-
 def fresh_token(prefix: str, random_bytes=os.urandom) -> str:
     """A process token no other concurrent route's `ps` or `pkill -f` can match."""
     return prefix + random_bytes(4).hex()
@@ -614,44 +500,6 @@ def judge_await(
     if not still_running or finished:
         raise ScenarioFailure(HARNESS, "steer stopped the awaited job")
     return f"await yielded to steer in {latency:.1f} s; job still running"
-
-
-def judge_ctrl_b(
-    *, latency: float | None, finished: bool, still_running: bool, returned: bool
-) -> str:
-    """Ctrl+B promotes the running foreground command and does not stop it."""
-    if finished and not still_running:
-        raise ScenarioFailure(MODEL, "command finished instead of staying in the foreground")
-    if not returned or latency is None or latency > STEER_LIMIT_S:
-        raise ScenarioFailure(HARNESS, "Ctrl+B did not background the foreground command")
-    if not still_running or finished:
-        raise ScenarioFailure(HARNESS, "Ctrl+B stopped the command")
-    return f"Ctrl+B promoted in {latency:.1f} s; job still running"
-
-
-def judge_stop(
-    *, confirmed: bool, still_running: bool, finished: bool, woke: bool, origin: str | None
-) -> str:
-    """Processes `S` stops a live job, and that stop wakes the idle root.
-
-    `try_child_wake_with_jobs` treats every job that is not `Running` as a
-    notice (`crates/hosting/hosted/src/runtime/host_loop/wake.rs` lines
-    156-158). `[turn] auto_continue` defaults true (spec 02), so a user stop
-    admits another turn. A missing telemetry origin is not a failure.
-    """
-    if finished:
-        raise ScenarioFailure(MODEL, "command finished before the stop")
-    if not confirmed:
-        raise ScenarioFailure(HARNESS, "Stop all processes confirmation did not appear")
-    if still_running:
-        raise ScenarioFailure(HARNESS, "process still running after the stop")
-    if not woke:
-        raise ScenarioFailure(HARNESS, "user stop did not wake the idle root")
-    if origin == "user_prompt":
-        raise ScenarioFailure(HARNESS, "stop wake was recorded as a user prompt")
-    if origin not in (None, "host_wake"):
-        raise ScenarioFailure(HARNESS, f"stop wake origin {origin}")
-    return "Processes S stopped the live job and woke the idle root"
 
 
 def judge_notice(
@@ -834,42 +682,6 @@ def judge_crash(*, unknown: bool, warned: bool) -> str:
     return "reopen reported outcome unknown for the live job"
 
 
-def judge_wake(
-    *, idle_with_job: bool, hud: bool, second_admission: bool, origin: str | None, finished: bool
-) -> str:
-    """An idle interactive root wakes when a promoted job exits, without a new prompt."""
-    if not idle_with_job:
-        raise ScenarioFailure(MODEL, "root was not idle with the job still running")
-    if not hud:
-        raise ScenarioFailure(HARNESS, "idle HUD did not show the live process")
-    if not finished or not second_admission:
-        raise ScenarioFailure(HARNESS, "idle root did not wake when the job finished")
-    if origin == "user_prompt":
-        raise ScenarioFailure(HARNESS, "wake turn was recorded as a user prompt")
-    if origin not in (None, "host_wake"):
-        raise ScenarioFailure(HARNESS, f"wake origin {origin}")
-    return "idle root woke from the job completion"
-
-
-def judge_badge(
-    *, root_idle: bool, child_alive: bool, agent: bool, process: bool, promoted: bool | None
-) -> str:
-    """The idle HUD counts a live child and that child's promoted running job.
-
-    A command still in the foreground never promotes, so a missing process
-    count is the model. `promoted` is None when no shell start names the token.
-    """
-    if not root_idle:
-        raise ScenarioFailure(MODEL, "root did not go idle while the child was live")
-    if not child_alive:
-        raise ScenarioFailure(MODEL, "child job was not live while the root was idle")
-    if promoted is False:
-        raise ScenarioFailure(MODEL, "child command was not promoted")
-    if not agent or not process:
-        raise ScenarioFailure(HARNESS, "idle HUD did not show the live child and process")
-    return "idle HUD showed 1 agent and 1 process"
-
-
 def exit_before_turn_terminal(events: list[dict], job_id: str) -> bool:
     """True when `job_id` exits before this turn publishes a terminal phase."""
     exited = False
@@ -965,221 +777,6 @@ def promoted_for(events: list[dict], job_id: str | None, owner: str | None) -> b
         and (owner is None or event.get("owner") == owner)
         for event in events
     )
-
-
-def screen_after(data: bytes, mark: int) -> str:
-    """PTY text painted after `mark`. Earlier bytes can quote the HUD."""
-    if mark < 0:
-        mark = 0
-    return visible(data[mark:])
-
-
-def last_hud_paint(text: str) -> str:
-    """The last composer HUD counter segment in `text`, or empty.
-
-    One paint is the middle-dot segment for "1 agent" and, beside it, "1 process".
-    Counters on the same row, separated only by padding, are one paint: a
-    cursor move rewrites one spinner and leaves the other on that row.
-    A transcript quote of those words is not a segment. A later row that
-    drops a counter is the row to judge.
-    """
-    found = list(_HUD_PAINT.finditer(text))
-    if not found:
-        return ""
-    last = found[-1]
-    line_start = text.rfind("\n", 0, last.start()) + 1
-    on_line = [match for match in found if match.start() >= line_start]
-    if len(on_line) > 1 and text[on_line[0].end() : on_line[-1].start()].strip() == "":
-        return text[on_line[0].start() : on_line[-1].end()]
-    start = last.start()
-    # Agent and process can be two writes a few cells apart. A later row is not.
-    if (
-        len(found) > 1
-        and last.start() - found[-2].end() <= 8
-        and "\n" not in text[found[-2].end() : last.start()]
-    ):
-        start = found[-2].start()
-    return text[start : last.end()]
-
-
-def render_frame(data: bytes) -> str:
-    """The visible rows of a PTY byte stream.
-
-    Absolute cursor addresses share one row, so a spinner refresh of one HUD
-    counter does not erase the other. SGR and private modes are ignored.
-    Enough for the composer border; not a terminal emulator.
-    """
-    text = data.decode("utf-8", errors="replace")
-    rows, cols = 64, 240
-    grid = [[" "] * cols for _ in range(rows)]
-    row = col = 0
-
-    def clip_row(value: int) -> int:
-        return min(max(value, 0), rows - 1)
-
-    def clip_col(value: int) -> int:
-        return min(max(value, 0), cols - 1)
-
-    def put(char: str) -> None:
-        nonlocal row, col
-        if char == "\n":
-            row = clip_row(row + 1)
-            col = 0
-            return
-        if char == "\r":
-            col = 0
-            return
-        if char == "\b":
-            col = clip_col(col - 1)
-            return
-        if char < " ":
-            return
-        grid[row][col] = char
-        if col + 1 < cols:
-            col += 1
-
-    def number(token: str, default: int) -> int:
-        token = token.lstrip("?")
-        return int(token) if token.isdigit() else default
-
-    index = 0
-    limit = len(text)
-    while index < limit:
-        char = text[index]
-        if char != "\x1b":
-            put(char)
-            index += 1
-            continue
-        index += 1
-        if index >= limit:
-            break
-        kind = text[index]
-        if kind == "[":
-            index += 1
-            params = ""
-            while index < limit and text[index] in "0123456789;?:":
-                params += text[index]
-                index += 1
-            if index >= limit:
-                break
-            final = text[index]
-            index += 1
-            parts = params.split(";") if params else []
-            if final in "Hf":
-                row = clip_row(number(parts[0] if parts else "", 1) - 1)
-                col = clip_col(number(parts[1] if len(parts) > 1 else "", 1) - 1)
-            elif final == "A":
-                row = clip_row(row - number(parts[0] if parts else "", 1))
-            elif final == "B":
-                row = clip_row(row + number(parts[0] if parts else "", 1))
-            elif final == "C":
-                col = clip_col(col + number(parts[0] if parts else "", 1))
-            elif final == "D":
-                col = clip_col(col - number(parts[0] if parts else "", 1))
-            elif final == "G":
-                col = clip_col(number(parts[0] if parts else "", 1) - 1)
-            elif final == "K":
-                mode = number(parts[0] if parts else "", 0)
-                if mode == 1:
-                    for cell in range(0, col + 1):
-                        grid[row][cell] = " "
-                elif mode == 2:
-                    grid[row] = [" "] * cols
-                else:
-                    for cell in range(col, cols):
-                        grid[row][cell] = " "
-            elif final == "J" and number(parts[0] if parts else "", 0) == 2:
-                grid = [[" "] * cols for _ in range(rows)]
-                row = col = 0
-            continue
-        if kind == "]":
-            index += 1
-            while index < limit and text[index] != "\x07":
-                if text[index] == "\x1b" and index + 1 < limit and text[index + 1] == "\\":
-                    index += 2
-                    break
-                index += 1
-            else:
-                index += 1
-            continue
-        if kind in "()":
-            index += 2
-            continue
-        index += 1
-    lines = ["".join(cells).rstrip() for cells in grid]
-    while lines and not lines[-1]:
-        lines.pop()
-    return "\n".join(lines)
-
-
-def latest_hud(data: bytes, mark: int) -> str:
-    """The composer HUD on the screen `data` has painted.
-
-    A cursor move after `mark` repaints the row drawn before it, so the frame
-    is the whole buffer: slicing at `mark` would drop the other counter.
-    Bytes that are not a HUD paint do not hide an earlier border. A later row
-    that drops a counter is that row. Used by `idle_badge` and `wake_while_idle`.
-    """
-    if mark < 0:
-        mark = 0
-    elif mark > len(data):
-        mark = len(data)
-    # `mark` bounds a caller's slice; the paint before it stays until overwritten.
-    _ = mark
-    return last_hud_paint(render_frame(data))
-
-
-def _tool_blob(record: dict) -> str:
-    return " ".join(
-        str(record.get(key) or "")
-        for key in ("name", "exposed_name", "subject", "arguments", "detail")
-    )
-
-
-def _is_shell_start(record: dict) -> bool:
-    return record.get("name") in SHELL_STARTS or record.get("exposed_name") in SHELL_STARTS
-
-
-def command_promoted(records: list[dict], token: str) -> bool | None:
-    """Whether the shell start that names `token` has returned.
-
-    None: no shell start names the token. A spawn whose task quotes the
-    command does not count. False: that start is still open, so the command
-    is still foreground and the HUD must not count it. True: the start
-    completed, which is promotion while the process is still running.
-    """
-    starts = [
-        record.get("call_id")
-        for record in records
-        if record.get("kind") == "tool.started"
-        and _is_shell_start(record)
-        and token in _tool_blob(record)
-    ]
-    if not starts:
-        completed = any(
-            record.get("kind") == "tool.completed"
-            and _is_shell_start(record)
-            and token in _tool_blob(record)
-            for record in records
-        )
-        return True if completed else None
-    done = {record.get("call_id") for record in records if record.get("kind") == "tool.completed"}
-    if any(call_id in done for call_id in starts):
-        return True
-    return False
-
-
-def all_session_records(home: Path) -> list[dict]:
-    """Every session log under `home`. The child's file is not the root's."""
-    records: list[dict] = []
-    seen: set[str] = set()
-    for path in sorted(home.glob("state/*/sessions/*.events.jsonl")):
-        session = path.name.removesuffix(".events.jsonl")
-        if session in seen:
-            continue
-        seen.add(session)
-        records.extend(live.session_records(home, session))
-    return records
 
 
 def _json_strings(value: object, out: list[str]) -> None:
@@ -1505,25 +1102,6 @@ def child_wait_state(events: list[dict], token: str, *, child_settled: bool) -> 
     return "ready"
 
 
-def root_is_idle(records: list[dict]) -> bool:
-    """True when the root's latest admitted turn has completed, and no later one is open."""
-    admitted: list[object] = []
-    terminals: list[tuple[object, object]] = []
-    for record in records:
-        if record.get("kind") != "turn.lifecycle":
-            continue
-        phase = record.get("phase")
-        turn_id = record.get("turn_id")
-        if phase == "admitted":
-            admitted.append(turn_id)
-        elif phase is not None:
-            terminals.append((turn_id, phase))
-    if not admitted or not terminals:
-        return False
-    turn_id, phase = terminals[-1]
-    return phase == "completed" and turn_id is not None and turn_id == admitted[-1]
-
-
 def classify_turn(
     turn: live.Turn,
     what: str,
@@ -1626,56 +1204,6 @@ def retry_budget_exhausted(retry: tuple[str, int, int, str | None] | None) -> bo
     return declined == "budget" and nxt == limit + 1
 
 
-def classify_tui_turn(
-    home: Path, session: str, index: int, what: str, *, lookup_faults: str | None = None
-) -> None:
-    """Classify a TUI turn from the session log, then from retry telemetry.
-
-    `emit_turn_lifecycle` (`crates/hosting/hosted/src/runtime/turn.rs` lines
-    204-208) writes `turn_id` and `phase` only. `model_error_kind` and
-    `http_status` are absent there. A provider failure is still provider when
-    the row itself carries them, or when the turn's last `model_retries` row
-    shows a provider cause exhausted the budget (`retry_budget_exhausted`).
-    A product failure after a transient retry that was not the last allowed
-    attempt stays harness. The turn's `turn.failed` text stands in for the
-    row's missing message, so a typed OutputLimit diagnostic is model.
-    """
-    records = [
-        record
-        for record in live.with_failure_messages(live.session_records(home, session))
-        if record.get("kind") == "turn.lifecycle" and record.get("phase") not in (None, "admitted")
-    ]
-    if index >= len(records):
-        raise ScenarioFailure(HARNESS, f"{what}: no logged turn terminal")
-    record = records[index]
-    status = record.get("http_status")
-    turn = live.Turn(
-        lookup_faults=lookup_faults,
-        phase=record.get("phase"),
-        model_error_kind=record.get("model_error_kind"),
-        http_status=status if type(status) is int else None,
-        errors=[str(record.get("message") or "")],
-        refusals=live.durable_refusals(record),
-    )
-    if turn.completed:
-        return
-    lookup = live.lookup_failure(" ".join(turn.errors), lookup_faults)
-    if lookup:
-        raise ScenarioFailure(lookup[1], f"{what}: {lookup[0]}")
-    retry = last_retry(home, str(record.get("turn_id") or ""))
-    if retry_budget_exhausted(retry):
-        raise ScenarioFailure(PROVIDER, f"{what}: model_retries {retry[0]} exhausted")
-    classify_turn(turn, what)
-
-
-def admitted_ids(home: Path, session: str) -> list[str]:
-    return [
-        str(record.get("turn_id", ""))
-        for record in live.session_records(home, session)
-        if record.get("kind") == "turn.lifecycle" and record.get("phase") == "admitted"
-    ]
-
-
 def child_has_settled(home: Path, root: str) -> bool:
     """A non-root session has published a terminal turn phase."""
     for path in sorted(home.glob("state/*/sessions/*.events.jsonl")):
@@ -1710,12 +1238,6 @@ def child_attempt(events: list[dict], agent_id: str | None) -> str | None:
             if node.get("agent_id") == agent_id and isinstance(node.get("attempt"), str):
                 found = node["attempt"]
     return found
-
-
-def tool_completed_count(home: Path, session: str) -> int:
-    return sum(
-        record.get("kind") == "tool.completed" for record in live.session_records(home, session)
-    )
 
 
 @contextmanager
@@ -1830,10 +1352,6 @@ class Jobs:
     ) -> live.Agent:
         with launch_home(self.env, home):
             return live.Agent(self.env, repo, f"{name}/agent", args=args or [], observe=True)
-
-    def open_tui(self, name: str, repo: Path, home: Path) -> live.Tui:
-        with launch_home(self.env, home):
-            return live.Tui(self.env, repo, self.env.artifacts / name / "tui.log")
 
     def promotion_budget(self) -> str:
         token = self.fresh_token("plakjobbudget")
@@ -2486,346 +2004,6 @@ class Jobs:
             close_agent(agent)
             stop_token(token)
             stop_token(close_token)
-
-    def ctrl_b(self) -> str:
-        token = self.fresh_token("plakjobctrlb")
-        nested = code_mode(self.route)
-        repo, home = self.prepare("ctrl_b", FOREGROUND_HOLD)
-        tui = None
-        try:
-            tui = self.open_tui("ctrl_b", repo, home)
-            session = _discover(home)
-            if nested:
-                tui.type(
-                    "Inside one code cell, run exactly this shell command and no other tool:\n"
-                    f"{hold_command(20, token)}\n"
-                    f"{immediate_hint(self.route)}\n"
-                    "Do not wait for it and do not stop it."
-                )
-            else:
-                tui.type(
-                    "Run exactly this shell command and wait for it. Do not background it "
-                    "and do not pass a timeout, yield, or block_until:\n"
-                    f"{hold_command(20, token)}"
-                )
-            tui.key(b"\r")
-            sent = {"at": None}
-
-            def running_foreground() -> bool:
-                if sent["at"] is not None:
-                    return True
-                live_job = (
-                    marker(repo, "job-started")
-                    and matching(command_lines(), token)
-                    and not marker(repo, "job-finished")
-                )
-                # Direct tools are still in the foreground when the tool has not
-                # completed. Nested Code Mode may already have returned the
-                # hint-promoted call; Ctrl+B is the outer-cell boundary.
-                foreground = tool_completed_count(home, session) == 0 or nested
-                if live_job and foreground:
-                    sent["at"] = time.monotonic()
-                    tui.key(b"\x02")
-                    return True
-                return False
-
-            if not tui.wait_until(running_foreground, 120):
-                if terminals(home, session):
-                    classify_tui_turn(
-                        home,
-                        session,
-                        len(terminals(home, session)) - 1,
-                        "ctrl+b",
-                        lookup_faults=tui.lookup_faults,
-                    )
-                raise ScenarioFailure(MODEL, "no foreground command was running for Ctrl+B")
-            if nested:
-                # The outer cell is not required to preempt the nested call.
-                # Give the key a moment, then judge that the job survived it.
-                tui.pump(1)
-                finished = marker(repo, "job-finished")
-                still_running = bool(matching(command_lines(), token))
-                require_script(repo, "hold.py", HOLD_PY)
-                return judge_nested_ctrl_b(
-                    promoted=self.nested_promoted(tui, home, token),
-                    sent=sent["at"] is not None,
-                    finished=finished,
-                    still_running=still_running,
-                )
-            returned = tui.wait_until(
-                lambda: tool_completed_count(home, session) > 0,
-                STEER_LIMIT_S,
-            )
-            latency = None if sent["at"] is None else time.monotonic() - sent["at"]
-            require_script(repo, "hold.py", HOLD_PY)
-            return judge_ctrl_b(
-                latency=latency,
-                finished=marker(repo, "job-finished"),
-                still_running=bool(matching(command_lines(), token)),
-                returned=returned,
-            )
-        finally:
-            if tui is not None:
-                tui.quit()
-            stop_token(token)
-
-    @staticmethod
-    def nested_promoted(tui: live.Tui, home: Path, token: str) -> bool:
-        """The hint promoted the nested start: the session log shows that start
-        returned (`command_promoted`), waited on briefly while the log flushes,
-        or a flushed telemetry `promoted` row corroborates it."""
-        if tui.wait_until(lambda: command_promoted(all_session_records(home), token) is True, 5):
-            return True
-        return promotion_of(read_telemetry(home)[0]) is not None
-
-    def stop_jobs(self) -> str:
-        token = self.fresh_token("plakjobstop")
-        repo, home = self.prepare("stop_jobs", FOREGROUND_BUDGET)
-        tui = None
-        try:
-            tui = self.open_tui("stop_jobs", repo, home)
-            session = _discover(home)
-            before = len(terminals(home, session))
-            tui.type(
-                "Run exactly this shell command:\n"
-                f"{hold_command(30, token)}\n"
-                "Do not pass a timeout, yield, block_until, or background flag.\n"
-                "When the tool returns while the command is still running, end your turn. "
-                "Do not wait for it and do not stop it.\n"
-                "Reply with the single word done."
-            )
-            tui.key(b"\r")
-            if not tui.wait_until(lambda: len(terminals(home, session)) > before, 180):
-                if terminals(home, session):
-                    classify_tui_turn(
-                        home,
-                        session,
-                        len(terminals(home, session)) - 1,
-                        "stop",
-                        lookup_faults=tui.lookup_faults,
-                    )
-                raise live.timeout_failure(
-                    self.env,
-                    tui.capture_dir,
-                    "root turn did not finish",
-                    tui.lookup_faults,
-                    timeout=180,
-                )
-            classify_tui_turn(home, session, before, "stop", lookup_faults=tui.lookup_faults)
-            require_script(repo, "hold.py", HOLD_PY)
-            if marker(repo, "job-finished"):
-                raise ScenarioFailure(MODEL, "command finished before the stop")
-            if not matching(command_lines(), token):
-                raise ScenarioFailure(MODEL, "job was not running when the turn ended")
-            time.sleep(1)
-            admitted = len(admitted_ids(home, session))
-            tui.type("/ps")
-            tui.key(b"\r")
-            tui.pump(0.5)
-            tui.key(b"S")
-            confirmed = tui.wait_until(lambda: STOP_TITLE in visible(tui.screen), 5)
-            if len(admitted_ids(home, session)) != admitted:
-                raise ScenarioFailure(HARNESS, "the stop gesture was sent as a prompt")
-            if confirmed:
-                time.sleep(0.8)
-                tui.key(b"\r")
-            gone = False
-            deadline = time.monotonic() + 8
-            while time.monotonic() < deadline:
-                tui.pump(0.2)
-                if not matching(command_lines(), token):
-                    gone = True
-                    break
-            woke = tui.wait_until(
-                lambda: len(admitted_ids(home, session)) > admitted,
-                WAKE_AFTER_STOP_S,
-            )
-            origin = None
-            admitted_now = admitted_ids(home, session)
-            if len(admitted_now) > admitted:
-                _rows, turns = read_telemetry(home)
-                origin = next(
-                    (
-                        row.get("origin")
-                        for row in turns
-                        if row.get("turn_id") == admitted_now[admitted]
-                    ),
-                    None,
-                )
-            return judge_stop(
-                confirmed=confirmed,
-                still_running=not gone,
-                finished=marker(repo, "job-finished"),
-                woke=woke,
-                origin=origin,
-            )
-        finally:
-            if tui is not None:
-                tui.quit()
-            stop_token(token)
-
-    def wake_while_idle(self) -> str:
-        token = self.fresh_token("plakjobwake")
-        repo, home = self.prepare("wake_while_idle", FOREGROUND_BUDGET)
-        tui = None
-        try:
-            tui = self.open_tui("wake_while_idle", repo, home)
-            session = _discover(home)
-            tui.type(
-                "Run exactly this shell command:\n"
-                f"{hold_command(20, token)}\n"
-                "Do not pass a timeout, yield, block_until, or background flag.\n"
-                "When the tool returns while the command is still running, end your turn "
-                "without waiting for it and without stopping it.\n"
-                "Reply with the single word done."
-            )
-            tui.key(b"\r")
-            mark = {"n": None}
-
-            def root_finished() -> bool:
-                if len(terminals(home, session)) < 1:
-                    return False
-                if mark["n"] is None:
-                    mark["n"] = len(tui.screen)
-                return True
-
-            if not tui.wait_until(root_finished, 180):
-                if terminals(home, session):
-                    classify_tui_turn(
-                        home,
-                        session,
-                        len(terminals(home, session)) - 1,
-                        "wake",
-                        lookup_faults=tui.lookup_faults,
-                    )
-                raise live.timeout_failure(
-                    self.env,
-                    tui.capture_dir,
-                    "root turn did not finish",
-                    tui.lookup_faults,
-                    timeout=180,
-                )
-            classify_tui_turn(home, session, 0, "wake", lookup_faults=tui.lookup_faults)
-            require_script(repo, "hold.py", HOLD_PY)
-            painted = mark["n"] or 0
-
-            def idle_snapshot() -> bool:
-                # HUD and the process list together. Sampling either one on
-                # the first paint races the promotion. A border drawn before
-                # the terminal still counts when nothing repainted after it.
-                return (
-                    not marker(repo, "job-finished")
-                    and bool(matching(command_lines(), token))
-                    and PROCESS_BADGE in latest_hud(tui.screen, painted)
-                )
-
-            idle_with_job = tui.wait_until(idle_snapshot, WAKE_AFTER_STOP_S)
-            hud = idle_with_job
-            woke = tui.wait_until(
-                lambda: len(admitted_ids(home, session)) >= 2 and marker(repo, "job-finished"),
-                45,
-            )
-            second = admitted_ids(home, session)
-            origin = None
-            if len(second) >= 2:
-                _jobs, turns = read_telemetry(home)
-                origin = next(
-                    (row.get("origin") for row in turns if row.get("turn_id") == second[1]), None
-                )
-            return judge_wake(
-                idle_with_job=idle_with_job,
-                hud=hud,
-                second_admission=woke,
-                origin=origin,
-                finished=marker(repo, "job-finished"),
-            )
-        finally:
-            if tui is not None:
-                tui.quit()
-            stop_token(token)
-
-    def idle_badge(self) -> str:
-        token = self.fresh_token("plakjobbadge")
-        repo, home = self.prepare("idle_badge", FOREGROUND_BUDGET)
-        tui = None
-        try:
-            tui = self.open_tui("idle_badge", repo, home)
-            session = _discover(home)
-            tui.type(idle_child_task(self.route, hold_command(25, token)))
-            tui.key(b"\r")
-            mark = {"n": None}
-
-            def root_finished() -> bool:
-                if len(terminals(home, session)) < 1:
-                    return False
-                if mark["n"] is None:
-                    mark["n"] = len(tui.screen)
-                return True
-
-            if not tui.wait_until(root_finished, 180):
-                if terminals(home, session):
-                    classify_tui_turn(
-                        home,
-                        session,
-                        len(terminals(home, session)) - 1,
-                        "badge",
-                        lookup_faults=tui.lookup_faults,
-                    )
-                raise live.timeout_failure(
-                    self.env,
-                    tui.capture_dir,
-                    "root turn did not finish",
-                    tui.lookup_faults,
-                    timeout=180,
-                )
-            classify_tui_turn(home, session, 0, "badge", lookup_faults=tui.lookup_faults)
-            require_script(repo, "hold.py", HOLD_PY)
-            painted = mark["n"] or 0
-            captured = {"hud": "", "live": False}
-
-            def badge_while_live() -> bool:
-                # Sample only while ps still shows the fixture. The frame is the
-                # composer row at that moment, including a cursor-split update.
-                if marker(repo, "job-finished") or not matching(command_lines(), token):
-                    return False
-                hud = latest_hud(tui.screen, painted)
-                captured["hud"] = hud
-                captured["live"] = True
-                return AGENT_BADGE in hud and PROCESS_BADGE in hud
-
-            alive = tui.wait_until(
-                lambda: bool(matching(command_lines(), token)) and not marker(repo, "job-finished"),
-                30,
-            )
-            if alive:
-                # The hold is 25 s. Keep the frame from while the job is live;
-                # a paint that arrives only as the TUI quits is not this sample.
-                tui.wait_until(badge_while_live, 25)
-            screen = captured["hud"]
-            return judge_badge(
-                root_idle=root_is_idle(live.session_records(home, session)),
-                child_alive=bool(captured["live"]),
-                agent=AGENT_BADGE in screen,
-                process=PROCESS_BADGE in screen,
-                promoted=command_promoted(all_session_records(home), token),
-            )
-        finally:
-            if tui is not None:
-                tui.quit()
-            stop_token(token)
-
-
-def _discover(home: Path, timeout: float = 30) -> str:
-    """The first session log. A child may add another; the root was created first."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        logs = sorted(
-            home.glob("state/*/sessions/*.events.jsonl"), key=lambda path: path.stat().st_mtime
-        )
-        if logs:
-            return logs[0].name.removesuffix(".events.jsonl")
-        time.sleep(0.2)
-    raise ScenarioFailure(HARNESS, "session log did not appear")
 
 
 def _capture_complete(segments: list[Path], pending: list[Path]) -> bool:

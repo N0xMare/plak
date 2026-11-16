@@ -1,9 +1,9 @@
 # Plak / Plakous
 
 This monorepo is **Plakous**, an embeddable single-agent multi-provider harness
-library, and **Plak**, the CLI/TUI that consumes only the public `plakous`
+library, and **Plak**, the host server and operator/batch CLI that consumes only the public `plakous`
 facade and the host-layer crates above it. Plakous owns the loop, providers,
-profiles, auth, and admit/revalidate; Plak owns product UX. There is no second
+profiles, auth, and admit/revalidate; Plak owns product policy and wire UX. There is no second
 runtime in Plak and no multi-agent topology in Plakous L0 — L0 is exactly
 `plakous-model`, `plakous-tools`, `plakous-agent` and the `plakous` facade.
 The workspace version is 0.0.3. Supported and published-internal packages are
@@ -12,9 +12,9 @@ not (spec 06 §1); uploading is a maintainer act, and a source checkout is a
 complete build.
 
 Host/web serving is supported in the default product. The public stdio bridge
-owns discovery and explicitly opted-in local startup; bare public `plak` keeps
-its current-key attach-or-embedded rule and never auto-starts a host. Do not
-rewire its direct hosted transport as part of the client split. Product wire
+owns discovery and explicitly opted-in local startup. Bare `plak` prints help
+without opening a session or starting a host; no public application client or
+terminal resume launch is shipped. Product wire
 DTOs belong in `plakd-wire-types`; handlers, credential resolution, settings
 metadata and runtime/store authority stay public and do not move into a client.
 Catalog construction, attachment eligibility and settings-default checks must
@@ -64,10 +64,9 @@ just build PROFILE        # debug, release, maintainer or profiling; no snapshot
 just install FLAVOR       # release (plain) or maintainer (dogfood) immutable snapshot on PATH
 just musl native          # Linux x86_64 musl platform tier, static PIE via rust-lld
 just musl container       # full tier in the pinned offline Alpine image; maintainer-only
-just live RECIPE          # smoke, soak, tui-soak, jobs, mcp-oauth, census, estimate, daily-driver, qualify
+just live RECIPE          # smoke, soak, jobs, mcp-oauth, census, estimate, daily-driver, qualify
 just perf RECIPE          # smoke, samply, flamegraph, stat, bloat, density, check; not a gate
 just prompts RECIPE       # render, diff, pins, native-compare
-just tui RECIPE           # story, frames
 just dev RECIPE           # home-install, home-reset, reload-rehearsal, coverage, test-timing, crash-sweep, crash-compare, jj-compat, weighted-lanes
 just harbor RECIPE        # Harbor bakeoff, not a gate; `test` is the zero-inference adapter suite
 ```
@@ -91,7 +90,7 @@ package alone),
 `builds` (default-feature, each supported package alone in its own default
 resolution, and maintainer-feature builds, plus a `wasm32-unknown-unknown`
 library check of the portable crate set, rustc warnings denied),
-`variants` (named headless/API/minimal builds and an admission fixture, clippy
+`variants` (named API/minimal builds and an admission fixture, clippy
 with warnings denied, and feature-admission/read-only-store contracts; full only),
 `rustdoc`, `tests-parallel`, `tests-serial`, `tests-durability`, `contracts`
 (public compile contracts), `tooling` (Python self-tests) and `package` (the
@@ -165,7 +164,7 @@ minus each feature, default and full), with a reviewed cap of 24 public
 optional features. Reduced products compile only in the full-only `variants`
 group, not in `check`.
 `check_features.py` owns the sole named-variant table. Only the default product
-is shipped and supported; headless, API and minimal are built and tested only.
+is shipped and supported; API and minimal are built and tested only.
 The root workspace excludes `.plak` operator state and fork worktrees; the
 workspace checker requires this exclusion without permitting unreviewed ones.
 The workspace checker also ratchets, per package, item-level allows of
@@ -205,7 +204,7 @@ in a change; amend the chapter that owns them.
   product that already works. Never trade a working product for unfinished work.
 - Keep visibility as narrow as possible (`private`, then `pub(crate)`, then
   public). Keep parsing and presentation at the product boundary; neutral core
-  types must not depend on CLI/TUI, and provider names must not enter
+  types must not depend on CLI or client presentation, and provider names must not enter
   `plakous-model` or `plakous-agent`.
 - Prefer established libraries already in the tree over reimplementation.
 - Optimize for the reader: explicit data flow, small modules, early returns,
@@ -213,17 +212,13 @@ in a change; amend the chapter that owns them.
   non-obvious invariants, not control flow the code already shows.
 - Test externally meaningful behavior and failure modes, deterministically. The
   daily bar is unit → offline integration; live e2e is opt-in and paid.
-- The final handoff for product work is human TUI review through `plak`: verify
-  the changes, install the tested maintainer snapshot (`just install maintainer`)
-  with matching sidecars, and report its binary ID. Do not interrupt a running
-  session; a running TUI shows `new build installed · /reload`, and
-  `/reload` resumes the session on the new build. When the session runs in a
-  `plak host` with its tools on a paired runner, the host and the runner must
-  share one source revision: point the runner's `command` at a dedicated link
-  that `just install maintainer` does not move, install the same commit on both
-  machines, settle running work, advance the runner link and restart the host
-  together, and report the client, host and runner binary IDs. Automated
-  checks do not substitute for a maintainer's TUI review.
+- Product host changes need the tested maintainer snapshot and matching
+  sidecars. Client review uses an independently maintained client, never a
+  bundled public TUI or a private-repository gate dependency. Keep a paired
+  host and runner on the same source revision; the runner uses a dedicated
+  command link that normal installation does not move. Settle work before
+  coordinated upgrade and report client, host and runner binary IDs. An agent
+  must not interrupt a running session or install merely to review a refactor.
 - A change to public semantics, crate boundaries, persistence or wire formats,
   security boundaries, or supported platforms MUST update the owning
   `docs/spec/` section in the same change.

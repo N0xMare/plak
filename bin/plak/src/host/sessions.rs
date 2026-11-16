@@ -3,7 +3,7 @@
 //! session's open in its own workspace, and an open's refusal.
 //!
 //! A row's `hosted_elsewhere` comes from its tree's custody after the
-//! sealed liveness check (`holder_elsewhere`): a crashed host's or TUI's
+//! sealed liveness check (`holder_elsewhere`): a crashed host's or client's
 //! stale custody never reads as held, and a holder on another machine,
 //! which cannot be proven gone, always does.
 

@@ -357,7 +357,7 @@ impl TargetSelection {
 
 /// Which authority resolves a bound session's model.
 ///
-/// Every attach — the TUI's deferred preparation, `plak agent`, the attached
+/// Every attach — the client's deferred preparation, `plak agent`, the attached
 /// one-shot verbs, `plak run --session` — used to re-derive this from a
 /// `matches!(target, OpenRouter { .. })` plus an `account == "openrouter"`
 /// string test plus an [`oauth_provider_for_account`] lookup, and the three

@@ -28,7 +28,7 @@ fn a_host_refuses_requested_reload_without_any_client_or_redispatch() {
         let original = std::fs::read_to_string(&config).unwrap();
         std::fs::write(
             config,
-            format!("{original}\n[tui]\nreload_requests = true\n"),
+            format!("{original}\n[host]\nreload_requests = true\n"),
         )
         .unwrap();
         let step = if busy {

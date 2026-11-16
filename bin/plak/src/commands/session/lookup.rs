@@ -167,7 +167,7 @@ pub(crate) fn match_session_id_prefix<'a>(
             more + 1
         )),
         (None, _) => Err(format!(
-            "no session in this workspace starts with `{prefix}`; list with `plak session list` or `plak resume`"
+            "no session in this workspace starts with `{prefix}`; list with `plak session list` or attach a client"
         )),
     }
 }

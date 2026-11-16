@@ -64,7 +64,6 @@ FACADE = "plakous"
 PRODUCT_FEATURES = (
     "anthropic",
     "claude",
-    "clipboard",
     "codex",
     "grok",
     "images",
@@ -73,17 +72,15 @@ PRODUCT_FEATURES = (
     "openai",
     "openrouter",
     "python",
-    "tui",
     "web-fetch",
     "xai-api",
 )
 NAMED_VARIANTS = {
     "default": ("default", ()),
-    "headless": ("omit", ("tui", "clipboard")),
     "api": ("omit", ("codex", "grok", "claude")),
-    "minimal": ("only", ("tui", "openrouter", "git-cli")),
+    "minimal": ("only", ("openrouter", "git-cli")),
 }
-ADMISSION_OMISSIONS = {"tui", "clipboard", "images", "python", "mcp"}
+ADMISSION_OMISSIONS = {"images", "python", "mcp"}
 
 
 def named_variants(manifest: dict[str, object]) -> list[tuple[str, tuple[str, ...], bool]]:
@@ -271,8 +268,7 @@ def product_smoke(executable: str, selected: tuple[str, ...], profile: str) -> l
     with tempfile.TemporaryDirectory(prefix="plak-feature-smoke-") as directory:
         environment = dict(os.environ, PLAK_HOME=directory)
         cases = [("version", ["version"], 0, "; features -"), ("help", ["help"], 0, "plak")]
-        if "tui" not in selected:
-            cases.append(("tui", [], 2, "feature `tui`"))
+        cases.append(("bare help", [], 0, "plak"))
         if "mcp" not in selected:
             cases.append(("mcp", ["mcp", "list"], 2, "feature `mcp`"))
         if "python" not in selected and "codex" in selected:
@@ -588,8 +584,6 @@ def cached_workspace(root: Path = ROOT) -> Workspace:
 
 
 REQUIRED_DEPENDENCY_FEATURE_EDGES = {
-    ("plak", "tui", "plakous-hosted/tui"),
-    ("plak", "clipboard", "plakous-hosted/clipboard"),
     ("plak", "images", "plakous-hosted/images"),
     ("plakous-hosted", "images", "plakous-image/normalize"),
     ("plak", "js", "plakous-hosted/js"),
@@ -755,8 +749,20 @@ EXCLUDED_CLOSURE_PACKAGES = {
         "arboard",
         "pulldown-cmark",
     ),
-    ("plak", ("git-cli", "tui", "python", "mcp")): ("image",),
-    ("plak", ("default",)): ("jj-lib", "gix", "pollster", "aws-lc-rs", "aws-lc-sys", "rsa"),
+    ("plak", ("git-cli", "python", "mcp")): ("image",),
+    ("plak", ("default",)): (
+        "jj-lib",
+        "gix",
+        "pollster",
+        "aws-lc-rs",
+        "aws-lc-sys",
+        "rsa",
+        "ratatui",
+        "crossterm",
+        "syntect",
+        "arboard",
+        "pulldown-cmark",
+    ),
     ("plakous", ("full",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
     ("plakous", ("codex",)): (
         "aws-lc-rs",
@@ -800,7 +806,6 @@ EXCLUDED_CLOSURE_PACKAGES = {
 }
 
 NAMED_VARIANT_EXCLUSIONS = {
-    "headless": ("ratatui", "crossterm", "syntect", "arboard", "pulldown-cmark"),
     "api": ("jsonwebtoken",),
     "minimal": (
         "rmcp",

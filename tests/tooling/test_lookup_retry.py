@@ -86,24 +86,6 @@ class LookupRetryTests(unittest.TestCase):
         self.assertFalse(live.provider_child_text(text, lookup_faults=faults))
         self.assertTrue(live.provider_child_text(text))
 
-    def test_durable_tui_turn_keeps_scenario_fault_plan(self):
-        import jobs
-
-        record = {
-            "kind": "turn.lifecycle",
-            "phase": "failed",
-            "message": "model lookup failed after 3 attempts: HTTP 503",
-        }
-        with (
-            patch.object(live, "session_records", return_value=[record]),
-            patch.object(jobs, "last_retry", return_value=None),
-        ):
-            with self.assertRaises(live.ScenarioFailure) as caught:
-                jobs.classify_tui_turn(
-                    Path("unused"), "session", 0, "TUI", lookup_faults="path=/v1,fault=503"
-                )
-            self.assertEqual(caught.exception.outcome, live.HARNESS)
-
     def test_one_timeout_attempt_is_not_provider_evidence(self):
         for cause in [
             "transport timeout",
@@ -145,16 +127,6 @@ class LookupRetryTests(unittest.TestCase):
                 finally:
                     agent.stderr.close()
                     agent.transcript.close()
-
-    def test_tui_startup_exhaustion_scores_provider_and_quits(self):
-        tui = live.Tui.__new__(live.Tui)
-        tui.screen = b"\x1b[31mmodel lookup failed after 3 attempts: HTTP 503\x1b[0m"
-        tui.pump = Mock()
-        tui.quit = Mock(return_value=0)
-        with self.assertRaises(live.ScenarioFailure) as caught:
-            tui.wait_until(lambda: False, 1)
-        self.assertEqual(caught.exception.outcome, live.PROVIDER)
-        tui.quit.assert_called_once()
 
     def test_lookup_validation_and_unrelated_errors_stay_harness(self):
         for cause in ["invalid catalog", "HTTP 401", "HTTP 403", "HTTP 404", "body bound"]:

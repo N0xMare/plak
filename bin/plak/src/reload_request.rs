@@ -88,20 +88,6 @@ struct OutcomeFile {
     outcome: ReloadOutcome,
 }
 
-/// The host-authored continuation this process's first attach posts, taken
-/// once so a later re-attach in the same process never posts it again.
-static CONTINUATION: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-
-pub(crate) fn set_reload_continuation(text: String) {
-    if let Ok(mut slot) = CONTINUATION.lock() {
-        *slot = Some(text);
-    }
-}
-
-pub(crate) fn take_reload_continuation() -> Option<String> {
-    CONTINUATION.lock().ok().and_then(|mut slot| slot.take())
-}
-
 fn directory(paths: &PlakPaths) -> PathBuf {
     paths.run_dir().join("reload-requests")
 }
@@ -118,7 +104,7 @@ pub fn outcome_path(paths: &PlakPaths, request_id: &str) -> PathBuf {
     directory(paths).join(format!("{request_id}.outcome"))
 }
 
-/// Whether this home accepts requests (`tui.reload_requests`, home-scoped).
+/// Whether this home accepts requests (`host.reload_requests`, home-scoped).
 pub fn enabled(paths: &PlakPaths) -> bool {
     crate::product_config::ProductConfig::load(paths).is_ok_and(|config| config.reload_requests)
 }
@@ -371,7 +357,7 @@ pub fn request(
 ) -> Result<(String, PathBuf), String> {
     if !enabled(paths) {
         return Err(
-            "reload requests are off in this home; set `tui.reload_requests = true` in ~/.plak/config.toml"
+            "reload requests are off in this home; set `host.reload_requests = true` in ~/.plak/config.toml"
                 .to_owned(),
         );
     }
@@ -467,84 +453,6 @@ pub fn settle_switched(paths: &PlakPaths, request_id: &str) {
             "reload request dropped: the session switched and its outcome could not be recorded"
         ),
     }
-}
-
-/// The request the reload handoff that started this process named, taken
-/// once by the first attach.
-static HANDED_OFF: std::sync::Mutex<Option<ReloadRequest>> = std::sync::Mutex::new(None);
-
-/// Keeps the request a reload handoff carried, when it is well formed.
-pub fn accept_handoff(request: Option<ReloadRequest>) {
-    if let Some(request) = request.filter(ReloadRequest::is_valid)
-        && let Ok(mut slot) = HANDED_OFF.lock()
-    {
-        *slot = Some(request);
-    }
-}
-
-/// Takes a handed-off request before choosing the destination's face mode.
-pub(crate) fn take_handoff() -> Option<ReloadRequest> {
-    HANDED_OFF.lock().ok().and_then(|mut slot| slot.take())
-}
-
-/// Completes the request a reload handoff passed, when `session` resumes on
-/// the new build.
-pub fn complete_handoff(
-    paths: &PlakPaths,
-    session: &crate::store::sessions::SessionRecord,
-    resumed: bool,
-) {
-    let request = take_handoff();
-    if resumed && let Some(request) = request {
-        complete(paths, &request, session, crate::build_identity::binary_id());
-    }
-}
-
-/// The destination half of a reload the session requested: record how it
-/// landed and arm the host-authored continuation that wakes the root. A
-/// destination that is not the build the request named says so instead of
-/// claiming the request was met.
-pub fn complete(
-    paths: &PlakPaths,
-    request: &ReloadRequest,
-    session: &crate::store::sessions::SessionRecord,
-    binary: &str,
-) {
-    let landed = if session.id == request.session_id {
-        "exactly".to_owned()
-    } else {
-        format!(
-            "and carried into session {} from {}",
-            session.id, request.session_id
-        )
-    };
-    if binary != request.expect_binary {
-        let reason = format!(
-            "the reload landed on build {binary}, not the requested {}",
-            request.expect_binary
-        );
-        set_reload_continuation(format!(
-            "Plak reloaded this session onto build {binary} {landed}, but the request named build {}; the requested build is not running. Check the installed build before continuing.",
-            request.expect_binary
-        ));
-        record(
-            paths,
-            &request.request_id,
-            &ReloadOutcome::Refused { reason },
-        );
-        return;
-    }
-    set_reload_continuation(format!(
-        "Plak reloaded this session onto build {binary} {landed}, as requested. Continue the current task, or reply briefly if nothing remains."
-    ));
-    record(
-        paths,
-        &request.request_id,
-        &ReloadOutcome::Reloaded {
-            binary: binary.to_owned(),
-            session: session.id.clone(),
-        },
-    );
 }
 
 fn is_binary_id(value: &str) -> bool {

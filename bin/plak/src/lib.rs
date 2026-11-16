@@ -54,8 +54,6 @@ mod command;
 pub mod commands;
 #[cfg(test)]
 mod composition_tests;
-#[cfg(feature = "tui")]
-mod config;
 mod diagnostics;
 mod dispatch;
 mod environment;
@@ -73,7 +71,6 @@ pub(crate) mod terminal_application;
     reason = "host terminal authority also compiles without the web transport"
 )]
 mod terminal_registry;
-pub(crate) mod tui_preferences;
 mod usage_remedy;
 pub mod wire_transport;
 /// Plak's own storage home: where the XDG layout puts each file, and the
@@ -99,13 +96,6 @@ pub mod product_config;
 mod profiles;
 #[doc(hidden)]
 pub mod prompts;
-#[cfg_attr(
-    not(feature = "tui"),
-    allow(
-        dead_code,
-        reason = "the interactive host is the request channel's reader"
-    )
-)]
 mod reload_request;
 #[doc(hidden)]
 #[doc(hidden)]
@@ -129,23 +119,18 @@ mod observation_projection;
 mod otel_bridge;
 #[cfg(all(test, unix))]
 mod product_compaction_runtime_e2e_tests;
-#[cfg(all(test, unix, feature = "tui"))]
-mod product_compaction_terminal_e2e_tests;
 #[cfg(test)]
 mod product_crash_tests;
 #[doc(hidden)]
 pub mod product_doctor;
-#[cfg(any(feature = "tui", feature = "web"))]
+#[cfg(feature = "web")]
 mod product_onboarding;
 #[cfg(all(test, unix))]
 mod product_runtime_e2e_tests;
 mod product_subscription_usage;
 mod product_telemetry;
-#[cfg(all(test, unix, feature = "tui"))]
-mod product_terminal_e2e_tests;
 #[cfg(any(test, feature = "test-hooks"))]
 mod profile_test_catalog;
-#[cfg(any(test, feature = "tui", feature = "test-hooks"))]
 mod reload_probe_latency;
 #[doc(hidden)]
 pub mod shell;
@@ -248,37 +233,17 @@ mod test_hooks {
         None
     }
 }
+#[cfg(feature = "web")]
+mod host;
+#[cfg(not(feature = "web"))]
+#[path = "host_unavailable.rs"]
+mod host;
 #[cfg(test)]
 mod test_support;
 #[doc(hidden)]
 pub mod topology_product;
 #[cfg(test)]
 mod topology_resources_projection;
-#[cfg(feature = "tui")]
-mod tui;
-#[cfg(feature = "tui")]
-mod tui_launch;
-#[cfg(not(feature = "tui"))]
-#[path = "tui_unavailable.rs"]
-mod tui_launch;
-#[cfg(feature = "tui")]
-mod tui_timing;
-#[cfg(not(feature = "tui"))]
-#[path = "tui_timing_unavailable.rs"]
-mod tui_timing;
-#[cfg(feature = "tui")]
-mod ui_wake {
-    pub(super) use crate::tui::wake::wake;
-}
-#[cfg(not(feature = "tui"))]
-mod ui_wake {
-    pub(super) fn wake() {}
-}
-#[cfg(feature = "web")]
-mod host;
-#[cfg(not(feature = "web"))]
-#[path = "host_unavailable.rs"]
-mod host;
 #[cfg(feature = "web")]
 mod web;
 #[cfg(all(feature = "web", any(feature = "maintainer", feature = "test-hooks")))]
@@ -292,13 +257,6 @@ mod web_dev_login;
 mod web_dev_login;
 mod wire_schema;
 
-/// Runs the repository-only TUI rendering benchmark.
-#[cfg(all(feature = "test-support", feature = "tui"))]
-#[doc(hidden)]
-pub fn benchmark_tui_render() -> String {
-    tui::benchmark::run()
-}
-
 /// Runs the repository-only product-store persistence benchmark.
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
@@ -307,19 +265,15 @@ pub fn benchmark_product_store(directory: Option<&Path>) -> String {
 }
 
 #[cfg(test)]
-pub(crate) use crate::commands::host_config::HostedAgentChannels;
-#[cfg(test)]
 pub(crate) use crate::commands::support::product_subscription_request_limits;
 pub(crate) use crate::home::paths as product_paths;
 pub(crate) use crate::home::secrets as product_secrets;
 #[cfg(test)]
 pub(crate) use crate::presentation::CompatibilityState;
 pub(crate) use crate::presentation::CredentialState;
-#[cfg(feature = "tui")]
-use crate::presentation::HostCatalogBundle;
 #[cfg(test)]
 pub(crate) use crate::presentation::PresentationBackend;
-#[cfg(any(feature = "tui", test))]
+#[cfg(test)]
 use crate::store::sessions as product_sessions;
 pub(crate) use plakous_hosted::agent as product_agent;
 pub(crate) use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
@@ -361,12 +315,10 @@ use crate::presentation::{
     format_unix_seconds, product_account_label, title_case_token, transcript_entry,
 };
 use crate::shell::services::Services;
-use crate::tui_launch::launch_tui;
 
 /// Run the Plak CLI using process arguments from the environment.
 #[must_use]
 pub fn main_from_env() -> ExitCode {
-    tui_timing::process_started();
     open_file_limit::raise();
     // Read the system zone once, before anything spawns a thread. Resume
     // dates and prompt send times resolve each instant's own offset in it.
@@ -485,6 +437,12 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let command = cli::parse(arguments)?.resolved_against(launch.as_deref());
     build_features::admit_command(&command)?;
 
+    if matches!(command, Command::Help) {
+        cli::render::global_help(&mut io::stdout().lock())
+            .map_err(|_| CliFailure::new("stdout failed"))?;
+        return Ok(ProcessOutcome::Success);
+    }
+
     if matches!(command, Command::WireSchema) {
         return wire_schema::print(&mut io::stdout().lock());
     }
@@ -587,15 +545,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     }
     // Only a command that uses product state records a fresh binary id in the
     // home; inspection commands read the identity cache and never write it.
-    if command_needs_product_state(&command)
-        || matches!(
-            command,
-            Command::Tui { .. }
-                | Command::TuiPlacement { .. }
-                | Command::Resume { .. }
-                | Command::HostResume { .. }
-        )
-    {
+    if command_needs_product_state(&command) {
         build_identity::allow_identity_cache_writes();
     }
 
@@ -632,7 +582,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
 
     let filter = diagnostics::requested_filter();
     // Automatic maintainer capture must leave safe failure diagnostics even
-    // without an operator logging override, and never write over the TUI.
+    // without an operator logging override, and never write over an external client.
     #[cfg(feature = "maintainer")]
     let filter = Some(filter.map_or_else(
         || "info,plak.capture=warn".to_owned(),
@@ -672,37 +622,8 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         log_command_start(&command);
     }
 
-    // The TUI owns the process terminal and must run before acquiring Rust's
-    // global standard-stream locks. Keeping those locks across `launch_tui`
-    // deadlocks when terminal setup or state admission uses stdout/stderr.
+    // Machine transports own their streams before standard-stream locks.
     let command = match command {
-        Command::Tui {
-            session_id,
-            resume_picker,
-        } => return launch_tui(&services, session_id, resume_picker, None),
-        Command::TuiPlacement { runner, workspace } => {
-            return tui_launch::launch_placed_tui(
-                &services,
-                runner.as_deref(),
-                workspace.as_deref(),
-            );
-        }
-        Command::HostResume { session_id } => {
-            return tui_launch::launch_host_tui(&services, session_id);
-        }
-        Command::Resume {
-            session_id: None, ..
-        } => return launch_tui(&services, None, true, None),
-        Command::Resume {
-            session_id: Some(id),
-            handoff,
-        } => {
-            carry::take_reload_handoff(&services, handoff.as_deref());
-            return launch_tui(&services, Some(id), false, None);
-        }
-        Command::ImportResume { path, handoff } => {
-            return carry::import_and_resume(&services, &path, handoff.as_deref());
-        }
         command @ Command::Agent { .. } => return run_agent_command(&services, command),
         Command::Host(command) => return host::run_host_command(&services, &command),
         Command::HostConnect { auto_start } => return host::connect_stdio(&services, auto_start),
@@ -742,7 +663,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             let (record, note) = commands::session::import_prepared(&services, prepared)?;
             writeln!(
                 io::stdout(),
-                "{}\nresume with: plak --resume {}",
+                "{}\nresume with: plak run --session {}",
                 cli_output::terminal_block(&note, cli_output::TerminalMode::of_stdout(), None),
                 record.id
             )
@@ -783,7 +704,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             let verdict = match services.paths() {
                 Ok(paths) => carry::reload_probe(paths),
                 Err(error) => carry::ReloadProbe {
-                    host_resume: tui_launch::HOST_RESUME_SUPPORTED,
                     state_key: home::state::state_key(),
                     export_versions: carry::IMPORTABLE_VERSIONS.to_vec(),
                     config_error: Some(error.message().to_owned()),
@@ -1385,7 +1305,7 @@ fn execute_command(
             let note =
                 cli_output::terminal_block(&note, cli_output::TerminalMode::of_stdout(), None);
             writeln!(stdout, "{note}")
-                .and_then(|()| writeln!(stdout, "resume with: plak --resume {}", record.id))
+                .and_then(|()| writeln!(stdout, "resume with: plak run --session {}", record.id))
                 .map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }
@@ -1467,10 +1387,6 @@ fn execute_command(
         | Command::RunOpenRouter { .. }
         | Command::RunPlatform { .. }
         | Command::ContinueSession { .. }
-        | Command::Tui { .. }
-        | Command::TuiPlacement { .. }
-        | Command::Resume { .. }
-        | Command::HostResume { .. }
         | Command::Agent { .. }
         | Command::Host(_)
         | Command::HostInstall(_)
@@ -1493,7 +1409,6 @@ fn execute_command(
         | Command::ReopenProbe { .. }
         | Command::CarryProbe { .. }
         | Command::ExportVersion
-        | Command::ImportResume { .. }
         | Command::Doctor
         | Command::TelemetryStatus { .. }
         | Command::TelemetrySql { .. }
@@ -1504,7 +1419,7 @@ fn execute_command(
 
 /// Appends the attached account's allowance through the one host-owned Usage
 /// projection. There is no second CLI renderer: `plak usage`, `plak usage
-/// --session` and the TUI Limits text all come out of `render_limits_text`.
+/// --session` and an external client Limits text all come out of `render_limits_text`.
 fn write_selected_subscription_usage(
     account: Option<&str>,
     backend: &mut impl AccountOps,

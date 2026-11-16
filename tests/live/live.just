@@ -16,9 +16,9 @@ _test-hooks-plak:
     tools/build/build-plak.sh --release --features plak/test-hooks --plak-only
 
 # Live smoke: a few minutes of short scenarios (coding task, resume, compaction,
-# cancel, injected faults, a 2-child wave, the TUI) on Grok, OpenRouter,
+# cancel, injected faults, a 2-child wave) on Grok, OpenRouter,
 # Codex or Claude OAuth. `--only` also selects opt-in long-session scenarios
-# (tests/live/long_session.py); they are not in the default twelve.
+# (tests/live/long_session.py); they are not in the default set.
 # Paid, never in a gate. See tests/live/README.md. Artifacts under target/live/.
 [doc("short live scenarios on one route; paid, not a gate")]
 smoke *ARGS: _test-hooks
@@ -33,14 +33,8 @@ smoke *ARGS: _test-hooks
 soak *ARGS: _test-hooks
     CARGO_INCREMENTAL=0 tests/live/soak.py {{ARGS}}
 
-# Multi-hour live TUI session with durable-terminal and independent file/test
-# oracles, one simulated sleep, and a quit/reopen. Paid, never in a gate.
-[doc("multi-hour live TUI session with file and test oracles; paid, not a gate")]
-tui-soak *ARGS: _test-hooks
-    tests/live/tui_soak.py {{ARGS}}
-
 # Bounded live background-job scenarios (promotion, steer, notices, crash,
-# child settle, Ctrl+B, Processes S, idle wake and HUD). Paid, never in a gate.
+# and child settle). Paid, never in a gate.
 # Usage: just live jobs grok --only promotion_budget
 [doc("bounded live background-job scenarios; paid, not a gate")]
 jobs *ARGS: _test-hooks

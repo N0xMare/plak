@@ -1,4 +1,4 @@
-//! Product empty-state setup detection shared by console metadata and the TUI.
+//! Product empty-state setup detection shared by console metadata and external clients.
 
 use crate::product_config::ProductConfig;
 

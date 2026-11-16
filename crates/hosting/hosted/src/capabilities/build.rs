@@ -1,11 +1,5 @@
 //! Product build capabilities; persisted route and composition vocabularies stay complete.
 
-#[cfg(feature = "clipboard")]
-mod clipboard;
-#[cfg(not(feature = "clipboard"))]
-mod clipboard {
-    pub(super) const COMPILED: bool = false;
-}
 #[cfg(feature = "images")]
 mod images;
 #[cfg(not(feature = "images"))]
@@ -27,12 +21,6 @@ mod mcp {
 mod python;
 #[cfg(not(feature = "python"))]
 mod python {
-    pub(super) const COMPILED: bool = false;
-}
-#[cfg(feature = "tui")]
-mod tui;
-#[cfg(not(feature = "tui"))]
-mod tui {
     pub(super) const COMPILED: bool = false;
 }
 
@@ -93,12 +81,6 @@ pub struct BuildCapability {
 /// Complete optional non-route capability table, including omitted implementations.
 pub const BUILD_CAPABILITIES: &[BuildCapability] = &[
     BuildCapability {
-        id: "clipboard",
-        kind: CapabilityKind::Surface,
-        feature: "clipboard",
-        compiled: clipboard::COMPILED,
-    },
-    BuildCapability {
         id: "images",
         kind: CapabilityKind::Surface,
         feature: "images",
@@ -121,12 +103,6 @@ pub const BUILD_CAPABILITIES: &[BuildCapability] = &[
         kind: CapabilityKind::Evaluator,
         feature: "python",
         compiled: python::COMPILED,
-    },
-    BuildCapability {
-        id: "tui",
-        kind: CapabilityKind::Surface,
-        feature: "tui",
-        compiled: tui::COMPILED,
     },
     BuildCapability {
         id: "fetch_url",

@@ -135,7 +135,7 @@ fn publish_shell_startup<P: plakous_host_protocol::ProtocolExtension>(
 ) {
     // The not-ready shell is reachable as a fallback *after* the canonical
     // attach published `SessionOpening` and then failed. Nothing else retires
-    // that startup row, so the TUI kept its 80 ms spinner cadence alive for the
+    // that startup row, so the client kept its 80 ms spinner cadence alive for the
     // life of the process on a session that had stopped opening — a periodic
     // repaint with no demand behind it, and the dominant idle-CPU cost on any
     // host where attach cannot complete. Zero is truthful here: no session was

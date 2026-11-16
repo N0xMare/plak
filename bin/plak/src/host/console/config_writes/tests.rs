@@ -137,7 +137,7 @@ async fn config_conflicts_detect_other_clients_cli_and_external_comment_edits() 
     let (_root, console) = fixture();
     std::fs::write(
         console.paths.config_file(),
-        "# retained\n[turn]\nauto_continue = true # inline\n[tui]\ntheme = 'default-light' # untouched\n",
+        "# retained\n[turn]\nauto_continue = true # inline\n[skills]\nenabled = false # untouched\n",
     )?;
     let etag = revision(&console);
     let first = config(
@@ -171,7 +171,7 @@ async fn config_conflicts_detect_other_clients_cli_and_external_comment_edits() 
     assert!(
         bytes.contains("# retained") && bytes.contains("# inline") && bytes.contains("# untouched")
     );
-    assert!(bytes.contains("theme = 'default-light'"));
+    assert!(bytes.contains("enabled = false"));
     let stale_cli = config(
         &console,
         1,

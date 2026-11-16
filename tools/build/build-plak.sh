@@ -157,7 +157,7 @@ fi
 # Report on stderr: --artifacts prints only the output directory on stdout.
 python3 tools/build/check-artifact-linkage.py "$output_dir" >&2
 if [[ "$profile" == debug ]]; then
-  echo "build-plak: debug binary (slow TUI cold start); daily PATH CLI is just install release or just install maintainer" >&2
+  echo "build-plak: debug binary (slower startup); daily PATH CLI is just install release or just install maintainer" >&2
 fi
 if [[ -z "$install" && -z "$artifacts_only" ]]; then
   exit 0

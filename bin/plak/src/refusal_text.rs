@@ -28,11 +28,11 @@ pub(crate) fn advice_text(advice: &RefusalAdvice, frontend: Frontend) -> String 
         RefusalAdvice::ChildCredential { account, .. } => format!("choose another template, or ask the operator to run `plak login {}` in a shell", crate::notice_text::account_label(*account)),
         RefusalAdvice::UnknownModel { account, .. } => format!("run `plak models {account}` to list the models it offers"),
         RefusalAdvice::ExplicitEffort { offered, .. } => match frontend {
-            Frontend::Tui => format!("choose an explicit root effort with /agents from {}", offered.join("|")),
+            Frontend::Wire => format!("choose an explicit root effort with profile actions from {}", offered.join("|")),
             _ => format!("requires --effort {}", offered.join("|")),
         },
         RefusalAdvice::EffortDowngraded => match frontend {
-            Frontend::Tui => "choose a profile with an admitted explicit root effort through /agents; refusing to run".into(),
+            Frontend::Wire => "choose a profile with an admitted explicit root effort through profile actions; refusing to run".into(),
             _ => "requested --effort was downgraded by the harness plan; refuse to run".into(),
         },
         RefusalAdvice::McpLogin { server, scopes } => if scopes.is_empty() {
@@ -130,7 +130,7 @@ pub(crate) fn failure_text(failure: &crate::CliFailure, context: RemedyContext<'
         offered,
     }) = failure.advice()
     {
-        if frontend != Frontend::Tui {
+        if frontend != Frontend::Wire {
             return format!(
                 "{account} model `{model}` requires --effort {}",
                 offered.join("|")

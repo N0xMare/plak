@@ -165,19 +165,13 @@ writes to these controls are refused (chapter 07).
 The epoch is the only spawn authority a session has: `spawn_agent`, its card
 text, and the binder all read the one roster its tree's digest covers, and
 nothing outside the digest widens it. Changed epoch-scoped orchestration or
-roster configuration is applied by `/reload` on an idle root with no live
-children or background processes: it carries the full history into a new
-session whose tree freezes the current settings at genesis and recompiles the
-root's tool descriptions. The roster compared and frozen is the session's own
-profile — the root template and working set its tree froze — re-resolved
-against the template files as they are now, never the home's default
-`[root] agent` / `[roster] working_set`; a source whose templates no longer
-load falls back to the home default with a notice (chapter 02 §5.5). The transcript says `orchestration settings changed;
-carried into a new session to apply them` and links `carried forward from <id>`.
-Only roster and bounds are refrozen: the source account, model, effort,
-composition and target selection stay selected, revalidated under the current
-login. The carry preserves committed session-owned named JSON state and keeps
-replay with validation when its binding is unchanged.
+roster settings apply to new sessions and explicit profile switches. Existing
+sessions keep their frozen epoch; reloading or restarting a host does not apply
+configuration edits by creating a successor. Explicit rebind remains a carry
+operation, preserving committed session-owned named JSON state and validating
+replay when its binding is unchanged. Startup and open settlement still finish
+an already-persisted orchestration carry intent under its saved identity and
+no-root-fallback policy; no terminal launch creates new intents of that kind.
 Persisted non-terminal children refuse carry even with no root attachment.
 The installed build performs the comparison after the normal reload handoff;
 a comparison reads effective bounds, occupancy/reclamation/evidence controls,
@@ -473,7 +467,7 @@ state as typed advice; incompatible-session recovery preserves the exact source
 session UUID. Topology tool error payloads keep their code/message and may carry
 this closed structured advice and an optional semantic remedy inside the existing
 tool result. Child startup, reopen and mail delivery retain both when composing
-runtime failures; rollback or recovery must not flatten them into prose. Plak's TUI, run
+runtime failures; rollback or recovery must not flatten them into prose. Plak's hosted views, run
 and JSONL tool-detail renderers restore the corresponding login, exact tree
 resume and export/import instructions; model-facing results stay neutral.
 Neither the error code alone when it is broader than the refusal, nor rendered
@@ -833,7 +827,7 @@ that `agent_ids` returns it whole.
 Per-attempt `compaction` is derived by the tree projector from the child's
 `WorkflowSettled` facts: `committed`, `failed`, `no_eligible`, and the latest
 committed pass's measured `tokens_before` / `tokens_after`. The typed agent view
-and TUI rows/inspector show the same observations. These are disposable views,
+and client rows/inspector show the same observations. These are disposable views,
 not a second telemetry writer or persisted attempt fields. Opening a tree
 replays the retained feed with an independent observation cursor; replay does
 not spend turns or duplicate counts. `complete=false` marks incomplete retention
@@ -1207,7 +1201,7 @@ the tree's own bump so a seal, question, or mail wakes it without waiting out
 the tick. It is not an event loop.
 
 **Cost, quota balances, and subtree rollups MUST NOT appear in any prompt.**
-They belong to the TUI and the telemetry sink.
+They belong to the client views and the telemetry sink.
 
 ### 4.5 `interrupt_agent` and `close_agent`
 
@@ -1294,7 +1288,7 @@ cleanup). A matching call is
 runs on the host executor without holding the tree mutex across the lease
 wait. The hub tracks that task with the tree's other `recover_node` runs.
 Shutdown waits up to `HOST_SHUTDOWN_RELEASE_TIMEOUT`, then aborts it, before
-any lease is released. Quit or `/reload` uses that same shutdown.
+any lease is released. Session close or host upgrade uses that same shutdown.
 
 The operator's retry is the one trigger that waits on a lease: it waits up to 35
 seconds for a lapsed owner's lease and then refuses. It polls: each try holds
@@ -1708,7 +1702,7 @@ Its failure message tells the parent to respawn with a handoff, not a follow-up
 into the same exhausted history. This uses the existing TEXT failure kind/message
 fields, without changing the tree schema; it is not a recovery-required turn.
 Once resolved partial work seals, `context_exhausted` and `turn_failed` list/wait
-failure messages and the TUI fault line name `partial candidate cand-<attempt>`
+failure messages and the client fault line name `partial candidate cand-<attempt>`
 and the fresh `spawn(inputs=["cand-<attempt>"])` handoff recipe. The result
 notice carries the same recipe as `continuation`. This is derived from the sealed
 candidate, never promised before sealing or manufactured from a rescue ref.
@@ -3060,7 +3054,7 @@ Model-visible rows carry per-attempt usage only: `elapsed_ms`, `turns`,
 `elapsed_ms = ended_at − started_at`.
 
 **Cost, quota balances, and subtree rollups MUST NOT appear in any prompt.**
-They belong to the TUI and to the telemetry sink, which is never recovery
+They belong to the client views and to the telemetry sink, which is never recovery
 authority. The context-occupancy meter is untouched by any of this.
 
 ### 10.4 Per-account request budget
@@ -3085,8 +3079,7 @@ at launch). Distinct local names never share the product request budget, even
 when authenticated as one upstream account and sharing upstream limits. A request takes a slot before its operation deadline starts and
 holds it until its response stream ends; a compaction summary is a request
 too. A full budget never fails a request: the request waits in arrival order,
-publishes `ModelRequestQueued` once (TUI status `waiting for a <account>
-slot`, the child's Agents-tab activity, the JSONL `model_request_queued`
+publishes `ModelRequestQueued` once (attached-client status, the JSONL `model_request_queued`
 line, and a `model.request_queued` session-log event), and proceeds when a
 slot frees. Interrupt, close, shutdown and a lost lease end the wait without
 taking a slot. A request never holds a slot while its tools run, so a
@@ -3963,8 +3956,8 @@ actions; it never replays the lost turn, carries the child's unread mail, and
 counts against `max_turns` like any turn.
 
 Under `[host] resume_after_loss = "hold"` (the default) a held continuation
-waits for the operator's Resume: the TUI's `r` on the held child in the Agents
-tab, or JSONL `resume` (chapter 02). Resume with no agent resumes every held
+waits for the operator's explicit resume intent through an attached client
+or JSONL `resume` (chapter 02). Resume with no agent resumes every held
 child. Under `"continue"` the `recover_node` run the root's open starts
 resumes each held child once by itself; the attached root sets the policy on
 the tree's hub when it opens. Each run ends with that continuation pass, after
@@ -4070,7 +4063,7 @@ new loss of the continuation turn with its own hold, never a second dispatch of
 the first.
 
 The operator's one Resume (`ResumeLossContinuation` with no agent: JSONL
-`resume`, the TUI's `Ctrl+R` on the paused queue, and `/recover` or JSONL
+`resume`, an external client's explicit continuation action, or JSONL
 `recover` on an attached face while the root holds one; `plak session recover`
 only recovers) resumes every held child, records the
 root's consent and runs its continuation, and lets the restored queue drain.
@@ -4142,7 +4135,7 @@ reload's orchestration carry would then drop it as finished; a retirement that
 did finish inside the bound with an error still records its fault. The
 retirement's own owner keeps its 65-second deadline (the cancel bound plus the
 session release bound), past which it records the fault itself; a host that
-exits or execs before then (a quit, `/reload`) leaves nothing. The next owner
+exits or execs before then (session close, a planned upgrade) leaves nothing. The next owner
 reads the unsettled turn as its own loss, or as the handoff it was. For a
 planned handoff such a release is no failure: the release says which children
 it handed off with their turn still running (a live warning, `handed off c1
@@ -4161,9 +4154,10 @@ continues by itself without a durable handoff row. *Durable before and
 after:* before the record the rows hold the working nodes; after it, one
 `handoff` interrupt per node and nothing else, then the release. A crash
 after the record reads as the handoff it was meant to be; a crash before it
-reads as a loss. `/reload` hands off a running root turn and running or
-parked sub-agents when it resumes the same session; it still refuses while
-background processes run (chapter 02 §5.1).
+reads as a loss. Planned host upgrade hands off running root turns and
+running or parked sub-agents under the server upgrade policy. Runner job
+retention is coordinated separately; replacing a client does not surrender
+host ownership (chapter 02 §4.6).
 
 Before an upgrade coordinator surrenders these sessions, the paused-host draft
 verdict barrier (chapter 02 §4.6) distinguishes queue-owned input from input
@@ -4604,7 +4598,7 @@ Settlement has three triggers:
   held for its own recovery; it never waits on a lease (a held lease is
   `recovery_lease_held` at once) and has no deadline. The host loop never
   waits on it. Runs may overlap: a run skips a child another holds, and that
-  run reports it. The hub tracks every run; quit and `/reload` wait briefly
+  run reports it. The hub tracks every run; session close and host upgrade wait briefly
   for running ones at hub shutdown and then abort them, before any lease is
   released (below). Release-triggered runs publish the recovered tree view and
   log their report. An explicit `/recover` says so, and one that starts a run
@@ -5263,7 +5257,7 @@ unbound turn, a wait's acknowledgement, a batch's acknowledgement or return.
 
 `plak agent` is a long-lived stdio client of the host: newline-delimited JSON
 envelopes projecting a closed subset of user actions and host events. Same
-session, tree, queue, reopen, and effect laws as the TUI. Every line is
+session, tree, queue, reopen, and effect laws as the attached host. Every line is
 `{ "v": 1, "kind": "<closed>", "id": "<correlation>", … }`. Unknown additive
 fields are ignored within v1; an unknown `kind` is a typed diagnostic and the
 connection stays up.
@@ -5283,8 +5277,7 @@ Topology-relevant commands:
 ten topology names, checked at the codec before any dispatch; anything else is
 a diagnostic. It runs the **same executor as the model**: grant compile is not
 bypassed, and tier, working set, tree epoch, bind, and submit-token laws are
-unchanged. Coding tools and composition exec are not this kind, and there is no
-TUI slash for it.
+unchanged. Coding tools and composition exec are not this kind.
 
 `invoke_tool` is **idle-only**. While a root turn is busy the host emits
 "available when idle (finish or interrupt the turn)" and starts no second turn
@@ -5463,7 +5456,7 @@ identity and a reasoning location also use the canonical position and fragment
 offset rather than the tail index.
 The derived notice retains the carried body's full text up to a UTF-8-safe
 2 KiB bound, using the existing `… cut at N KiB of M KiB` marker when cut;
-the TUI owns first-line summaries and expansion (chapter 02 §5.4).
+each independent client owns first-line summaries and expansion (chapter 02 §5).
 Existing stored notices retain their earlier first-line-only text until the
 projection is rebuilt; their persisted row format does not change. Local nested calls retain their canonical cell identity and
 their explicit evaluation owner from the same checkpoint's retained operation

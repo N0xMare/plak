@@ -128,27 +128,25 @@ class CrashSweepTests(unittest.TestCase):
             code, calls = self.run_sweep(
                 Path(directory),
                 [0, 0, 0],
-                ["--strict", "--shapes", "tui_host_restart", "--repeat", "2"],
+                ["--strict", "--shapes", "wire_host_restart", "--repeat", "2"],
             )
             self.assertEqual(code, 0)
             self.assertEqual(len(calls), 3)
             for call in calls[1:]:
-                self.assertIn("host_skeleton::crash::tui::tui_host_restart::", call.args[0])
+                self.assertIn("host_skeleton::crash::wire::cuts::wire_host_restart::", call.args[0])
                 self.assertNotIn("crash_sweep::full_sweep", call.args[0])
 
     def test_strict_restart_families_select_all_groups_instead_of_zero_exact_matches(self):
         shapes = [
-            "tui_host_restart",
-            "review_tui_host_restart_switch",
             "wire_host_restart",
             "wire_host_restart_switch",
         ]
         with tempfile.TemporaryDirectory() as directory:
             code, calls = self.run_sweep(
-                Path(directory), [0] * 5, ["--strict", "--jobs", "2", "--shapes", ",".join(shapes)]
+                Path(directory), [0] * 3, ["--strict", "--jobs", "2", "--shapes", ",".join(shapes)]
             )
             self.assertEqual(code, 0)
-            self.assertEqual(len(calls), 5)
+            self.assertEqual(len(calls), 3)
             for shape, call in zip(shapes, calls[1:], strict=True):
                 selector = call.args[0][call.args[0].index("--") - 1]
                 self.assertTrue(selector.endswith(f"::{shape}::"))
@@ -171,7 +169,7 @@ class CrashSweepTests(unittest.TestCase):
 
     def test_terminal_shape_failure_is_not_reported_as_a_success(self):
         with tempfile.TemporaryDirectory() as directory:
-            code, _ = self.run_sweep(Path(directory), [0, 42], ["--shapes", "tui_host_restart"])
+            code, _ = self.run_sweep(Path(directory), [0, 42], ["--shapes", "wire_host_restart"])
             self.assertEqual(code, 42)
 
     def test_non_strict_default_keeps_the_quick_selection(self):

@@ -947,7 +947,6 @@ fn hello_ready_bye_are_stable() {
 #[cfg(all(
     feature = "anthropic",
     feature = "claude",
-    feature = "clipboard",
     feature = "codex",
     feature = "grok",
     feature = "images",
@@ -956,7 +955,6 @@ fn hello_ready_bye_are_stable() {
     feature = "openai",
     feature = "openrouter",
     feature = "python",
-    feature = "tui",
     feature = "web-fetch",
     feature = "xai-api"
 ))]
@@ -986,7 +984,6 @@ mod default_build {
             serde_json::json!([
                 "anthropic",
                 "claude",
-                "clipboard",
                 "codex",
                 "grok",
                 "images",
@@ -995,7 +992,6 @@ mod default_build {
                 "openai",
                 "openrouter",
                 "python",
-                "tui",
                 "web-fetch",
                 "xai-api",
             ])

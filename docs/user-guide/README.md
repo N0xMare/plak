@@ -1,18 +1,21 @@
 # Plak user guide
 
-Plak is a coding agent with a CLI and a TUI. Install it with the release
-installer, `cargo install`, or a source build; see getting started.
+Plak is a host server and operator/batch CLI built on Plakous. No application
+client is shipped. This guide covers operating the host, integrating your own
+client and embedding the libraries.
 
 Start here:
 
 - **[Getting started](getting-started.md)** — install or build, connect an account,
-  run your first turn, open your first TUI session.
+  run your first turn, and start a host for your client.
+- **[Integrating](integrating.md)** - build your client against the stdio bridge,
+  wire schema and host protocol; see the handshake and attach examples.
+- **[Embedding](embedding.md)** - build a Rust application on the Plakous facade,
+  with explicit features, worker artifacts and lifecycle ownership.
 - **[CLI reference](cli.md)** — every command, its flags, its output shape, and
   the exit codes.
 - **[Run plak host as a service](host-service.md)** — Linux user units and macOS LaunchAgents,
   Tailscale Serve, upgrades and logs.
-- **[TUI](tui.md)** — the composer, the slash commands, the key bindings, the
-  Menu, themes, and the Agents list.
 - **[Agents and orchestration](agents-and-orchestration.md)** — agent templates,
   the working set, tiers, spawning children, candidates and adoption, and the
   `plak agent` JSONL protocol.
@@ -28,10 +31,6 @@ Start here:
 - **[Known limits and security model](known-limits-and-security-model.md)** —
   what Plak does and does not protect: host authority, credential files, the
   Claude OAuth disclosure, and the absence of approval gates.
-- **[Embedding](embedding.md)** — building your own Rust program on the Plakous
-  library: features, manifests, examples, and the construction helpers.
-- **[Integrating](integrating.md)** — choose a library, wire transport, batch
-  command or runner boundary; schema export and a tested Python socket client.
 
 Ready-made configuration shapes you can copy into your Plak home live in
 [`docs/reference-config/`](../reference-config/) (the annotated every-key home),

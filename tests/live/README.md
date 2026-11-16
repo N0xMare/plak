@@ -19,15 +19,15 @@ ETags, access-window expiry and all other account-scoped values are omitted.
 It never prints or exports credentials or the raw authenticated response.
 
 
-Four opt-in commands that drive the real `plak` against real provider accounts.
+Three opt-in drivers that drive the real `plak` against real provider accounts.
 They spend provider usage and never run in a gate. `STATUS.md` records what they
 last showed.
 
 ```sh
 just live smoke            # grok (grok-4.7, low)
 just live smoke claude-sonnet55-low    # Claude OAuth (claude-sonnet-5-5, low)
-just live smoke claude-sonnet55-low --only cli_resume,jsonl_task,tui
-just live smoke claude-sonnet55-medium --only cli_resume,jsonl_task,tui
+just live smoke claude-sonnet55-low --only cli_resume,jsonl_task
+just live smoke claude-sonnet55-medium --only cli_resume,jsonl_task
 just live smoke claude-haiku55-low    # claude-haiku-5-5
 just live smoke claude-opus-low       # claude-opus-5-5
 just live smoke claude-opus-medium
@@ -42,10 +42,8 @@ just live soak grok --long-session --only in_turn_compaction
 just live soak grok --long-session --all
 PLAK_LIVE_GROWTH_PAGES=20 just live smoke claude-haiku55-low --only in_turn_compaction
 just live soak claude-sonnet55-low --hours 2
-just live tui-soak claude-opus-medium --hours 4
-python3 tests/live/tui_soak.py claude-opus-medium --hours 1
 just live jobs grok
-just live jobs grok --only promotion_budget,steer_command,ctrl_b
+just live jobs grok --only promotion_budget,steer_command
 python3 tests/live/jobs.py grok --only crash_jobs
 ```
 
@@ -64,9 +62,9 @@ executable. A `test-hooks` binary only captures under the
 from that checkout: smoke refuses a binary built elsewhere before launching. `test-hooks` enables `PLAK_TEST_FAULTS` (spec 05 §2.8).
 The drivers put ordinary artifacts under
 `target/live/<kind>-<route>-<stamp>/`: a private `PLAK_HOME`, the repos the
-agent worked in, every JSONL transcript and stderr, the TUI's PTY bytes, and a
+agent worked in, every JSONL transcript and stderr, and a
 `report.json`.
-Smoke and TUI soak reports pin the executable's SHA-256 at start and end and
+Smoke reports pin the executable's SHA-256 at start and end and
 fail if it changes mid-run. Headless soak reports both digests, allowing its
 intentional byte-distinct rebuild; with `--no-rebuild` a changed executable is
 an evidence failure. `task_repo_commit` names the task fixture, **not** Plak's
@@ -74,7 +72,7 @@ source. Record the clean Plak source revision and build invocation separately
 before a publication run; a digest alone cannot prove how a binary was built.
 
 Raw exchange capture is automatic and required on **every** real launch:
-`plak run`, `plak agent`, and TUI launch/reopen, in smoke, both soaks, and the job driver.
+`plak run` and `plak agent`, in smoke, soak and the jobs driver.
 There is no capture opt-in flag. Each run gets a uniquely named private root
 under ignored `tests/provider-authority/`, with fresh owned mode-0700 process
 segments. Inherited capture paths are replaced, never reused; non-private,
@@ -82,7 +80,7 @@ foreign-owned, symlinked or nonempty segments are refused before launch.
 Reports name the segments and exchange counts and always check their integrity.
 Smoke refuses qualification if any launched process has missing or incomplete
 raw evidence, even if its functional oracle passes or its failure is pending;
-TUI soak likewise requires a response in every process. Headless soak retains
+Headless soak retains
 its per-task authority-witness versus unexplained-no-response classification.
 A physical failure can still leave a partial response; the capture result does
 not imply model success.
@@ -90,16 +88,15 @@ Each exchange must have matching `.request`, `.body` and `.info` basenames.
 The request body and pending/incomplete metadata are persisted before dispatch;
 terminal metadata must no longer be pending, must say `incomplete=false`, and
 must record exactly the `.body` file's byte length. Missing or malformed metadata,
-unpaired files and segments at the 512-exchange process limit fail integrity;
-old response-only captures are not accepted. The required capture sink refuses
-dispatch when it cannot persist a request or has exhausted that limit.
+unpaired files fail integrity; old response-only captures are not accepted.
+The required capture sink refuses dispatch when it cannot persist a request
+or its bounded response evidence (spec 05 section 2.5).
 A fully recorded transport failure can pass physical capture integrity without
 being a successful model turn.
 Captured runs also keep private xAI authority diagnostics in the scratch
 `PLAK_HOME/logs/plak.log`. The headless report classifies each task's evidence
 separately, so an uncaptured task cannot be hidden by responses from later
-tasks; the TUI report requires the diagnostics file and gives process IDs for
-correlation. A local authority witness without a response is a clue, not proof
+tasks. A local authority witness without a response is a clue, not proof
 of the entire failure sequence; missing diagnostics or unexplained absence of
 a response is an evidence gap. An empty segment still needs that diagnostic
 authority-witness classification; physical integrity alone does not qualify it.
@@ -138,7 +135,7 @@ The drivers start `plak run` with stdin
 closed, so an unaccepted notice fails at once with exit 3 instead of waiting
 on a hidden prompt, and the scenario scores `harness` with that remedy.
 
-**Smoke** (`smoke.py`, about three minutes) runs twelve scenarios, each in its own
+**Smoke** (`smoke.py`, about three minutes) runs eleven scenarios, each in its own
 small git repo:
 
 | Scenario | Surface | Passes when |
@@ -153,9 +150,8 @@ small git repo:
 | `fault_reset` | injected after 3 SSE events | a cost-only turn request replays once with its partial output discarded (a `retry` event, `stream_interrupted`, `output_discarded`), the turn completes with one effect, the session continues; a real provider HTTP error (an `http_status` retry) that ends the faulted request before the reset fires scores `provider`, as does an unobserved reset whose targeted exchange (the first request carrying a conversation) ended `Complete`, `ProtocolComplete`, `ClosedEarly` or in a network-shaped response transport failure (`Io`, `Tls`, `DeadlineExceeded`, or an HTTP/2 reset) before its third counted event (keep-alive comment blocks do not count) in a provider failure (HTTP 408, 429 or a 5xx; a last in-band error event on the Chat, Messages or Responses wire, spec 05 §3.2; or that transport failure) while the turn failed as any provider error (an in-band provider kind or a provider HTTP status), or completed after a recorded transport or provider retry replayed that same request. Any other unobserved reset is `harness` |
 | `fault_stall` | 20 s stall after 2 events | the turn completes |
 | `subagents` | `spawn_agent` × 2 | two forked children, both candidates adopted |
-| `tui` | TUI on a PTY | two turns, then a clean `Ctrl+Q` |
 
-`wrap_up` is opt-in (`--only wrap_up`) and is not one of the twelve. It uses a
+`wrap_up` is opt-in (`--only wrap_up`) and is not one of the eleven. It uses a
 private `PLAK_HOME` with `[turn] max_model_rounds = 2`, asks `plak run` to `ls`
 and then `cat` each file one at a time, and passes when that turn completes
 with assistant text, the session log records `turn.operation_budget_exhausted`,
@@ -176,7 +172,7 @@ the turn completes, the captured exchanges show `exec_py`, the second cell's
 reversed token, which exists only in the repository.
 
 **Feature scenarios** (`features.py`) are opt-in through `--only` and are
-not in the twelve. Each is one `plak run` (the image round trip is two) in a
+not in the eleven. Each is one `plak run` (the image round trip is two) in a
 fresh repo with a private `PLAK_HOME` whose root template lists exactly the
 optional tools it needs (`tools = [...]`, spec 07 §3.4 and §3.5). Oracles read
 `plak session log <id> --json`, the repository, the raw exchange capture and
@@ -221,7 +217,7 @@ scenarios need `gh` logged in and, for stdio, Docker: the driver pipes
 home only; the token is never printed or written anywhere else. The server is
 read-only and allowlisted to read tools, so no write tool is ever offered.
 
-**Long session** (`long_session.py`) is opt-in and is not one of the twelve, and
+**Long session** (`long_session.py`) is opt-in and is not one of the eleven, and
 it is not the hour soak loop. `just live smoke <route> --only <names>` and
 `just live soak <route> --long-session --only <names>` run a named subset.
 `just live soak <route> --long-session --all` runs exactly the four scenarios and
@@ -332,7 +328,7 @@ the shared home and the scenario private home.
 A growth turn that finishes without that compaction is `harness` only when `model.operation_usage` shows prepared input at the lower of the compaction trigger and the catalog window minus one read page, and `model` otherwise. The trigger is spec 01 §10.3: 80% for `grok-4.6`, otherwise the window minus a tenth (about 90%) when that exceeds the semantic-summary headroom. A peak between that trigger and the window minus one page is harness, not a model miss. The same split applies to an overflow turn that completes without a remedy, so sequential reads that never reach the bar are not a harness failure. It does not apply to `child_compaction`: the child history projection has no `model.operation_usage` row, and a history without the compaction segment is `model`. A `ContextLimit` stop without a committed recovery is `harness`. Provider refusal is classified the same way as smoke.
 
 After every fault the session must answer a plain follow-up: a failure that
-leaves it needing `/new` is a dead end, and a harness failure.
+requires a new session is a dead end, and a harness failure.
 
 **Soak** (`soak.py`) is headless: it keeps one session working through a cycle of tasks on
 more-itertools pinned at v10.5.0: explore, fix a planted bug, add a function with
@@ -353,32 +349,19 @@ but worded differently, and functions earlier tasks added stay. A plant that
 cannot run is that task's `harness` result; a driver exception still writes
 `report.json`, with the traceback in `summary.crash` and every task that ran.
 
-**TUI soak** (`tui_soak.py`) keeps one logical session on the real TUI for the
-requested duration. It repeatedly adds a function and tests across two files,
-checks the full suite plus a task-specific Python oracle, and waits for durable
-`turn.lifecycle` terminals rather than treating a file write or screen paint as
-completion. The first turn is suspended with SIGSTOP for 10 seconds and resumed;
-the TUI is then cleanly quit and reopened on the same session, and a separate
-file oracle verifies the follow-up. It uses the same route/model/effort defaults
-as the other live drivers. If a provider turn fails, it tests whether the same
-TUI session can complete the task on a follow-up prompt, recording the failed
-turn separately. This is paid evidence and never runs in a gate.
-
-**Jobs** (`jobs.py`) runs eleven bounded turns that exercise background-process
-promotion. It is paid. The pre-release bar runs all eleven on every `full`
+**Jobs** (`jobs.py`) runs seven bounded turns that exercise background-process
+promotion. It is paid. The pre-release bar runs all seven on every `full`
 row (spec 05 §3.4); any other invocation is opt-in. `estimate.py` prices
 that full-row cell. Each scenario gets a private home whose `[jobs] foreground_seconds`
 is `1` (the default budget promotes a short sleep) or `45`
-(a steer or Ctrl+B lands while the command is still foreground). The bound is
+(a steer lands while the command is still foreground). The bound is
 not a kill timer. The fixture is `hold.py`: it records its wall start, sleeps
 the requested seconds, then writes `job-finished`. Each scenario appends eight
 hex characters from `os.urandom` to its process token, so two routes running
 at once never `ps` or `pkill` each other's fixture. The model's reply is never
 the oracle.
-`/stop` is not a slash command. Background processes stop from Activity
-Processes with `S`, which asks `Stop all processes?`. The idle HUD reads
-`1 agent` and `1 process`. `plak run` waits for a promoted job and continues
-when it exits; it does not stop the job at the end of the first turn.
+`plak run` waits for a promoted job and continues when it exits; it does not
+stop the job at the end of the first turn.
 
 | Scenario | Surface | Passes when |
 | --- | --- | --- |
@@ -389,10 +372,6 @@ when it exits; it does not stop the job at the end of the first turn.
 | `run_promoted` | `plak run` | the prompt requests the pack's immediate background hint and ends without polling; stderr says `waiting for p` and then `continuing` with `exited`, and the fixture finishes |
 | `crash_jobs` | `plak agent` | SIGKILL only after the root turn's exchange info is `terminal=Complete` or `ProtocolComplete` and `incomplete=false`, while the promoted job is still live; reopen reports `outcome_unknown`, and the next request contains `Plak stopped unexpectedly while this command was running.` |
 | `child_settle` | `plak agent` | the child promotes with the pack's immediate hint and calls `submit_result` while that job is live. The first submit is refused `live_work` (spec 03 §4.6). The child then stops the job (or, on Codex, waits until it exits) and submits successfully, and the job is terminal when the attempt settles. A second worker promotes another job and does not submit; the driver `close_node`s it as soon as that job is promoted and running (a still-foreground start is not closed; the worker is the one child spawned for this half whose spawn prompt carries the command, since job owners are not tree ids; more than one new worker is `model`), during the root's turn when the root waits on the worker with `wait_agent` (as Plak's JSONL-root agreement asks; both root prompts allow it) or after the turn when the root replies first, and that job stops with `stop_reason=attempt_ended` (interrupt would keep the job). A job that finished before close is `model` only when the worker never left it promoted; when the driver never sent the close while the job ran, or a close sent in time did not stop it, it is `harness`. Model otherwise only when the child ignores those instructions. A provider refusal in the job output is provider |
-| `ctrl_b` | TUI | Ctrl+B during a 45 s foreground command returns the tool within 8 s and leaves the process running. Code Mode asks for hint promotion, requires evidence that the hint promoted the nested start (the session log shows the start returned, or a telemetry `promoted` row; without it `model`) and asserts Ctrl+B leaves that job running |
-| `stop_jobs` | TUI | after the turn, Processes `S` shows `Stop all processes?`, the process is gone before `job-finished`, and the idle root admits another turn. A user stop is a process notice (`wake.rs` lines 156-158 keep every job that is not running); `[turn] auto_continue` defaults true |
-| `wake_while_idle` | TUI | after the root terminal, wait until the latest HUD paint shows `1 process` (a paint from before the terminal counts when nothing repainted) and `ps` still shows the fixture (bounded); the job finishing then admits a second turn that is not recorded as `user_prompt` |
-| `idle_badge` | TUI | the root's latest admitted turn has completed; the child started the hold with the pack's immediate background hint and is waiting on that job; a frame taken while that job is still live shows `1 agent` and `1 process` on the composer row. A cursor update that repaints one counter does not drop the other. A child that never promoted is model |
 
 A missing telemetry row is not a failure: the writer drops a queued row on
 exit. When a row is present it corroborates the hint, the notice delivery
@@ -418,18 +397,6 @@ finalized in-turn compaction or a live process at the final. In particular,
 failure is unknown, not a changed score. Precise shape tables belong to the
 offline crash-point sweep, not this live diagnostic.
 
-The durable `turn.lifecycle` row stores `turn_id` and `phase` only
-(`emit_turn_lifecycle` in `crates/hosting/hosted/src/runtime/turn.rs` lines
-204-208), so a TUI scenario cannot read `model_error_kind` or `http_status`
-from it. A failed TUI turn is `provider` when that row does carry them, or
-when the turn's last `model_retries` row has `cause_kind` `http_status`,
-`connect`, `record_rejected_in_transit`, `transport_after_send`, or
-`stream_interrupted`, and either `next_attempt` equals `max_attempts` on a
-dispatched row or the row was declined for `budget` (its proposed
-`next_attempt` is `max_attempts + 1`). A failed turn
-after a transient retry that did not exhaust that budget, and a failed turn
-with neither a status nor such a row, is `harness`.
-
 **Outcome classes.** `pass`; `harness`, Plak's failure (a crash, no terminal, a
 dead end, a refused reopen); `model`, a completed turn whose work misses the
 oracle, or invalid tool arguments proven by a finished capture (spec 05 §3.2);
@@ -439,8 +406,7 @@ counts), never an earlier scenario, process or exchange;
 `provider`, the real provider refusing with no injected fault; and
 `pending`, a failure a named in-flight slice is expected to fix
 (`EXPECTED_PENDING` in `smoke.py`).
-A `plak run`, an awaited `plak agent` turn (the jobs driver's included), or a
-TUI root turn (smoke's or the jobs driver's) that outlives its scenario budget is `harness` unless the
+A `plak run` or an awaited `plak agent` turn (the jobs driver's included) that outlives its scenario budget is `harness` unless the
 process's capture proves the provider used the budget (spec 05 §3.2). Over the
 window from the kill back over the budget, exchanges span `.request` to
 `.info` modification time (a pending one to the kill, children sharing the
@@ -476,7 +442,7 @@ committed at its output limit completed its turn: `plak run` prints it and
 exits 5 with `turn_failed:output-limit`, and the drivers judge that printed
 answer with the scenario's oracle. A failed turn of typed kind `OutputLimit`
 (an empty answer at the limit after its one retry) is `model`; JSONL reads the
-kind, while `plak run` stderr and the TUI's `turn.failed` row carry its
+kind, while `plak run` stderr carries its
 diagnostic (`... output bound before ...`).
 For the headless soak, `dead_end` means the immediate follow-up in the same
 process also failed; it does not by itself prove a later, fault-free reopen
@@ -490,11 +456,10 @@ growth turns early and skipped a page after the child's compaction in every
 long-session cell, while `gpt-6.1-sol` paged through compaction and passed
 in-turn compaction, the child and kill-reopen. The
 pre-release bar, the platforms and the pass rule are spec 05 §3.4. On Apple
-Silicon, `full` is the twelve smoke scenarios, the four long-session
-scenarios and the eleven jobs scenarios, with `crash_jobs` run three times.
+Silicon, `full` is the eleven smoke scenarios, the four long-session
+scenarios and the seven jobs scenarios, with `crash_jobs` run three times.
 Only the least-used `full` row also runs the headless soak (default one hour).
-There is no per-row two-hour TUI soak: the maintainer's TUI review replaces it.
-`light` is the twelve smoke scenarios.
+`light` is the eleven smoke scenarios.
 `informational` is that smoke, recorded: a model or provider outcome does not
 block, and a harness outcome does. A row may mark single lanes informational
 (`informational_lanes`): the lane runs at the row's depth and is scored like
@@ -506,7 +471,7 @@ it, on Chat and on Messages, from about 34k tokens up (Grok and Claude pass
 the same lane), and over Messages it also dropped `read` offset and limit deep
 into long tool loops. The marking stays until the current DeepSeek id has its
 own long-session evidence. Smoke, jobs and the headless soak stay blocking on
-both rows. Linux `x86_64-unknown-linux-musl` runs the twelve-scenario smoke on
+both rows. Linux `x86_64-unknown-linux-musl` runs the eleven-scenario smoke on
 each `full` row and on `api-openai`, `api-anthropic` and `api-xai` only.
 
 Depth follows the account: the Codex, SuperGrok and Claude subscriptions and
@@ -551,7 +516,7 @@ default sweep (`just live estimate` adds them only with `--confirm`).
 The pre-release bar runs once per release candidate, not per install. It
 binds the same clean source revision, binary/sidecar hashes and platform
 tuple across the supported-platform integrated gates (including the full
-offline crash sweep), live matrix and the maintainer's TUI sign-off. Spec 05 §3.4 owns the bar and later revision's
+offline crash sweep), live matrix and maintainer external-client review. Spec 05 section 3.4 owns the bar and later revision's
 per-row rerun rule.
 
 On Apple Silicon the full cell of a `full` row is:
@@ -585,7 +550,6 @@ PLAK_LIVE_INPUT_CEILING=<N> python3 tests/live/qualification.py long-session dee
 python3 tests/live/qualification.py jobs <route>
 python3 tests/live/qualification.py jobs <route> --only crash_jobs
 python3 tests/live/qualification.py soak <route> --hours 1
-python3 tests/live/qualification.py tui-soak <route> --hours 0.5
 python3 tests/live/qualification.py smoke <route> --dry-run
 ```
 
@@ -620,7 +584,7 @@ just live daily-driver --since 2026-10-09
 python3 tests/live/daily_driver.py --since 2026-10-09
 ```
 
-This is read-only over `~/.plak/logs/plak.log`: no build, provider call, TUI
+This is read-only over `~/.plak/logs/plak.log`: no build, provider call, application-client
 launch or database mutation. `just live daily-driver --since <date>` selects the
 window.
 `--since YYYY-MM-DD` is inclusive; earlier
@@ -648,25 +612,22 @@ Provider/model bindings do not establish effort, protocol or composition;
 in particular DeepSeek Chat and Messages cannot be distinguished here.
 
 The bar's third part is the maintainer's sign-off after using the candidate's
-maintainer build in the TUI on their own work. This report is a diagnostic for
+maintainer build through an independently maintained client. This report is a diagnostic for
 that review and for choosing the least-used `full` row for the one-hour
 headless soak; it is never a substitute for a missing live cell.
 
 ## Token telemetry
 
-Smoke, TUI soak and the job driver read `turn.usage` from the session log (input, output,
+Smoke and the jobs driver read `turn.usage` from the session log (input, output,
 cached input, reasoning). Each smoke scenario gets the delta of that log
 across the scenario, including a failed one, and the report's
-`token_telemetry` is the sum. Each TUI soak task, recovery and reopen
-follow-up gets the delta across that wait; the report total is the whole
-session log, which can include a turn that never became a task row. Headless
-soak keeps summing the JSONL `turn` usage event per task, and now also keeps
+`token_telemetry` is the sum. Headless soak keeps summing the JSONL `turn` usage event per task, and now also keeps
 cached input and reasoning from that event. A missing field is zero. Reports
 also name `route_class`, account, effort, protocol, `composition_requested`
 (`plakous-default` unless the scenario passed another) and, for smoke, soak,
 jobs and long-session runs, `composition_bound`: the sorted compositions the
 run's `plak agent` hellos reported (Codex binds `plakous-default` as
-`native-ptc`). The TUI soak has no JSONL hello and names only the request.
+`native-ptc`).
 
 ## Dry-run estimate
 
@@ -691,30 +652,24 @@ cells, and the estimate is refused without it.
 ```sh
 python3 tests/live/estimate.py --rate-card rates.json --soak-row deepseek --openrouter-window 1048576
 python3 tests/live/estimate.py --rate-card rates.json --soak-row deepseek --openrouter-window 1048576 --contingency 0.25 --openrouter-ceiling 40
-just live estimate --rate-card rates.json --soak-row deepseek --openrouter-window 1048576 --tui-rows codex-sol,grok
 just live estimate --rate-card rates.json --soak-row deepseek --openrouter-window 1048576 --confirm claude-opus-low
 ```
 
 Defaults are measured volumes where a trial recorded them, all overridable.
-Smoke (12 scenarios): 241,039 input and 5,500 output, cached share 0.64.
+Smoke budget: 241,039 input and 5,500 output, cached share 0.64.
 The compaction scenario's 20,000-token fold accounts for 40,000 of that input.
 Headless soak (1 hour): 5,600,000 input and 60,000 output, cached share 0.9.
-TUI soak (2 hours): 8,600,000 input, output scaled by the soak output/input
-ratio, cached share 0.9. Long-session, on each `full` row: the measured
+Long-session, on each `full` row: the measured
 DeepSeek four-scenario cell, 750,415 input and 4,673 output at 22% cached,
 scaled by catalog window / 1,048,576 for every other window (the OpenRouter
 rows by `--openrouter-window`); the
 `deepseek` and `deepseek-messages` long-session cells are priced and printed
-with class `informational`. Jobs (11
-scenarios) uses the smoke per-scenario share and the smoke cache share.
-Two further `crash_jobs` runs are priced on every `full` row at two elevenths
-of the jobs volume, so that scenario runs three times including the jobs cell.
+with class `informational`. Jobs budget uses the smoke per-scenario share and the smoke cache share.
+Two further `crash_jobs` runs are priced on every `full` row at the estimator's per-scenario share of the jobs volume, so that scenario runs three times including the jobs cell.
 `--soak-row <route>` is required: it must name the least-used `full` row and
-prices ONE Mac headless soak (one hour by default). No TUI soak is priced
-unless `--tui-rows a,b` names distinct `full` rows; each is 0.5 hours by
-default. Linux prices a smoke only, on the `full` rows and `api-openai`,
+prices ONE Mac headless soak (one hour by default). Linux prices a smoke only, on the `full` rows and `api-openai`,
 `api-anthropic` and `api-xai`. Contingency is
-0.20. Soak and TUI totals scale with `--soak-hours` and `--tui-soak-hours`.
+0.20. Soak totals scale with `--soak-hours`.
 
 `tests/tooling/test_live_oracles.py` covers the offline pieces (fault plans,
 session-log parsing, the table) in the ordinary tooling tests. Catalog,

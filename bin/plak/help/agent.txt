@@ -6,12 +6,12 @@ USAGE:
   plak agent --session <uuid>
 
 DESCRIPTION:
-  Attaches the same plakous-hosted loop as the TUI and speaks newline-delimited
+  Attaches the plakous-hosted loop and speaks newline-delimited
   JSON (v=1) on stdin/stdout. Stdio is the default pipe; there is no
   `plak agent stdio` subcommand.
   During turns, models still call topology tools in the catalog; JSONL
   invoke_tool is an idle-only host inject of the same grant-compiled
-  executor (optional agent_id). JSONL fork maps to TUI /fork.
+  executor (optional agent_id).
 
 EXAMPLES:
   plak agent --account codex --model gpt-5.6-luna --effort medium

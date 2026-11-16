@@ -516,7 +516,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             return;
         };
         // Keep row alive; never clobber subject. Optional progress detail only
-        // when we have no expand body yet (TUI merges carefully). The row
+        // when we have no expand body yet (client merges carefully). The row
         // keeps the name its start gave it (a Grok await reads as one).
         let name = presented_later_name(
             projection,

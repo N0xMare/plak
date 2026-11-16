@@ -265,7 +265,7 @@ async fn assert_idle_detach(stop: bool) {
     }
 }
 
-/// Plan §F trap 1, host half: the TUI's glyph table is keyed on the strings
+/// Plan §F trap 1, host half: the client's glyph table is keyed on the strings
 /// this module produces, so a status added to any of the three enums with
 /// no glyph arm silently paints a dot. Every label crosses the crate
 /// boundary here.

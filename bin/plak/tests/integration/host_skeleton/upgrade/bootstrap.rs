@@ -33,7 +33,7 @@ fn host_upgrade_bootstrap_imports_all_seventeen_frozen_predecessor_presentations
         let id = String::from_utf8(imported.stdout)
             .unwrap()
             .lines()
-            .find_map(|line| line.strip_prefix("resume with: plak --resume "))
+            .find_map(|line| line.strip_prefix("resume with: plak run --session "))
             .unwrap()
             .to_owned();
         assert_ne!(id, document["source"]["session_id"]);

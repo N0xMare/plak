@@ -1,7 +1,7 @@
 //! Library-shaped composition for the product command workflows.
 //!
 //! The `plak` binary keeps clap parsing and dispatch, exit-code mapping,
-//! output-mode selection and the TUI attach. Everything a command *does* —
+//! output-mode selection and the host attach. Everything a command *does* —
 //! subscription login/logout/refresh, catalog and model selection, run-loop
 //! driving, session commands and attach-time host configuration — lives here.
 

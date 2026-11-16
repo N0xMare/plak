@@ -701,7 +701,7 @@ fn runtime_store_check(
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum StorePressure {
     Available,
-    /// At or past 70% of the ordinary threshold, where the TUI first warns.
+    /// At or past 70% of the ordinary threshold, at the warning threshold.
     NearlyFull,
     /// New work is refused; only settlement and recovery still write.
     Full,

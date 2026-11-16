@@ -38,7 +38,6 @@ const COMMAND_PAGES: &[(&str, &str)] = &[
     ("run", include_str!("../../help/run.txt")),
     ("agent", include_str!("../../help/agent.txt")),
     ("wire", include_str!("../../help/wire.txt")),
-    ("resume", include_str!("../../help/resume.txt")),
     #[cfg(feature = "maintainer")]
     ("fork", include_str!("../../help/fork.txt")),
     #[cfg(feature = "maintainer")]

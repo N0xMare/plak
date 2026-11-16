@@ -15,7 +15,7 @@ type Host = HostFrame<PlakExtension>;
 /// The first attachment the service makes.
 const ROOT_ATTACHMENT: AttachmentId = 1;
 use crate::surface_protocol::{
-    PlakExtension, SettingsView, SurfaceIntent, SurfaceObservation, user_action_channel,
+    PlakExtension, SurfaceIntent, SurfaceObservation, user_action_channel,
 };
 
 fn root() -> NodeAddress {
@@ -52,7 +52,9 @@ fn fake_session(
                 .unwrap();
             observations
                 .send(SessionObservation::Extension(
-                    SurfaceObservation::SettingsView(SettingsView::default().into()),
+                    SurfaceObservation::SettingsView(crate::shell::settings::settings_view(
+                        &crate::product_config::ProductConfig::default_product(),
+                    )),
                 ))
                 .unwrap();
         }
@@ -198,11 +200,12 @@ fn the_handshake_refuses_another_version() {
 /// Plak's extension traffic travels: settings round-trip without the
 /// client-local terminal preferences, and a surface intent keeps its kind.
 #[test]
-fn the_extension_codec_round_trips_and_keeps_terminal_preferences_local() {
-    let mut view = SettingsView::default();
-    view.tui.mouse = !view.tui.mouse;
+fn the_extension_codec_round_trips_product_settings_without_terminal_preferences() {
+    let view = crate::shell::settings::settings_view(
+        &crate::product_config::ProductConfig::default_product(),
+    );
     let observation: SessionObservation<PlakExtension> =
-        SessionObservation::Extension(SurfaceObservation::SettingsView(view.clone().into()));
+        SessionObservation::Extension(SurfaceObservation::SettingsView(view.clone()));
     let encoded = serde_json::to_value(&observation).unwrap();
     assert!(encoded["body"]["settings_view"].get("tui").is_none());
     let decoded: SessionObservation<PlakExtension> = serde_json::from_value(encoded).unwrap();
@@ -210,11 +213,6 @@ fn the_extension_codec_round_trips_and_keeps_terminal_preferences_local() {
         panic!("a settings view");
     };
     assert_eq!(received.product, view.product);
-    let received: SettingsView = received.into();
-    assert_eq!(
-        received.tui,
-        crate::tui_preferences::TuiPreferences::default()
-    );
 
     let intent: SessionIntent<PlakExtension> =
         SessionIntent::Extension(SurfaceIntent::ListAgentAcknowledgements {
@@ -345,7 +343,9 @@ fn only_a_local_face_may_probe_or_check_the_installed_build() {
             intent(3, SurfaceIntent::CheckBuild),
             intent(
                 4,
-                SurfaceIntent::SaveSettings(SettingsView::default().into()),
+                SurfaceIntent::SaveSettings(crate::shell::settings::settings_view(
+                    &crate::product_config::ProductConfig::default_product(),
+                )),
             ),
             intent(
                 5,

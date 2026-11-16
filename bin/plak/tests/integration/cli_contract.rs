@@ -12,10 +12,7 @@
 use std::io::{Read as _, Write as _};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Arc, Barrier, Mutex};
-use std::time::{Duration, Instant};
-
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use std::sync::{Arc, Barrier};
 
 fn plak_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_plak"))
@@ -59,9 +56,8 @@ fn an_omitted_host_bridge_reports_its_capability_without_creating_a_home() {
     assert!(!root.path().join("home").exists());
 }
 
-#[cfg(not(feature = "tui"))]
 #[test]
-fn omitted_terminal_placement_refuses_before_creating_a_home_or_host() {
+fn removed_terminal_placement_refuses_before_creating_a_home_or_host() {
     let root = tempfile::tempdir().unwrap();
     let output = publication_command(
         root.path(),
@@ -75,10 +71,7 @@ fn omitted_terminal_placement_refuses_before_creating_a_home_or_host() {
     .output()
     .unwrap();
     assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("compiled without feature `tui`"),
-        "{output:?}"
-    );
+    assert!(output.status.code() == Some(2), "{output:?}");
     assert!(!root.path().join("home").exists());
     assert!(!root.path().join("xdg").exists());
 }
@@ -314,7 +307,7 @@ fn publication_user_refusals_are_usage() {
     for args in [
         vec!["session", "show", "abc"],
         vec!["key", "status", "codex"],
-        vec!["config", "set", "tui.mouse", "maybe"],
+        vec!["config", "set", "skills.enabled", "maybe"],
         vec!["state", "prune-legacy"],
         vec!["tree", "release", "some-tree"],
     ] {
@@ -338,7 +331,7 @@ fn publication_config_init_pins_nothing_and_preserves_existing_file() {
     assert!(out.status.success());
     let path = root.path().join("home/config.toml");
     let text = std::fs::read_to_string(&path).unwrap();
-    assert!(text.contains("# mouse = true"));
+    assert!(text.contains("# enabled = true"));
     let parsed: toml::Value = toml::from_str(&text).unwrap();
     // Section headers stay live so an uncommented key lands in its section;
     // every section is empty.
@@ -443,11 +436,8 @@ fn publication_removed_spellings_name_unambiguous_replacements() {
         assert_eq!(out.status.code(), Some(2));
         assert!(String::from_utf8_lossy(&out.stderr).contains("`xai` is ambiguous: use `grok`"));
     }
-    for (key, dotted) in [
-        ("mouse", "tui.mouse"),
-        ("theme", "tui.theme"),
-        ("compaction_enabled", "compaction.enabled"),
-    ] {
+    {
+        let (key, dotted) = ("compaction_enabled", "compaction.enabled");
         let root = tempfile::tempdir().unwrap();
         let out = publication_command(root.path(), &["config", "set", key, "false"])
             .output()
@@ -723,218 +713,6 @@ fn install_unsupported_runtime_schema_13(path: &std::path::Path) {
     }
 }
 
-struct ProductPty {
-    writer: Box<dyn std::io::Write + Send>,
-    child: Box<dyn portable_pty::Child + Send + Sync>,
-    terminal: Arc<Mutex<TerminalCapture>>,
-    reader: Option<std::thread::JoinHandle<()>>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct FrameSnapshot {
-    contents: String,
-    cursor: (u16, u16),
-    cursor_hidden: bool,
-    raw_len: usize,
-}
-
-struct TerminalCapture {
-    parser: vt100::Parser,
-    raw: Vec<u8>,
-}
-
-impl TerminalCapture {
-    fn new(rows: u16, cols: u16) -> Self {
-        Self {
-            parser: vt100::Parser::new(rows, cols, 0),
-            raw: Vec::new(),
-        }
-    }
-
-    fn process(&mut self, bytes: &[u8]) {
-        self.parser.process(bytes);
-        self.raw.extend_from_slice(bytes);
-    }
-
-    fn snapshot(&self) -> FrameSnapshot {
-        FrameSnapshot {
-            contents: self.parser.screen().contents(),
-            cursor: self.parser.screen().cursor_position(),
-            cursor_hidden: self.parser.screen().hide_cursor(),
-            raw_len: self.raw.len(),
-        }
-    }
-}
-
-impl ProductPty {
-    fn spawn(home: &std::path::Path) -> Self {
-        Self::spawn_with_args(home, &[])
-    }
-
-    fn spawn_with_args(home: &std::path::Path, args: &[&str]) -> Self {
-        make_private_home(home);
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows: 30,
-                cols: 100,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .expect("open PTY");
-        let mut command = CommandBuilder::new(plak_bin());
-        command.args(args);
-        command.env_clear();
-        command.env("HOME", home);
-        command.env("PLAK_HOME", home);
-        command.env("XDG_CONFIG_HOME", home.join("xdg-config"));
-        command.env("XDG_DATA_HOME", home.join("xdg-data"));
-        command.env("XDG_STATE_HOME", home.join("xdg-state"));
-        command.env("TERM", "xterm-256color");
-        command.env("LANG", "C.UTF-8");
-        command.cwd(home);
-        let mut source = pair.master.try_clone_reader().expect("clone PTY reader");
-        let writer = pair.master.take_writer().expect("take PTY writer");
-        let child = pair.slave.spawn_command(command).expect("spawn Plak PTY");
-        drop(pair.slave);
-        let terminal = Arc::new(Mutex::new(TerminalCapture::new(30, 100)));
-        let sink = Arc::clone(&terminal);
-        let reader = std::thread::spawn(move || {
-            let mut bytes = [0_u8; 8192];
-            while let Ok(count) = source.read(&mut bytes) {
-                if count == 0 {
-                    break;
-                }
-                sink.lock()
-                    .expect("PTY terminal lock")
-                    .process(&bytes[..count]);
-            }
-        });
-        Self {
-            writer,
-            child,
-            terminal,
-            reader: Some(reader),
-        }
-    }
-
-    fn frame(&self) -> FrameSnapshot {
-        self.terminal.lock().expect("PTY terminal lock").snapshot()
-    }
-
-    fn send(&mut self, bytes: &[u8]) {
-        self.writer.write_all(bytes).expect("write PTY");
-        self.writer.flush().expect("flush PTY");
-    }
-
-    fn wait_for(&mut self, needle: &str) -> String {
-        self.wait_for_timeout(needle, Duration::from_secs(15))
-    }
-
-    fn wait_gone(&mut self, needle: &str) {
-        let deadline = Instant::now() + Duration::from_secs(15);
-        loop {
-            let first = self.frame();
-            if !first.contents.contains(needle) {
-                std::thread::sleep(Duration::from_millis(30));
-                let second = self.frame();
-                if first == second && !second.contents.contains(needle) {
-                    return;
-                }
-            }
-            if let Some(status) = self.child.try_wait().expect("poll Plak") {
-                panic!(
-                    "Plak exited before {needle:?} left the screen: {status:?}\n{}",
-                    first.contents
-                );
-            }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for {needle:?} to leave\n{}",
-                first.contents
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-
-    fn wait_for_timeout(&mut self, needle: &str, timeout: Duration) -> String {
-        let deadline = Instant::now() + timeout;
-        loop {
-            let first = self.frame();
-            if first.contents.contains(needle) {
-                std::thread::sleep(Duration::from_millis(30));
-                let second = self.frame();
-                if first == second {
-                    return second.contents;
-                }
-            }
-            if let Some(status) = self.child.try_wait().expect("poll Plak") {
-                panic!(
-                    "Plak exited before stable {needle:?}: {status:?}\n{}",
-                    first.contents
-                );
-            }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for stable {needle:?}\n{}",
-                first.contents
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-
-    fn finish(mut self) -> Vec<u8> {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            if let Some(status) = self.child.try_wait().expect("poll Plak exit") {
-                assert!(status.success(), "Plak PTY exit failed: {status:?}");
-                break;
-            }
-            assert!(Instant::now() < deadline, "Plak did not exit");
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        drop(self.writer);
-        if let Some(reader) = self.reader.take() {
-            reader.join().expect("join PTY reader");
-        }
-        self.terminal.lock().expect("PTY terminal lock").raw.clone()
-    }
-
-    /// Wait until `needle` is on a frame that stayed still, with no wall-clock
-    /// deadline. A loaded lane can leave the debug binary unscheduled for longer
-    /// than the 15s liveness bound [`Self::wait_for`] uses. A stdio-lock hang
-    /// still fails the test: nextest's slow-timeout is the suite bound.
-    fn wait_until_stable(&mut self, needle: &str) -> String {
-        loop {
-            let first = self.frame();
-            if first.contents.contains(needle) {
-                std::thread::sleep(Duration::from_millis(30));
-                let second = self.frame();
-                if first == second {
-                    return second.contents;
-                }
-            }
-            if let Some(status) = self.child.try_wait().expect("poll Plak") {
-                panic!(
-                    "Plak exited before stable {needle:?}: {status:?}\n{}",
-                    first.contents
-                );
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-
-    /// Block until the child exits. Same hang bound as [`Self::wait_until_stable`].
-    fn finish_when_exited(mut self) -> Vec<u8> {
-        let status = self.child.wait().expect("wait Plak exit");
-        assert!(status.success(), "Plak PTY exit failed: {status:?}");
-        drop(self.writer);
-        if let Some(reader) = self.reader.take() {
-            reader.join().expect("join PTY reader");
-        }
-        self.terminal.lock().expect("PTY terminal lock").raw.clone()
-    }
-}
-
 fn stdout(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
@@ -993,7 +771,6 @@ fn help_output_is_the_shipped_page_files_byte_for_byte() {
         ("key", include_str!("../../help/key.txt")),
         ("run", include_str!("../../help/run.txt")),
         ("agent", include_str!("../../help/agent.txt")),
-        ("resume", include_str!("../../help/resume.txt")),
         ("config", include_str!("../../help/config.txt")),
         ("doctor", include_str!("../../help/doctor.txt")),
         ("usage", include_str!("../../help/usage.txt")),
@@ -1232,8 +1009,8 @@ fn config_init_show_set_path_round_trip() {
 
     // the closed key list. Bare tuple keys are gone with `[default]`.
     for (key, value) in [
-        ("tui.theme", "catppuccin-mocha"),
-        ("tui.scroll_lines", "4"),
+        ("skills.enabled", "false"),
+        ("jobs.foreground_seconds", "4"),
         ("orchestration.max_children", "4"),
         ("roster.working_set", ""),
         ("compaction.enabled", "false"),
@@ -1278,8 +1055,8 @@ fn config_init_show_set_path_round_trip() {
     let text = stdout(&out);
     assert!(text.contains("[orchestration]"), "{text}");
     assert!(text.contains("max_children = 4"), "{text}");
-    assert!(text.contains("scroll_lines = 4"), "{text}");
-    assert!(text.contains("theme = \"catppuccin-mocha\""), "{text}");
+    assert!(text.contains("foreground_seconds = 4"), "{text}");
+    assert!(text.contains("enabled = false"), "{text}");
     // Secrets must never appear in config show.
     assert!(!text.to_ascii_lowercase().contains("sk-"));
 }
@@ -1416,10 +1193,10 @@ fn session_mutations_require_confirmation_and_context_never_guesses() {
 }
 
 #[test]
-fn bare_plak_non_tty_fails_with_run_hint() {
+fn bare_plak_prints_help_without_creating_product_state() {
     let dir = isolated_home_dir();
     let home = dir.path();
-    // No stdin TTY in CI; bare plak should not hang.
+    // Bare invocation is useful in pipes and never starts a runtime.
     let out = Command::new(plak_bin())
         .env("PLAK_HOME", home)
         .env("HOME", home)
@@ -1433,199 +1210,10 @@ fn bare_plak_non_tty_fails_with_run_hint() {
         .stderr(std::process::Stdio::piped())
         .output()
         .expect("spawn");
-    assert!(!out.status.success(), "bare plak on non-TTY should fail");
-    let err = stderr(&out);
-    assert!(
-        err.contains("TTY") || err.contains("plak run") || err.contains("interactive"),
-        "unexpected stderr: {err}"
-    );
-}
-
-#[test]
-fn fresh_real_binary_shell_keeps_controls_and_draft_usable() {
-    let dir = isolated_home_dir();
-    let mut plak = ProductPty::spawn(dir.path());
-    let first = plak.wait_for("/ commands");
-    assert!(
-        !first.contains("plak · ready"),
-        "static transcript header leaked:\n{first}"
-    );
-
-    plak.send(b"/settings\r");
-    let settings = plak.wait_for("Scroll lines");
-    assert!(!settings.contains("Loading settings"));
-    assert!(
-        !settings.contains("Open Models tab") && !settings.contains("Open Keybinds tab"),
-        "spec 8.1 deletes the navigation-only rows:\n{settings}"
-    );
-    plak.send(b"\x1b");
-    plak.wait_gone("Menu");
-
-    // Spec 02 §5.5: Usage, Context and Session are peer tabs, so
-    // `/usage`, `/context` and `/status` each land on their own tab and the
-    // section-jump hint is gone with the page it navigated.
-    plak.send(b"/usage\r");
-    let usage = plak.wait_for("Limits");
-    assert!(
-        usage.contains("Settings") && usage.contains("Context") && usage.contains("Session"),
-        "the seven-tab strip is painted:\n{usage}"
-    );
-    assert!(
-        !usage.contains("jump section") && !usage.contains("switch sub-tab"),
-        "the Usage page's section navigation is gone:\n{usage}"
-    );
-    assert!(
-        usage.contains("Agents"),
-        "the Agents tab is in the strip:\n{usage}"
-    );
-    assert!(
-        !usage.contains("Per attempt"),
-        "usage does not list child attempts:\n{usage}"
-    );
-    assert!(
-        usage.contains("Providers"),
-        "the read-only Providers tab is in the strip:\n{usage}"
-    );
-    plak.send(b"\x1b");
-    plak.wait_gone("Menu");
-
-    // Spec 8.2a: `/providers` is a read-only status view — account, status and
-    // the CLI command per vertical, and no action anywhere.
-    plak.send(b"/providers\r");
-    let providers = plak.wait_for("plak login codex");
-    assert!(
-        providers.contains("account:") && providers.contains("status:"),
-        "each vertical states its account and status:\n{providers}"
-    );
-    assert!(
-        !providers.contains("Log in") && !providers.contains("Paste key"),
-        "the tab offers no action:\n{providers}"
-    );
-    plak.send(b"\x1b");
-    plak.wait_gone("Menu");
-
-    plak.send(b"/context\r");
-    let context = plak.wait_for("Context usage");
-    assert!(context.contains("Context"), "{context}");
-    plak.send(b"\x1b");
-    plak.wait_gone("Menu");
-
-    plak.send(b"/status\r");
-    let session = plak.wait_for("Session ID");
-    assert!(session.contains("Working directory"), "{session}");
-    plak.send(b"\x1b");
-    plak.wait_gone("Menu");
-
-    plak.send(b"draft survives failed attach\r");
-    let refused = plak.wait_for("draft survives failed attach");
-    assert!(
-        refused.contains("│❯ draft survives failed attach"),
-        "the refused draft left the composer:\n{refused}"
-    );
-    plak.send(b"\x03");
-    plak.send(b"/exit\r");
-    let raw = plak.finish();
-    assert!(raw.windows(7).any(|window| window == b"[?1000h"));
-    assert!(raw.windows(7).any(|window| window == b"[?1000l"));
-    assert!(raw.windows(7).any(|window| window == b"[?1049l"));
-}
-
-#[test]
-fn repeated_fresh_tui_open_and_quit_creates_zero_resumable_sessions() {
-    let dir = isolated_home_dir();
-    for _ in 0..3 {
-        let mut plak = ProductPty::spawn(dir.path());
-        plak.wait_for("/ commands");
-        plak.send(b"/exit\r");
-        let _ = plak.finish();
-    }
-
-    let connection = rusqlite::Connection::open(
-        plak::home::paths::PlakPaths::explicit(dir.path().to_path_buf()).product_database(),
-    )
-    .unwrap();
-    assert_eq!(
-        connection
-            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        0,
-        "presentation-only launches must not become resume candidates"
-    );
-    let sessions_dir =
-        plak::home::paths::PlakPaths::explicit(dir.path().to_path_buf()).sessions_dir();
-    let event_logs = std::fs::read_dir(&sessions_dir)
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .ends_with(".events.jsonl")
-        })
-        .count();
-    assert_eq!(
-        event_logs, 0,
-        "fresh shells must not create orphan event logs"
-    );
-}
-
-/// `plak resume` (and `plak --resume`) must open the TUI directly on the
-/// cwd-scoped session picker. The CLI used to send the `/resume` request to
-/// the host without marking it outstanding in the TUI, so the reply was
-/// dropped and the operator landed on an empty "not ready · `resume_picker`"
-/// shell.
-#[test]
-fn plak_resume_opens_the_session_picker_on_first_frame() {
-    for args in [&["resume"][..], &["--resume"][..]] {
-        let dir = isolated_home_dir();
-        let mut plak = ProductPty::spawn_with_args(dir.path(), args);
-        // First paint is a liveness bound (process start plus the picker
-        // frame), not a product deadline. The offline TUI first-frame wait
-        // is the same 45s; 15s has elapsed on a loaded lane before the
-        // debug binary was scheduled.
-        let frame = plak.wait_for_timeout("Resume session", Duration::from_secs(45));
-        assert!(
-            frame.contains("No sessions in this workspace yet."),
-            "{args:?} must open the cwd-scoped picker over an empty home\n{frame}"
-        );
-        assert!(
-            !frame.contains("resume_picker"),
-            "{args:?} must not leak the internal shell reason\n{frame}"
-        );
-        // Declining must not leave the product parked on
-        // `not ready · pick a session to resume` with `/attach` as the only
-        // way out. This home has no configured model, so the workspace has no
-        // attachable default and the launcher quits cleanly and says why.
-        plak.send(b"\x1b");
-        // Declining quits the process; under load the exit can land before a
-        // frame without the picker is captured, so wait on exit, not on paint.
-        let raw = String::from_utf8_lossy(&plak.finish()).into_owned();
-        assert!(
-            raw.contains("no session resumed, and this workspace has no attachable default"),
-            "{args:?} must state why it stopped instead of stranding the shell\n{raw}"
-        );
-        // The stream keeps every frame ever painted, so the check is ordering:
-        // the quit line is the last word, after the picker's own shell reason.
-        assert!(
-            raw.rfind("no session resumed, and this workspace has no attachable default")
-                > raw.rfind("pick a session to resume"),
-            "{args:?} must end on the quit line, not on the picker shell\n{raw}"
-        );
-    }
-}
-
-#[test]
-fn real_binary_tui_reaches_frame_and_accepts_input_without_stdio_lock_hang() {
-    let dir = isolated_home_dir();
-    let mut plak = ProductPty::spawn(dir.path());
-    plak.wait_until_stable("/ commands");
-    plak.send(b"x");
-    plak.wait_until_stable("│❯ x");
-    plak.send(b"\x03");
-    plak.send(b"/exit\r");
-    let _ = plak.finish_when_exited();
+    assert!(out.status.success());
+    assert!(stdout(&out).contains("host        Serve"));
+    assert_eq!(out.stderr, [] as [u8; 0]);
+    assert!(!home.join("state").exists());
 }
 
 #[test]
@@ -1949,7 +1537,7 @@ fn a_non_private_home_is_refused_with_its_fix_and_never_repaired() {
     let fix = format!("run `chmod 700 {}`", home.display());
     for args in [
         &["session", "list"][..],
-        &["config", "set", "tui.theme", "dark"][..],
+        &["config", "set", "skills.enabled", "false"][..],
     ] {
         let out = plak(args);
         assert_ne!(out.status.code(), Some(0), "{args:?}");

@@ -1,7 +1,7 @@
 """Shared pieces of the live smoke, soak, and job drivers.
 
 Everything here drives the real `plak` binary: `plak run`, `plak agent` over
-JSONL, and the TUI on a pseudo-terminal. Nothing talks to a provider directly.
+JSONL, with no presentation client. Nothing talks to a provider directly.
 A run gets a scratch `PLAK_HOME` under `target/live/`; OAuth logins are XDG
 state outside that home, so they are shared with the real ones (a token refresh
 during a run writes the real store). API-key routes copy the key installed by
@@ -12,20 +12,15 @@ from __future__ import annotations
 
 import dataclasses
 import collections
-import fcntl
 import hashlib
 import json
 import os
-import pty
 import queue
 import re
-import select
 import signal
 import stat
-import struct
 import subprocess
 import tempfile
-import termios
 import threading
 import time
 from collections.abc import Collection
@@ -680,7 +675,7 @@ def provider_reason_from(
 ) -> str | None:
     """Why this observation is a typed provider refusal, or None.
 
-    Covers JSONL turn failures, `plak run` stderr, TUI session-log terminals,
+    Covers JSONL turn failures, `plak run` stderr, durable session-log terminals,
     manual `/compact` refusals, and child job output. A kernel
     stream-validation failure is not decided here.
     """
@@ -2783,101 +2778,6 @@ class Agent:
 
     def signal(self, number: int) -> None:
         os.killpg(self.proc.pid, number)
-
-
-class Tui:
-    """The interactive TUI on a pseudo-terminal, driven by keystrokes."""
-
-    def __init__(
-        self,
-        env: Env,
-        repo: Path,
-        log: Path,
-        args: list[str] = (),
-        capture_dir: Path | None = None,
-        faults: str | None = None,
-    ):
-        self.lookup_faults = faults
-        child_env = {
-            **env.environ(faults=faults, capture_dir=capture_dir),
-            "TERM": "xterm-256color",
-        }
-        self.capture_dir = env.capture_segments[-1]
-        self.log = log.open("wb")
-        self.pid, self.fd = pty.fork()
-        if self.pid == 0:
-            os.chdir(repo)
-            os.execve(str(env.binary), [str(env.binary), *args], child_env)
-        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
-        self.screen = b""
-        self._quit_output: bytearray | None = None
-
-    def pump(self, seconds: float) -> None:
-        deadline = time.monotonic() + seconds
-        while time.monotonic() < deadline:
-            ready, _, _ = select.select([self.fd], [], [], 0.1)
-            if ready:
-                try:
-                    chunk = os.read(self.fd, 65536)
-                except OSError:
-                    return
-                self.log.write(chunk)
-                self.screen = (self.screen + chunk)[-200_000:]
-                if self._quit_output is not None:
-                    self._quit_output.extend(chunk)
-
-    def type(self, text: str) -> None:
-        for char in text:
-            os.write(self.fd, char.encode())
-            self.pump(0.01)
-
-    def key(self, sequence: bytes) -> None:
-        os.write(self.fd, sequence)
-        self.pump(0.2)
-
-    def wait_until(self, predicate, timeout: float) -> bool:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            self.pump(0.5)
-            if predicate():
-                return True
-            failure = lookup_failure(
-                self.screen.decode(errors="replace"), getattr(self, "lookup_faults", None)
-            )
-            if failure:
-                self.quit()
-                raise ScenarioFailure(failure[1], f"TUI startup: {failure[0]}")
-        return False
-
-    def quit(self, timeout: float = 30) -> int | None:
-        # The screen tail can roll over; collect only bytes received after Ctrl+Q.
-        self._quit_output = bytearray()
-        try:
-            self.key(b"\x11")  # Ctrl+Q
-            confirmed = False
-            deadline = time.monotonic() + timeout
-            while time.monotonic() < deadline:
-                self.pump(0.2)
-                # Quit asks while a turn, an agent or a background process still
-                # runs (spec 02 §5.3). Focus starts on Quit, so Enter confirms;
-                # Right would move onto Cancel.
-                if not confirmed and b"Quit plak?" in self._quit_output:
-                    confirmed = True
-                    time.sleep(0.8)
-                    try:
-                        os.write(self.fd, b"\r")
-                    except OSError:
-                        pass
-                pid, status = os.waitpid(self.pid, os.WNOHANG)
-                if pid:
-                    self.log.close()
-                    return os.waitstatus_to_exitcode(status)
-            os.kill(self.pid, signal.SIGKILL)
-            os.waitpid(self.pid, 0)
-            self.log.close()
-            return None
-        finally:
-            self._quit_output = None
 
 
 def table(results: list[Result]) -> str:

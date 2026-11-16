@@ -110,6 +110,31 @@ fn current_and_previous_documents_preserve_every_transcript_row_type() {
 }
 
 #[test]
+fn carry_files_are_private_and_never_overwritten() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let root = tempfile::tempdir().unwrap();
+    let paths = crate::home::paths::PlakPaths::explicit(root.path().join("home"));
+    fs::create_dir(paths.home()).unwrap();
+    let path =
+        crate::carry::new_carry_file(&paths, "5f0e2a43-7d3c-4c1e-9a55-4b1f7f0c9a11").unwrap();
+    let dir = path.parent().unwrap();
+    assert_eq!(dir, paths.home().join("carry"));
+    assert_eq!(
+        fs::metadata(dir).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    let document = sample_document();
+    write_document(&path, &document).unwrap();
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert!(write_document(&path, &document).is_err());
+    let read = read_document(&path).unwrap();
+    assert_eq!(read.source.session_id, document.source.session_id);
+}
+
+#[test]
 fn current_and_previous_documents_carry_send_times_and_process_commands() {
     use plakous_host_protocol::views::transcript::{ProcessNotice, ProcessOutcome};
     let dir = tempfile::tempdir().unwrap();
@@ -204,7 +229,10 @@ fn published_export_survives_directory_sync_failure() {
     })
     .unwrap();
     let published = read_document(&path).unwrap();
-    assert_eq!(published.source(), document.source());
+    assert_eq!(
+        (&published.source.session_id, &published.source.state_key),
+        (&document.source.session_id, &document.source.state_key)
+    );
     assert!(write_document(&path, &document).is_err());
 }
 

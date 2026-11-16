@@ -73,7 +73,7 @@ pub type HostWorker<P = plakous_host_protocol::Core> = (
     HostWorkerHandle,
 );
 
-/// Spawn host worker thread and return channels for the TUI.
+/// Spawn host worker thread and return channels for the client.
 ///
 /// # Errors
 /// Refuses a worker startup or initial attachment failure before returning usable
@@ -155,7 +155,7 @@ pub(super) fn await_host_startup<P: plakous_host_protocol::ProtocolExtension>(
 
 /// Spawn the single Plak product controller before expensive provider work.
 ///
-/// The returned channels are immediately usable by the TUI. The controller
+/// The returned channels are immediately usable by the client. The controller
 /// publishes activity while discovery/attachment runs, then transfers the same
 /// action receiver to either the one canonical runtime host or the shell host.
 pub fn spawn_deferred_host<P: plakous_host_protocol::ProtocolExtension>(

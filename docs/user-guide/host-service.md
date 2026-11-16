@@ -284,7 +284,7 @@ Before an upgrade that changes the runner protocol, finish or stop all
 home-local background jobs using the old build. This build uses runner
 protocol 9 and does not see another native protocol's home-local daemon or its jobs,
 including during the embedded startup check. Settle those jobs before
-installing the new build and using `/reload`; reloading does not transfer them
+installing and restarting onto the new build; restart does not transfer them
 across protocol directories. This is separate from the coordinated host
 upgrade described above, whose runner qualification checks the destination.
 

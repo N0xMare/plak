@@ -594,7 +594,7 @@ fn ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement(
 }
 
 #[test]
-fn a_web_face_and_a_terminal_share_one_hosts_transcript() {
+fn two_web_faces_share_one_hosts_transcript() {
     let fixture = Fixture::new(&json!({
         "version": 1,
         "repeat_last_step": true,
@@ -617,11 +617,39 @@ fn a_web_face_and_a_terminal_share_one_hosts_transcript() {
         },
     );
     let listed = response(&mut socket, 901);
-    let session = listed["ok"]["rows"][0]["session"].as_str().unwrap();
-    let mut terminal = super::offline_tui::attach_to_host(&fixture.root, session);
-    terminal.wait_ready();
-    terminal.send(b"a prompt from the terminal\r");
-    terminal.wait_screen("both attachments see this answer");
+    assert!(listed["ok"]["rows"][0]["session"].as_str().is_some());
+    let mut other = upgrade(&web, &cookie);
+    send(
+        &mut other,
+        &ClientFrame::Hello(Hello {
+            proto: WIRE_VERSION,
+            binary_id: "second-web-test".into(),
+            caps: Vec::new(),
+        }),
+    );
+    assert_eq!(next_frame(&mut other)["frame"], "welcome");
+    let other_attachment = attach(&mut other, &root, 1);
+    send(
+        &mut other,
+        &ClientFrame::Request {
+            id: 901,
+            op: Op::Intent {
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
+                attachment: other_attachment,
+                intent: SessionIntent::Prompt(Draft::from("a prompt from the other attachment")),
+                blobs: Vec::new(),
+            },
+        },
+    );
+    assert_eq!(response(&mut other, 901)["ok"]["answer"], "accepted");
+    loop {
+        if next_frame(&mut other)
+            .to_string()
+            .contains("both attachments see this answer")
+        {
+            break;
+        }
+    }
     loop {
         let frame = next_frame(&mut socket);
         if frame
@@ -644,8 +672,15 @@ fn a_web_face_and_a_terminal_share_one_hosts_transcript() {
         },
     );
     assert_eq!(response(&mut socket, 902)["ok"]["answer"], "accepted");
-    terminal.wait_screen("a prompt from the web");
-    terminal.quit();
+    loop {
+        if next_frame(&mut other)
+            .to_string()
+            .contains("a prompt from the web")
+        {
+            break;
+        }
+    }
+    drop(other);
     send(
         &mut socket,
         &ClientFrame::Request {

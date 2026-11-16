@@ -90,12 +90,12 @@ regular file, or the lookup fails closed. Neither is a credential.
 
 `[turn] auto_continue` defaults to `true`. An idle interactive
 root continues when background processes finish or child results or questions arrive after a 2-second quiet
-window. User prompts take precedence; Esc pauses auto-continue until your next
+window. User prompts take precedence; interrupt pauses auto-continue until your next
 prompt. There is no limit on consecutive wake turns; each needs a new completion
 or unread child result or question. Recovery and
 paused restored queues prevent waking. JSONL remains explicit-prompt only; `plak run` follows its own until-idle
 policy and ignores this key. A `plak run` wake that does not fit the window still
-pauses auto-continue on the session, so opening it later in the TUI starts paused
+pauses auto-continue on the session, so opening it later through the host starts paused
 until the next prompt. Set `plak config set turn.auto_continue false`
 to disable it immediately, including while children are running. The attached
 host re-reads this home-only flag; no tree quiescence or reattachment is needed.
@@ -120,8 +120,8 @@ for a background process. Set them with
 These bounds bind when a session is created or explicitly rebound. An exact
 resume keeps its stored bounds; editing `[jobs]` does not change an existing
 session's process tool descriptions or running jobs. Observation hints on tool
-calls control how long to wait for output, not these lifetime bounds. Ctrl+B
-and JSONL `background` promote one process, not future calls.
+calls control how long to wait for output, not these lifetime bounds.
+JSONL `background` promotes one process, not future calls.
 
 ## API Input Window
 
@@ -194,8 +194,8 @@ on the runner; the host's home is never used. At most 64
 skills are listed, and the listing stops at 16 KiB; a skill left out is named
 in the notice and cannot be loaded.
 
-The listing is fixed for the session, like `AGENTS.md`: `/resume` and `/reload`
-keep it, and a new session, a spawned child or `/fork` lists the skills as they
+The listing is fixed for the session, like `AGENTS.md`: exact resume
+keeps it, and a new session, a spawned child or fork lists the skills as they
 are then. A skill's own files are read when used, so edits to them apply at
 once. Skills that are not valid are named in one notice when the session (or
 fork, or child) is created, and a notice already shown for the session is not
@@ -204,8 +204,8 @@ repeated.
 Turn skills off with `plak config set skills.enabled false`: new sessions then
 have no skills and no `Skill` tool. The setting is fixed into each session
 when it starts. Resuming a session keeps its tools whatever the setting is
-now. Forking it (`/fork`, `/fork-then-compact`) or switching it to another
-model or account (`/rebind`, `/agents <profile>`, **Fork now**) also keeps
+now. Forking it or switching it to another
+model or account through explicit host operations also keeps
 its skills on or off, including a switch between Claude and another provider
 and back: a session started with skills keeps them, and one started without
 them, or before Plak had skills, never gains them. Start a new session to use
@@ -239,19 +239,18 @@ readiness or live catalog availability. When the session binds, the selected
 account must be ready (`plak status`) and its current catalog must admit the
 model, effort and composition.
 
-The Agents tab's **Set as default** writes a profile's templates and points
-the root and working set at them for new sessions. **Switch now** and
-**Fork now** change the attached session instead; `/agents <profile>` opens
-that choice. `/rebind` carries the conversation under the current configuration
-and login. See [agent profiles](tui.md#agent-profiles).
+Host profile operations distinguish saving a default for new sessions from
+switching or forking an attached session. Defaults never replace the exact
+recorded binding during resume. See [client integration](integrating.md) for
+the wire boundary and metadata.
 
-For the typed Python SDK, select `py-sdk` in `/settings` or pass
+For the typed Python SDK, pass
 `--composition py-sdk` to `plak run` or `plak agent`. To save it for the root,
 set `composition = "py-sdk"` in `[root]` beside the root `agent` name.
 The SDK is single-agent and core-tools-only; do not put `py-sdk` in an agent
 template. Cells have fresh globals; save JSON with `state.put` to retain it.
 Session export v13 preserves those named values and the selection. V12 imports
-retain them; v10 and older exports are refused.
+retain them; v11 and older exports are refused.
 
 Changing the root template or applying a profile clears the saved composition
 override; the new template supplies its own composition.
@@ -383,8 +382,7 @@ plak mcp enable github --template root-agent
 ```
 
 `plak mcp list` shows every server, the templates that enable it and any
-secret it still needs; `/mcp` in the TUI shows the same plus what the current
-session bound. See the CLI reference for every option.
+secret it still needs. Host clients can request the current session's MCP view. See the CLI reference for every option.
 
 Secrets are never written in `config.toml`. Store one under a name and refer
 to the name:
@@ -425,12 +423,10 @@ server that later changes a tool answers that tool with an error telling you to
 start a new session. The root's tools are frozen the same way: editing the
 `[root] agent` template's `tools`, a `[tools.*]` table or an `[mcp_servers.*]`
 table changes newly bound sessions, not an exact resume or a profile Switch now.
-Embedded `/new` retains the current tools; hosted `/new` binds the host's
-default profile afresh. A session keeps its tools when you switch models: a
+A new hosted session binds the host's default profile afresh. A session keeps its tools when you switch models: a
 session started on the `[root] agent` template's account and model has the template's tools for its
 whole life, one started on any other model has none, and a switch to a model
-whose route cannot run one of the session's tools is refused (use `/new` or
-start a new session on that model). A tool listed through `mcp:<id>` whose input schema Plak cannot represent
+whose route cannot run one of the session's tools is refused (start a new session on that model). A tool listed through `mcp:<id>` whose input schema Plak cannot represent
 is left out with a notice in the transcript, on `plak run` stderr and as a
 `tool.omitted` record in the session log; naming it as `mcp:<id>/<tool>`
 refuses the session instead. MCP results reach the model marked as untrusted
@@ -537,7 +533,7 @@ trusted, the project config is skipped entirely and `plak config show` marks
 it `untrusted — ignored`.
 
 Orchestration controls (`[orchestration]`), `turn.auto_continue`,
-`tui.reload_requests`, `mcp.client_id_metadata_url`, `[host]`, `[runners]` and
+`host.reload_requests`, `mcp.client_id_metadata_url`, `[host]`, `[runners]` and
 `[web]` always come from your home config. Project values for them are ignored
 with a warning, even after trust. Use
 `plak config set <key> <value> --scope user` for supported scalar keys;
@@ -555,8 +551,8 @@ Writes pick a side too. `plak config set` writes `~/.plak/config.toml`; add
 instead — Plak stores only the keys that differ from your global file, so the
 project config stays a readable delta. Setting a key the project already
 decides asks you for `--scope project` rather than silently absorbing the
-project's value into your global file. Settings you change inside the TUI
-follow the same rule: in a trusted project they land in the project config.
+project's value into your global file. Confirmed host settings writes follow
+the same project trust and scope rules.
 
 Project configuration never moves your state: sessions, credentials,
 databases, logs and cache all stay under `~/.plak`.
@@ -587,25 +583,12 @@ The built-in tree is one level deep. For a deeper one, give a template its own
 `[orchestration] max_depth` to 2 (see
 [Agents and orchestration](agents-and-orchestration.md)).
 
-The Agents tab lists `codex-default`, `claude-default`, `grok-default` and
-`multi-default` even when `~/.plak/profiles/` is empty. `multi-default` runs
-the root and reviewer on Claude (`claude-opus-5-5`, high), the worker on Codex
-(`gpt-6.1-sol`, medium, fast mode) and the researcher on Grok
-(`grok-4.7-build-fast`, medium). It loads with only the Claude login; spawning
-the worker or researcher without its login is refused with the `plak login`
-to run, and `plak doctor` names each such role. **Set as default** writes
-`{name}-root`, `{name}-worker`, `{name}-reviewer`, and `{name}-researcher`
-under `~/.plak/agents/` (a file you already have under one of those names is
-kept as it is) and points `[root] agent` and `[roster] working_set` at those
-files, which is how new sessions pick a profile. **Switch now** and **Fork now**
-leave the default alone; embedded **Use now** sets the default only when the
-home has none yet, and hosted Use now never changes it. A refusal
-before dispatch changes nothing. A stop after publication can leave a saved,
-resumable successor without attaching it or applying the profile files; the
-notice names that session and its `/resume` command. Fork now branches the current session onto that profile,
-briefs the new session as that profile with its own sub-agent cards, and
-returns to the transcript; the previous session keeps its own cards. See
-[the TUI guide](tui.md#agent-profiles).
+The host profile catalog lists `codex-default`, `claude-default`, `grok-default`
+and `multi-default` even when `~/.plak/profiles/` is empty. Clients read the
+catalog and use confirmed profile operations to set defaults or explicit
+session actions to switch/fork. Saving a default writes the profile's template
+files and root/working-set references for future sessions; it does not mutate
+the recorded binding of an existing session.
 
 A file you add at `~/.plak/profiles/<name>.toml` is listed after the built-ins.
 It has exactly two keys:
@@ -617,14 +600,14 @@ working_set = ["grok-worker", "grok-reviewer"]
 
 The templates it names must already exist. A file with another key, a missing
 template, or a built-in's name (`codex-default`, `claude-default`,
-`grok-default`, `multi-default`) is not listed; the Agents tab shows a line saying why. Copy into a **new, empty** `PLAK_HOME`:
+`grok-default`, `multi-default`) is not listed; the host profile view reports why. Copy into a **new, empty** `PLAK_HOME`:
 copying over an existing home leaves your old templates beside the preset's,
 and files written for an older grammar will fail the current loader.
 
 ## How long a turn may run
 
 A turn has no time limit. It runs until the model answers, until you interrupt
-it (Esc in the TUI, Ctrl-C for `plak run`), or until it reaches its round cap.
+it (a wire interrupt, or Ctrl-C for `plak run`), or until it reaches its round cap.
 Every model call is one round, and polling a long build costs one round per
 poll. At the cap, the model gets one more round with no tools and is told to
 summarize what it did and what it could not finish. The default cap is 512
@@ -644,8 +627,6 @@ running keeps the cap it started with.
 Plak refuses to start on a config file it did not fully understand, and the
 message names the problem. The common ones:
 
-- **`unknown config key: tui.reading_width`** — the key was deleted. Delete the
-  line. The same goes for `tui.show_timestamps`.
 - **`unknown config key: <key>; run plak config show for the valid keys`** — a
   typo, or a key that moved into a template file.
 - **`[root] agent names no template file root-agent.toml`** — the pointer and

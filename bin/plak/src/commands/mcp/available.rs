@@ -521,7 +521,7 @@ fn probe_inputs(paths: &PlakPaths, id: &str) -> CliResult<(String, std::path::Pa
     Ok((rendered, workspace))
 }
 
-/// The TUI's read-only `/mcp` view: the configured servers, which of them
+/// An external client's read-only `/mcp` view: the configured servers, which of them
 /// the current session bound and with how many tools, what its bind left
 /// out, and the CLI commands that change any of it.
 pub(crate) fn session_overview(

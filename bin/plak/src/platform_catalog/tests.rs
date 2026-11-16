@@ -234,7 +234,7 @@ fn api_root_defaults_seed_the_same_session_binding_as_explicit_selection() {
     }
 }
 
-/// A TUI/`plak agent` new session seeded from an OpenAI API root template
+/// A host/`plak agent` new session seeded from an OpenAI API root template
 /// on `plakous-default` binds the composition `platform::api_composition`
 /// decides (native-ptc on a CodeModeOnly row), as `plak run` does.
 #[test]

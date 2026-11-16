@@ -7,33 +7,6 @@ use crate::surface_protocol::HostEvent;
 use plakous_host_protocol::status::HostPhase;
 
 #[test]
-fn a_wire_decoded_settings_save_keeps_terminal_preferences() {
-    let (_root, paths) = PlakPaths::isolated_test_home();
-    let config = ProductConfig::update_user(&paths, |config| {
-        config.theme = crate::product_config::ProductTheme::CatppuccinLatte;
-        config.tui_mouse = false;
-        config.scroll_lines = 9;
-        config.show_thinking = false;
-        config.group_tool_calls = false;
-        config.reduced_motion = true;
-        Ok(())
-    })
-    .unwrap();
-    let expected = settings_view(&config).tui;
-    let mut update = settings_view(&config);
-    update.product.compaction = !config.compaction_enabled;
-    let update = serde_json::from_slice(&serde_json::to_vec(&update).unwrap()).unwrap();
-    let (events, _observed) = host_event_sink();
-    let saved = save_settings(&paths, update, &[], &events).unwrap();
-    assert_eq!(settings_view(&saved).tui, expected);
-    assert_eq!(
-        settings_view(&ProductConfig::load(&paths).unwrap()).tui,
-        expected
-    );
-    assert_ne!(saved.compaction_enabled, config.compaction_enabled);
-}
-
-#[test]
 fn settings_cannot_clear_an_existing_root_with_an_incomplete_binding() {
     let (_root, paths) = PlakPaths::isolated_test_home();
     let mut config = ProductConfig::default_product();
@@ -445,6 +418,25 @@ fn child_wake_reads_only_config_and_observes_immediate_changes() {
     assert_eq!(surface.child_wake_enabled(), None);
 }
 use super::*;
+
+#[test]
+fn a_settings_notice_names_only_what_changed() {
+    let before = ProductConfig::default_product();
+    let mut after = before.clone();
+    after.compaction_enabled = !before.compaction_enabled;
+    assert_eq!(
+        settings_saved_note(&before, &after, false),
+        "settings saved · auto compaction"
+    );
+    assert_eq!(
+        settings_saved_note(&before, &before, false),
+        "settings saved · nothing changed"
+    );
+    assert_eq!(
+        settings_saved_note(&before, &before, true),
+        "settings saved · defaults (next launch)"
+    );
+}
 use crate::surface_protocol::{AgentAcknowledgement, SurfaceIntent, UserAction};
 use plakous_hosted::runtime::{ShellHostConfig, note_idle_only};
 use plakous_hosted::sessions::SessionRecord;
@@ -541,7 +533,7 @@ fn every_product_intent_uses_immutable_phase_facts_and_bounded_observations() {
             let intent = match intent_index {
                 0 => SurfaceIntent::OpenConfigFile,
                 1 => SurfaceIntent::OpenSettings,
-                2 => SurfaceIntent::SaveSettings(settings_view(&config).into()),
+                2 => SurfaceIntent::SaveSettings(settings_view(&config)),
                 3 => SurfaceIntent::OpenUsage,
                 _ => unreachable!(),
             };
@@ -799,7 +791,7 @@ fn refused_product_save_returns_no_binding_effect_and_preserves_the_file() {
     update.product.default_model = Some("unadmitted-model".into());
     let (events, received) = host_event_sink();
     let effect = ProductSurface::new(paths.clone()).dispatch(
-        SurfaceIntent::SaveSettings(update.into()),
+        SurfaceIntent::SaveSettings(update),
         SurfaceFacts {
             session: None,
             phase: SurfacePhase::Busy,
@@ -835,53 +827,6 @@ fn roster_shared_root_config() -> ProductConfig {
     config.root_agent = Some("qa".to_owned());
     config.working_set = plakous_hosted::agent_tree_protocol::WorkingSet::parse(["qa"]).unwrap();
     config
-}
-
-/// A settings notice names the row the operator actually changed.
-///
-/// The fixed line said `theme applied` after every toggle, so flipping
-/// `Show thinking blocks` reported a theme change that had not happened
-/// and had in fact just been reverted.
-#[test]
-fn a_settings_notice_names_only_what_changed() {
-    let before = ProductConfig::default_product();
-
-    let mut after = before.clone();
-    after.show_thinking = !before.show_thinking;
-    let note = settings_saved_note(&before, &after, false);
-    assert_eq!(note, "settings saved \u{b7} show thinking blocks");
-    assert!(
-        !note.contains("theme"),
-        "a toggle must not report a theme change: {note}"
-    );
-
-    let mut themed = before.clone();
-    themed.theme = if before.theme == crate::product_config::ProductTheme::DefaultDark {
-        crate::product_config::ProductTheme::DefaultLight
-    } else {
-        crate::product_config::ProductTheme::DefaultDark
-    };
-    assert_eq!(
-        settings_saved_note(&before, &themed, false),
-        "settings saved \u{b7} theme applied"
-    );
-
-    let mut both = themed.clone();
-    both.reduced_motion = !before.reduced_motion;
-    assert_eq!(
-        settings_saved_note(&before, &both, false),
-        "settings saved \u{b7} theme applied, reduced motion"
-    );
-
-    // A save that changed nothing says so rather than claiming a theme.
-    assert_eq!(
-        settings_saved_note(&before, &before, false),
-        "settings saved \u{b7} nothing changed"
-    );
-    assert_eq!(
-        settings_saved_note(&before, &before, true),
-        "settings saved \u{b7} defaults (next launch)"
-    );
 }
 
 #[test]
@@ -987,11 +932,7 @@ fn a_view_only_save_under_a_non_ready_root_applies_and_leaves_the_templates_alon
             default_effort: None,
             default_extra: None,
             composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
-            ..(crate::surface_protocol::SettingsUpdate::default()).product
-        },
-        tui: crate::tui_preferences::TuiPreferences {
-            theme: crate::surface_protocol::SettingsTheme::CatppuccinMacchiato,
-            ..(crate::surface_protocol::SettingsUpdate::default()).tui
+            ..(settings_view(&ProductConfig::default_product())).product
         },
     };
     let (events, rx) = host_event_sink();
@@ -1009,7 +950,6 @@ fn a_view_only_save_under_a_non_ready_root_applies_and_leaves_the_templates_alon
         HostEvent::Extension(SurfaceObservation::SettingsSaveFailed(_))
     )));
     let saved = ProductConfig::load(&paths).unwrap();
-    assert_eq!(saved.theme, seeded.theme);
     assert_eq!(saved.root_agent.as_deref(), Some("primary"));
     assert_eq!(saved.templates.len(), 1);
     assert_eq!(
@@ -1046,9 +986,8 @@ fn a_view_only_save_under_a_non_ready_root_applies_and_leaves_the_templates_alon
             default_effort: None,
             default_extra: None,
             composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
-            ..(crate::surface_protocol::SettingsUpdate::default()).product
+            ..(settings_view(&ProductConfig::default_product())).product
         },
-        ..crate::surface_protocol::SettingsUpdate::default()
     };
     let (events, rx) = host_event_sink();
     save_settings(&paths, identity, &catalog, &events);
@@ -1865,11 +1804,9 @@ fn settings_save_uses_exact_ready_catalog_not_effort_name_heuristics() {
                     unavailable_reason: None,
                 }]
                 .into_boxed_slice(),
-                ..(crate::surface_protocol::SettingsUpdate::default()).product
+                ..(settings_view(&ProductConfig::default_product())).product
             },
-            ..crate::surface_protocol::SettingsUpdate::default()
-        }
-        .into(),
+        },
     )))
     .unwrap();
     tx.send(UserAction::Extension(SurfaceIntent::SaveSettings(
@@ -1886,11 +1823,9 @@ fn settings_save_uses_exact_ready_catalog_not_effort_name_heuristics() {
                     unavailable_reason: None,
                 }]
                 .into_boxed_slice(),
-                ..(crate::surface_protocol::SettingsUpdate::default()).product
+                ..(settings_view(&ProductConfig::default_product())).product
             },
-            ..crate::surface_protocol::SettingsUpdate::default()
-        }
-        .into(),
+        },
     )))
     .unwrap();
     drop(tx);
@@ -1960,14 +1895,14 @@ fn a_view_only_settings_save_leaves_the_root_template_alone() {
     requested.composition = Some(plakous_hosted::binding::CompositionSelection::FollowCatalog);
     assert!(
         !settings_save_changes_root_binding(&current, &requested),
-        "a theme-only save carries no identity change"
+        "a compaction-only save carries no identity change"
     );
 
     let mut config = current.clone();
     if settings_save_changes_root_binding(&current, &requested) {
         commit_root_template(&mut config, requested).unwrap();
     }
-    config.theme = crate::product_config::ProductTheme::CatppuccinMacchiato;
+    config.compaction_enabled = !current.compaction_enabled;
     assert_eq!(config.root_agent.as_deref(), Some("qa"));
     assert!(
         !config.templates.contains_key("default"),

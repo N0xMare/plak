@@ -11,7 +11,7 @@ pub(crate) mod mcp_edit;
 mod policy;
 mod publication;
 mod readiness;
-#[cfg(any(test, feature = "tui"))]
+#[cfg(test)]
 pub(crate) mod settings;
 mod templates;
 mod toml_file;
@@ -41,8 +41,8 @@ pub use plakous_hosted::binding::{
 };
 
 pub use load::{
-    ConfigSaveError, ConfigValueOrigin, ConfigWriteScope, ProductConfig, ProductTheme,
-    ProjectConfigSource, no_native_protocol_accounts, template_accounts,
+    ConfigSaveError, ConfigValueOrigin, ConfigWriteScope, ProductConfig, ProjectConfigSource,
+    no_native_protocol_accounts, template_accounts,
 };
 
 pub use keys::{
@@ -52,9 +52,8 @@ pub use keys::{
 pub use policy::{
     AgentTemplate, CEILING_MAX_ATTEMPTS, CEILING_MAX_CHILDREN, CEILING_MAX_DEPTH,
     CEILING_MAX_MODEL_ROUNDS, CEILING_MAX_NODES, CEILING_REQUESTS_PER_ACCOUNT,
-    DEFAULT_MAX_MODEL_ROUNDS, DEFAULT_SCROLL_LINES, DefaultBinding, MAX_SCROLL_LINES,
-    MIN_SCROLL_LINES, MINTED_ROOT_TEMPLATE_NAME, SessionPolicy, TelemetryConfig,
-    topology_admission_probe, validate_template_name,
+    DEFAULT_MAX_MODEL_ROUNDS, DefaultBinding, MINTED_ROOT_TEMPLATE_NAME, SessionPolicy,
+    TelemetryConfig, topology_admission_probe, validate_template_name,
 };
 
 pub use readiness::{

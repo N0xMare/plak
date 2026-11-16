@@ -25,13 +25,7 @@ impl PartialEq for ProductConfig {
             && self.jobs_max_runtime_hours == other.jobs_max_runtime_hours
             && self.api_full_window == other.api_full_window
             && self.max_model_rounds == other.max_model_rounds
-            && self.tui_mouse == other.tui_mouse
-            && self.scroll_lines == other.scroll_lines
-            && self.show_thinking == other.show_thinking
-            && self.group_tool_calls == other.group_tool_calls
-            && self.reduced_motion == other.reduced_motion
             && self.reload_requests == other.reload_requests
-            && self.theme == other.theme
             && self.compaction_enabled == other.compaction_enabled
             && self.skills_enabled == other.skills_enabled
             && self.telemetry_max_bytes == other.telemetry_max_bytes

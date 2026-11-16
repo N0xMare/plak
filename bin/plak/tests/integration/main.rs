@@ -19,8 +19,6 @@ mod offline_e2e;
 #[cfg(feature = "test-hooks")]
 #[path = "support/offline.rs"]
 mod offline_support;
-#[cfg(feature = "test-hooks")]
-mod offline_tui;
 mod product_config_fixtures;
 mod product_doctor_contract;
 #[cfg(feature = "maintainer")]

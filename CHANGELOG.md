@@ -25,6 +25,18 @@ for one version bump, without native protocol compatibility.
   API with explicit selection; Mythos 5.2, GPT-6.1 Terra, GPT-6 Cyber and
   Rosalind stay `needs review`.
 
+- Remove the public terminal application, terminal resume/hidden launch flags,
+  clipboard features, screen goldens and story/live-TUI tooling. Bare invocation
+  prints help without starting a host. Server catalogs, settings metadata,
+  reload/upgrade, credential resolution and explicit session resume remain;
+  move the operational reload-request switch to `host.reload_requests`.
+  Clients are independently maintained against the wire protocol; the Python
+  socket example is test-only support.
+
+- Remove terminal-only orchestration-on-reload. Existing sessions retain their
+  frozen epoch; new sessions and explicit profile switches use current settings.
+  Startup still settles already-persisted orchestration carry intents.
+
 - Separate host catalog and attachment vocabulary from terminal adapters, and
   run catalog admission, settings defaults and compaction-view rebuild checks
   independently of terminal rendering.
@@ -363,9 +375,7 @@ for one version bump, without native protocol compatibility.
   7 (runner protocol unchanged); welcome advertises `max_request_bytes: 278528`,
   with the enlarged request allowance restricted to template/profile puts.
   Remote `SaveSettings`, `ApplyProfile {apply:default}` and
-  `RefreshUsageCredential` are refused; the public socket TUI marks these
-  controls unavailable, names host CLI remedies and visibly handles late
-  refusals. Terminal-local preferences remain editable. Public API additions:
+  `RefreshUsageCredential` are refused. Public API additions:
   `plakous-hosted` exposes `HostSessions::{host_request_timeout,
   host_request_refused, host_disconnect}` and `HostRequestContext.request_id`;
   `plakous-host-protocol` adds `ProtocolExtension::host_request_size_allowed`,
@@ -504,23 +514,18 @@ for one version bump, without native protocol compatibility.
 - Include host/web serving in default builds and qualify a transparent
   `host connect --stdio` bridge. Explicit local auto-start uses a curated
   environment, detached bounded logging and five-minute empty-service exit;
-  cross-key home guards prevent sibling hosts. Bare terminal launch is unchanged.
+  cross-key home guards prevent sibling hosts. Bare invocation prints help without starting a host.
 
 - Let the serving host announce and refuse requested reloads without a
   connected terminal; a client never consumes the host's request channel.
 
-- Preserve current terminal preferences when a stale product configuration
-  snapshot is saved; explicit terminal-key edits still apply under the lock.
 
-- Refresh hosted-terminal preferences on every UI relaunch, including resume
-  and rebind.
 
-- Persist terminal preference resets locally and serialize configuration
-  publication so independent terminal and host settings edits are merged.
 
-- Preserve terminal-local theme and reading preferences across wire settings
-  saves and reconnects. Automatic reattachment also keeps an unresolved
-  new-session request's identity until the operator retries or selects a session.
+
+- Serialize configuration publication so independent operator and host settings edits are merged.
+
+- Preserve an unresolved new-session request identity across reconnects until the operator retries or selects another session.
 
 - Add the portable internal runner dial core: Noise IK, pairing proofs, offers,
   fingerprint confirmation and bounded encrypted transport framing, without a product caller.
@@ -652,17 +657,9 @@ an export.
 
 ### Plak
 
-- When this home's `plak host` answers, the TUI uses its local socket.
-  Terminal and web attachments share a session; `/new` switches only the
-  terminal, quit detaches, `/stop` stops the attached session, and `/reload`
-  replaces only the client. With no host it still embeds; a wire-version
-  mismatch refuses with a stop-host/run-its-build remedy.
 
-- Host-mode attachment refusals preserve the previous attachment and show
-  the holder's remedy. Discovery enforces same-user socket checks and waits
-  through host start/stop windows. Requested reloads settle even across an
-  embedded-to-host transition or with two terminal faces, and an unanswered
-  `/new` reuses its identity on the next explicit retry after reconnect.
+
+- Host-mode attachment refusals preserve the previous attachment and name the holder's remedy. Discovery enforces same-user socket checks and waits through host start/stop windows. Requested reloads remain host-owned without a connected client.
 
 - `plak host` runs root and child process sessions on the home-local runner:
   jobs survive a host crash or signal handoff, the next host sweeps and
@@ -673,21 +670,10 @@ an export.
   closing before its inspection Hello. An idle handoff does not revive a
   cancelled turn from a previous host.
 
-- The TUI moves a focus marker through transcript items with `Alt+Up` and
-  `Alt+Down` (then `Up` and `Down`). `Enter` or `Space` folds the focused
-  block, `Alt+C` copies that item, `Esc` leaves the marker without stopping a
-  turn, and typing returns to the composer.
-- The TUI speaks wire v2 to its session: each round's supervisor serves a
-  local-face connection of the session's host service over a socket pair
-  in the process, and the TUI is a `plakous_host_protocol::client` of it.
-  Only two process-local signals stay beside the frames: the
-  abandon-and-release request on the session's mailbox, set once the
-  session has its verdict on everything the TUI sent, and the launcher's
-  `/new` and resume publication cells. The in-process face is gone. The
-  TUI's sends never wait for the session: a refusal comes back later, and
-  the TUI restores the draft and names the reason (the role-table row of a
-  role refusal, or that no answer came and the session may still run it).
-  A round whose connection fails releases its session and joins it.
+
+
+
+
 - A tree's genesis roster reads the session's own workspace: a trusted
   project's templates in its `[roster] working_set` are on the root's spawn
   menu. Before, the roster read the home alone, so a trusted project's
@@ -701,7 +687,7 @@ an export.
   answers the same session), and attach any, which opens a dormant one in its
   own workspace. An idle session releases after 300 s. A row names a tree's
   other custody holder only when it is not proven gone, so a crashed host's
-  or TUI's stale custody reads free. Its custody identity and the login
+  or departed client's stale custody reads free. Its custody identity and the login
   shell's `PATH` are captured once at start (not yet given to its sessions'
   tools); a `SIGTERM` hands every resident session off as a planned handoff
   and stops it within 60 s, and the next host's start scan opens each
@@ -709,7 +695,7 @@ an export.
   a held loss under `resume_after_loss = "continue"`), so it continues with
   no client attached. `release_session` detaches every attachment of a
   session and releases it now unless something else keeps it resident, so a
-  desk TUI can take it; a session already opening or releasing settles
+  another attached client can take it; a session already opening or releasing settles
   first, so `released` means another face can open it. `stop_session` stops
   the session the connection is attached to, as on a connection that serves
   one session, and is answered even when that attachment ends first. A
@@ -799,14 +785,8 @@ an export.
   the route and model named. New sessions record a registry descriptor that
   includes `view_image`; no schema revision or state-key change. Codex native
   Code Mode does not offer `view_image`.
-- The Agents tab's profile dialog offers **Switch now**: this session's root
-  continues as the profile on its own line while its sub-agents and background
-  processes keep running; future root spawns use the profile's cards and every
-  running sub-agent keeps its own. It needs an idle root and an empty queue.
-  **Fork now** is unchanged and now comes second.
-- `/clear` is replaced by `/new`, which starts a new session in the same TUI; the
-  previous session is untouched and resumable. With running agents or background
-  processes, `/new` asks first and offers to stop that work before switching.
+- Add explicit profile switching: the session root continues on its own line while sub-agents and background processes keep running. Future root spawns use the selected profile's cards; running sub-agents keep their frozen roster. Switching requires an idle root and empty queue.
+
 - Claude `Read` and pi `read` results cut to fit the context keep whole leading
   lines and say where to continue, like Grok's read.
 - Agent Skills: `SKILL.md` folders under `<workspace>/.agents/skills` and
@@ -879,9 +859,8 @@ an export.
   pause it already recorded) is closed as abandoned,
   never rejoined, and a pending wake's mail returns unread for the
   continuation. Mail sent to a sub-agent still being reopened
-  waits as for a busy slot and stays durable until its recovery settles. `--resume-tree`, the TUI resume
-  row and the `Resume agents first` copy are gone, and the background
-  recovery pass no longer holds a tree-wide lock.
+  waits as for a busy slot and stays durable until its recovery settles. The
+  background recovery pass does not hold a tree-wide lock.
 - Recovery is Plak's job, not the model's: `recover_agent` leaves every
   agent's tools. `list_agents` now says the host is recovering a child whose
   session recovery is pending, with no remedy to call. You retry one child
@@ -922,16 +901,14 @@ an export.
   tree result that name the same `child-result:` call stay two rows in key
   order; the result used to overwrite the imported row and break the view's
   key order. A repaired presentation now keeps one error notice per cause in
-  that transcript and logs the cause to `plak.log`, and the TUI's note for a
-  refused snapshot survives the resync that answers it.
+  that transcript and logs the cause to `plak.log`.
 - A reload request (`plak session reload`) belongs to its session. An in-place
   switch to another session (`/new`, `/resume`, a fork or a rebind) settles
   the requests the host holds for the session it leaves as `not taken: the
-  session switched` before it completes; before, one the TUI had already taken
-  could run `/reload` on the session it switched to.
+  session switched` before it completes.
 - Rows that share a call id are kept apart everywhere: importing a document
   keeps every row, and a new tree result that reuses an imported result's call
-  id shows as its own row while the turn runs, in the host and in the TUI,
+  id shows as its own row while the turn runs, in the host views,
   instead of briefly replacing the imported one. A carried session's first save
   keeps the notices recorded before it (such as the carried-forward note) as
   notices with their own identities, after the imported rows. A repair or
@@ -994,7 +971,7 @@ an export.
   attach snapshot of every state, the root baseline, pending approvals and
   the holding credential wait, and bounded per-attachment queues that drop
   a slow attachment with `resync_required` instead of blocking the session.
-  The TUI and `plak agent` JSONL v1 are its in-process faces
+  Typed host attachments and `plak agent` JSONL v1 share its loop
   (`host_service::face`, `FaceReceiver`): their intents go out on the
   session's own mailbox sender tagged with their attachment, and their
   observations pass through the service, so they receive exactly what they
@@ -1058,7 +1035,7 @@ an export.
   of its own. A wire v2 child attachment's interrupt now runs on the tree
   (`ProductTopologyRuntime::executor`), not behind the root session's
   mailbox, and is taken whatever the root runs.
-- The TUI is an attachment of its session's host service: a face's
+- An attached client uses its session's host service: a face's
   intents pass through the service (`host_service::FaceSender`,
   `HostService::attach_face`), so its agent view is opened, held and
   released there as any attachment's and its queue holds the root and the
@@ -1137,18 +1114,9 @@ an export.
   the mailbox mirror is gone (`IntentSender::processes`,
   `background_processes`, `mark_promptable`; `IntentReceiver::set_processes`,
   `set_background_processes`; the `FaceSender` forwards).
-- The TUI's last direct product reads move behind the protocol: the
-  reload target is the session host's `probe_reload` (answered by
-  `reload_probed` with the target and the host build's refusal, or
-  `reload_probe_failed`), and pre-bind lookup progress is the launch
-  supervisor's `lookup_status` publication to the face on screen
-  (`host_service::FacePublisher`, `FaceReceiver::publisher`).
-- The interactive launch's round loop is the session supervisor
-  (`tui_launch::supervisor`): it settles each round, applies the TUI's
-  session requests (`SessionRequest`: retry attach, edit config, rebind,
-  resume a session, reload release; `TuiOutcome` is now `Exited` or
-  `Request`) and owns the launcher cells and the abandon. A wire v2
-  connection whose session switches to another now sends `moved
+- Keep product settings, account/catalog facts and telemetry behind host-owned typed views. Clients neither read product stores as authority nor resolve credentials themselves.
+
+- A wire v2 connection whose session switches to another sends `moved
   {attachment, node}` and keeps the connection for a fresh attach of the
   new root (`HostFrame::Moved`, `HostService::reroot`,
   `host_service::wire::session_root_of`; `WireConnection::serving` takes a
@@ -1177,16 +1145,8 @@ an export.
   agent transcript again. Wire break: `hello` has no `locality`
   (`ClientLocality` is gone), and `WIRE_VERSION` is 3, so a peer of the
   previous version is refused `version_mismatch`.
-- The TUI's installed-build check and its reload-request channel move to
-  the session's host: every five seconds the TUI sends the product
-  surface's `check_build`, and the host answers whether a newer build is
-  installed (`build_status`), announces the session it serves on the
-  reload-request channel and offers a waiting request (`reload_requested`)
-  until the TUI acknowledges it (`accept_reload_request`); the TUI hands
-  refusals back (`refuse_reload_request`) for the host to record, and the
-  host refuses `not taken` a request no face took. One check is outstanding
-  at a time. Only a session's UUID names a file in the channel. The
-  announcement now lives with the session's host.
+- The session host owns installed-build observations and requested-reload announcements, offers and refusals. Only a session UUID names a reload-channel file, and a request no face takes is refused as `not taken`.
+
 - Wire v2 handshake: `welcome` names the session id, tree id and root node,
   and the session opens before it is sent, so a failure before dispatch
   (`plak agent --wire v2` included) is a `refused` frame with the new

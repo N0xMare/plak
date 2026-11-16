@@ -177,7 +177,7 @@ kills that home's daemons until none remain. A real-daemon regression places
 a successor and a startup probe before the exit observation, on both supported
 platforms.
 
-Runner placement contracts pin protocol 7 frames, process payloads and read-only
+Runner placement contracts pin protocol 9 frames, process payloads and read-only
 root-identity probes without modifying earlier version pins. Deterministic runner
 tests distinguish an answered/Acked start from a committed terminal driver operation:
 same-owner live reconnect preserves foreground work, terminal cleanup stops only the
@@ -321,7 +321,7 @@ independently of a clean protocol terminal.
 
 Offline idle-continuation evidence covers notices without a tree runtime,
 content-free trigger receipts, `turn.auto_continue` home-only immediate policy,
-obsolete-key rejection, Esc suppression, and RFC 3339 UTC notice envelopes.
+obsolete-key rejection, interrupt suppression, and RFC 3339 UTC notice envelopes.
 
 Run-until-idle regressions cover continuation admission and terminal status,
 turn-free waiting diagnostics, admitted-turn and timeout bounds, signal
@@ -377,7 +377,7 @@ These hosted tests do not establish CLI signal delivery for a real live child;
 the CLI real-child resume e2e remains separate evidence.
 Offline background regressions cover v1 JSONL command admission, a background
 edge waking an in-flight top-level dispatch without cancellation, later-batch
-and next-turn reset, Ctrl+B foreground-only routing, and process-start-only
+and next-turn reset, foreground-only promotion routing, and process-start-only
 preemption (polls keep waiting). Job protocol fixtures check ordered promotion
 and terminal transitions, repeated-snapshot suppression and uncorrelated v1
 wire identity pins. Route schema fixtures accept oversized start hints before
@@ -562,8 +562,7 @@ model request, proving a >64 KiB, multi-turn conversation reaches the next
 request after a simulated state-key move. Seed fixtures distinguish unanchored
 above-trigger input that still fits from genuinely over-window input, and
 exercise first-prompt compaction. Offline capacity probes create no session;
-CLI and real-PTY tests pin pre-carry window warnings and cancellation while the
-old terminal remains attached. No live credential or inference is involved.
+CLI and installed-build probe tests pin pre-carry window warnings. No live credential or inference is involved.
 Terminal-mode regressions cover hosted-owner shutdown, direct attachment
 release, and retirement of an interrupted child with a running job, then reopen
 with a fresh registry to prove terminal evidence was committed before release.
@@ -582,35 +581,10 @@ entity-aligned escaped tails; export refusal tests distinguish unsettled process
 rows from unfinished turns. The real promoted-process quit/resume fixture also
 asserts the one-second elapsed bound.
 
-Interactive exit has spawned-PTY wall-clock assertions for idle quit,
-mid-turn quit against a cancellation-deaf offline provider, `/reload`, and the
-real-process quit/resume fixtures (TUI, JSONL and promoted job).
-Local launch measures first-frame and typing budgets separately for fresh and
-resumed sessions. These and the hosted real-root/two-child batched-release
-regression run in the serial budget lane. The hosted test checks one SQLite
-mutation, released holders, stopped admission, aborted hub recovery and no
-late actor publication; the store test explicitly rejects an old commit both
-before and after a successor acquires the branch. Fault environment settings
-in the offline launch fixture do not make paid transport calls.
-
-`tui_local_launch_budget_new_and_resume_with_network_faults` keeps fixed
-process-local limits of 200 ms to first frame and 500 ms to typing, and checks
-visible key echo as well as both sessions' timing rows. Each scenario uses three
-separate process launches, prints every sample, and asserts the minimum first
-frame, ready-to-type, and frame-plus-key-echo measurements independently. This
-best-of-three rule tolerates a transient host stall without accepting a
-regression that makes every launch slow. The offline model prepares its host on the
-same deferred path a provider launch takes (it is eligible on its explicit
-binding, since no Ready catalog lists it), so the measured first frame excludes
-host preparation exactly as a product launch does. The launch banner's
-pure renderer test `the_banner_paints_while_binary_identity_is_pending` covers
-the pending and completed executable identities without hashing in a draw.
-`launch_phases_wait_for_the_background_telemetry_writer` pins deferred emission
-with the original measurements, so a fast frame cannot lose its process-start
-or frame timings before writer registration.
-`an_exit_imported_before_writer_registration_is_emitted_on_registration` pins
-the same buffer for the previous exit's timings, which an open imports at its
-first frame, before host preparation registers the writer.
+Hosted real-root/two-child batched-release regressions run in the serial
+budget lane. They check atomic SQLite mutation, released holders, stopped
+admission, aborted hub recovery and no late actor publication; store tests
+reject an old commit before and after a successor acquires the branch.
 
 Job fixtures pin per-id joining and snapshot reads, cancellation detachment,
 64-per-runtime and 128-per-host pre-spawn refusals, attributed stops, foreground
@@ -758,10 +732,10 @@ scripted turn whose stream reports an unobservable outcome after two deltas and
 require: one `recovery_required` terminal per turn, one `recovered` record with
 the `model_request` claim and `interrupted` cause (from JSONL `recover`, from the
 next prompt, from `plak run --session`, and from `plak session recover`), exactly
-one harness note, no second provider dispatch, and no text naming `/new`.
+one harness note, no second provider dispatch, and no text naming a new-session operation.
 Unit tests pin the abandonment fold per obligation shape, the claim precedence
 and each claim × cause note, the process-session and Code Cell abandonments at
-reopen, Esc inside a paid fold ending `Cancelled` with the fold finalized, a
+reopen, interrupt inside a paid fold ending `Cancelled` with the fold finalized, a
 failed paid fold falling to placeholders with one fold dispatched, lease
 revival under the same fence (and its refusal after an acquire or a store
 reopen), and a pre-dispatch lease refusal being definite. Unsynced renewal and
@@ -807,96 +781,6 @@ operation outcome-unknown with claim `RunningTool` (cause `ProcessLost`), no
 source, nested call or provider request replayed, the job kept as
 outcome-unknown, and the next prompt to complete. Host refusal classification
 distinguishes local abandonment/finalization debt from external effect evidence.
-
-### Declarative TUI stories and the semantic pilot
-
-The ignored `tui::ui::transcript_perf_tests::transcript_selection_perf_probe`
-runs the debug TUI over the real hosted `Sender`: 0, 8,000 and 9,990 synthetic
-roughly 100-column history rows, 100 tool start/finish calls with a frame after
-each boundary, 20 calls with a two-row selection, and 20 busy resyncs with a
-pending tool, approval and local note. It reports per-call/per-resync timing,
-selection-survival frames, duplicate-free tail order and copying after five
-boundaries with the camera 300 rows above the tail. The hosted test-support kit
-exposes only observational replacement/resync wrappers for this fixture.
-Run it alone on the same lane and debug configuration for each compared tree:
-`cargo test --locked -p plak --lib --all-features transcript_selection_perf_probe -- --ignored --nocapture --test-threads=1`.
-Use the ordinary isolated test environment (§2); it performs no inference.
-Timings are informational, not gate thresholds. Non-ignored tests separately
-require copy after patches/resyncs/trims and bounded selected-span formatting
-at 0, 8,000 and 10,000 rows.
-
-Processes stories cover 48-, 80- and 120-column TestBackend frames in the
-default dark theme: idle HUD count, Processes list, live output, the busy
-`Esc` stop pop-up and the quit pop-up. `activity-processes.frame` pins these
-surfaces. A `.frame` is either one `frame WxH` dump or a bundle in which each
-dump is preceded by its story name. The SVG reader preserves single-frame
-rendering and renders every named dump in a bundle, in order, with its label.
-Pilot journeys cover confirmed `s` and `S` intents and the turn
-stop's `[ Stop turn + processes ]` button. The typing-safety tests type drafts,
-editing keys and pastes into every view (Activity tabs, the agent view, the
-root view, the queue, approvals, the slash palette, quit and settings reset).
-Over the composer a printable key closes any pop-up into the draft and the
-following `Enter` sends that draft, never the pop-up's action; in full-page
-views a mapped key acts and `Enter` presses the pop-up's focused button, and
-an unmapped key sends nothing. A real offline PTY
-journey promotes a process, opens `/ps`, confirms its stop and observes process
-cleanup. Registry tests cover exact-id stop attribution, recent-terminal
-retention across consumption, the pre-consumption callback without any product
-poll, and the five-minute expiry. These are offline evidence, not live provider
-qualification.
-
-`just tui story` drives a versioned JSON story through the real Plak binary on
-a PTY against the repository-only scripted model. A story contains exact input,
-deterministic waits and assertions, and hand-labeled choices over a closed
-action table. Its private trace records each normalized before/after screen,
-cursor visibility and position, compact style runs, transition latency, and
-terminal-restoration evidence. The checked-in first story covers launch,
-settings, modal dismissal, prompt execution, rendered completion, and graceful
-quit. Story traces live under `target/` and may contain prompt or model content;
-they are private evidence and MUST NOT be published.
-
-This is the black-box acceptance lane, not the semantic automation control
-plane. It proves terminal encoding, paint, binary wiring and mode restoration.
-Agent-guided TUI control instead projects typed TUI view state, derives
-mode-aware actions from the product keymap and slash registries, and dispatches
-typed UI intent through the existing driver. A VT100 screen or hand-copied key
-sequence MUST NOT become that control plane or a second product runtime.
-
-The semantic TUI snapshot is owned beside the TUI as
-`plak.tui-snapshot.v1`. It projects stable focus and nested modal mode, phase,
-binding, redacted composer shape, revisioned queue identity, transcript shape,
-Menu state, registry-keyed Settings values, picker shape and canvas
-identity while excluding prompt, queue, transcript and overlay text, geometry,
-clocks, animation and caches. Its typed driver rejects actions absent from the
-current mode-aware legal table. Local movement is lowered through the product's
-real input router; host operations remain the same `UserAction` values a human
-gesture emits. Slash choices, key descriptions and Settings rows come from the
-product registries rather than a second action catalog.
-The Menu's read-only tabs use owner `menu`; `open-menu` reopens the last-used
-tab and `all-keybinds` is legal only on the While typing Keybinds page.
-
-
-Offline contracts pin Settings persistence, composer send and busy steer,
-all slash choices, queue revision actions, picker and confirmation ownership,
-canvas confirmation, execution of every action advertised by representative
-owner states, and a 200-turn redaction/bounded-action soak.
-This is internal test machinery, not an external pilot API.
-
-The private pilot uses `plak.tui-pilot.v2`. Observations carry a conservative
-monotonic revision and a digest of the revision, public snapshot and
-legal-action table. Every mutating request names `if_revision`; the UI owner
-checks it immediately before local dispatch and rejects stale requests without
-a host action. The revision can advance for presentation invalidation and is
-not a coverage identity. Responses distinguish `observed`, `applied`,
-`stale_observation` and `rejected`; `host_action_pending` means the local
-action has produced a host intent, not that the host admitted or completed it.
-The snapshot's `turn` field projects correlated canonical turn outcomes; busy
-and usage are never completion oracles. An unresolved observation reports
-missing terminal evidence rather than inventing a result.
-
-The `.frame` review utility writes deterministic SVG derivatives under
-`target/`. It adds no render oracle: checked-in frames and Rust tests remain
-the evidence, while SVG is only a human visual-review convenience.
 
 ### The external facade consumer
 
@@ -990,15 +874,6 @@ and capacity and workflow cuts share immutable seed/pilot fixtures, never the
 mutated cut workspace. Busy and quiescent child-timeout fixtures overlap their
 unchanged real timeout windows but assert each terminal and exact reopen.
 
-Debug TUI smoothness gates score 40 frames over 120 ordinary transcript blocks;
-release retains 200 frames over 400 blocks. Windowed-layout and retention-cap
-fixtures still cross the production bounds. Debug pilot paging uses sizes
-1, 2 and the full feed with every replay depth; release checks every size.
-The generated `rebuild_from_empty_equals_every_paging_and_replay` law covers
-arbitrary page partitions in either build. Wall-clock performance claims still
-require the release procedure, not a debug gate.
-
-
 Source live-move qualification covers selected-head inspection while actors run,
 missing-branch refusal, semantic binding checks without a foreign native reader,
 durable handoff-write refusal after release, and a joined busy-root cut before
@@ -1061,13 +936,13 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these 
 | --- | --- |
 | `static` | fmt, then `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/` (root `pyproject.toml` is tool config only; `vendor/` and `eval/datasets` stay excluded), then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch, ruff and structure checkers not in platform), then workspace all-features clippy, then clippy on each supported package alone in its own default resolution with all its targets (`cargo clippy -p <package> --all-targets`); all deny warnings. Worker fast narrows only the lint roots and affected facade/hosted profile compiles, never the global fmt/ruff/structure/closure checks |
 | `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); Plak maintainer-feature build; then `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each portable crate and each portable default library (chapter 06 §7.5). All deny rustc warnings. The musl qualification container (`--qual-container`) skips only that wasm check when its preloaded image has no such rustc target; the final summary names the skip and the run records no gate evidence |
-| `variants` | Reduced Plak resolutions, each built (lib and bins) and clippy-linted with warnings denied (a linker warning that holds only Apple ld's compact-unwind size note for a large debug binary, which rustc forwards through the `linker_messages` lint outside `-D warnings`, is not a failure; any other linker line is), using the gate's target and rustflags, then smoke-checked (version, doctor build features, CLI/JSONL feature refusals): headless is default minus `tui` and `clipboard`; api is default minus `codex`, `grok` and `claude`; minimal is exactly `tui`, `openrouter` and `git-cli`; the admission fixture is default minus `tui`, `clipboard`, `images`, `python` and `mcp`. Helper builds (a full `test-hooks` fixture writer, the MCP fake server, a reduced `test-hooks`+`maintainer` reader) drive the feature-admission and JSONL contracts, the api and minimal route checks, the canonical Python/MCP store read/refusal and byte-preservation fixtures, and the image diagnostic. Those plak processes use a private `HOME` and `XDG_*` directories inside the fixture temporary directory and accept the codex compatibility notice on stdin, so the fixture never reads or writes the operator subscription store. Selected by full only, never check, fast or platform; it runs at the release-candidate tier, not in the integration batch gate |
+| `variants` | Reduced Plak resolutions, each built (lib and bins) and clippy-linted with warnings denied (a linker warning that holds only Apple ld's compact-unwind size note for a large debug binary, which rustc forwards through the `linker_messages` lint outside `-D warnings`, is not a failure; any other linker line is), using the gate's target and rustflags, then smoke-checked (version, doctor build features, CLI/JSONL feature refusals): the default product is headless; api is default minus `codex`, `grok` and `claude`; minimal is exactly `openrouter` and `git-cli`; the admission fixture is default minus `images`, `python` and `mcp`. Helper builds (a full `test-hooks` fixture writer, the MCP fake server, a reduced `test-hooks`+`maintainer` reader) drive the feature-admission and JSONL contracts, the api and minimal route checks, the canonical Python/MCP store read/refusal and byte-preservation fixtures, and the image diagnostic. Those plak processes use a private `HOME` and `XDG_*` directories inside the fixture temporary directory and accept the codex compatibility notice on stdin, so the fixture never reads or writes the operator subscription store. Selected by full only, never check, fast or platform; it runs at the release-candidate tier, not in the integration batch gate |
 | `rustdoc` | Workspace all-features documentation, then each supported package alone in its default resolution, all with warnings denied; the same group in every integration batch, explicit step and full/RC run (chapter 06 §8), never selected by `--fast` |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
 | `tests-serial` | nextest profile `serial`: wall-clock budgets, one test thread |
 | `tests-durability` | nextest profile `durability`: crash matrices and the sqlite SIGKILL campaign, host-scaled weighted pool (at most 16 slots) |
 | `contracts` | Positive/negative public compile contracts |
-| `tooling` | Python tooling self-tests, including the user-guide stdlib socket client and hello/directory/attach transcript against an isolated, offline-scripted real host. Prepares the shared all-feature workspace test artifacts, including the host binary, and requires exact wire-version refusal |
+| `tooling` | Python tooling self-tests, including a test-only socket driver and the user-guide hello/directory/attach transcript against an isolated, offline-scripted real host. Prepares the shared all-feature workspace test artifacts, including the host binary, and requires exact wire-version refusal |
 | `package` | Publish dry run, `tools/release/publish.sh --gate`: prefetch archive verification inputs offline first, online only for missing cache inputs, then package and verify every publishable crate strictly offline from the staged published tree (chapter 06 §6.5); skipped outside a git work tree |
 
 | Tier | Groups |
@@ -1448,7 +1323,7 @@ coalescing, non-waking findings, disabled and interrupted hosts, queued-prompt
 precedence, 30 consecutive wakes with fresh mail and process completions, and
 post-terminal delivery of two jobs finishing 10 s apart followed by a child
 result after 24 consecutive wakes, including quiet-window coalescing and no
-leftovers for user admission. They cover Esc suppression until a user prompt,
+leftovers for user admission. They cover interrupt suppression until a user prompt,
 run continuation beyond 24 host-authored turns, and exact-once delivery after
 clean close and reopen. They also cover bounded
 prompt backpressure with unread results retained, and cuts after journal
@@ -1532,7 +1407,7 @@ also checked to leave both node state and the live canceller untouched.
 
 Child-recovery regressions (`agent::recovery::tests` in `plakous-hosted`, the
 tree's `tree::recovery` unit tests, the operator-retry tests, and one
-host-loop `/recover` test) reproduce the stranding failure mode: a real
+host-loop recovery test) reproduce the stranding failure mode: a real
 unknown-outcome child turn on a real runtime database, a fixture binding with
 a real projected tool catalog, and a SQLite trigger that refuses the turn
 waiter's own recycle reopen, so the node is left `recovery_required` and its
@@ -1542,7 +1417,7 @@ rejoin spec. They prove that the operator's retry (JSONL `invoke_tool` of
 `recover_agent`, on the host's operator port; no model catalog has it)
 and a `recover_node` run each interrupt the child (law L, attempt kept, no
 failure) with no additional provider dispatch, that close frees the slot, and
-that `/recover` shows the user which child it recovered. Parent-followup
+that a recovery operation shows the user which child it recovered. Parent-followup
 regressions start with the same deterministic `OutcomeUnknown` child: plain
 followup refuses, while `acknowledge_recovery` naming its exact attempt settles
 recovery and admits a fresh attempt/token. Only the fresh task and its bounded
@@ -1746,7 +1621,7 @@ their status page live in `tests/live/`. Build helpers
 and their authenticated inputs live in `tools/build/`, repository policy in
 `tools/gate/`, and measurement helpers in `tools/perf/`. Each just module
 lives beside the scripts it runs: `tools/musl/`, `tools/perf/`,
-`tools/prompts/`, `tools/tui/`, `tools/dev/`, `tests/live/live.just` and
+`tools/prompts/`, `tools/dev/`, `tests/live/live.just` and
 `eval/harbor.just`.
 
 Doc comments are gated on the same footing as tests: the `== rustdoc ==` step
@@ -1854,7 +1729,7 @@ regressions run with the workspace all-feature artifact set used by durability,
 not only the product package's separate feature resolution.
 
 Runner authority shapes in the strict sweep own explicit process/link cuts,
-like the direct TUI restart shapes, rather than pretending their clocks are
+rather than pretending their clocks are
 SQLite commit ordinals. `runner_wake_settled_foreground` freezes runner awake
 time while the driver settles, then checks keyed cleanup before a new effect.
 The settled fixtures hold a real answered/Acked start at the tool-link seam,
@@ -1959,7 +1834,7 @@ are test hooks, not product configuration, wire fields or persisted hold state.
 There is no optional hold cap in the product to shorten in these fixtures.
 
 Live paired-machine acceptance remains separate: real suspend, awake lease
-lapse, matching source/binary identities, host restart and human web/TUI review
+lapse, matching source/binary identities, host restart and external-client review
 are not inferred from these controlled process cuts.
 
 Protocol-5 contracts pin closed request/answer/progress JSON and the generated
@@ -2126,7 +2001,7 @@ and `weighted-durability` profiles with the `serial` and `durability`
 membership and settings, 4 and at most 16 threads by default. In `weighted-durability`
 the three campaigns that run cuts on their own workers (`durability_subset`,
 `durability_twin_pilots`, image residency) retain whole-pool reservations and
-priority -50. Ledger, restart/recovery and TUI approval reservations scale to
+priority -50. Ledger and restart/recovery reservations scale to
 one quarter rounded up. Long shared cases start early. The trial reuses the
 gate's scaling implementation and caps its width by the host. It refuses a
 weight filter that matches no test, builds the workers as the gate does, runs
@@ -2156,8 +2031,8 @@ files are sibling modules, so their test names have the former target name as
 a module prefix. Store's
 `fixture.rs` is a library-test helper, not an integration target; the nested
 SQLite conformance module retains its independently inventoried tests.
-Product modules gate telemetry on `test-support`, offline end-to-end and TUI
-tests on `test-hooks`, and reload rehearsal on `maintainer`; store gates its
+Product modules gate telemetry on `test-support`, offline end-to-end tests
+on `test-hooks`, and reload rehearsal on `maintainer`; store gates its
 SQLite module on `sqlite`. Default-feature `cargo test` compiles the ungated
 modules, and the all-features gate includes every module. Relative fixture
 includes follow the module location; manifest-root fixture paths do not move.
@@ -2246,7 +2121,7 @@ The real-binary `real_*quit_releases*` checks accept exactly the two specified
 quit statuses: joined release (0) and lease-only abandonment (130), never a
 signal death. The JSONL check correlates that status with `cancelled` versus
 `unresolved` for the admitted turn. Both paths still require the owned child's
-TERM witness, terminal restoration on the PTY face, and a successful next turn
+TERM witness and a successful next turn
 after reopening exactly the same session. Host load can legitimately spend
 the bounded cancel/join windows; requiring only exit 0 would assert an
 unpromised scheduling deadline rather than release and recovery.
@@ -2263,10 +2138,7 @@ a same-attempt effect whose call identity has no child must not close.
 The product-revision CAS probes run serially with `PLAK_TEST_CAS_SAMPLES`
 independent homes each (positive integer, default 6, two process launches per
 home). `PLAK_TEST_CAS_SAMPLES=30` selects a thirty-home qualification probe.
-Idle quit/reopen alternates the home-owned tree gate on and off. The
-`a_mid_session_compaction_renders_its_note_and_the_session_carries_on` PTY test
-requires a Compact row ordered before the answer, no placeholder essay or
-forged user prompt, and a successful subsequent turn.
+Idle quit/reopen alternates the home-owned tree gate on and off.
 
 Four real-JSONL-face SIGKILL cells run in the durability lane: idle before a
 turn, inside the model request, inside a running tool and after the answer.
@@ -2331,10 +2203,8 @@ assertions (wake consumption, retry delay and progressing streams) do not fail
 because the runner was descheduled and stay parallel. Pure duration-value
 assertions do not measure elapsed time and need no budget lane.
 
-
 | Kind | Predicates |
 | --- | --- |
-| Interactive PTY budgets | `product_terminal_e2e_tests::` — the whole real-PTY end-to-end module, 20 tests: startup and first frame, ordered transitions and quiescent reopen, prompt exit, resume and restore, cancellation chords, draft editing, the control-center keys; `fresh_real_binary_shell_keeps_controls_and_draft_usable` covers fresh-shell controls, draft retention and exit |
 | Observation parity | `observation_parity_tests::` — the whole module: the parity scenarios (plain turn with a tool call, tool error, capacity block, clear then turn, interrupt then second prompt, escape then quit, context placeholders, compaction, spawn/wait/adopt), each comparing against its golden under `bin/plak/tests/parity/`, plus the normalization, wait-receipt, cancelled-tool terminal and JSONL terminal tool-line checks |
 | Process spawn, drain and cancellation windows | `exec_command_with_zero_yield_returns_the_joined_output`, `host_process_bounds_live_output_and_enforces_timeout`, `joined_process_pty_cancellation_and_timeout_join_the_group`, `cancel_during_a_cell_running_a_real_process_command_joins_inside_the_settle_window` |
 | Python worker request deadline | `a_stuck_worker_request_is_killed_and_reported_as_session_loss` — isolates bundle setup from parallel load without weakening the stuck-request kill and fail-closed loss assertions |
@@ -2344,7 +2214,6 @@ assertions do not measure elapsed time and need no budget lane.
 | Process observation and job-await budgets | `process_await_wait_does_not_reserve_a_blocking_worker`, `terminal_hint_drains_more_than_one_record_batch_without_waiting`, `terminal_utf8_larger_than_observation_bound_returns_without_deadline_spin`, `contended_observation_does_not_block_the_async_worker` |
 | Process capacity probes | `running_children_still_count_against_the_session_limit`, `sixty_fifth_running_start_is_refused_before_spawn`, `host_capacity_refuses_the_129th_start_across_services_before_spawn`, `a_refusal_raised_before_any_spawn_reaches_the_model_as_a_tool_failure` |
 | Product CAS startup/reopen | `isolated_jsonl_startups_and_reopens_preserve_product_revision`, `isolated_idle_jsonl_quits_and_reopens_preserve_product_revision` |
-| PTY resize | `resizing_between_160_and_60_columns_under_a_long_transcript_refits_the_banner` |
 | Crash-sweep view rebuild | `full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape` — runs every registered sweep shape's lifecycle in sequence in one test (38 to 58 seconds alone); under parallel gate load it outran the parallel lane's 120-second allowance |
 | Auth lock/callback and HTTP closure deadlines | `expired_commit_and_stalled_callback_writer_are_fail_closed_and_bounded`, `busy_execution_lock_fails_without_waiting_or_accepting`, `an_early_response_to_an_unfinished_upload_is_not_kept`, `a_post_acceptance_deadline_is_definite_on_both_wires` |
 | Detached writer cleanup | `host_future_drop_is_bounded_with_a_detached_continuous_writer` |
@@ -2367,7 +2236,7 @@ no-dispatch fixture pins the elapsed deadline error. Tokio inhibits automatic
 time advance during blocking work, so joined blocking cleanup is not mistaken
 for a lost wakeup. All joined-terminal assertions and fixed seeds remain intact.
 
-The module predicates select whole suites. PTY and observation-parity tests
+The module predicates select whole suites. Observation-parity tests
 share the host turn machinery and its wall-clock budget, so the module is the
 unit rather than an arbitrary subset of its tests.
 
@@ -2411,9 +2280,7 @@ long shared tests. Its isolation rule precedes the general ledger weight.
 Other independent cuts use one slot. The 64 host-restart cut groups, the redial
 test and the busy-root absence test have priority 90 so long paths start early.
 They reserve `ceil(N/4)` slots each, limiting simultaneous real-process restart work
-to four cases without serializing the independent cuts. The TUI approval-resume
-cases also reserve `ceil(N/4)` slots: sixteen competing PTY fixtures have exhausted
-unchanged child-recovery and terminal-quit bounds under load.
+to four cases without serializing the independent cuts.
 Weights are scheduling reservations, not fewer cuts, extra retries or relaxed
 assertions. The existing extended watchdogs for host-restart matrices remain.
 
@@ -2504,26 +2371,8 @@ it is not a portable format constant. Actual IDs, definitions, other bindings
 and nested eligibility remain unchanged in the fixture. No production binding
 or containment descriptor is normalized.
 
-Frame goldens for the TUI are the only oracle kept in files. They are
-committed under `bin/plak/tests/goldens` as `.frame` files, one per surface,
-story and terminal size: chrome at two widths, each tab at 80x24 and 120x40,
-the resume picker, Activity and item-detail stories at 40 and 120 columns, the
-agent view and the Agents list (also at 80x24), lifecycle sealing, control
-hover, the transcript frames (compose collapsed/expanded/in-flight/cancelled,
-spacing, thoughts, tool rows) and the offline usage-limits overlay. Frames are
-rendered in the default dark theme only: themes share one layout and differ
-only in palette, which the theme unit tests check (semantic token mapping and
-contrast). `PLAK_UPDATE_GOLDENS=1` rewrites them from the render; without it
-the test compares and fails with the diff. They are
-in-crate and committed because the TUI is inert and presentation-only: a frame
-is a pure function of state, so a moved byte is a real behavior change.
-
-Every other oracle is pinned in code, so a fresh clone passes with no artifacts
-present. The full inventory:
-
 | Oracle | Where | Re-pin with |
 | --- | --- | --- |
-| TUI frames | `bin/plak/tests/goldens/*.frame` | `PLAK_UPDATE_GOLDENS=1 cargo test -p plak` |
 | Wire identity goldens (host-protocol intents, observations, views) | `crates/hosting/host-protocol/src/wire_identity_goldens.rs` | `PLAK_PRINT_WIRE_PINS=1 cargo test -p plakous-host-protocol wire_identity -- --nocapture` |
 | Durable tool-descriptor golden | `crates/harness/compose/tests/integration/durable_descriptor_identity_golden.rs` | `PLAK_PRINT_DESCRIPTOR_PINS=1 cargo test -p plakous-compose --test integration durable_descriptor_identity_golden:: -- --nocapture` |
 | Pack prompt pins (each pack's `pins()`, checked by `drifted_pins`) | `crates/core/tools/src/prompt_digest.rs`, each pack's `crates/harness/tool-{files,search,process,plan}/src/text.rs`, `crates/harness/compose/src/text.rs`, and `crates/orchestration/recursive-subagents/src/tree/text/mod.rs` | the failing assertion prints each drifted id with its new digest |
@@ -2622,7 +2471,7 @@ capture validation likewise happens before that first exchange can dispatch.
 Automatic capture is passive and never blocks inference or lookup on recording failures.
 Maintainer startup enables safe `plak.capture=warn` file diagnostics
 in `PLAK_HOME/logs/plak.log`, including alongside `PLAK_LOG` target selection,
-not TUI stderr. The live smoke and soak drivers also require capture for every process and default to
+not application-client stderr. The live smoke and soak drivers also require capture for every process and default to
 release executables. Explicit `PLAK_TEST_EXCHANGE_CAPTURE_DIR` selection in either
 feature build is instead required, fail-closed qualification capture.
 Capture persists mode-0600 `.request` bodies and upfront
@@ -2684,9 +2533,7 @@ Real-process fixtures own host children and their process groups from spawn,
 before waiting for readiness. Teardown reaps them on drop, panic or a readiness
 timeout, and reaps home-local daemons before removing their homes.
 The process-group teardown regression waits for the grandchild's exit as well
-as reaping its parent: group signal delivery is not a join. Hosted client-reload
-PTY fixtures fence Activity opening and closing by its heading, not command text
-that can already appear in the transcript, before sending the next slash command.
+as reaping its parent: group signal delivery is not a join.
 Remote skills regressions construct a native Claude-profile session through a
 workspace-restricted loopback runner with its own user-skill exception and
 cold-reopen an API session through the host
@@ -2747,9 +2594,8 @@ No in-process test reaches any of it, and each of those was found live rather
 than in the gate.
 
 `bin/plak/tests/integration/offline_e2e.rs` spawns the shipped executable through
-`env!("CARGO_BIN_EXE_plak")` and drives all three faces — `plak run`, the
-`plak agent` JSONL stream, and the terminal application on a real pseudoterminal
-— against a deterministic in-process model. There is no provider, no credential
+`env!("CARGO_BIN_EXE_plak")` and drives `plak run` and the `plak agent` JSONL
+stream against a deterministic in-process model. There is no provider, no credential
 and no network.
 
 The model is selected by two environment variables the binary reads only under
@@ -2774,7 +2620,7 @@ catalog, with `low` and `medium` effort and no priority tier (Fast is refused
 by the ordinary tier admission). Other routes retain their real
 credential readiness, including other models on `codex`; the injected row
 does not make an unready real model selectable. Profile Switch now, Fork now
-and `/agents <profile>` use the ordinary profile validation, canonical branch
+and explicit profile actions use the ordinary profile validation, canonical branch
 transition, line/epoch publication and exact reopen, with the scripted runtime
 as their provider transport. No credentials or network are needed. The
 profile's effort is frozen in the scripted provider configuration, so an
@@ -2927,11 +2773,7 @@ beside the root's evidence. Those dials are refused unless `tree` is set,
 `product_child_script` requires `durable_tree` and none of the scripted child
 dials. They are fixture controls,
 not product configuration. A scripted stall observes cancellation unless the
-script sets `stall_ignores_cancellation`. Root-turn reload PTY tests instead
-use the script step's cancellable `gate: {"file": <sentinel>}` rendezvous:
-the test releases it only after observing the reload continuation, with a
-120-second safety release. Installed-build probe latency cannot finish the
-original answer ahead of the handoff. On an attached offline face,
+script sets `stall_ignores_cancellation`. On an attached offline face,
 `PLAK_TEST_PROVIDER_RELEASE` selects a file gate at the first physical provider
 dispatch: the operation waits, observing cancellation, until that file exists.
 This repository-only hook uses the harness boundary controller, not a scripted
@@ -2952,7 +2794,7 @@ whole-run deadline: the same timeout bound and interrupt as an elapsed
 `--timeout`, including stopping owned processes. Without a configured deadline
 the file does nothing. It is not a second timeout policy, and release builds
 do not read it. The failure-wave chain checks the
-failed child on both the JSONL face and the TUI, then sends another root prompt.
+failed child on the JSONL face, then sends another root prompt.
 It does not require root refusal while a child locator is unavailable: child recovery
 inspection and root admission are separate facts.
 
@@ -3183,54 +3025,6 @@ the wake's). Its cuts kill the endpoint at every indexed commit, the idle
 release's and the wake's included, and recover through the ordinary `plak
 agent` relaunch.
 
-The `tui_host_restart` shape uses the ordinary offline TUI PTY fixture
-against a test-hooks `plak host`. Its specialized driver is registered in
-the strict crash-sweep entry point and the durability lane (excluded from
-offline by its test-family name). It cuts every indexed host commit of
-creation, terminal attach, a turn and `stop_session`, once with a
-root alone and once with a real child running. Twin pilots must have the
-same indexed labels per store, and every cut must reach that pilot label.
-A live terminal reports
-transport loss plainly; a handshake cut may end before a TUI takes the
-terminal. A restarted host replays the create idempotently, and a fresh
-TUI attach opens that session without replaying the prompt. The driver
-records each per-store cut and dispatch count under
-`target/crash-sweep/tui-host-restart-*.jsonl`. Client reload has no session
-authority handoff or host commit to cut: the deterministic PTY case checks
-that the host process and resident session survive it.
-
-The durability family `review_tui_host_restart_switch` adds the TUI's
-own `/new`, `/resume <original>` and `/stop` after the root's answer or while
-a real child runs. Twin pilots pin every indexed per-store label. Both terminal shapes
-wait for the stop notice to appear in the read-only durable transcript before
-leaving, and for the stopped child tree to become interrupted with no active
-turns before killing each pilot host. The stop reply and live notice alone
-do not acknowledge the host loop's later notice-intent commit. Their indexed
-cuts restart and reattach without redispatch, handoff or continuation;
-the original remains unique, and at most its one newly created session
-also exists. The strict sweep registers this shape independently and the
-offline lane excludes it by name.
-
-The offline TUI corpus shares one fixture for embedded and socket modes;
-`PLAK_TEST_TUI_MODE=embedded|host` selects whether it starts a test-hooks
-host for the home before launching the same terminal driver. Dedicated
-socket cases check `/new`, `/stop`, quit-as-detach and re-attachment after
-loss; a real web endpoint and a real terminal also share one transcript.
-Shared crash and reload cases assert each mode's own law: losing or
-re-execing a client leaves the host's root and children running. Binding
-carry and embedded-launch attribution cases explicitly select an embedded
-owner. Requested-reload continuation cases are embedded-only; host cases
-require an immediate local refusal with no host intent or dispatch.
-
-Busy-root exit fixtures assert the original terminal sees its scripted
-stream, then reattach to the durable admitted prompt and still-busy turn.
-The provider waits at a file gate until that attachment is ready, then
-streams a second chunk that the reattached face must receive live.
-They do not wait for the old face's transient text delta to replay: that
-delta may not be in the new baseline, and waiting past the fixture's stall
-would instead observe its ordinary final output. Twenty repeats cover
-Ctrl+Q, SIGTERM and SIGHUP for roots and real children, with unchanged
-dispatch counts and directory activity after detach.
 `plak host`'s crash windows run against the real binary on its control
 socket (`host_skeleton`, the durability lane for the `host_crash_` cases):
 `host_crash_cuts_of_create_materialize_and_release_recover` kills the host at
@@ -4028,7 +3822,7 @@ codec now publishes only the final reachable candidate DAG, both states close
 as `ABANDONED{running_tool}`, and any recurrence is an ordinary finding.
 
 A compact workflow request with no admitted summary at the cut is withdrawn at
-relaunch with one `compaction did not start; run /compact again` notice and is
+relaunch with one compaction-not-started notice and explicit compact remedy and is
 never dispatched without a new operator action. A separate fsynced
 `evidence.summary.jsonl` request log pins total physical summary dispatches
 across the pre-cut process and both relaunches to at most one, and to zero after
@@ -4160,7 +3954,7 @@ facts are consistent rather than contradictory.
 
 ### 2.7 The offline performance smoke
 
-`just perf smoke` measures six short product paths over the scripted model,
+`just perf smoke` measures five short product paths over the scripted model,
 four cell-worker timings and six retained-history metrics. It emits one JSON
 line per metric:
 
@@ -4170,7 +3964,6 @@ line per metric:
 | `jsonl_tool_round_trip_ms` | one tool row from `running` to `done`, median of five repeats | no |
 | `cli_two_tool_turn_ms` | a whole `plak run` process for a two-tool turn | yes |
 | `jsonl_bulk_throughput_mb_per_s` | ten prompts, each answered with 100 kB, over the whole batch | yes |
-| `tui_transcript_20k_layout_ms` | full layout of a 20,000-block transcript at 120x40 | yes |
 | `growth_turn_peak_rss_mb` | maximum resident set over a growth turn through the placeholder rung | yes |
 | `cell_quickjs_spawn_round_trip_ms`, `cell_monty_spawn_round_trip_ms` | worker spawn, checked hello/configure, one cell with a nested call and its acceptance, median of five | no |
 | `cell_quickjs_per_cell_ms`, `cell_monty_per_cell_ms` | the same nested-call cell on a warm worker, median of 80 cells | no |
@@ -4201,24 +3994,20 @@ may contain no machines: comparisons require an explicit idle-host reseed.
 Profile mismatches use `perf smoke: incompatible baseline`, not the
 `perf smoke regression:` prefix reserved for comparable timing regressions.
 
-The six short product metrics are measured. `tui_transcript_20k_layout_ms`,
-`growth_turn_peak_rss_mb`, `jsonl_bulk_throughput_mb_per_s`, and
-`cli_two_tool_turn_ms` are compared with a fifty percent tolerance by
-`--check`; the other two are informational. `jsonl_tool_round_trip_ms` uses the
-median of five in-run repeats because it varies even on an idle host.
-`cold_start_to_ready_ms` lacks enough headroom for a loaded shared host.
-Neither informational metric is described as a regression: a measurement alone
-cannot distinguish a slowdown from a busy neighbour.
+Five short product metrics are measured. `growth_turn_peak_rss_mb`,
+`jsonl_bulk_throughput_mb_per_s` and `cli_two_tool_turn_ms` are compared with a
+fifty percent tolerance by `--check`. `jsonl_tool_round_trip_ms` and
+`cold_start_to_ready_ms` are informational: an isolated measurement cannot
+distinguish a slowdown from host contention.
 
-Seeding a new machine waits for one run in which all six metrics measure
+Seeding a new machine waits for one run in which all five metrics measure
 successfully on an idle host, so a seed never records a contended number as the
 thing to beat.
 
 The recipe builds only `plak`, `plakous-js-runtime` and `plakous-py-worker` in
-the release profile, with the product's default features plus `plak/test-hooks`
-and the render benchmark's required `plak/test-support` feature.
+the release profile, with the product's default features plus `plak/test-hooks`.
 It copies `plak` and its matching JavaScript/Python workers aside before
-measuring. The render benchmark uses the same product features. Product and
+measuring. Product and
 worker timings measure optimized binaries; the row profile is `release`.
 As in the product build helper, `CARGO_PROFILE_RELEASE_STRIP=debuginfo` retains
 raw symbols for the artifact-isolation checker; generated code is release-optimized.
@@ -4236,8 +4025,7 @@ carry neither, so the recipe probes for a usable one. Assuming BSD made a Linux
 run abort and the gate call it a slowdown.
 
 The smoke is in no gate tier; `just perf smoke` runs it on demand. A
-measurement on a shared machine is evidence, not a gate, which is also why the
-named render benchmark asserts nothing itself. The restricted comparison refuses
+measurement on a shared machine is evidence, not a gate. The restricted comparison refuses
 to call a swing in either noisy metric a regression.
 
 **Build-closure evidence.** The opt-in build producer emits
@@ -4303,9 +4091,8 @@ with `PLAKOUS_PERF_HOST_ID` set; ordinary gates never enforce its timings.
 With `test-hooks`, `PLAK_TEST_RELOAD_PROBE_LAUNCH_DELAY_MS` (an unsigned integer
 in milliseconds) delays the installed-build reload probe before launching the
 executable, outside the child's response budget. It models OS executable-launch
-latency without changing production timeouts or probe answers. The reload PTY
-fixtures forward it explicitly for delayed-probe regression runs; ordinary
-builds do not read it.
+latency without changing production timeouts or probe answers. Ordinary builds
+do not read it.
 
 `plakous-http`'s `fault-injection` feature makes chosen exchanges fail the way
 the network or a provider would, at the one place every provider's traffic
@@ -4452,8 +4239,8 @@ Responses in-band rate-limit and overload fixtures pin failed lifecycle,
 closed observations, fresh terminal facts and one physical request for session
 workflows (including compaction) and turns carrying `x-should-retry: false`.
 
-Product tests pin the `plak run` retry line, the JSONL `retry` frame, the TUI
-status row and discarded text and reasoning marking, and (in `plakous-hosted`)
+Product tests pin the `plak run` retry line, the JSONL `retry` frame and
+(in `plakous-hosted`)
 that a discarded response's sealed reasoning never reaches the session. `check_features.py` requires that a default `plak`
 never enables the feature and that `test-hooks` does.
 
@@ -4515,41 +4302,39 @@ headroom, pong re-arming and FIFO suffix withdrawal are mutation targets.
 Exact-control replay, retry-state clearing, overflow notification and
 buffered-Pong priority also have targeted mutation witnesses.
 
-`product_runtime_e2e_tests` retains the former mixed terminal module's actual
-runtime cases without depending on the terminal feature: exact-resume
+`product_runtime_e2e_tests` covers runtime behavior: exact-resume
 publication, cross-profile history/queue and reverse switching, fast-lane and
 native-PTC/direct transitions, independent fork trees, refused/already-active
 forks, treeless-source seeding and stale-pause follow-up draining. Their
 durable/dispatch assertions are retained, not replaced by render assertions.
-They keep the original serial membership. Shared host/catalog fixtures remain
-test-only; terminal scenarios retain their separate PTY checks.
+They run in the serial group. Shared host/catalog fixtures remain
+test-only.
 
 `product_runtime_e2e_tests::exited_child_output_over_8192_commits_and_reopens_without_recovery_required`
 drives the actual process backend through start and poll, checks both successful
 tool rows and the answer, then opens the exact runtime locator with no extra
-provider dispatch. The terminal counterpart separately protects continuity.
+provider dispatch.
 `product_compaction_runtime_e2e_tests::exact_overflow_compacts_reopens_and_continues_without_terminal`
-shares the exact projected-input calibration with the ignored PTY qualification.
+uses exact projected-input calibration.
 It checks current Fits versus pending WouldOverflow, scheduled workflow settlement,
 publication boundaries and distinct locators, retained causal history, exact reopen
 and subsequent input. Its physical dispatch counts are two, four and six; no
-effect dispatch occurs. It runs in the serial lane without the terminal feature;
-the ignored terminal qualification is not claimed as gated evidence.
+effect dispatch occurs. It runs in the serial lane.
 
 `observation_parity_tests::abandoned_open::abandoned_recovery_reaches_host_and_jsonl_once_without_persisting_a_duplicate`
-uses the same fenced-open fixture as the terminal row test, with and without
+uses a fenced-open fixture with and without
 a durable submission. Host and JSONL receive one recovery row; no duplicate
-is persisted. The UI test separately asserts snapshot-safe rendering.
+is persisted.
 `offline_e2e::projection_parity::real_jsonl_rows_equal_exact_resume_rebuilt_from_deleted_views_without_redispatch`
-shares all six original terminal view-parity scripts, removes the saved views,
+runs six view-parity scripts, removes the saved views,
 and compares exact reopened rows and complete transcript with unchanged
-dispatch evidence. The retained terminal test separately checks presentation.
+dispatch evidence.
 `offline_e2e::reopen_probe::a_headless_reopen_probe_leaves_the_live_tree_unchanged_and_its_owner_keeps_saving`
 uses the original two-tree-turn script: read-only reopen probes neither take
 the live owner's lease nor change its revision/generation, and its next turn
 still saves successfully.
-`product_crash_tests::carry_law` no longer requires the terminal feature: its
-rebind/orchestration carry cuts still relaunch to one successor at the line
+`product_crash_tests::carry_law` exercises binding-repair carry and persisted
+orchestration-intent settlement cuts, relaunching to one successor at the line
 head, including its ignored process-child fixture.
 
 `host_skeleton::bridge` uses the real public stdio bridge and host. Its single
@@ -4599,26 +4384,21 @@ not block startup. The same-key second-host/restart test retains its process
 and socket-cleanup assertions. `host::lock::tests` also proves a linked lock
 cannot truncate its target.
 
-In a build without `tui`,
-`cli_contract::omitted_terminal_placement_refuses_before_creating_a_home_or_host`
-executes the real placement launch grammar and verifies the typed missing
-capability error leaves the product home and subscription state absent.
-Terminal-only source harnesses are feature-gated; this does not remove the
-pure store, settings or runtime composition tests from reduced inventories.
+Bare help and removed terminal-launch flags are real-binary contracts: help
+succeeds without home/runtime creation, while removed flags are usage errors.
+Secret-input PTY/termios tests remain because CLI authentication is interactive.
 
 `host_skeleton::reload::a_host_refuses_requested_reload_without_any_client_or_redispatch`
 uses the real host and socket with idle and busy roots. After the only client
 disconnects, the host's pid owns the announcement and the service records a
 refusal; a fresh attachment reaches the same session with one physical
-provider dispatch. The existing host-TUI request test retains the terminal
-notice assertion. Neither client polling nor a terminal is required for the
+provider dispatch. Neither client polling nor a terminal is required for the
 public runtime invariant.
 
-The local-face settings payload/dispatch fixture saves runtime settings with
-nondefault terminal preferences in the host configuration. Skipped appearance
-fields never travel in that payload, and the durable `[tui]` values remain
-unchanged. It does not authorize remote legacy saves: role checks introduced in protocol 7 (current client protocol 8)
-refuse those before product dispatch.
+Settings payload and publication fixtures use product fields. Client-local
+preferences are not serialized or persisted by the host. Role checks refuse
+remote legacy saves before product dispatch; confirmed operator paths keep
+their capability, consent and etag rules (current client protocol 10).
 Product DTO contract examples decode and re-encode unchanged before and after
 extraction, including temporary reload values. Schema extraction is checked
 against raw `plak wire schema` output with an uninstalled executable and an
@@ -4677,10 +4457,6 @@ they do not schedule emissions or reorder frames. Negative tooling tests pin
 identity separation, nonempty probe retention, every required-control rejection
 class, attachment lifetimes and semantic boundaries; a legal independent
 cross-direction interleaving passes.
-Terminal unit tests permute binding, attach/readiness and directory observations
-across separate drains, with first paint before, between or after them. Binding
-alone arms topology refresh; one publication path sends topology before the
-first promptable notification and never re-arms on a late attach observation.
 
 The native-client immediate-exit regression repeats 200 real subprocess
 connections, alternating implicit drop and explicit goodbye before drop. Each
@@ -4854,7 +4630,7 @@ creates and reopens a durable native-ptc session (both `plakous-default` and
 explicit), while `native-ptc` on the Anthropic or xAI API fails construction
 and native-ptc without the JavaScript host fails naming the sidecar; and
 command parse, template load, the root rebind, `plak run`, `plak agent`, a
-seeded TUI session, `plak models`, `plak doctor` and an API child's pin admit
+seeded hosted session, `plak models`, `plak doctor` and an API child's pin admit
 or refuse `native-ptc` by the same table, with `run` and `agent` saving the
 same record for the same arguments. One local-TLS wire contract dispatches an
 OpenAI API native-ptc turn: the request carries only the `exec` custom tool
@@ -4944,7 +4720,7 @@ settings dispatch matrix remains binary-owned evidence.
 Deterministic, hermetic, credential-free, and reproducible on any supported
 host. It covers kernel grammar and framing, canonical history, checkpoint and
 recovery semantics, store schema acceptance and rejection, tool contracts,
-compile inventories, config parsing, TUI frames, prompt digests, and every
+compile inventories, config parsing, prompt digests, and every
 fail-closed refusal path. This is the only class that gates a change.
 
 Fail-closed rows are coverage, not gaps: a test asserting that an unqualified
@@ -4987,7 +4763,7 @@ injected faults score `harness`: the product was required to absorb those
 faults. `path=` is a prefix of path and query, including broad `/v1`, `/api`
 and `/backend-api/codex` prefixes; an empty path matches all lookup paths on
 the selected host. An unbounded matching injection cannot establish a real
-provider failure. CLI, JSONL, TUI, command and child-output classifiers use the
+provider failure. CLI, JSONL, command and child-output classifiers use the
 scenario's fault plan consistently. Malformed catalogs, invalid admission
 evidence and absent models do not acquire provider classification.
 Transient first-attempt proof scenarios must still bind and complete a real
@@ -4995,14 +4771,14 @@ turn; a retry message alone is not success evidence.
 
 A live scenario drives the real `plak` binary against a real provider account
 and checks its result independently of a clean protocol terminal. It is opt-in,
-may spend provider usage, and never runs in any gate tier. Four commands exist
+may spend provider usage, and never runs in any gate tier. Three drivers exist
 in `tests/live/` (whose README lists every scenario and its oracle):
 
-- `just live smoke <route>` runs twelve short scenarios in a few minutes across
-  `plak run`, `plak agent` and the TUI on a pseudo-terminal: a coding task with
+- `just live smoke <route>` runs eleven short scenarios in a few minutes across
+  `plak run` and `plak agent`: a coding task with
   a planted bug, resume, a manual compaction whose earlier fact must survive,
   cancel mid-tool, four transport faults injected with `PLAK_TEST_FAULTS`
-  (§2.8), a two-child subagent wave with adoption, and two TUI turns.
+  (section 2.8), and a two-child subagent wave with adoption.
   The compaction read's byte-measured observation may hit a small route's
   admitted input ceiling. Only when the driver's catalog window is unknown
   or at most 65,536, a first-turn `ContextLimit` followed by a logged
@@ -5026,7 +4802,7 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   exactly those four. The two flags are mutually exclusive, and a bare
   `long_session.py` launch is refused.
 - Opt-in long-session scenarios in `tests/live/long_session.py` are outside
-  the default twelve: in-turn compaction, an overflow remedy and continuation,
+  the default eleven: in-turn compaction, an overflow remedy and continuation,
   SIGKILL mid-tool then reopen, and a child that compacts and still reports.
   The pre-release bar runs all four on every `full` row, via `--all` (§3.4).
   The product caps the text one model round observes (chapter 01,
@@ -5093,18 +4869,14 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   `PLAK_LIVE_INPUT_CEILING` (§3.4); without a valid value the driver starts no
   process and reports a `pre_attempt_error`. The long-session report records
   the window used and its source as `input_ceiling`.
-- `just live tui-soak <route> [--hours N]` keeps one TUI session doing checked coding
-  tasks, simulates a sleep, quits and reopens, then checks a follow-up in the
-  same session. It does not inject transport faults or rebuild the binary.
-- `just live jobs <route> [--only NAME,...]` runs eleven bounded background-job
+- `just live jobs <route> [--only NAME,...]` runs seven bounded background-job
   scenarios: promotion at `[jobs] foreground_seconds`, a steer during a
   foreground command and during an await, a completion notice while busy,
   `plak run` waiting for a promoted job, crash reopen as outcome-unknown, a
   child submit refused with `live_work` while its job is live and then settled
   with that job terminal, plus a parent close that stops another live child
-  job with `attempt ended`, Ctrl+B, Processes `S`, an idle wake,
-  and the idle HUD with a live child. It injects no transport faults. The
-  pre-release bar runs all eleven on every `full` row (§3.4). Any other jobs
+  job with `attempt ended`. It injects no transport faults. The
+  pre-release bar runs all seven on every `full` row (section 3.4). Any other jobs
   run is opt-in. The dry-run estimator prices that full-row cell (§3.4).
 
 - Opt-in feature scenarios in `tests/live/features.py`, selected with `just
@@ -5120,7 +4892,7 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   fetches itself. A route row that Plak refuses at bind or admission scores
   `refused`, which is the product's statement rather than a failure.
 
-All four build `plak` with `test-hooks`; only the smoke and headless soak
+All three build `plak` with `test-hooks`; only the smoke and headless soak
 inject faults. Each result is
 `pass`, `harness` (Plak's failure, including a dead end: a failed turn after
 which a plain follow-up also fails), `model` (a completed turn whose work
@@ -5145,7 +4917,7 @@ acceptance rate limits, ambiguous 5xx responses) are recorded as provider
 outcomes, never retried silently and never relabeled as product failures.
 
 The same `provider` class covers every surface the drivers score: a JSONL
-turn failure, a `plak run` exit, a TUI turn failure, a manual `/compact`
+turn failure, a `plak run` exit, a manual compact operation
 refusal, and a child failure. A typed provider refusal or outage is
 `provider`: `RateLimited` or HTTP 429, `Unavailable` (including an OpenAI
 `server_is_overloaded` terminal), `QuotaExceeded`, a refusal
@@ -5200,11 +4972,11 @@ Output-limit outcomes score alike on every surface. A tool-free `Length`
 answer with visible text is a completed turn (chapter 01, length
 classification): `plak run` prints it and exits 5 with
 `turn_failed:output-limit`, and the drivers treat that exit as the completed,
-truncated turn JSONL and TUI report, so the scenario's oracle judges the
+truncated turn JSONL, so the scenario's oracle judges the
 printed answer. A failed turn of typed kind `OutputLimit` (a second
 consecutive empty `Length`, or one that may not retry) is `model`: the model
 spent its output bound without an answer. JSONL lifecycle frames carry the
-kind; `plak run` stderr, the TUI's `turn.failed` session-log row and child
+kind; `plak run` stderr and child
 failure text carry only its rendered diagnostic (`response reached its output
 bound before completion`, or the Responses provider's `stopped at the output
 bound before` message), which identifies it there; on `plak run` only the
@@ -5246,7 +5018,7 @@ a network-shaped transport failure in `ResponseHead` or `ResponseBody`: `Io`,
 no resend allowance.
 
 A driver's `plak run`, an awaited `plak agent` turn (the jobs driver's
-included), or a TUI root turn (smoke's or the jobs driver's) that outlives its
+included), that outlives its
 scenario budget is `harness` (a product hang) unless the timed-out process's capture segment proves the
 provider used that budget. The driver accounts the window from the kill back
 over the budget using file modification times. Each exchange spans dispatch
@@ -5320,16 +5092,8 @@ on the aborted stream (reported as a transport failure of the response
 stream), and the runaway exchange is in the scenario's last process segment
 and is the last exchange there that received a response byte. Any other
 failure in the same scenario keeps its class.
-The headless and TUI soaks keep their own task outcome. Every other incomplete
+The headless soak keeps its own task outcome. Every other incomplete
 capture stays `harness`.
-
-TUI `turn.lifecycle` terminals carry only the turn id and phase. Smoke and the
-jobs driver use that turn's last `model_retries` telemetry row to recognize an
-exhausted provider retry budget: a provider cause on a dispatched row with
-`next_attempt == max_attempts`, or on a row declined for `budget`, whose
-proposed `next_attempt` is `max_attempts + 1` (chapter 01 §13.1). Any other
-declined row is not exhaustion: the last allowed attempt was never sent. A
-transient retry below that budget is not enough to relabel a later product failure.
 
 A live run uses an isolated, disposable `PLAK_HOME` under the ignored
 `target/live/`; the ordinary home is never imported. OAuth subscription credentials are the
@@ -5361,8 +5125,8 @@ install. It has three parts, all bound to the same source revision:
    `just musl container`, the full strict crash-point sweep (§2.3) with every
    REFUSED signature reviewed against its allowlist, and the publish dry run;
 2. the live matrix below;
-3. a maintainer's sign-off after reviewing the candidate's maintainer build in
-   the TUI on their own work.
+3. maintainer review of the candidate host through an independently maintained
+   client, separate from public automated gate prerequisites.
 
 The live matrix is opt-in and paid. It is not a gate tier, and a gate pass
 does not satisfy it. Library and facade evidence stays the offline fixtures
@@ -5478,19 +5242,18 @@ cover the Chat and Messages dialects.
 The three API rows are `light` and are not best-effort.
 
 Apple Silicon runs every row at the depth of its class, sparing rows only when
-a confirmation names them. Linux x86_64 musl runs only the twelve-scenario
+a confirmation names them. Linux x86_64 musl runs only the eleven-scenario
 smoke, and only on the `full` rows and the three API rows `api-openai`,
 `api-anthropic` and `api-xai`.
 
 On Apple Silicon, §3.2 names the oracles:
 
-- `full` runs the twelve smoke scenarios, all four long-session scenarios,
-  and all eleven jobs scenarios, with `crash_jobs` run three times. One `full`
+- `full` runs the eleven smoke scenarios, all four long-session scenarios,
+  and all seven jobs scenarios, with `crash_jobs` run three times. One `full`
   row, the one the maintainer uses least, also runs the headless soak at the
-  driver's default of one hour. No `full` row runs the two-hour TUI soak; the
-  maintainer's TUI review replaces it.
-- `light` runs the twelve smoke scenarios.
-- `informational` runs the twelve smoke scenarios. The result is recorded. A
+  driver's default of one hour.
+- `light` runs the eleven smoke scenarios.
+- `informational` runs the eleven smoke scenarios. The result is recorded. A
   `model` or `provider` outcome does not block the bar. A `harness` outcome
   does. An informational lane of a `full` row is scored the same way.
 
@@ -5520,10 +5283,10 @@ any paid attempt, recording the remedy as its one attempt's reason, and the
 cell binding and the long-session report record the value and its source.
 
 The qualification commands select the same oracles as the raw single-attempt
-diagnostics: `just live smoke <route>` is the twelve scenarios; `just live soak <route>
+diagnostics: `just live smoke <route>` is the eleven scenarios; `just live soak <route>
 --long-session --all` is exactly the four long-session scenarios. `--all` and
 `--only` are mutually exclusive, a bare long-session launch is refused, and
-`--only` does not fill the cell. `just live jobs <route>` is all eleven scenarios.
+`--only` does not fill the cell. `just live jobs <route>` is all seven scenarios.
 The headless soak is the driver default of one hour; a shorter soak does not
 fill the cell and a longer one does. Linux x86_64 musl's cell is
 `python3 tests/live/qualification.py smoke <route>` on each `full` row and on
@@ -5534,8 +5297,9 @@ drivers record the refused head's decoded shape and bucket it as covered,
 known-uncovered or unknown; the bucket is diagnostic and does not change the
 class.
 
-**Maintainer sign-off.** A maintainer uses the candidate's maintainer build in
-the TUI on their own work and signs off when it is satisfactory.
+**Maintainer sign-off.** A maintainer reviews the candidate host through an
+independently maintained client. No private client repository is a prerequisite
+for public host gates, builds or source checkouts.
 `just live daily-driver --since <date>` summarises that use from the product log and
 telemetry, read-only, per installed build (active days, session bindings,
 warnings and errors by target, retries, reloads, carries, recovered or
@@ -5545,7 +5309,7 @@ missing cell.
 Every independent oracle has to be `pass` on a blocking cell. Classes are
 §3.2's. The raw drivers do not retry inference inside a run (§5).
 `tests/live/qualification.py <lane> <route> [lane options]` drives a cell's
-attempts for `smoke`, `long-session`, `jobs`, `soak` or `tui-soak`. Each
+attempts for `smoke`, `long-session`, `jobs` or `soak`. Each
 attempt runs the whole selected lane in a fresh artifact directory and home,
 with a new session and the same route, build and prompt. Randomized
 long-session and jobs fixture inputs use the same seed on both attempts. The
@@ -5560,8 +5324,7 @@ OpenRouter `PLAK_LIVE_INPUT_CEILING` on a long-session cell is refused the same
 way, scored `harness` with its remedy and no paid attempt. Missing or incomplete captures
 (other than the one pending exchange a provider timeout leaves, §3.2),
 dead ends and unexpected build changes are `harness`, not a reason to spend
-another attempt. A TUI failed turn that reaches a completed recovery turn is
-not an unrecovered harness failure; the recovery's answer oracle is still scored.
+another attempt.
 
 Scoring normalizes the first word of a soak outcome, so `model after
 stream:reset` remains `model`. HARNESS evidence failures precede PENDING,
@@ -5603,9 +5366,9 @@ and `deepseek-messages` outside their long-session lanes and `or-glm`, every
 subscription row, and `api-openai`, `api-anthropic` and `api-xai` are not
 best-effort.
 
-A later revision is re-confirmed by a new twelve-scenario smoke on each
+A later revision is re-confirmed by a new eleven-scenario smoke on each
 `full` row, on Apple Silicon and on Linux x86_64 musl. That smoke does not
-by itself repeat light rows, informational rows, long-session, jobs or either
+by itself repeat light rows, informational rows, long-session, jobs or the
 soak, and it does not replace the offline gate.
 
 A row that was never qualified, or whose tuple changed, has no earlier pass
@@ -5616,7 +5379,7 @@ In addition, every row whose own rendered-prompt digests (§2.5) or harness
 footprints (chapter 02 §6.7) differ from the passing revision reruns at its
 class depth. A `full` row reruns the whole cell, and that cell's smoke is its
 re-confirmation smoke, not a second one. A `light` or `informational`
-row reruns the twelve-scenario smoke, and the Linux smoke when that row has
+row reruns the eleven-scenario smoke, and the Linux smoke when that row has
 one. A row whose own digests and footprints are identical carries the earlier pass.
 
 A row's digests are the pack and family render pins for that route: the §2.5
@@ -5636,7 +5399,7 @@ estimate warns when the OpenRouter cells, including the contingency, exceed
 that ceiling, and it still prints every cell. It prices a Mac smoke for every
 route except the sparing rows, which it adds only when `--confirm` names
 them. For each `full` row it also prices the four long-session scenarios, the
-eleven jobs scenarios plus two further `crash_jobs` runs, and a Linux smoke,
+seven jobs scenarios plus two further `crash_jobs` runs, and a Linux smoke,
 and prints an informational lane's cell with class `informational`; it prices
 one Mac headless soak for the row named by `--soak-row`. The tree pins no
 OpenRouter context window, so an OpenRouter long-session cell is scaled by
@@ -5656,8 +5419,7 @@ This bar does not cover:
 - a composition other than `plakous-default`, or an effort other than the
   route's
 - a Linux run of a subscription light row, an OpenRouter light or
-  informational row, long-session, jobs, or either soak
-- the two-hour TUI soak, which the maintainer's TUI review replaces
+  informational row, long-session, jobs, or the soak
 - `x86_64-apple-darwin`
 - the Harbor bakeoff (`eval/`), which is never a qualification row (§1.2)
 - library or facade support
@@ -5687,7 +5449,7 @@ For an explicit qualification capture outside the live drivers, create
 `tests/provider-authority/` with mode 0700, a private mode-0700 run directory
 under it, and a fresh private mode-0700 directory under the run for each
 process, and set `PLAK_TEST_EXCHANGE_CAPTURE_DIR` to that process directory's
-absolute path for `plak run`, `plak agent` or the TUI. Never reuse a process
+absolute path for `plak run` or `plak agent`. Never reuse a process
 directory. The live drivers do this per launch and reopen and report capture
 integrity (`tests/live/README.md`). A successful turn with zero `.body` files
 is not wire evidence, and instrumented timing is not production performance.
@@ -5756,12 +5518,10 @@ the assertion. Open investigations name their current containment explicitly.
 | Exchange deadline spent on setup | A short absolute exchange deadline includes resolution, connect and TLS. A wall stopwatch started before execute includes setup. A 30 ms write idle can be spent by scheduling the write itself | These tests start with paused time. A blocking hold inhibits auto-advance until the peer has admitted the request, or until TLS is up for the idle-bound body. The absolute and head budgets then advance on the frozen clock. The HTTP/2 body pauses stay real after the clock resumes, so paced consumption still has to outlive the idle and a stall still has to expire inside 2s. Phase, kind, transmission, and idle-bound assertions are unchanged |
 | Live writer mistaken for a dead one | A probe read can time out while the single-threaded server is still slow to serve it; if serving a request stops the server, a retry finds it gone and reports a dead writer | Only `/stop` shuts the server down. The probe retries connect failures while the writer pid is alive and reads one accepted response with a 15 s hang bound. Process exit still fails with the same text. A live process that never answers is a separate hang, not a dead writer |
 | Cancel-cell wrapper deadline | The scenario wrapper covers agent setup, the real process start, the cancel and shutdown. On a loaded machine that work reports `deadline has elapsed` before the settle result | The wrapper is a 60 s hang watchdog. The assertion that the running nested command joins within 3 s is unchanged |
-| Hosted projected totals | An interactive terminal's bounded projector pass can defer its view update under load | Counter fixtures explicitly settle the view before asserting counts and rows; a refused-pass regression requires the same counts after catch-up. Presentation tests drive the after-ack pass without the live loop's wall-clock bound, which only defers it |
-| Tree activity folding | A terminal snapshot can replace transient per-call and milestone rows with the completed multi-call summary | The screen oracle accepts only the exact successful spawn/finish/adopt summary or the complete split rows, before the answer; incomplete and failed summaries are rejected |
+| Hosted projected totals | A host's bounded projector pass can defer its view update under load | Counter fixtures explicitly settle the view before asserting counts and rows; a refused-pass regression requires the same counts after catch-up. Presentation tests drive the after-ack pass without the live loop's wall-clock bound, which only defers it |
 | Follow-up completion mistaken for the previous turn | A JSONL waiter rescans retained records and matches an earlier `assistant_done` | The refused-fold continuation waits for two completed turns before quit |
 | Random retry fits a supposedly shorter deadline | Equal jitter makes the first backoff 500–1000 ms, so an 800 ms pre-dispatch fixture can unexpectedly retry | The fixture deadline is below the minimum backoff; a pure `next_delay` test pins both jitter extremes |
 | Nested executor during root interruption | The async turn driver reaches descendant cancellation through a synchronous marker that constructs an application executor | The marker and its callers await the existing async cancellation path; a direct async-context regression requires joined child retirement |
-| TERM trap deferred behind a foreground child | The Processes journey's shell repeatedly spawns a sleep as long as its TERM allowance | The fixture blocks in a builtin read over a separate FIFO, surviving the stop's stdin close without a foreground sleep; the TERM marker and stop oracles remain unchanged |
 | Retries masking a race | A rerun hides a load-dependent interleaving instead of removing it | No nextest profile carries `retries`; a load failure is fixed with a gate, barrier or notification, never a retry or a wider window |
 | Live transient provider failures | HTTP 429 rejection, post-acceptance SSE rate limits, and ambiguous 502 responses are provider outcomes | Live scenarios run zero inference retries; a transient failure is recorded as such and the scenario is re-run deliberately |
 
@@ -5811,8 +5571,7 @@ The JSONL driver is exercised with bounded offline input and the real injected
 host: a failing owned child shutdown returns a fatal process result after the
 parent locator is published and `bye` is emitted. A refused model command
 followed by quit still succeeds, distinguishing diagnostics from the worker
-terminal result. TUI join helpers propagate that same typed result after
-terminal restoration.
+terminal result.
 
 Offline refusal presentation tests drive the normal hosted loop and production
 one-shot CLI for empty and partial-text refusals, asserting exact stdout, one
@@ -5865,7 +5624,6 @@ hunk lines before any file changes, including a later malformed file in a
 multi-file patch. Explicit no-final-newline markers preserve exact content
 whether or not the marker itself has a terminal LF.
 
-
 Claude native attribution qualification pins first-turn logical prompt IDs,
 provider-issued continuation IDs, field order, native byte-range attestation, and
 UTF-16 version-suffix vectors against the declared native reference. A durable
@@ -5885,7 +5643,6 @@ isolated local Messages endpoint pin exact output bytes and checksum values;
 their metadata is synthetic and they contact no provider. A native-executed
 model/output-limit variant pins the same checksum, while separate source-derived
 vectors cover the field-scanning edge cases.
-
 
 ### 6.1 Identity, finalization and codec regressions
 
@@ -5987,10 +5744,9 @@ batch written ahead of admission and the projector's tree save both end with
 exit code 7 and the JSONL code and write nothing
 (`another_hosts_custody_stays_typed_through_the_ledger_and_the_projector`).
 A clean quit releases the custody it held on every face: after `plak run`,
-`plak agent` and the TUI each quit, every custody record in the store reads
+`plak agent` each quit, every custody record in the store reads
 released (`a_clean_run_releases_its_tree_custody`,
-`a_clean_agent_quit_releases_its_tree_custody`,
-`a_clean_tui_quit_releases_its_tree_custody`). A fork request withdrawn at
+`a_clean_agent_quit_releases_its_tree_custody`). A fork request withdrawn at
 reopen takes its seeded genesis tree, or a seed's row-less custody record,
 with it and leaves any other tree under that id alone
 (`a_withdrawn_fork_leaves_no_seeded_tree_or_custody_record`); a fork that
@@ -6071,13 +5827,13 @@ after its attached driver let go (`Ownership` before), and after the head's
 session is deleted the predecessor opens as `LineEnded` and gc answers
 `PruneHistoryOutcome::LineEnded`. The product law
 `product_carry_cuts_relaunch_to_one_successor_at_the_line_head` (durability
-profile) drives the real `/rebind` carry (`carry::rebind_session`) and
-the reload's orchestration carry (`carry::apply_on_reload`) in a child process
-on the offline model, and kills each (a `carry-cut` file beside the offline
+profile) drives the binding-repair carry (`carry::rebind_session`) and
+settlement of persisted orchestration carry intents in a child process on the
+offline model, and cuts execution (a `carry-cut` file beside the offline
 model's evidence log) before its
 runtime create and after the create returned but before the record that binds
 it is saved. A relaunch settles the workspace's write-ahead intents and opens
-the source as a TUI launch does, and must show exactly one carried record,
+the source through ordinary session open, and must show exactly one carried record,
 bound and with no intent, at the line's head at generation 2, the source's
 open redirected to it with a `carried forward as` note, and one source and one
 successor in the runtime store. The settlement tests (`carry::intent::tests`) withdraw an
@@ -6114,7 +5870,7 @@ locator names the current head, archived sessions are listed until deleted, a
 Working head is `RecoveryRequired` at the facade and
 `Invalid(PruneHeadNotQuiescent)` at the store, and a store over its absolute
 limit is pruned. Over 80 SQLite rounds with automatic prunes, an explicit prune
-and a reopen, a duplicate of the previous root command replays its exact turn
+and an exact reopen, a duplicate of the previous root command replays its exact turn
 and checkpoint, a duplicate of the fourth latest root command replays, and a
 duplicate of the fifth is refused, unrecorded, as `ControlErrorKind::Reclaimed`
 without running or moving the head
@@ -6182,15 +5938,12 @@ crash/reopen itself emits that remedy.
 shapes: every SQL view cell equals the incremental lifecycle, including after
 one plain reopen with no harness repair.
 `a_lingering_owner_past_its_lease_changes_nothing_of_the_new_owner` stops a
-real host past its lease, lets a reopen take the session over, resumes the
+real host past its lease, lets an exact reopen take the session over, resumes the
 stopped host and has it prompt: nothing is dispatched, the new owner's views
 are unchanged, and the lingering prompt is never run or resubmitted.
 `a_sealed_reasoning_final_answer_rebuilds_to_its_live_thinking_and_assistant_rows`
 streams synthetic SSE through the real Anthropic Messages and OpenAI Responses
 kernels into the host: one thinking and one assistant row, rebuilt exactly.
-`live_tui_rows_equal_the_rows_a_resume_rebuilds_from_deleted_views` compares
-the semantic pilot's live transcript tail with a resumed TUI over rebuilt views
-for the final-only, direct-tool and provider-hosted shapes.
 `pause_lines_and_milestones_are_notice_intents_that_survive_a_rebuild` and
 `an_accepted_steer_commits_no_revision_and_rebuilds_from_its_acceptance` pin
 the notice-intent and live-only writer classes.
@@ -6563,7 +6316,6 @@ rather than a guess. Product paths that only a spawned binary can reach are
 covered by the offline end-to-end harness; anything still uncovered there is a
 candidate for that harness, not for a mocked unit test.
 
-
 ### SQLite Reclaim and Admission Budgets
 
 The runtime schema-25 fixture checks rowid metadata, separate payloads and
@@ -6703,7 +6455,7 @@ The witness neither changes nor replaces the existing recovery crash contracts.
 They use synthetic account IDs and no provider traffic. No persisted format
 or binding input changes are introduced by the consent machinery.
 
-Account-write contracts, introduced in protocol 7 (current client protocol 8),
+Account-write contracts, introduced in protocol 7 (current client protocol 10),
 use temporary isolated homes and synthetic
 secrets to verify write-only replies, Debug/input-bound redaction, exact named
 creation/removal and absent-slot isolation. Attempt-table contracts verify
@@ -6732,7 +6484,7 @@ capacity before I/O, and consume it after success. Changes contracts retain
 compared with live admission buckets and host capacity.
 
 Configuration-write evidence, introduced in protocol 7 (current client
-protocol 8), covers two-connection stale forms, CLI and
+protocol 10), covers two-connection stale forms, CLI and
 external-byte/comment edits, exact allowlists, invalid values with unchanged
 bytes, referenced definitions, built-in collisions, typed template/profile
 publication and comment preservation. Atomic publication probes cover write,
@@ -6756,3 +6508,12 @@ reattaches, and invokes Use now on a fresh home without publishing a default.
 Its continued sender retains remote provenance. Addressed profile-verdict tests
 retain both local and remote faces.
 Missing request provenance fails closed; local faces carry an explicit stamp.
+
+Public evidence covers host wire restart matrices and crash cuts, independent
+control traces, settings/catalog/admission, carry and host-upgrade laws.
+JSONL compaction rebuild assertions run in `offline_e2e::projection_parity`;
+installed-build inspection tests live under `carry::installed`. Publication
+concurrency tests use product fields. Neutral protocol helpers and test-only
+socket drivers remain; no runnable application client or private client
+repository is a public gate prerequisite. External-client review is separate
+from public host evidence.

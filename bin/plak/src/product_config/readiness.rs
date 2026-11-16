@@ -62,7 +62,7 @@ impl TemplateReadiness {
 }
 
 /// One template projected for the Agents / Models tabs. Typed view only; the
-/// TUI computes none of this and never reads `config.toml`.
+/// The client computes none of this and never reads `config.toml`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TemplateReadinessRow {
     pub name: String,

@@ -1569,7 +1569,7 @@ uses it only while it is a real directory owned by the effective user, with
 the owner write bit and no group or other write bit; otherwise claims are
 unavailable and the clock rule applies. Each process that takes a branch holds an exclusive `flock` on
 `<identity>.lock`, where the identity is the decimal process id, a hyphen and
-16 random lowercase hex digits drawn per process image (so a `/reload` exec is
+16 random lowercase hex digits drawn per process image (so a process-image replacement is
 a new identity), opened close-on-exec so a spawned child never inherits it.
 Every store of the process using that directory (by device and inode) shares
 the one lock, which is released when the last of them closes. A record is
@@ -4065,8 +4065,8 @@ checkpoint format epoch 38.
 
 **Read-only model lookup exchanges.** The shared bounded GET retry in
 `plakous-exchange` applies where the operator is waiting on a bind: `plak run`,
-`plak agent`, TUI new-session/attach and an explicit model rebind (`/model`).
-No provider owns a second retry copy. Native TUI background catalog refresh uses
+`plak agent`, hosted new-session/attach and an explicit model binding request.
+No provider owns a second retry copy. Native host background catalog refresh uses
 one physical attempt. Native child binding has no separate catalog probe: its
 provider resolution obtains fresh exact-route catalog evidence once and uses
 that same row to validate the selected model, native tool mode and named
@@ -4170,7 +4170,7 @@ Both rebind stages also retain the full lookup attempt count and cause.
 Other 4xx, absent models, malformed/oversized catalogs, invalid media types and
 invalid admission evidence fail immediately with their existing errors. Parsing
 and evidence validation happen after transport retry, not inside it. CLI and
-TUI status report each retry as `retrying model lookup (2/3): <cause>` (then
+attached-client status report each retry as `retrying model lookup (2/3): <cause>` (then
 `3/3`), and diagnostic logs record the same attempt and redacted cause. A
 transient failure that exhausts either bound reports `model lookup failed after
 N attempts: <cause>`; N counts only attempts actually run. No persisted encoding
@@ -8256,7 +8256,7 @@ write) and tries once to append
 `[output file incomplete: write failed after N bytes]`; the same line is
 reported, whether or not that append succeeded, after the `full output:` line
 of process notices, before it in tool pages, and at the end of the last page a
-read returns. The in-memory window is unchanged and still serves the TUI and
+read returns. The in-memory window is unchanged and still serves attached clients and
 tool pages. A failed creation never fails promotion; the job then has no file.
 The issued path appears as the last line `full output: <path>` of the
 promotion result (on Claude `Bash`, the native promotion sentence follows it)
@@ -13530,7 +13530,7 @@ Architecture claims require layered proof, not documentation:
 
 Plakous is not:
 
-- a CLI, TUI, or any presentation layer — the typed views the host protocol
+- a CLI, client UI, or any presentation layer — the typed views the host protocol
   carries are observation read models, not a presentation layer;
 - a multi-agent supervisor, topology, role system, or work scheduler **in L0**:
   the core has no notion of a subagent, roster, tier, or tree; orchestration is

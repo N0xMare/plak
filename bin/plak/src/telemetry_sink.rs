@@ -376,7 +376,6 @@ pub(crate) fn register_telemetry_writer(home: &Path, writer: &Arc<TelemetryWrite
     if let Ok(mut guard) = registry.lock() {
         guard.insert(home, Arc::downgrade(writer));
     }
-    crate::tui_timing::writer_registered();
 }
 
 /// Status-registry lookup keyed by canonical home (CLI diagnostics only).

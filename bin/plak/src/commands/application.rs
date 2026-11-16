@@ -461,8 +461,7 @@ impl PlakousApplication {
     }
 
     /// An accounts-and-catalog handle that will never open product state
-    /// roots: the deferred TUI preparation thread builds one of these per
-    /// attach, and it needs credentials and the catalog only.
+    /// roots: read-only account/catalog workflows need no session authority.
     pub fn for_accounts(state_home: PathBuf) -> CliResult<Self> {
         Self::new(state_home, None, None)
     }

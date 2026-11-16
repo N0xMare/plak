@@ -1,16 +1,6 @@
 use super::{FileIdentity, Invocation, launch};
 use std::path::{Path, PathBuf};
 
-/// `argv[0]` to hand a re-exec, so the successor records the same invocation
-/// (a `PATH` name stays a name) and keeps detecting newer installs.
-#[cfg(feature = "tui")]
-pub(crate) fn invocation_argv0() -> std::ffi::OsString {
-    match &launch().invocation {
-        Invocation::Name(name) => name.clone(),
-        Invocation::Path(path) => path.clone().into_os_string(),
-    }
-}
-
 /// The executable the same invocation would start now: `argv[0]` resolved on
 /// `PATH` (or as recorded), with symlinks followed to the installed file. A
 /// launch by an installer snapshot's own path follows that flavor's current

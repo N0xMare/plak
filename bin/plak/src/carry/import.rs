@@ -1,14 +1,8 @@
-use super::document::privately_owned;
-use super::document::{
-    CarryBinding, CarryDocument, CarrySource, ImportError, ProducerBuild, read_document,
-};
+use super::document::{CarryBinding, CarryDocument, CarrySource, ImportError, ProducerBuild};
 use crate::shell::services::Services;
 use crate::store::sessions::{ProductTranscript, QueueDrainState, QueueItem, SessionRecord};
-use crate::{CliFailure, CliFailureKind, CliResult, ProcessOutcome, commands};
 use plakous::sessions::PortableSessionHistory;
 use plakous_hosted::sessions::TranscriptRow;
-use std::fs;
-use std::io::IsTerminal as _;
 use std::path::Path;
 
 impl CarryDocument {
@@ -156,164 +150,11 @@ pub(crate) fn already_carried(
     Ok(record.filter(|record| !withheld.contains(&record.id)))
 }
 
-/// The link a carried-forward record shows in listings and the TUI.
+/// The link a carried-forward record shows in listings and external clients.
 pub(crate) fn carried_forward_label(record: &SessionRecord) -> Option<String> {
     record
         .carried_forward_from()
         .map(|(id, key)| format!("carried forward from {id} ({key})"))
-}
-
-fn consume_handoff_receipt(path: &Path, home: &Path, digest: Option<&str>) -> bool {
-    use std::os::unix::fs::MetadataExt as _;
-    let Ok(parent) = fs::canonicalize(home.join("carry")) else {
-        return false;
-    };
-    if path
-        .parent()
-        .and_then(|p| fs::canonicalize(p).ok())
-        .as_ref()
-        != Some(&parent)
-    {
-        return false;
-    }
-    let Ok(directory) = fs::metadata(&parent) else {
-        return false;
-    };
-    if !privately_owned(&directory) || directory.mode() & 0o077 != 0 {
-        return false;
-    }
-    let receipt = path.with_extension("handoff");
-    let Ok(metadata) = fs::symlink_metadata(&receipt) else {
-        return false;
-    };
-    if !metadata.is_file()
-        || !privately_owned(&metadata)
-        || metadata.mode() & 0o077 != 0
-        || metadata.len() != 64
-    {
-        return false;
-    }
-    let expected = fs::read_to_string(&receipt);
-    let _ = fs::remove_file(&receipt);
-    matches!((expected,digest),(Ok(expected),Some(digest)) if expected==digest)
-}
-
-/// `plak --import-resume <file>`: the new build's half of a carrying
-/// `/reload`. The file is deleted once the import committed and kept, with
-/// its path named, when it did not.
-pub(crate) fn import_and_resume(
-    services: &Services,
-    path: &Path,
-    handoff: Option<&Path>,
-) -> CliResult<ProcessOutcome> {
-    let handoff = super::take_reload_handoff(services, handoff);
-    let document = read_document(path).map_err(|failure| {
-        CliFailure::new(format!(
-            "could not carry the session forward: {failure}; the export is kept at {}",
-            path.display()
-        ))
-    })?;
-    let source_id = document.source().0.to_owned();
-    let paths = if document.runner_id() == "local" {
-        services.paths()?.for_workspace(document.workspace_root())
-    } else {
-        services
-            .paths()?
-            .for_remote_workspace(document.workspace_root())
-    };
-    crate::product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
-    if !rustix::termios::isatty(std::io::stdin()) || !std::io::stdout().is_terminal() {
-        return Err(CliFailure::classified(
-            CliFailureKind::Usage,
-            "the interactive TUI needs a terminal; import was refused before creating a successor",
-        ));
-    }
-    let cwd = services
-        .paths()?
-        .workspace()
-        .map_err(CliFailure::new)?
-        .to_path_buf();
-    let requested = fs::canonicalize(&cwd).unwrap_or(cwd);
-    let recorded = if document.runner_id() == "local" {
-        fs::canonicalize(document.workspace_root())
-            .unwrap_or_else(|_| document.workspace_root().to_path_buf())
-    } else {
-        document.workspace_root().to_path_buf()
-    };
-    if document.runner_id() == "local" && requested != recorded {
-        return Err(CliFailure::new(format!(
-            "session {source_id} belongs to {}; import-resume from {} was refused before creating a successor",
-            recorded.display(),
-            requested.display()
-        )));
-    }
-    crate::home::state::ensure_usable_state(services.paths()?, &mut std::io::stderr().lock())
-        .map_err(CliFailure::new)?;
-    let placement = commands::session::import_placement::ImportPlacement::prepare(
-        services,
-        document.runner_id(),
-        document.workspace_root(),
-    )?;
-    let services = &placement.services;
-    let local_handoff = consume_handoff_receipt(
-        path,
-        services.paths()?.home(),
-        document.local_digest.as_deref(),
-    );
-    let imported = commands::session::import_reload_handoff(
-        services,
-        document,
-        local_handoff,
-        handoff.cause.as_deref(),
-        handoff.profile,
-    );
-    let (record, note) = imported.map_err(|failure| {
-        failure.with_context(format!(
-            "could not carry the session forward; the export is kept at {}",
-            path.display()
-        ))
-    })?;
-    let note = match fs::remove_file(path) {
-        Ok(()) => note,
-        Err(error) => format!("{note}; could not delete {}: {error}", path.display()),
-    };
-    let successor = record.id;
-    crate::tui_launch::launch_tui(services, Some(successor.clone()), false, Some(note))
-        .map_err(|failure| import_resume_failure(failure, &successor, &source_id))
-}
-
-fn import_resume_failure(failure: CliFailure, successor: &str, source: &str) -> CliFailure {
-    failure.with_context(format!(
-        "session {successor} was carried forward from {source}; fix the error and run: plak --resume {successor}"
-    ))
-}
-
-impl CarryDocument {
-    /// An import whose successor records why it was carried, as one notice.
-    pub(crate) fn into_noticed_import(
-        self,
-        cause: &str,
-        local_handoff: bool,
-    ) -> CliResult<CarriedImport> {
-        let mut carried = self
-            .into_import_with_replay(local_handoff)
-            .map_err(|error| CliFailure::new(error.to_string()))?;
-        let record = &mut carried.record;
-        let source = record
-            .carried_forward_from()
-            .map(|(id, _)| id)
-            .unwrap_or("unknown");
-        let notice = format!(
-            "carried forward from {source}: {}",
-            plakous::model::SafeDiagnostic::new(cause)
-        );
-        record.record_notice(TranscriptRow::info(
-            crate::store::sessions::NoticeScope::Session,
-            &notice,
-        ));
-        carried.note.push_str(&format!("; {notice}"));
-        Ok(carried)
-    }
 }
 
 #[cfg(test)]

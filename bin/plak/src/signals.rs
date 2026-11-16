@@ -5,9 +5,7 @@
 //! immediately, so the turn ends with empty stdout and empty stderr and the
 //! operator is left with a bare exit code. A live qualification run hit exactly
 //! that: the harness stopped the case, sent `SIGTERM`, and the process vanished
-//! having written its request capture and nothing else. The TUI fared worse:
-//! it died inside the alternate screen with raw mode, mouse reporting and
-//! keyboard flags still on.
+//! having written its request capture and nothing else.
 //!
 //! **A dedicated thread owns the announcement.** It runs its own single-thread
 //! runtime whose only job is to wait for those two signals, so it is always
@@ -28,17 +26,6 @@
 //! inside a supervisor's grace period. `SIGINT` is deliberately untouched:
 //! Ctrl-C keeps its graceful cancel-and-join path and its own interrupt status.
 //!
-//! **The TUI quits on its own loop.** [`install_interactive`] records the
-//! signal and wakes the parked event loop, which reads [`signalled_stops`] and
-//! quits exactly as `Ctrl+Q` does, so the terminal is restored by the ordinary
-//! restoration before the session is released. The same watcher wakes the loop
-//! on `SIGWINCH`, so a resize repaints at once while the loop is parked. Only a
-//! second signal, or a loop that has not exited by
-//! [`INTERACTIVE_FORCED_EXIT_DEADLINE`], makes the watcher restore the terminal
-//! itself and exit. Nothing here survives the `/reload`
-//! `exec`: caught signals reset to their default disposition across `exec`,
-//! no signal is ignored or blocked, and the watcher thread does not outlive
-//! the old image, so the new process arms its own watcher from scratch.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -138,7 +125,7 @@ pub fn stop_reason() -> Option<&'static str> {
 
 /// How many `SIGINT`s the JSONL face has received.
 ///
-/// The CLI and TUI own Ctrl-C through their own paths. `plak agent` has no
+/// The CLI owns Ctrl-C through its own path. `plak agent` has no
 /// terminal, so without a handler a `SIGINT` either killed it with no `bye` or,
 /// inherited as ignored, did nothing while the turn ran on. It counts here and
 /// the drive turns it into the same interrupt-then-quit an end of input sends.
@@ -299,84 +286,6 @@ fn watch(
         announce(announcement.fd, text);
     }
     std::process::exit(SIGNALLED_EXIT_CODE);
-}
-
-/// How long a signalled TUI may take to quit through its own loop before the
-/// watcher restores the terminal itself and exits.
-///
-/// This backstop also covers a loop blocked before terminal restoration.
-pub const INTERACTIVE_FORCED_EXIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(1);
-
-/// Starts the terminating-signal watcher for the interactive TUI.
-///
-/// The first `SIGTERM` or `SIGHUP` is recorded and wakes the event loop, which
-/// sees [`signalled_stops`] rise and quits as `Ctrl+Q` would. A second signal, or
-/// [`INTERACTIVE_FORCED_EXIT_DEADLINE`] passing after the first, calls
-/// `force_restore` on the watcher thread and exits with
-/// [`SIGNALLED_EXIT_CODE`]. Registration is live when this returns; a second
-/// call is a no-op.
-#[cfg(unix)]
-pub fn install_interactive(force_restore: fn()) {
-    static INSTALLED: std::sync::Once = std::sync::Once::new();
-    INSTALLED.call_once(|| {
-        let (registered, confirmed) = std::sync::mpsc::sync_channel(1);
-        if std::thread::Builder::new()
-            .name("plak-stop-signals".to_owned())
-            .spawn(move || watch_interactive(force_restore, &registered))
-            .is_ok()
-        {
-            let _ = confirmed.recv();
-        }
-    });
-}
-
-#[cfg(unix)]
-fn watch_interactive(force_restore: fn(), registered: &std::sync::mpsc::SyncSender<()>) {
-    use tokio::signal::unix::{SignalKind, signal};
-
-    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .enable_time()
-        .build()
-    else {
-        return;
-    };
-    let stopped = runtime.block_on(async {
-        let (Ok(mut terminate), Ok(mut hangup)) = (
-            signal(SignalKind::terminate()),
-            signal(SignalKind::hangup()),
-        ) else {
-            return false;
-        };
-        // Crossterm reads the resize itself; the loop only has to look.
-        if let Ok(mut resized) = signal(SignalKind::window_change()) {
-            tokio::spawn(async move {
-                while resized.recv().await.is_some() {
-                    crate::ui_wake::wake();
-                }
-            });
-        }
-        let _ = registered.try_send(());
-        tokio::select! {
-            _ = terminate.recv() => STOPPED_BY.store(STOPPED_BY_TERMINATE, Ordering::Release),
-            _ = hangup.recv() => STOPPED_BY.store(STOPPED_BY_HANGUP, Ordering::Release),
-        }
-        SIGNALLED_STOPS.fetch_add(1, Ordering::Release);
-        crate::ui_wake::wake();
-        crate::tui_timing::quit_requested();
-        let _ = tokio::time::timeout(INTERACTIVE_FORCED_EXIT_DEADLINE, async {
-            tokio::select! {
-                _ = terminate.recv() => {}
-                _ = hangup.recv() => {}
-            }
-        })
-        .await;
-        true
-    });
-    if stopped {
-        force_restore();
-        std::process::exit(SIGNALLED_EXIT_CODE);
-    }
 }
 
 /// Writes one face's terminal record, unless the ordinary path wrote one first.

@@ -20,7 +20,7 @@ command exits 5 when anything is ERROR. Then `plak status` for credentials.
 ## Startup Model Lookup
 
 Before attaching, Plak retries transient catalog/discovery GET failures up to
-three times, without changing the URL, account or model. CLI and TUI status show
+three times, without changing the URL, account or model. CLI and host status show
 `retrying model lookup (2/3): <cause>`. The waits are roughly half a second and
 two seconds; provider `Retry-After` advice is honored only within the lookup's
 caller-supplied overall deadline, and only when enough time remains for a useful
@@ -112,7 +112,7 @@ HTTP response or possible acceptance.
 
 One such proof is `peer_rejected_record`: on HTTP/1.1 with TLS 1.3, the server sent TLS
 `bad_record_mac` (alert 20) before any response byte, rejecting a record of
-the request. Plak retries this automatically, including during `/compact`,
+the request. Plak retries this automatically, including during a compact operation,
 within the same budget below. Other TLS alerts, a locally detected decrypt
 failure, alert 20 after response bytes, TLS 1.2, and HTTP/2 do not gain this unsent-only
 retry permission.
@@ -150,17 +150,16 @@ output starts, 300 seconds without semantic progress is a stall even if
 keepalives continue. A newly added non-visible item (hidden reasoning or a
 provider-hosted tool) suspends that limit until the next visible output. Before
 output starts or while suspended, keepalives can sustain hidden reasoning and
-hosted tools without that semantic limit. Each actual retry wait is shown: on the TUI status row as
-`retrying 4s`, with the attempt and cause on the transcript retry row
-(`retry 2/4 · <cause>`), on `plak run` as a `plak:` line, in
+hosted tools without that semantic limit. Each actual retry wait is shown
+on `plak run` as a `plak:` line, in
 `plak agent` JSONL as a `retry` frame, and in the log under target `plak.retry`
 with session/turn/agent ids, checkout idle age when pooled, transport phase and cause (for a provider refusal, the provider's own
 error message with credentials filtered out). If the broken stream had already
-shown text or thinking, the TUI dims it and labels it `discarded -- retrying`,
+shown text or thinking, clients must discard that provisional response,
 including text and thinking that preceded a tool call of that same response;
 only the replay's answer enters the conversation, and its usage is the only one
 counted. Text and thinking from earlier model calls of the same turn are kept.
-Press Esc (or cancel the JSONL turn) to stop waiting; nothing is sent after
+Send an interrupt operation (or cancel the JSONL turn) to stop waiting; nothing is sent after
 cancellation.
 
 If the turn still fails with a transient connection or provider error, Plak
@@ -169,7 +168,7 @@ continuation budget and wait: connect failures wait for the same route to be
 reachable, while other transient errors use a short bounded delay. Completed
 actions are not replayed. `orchestration.transient_resumes` defaults to `1`;
 set it to `0` to disable this behavior (maximum `2` per user prompt).
-A new prompt, steer, Esc, or quit cancels the pending continuation without
+A new prompt, steer, interrupt or quit cancels the pending continuation without
 blocking your input. Reload drops a pending root continuation; send a prompt
 to continue after reloading. `plak run` still obeys its timeout and turn limit.
 
@@ -260,9 +259,8 @@ finish, publish their result, and recover. You see it as one of:
 
 The store is `runtime.sqlite3` in this build's state directory
 (`~/.plak/state/<key>/`); the notices and `plak doctor` name the exact file.
-Before it fills, the TUI warns once each at 70%, 85% and 95% of the point
-where new work stops, and while it is past 70% the idle status line reads
-`session store <n>% full · plak session gc --all`.
+`plak doctor` reports retained usage and pressure; host notices identify
+when new work is blocked and name the reclaim commands.
 
 Sub-agents stop first. Their new work stops one reserve earlier (3 GiB of
 object bytes by default, against 3.5 GiB for the root), so a tree that fills
@@ -276,7 +274,7 @@ at once. A turn then fails with the first line
 `session store reserve is exhausted (<bound> <used>/<limit> (settlement writes
 stop at <threshold>)) - a running turn could not record its outcome and needs
 recovery ...` (or `recovery writes`). That turn needs recovery: free space as
-below, then run `/recover` in that session.
+below, then request recovery in that session.
 
 First reclaim superseded checkpoint history, which keeps every session whole:
 
@@ -306,11 +304,11 @@ plak session delete SESSION_ID
 
 `gc` and deleting are never refused for lack of space. Deleting is refused while the session is
 open in a running plak, while its agent tree has a child that is still running
-or resumable or needs recovery (Plak recovers it; `u` in the Agents tab retries one), and while other sessions continue from it or share its history
-(forks, rebinds, `/new` targets); the refusal names what
+or resumable or needs recovery (Plak recovers it; an explicit recovery retries one), and while other sessions continue from it or share its history
+(forks, rebinds, new-session targets); the refusal names what
 blocks it. A finished child's history and the agent tree are deleted with the
 session. A delete that failed part way finishes when run again (or with
-`plak session gc --all`). `/new`, compaction, a fresh session, and `/recover`
+`plak session gc --all`). Starting a new session, compaction and recovery
 do not reclaim retained state. `plak state prune-legacy` removes only other
 builds' state directories (listed by `plak doctor` as `Legacy state`); it frees
 disk space but never this build's store. The database file shrinks as `gc` and deletion
@@ -336,16 +334,16 @@ answer.
 A turn whose outcome Plak could not observe ends *recovery required*: a stream
 that broke where a provider-hosted action was possible, a process it could not
 prove had stopped, a checkpoint it could not confirm, a lease it lost. The
-session is not lost and you do not need `/new`. The host reopens it in place
+session is not lost and you do not need a new-session operation. The host reopens it in place
 at once, with no action from you. If that reopen fails (for example while you
 are offline), the next thing you do that needs the session — a prompt,
-`/compact`, a model change — first reopens it in place and then runs. `/recover` in the TUI, `{"v":1,"kind":"recover","id":"r1"}`
+compaction, a model change -- first reopens it in place and then runs. `{"v":1,"kind":"recover","id":"r1"}`
 in `plak agent`, or `plak session recover SESSION_ID` does the same on its own.
 `plak run` exits 5 for such a turn, and the next `plak run --session` recovers
 it.
 
 If a context-capacity stop cannot be saved to the product transcript, queue drain
-stays paused even after storage recovers. The next prompt or `/recover` first
+stays paused even after storage recovers. The next prompt or a recovery operation first
 reopens the session and publishes the saved result; the failed turn is not retried.
 After a crash, its capacity error appears once and queued prompts remain paused
 until you explicitly resume them or resolve the context limit.
@@ -365,9 +363,9 @@ in the transcript and in one `plak:` line, which of these is true:
 - **its pending work never started** — nothing after that boundary ran. This includes an admitted prompt interrupted before its first model request, or an unstarted tool from its last round. Earlier rounds stay in the history; the prompt is not retried.
 
 If the interrupted turn has no publishable product result, the recovery note
-still appears once in the current TUI or JSONL stream, but is not saved as
+still appears once in the current host or JSONL stream, but is not saved as
 another transcript result. Otherwise it is saved with the recovered result.
-This is the same for `/recover`, the next prompt's in-place recovery, and reopening
+This is the same for a recovery operation, the next prompt's in-place recovery, and reopening
 after a crash; a saved result's notice never gets a second fallback line.
 
 A saved text-only answer also completes when the provider stopped for length
@@ -385,14 +383,14 @@ saved-terminal cuts can settle that debt without an interruption note;
 already-recoverable interrupted turns keep their existing recovery notice.
 
 The same happens when you reopen a session after a crash, a `kill -9` or a
-machine that stopped: the next `plak resume` or `plak run --session` closes the
+machine that stopped: the next host attach or `plak run --session` closes the
 turn it left. That includes a turn lost inside a Code Mode `exec` (or a
 JavaScript or Python cell), even while a command the cell started was still
 running: the cell and that command are reported as **a tool may have run**
 (or **its pending work never started** when the cell had not begun), and
 neither is run again. Recovered child agents are marked `interrupted` (owner
 lost) with their attempt kept. This applies to children lost mid-turn as well
-as parked children. Resume the held child with `r` in the Agents tab, or have
+as parked children. Resume the held child through JSONL or wire operations, or have
 its direct parent send `purpose=followup` with `acknowledge_recovery` equal to
 the child's current `attempt_id`. That settles uncertainty before admitting
 fresh work; it never replays the old tools. A crash does not spend the tree's
@@ -400,13 +398,12 @@ attempt budget. See [child recovery](agents-and-orchestration.md#what-a-spawned-
 
 If prompts were queued behind the interrupted turn, they stay queued and
 paused, since they were written for a turn whose outcome nobody saw: review
-them, then focus the paused queue with `Tab` and press `Ctrl+R` in the TUI to
-resume held work and the queue. JSONL `resume_queue` resumes only queue
+them, then explicitly resume held work and the queue. JSONL `resume_queue` resumes only queue
 delivery; `resume` is the explicit Resume for loss-held work. A prompt you type
 now runs at once.
 
-A `/fork` request a crash interrupted before it started is withdrawn on
-reopen with `fork did not start; run /fork again`. A fork that already landed
+A fork request a crash interrupted before it started is withdrawn on
+reopen with a fork-not-started notice and an explicit fork remedy. A fork that already landed
 is saved as a separate resumable session, even if its live attachment failed;
 reopening the source keeps the source selected. Fork recovery never reruns the
 request. A model change that could not complete says it was abandoned and the
@@ -439,15 +436,15 @@ them from tree-node retirement. A root can be quiescent while a child still
 requires recovery. Inspection does not resume work or clear the condition;
 missing or unreadable evidence remains explicit.
 
-A root head stays recovery-required after a reopen only when its saved record
+A root head stays recovery-required after an exact reopen only when its saved record
 is damaged or contradicts itself (a typed integrity failure); every state a
 crash can leave closes on reopen. For such a root session, keep it for diagnosis and start a new one for the remaining work;
 a fresh session does not mark an old child recovered.
 
 A recovery-required **child**, including one whose release was refused, is
 settled by reopening its session exactly once more: reopening or resuming the
-tree does it in the background, `/recover` does it for the whole tree, and `u`
-on a child in the Agents tab (or a JSONL `invoke_tool` of `recover_agent`)
+tree does it in the background, a root recovery does it for the whole tree,
+and a JSONL `invoke_tool` of `recover_agent`
 retries one child. No agent has a recovery tool. Nothing is replayed, and a note
 says which children were recovered, which were not and why, and which the pass
 did not reach. Until it is closed, such a child holds none of its parent's
@@ -456,7 +453,7 @@ child slots but counts toward the tree's node budget.
 If a child still reads recovery-required:
 
 - `recovery_lease_held`: another process still holds its session. The lease
-  clears about 30 seconds after that process is gone; run `/recover` again.
+  clears about 30 seconds after that process is gone; request recovery again.
 - `recovery_owner_live`: this process is still settling the child; it finishes
   on its own.
 - an interrupted seal or adopt, or a refusal no retry can get past (an
@@ -473,30 +470,27 @@ The session was written by a plak build whose stored format this build does not
 read. Plak never opens another build's state. 0.0.2 wrote export version 8,
 which this build refuses, so a 0.0.2 session cannot be carried in: finish it
 on 0.0.2, or start a new one. 0.0.2 state is left untouched for the 0.0.2
-binary. When the other build's export version is one this build imports (11
+binary. When the other build's export version is one this build imports (13
 or 12), run that build with `plak session export <id>` (an installed snapshot
 under `~/.local/lib/plak/release/` or `~/.local/lib/plak/maintainer/`, or an
 older checkout), then run `plak session import <file>` with this build: you
 get a new session carried forward from the old one, with its full history.
-`plak --resume <id>` does this by itself when a kept installed snapshot for
+`plak run --session <id> -- '<followup>'` does this when a kept installed snapshot for
 that state key exists and the export is importable; resuming a session already
 carried forward opens the carried session instead of importing it again.
 Otherwise start a new session; the old one is left untouched.
 
-If a carry fails after the export was written (`/reload` could not start the
-new build, or the import was refused), the export file is kept under
+If a carry fails after the export was written (for example, import was refused), the export file is kept under
 `~/.plak/carry/` and named in the error. `plak doctor` lists kept files under
 `carry_files`; import each with `plak session import <file>`, or delete it.
 
-Reload asks the destination build to check configuration before leaving the
-current session. A refusal keeps the session open: fix the named config file
-and retry `/reload`. If a successor was already committed, the error names it
-and gives `plak --resume <new>`; do not import the original a second time.
-Foreign resume checks configuration before running the old snapshot's export.
-For a config refusal, fix the named file and retry the same command.
-Foreign-resume exports are regenerable and are removed on failure. For a
-version or unimportable-export refusal, list this workspace's carried successors
-with `plak session list` and resume its newest carried session.
+Installed-build probes check configuration before a host upgrade. Repair the
+named file and retry the explicit host upgrade operation. If a successor already
+exists, use its reported ID rather than importing the original again.
+Foreign run-session resume checks configuration before exporting from the old
+snapshot. For a configuration refusal, repair it and retry the same command.
+For a version refusal, inspect this workspace's carried successors with
+`plak session list`.
 
 ## A service stopped after the turn
 
@@ -521,22 +515,20 @@ see the [security specification](../spec/04-security-and-boundaries.md).
 The selected model or account cannot replay native or opaque history, or its
 exact replay artifact is no longer available. The request was refused before
 dispatch; this is not a context-capacity error. Switch back to the model and
-account that produced the history, start a new session with `/new`, or fork
+account that produced the history, start a new session, or fork
 from a checkpoint before the incompatible history. Returning to the producing binding
-cannot restore an expired or missing replay artifact. `/recover` and `/compact`
+cannot restore an expired or missing replay artifact. Recovery and compaction
 do not authorize replay on another binding.
 
-## Context admission failed and the submitted prompt is no longer in the composer
+## Context admission failed after prompt submission
 
-The composer clears on submission, but an ordinary TUI prompt is saved in
-session prompt history before runtime delivery. On an empty composer, press
-`↑`, select the prompt, then `Enter` or `←` to load it for editing. Loading
-does not submit it. An empty queue can mean delivery was accepted before model
-preparation failed; it does not mean the prompt was deleted.
+A submitted prompt can be retained in prompt history even if model preparation
+failed. An empty queue does not prove the prompt was deleted. Clients should
+reread the host's history and delivery facts before offering a retry.
 
 A local context-admission denial happens before that model request is sent.
 Compaction may be needed before resending; use the context-capacity recovery
-controls or `/compact`, which may invoke paid inference. `/recover` settles
+controls or a compact operation, which may invoke paid inference. Recovery settles
 interrupted durable work; it does not make a full conversation smaller.
 
 The displayed occupancy and admission bound are different quantities. In
@@ -585,7 +577,7 @@ prompt, credential read or session.
 
 ```
 $ plak config show
-plak: /path/to/config.toml: unknown config key: tui.show_timestamps (line 2, column 1); run `plak config edit` to fix it
+plak: /path/to/config.toml: unknown config key: misspelled_key (line 2, column 1); run `plak config edit` to fix it
 ```
 
 A key the product does not know is an unknown key, whatever it once meant.
@@ -635,17 +627,12 @@ model calls, with no action from you. It stops with this message, before
 anything is sent, only when that fresh read could not be used. Follow its
 specific reason: contract drift needs a newer build, while a signed-out or
 quarantined credential names `plak login codex`, `grok`, or `claude`. A same-account
-Claude login preserves the session binding; retry the prompt or `/attach`.
-Another account or a changed model binding refuses exact reopen: restore the
-original login/configuration, or use `/rebind` to carry the full history into
-a new session under current configuration and login. This works while the root
-is unattached; `/reload` from that binding refusal takes the same carry path.
-Both refuse live children and background processes. `/agents` is not a repair
-for a frozen binding mismatch.
-For Codex/Grok, a new login changes the live login-selection fence even for the
-same account. Re-login cannot restore that old selection: use `/reload` or
-`/rebind` to carry history. **Fork now** is an alternative only while the source
-is attached; an unattached session with history refuses it and needs the carry.
+Claude login preserves the session binding; retry the prompt or attach.
+Another account or a changed binding refuses exact reopen: restore the original
+login/configuration or explicitly carry/rebind history through host operations.
+Codex/Grok re-login changes the login-selection fence even for the same account;
+restoring that old selection is not possible. Explicit carry is required rather
+than an implicit account substitution.
 `plak doctor` and `plak status` show the sanitized last refresh failure with its
 time and credential generation; no raw response body or token is retained.
 After following the reported remedy, retry the prompt: it reads the catalog afresh rather
@@ -717,10 +704,7 @@ Setup needed row (`Profile changed · run plak login <account>`) and still lists
 every other account, exiting 0; `plak status <account>` prints
 `credential=profile-changed; run plak login <account>`, and `plak doctor`
 reports the account as `profile_changed`. Model runs, usage and refresh print
-the repair on stderr and exit 3. In the TUI the header reads
-`not ready · credential_unusable: …` with the same words, and a prompt sent
-then is refused with that repair and returned to the input instead of being
-held.
+the repair on stderr and exit 3. Host admission refuses with the same repair.
 
 ## `the stored <account> login was written by a newer plak build …`
 
@@ -754,7 +738,7 @@ build can still use its own directory. Your `config.toml`, templates, logs,
 telemetry and OAuth credentials live outside `state/` and are shared.
 
 Inspect paths with `plak doctor` and use `plak state prune-legacy` only when you
-no longer need the sessions in those older or newer builds. A `plak resume` of
+no longer need the sessions in those older or newer builds. An explicit resume of
 one of those sessions says it was created by an incompatible plak build and
 names `plak session export` / `plak session import`, the way to carry it into
 this build when that build's export version is one this build imports (13 or
@@ -804,8 +788,8 @@ was forbidden. The Usage reason names the key source, not any key material.
 If it names `OPENROUTER_API_KEY`, that variable overrides the stored key file.
 Run `unset OPENROUTER_API_KEY`, remove its stale export from your shell startup
 configuration, and start a fresh Plak process to use the file. Alternatively,
-replace the variable's value through your normal secret setup. `/reload`
-inherits the current process environment and cannot clear this override.
+replace the variable's value through your normal secret setup and restart the
+resolving process; another shell cannot clear a running host's environment.
 If the reason names a `sha256:` fingerprint, run `plak key set openrouter`.
 Plak refuses to change key files while an overriding environment variable is set.
 
@@ -911,8 +895,8 @@ any needed files before replacing it with a new agent workspace.
 With the default `workspace = "inherit"`, child edits already affect the shared
 checkout. A child using `workspace = "fork"` instead seals its edits as a
 *candidate*, which reaches your working tree only when an agent with `may_adopt`
-adopts it — as uncommitted changes, never a commit. Check Activity's Agents
-tab (`/tree`; `Ctrl+T` opens the last Activity tab) for the child's status:
+adopts it -- as uncommitted changes, never a commit. Request the tree view
+through your client or inspect `plak session show <id>` for the child's status:
 `active`, `adopting`, `adopted`, `discarding`, `clean_removed`, `discarded`.
 `merge_conflict` and `target_changed` are failed adoptions that keep
 the child's copy intact. See
@@ -922,34 +906,26 @@ the child's copy intact. See
 
 Another running `plak` holds this session's agent tree: only one process
 works a tree at a time. `plak run` and `plak agent` exit 7 (`plak agent`'s
-error line carries `code: "tree_hosted_elsewhere"`), and the TUI stays
-detached with the same message. Quit the other `plak`, then open the session
+error line carries `code: "tree_hosted_elsewhere"`). Quit the other `plak`, then open the session
 again. If that `plak` crashed on this machine, the next open takes the tree
 over by itself. If it ran on another machine sharing this home, or is gone
 in a way that cannot be proven, release it explicitly with
 `plak tree release --force <tree-id>` (see the CLI reference), then open the
 session again.
 
-## The TUI will not start
-
-`plak` needs an interactive terminal and refuses a pipe. If it starts but feels
-sluggish, check you are running the release build: `just build debug` prints a
-warning for debug binaries precisely because their cold start is visible.
-
 ## Restored sessions with a paused queue
 
 Reopening a session preserves queued prompts but pauses automatic delivery.
 In `plak agent`, send `{"v":1,"kind":"resume_queue","id":"resume-1"}` to
-resume queue delivery explicitly. In the TUI focus the paused queue with `Tab`
-and press `Ctrl+R`: this is the one Resume for loss-held root/child work and
-the restored queue. JSONL clients use `resume` for held work;
+resume queue delivery explicitly. JSONL clients use `resume` for held work
+and the restored queue;
 `resume_queue` alone does not resume the tree.
 The default loss policy holds work even after recovery settles its old turn.
 See [host-loss policy](../spec/07-config-reference.md#3-configtoml).
 
 If scheduled compaction leaves a prompt queued, read the preceding compaction
 result and correct its cause before resuming. Retrying compaction is a new
-paid operation. Use `clear` in JSONL or `/new` in the TUI to start a new
+paid operation. Use `clear` in JSONL or the host new-session operation to start a new
 session when retaining the old context is unnecessary. A compaction whose
 outcome was never observed is closed without being sent again when the session
 is next used; queue resumption does not send it again either.
@@ -960,7 +936,7 @@ Otherwise one notice says compaction was not applied: a summary known not to
 have been sent says "was not sent", and otherwise it says "may have been
 billed". It is never sent again; an explicit later compact is a new operation.
 A compact you asked for that had not started when Plak stopped is not started
-by reopening: one notice says `compaction did not start; run /compact again`.
+by reopening: one notice says a compaction-not-started notice with an explicit compact remedy.
 An already committed compact keeps its committed outcome on reopen.
 If compaction committed before a new turn's first model request and Plak then
 stopped, reopening abandons only the unfinished turn. The committed summary
@@ -1013,7 +989,7 @@ reserve disk blocks.
 
 ## Low storage
 
-`plak doctor` and the idle TUI warn when the product volume has less than
+`plak doctor` and host notices warn when the product volume has less than
 5 GiB free. Below 512 MiB, new root turns and spawns are refused
 (`storage_low`); work already running is not cancelled. Free space, then
 retry. `plak doctor` names the volume, and `plak session gc --all` reclaims
@@ -1021,7 +997,7 @@ history this build no longer needs. Plak does not delete files to make space.
 
 `prompt was not admitted` means the runtime definitely refused the prompt
 before starting a turn. Its text remains queued with a `prompt remains queued`
-note, not a restored composer copy; definite queued rejections are labeled
+note, not a duplicated input draft; definite queued rejections are labeled
 `rejected:`. There is no recovery-pending note or recovery fence, but storage-wide
 refusals stop the live drain pass. Edit or submit a new prompt explicitly after
 fixing the refusal.

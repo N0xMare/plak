@@ -91,7 +91,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
 
         let session_open_started = Instant::now();
         // The open below blocks this thread for seconds on a cold session. Tell
-        // the TUI it started so the startup row can tick its own elapsed seconds
+        // the client it started so the startup row can tick its own elapsed seconds
         // instead of showing an unqualified "starting…" (spec 02 §5.4).
         let _ = events.send(ContentEvent::SessionOpening);
         // Creation freezes the root's tools; a wildcard MCP tool left out then

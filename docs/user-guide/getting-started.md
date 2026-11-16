@@ -127,18 +127,18 @@ snapshot or change PATH. `just install maintainer` builds the dogfood profile
 (release codegen, no LTO, incremental, line tables) and installs an immutable
 snapshot under `~/.local/lib/plak/maintainer`, with the same three links in
 `~/.local/bin` as `just install release` and the same refusals. The debug
-binary is large and its cold start is visible in the TUI.
+binary is large and has a visible cold-start cost.
 
 ```sh
 $ plak version
 plak 0.0.3 (release; binary 0123456789ab)
 ```
 
-The binary ID is the executable identity used by `/reload` and handoffs.
+The binary ID is the executable identity used by build checks and host upgrades.
 
 To update later, pull the source and repeat `just install release` (or the Cargo
-commands). A running TUI shows `new build installed · /reload` once a new
-`just install release` snapshot is in place. Default builds
+commands). Existing processes keep their immutable installed image until
+restarted or upgraded through the host. Default builds
 include the Git CLI backend only; release tarballs also omit JJ. Add
 `--features plak/jj` to enable native JJ alongside Git (maintainer builds
 already enable it). To add native JJ to the default product:
@@ -191,9 +191,8 @@ mode `0600`. Environment variables (`OPENAI_API_KEY`, `XAI_API_KEY`,
 `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`) override the files, and Plak never
 loads a `.env` file.
 
-Both use the CLI in the public TUI; its Providers tab shows status and names
-the command. Current-protocol host clients can also offer confirmed Accounts forms
-for login and masked key entry; the public TUI does not yet include those forms.
+Host clients can also implement the confirmed Accounts operations for login
+and masked key entry. Credential resolution remains on the host.
 
 ## Check the setup
 
@@ -265,28 +264,13 @@ default, the catalog row decides.
 > directory. Process tools are worker-isolated, not workspace-isolated. If you
 > want a real boundary, run Plak in a container or a VM.
 
-## Your first TUI session
+## Connect your client
 
-```sh
-plak
-```
-
-A new session in the current directory; it needs an interactive terminal. Type a
-prompt and press `Enter`. From there:
-
-- `/` opens the slash palette (26 commands, including the host-only `/stop`, `/ps` and `/rebind`).
-- `Ctrl+X` reopens Menu; `?` opens While typing; `Enter` opens All keybinds. `/help` also prints the full sheet.
-- `/agents` opens the Agents tab, where you choose a profile. On a fresh home,
-  pick one and **Use now**; the agent attaches in the same session. An
-  OpenRouter or direct API account needs a user template and a profile that
-  names it, or the
-  `--account`/`--model`/`--effort` flags of `plak run` and `plak agent`.
-- `/settings` opens the settings tab; changes apply as you make them.
-- `Ctrl+T` opens the last Activity tab (Processes or Agents).
-- `Ctrl+Q`, or `Ctrl+C` twice, quits.
-
-`plak resume` reopens a session from this directory via a picker;
-`plak resume <uuid>` reopens one by id. See [the TUI guide](tui.md).
+Start `plak host`, then connect your own client through
+`plak host connect --stdio`. A missing host does not start automatically;
+local startup requires the bridge's explicit `--auto-start` option. There is
+no public terminal application, `resume` picker or bare interactive launch.
+See [Integrating](integrating.md) for schema export and the wire contract.
 
 ## Where things live
 
@@ -296,7 +280,6 @@ prompt and press `Enter`. From there:
 | `~/.plak/config.toml` | Product configuration |
 | `~/.plak/agents/<name>.toml` | One agent template per file |
 | `~/.plak/secrets/<account>.key` | API keys, mode `0600` |
-| `~/.plak/references/<uuid>.json` | Imported archive retained after successful import; removed by session delete |
 | `~/.plak/state/<format key>/` | This build's state; another build's state sits beside it untouched |
 | `~/.plak/state/<format key>/sessions/<uuid>.events.jsonl` | Agent-readable session event logs |
 | `~/.plak/state/<format key>/product.sqlite3`, `runtime.sqlite3` | Product and runtime state |
@@ -343,5 +326,5 @@ creates it if missing. `[roster]` and `[orchestration]` are config-only.
 Every key is documented in [configuration](configuration.md). Complete,
 tested example homes you can copy live in [`docs/reference-config/`](../reference-config/) and [`tests/fixtures/config-scenarios/`](../../tests/fixtures/config-scenarios/).
 
-Next: [the CLI reference](cli.md), [the TUI](tui.md), or [agents and
-orchestration](agents-and-orchestration.md).
+Next: [integrate your client](integrating.md), use the [CLI reference](cli.md),
+or configure [agents and orchestration](agents-and-orchestration.md).

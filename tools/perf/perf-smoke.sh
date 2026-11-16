@@ -275,15 +275,6 @@ PY
 emit jsonl_bulk_throughput_mb_per_s "$throughput" mb_per_s
 
 # ---------------------------------------------------------------------------
-# 5. TUI layout over a 20,000-block transcript.
-# ---------------------------------------------------------------------------
-redraw="$(cargo bench --profile release --locked -q -p plak --bench tui_render --features test-hooks,test-support 2>/dev/null || true)"
-redraw_ms="$(printf '%s\n' "$redraw" | awk -F'  +' '/20k blocks/ {print $3}' | head -1)"
-if [[ -n "$redraw_ms" ]]; then
-  emit tui_transcript_20k_layout_ms "$redraw_ms" ms
-fi
-
-# ---------------------------------------------------------------------------
 # 6. Peak resident set after a scripted growth turn through the placeholder rung.
 # ---------------------------------------------------------------------------
 "$PY" - "$root" <<'PY'

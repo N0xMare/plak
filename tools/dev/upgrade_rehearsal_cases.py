@@ -195,7 +195,7 @@ class Case:
         for name in ["lead", "review", "explore", "implement", "orchestrate", "note"]:
             (home / "agents" / f"{name}.toml").write_text(template)
         spec = importlib.util.spec_from_file_location(
-            "rehearsal_host_client", images["checkout"] / "tools/examples/host_client.py"
+            "rehearsal_host_client", images["checkout"] / "tests/tooling/fixtures/host_client.py"
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -404,7 +404,7 @@ class Case:
         path = self.path / "seed.json"
         self.s.write_json(path, document)
         result = self.command("source", ["session", "import", str(path)])
-        match = re.search(r"resume with: plak --resume (\S+)", result.stdout)
+        match = re.search(r"^session (\S+) linked from ", result.stdout, re.MULTILINE)
         self.s.require(match, f"import did not return a session: {result.stdout}")
         return match[1]
 

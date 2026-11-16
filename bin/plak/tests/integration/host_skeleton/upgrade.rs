@@ -75,7 +75,7 @@ fn seed_in(fixture: &Fixture, ordinal: usize, workspace: &std::path::Path) -> St
     String::from_utf8(result.stdout)
         .unwrap()
         .lines()
-        .find_map(|line| line.strip_prefix("resume with: plak --resume "))
+        .find_map(|line| line.strip_prefix("resume with: plak run --session "))
         .unwrap()
         .to_owned()
 }

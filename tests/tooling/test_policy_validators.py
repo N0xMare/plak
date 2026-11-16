@@ -2072,11 +2072,6 @@ fn cli_human_output() {
     let _ = std::env::var_os("NO_COLOR");
 }
 """,
-                "src/tui_launch/supervisor.rs": """
-fn reload(executable: &std::path::Path) {
-    let _ = std::process::Command::new(executable);
-}
-""",
                 "src/main.rs": "use std::process::ExitCode;",
                 "src/commands/support.rs": """
 use std::env;
@@ -2107,13 +2102,12 @@ fn paths() {
     let _ = std::env::var_os("PLAK_TEST_TMPDIR");
 }
 """,
-                "src/carry/interactive.rs": """
-fn carry(executable: &str, snapshot: &str) {
+                "src/carry/installed.rs": """
+fn carry(executable: &str) {
     let _ = std::process::Command::new(&executable);
     let _ = std::process::Command::new(&target.executable);
     let _ = std::process::Command::new(executable);
     let _ = std::process::Command::new(executable);
-    let _ = std::process::Command::new(snapshot);
 }
 """,
                 "src/home/secrets.rs": """
@@ -3065,8 +3059,8 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(profile_counts["plakous"], 2 * 14 + 3)
         # sqlite, perf-instrumentation, repository-only commit-trace.
         self.assertEqual(profile_counts["plakous-store"], 2 * 3 + 3)
-        self.assertEqual(profile_counts["plak"], 2 * 21 + 3)
-        self.assertEqual(profile_counts["plakous-hosted"], 2 * 17 + 3)
+        self.assertEqual(profile_counts["plak"], 2 * 19 + 3)
+        self.assertEqual(profile_counts["plakous-hosted"], 2 * 15 + 3)
         self.assertNotIn("plakous-cell", profile_counts)
         self.assertEqual(profile_counts["plakous-js-runtime"], 2 * 1 + 3)
         for count in profile_counts.values():

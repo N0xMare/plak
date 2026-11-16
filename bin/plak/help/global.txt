@@ -1,10 +1,8 @@
 plak {version}
-Plak coding agent (CLI + TUI) on plakous
+Plak host server and operator CLI on plakous
 
 USAGE:
-  plak                              Open TUI (new session in cwd; interactive terminal required)
-  plak --runner <name> --workspace <path>
-                                    Open TUI on host-selected placement (running host required)
+  plak                              Global help (no host or session startup)
   plak <command> [options]
   plak help                         Global help (this message)
   plak <command> --help             Command-specific help
@@ -21,9 +19,8 @@ COMMANDS:
   runner      Runner daemon on this machine; pair with and list remote runners
   host        Serve the home's sessions on a private socket and optional web endpoint
   run         Non-interactive one-shot agent run
-  agent       Long-lived JSONL host client (stdio; same host as TUI)
+  agent       Long-lived JSONL agent loop (stdio)
   wire        Export this build's wire v2 JSON Schema
-  resume      Resume session (cwd picker or UUID)
   config      Show/set/edit product config (~/.plak)
   doctor      Local health diagnosis
   usage       Subscription limits and context-status availability

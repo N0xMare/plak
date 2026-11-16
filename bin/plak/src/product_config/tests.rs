@@ -7,6 +7,22 @@
 use super::policy::template;
 use super::*;
 
+fn set_config_key(
+    paths: &PlakPaths,
+    scope: ConfigWriteScope,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    let mut config = match scope {
+        ConfigWriteScope::User => ProductConfig::load_user(paths),
+        ConfigWriteScope::Project => ProductConfig::load(paths),
+    }?;
+    config.set_key(key, value)?;
+    config
+        .save_scoped(paths, scope)
+        .map_err(ConfigSaveError::into_message)
+}
+
 #[test]
 fn sdk_is_a_root_override_not_a_child_template_capability() {
     let (_tmp, paths) = PlakPaths::isolated_test_home();
@@ -155,14 +171,25 @@ fn init_template_uncommenting_one_key_loads_it_in_its_section() {
     let paths = PlakPaths::explicit(temp.path().join("home"));
     assert!(init_if_missing(&paths).unwrap());
     let template = fs::read_to_string(paths.config_file()).unwrap();
-    assert!(ProductConfig::load(&paths).unwrap().tui_mouse);
-    assert_eq!(template.matches("\n# mouse = true\n").count(), 1);
+    assert!(ProductConfig::load(&paths).unwrap().skills_enabled);
+    let skills = template
+        .split_once("[skills]")
+        .unwrap()
+        .1
+        .split("\n[")
+        .next()
+        .unwrap();
+    assert_eq!(skills.matches("\n# enabled = true\n").count(), 1);
     fs::write(
         paths.config_file(),
-        template.replace("\n# mouse = true\n", "\nmouse = false\n"),
+        template.replacen(
+            skills,
+            &skills.replace("\n# enabled = true\n", "\nenabled = false\n"),
+            1,
+        ),
     )
     .unwrap();
-    assert!(!ProductConfig::load(&paths).unwrap().tui_mouse);
+    assert!(!ProductConfig::load(&paths).unwrap().skills_enabled);
 }
 
 #[test]
@@ -172,10 +199,10 @@ fn untrusted_project_applies_nothing_and_names_the_blocked_source() {
     fs::write(paths.config_file(), "[root]\nagent = \"ga\"\n").unwrap();
     let home = project_home(&project);
     write_template_file(&home.join("agents"), "pt", "project-model");
-    fs::write(home.join("config.toml"), "[tui]\nmouse = false\n").unwrap();
+    fs::write(home.join("config.toml"), "[skills]\nenabled = false\n").unwrap();
 
     let config = ProductConfig::load(&paths).unwrap();
-    assert!(config.tui_mouse, "untrusted keys must not apply");
+    assert!(config.skills_enabled, "untrusted keys must not apply");
     assert!(!config.templates.contains_key("pt"));
     let source = config.project.as_ref().unwrap();
     assert!(!source.trusted);
@@ -198,7 +225,7 @@ fn trusted_project_overlays_keys_and_replaces_whole_templates() {
     write_template_file(&paths.user_agents_dir(), "ga", "global-model");
     fs::write(
         paths.config_file(),
-        "[root]\nagent = \"ga\"\n[tui]\nmouse = true\n",
+        "[root]\nagent = \"ga\"\n[skills]\nenabled = true\n",
     )
     .unwrap();
     let home = project_home(&project);
@@ -206,17 +233,17 @@ fn trusted_project_overlays_keys_and_replaces_whole_templates() {
     write_template_file(&home.join("agents"), "pt", "project-only");
     fs::write(
         home.join("config.toml"),
-        "[root]\nagent = \"pt\"\n[tui]\nmouse = false\n",
+        "[root]\nagent = \"pt\"\n[skills]\nenabled = false\n",
     )
     .unwrap();
     project_trust::trust(&paths, project.path()).unwrap();
 
     let config = ProductConfig::load(&paths).unwrap();
-    assert!(!config.tui_mouse);
+    assert!(!config.skills_enabled);
     assert_eq!(config.root_agent.as_deref(), Some("pt"));
     assert_eq!(config.templates["ga"].model, "project-model");
     assert_eq!(
-        config.origin(ConfigField::TuiMouse),
+        config.origin(ConfigField::SkillsEnabled),
         ConfigValueOrigin::Project
     );
     assert_eq!(
@@ -233,14 +260,14 @@ fn trusted_project_cannot_override_home_orchestration() {
     let (_temp, project, paths) = project_fixture();
     fs::write(
         paths.config_file(),
-        "[orchestration]\nsubagents = false\nmax_depth = 2\nmax_children = 3\nmax_nodes = 8\nmax_attempts = 12\ntransient_resumes = 0\nmax_concurrent_requests_per_account = 3\nrequire_review_evidence = true\n[turn]\nauto_continue = false\n[tui]\nreload_requests = false\n[mcp]\nclient_id_metadata_url = \"https://home.example/plak/client.json\"\n[host]\nresume_after_loss = \"hold\"\n[web]\nallow = [\"home@example.com\"]\norigin = \"https://home.example.ts.net\"\naccounts_read = false\nconfig_read = false\n",
+        "[orchestration]\nsubagents = false\nmax_depth = 2\nmax_children = 3\nmax_nodes = 8\nmax_attempts = 12\ntransient_resumes = 0\nmax_concurrent_requests_per_account = 3\nrequire_review_evidence = true\n[turn]\nauto_continue = false\n[mcp]\nclient_id_metadata_url = \"https://home.example/plak/client.json\"\n[host]\nreload_requests = false\nresume_after_loss = \"hold\"\n[web]\nallow = [\"home@example.com\"]\norigin = \"https://home.example.ts.net\"\naccounts_read = false\nconfig_read = false\n",
     )
     .unwrap();
     let home = project_home(&project);
     fs::create_dir_all(&home).unwrap();
     fs::write(
         home.join("config.toml"),
-        "[orchestration]\nsubagents = true\nmax_depth = 4\nmax_children = 8\nmax_nodes = 32\nmax_attempts = 64\ntransient_resumes = 2\nmax_concurrent_requests_per_account = 9\nrequire_review_evidence = false\n[turn]\nauto_continue = true\n[tui]\nmouse = false\nreload_requests = true\n[mcp]\nclient_id_metadata_url = \"https://project.example/client.json\"\n[host]\nresume_after_loss = \"continue\"\n[runners.buildbox]\nssh = \"buildbox\"\ncommand = \"/opt/bin/plak\"\n[web]\nallow = [\"repo@example.com\"]\norigin = \"https://repo.example.ts.net\"\naccounts_read = true\nconfig_read = true\n",
+        "[orchestration]\nsubagents = true\nmax_depth = 4\nmax_children = 8\nmax_nodes = 32\nmax_attempts = 64\ntransient_resumes = 2\nmax_concurrent_requests_per_account = 9\nrequire_review_evidence = false\n[turn]\nauto_continue = true\n[skills]\nenabled = false\n[mcp]\nclient_id_metadata_url = \"https://project.example/client.json\"\n[host]\nreload_requests = true\nresume_after_loss = \"continue\"\n[runners.buildbox]\nssh = \"buildbox\"\ncommand = \"/opt/bin/plak\"\n[web]\nallow = [\"repo@example.com\"]\norigin = \"https://repo.example.ts.net\"\naccounts_read = true\nconfig_read = true\n",
     )
     .unwrap();
     project_trust::trust(&paths, project.path()).unwrap();
@@ -255,7 +282,7 @@ fn trusted_project_cannot_override_home_orchestration() {
         assert_eq!(config.origin(row.field), global.origin(row.field));
     }
     assert!(
-        !config.tui_mouse,
+        !config.skills_enabled,
         "ordinary project preferences still apply"
     );
     assert!(!SessionPolicy::load(&paths).unwrap().topology_enabled);
@@ -288,7 +315,7 @@ fn project_save_refuses_orchestration_changes_before_publication() {
     let home = project_home(&project);
     fs::create_dir_all(&home).unwrap();
     let project_file = home.join("config.toml");
-    fs::write(&project_file, "[tui]\nmouse = false\n").unwrap();
+    fs::write(&project_file, "[skills]\nenabled = false\n").unwrap();
     project_trust::trust(&paths, project.path()).unwrap();
     let before = fs::read(&project_file).unwrap();
     let mut config = ProductConfig::load(&paths).unwrap();
@@ -337,24 +364,32 @@ fn user_scope_save_never_flattens_project_values() {
     write_template_file(&paths.user_agents_dir(), "ga", "global-model");
     fs::write(
         paths.config_file(),
-        "[root]\nagent = \"ga\"\n[tui]\ntheme = \"default-dark\"\n",
+        "[root]\nagent = \"ga\"\n[jobs]\nforeground_seconds = 30\n",
     )
     .unwrap();
     let home = project_home(&project);
     write_template_file(&home.join("agents"), "pt", "project-model");
     fs::write(
         home.join("config.toml"),
-        "[tui]\ntheme = \"catppuccin-mocha\"\n",
+        "[jobs]\nforeground_seconds = 50\n",
     )
     .unwrap();
     project_trust::trust(&paths, project.path()).unwrap();
 
-    ProductConfig::save_terminal_key(&paths, ConfigWriteScope::User, "tui.scroll_lines", "7")
-        .unwrap();
+    set_config_key(
+        &paths,
+        ConfigWriteScope::User,
+        "jobs.max_runtime_hours",
+        "7",
+    )
+    .unwrap();
     let global_text = fs::read_to_string(paths.config_file()).unwrap();
-    assert!(global_text.contains("scroll_lines = 7"), "{global_text}");
     assert!(
-        global_text.contains("theme = \"default-dark\""),
+        global_text.contains("max_runtime_hours = 7"),
+        "{global_text}"
+    );
+    assert!(
+        global_text.contains("foreground_seconds = 30"),
         "the global file keeps its own theme: {global_text}"
     );
     assert!(
@@ -363,7 +398,7 @@ fn user_scope_save_never_flattens_project_values() {
     );
     // The merged view is untouched: reload still shows the project theme.
     let reloaded = ProductConfig::load(&paths).unwrap();
-    assert_eq!(reloaded.theme, ProductTheme::CatppuccinMocha);
+    assert_eq!(reloaded.jobs_foreground_seconds, 50);
 }
 
 #[test]
@@ -372,7 +407,7 @@ fn project_scope_save_writes_only_the_delta() {
     write_template_file(&paths.user_agents_dir(), "ga", "global-model");
     fs::write(
         paths.config_file(),
-        "[root]\nagent = \"ga\"\n[tui]\ntheme = \"default-dark\"\n",
+        "[root]\nagent = \"ga\"\n[jobs]\nforeground_seconds = 30\n",
     )
     .unwrap();
     let home = project_home(&project);
@@ -380,11 +415,16 @@ fn project_scope_save_writes_only_the_delta() {
     project_trust::trust(&paths, project.path()).unwrap();
     let global_before = fs::read(paths.config_file()).unwrap();
 
-    ProductConfig::save_terminal_key(&paths, ConfigWriteScope::Project, "tui.theme", "light")
-        .unwrap();
+    set_config_key(
+        &paths,
+        ConfigWriteScope::Project,
+        "jobs.foreground_seconds",
+        "40",
+    )
+    .unwrap();
     let project_text = fs::read_to_string(home.join("config.toml")).unwrap();
     assert!(
-        project_text.contains("theme = \"default-light\""),
+        project_text.contains("foreground_seconds = 40"),
         "{project_text}"
     );
     assert!(
@@ -394,9 +434,9 @@ fn project_scope_save_writes_only_the_delta() {
     assert_eq!(fs::read(paths.config_file()).unwrap(), global_before);
     // And the merged load now shows the override.
     let reloaded = ProductConfig::load(&paths).unwrap();
-    assert_eq!(reloaded.theme, ProductTheme::DefaultLight);
+    assert_eq!(reloaded.jobs_foreground_seconds, 40);
     assert_eq!(
-        reloaded.origin(ConfigField::Theme),
+        reloaded.origin(ConfigField::JobsForegroundSeconds),
         ConfigValueOrigin::Project
     );
 }
@@ -407,7 +447,7 @@ fn project_scope_save_requires_trust() {
     fs::write(paths.config_file(), "").unwrap();
     fs::create_dir_all(project_home(&project)).unwrap();
     let mut config = ProductConfig::load(&paths).unwrap();
-    config.set_key("tui.scroll_lines", "5").unwrap();
+    config.set_key("jobs.max_runtime_hours", "5").unwrap();
     let error = config
         .save_scoped(&paths, ConfigWriteScope::Project)
         .unwrap_err();
@@ -427,45 +467,6 @@ fn launching_in_the_home_parent_does_not_read_home_as_a_project() {
     let config = ProductConfig::load(&paths).unwrap();
     assert!(config.project.is_none());
     assert_eq!(config.root_agent.as_deref(), Some("ga"));
-}
-
-#[test]
-fn the_theme_set_is_the_six_the_tui_ships() {
-    let shipped = [
-        ProductTheme::DefaultDark,
-        ProductTheme::DefaultLight,
-        ProductTheme::CatppuccinLatte,
-        ProductTheme::CatppuccinFrappe,
-        ProductTheme::CatppuccinMacchiato,
-        ProductTheme::CatppuccinMocha,
-    ];
-    for (host, tui) in shipped
-        .into_iter()
-        .zip(crate::surface_protocol::SettingsTheme::ALL)
-    {
-        assert_eq!(host.as_str(), tui.as_str());
-        assert_eq!(ProductTheme::parse(host.as_str()), Ok(host));
-    }
-    // `dark` and `light` remain accepted aliases of the two defaults.
-    assert_eq!(ProductTheme::parse("dark"), Ok(ProductTheme::DefaultDark));
-    assert_eq!(ProductTheme::parse("light"), Ok(ProductTheme::DefaultLight));
-}
-
-#[test]
-fn the_new_tui_rows_round_trip_through_the_file() {
-    let mut config = ProductConfig::default_product();
-    config.set_key("tui.scroll_lines", "7").unwrap();
-    config.set_key("tui.show_thinking", "false").unwrap();
-    config.set_key("tui.group_tool_calls", "false").unwrap();
-    config.set_key("tui.reduced_motion", "true").unwrap();
-    config.set_key("tui.theme", "default-light").unwrap();
-    let round_tripped = ProductConfig::parse(&config.render()).unwrap();
-    assert_eq!(round_tripped, config);
-    assert_eq!(round_tripped.scroll_lines, 7);
-    assert!(!round_tripped.show_thinking);
-    assert!(!round_tripped.group_tool_calls);
-    assert!(round_tripped.reduced_motion);
-    assert_eq!(round_tripped.theme, ProductTheme::DefaultLight);
 }
 
 fn catalog_entry(
@@ -642,13 +643,6 @@ fn save_and_reload(cfg: &ProductConfig) -> ProductConfig {
     let (_tmp, paths) = PlakPaths::isolated_test_home();
     paths.ensure_layout().unwrap();
     cfg.save(&paths).unwrap();
-    ProductConfig::update_user(&paths, |fresh| {
-        for row in CONFIG_KEYS.iter().filter(|row| row.section() == "tui") {
-            fresh.assign_overlay_field(row.field, cfg);
-        }
-        Ok(())
-    })
-    .unwrap();
     ProductConfig::load(&paths).unwrap()
 }
 
@@ -663,7 +657,7 @@ fn full_schema_round_trips_through_files() {
         "max_depth = 2\n",
         "max_children = 3\n",
         "max_nodes = 9\n",
-        "\n[tui]\nmouse = false\ntheme = \"catppuccin-mocha\"\nscroll_lines = 6\n",
+        "\n[skills]\nenabled = false\n[jobs]\nforeground_seconds = 50\nmax_runtime_hours = 6\n",
         "\n[compaction]\nenabled = false\n",
     );
     let (_tmp, paths) = home_with_templates(&[
@@ -710,7 +704,7 @@ fn full_schema_round_trips_through_files() {
     assert_eq!(router.max_turns, Some(12));
     assert_eq!(router.on_mint.as_deref(), Some("cargo fetch"));
     assert_eq!(parsed.max_children, 3);
-    assert_eq!(parsed.scroll_lines, 6);
+    assert_eq!(parsed.jobs_max_runtime_hours, 6);
     let again = save_and_reload(&parsed);
     assert_eq!(again, parsed);
     assert_eq!(again.render(), parsed.render());
@@ -1685,11 +1679,11 @@ fn every_template_field_is_documented_once() {
 #[test]
 fn a_hash_inside_a_quoted_value_is_not_a_comment() {
     let parsed = ProductConfig::parse(
-        "[root]\nagent = \"router\" # the genesis template\n[tui]\ntheme = \"default-light\"\n",
+        "[root]\nagent = \"router\" # the genesis template\n[jobs]\nforeground_seconds = 40\n",
     )
     .unwrap();
     assert_eq!(parsed.root_agent.as_deref(), Some("router"));
-    assert_eq!(parsed.theme, ProductTheme::DefaultLight);
+    assert_eq!(parsed.jobs_foreground_seconds, 40);
 
     let template = parse_template(
         "account = \"codex\"\nmodel = \"gpt-5.6-luna\"\ndescription = \"fixes the #123 bug\" # card\n",
@@ -1765,11 +1759,8 @@ fn working_set_takes_the_file_array_and_the_shell_shorthand() {
 #[test]
 fn removed_bare_config_set_aliases_name_dotted_keys() {
     let mut cfg = ProductConfig::default_product();
-    for (bare, dotted, value) in [
-        ("mouse", "tui.mouse", "false"),
-        ("theme", "tui.theme", "catppuccin-mocha"),
-        ("compaction_enabled", "compaction.enabled", "false"),
-    ] {
+    {
+        let (bare, dotted, value) = ("compaction_enabled", "compaction.enabled", "false");
         let mut bare_cfg = ProductConfig::default_product();
         assert!(bare_cfg.set_key(bare, value).unwrap_err().contains(dotted));
         let mut dotted_cfg = ProductConfig::default_product();
@@ -1777,6 +1768,8 @@ fn removed_bare_config_set_aliases_name_dotted_keys() {
         assert_ne!(bare_cfg, dotted_cfg, "{bare} must not pin {dotted}");
     }
     for bare in [
+        "mouse",
+        "theme",
         "scroll_lines",
         "show_thinking",
         "group_tool_calls",
@@ -1838,9 +1831,9 @@ fn an_unreadable_config_file_refuses_session_policy() {
 fn session_policy_refuses_an_unreadable_config_with_its_named_error() {
     let (_tmp, paths) = PlakPaths::isolated_test_home();
     paths.ensure_layout().unwrap();
-    fs::write(paths.config_file(), "[tui]\ncollapsed_edit_blocks = true\n").unwrap();
+    fs::write(paths.config_file(), "[turn]\nunknown_control = true\n").unwrap();
     let result = SessionPolicy::load(&paths);
-    assert!(result.unwrap_err().contains("collapsed_edit_blocks"));
+    assert!(result.unwrap_err().contains("unknown_control"));
 }
 
 #[test]
@@ -1879,8 +1872,8 @@ fn config_set_accepts_exactly_the_closed_key_list() {
         ("orchestration.max_depth", "2"),
         ("orchestration.max_children", "4"),
         ("orchestration.max_nodes", "16"),
-        ("tui.mouse", "false"),
-        ("tui.theme", "catppuccin-mocha"),
+        ("skills.enabled", "false"),
+        ("jobs.foreground_seconds", "50"),
         ("compaction.enabled", "false"),
         ("telemetry.max_bytes", "1000"),
         ("telemetry.max_age_days", "7"),
@@ -2218,46 +2211,6 @@ fn composition_for_tuple_is_bound_to_the_exact_root_tuple() {
     );
 }
 
-#[test]
-fn themes_parse_render_and_set_key() {
-    for (value, expected) in [
-        ("default-dark", ProductTheme::DefaultDark),
-        ("default-light", ProductTheme::DefaultLight),
-        ("catppuccin-latte", ProductTheme::CatppuccinLatte),
-        ("catppuccin-frappe", ProductTheme::CatppuccinFrappe),
-        ("catppuccin-macchiato", ProductTheme::CatppuccinMacchiato),
-        ("catppuccin-mocha", ProductTheme::CatppuccinMocha),
-    ] {
-        let parsed = ProductConfig::parse(&format!("[tui]\ntheme = \"{value}\"\n")).unwrap();
-        assert_eq!(parsed.theme, expected);
-        assert!(parsed.render().contains(&format!("theme = \"{value}\"")));
-
-        let mut set = ProductConfig::default_product();
-        set.set_key("tui.theme", value).unwrap();
-        assert_eq!(set.theme, expected);
-        set.set_key("tui.theme", value).unwrap();
-        assert_eq!(set.theme, expected);
-    }
-    for (legacy, expected, canonical) in [
-        ("dark", ProductTheme::DefaultDark, "default-dark"),
-        ("light", ProductTheme::DefaultLight, "default-light"),
-    ] {
-        let parsed = ProductConfig::parse(&format!("[tui]\ntheme = \"{legacy}\"\n")).unwrap();
-        assert_eq!(parsed.theme, expected);
-        assert!(
-            parsed
-                .render()
-                .contains(&format!("theme = \"{canonical}\""))
-        );
-    }
-    assert!(ProductConfig::parse("[tui]\ntheme = \"sepia\"\n").is_err());
-    assert!(
-        ProductConfig::default_product()
-            .set_key("tui.theme", "sepia")
-            .is_err()
-    );
-}
-
 /// The file is TOML, so the whole of TOML's string and array vocabulary
 /// reads back as the value it spells.
 #[test]
@@ -2309,16 +2262,16 @@ fn toml_strings_arrays_and_escapes_read_back_as_written() {
 #[test]
 fn a_key_outside_every_section_is_a_named_unknown_key() {
     assert_eq!(
-        ProductConfig::parse("theme = \"default-dark\"\n").unwrap_err(),
-        "unknown config key: theme (line 1, column 1)"
+        ProductConfig::parse("foreground_seconds = 30\n").unwrap_err(),
+        "unknown config key: foreground_seconds (line 1, column 1)"
     );
 }
 
 #[test]
 fn duplicate_keys_and_sections_are_refused() {
     for text in [
-        "[tui]\ntheme = \"default-dark\"\ntheme = \"default-light\"\n",
-        "[tui]\ntheme = \"default-dark\"\n[tui]\nmouse = false\n",
+        "[jobs]\nforeground_seconds = 30\nforeground_seconds = 40\n",
+        "[jobs]\nforeground_seconds = 30\n[jobs]\nmax_runtime_hours = 10\n",
     ] {
         let error = ProductConfig::parse(text).unwrap_err();
         assert!(error.contains("duplicate key"), "{error}");
@@ -2331,9 +2284,12 @@ fn duplicate_keys_and_sections_are_refused() {
 fn wrong_types_name_the_key_and_the_location() {
     for (text, needle) in [
         ("[root]\nagent = 5\n", "[root] agent must be a string"),
-        ("[tui]\ntheme = true\n", "[tui] theme must be a string"),
         (
-            "[tui]\nmouse = \"yes\"\n",
+            "[jobs]\nforeground_seconds = true\n",
+            "jobs.foreground_seconds must be an integer",
+        ),
+        (
+            "[skills]\nenabled = \"yes\"\n",
             "boolean config values must be true or false",
         ),
         (
@@ -2345,8 +2301,8 @@ fn wrong_types_name_the_key_and_the_location() {
             "telemetry.max_bytes must be a positive integer",
         ),
         (
-            "[tui]\nscroll_lines = \"3\"\n",
-            "[tui] scroll_lines must be an integer between",
+            "[jobs]\nforeground_seconds = \"3\"\n",
+            "jobs.foreground_seconds must be an integer",
         ),
         (
             "[turn]\nmax_model_rounds = 1025\n",
@@ -2385,27 +2341,27 @@ fn the_turn_round_cap_reaches_the_session_policy() {
 #[test]
 fn booleans_are_real_toml_booleans_only() {
     assert!(
-        ProductConfig::parse("[tui]\nmouse = true\n")
+        ProductConfig::parse("[skills]\nenabled = true\n")
             .unwrap()
-            .tui_mouse
+            .skills_enabled
     );
     assert!(
-        !ProductConfig::parse("[tui]\nmouse = false\n")
+        !ProductConfig::parse("[skills]\nenabled = false\n")
             .unwrap()
-            .tui_mouse
+            .skills_enabled
     );
     for rejected in ["1", "yes", "0", "no", "True", "\"true\""] {
-        let text = format!("[tui]\nmouse = {rejected}\n");
+        let text = format!("[skills]\nenabled = {rejected}\n");
         assert!(ProductConfig::parse(&text).is_err(), "{rejected}");
         assert!(
             ProductConfig::default_product()
-                .set_key("tui.mouse", rejected)
+                .set_key("skills.enabled", rejected)
                 .is_err(),
             "{rejected}"
         );
     }
     ProductConfig::default_product()
-        .set_key("tui.mouse", "false")
+        .set_key("skills.enabled", "false")
         .unwrap();
 }
 
@@ -2417,9 +2373,10 @@ fn hand_written_home() -> (tempfile::TempDir, PlakPaths, String) {
                     [root]\n\
                     # the genesis template\n\
                     agent = \"lead\"\n\n\
-                    [tui]\n\
-                    mouse    =   false      # the terminal keeps selection\n\
-                    theme = \"catppuccin-mocha\"\n\n\
+                    [skills]\n\
+                    enabled    =   false      # discovery stays off\n\
+                    [jobs]\n\
+                    foreground_seconds = 50\n\n\
                     [telemetry]\n\
                     max_age_days = 30\n"
         .to_owned();
@@ -2432,26 +2389,23 @@ fn hand_written_home() -> (tempfile::TempDir, PlakPaths, String) {
 #[test]
 fn a_single_key_save_keeps_every_other_byte_of_the_file() {
     let (_tmp, paths, before) = hand_written_home();
-    ProductConfig::save_terminal_key(
+    set_config_key(
         &paths,
         ConfigWriteScope::User,
-        "tui.theme",
-        "catppuccin-latte",
+        "jobs.foreground_seconds",
+        "60",
     )
     .unwrap();
     let after = fs::read_to_string(paths.config_file()).unwrap();
     assert_eq!(
         after,
-        before.replace(
-            "theme = \"catppuccin-mocha\"",
-            "theme = \"catppuccin-latte\""
-        )
+        before.replace("foreground_seconds = 50", "foreground_seconds = 60")
     );
     // The comments, the unrelated hand-set keys and the operator's own
     // spacing all survived, and the file still means what it says.
     let reloaded = ProductConfig::load(&paths).unwrap();
-    assert_eq!(reloaded.theme, ProductTheme::CatppuccinLatte);
-    assert!(!reloaded.tui_mouse);
+    assert_eq!(reloaded.jobs_foreground_seconds, 60);
+    assert!(!reloaded.skills_enabled);
     assert_eq!(reloaded.telemetry_max_age_days, 30);
     assert_eq!(reloaded.root_agent.as_deref(), Some("lead"));
 }
@@ -2463,30 +2417,28 @@ fn an_inline_table_section_is_edited_in_place() {
     let (_tmp, paths, _) = hand_written_home();
     fs::write(
         paths.config_file(),
-        "# inline\ntui = { mouse = false, theme = \"catppuccin-mocha\" }\n[root]\nagent = \"lead\"\n",
+        "# inline\njobs = { max_runtime_hours = 10, foreground_seconds = 50 }\n[root]\nagent = \"lead\"\n",
     )
     .unwrap();
     ProductConfig::update_user(&paths, |config| {
-        config.set_key("tui.theme", "catppuccin-latte")?;
-        config.set_key("tui.scroll_lines", "7")
+        config.set_key("jobs.foreground_seconds", "60")?;
+        config.set_key("jobs.max_runtime_hours", "7")
     })
     .unwrap();
     let after = fs::read_to_string(paths.config_file()).unwrap();
     assert!(after.starts_with("# inline\n"), "{after}");
-    assert!(after.contains("mouse = false"), "{after}");
-    assert!(after.contains("theme = \"catppuccin-latte\""), "{after}");
-    assert!(after.contains("scroll_lines = 7"), "{after}");
-    assert!(!after.contains("catppuccin-mocha"), "{after}");
+    assert!(after.contains("foreground_seconds = 60"), "{after}");
+    assert!(after.contains("max_runtime_hours = 7"), "{after}");
+    assert!(!after.contains("50"), "{after}");
     let reloaded = ProductConfig::load(&paths).unwrap();
-    assert_eq!(reloaded.theme, ProductTheme::CatppuccinLatte);
-    assert!(!reloaded.tui_mouse);
-    assert_eq!(reloaded.scroll_lines, 7);
+    assert_eq!(reloaded.jobs_foreground_seconds, 60);
+    assert_eq!(reloaded.jobs_max_runtime_hours, 7);
 
     // Clearing a key removes it from an inline table too; a stale bind
     // must not resurrect on the next load.
     fs::write(
         paths.config_file(),
-        "root = { agent = \"lead\" }\ntui = { mouse = false }\n",
+        "root = { agent = \"lead\" }\nskills = { enabled = false }\n",
     )
     .unwrap();
     let mut config = ProductConfig::load(&paths).unwrap();
@@ -2494,7 +2446,7 @@ fn an_inline_table_section_is_edited_in_place() {
     config.save(&paths).unwrap();
     let cleared = fs::read_to_string(paths.config_file()).unwrap();
     assert!(!cleared.contains("agent"), "{cleared}");
-    assert!(cleared.contains("mouse = false"), "{cleared}");
+    assert!(cleared.contains("enabled = false"), "{cleared}");
     assert_eq!(ProductConfig::load(&paths).unwrap().root_agent, None);
 }
 
@@ -2518,45 +2470,8 @@ fn a_save_adds_a_missing_key_and_removes_a_cleared_one() {
     config.save(&paths).unwrap();
     let cleared = fs::read_to_string(paths.config_file()).unwrap();
     assert!(!cleared.contains("agent = "), "{cleared}");
-    assert!(
-        cleared.contains("theme = \"catppuccin-mocha\""),
-        "{cleared}"
-    );
+    assert!(cleared.contains("foreground_seconds = 50"), "{cleared}");
     assert!(ProductConfig::load(&paths).unwrap().root_agent.is_none());
-}
-
-/// A theme alias normalizes on the next save, and the surgical editor is
-/// what makes that true: `dark` and `default-dark` are different strings,
-/// so the key counts as changed and is rewritten even when the save was
-/// about some other key (spec 02 §5.8, spec 07 §3.2).
-#[test]
-fn a_theme_alias_is_rewritten_canonically_by_any_save() {
-    for (alias, canonical) in [("dark", "default-dark"), ("light", "default-light")] {
-        let (_tmp, paths) = home_with_templates(&[]);
-        let before =
-            format!("# hand written\n\n[tui]\ntheme = \"{alias}\"\nmouse    =   false   # kept\n");
-        fs::write(paths.config_file(), &before).unwrap();
-
-        // A save of an unrelated key still normalizes the alias.
-        ProductConfig::save_terminal_key(&paths, ConfigWriteScope::User, "tui.scroll_lines", "7")
-            .unwrap();
-
-        let after = fs::read_to_string(paths.config_file()).unwrap();
-        assert!(
-            after.contains(&format!("theme = \"{canonical}\"")),
-            "{after}"
-        );
-        assert!(!after.contains(&format!("\"{alias}\"")), "{after}");
-        // Everything the operator wrote around it is still theirs.
-        assert!(after.starts_with("# hand written\n\n[tui]\n"), "{after}");
-        assert!(after.contains("mouse    =   false   # kept"), "{after}");
-        assert!(after.contains("scroll_lines = 7"), "{after}");
-        // And the alias is gone for good: a reload reads the canonical
-        // name and a second save leaves the file alone.
-        let reloaded = ProductConfig::load(&paths).unwrap();
-        reloaded.save(&paths).unwrap();
-        assert_eq!(fs::read_to_string(paths.config_file()).unwrap(), after);
-    }
 }
 
 /// A refused save is refused before the file is touched: the bytes on disk
@@ -2636,23 +2551,14 @@ proptest! {
         account_index in 0_usize..4,
         model in "[a-z0-9._/-]{2,32}",
         effort in proptest::option::of("low|medium|high"),
-        mouse in any::<bool>(),
+        skills in any::<bool>(),
         compact in any::<bool>(),
-        theme_index in 0_usize..5,
     ) {
         let accounts = ["codex", "grok", "claude", "openrouter"];
-        let themes = [
-            ProductTheme::DefaultDark,
-            ProductTheme::CatppuccinLatte,
-            ProductTheme::CatppuccinFrappe,
-            ProductTheme::CatppuccinMacchiato,
-            ProductTheme::CatppuccinMocha,
-        ];
         let mut cfg = ProductConfig::default_product();
         cfg.bind_root_tuple(accounts[account_index], &model, effort.as_deref());
-        cfg.tui_mouse = mouse;
+        cfg.skills_enabled = skills;
         cfg.compaction_enabled = compact;
-        cfg.theme = themes[theme_index];
         let back = ProductConfig::parse(&cfg.render()).unwrap();
         // The main file carries everything but the template bodies.
         let mut expected = cfg.clone();
@@ -2712,14 +2618,6 @@ fn removed_keys_are_plain_unknown_keys() {
             "[orchestration]\nmax_agents_per_cell = 1\n",
             "orchestration.max_agents_per_cell",
         ),
-        ("[tui]\nbanner = true\n", "tui.banner"),
-        ("[tui]\nstartup_animation = true\n", "tui.startup_animation"),
-        (
-            "[tui]\ncollapsed_edit_blocks = true\n",
-            "tui.collapsed_edit_blocks",
-        ),
-        ("[tui]\nreading_width = 96\n", "tui.reading_width"),
-        ("[tui]\nshow_timestamps = true\n", "tui.show_timestamps"),
     ] {
         assert_eq!(
             toml_file::parse_config(body).unwrap_err(),

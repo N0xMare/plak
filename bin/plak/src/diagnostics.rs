@@ -1,4 +1,4 @@
-//! Optional file diagnostics (`PLAK_LOG`) and OTel export; never writes to the TUI terminal.
+//! Optional file diagnostics (`PLAK_LOG`) and OTel export; never writes to protocol stdout.
 
 use std::fmt;
 use std::fs::{File, OpenOptions};

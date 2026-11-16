@@ -101,7 +101,6 @@ class BaselineTests(unittest.TestCase):
             ("cli_two_tool_turn_ms", "ms", 380.0, 9_000.0),
             ("growth_turn_peak_rss_mb", "mb", 54.8, 500.0),
             ("jsonl_bulk_throughput_mb_per_s", "mb_per_s", 1.0, 0.001),
-            ("tui_transcript_20k_layout_ms", "ms", 62.6, 900.0),
         ):
             with self.subTest(metric=metric):
                 exit_code = self.run_check(
@@ -122,7 +121,7 @@ class BaselineTests(unittest.TestCase):
         )
         self.assertEqual(exit_code, 0)
 
-    def test_the_gated_set_is_the_four_measured_stable_metrics(self):
+    def test_the_gated_set_is_the_three_measured_stable_metrics(self):
         """The set follows the idle-host spread table, not instinct."""
         self.assertEqual(
             CHECKER.GATED_METRICS,
@@ -130,7 +129,6 @@ class BaselineTests(unittest.TestCase):
                 "cli_two_tool_turn_ms",
                 "growth_turn_peak_rss_mb",
                 "jsonl_bulk_throughput_mb_per_s",
-                "tui_transcript_20k_layout_ms",
             },
         )
 

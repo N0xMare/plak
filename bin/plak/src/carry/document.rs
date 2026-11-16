@@ -239,6 +239,11 @@ pub(super) fn validate_size(
 }
 
 impl CarryDocument {
+    #[cfg(test)]
+    pub(crate) fn carry_summary(&self) -> String {
+        self.history.summary()
+    }
+
     pub(super) fn validate(&self) -> Result<(), ImportError> {
         match (self.version, self.kind) {
             (VERSION, Some(DocumentKind::PortableSession)) | (PREVIOUS_VERSION, None) => {}
@@ -283,23 +288,6 @@ impl CarryDocument {
                 .map_err(|error| ImportError::Invalid(format!("$.profile: {error}")))?;
         }
         self.history.validate_size()
-    }
-
-    /// The session id and state key this document was exported from.
-    pub(crate) fn source(&self) -> (&str, &str) {
-        (&self.source.session_id, &self.source.state_key)
-    }
-
-    /// The workspace the exported session belonged to.
-    pub(crate) fn workspace_root(&self) -> &Path {
-        &self.workspace_root
-    }
-
-    /// Saved placement identity, validated before admission.
-    pub(crate) fn runner_id(&self) -> &str {
-        self.runner
-            .as_ref()
-            .map_or("local", |runner| runner.runner_id.as_str())
     }
 
     pub(crate) fn message_count(&self) -> usize {
@@ -471,19 +459,6 @@ pub(super) fn private_dir(dir: &Path) -> Result<PathBuf, String> {
         return Err(format!("{} is not a directory", dir.display()));
     }
     Ok(dir.to_path_buf())
-}
-
-pub(super) fn privately_owned(metadata: &fs::Metadata) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt as _;
-        metadata.uid() == rustix::process::geteuid().as_raw() && metadata.mode() & 0o022 == 0
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = metadata;
-        true
-    }
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@ carry-forward: export with the installed build, then validate config, import
 and rehearse with the staged build. Every home is temporary and removed.
 
 On the same state key the staged build then answers the exact-reopen binding
-verdict `/reload` asks before teardown (`version --reopen-probe`): it reads the
+verdict a host reload inspects before teardown (`version --reopen-probe`): it reads the
 live home and its logins read-only, takes no lease, writes no session, tree or
 credential state and never renews a login, and reports `reopen=exact`,
 `reopen=carries: <change>`, `reopen=unknown: <reason>` (a login that would need
@@ -145,7 +145,7 @@ def backup_database(source, target):
         if time.monotonic() > deadline:
             raise TimeoutError("backup_deadline")
 
-    # mode=ro, not immutable: a running TUI's committed WAL must be included.
+    # mode=ro, not immutable: a running host's committed WAL must be included.
     try:
         live = sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
     except FileNotFoundError:
@@ -528,7 +528,7 @@ def verdict_environment(live, source=None):
 
 
 def reopen_verdict(live, key, binary, session_id):
-    """Asks the staged build whether exact reopen would attach, as /reload does."""
+    """Asks the staged build whether exact reopen would attach before replacement."""
     roots = [live, binary, ROOT]
     try:
         cwd = session_workspace(live, key, session_id)

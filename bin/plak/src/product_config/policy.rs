@@ -184,15 +184,6 @@ pub const DEFAULT_MAX_MODEL_ROUNDS: u16 = crate::product_agent::NATIVE_RUN_MAX_M
 pub const CEILING_MAX_MODEL_ROUNDS: u16 =
     crate::product_agent::NATIVE_RUN_MAX_MODEL_ROUNDS_CEILING as u16;
 
-/// `[tui] scroll_lines` default and bounds (spec 8.1).
-pub const DEFAULT_SCROLL_LINES: u16 = 3;
-
-/// Lower bound for `[tui] scroll_lines`.
-pub const MIN_SCROLL_LINES: u16 = 1;
-
-/// Upper bound for `[tui] scroll_lines`.
-pub const MAX_SCROLL_LINES: u16 = 10;
-
 /// Template minted by pre-attach shell binding when `[root] agent` is unset.
 pub const MINTED_ROOT_TEMPLATE_NAME: &str = "default";
 

@@ -64,7 +64,7 @@ pub struct AttemptCompaction {
 /// Why the current attempt is `blocked`.
 ///
 /// A blocked attempt leaves the *node* `Failed`; the reset time lives on the
-/// attempt, which is why the TUI reads it from here and not from the status.
+/// attempt, which is why the client reads it from here and not from the status.
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
 )]
@@ -81,7 +81,7 @@ pub struct BlockedObservation {
 /// Every status label the host projects onto a canvas row: node statuses,
 /// the root's session-derived `idle`, workspace-row statuses,
 /// and the attempt statuses the inspector presents. Frontends own their glyphs;
-/// the TUI checks its table against this complete set.
+/// the client checks its table against this complete set.
 pub const PROJECTED_STATUS_LABELS: &[&str] = &[
     // Node statuses.
     "pending",

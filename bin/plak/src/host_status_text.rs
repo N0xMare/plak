@@ -11,7 +11,7 @@ mod tests;
 pub(crate) fn pause_suffix(pause: HostPause) -> Option<&'static str> {
     pause
         .queue
-        .then_some("queue paused, not draining · Tab then r")
+        .then_some("queue paused, not draining · resume_queue")
 }
 
 fn with_pause(detail: String, pause: HostPause) -> String {
@@ -42,7 +42,7 @@ fn legacy_failure(failure: &HostFailure) -> String {
             let account = crate::notice_text::account_label(*account);
             match failure.cause {
                 F::AccountChanged => format!(
-                    "{label} provider account changed; log in to the original account with `plak login {account}` to reopen exactly, or use /rebind to carry the history into a new session under the newly logged-in account"
+                    "{label} provider account changed; log in to the original account with `plak login {account}` to reopen exactly, or use rebind to carry the history into a new session under the newly logged-in account"
                 ),
                 F::CredentialRejected => format!(
                     "{label} credential was rejected at refresh; run `plak login {account}`"
@@ -51,16 +51,16 @@ fn legacy_failure(failure: &HostFailure) -> String {
                     "{label} credential is unavailable (signed out, quarantined, or a login made by an earlier build); run `plak login {account}`"
                 ),
                 F::LoginSelectionChanged => format!(
-                    "exact reopen refused: {label} login selection changed; use /reload or /rebind to carry the history under the current login; Fork now is available only while attached"
+                    "exact reopen refused: {label} login selection changed; use reload or rebind to carry the history under the current login; fork is available only while attached"
                 ),
                 F::BindingChanged => format!(
-                    "exact reopen refused: {label} is bound to a different account or model; restore the original account and configuration with `plak login {account}`, or use /rebind to carry the history into a new session"
+                    "exact reopen refused: {label} is bound to a different account or model; restore the original account and configuration with `plak login {account}`, or use rebind to carry the history into a new session"
                 ),
                 _ => failure.diagnostic.as_str().into(),
             }
         }
         Some(HostFailureOrigin::ModelFacts { account, model }) => format!(
-            "{account} model `{model}` changed since this session was created (its provider-published facts or this build's reviewed table moved); rebind with Fork now in the Agents tab, or start a new session"
+            "{account} model `{model}` changed since this session was created (its provider-published facts or this build's reviewed table moved); rebind with the fork operation, or start a new session"
         ),
         None => failure.diagnostic.as_str().into(),
     }
@@ -88,7 +88,7 @@ pub(crate) fn status_detail(
     use HostStatusDetail as D;
     match detail {
         D::ConfigurationPath { path } => format!("config: {path}"),
-        D::ChooseProfile => "choose a profile with /agents".into(),
+        D::ChooseProfile => "choose a profile with profile actions".into(),
         D::CreatingFreshConversation => {
             "starting a new session on the current exact binding".into()
         }

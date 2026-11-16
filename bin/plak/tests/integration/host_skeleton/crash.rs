@@ -16,7 +16,6 @@ use super::*;
 pub(super) mod client_control;
 mod compaction_queue;
 mod restart_matrix;
-mod tui;
 mod wire;
 
 /// The physical provider dispatches the fixture has seen.

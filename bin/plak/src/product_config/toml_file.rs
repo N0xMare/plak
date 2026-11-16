@@ -48,7 +48,6 @@ struct ConfigFile {
     turn: Option<TurnSection>,
     jobs: Option<JobsSection>,
     api: Option<ApiSection>,
-    tui: Option<TuiSection>,
     compaction: Option<CompactionSection>,
     skills: Option<SkillsSection>,
     telemetry: Option<TelemetrySection>,
@@ -63,6 +62,7 @@ struct ConfigFile {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HostSection {
+    reload_requests: Entry,
     resume_after_loss: Entry,
 }
 
@@ -124,18 +124,6 @@ struct TurnSection {
 struct JobsSection {
     foreground_seconds: Entry,
     max_runtime_hours: Entry,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TuiSection {
-    mouse: Entry,
-    theme: Entry,
-    scroll_lines: Entry,
-    show_thinking: Entry,
-    group_tool_calls: Entry,
-    reduced_motion: Entry,
-    reload_requests: Entry,
 }
 
 #[derive(Debug, Deserialize)]
@@ -261,15 +249,6 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
     if let Some(section) = &file.api {
         assign("api.full_window", &section.full_window)?;
     }
-    if let Some(section) = &file.tui {
-        assign("tui.mouse", &section.mouse)?;
-        assign("tui.theme", &section.theme)?;
-        assign("tui.scroll_lines", &section.scroll_lines)?;
-        assign("tui.show_thinking", &section.show_thinking)?;
-        assign("tui.group_tool_calls", &section.group_tool_calls)?;
-        assign("tui.reduced_motion", &section.reduced_motion)?;
-        assign("tui.reload_requests", &section.reload_requests)?;
-    }
     if let Some(section) = &file.compaction {
         assign("compaction.enabled", &section.enabled)?;
     }
@@ -301,6 +280,7 @@ fn forward_sections(
     assign: &mut impl FnMut(&'static str, &Entry) -> Result<(), String>,
 ) -> Result<ForwardPresence, String> {
     if let Some(section) = &file.host {
+        assign("host.reload_requests", &section.reload_requests)?;
         assign("host.resume_after_loss", &section.resume_after_loss)?;
     }
     if let Some(section) = &file.web {

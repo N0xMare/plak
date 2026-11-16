@@ -1,6 +1,6 @@
 [package]
 name = "plak"
-description = "Plak product library, command-line interface, and terminal application"
+description = "Plak host server, product library, and operator command-line interface"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 homepage.workspace = true
 documentation = "https://github.com/N0xMare/plak/tree/main/docs/user-guide"
 readme.workspace = true
-keywords = ["llm", "agent", "cli", "tui", "coding-agent"]
+keywords = ["llm", "agent", "cli", "coding-agent"]
 categories = ["command-line-utilities", "development-tools"]
 exclude.workspace = true
 
@@ -18,10 +18,10 @@ layer = "bin"
 class = "supported"
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 117
-too-many-arguments-ceiling = 21
+too-many-lines-ceiling = 67
+too-many-arguments-ceiling = 13
 large-file-ceiling = 0
-reason = "Explicit CLI/TUI dispatch and scenario allowances after removing crate-wide suppression; production files remain below 1500 lines."
+reason = "Explicit product dispatch and scenario allowances after removing crate-wide suppression; production files remain below 1500 lines."
 
 [[bin]]
 name = "plak"
@@ -43,29 +43,17 @@ plakous = { workspace = true, features = ["sessions-sqlite"] }
 nix = { workspace = true, features = ["signal"] }
 rusqlite = { workspace = true, features = ["hooks"] }
 rustix = { workspace = true, features = ["event", "fs", "process", "system", "termios", "time"] }
-# The TUI module's terminal stack: match Ratatui's current Crossterm backend so
-# the product carries one terminal stack.
-crossterm = { version = "0.29", default-features = false, features = ["events"], optional = true }
-ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29"], optional = true }
-pulldown-cmark = { version = "0.13", default-features = false, optional = true }
-# Ctrl+V attaches the system clipboard's image (AppKit on macOS, X11 on
-# Linux); plakous-hosted normalizes its pixels.
-arboard = { version = "3.6.1", default-features = false, features = ["image-data"], optional = true }
-syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "regex-fancy"], optional = true }
 base64 = { workspace = true }
 url.workspace = true
 tracing = { workspace = true }
-unicode-segmentation = "1.13.3"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha2.workspace = true
 shell-words = "1.1"
 zeroize.workspace = true
 tempfile = { workspace = true }
-# `local-offset`: the resume picker reads the UTC offset once on the main thread.
-time = { version = "0.3", features = ["formatting", "local-offset", "parsing"] }
-# Prompt send times resolve each stamp in the process zone. `tz-system` loads
-# it once; `tzdb-zoneinfo` reads the host zoneinfo for that stamp's offset.
+time = { version = "0.3", features = ["formatting", "parsing"] }
+# Usage and credential refresh times resolve each stamp in the process zone.
 jiff = { version = "0.2.35", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "time"] }
 # Configuration is real TOML: `toml` loads the typed schema with spans for
@@ -90,13 +78,6 @@ opentelemetry-otlp = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 
-# Ctrl+V reads a macOS screenshot's PNG flavour directly instead of
-# arboard's TIFF decode.
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = { version = "0.6.5", default-features = false, features = ["std"], optional = true }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSPasteboard"], optional = true }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSString"], optional = true }
-
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 plakous = { workspace = true, features = ["test-clock"] }
@@ -108,16 +89,10 @@ portable-pty.workspace = true
 proptest = { workspace = true, features = ["std"] }
 rusqlite.workspace = true
 tempfile = { workspace = true }
-vt100.workspace = true
 tungstenite.workspace = true
 
 # No benchmark harness dependency in the workspace: the bench is a plain
 # `main` over `std::time::Instant` (named benchmark).
-[[bench]]
-name = "tui_render"
-harness = false
-required-features = ["test-support", "tui"]
-
 [[bench]]
 name = "product_store"
 harness = false
@@ -131,11 +106,9 @@ openai = ["plakous/openai", "plakous-hosted/openai", "js"]
 xai-api = ["plakous/xai", "plakous-hosted/xai-api"]
 anthropic = ["plakous/anthropic", "plakous-hosted/anthropic"]
 openrouter = ["plakous/openrouter", "plakous-hosted/openrouter"]
-default = ["git-cli", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "web", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"]
+default = ["git-cli", "images", "js", "python", "mcp", "web-fetch", "web", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"]
 js = ["plakous/composition", "plakous-hosted/js"]
 web-fetch = ["plakous/web-fetch", "plakous-hosted/web-fetch"]
-tui = ["plakous-hosted/tui", "dep:ratatui", "dep:crossterm", "dep:pulldown-cmark", "dep:syntect"]
-clipboard = ["tui", "images", "plakous-hosted/clipboard", "dep:arboard", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation"]
 images = ["plakous-hosted/images"]
 python = ["js", "plakous/composition-python", "plakous-hosted/python"]
 mcp = ["plakous/mcp", "plakous-hosted/mcp"]

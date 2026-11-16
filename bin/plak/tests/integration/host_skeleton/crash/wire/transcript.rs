@@ -95,21 +95,3 @@ fn durable(
     );
     Ok(expected)
 }
-
-pub(in super::super) fn assert_recorded(fixture: &Fixture, session: &str, entries: &[Value]) {
-    let expected = durable(fixture, session).unwrap();
-    for connection in [1, 2] {
-        let mut face = FaceTranscript::default();
-        for entry in entries
-            .iter()
-            .filter(|entry| entry["connection"] == connection && entry["direction"] == "host")
-        {
-            face.observe(&entry["frame"]).unwrap();
-        }
-        assert_eq!(
-            face.state.items().values().collect::<Vec<_>>(),
-            expected.values().collect::<Vec<_>>(),
-            "real-client connection {connection}: missing or duplicated transcript content"
-        );
-    }
-}

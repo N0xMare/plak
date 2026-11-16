@@ -8,17 +8,13 @@
 //! 11 and older. The writer emits version 13.
 
 mod document;
-#[cfg(any(test, feature = "tui"))]
-pub(crate) mod epoch;
 mod export;
-pub(crate) mod handoff;
 mod history;
 #[cfg(feature = "web")]
 pub(crate) mod host_move;
 mod import;
+mod installed;
 pub(crate) mod intent;
-#[cfg(any(test, feature = "tui"))]
-mod interactive;
 pub(crate) mod rebind;
 mod reference;
 mod reload;
@@ -31,20 +27,10 @@ pub(crate) use document::{
 #[cfg(feature = "web")]
 pub(crate) use export::ExportRefusal;
 pub(crate) use export::{export_session, new_carry_file};
-pub(crate) use handoff::take_reload_handoff;
 pub(crate) use reload::{
     CarryCapacityProbe, ReloadProbe, ReloadTarget, ReopenProbe, reload_probe,
     reopen_credential_gate, reopen_probe,
 };
-#[cfg(feature = "tui")]
-pub(crate) use {
-    epoch::apply_on_reload,
-    interactive::{
-        ReloadPlan, carry_foreign_session, carry_out, reload_plan, reverify_released, switch_to,
-    },
-    rebind::session::rebind_session,
-};
-
 /// A running turn refuses a reload or rebind whose successor is another
 /// session: only a reload that resumes the same session hands it off.
 pub(crate) const CARRY_REFUSED_TURN: &str =
@@ -57,34 +43,22 @@ pub(crate) const CARRY_REFUSED_CHILDREN: &str = "reload refused: sub-agents are 
 /// The installed build a reload of `session_id` would start, and this
 /// build's refusal of it, resolved while the session is still attached.
 /// `in_flight` is the work a running turn or sub-agents leave, which a
-/// reload resuming the same session hands off (spec 02 §5.1) and one
+/// reload resuming the same session hands off (spec 02 §4.6) and one
 /// carrying into another session refuses.
-#[cfg(feature = "tui")]
 pub(crate) fn probe_reload(
     paths: &crate::home::paths::PlakPaths,
     workspace: &std::path::Path,
     session_id: Option<&str>,
     in_flight: Option<&'static str>,
 ) -> (Option<ReloadTarget>, Option<String>) {
-    let target = interactive::reload_target_for_session(paths, workspace, session_id);
+    let target = installed::reload_target_for_session(paths, workspace, session_id);
     let refusal = target.as_ref().and_then(|target| {
-        interactive::reload_refusal(target, &crate::home::state::state_key(), in_flight)
+        installed::reload_refusal(target, &crate::home::state::state_key(), in_flight)
     });
     (target, refusal)
 }
 
-/// A build with no interactive face has no installed build to reload onto.
-#[cfg(not(feature = "tui"))]
-pub(crate) const fn probe_reload(
-    _paths: &crate::home::paths::PlakPaths,
-    _workspace: &std::path::Path,
-    _session_id: Option<&str>,
-    _in_flight: Option<&'static str>,
-) -> (Option<ReloadTarget>, Option<String>) {
-    (None, None)
-}
-
-pub(crate) use import::{CarriedImport, already_carried, carried_forward_label, import_and_resume};
+pub(crate) use import::{CarriedImport, already_carried, carried_forward_label};
 pub(crate) use intent::{load_for_work, work_id};
 
 pub(crate) use reference::remove_retained_archive;

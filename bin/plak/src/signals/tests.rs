@@ -71,15 +71,6 @@ fn the_deadline_leaves_room_for_the_graceful_stop_and_for_the_supervisor() {
     assert!(GRACEFUL_STOP_DEADLINE <= std::time::Duration::from_millis(1_500));
 }
 
-/// A blocked TUI cannot exceed the same hard bound as voluntary quit.
-#[test]
-fn the_interactive_backstop_enforces_the_one_second_bound() {
-    assert_eq!(
-        INTERACTIVE_FORCED_EXIT_DEADLINE,
-        std::time::Duration::from_secs(1)
-    );
-}
-
 /// A signal racing a natural exit still yields exactly one `bye`, last.
 ///
 /// Both terminators are real: the drive's tail writes `bye` on stdout, and

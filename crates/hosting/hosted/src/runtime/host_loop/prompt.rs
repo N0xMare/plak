@@ -497,7 +497,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             replayed_mail,
         } = mail;
         let pending_input = |command: &str| queue::user_input(command, &images);
-        // One failed context query must not end the host: the TUI would only
+        // One failed context query must not end the host: the client would only
         // see a dead channel. Park the queue and stay attached instead.
         let queried = if host_authored && !transient_resume {
             self.role
@@ -575,7 +575,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         if !host_authored && pending_context.compaction_verdict().is_due() {
             if self.role.config.compaction_enabled {
                 // A scheduled compact is one paid round-trip the host blocks
-                // on; without the busy row the TUI paints idle while every
+                // on; without the busy row the client paints idle while every
                 // prompt is silently deferred (the 2026-09-03 "freeze").
                 observe_compact(
                     &self.role.events,

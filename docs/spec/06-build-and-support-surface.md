@@ -111,9 +111,9 @@ A retired package stops at its last published version; that version is not yanke
 
 `plakd-wire-types` is the product's serialized extension vocabulary over
 `plakous-host-protocol`, not a command-layer SDK. It has no hosted, store,
-configuration or runtime dependency. Local appearance wrappers and executable
-reload probes remain in the product. For a given exact client protocol version
-(currently 6), DTO extraction preserves frame bytes, schema and serialized
+configuration or runtime dependency. Executable reload probes remain in the
+product. For a given exact client protocol version
+(currently 10), DTO extraction preserves frame bytes, schema and serialized
 reload values byte-for-byte; the move itself adds no version cut.
 The external `tests/fixtures/host-protocol-consumer` compile fixture pins
 non-`Never` host payloads and an extension-free `Core` consumer with explicit
@@ -152,7 +152,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | `crates/plakous/` | complete-workflow public entrypoint | facade |
 | `crates/hosting/` | host protocol and hosted runtime | host |
 | `crates/orchestration/` | workspace, recursive subagents and their store | host |
-| `bin/plak/` | CLI, TUI and JSONL product | bin |
+| `bin/plak/` | Host server, operator CLI and JSONL product | bin |
 | `tests/` | repository support, fixtures and harnesses | test |
 | `vendor/` | the reviewed Code Mode protocol snapshot (`vendor/monty-typeshed` is a `[patch]` source, not a member) | vendor |
 | `eval/` | Opt-in, paid Harbor / Terminal-Bench harness bakeoff; linux/amd64 or linux/arm64 GNU agent packaging selected by `HARBOR_ARCH`, not musl qualification; ARM cells are rebuilt from task definitions rather than the published amd64 images; an eval lane is not product support; paid runs are not in the daily gate | (none) |
@@ -173,9 +173,8 @@ cohort packages together (§6.5), and it keeps its upstream edition,
 rust-version, Apache-2.0 license and `unsafe_code = "forbid"` lint table rather
 than the workspace's.
 
-`plak` names `plakous-host-protocol` directly under an edge exception recorded
-in the same policy table, and `[workspace.metadata.plakous.modules.plak.tui]`
-constrains what the binary's `tui` module may name.
+`plak` names `plakous-host-protocol` under its recorded host-layer edge
+exception. The product ships no application-client module.
 
 The facade's optional native-route edge to `plakous-exchange` is an explicit
 exception for shared model-lookup backoff policy. Its Grok route also names
@@ -315,9 +314,8 @@ published shape.
 ## 4. Product features
 
 Product catalog construction and attachment eligibility do not depend on the
-terminal feature. Their credential and model-admission tests, settings metadata
-default checks, and headless compaction-view rebuild tests run independently
-of terminal rendering tests.
+application client. Credential and model-admission tests, settings metadata
+default checks and JSONL compaction-view rebuild tests run on the host surfaces.
 
 Compile-time capabilities are additive. A capability merits a feature when it
 adds at least five exclusive packages, a C/system build or 1 MB stripped; ships
@@ -441,14 +439,9 @@ are unchanged. Serialized
 binding enums, the complete template-account vocabulary and credential-store
 directory names remain ungated; they describe records, not enabled menus.
 
-Reduced builds group their interactive carry/reload and identity helpers in
-TUI-gated submodules; the launch invocation field itself is absent without
-TUI support. Feature-dependent lookup and publication helpers belong in
-feature-gated modules, not behind item-level predicates or dead-code allowances.
-Already-gated consumers import neutral wire DTOs directly instead of adding
-conditional intermediary re-exports. Capability markers likewise use gated
-modules rather than conditional aliases. The placement ceilings recorded in
-workspace metadata remain exact ratchets; these boundaries do not raise them.
+Installed-build probes remain product-owned and independent of terminal
+re-exec. Feature-dependent lookup and publication helpers belong in their
+own capability modules; existing configuration-placement ratchets still apply.
 
 `plakous` facade features are listed in chapter 00. The host and product
 features and the evaluator selection are summarized here; backend defaults are
@@ -458,8 +451,6 @@ called out explicitly.
 | --- | --- | --- |
 | `plak`, `plakous-hosted` | `codex`, `grok`, `claude` | Independently forward the corresponding native facade route; `codex` additionally requires `js` |
 | `plak`, `plakous-hosted` | `openai`, `anthropic`, `xai-api`, `openrouter` | Independently forward the API route (`xai-api` forwards facade `xai`); `openai` additionally requires `js` |
-| `plak`, `plakous-hosted` | `tui` | Default on; Plak's optional terminal presentation stack and interactive helpers. Hosted carries capability identity only, without a TUI dependency |
-| `plak`, `plakous-hosted` | `clipboard` | Default on; requires `tui` and `images`; Plak's optional clipboard libraries and image paste. Hosted carries capability identity |
 | `plak`, `plakous-hosted` | `images` | Default on; hosted image normalization, forwarding `plakous-image/normalize` and its optional `image` dependency; new attachments refuse without it, canonical history remains readable |
 | `plakous-image` | `normalize` | Default on for direct use; decoding, downscaling and re-encoding through the `image` crate, and the image-file reader, in its `normalize` module. Without it sniffing, the bounds, the message budget, the dropped-path check and the error vocabulary remain; `plakous-tools` uses it that way |
 | `plak`, `plakous-hosted` | `js` | Default on; JavaScript/Code Mode admission, facade `composition`, and product JavaScript worker resolution |
@@ -501,11 +492,11 @@ their default-disabled facade edges, and the orchestration tree only `store`. Th
 forward to the facade where each implementation lives; neither package can
 borrow those declarations from the other's feature unification. Product
 defaults include all seven routes, JS, Python, MCP, local web fetch, images,
-TUI, clipboard and Git. Hosted defaults additionally include the JJ backend.
+Git and the server capabilities. Hosted defaults additionally include the JJ backend.
 Every package must declare the dependency features its own Rust targets use;
 features enabled only by another workspace member are not evidence that the
 package builds on its own. Plak declares the signal feature used by same-user
-host discovery directly; shared console/TUI setup detection and MCP adapters
+host discovery directly; shared console setup detection and MCP adapters
 are gated by their actual consuming surfaces, not the default feature set.
 The agent entry owns omitted-route admission so a reduced JSONL product still
 terminates rejection with `error` then `bye`, before session or credential
@@ -558,22 +549,16 @@ not public, is excluded from these witnesses, and never enters `full` or the
 product default/maintainer release closures. The `plakous` and `plakous-cell`
 `test-hooks` features are hidden the same way.
 The one named-variant table is `NAMED_VARIANTS` in `check_features.py`:
-`headless` is default minus `tui` and `clipboard`; `api` is default minus
-`codex`, `grok` and `claude`; `minimal` is exactly `tui,openrouter,git-cli`.
+Default is headless. `api` is default minus `codex`, `grok` and `claude`;
+`minimal` is exactly `openrouter,git-cli`. There is no redundant headless variant.
 The supported and shipped Plak is **default only**. Named variants are built
 and contract-tested in full, not shipped. Other combinations may compile;
 compilation does not establish support. Named variants also get closure
 witnesses in the static checker, without adding reduced compilation to check.
-An omitted terminal rejects placement launch with the same typed `tui`
-capability refusal as ordinary terminal launch, before creating a home or
-host. Product setting bounds and account remedies do not depend on terminal
-re-exports. Store/composition tests remain compilable without terminal
-features; actual terminal harnesses and picker/paint adapter tests require
-`tui`. All-feature versus minus-terminal test inventories include ignored
-tests and hold every other feature fixed; this inventory is not a claim that
-reduced products are supported.
-Only the `variants` group (full only) builds the three reduced named products,
-plus an admission fixture that omits TUI, clipboard, images, Python and MCP.
+Product setting bounds and account remedies do not depend on client
+presentation. Store/composition tests compile without terminal adapters.
+Only the `variants` group (full only) builds the two reduced named products,
+plus an admission fixture that omits images, Python and MCP.
 Each distinct resolution builds its
 library and binary and runs clippy with warnings denied, then checks version,
 doctor, CLI/JSONL refusals and canonical-store read/refusal byte preservation.
@@ -584,7 +569,7 @@ in-flight JSONL turn. Full-created canonical native sessions remain readable
 through show/log/export in the API and minimal binaries, while attach/resume
 returns typed `CapabilityUnavailable` (exit 2) without changing store bytes.
 These harness builds are not shipped variants. Complete external-closure pins
-exclude terminal/clipboard libraries from headless and JWT from API; minimal
+exclude terminal/clipboard libraries from the product and JWT from API; minimal
 also excludes MCP, Python, evaluator clients, image decoding, HTML conversion
 and JWT. Default minus Python excludes Monty and WebSockets. The default,
 facade-full and native-auth closures exclude aws-lc and rsa. The workspace
@@ -703,32 +688,10 @@ platforms: the Rust v0-mangled crate names are platform-independent, and the
 engine's C entry points are listed in both the Mach-O underscored and the ELF
 bare spelling.
 
-Plak forwards five product features to `plakous-hosted`: `tui`, `clipboard`,
-`images`, `python`, and `mcp`. All five plus `git-cli` are on by default;
-the default artifact exposes the complete product tool/prompt catalogs. Clipboard requires
-both `tui` and `images`; disabling either therefore also omits clipboard.
-The supported Plak artifact is the default feature set. These reduced
-resolutions are build/contract evidence, not additional supported artifacts.
-This is product selection only: hosted and Plak request the complete
-facade provider, auth, evaluator and MCP closure. Route construction is not
-feature-gated, and Python/MCP product omission does not unlink their
-facade implementation. Persisted account and composition vocabularies stay
-complete, including when their runtime capability is omitted.
-
-The presentation stack (`ratatui`, `crossterm`, `pulldown-cmark`, `syntect`) is
-selected by `tui`; its module is private to the product library. There is no
-separate presentation package or `ui` feature.
-Clipboard image paste (`Ctrl+V`) uses `arboard` (image data only: AppKit on
-macOS, the pure-Rust X11 client `x11rb` on Linux, no Wayland feature), an
-optional `bin/plak` dependency selected by `clipboard`; on macOS this feature also selects
-`objc2`, `objc2-app-kit` (`NSPasteboard` only) and `objc2-foundation` to read
-a screenshot's PNG flavour without the TIFF decode. Attached images are normalized by
-`plakous-image` with the pure-Rust `image` crate (features `png`, `jpeg`,
-`gif`, `webp` only), which `plakous-hosted` selects under `images`. Defaults build for both supported targets, musl static
-included.
-`ratatui` does not appear anywhere in the `plakous-hosted` closure. The hosted
-crate depends on the tree store port through `plakous-recursive-subagents`;
-it has no dependency on the SQLite tree-store implementation package.
+Plak forwards the server capabilities `images`, `js`, `python`, `mcp` and
+`web-fetch` to hosted, independently of provider routes. Terminal and clipboard
+features are absent from both packages. External clients own appearance; the
+server still admits image attachments and owns settings/catalog metadata.
 
 Hosted child startup uses the public `TurnCommand::Start` submission to retain
 its original typed rejection acknowledgement. Recovery learns what became of a
@@ -768,12 +731,6 @@ provider-owned protocol names, enrolled in the same inventory.
 The external facade consumer pins all four `JobStatus` variants (`Running`,
 `Exited`, `Stopped`, `OutcomeUnknown`) and all five `JobStopReason` variants.
 
-The repository rendering benchmark runs with
-`cargo bench -p plak --bench tui_render --features test-support`. Its body
-lives inside the private TUI module and is reached through the single hidden
-`benchmark_tui_render()` entry point, compiled only with `test-support`.
-Layout and test helpers do not become a public TUI API for the benchmark.
-
 ### 4.1 The `maintainer` feature
 
 `maintainer` gates these verbs:
@@ -792,7 +749,7 @@ refuses with a typed capability error. `maintainer` also selects `web`. There is
 no `plak web`: the web endpoint is `plak host --web`.
 
 `models` is not gated — it is an ordinary product verb alongside `login`,
-`logout`, `status`, `refresh`, `key`, `run`, `agent`, `resume`, `session`,
+`logout`, `status`, `refresh`, `key`, `run`, `agent`, `session`,
 `usage`, `doctor`, `config`, `telemetry`, `help`, and `version`.
 
 Without the feature the maintainer tokens do not parse: argv carrying one is
@@ -812,7 +769,7 @@ For each exact root and selected-child head it reports the one recovery
 verdict an open would execute (chapter 01 §5.5) and the number of feed records
 the product and tree projectors are behind (`projects:<n>`, passing). It
 applies those records in memory and validates the resulting views and the
-root's TUI restore `PresentationSnapshot`. The product side never refuses; only
+root's `PresentationSnapshot`. The product side never refuses; only
 a head the verdict refuses fails the rehearsal. Inspection leaves the
 databases byte-identical.
 For children it validates a snapshot projected from only the first Forward
@@ -1062,7 +1019,7 @@ best-effort loss frame on panic. It takes no arguments.
 
 For maintainer installation:
 
-Before asking an owner to `/reload`, run from the candidate checkout:
+Before a host upgrade or explicit session reopen, run from the candidate checkout:
 
 ```sh
 just dev reload-rehearsal <full-session-uuid> [--installed <path>] [--config-overlay <dir>]
@@ -1084,12 +1041,12 @@ The requested session's source key is located
 by read-only sessions-table ID membership. When it matches the staged key, only
 that key's runtime, product and tree are backed up and `plak session rehearse`
 runs there; when that passes, the staged build then answers the exact-reopen
-binding verdict `/reload` asks before teardown (`version --reopen-probe <id>`,
+binding verdict used by installed-build inspection (`version --reopen-probe <id>`,
 chapter 02 §2.5.1) against the live home, from the session's workspace, with
 only `PATH`, `HOME`, `TMPDIR`, locale and the XDG state/config locations
 inherited: it reads the session and its login read-only, takes no lease and
 writes no session state. It prints `reopen=exact`, `reopen=carries: <change>`
-(the reload will carry, exit 0) or `reopen=refused: <reason>` (exit 1); this is
+(carry is required, exit 0) or `reopen=refused: <reason>` (exit 1); this is
 the reopen check to run before an install handoff. When it differs, the report says `state key changed <old> -> <new>:
 rehearsing carry-forward` and the tool rehearses carry-forward in disposable
 homes: the installed `plak` on `PATH` (or `--installed <path>`) exports the
@@ -1125,7 +1082,7 @@ paths, not replaced by the staged workers. The temp homes and staged executables
 are removed on success, failure, SIGHUP, SIGINT or SIGTERM. No live session or workspace is mutated.
 Backup operations have a deadline; the inspector has a process timeout.
 Databases are separate snapshots: concurrent publication can produce an exact
-head refusal; retry while the TUI is idle rather than ignoring it.
+head refusal; retry while the session is idle rather than ignoring it.
 `--wait-idle` retries only the exact installed-build export refusals for a
 running or parked turn, a runtime ahead of its session record, or unsettled
 background-process outcomes.
@@ -1144,8 +1101,8 @@ overwritten. The caller receives the child PID and may end its turn; the
 detached run retains the build checkout and absolute installed/overlay paths.
 `--install` runs `just install maintainer` from that checkout only after a passing
 rehearsal, after disposable copies are removed; the installer's linked-worktree
-guard still applies. It never interrupts a running session; `/reload` remains
-the operator's action. The existing credential-unavailable import exception is still
+guard still applies. It never interrupts a running session; host upgrade
+remains the operator's explicit action. The existing credential-unavailable import exception is still
 a passing, explicitly partial rehearsal, not proof of an authenticated import.
 A live-session race — a database busy or locked, the source changing during
 capture, or a carry already in progress — prints only
@@ -1206,8 +1163,8 @@ corresponding existing paths under `~/.cargo/bin` are repaired. An existing
 link is replaced only when it already resolves under the maintainer or release
 snapshot root, the shared sidecar cache, or the Cargo target directory; any
 other file or link is refused. A rebuild never
-rewrites a file a running session executes, so a running TUI can offer
-`/reload` (chapter 02 §5.1). A running `plak` finds its sidecars beside the
+rewrites a file a running session executes. Host upgrade remains an explicit
+operator workflow (chapter 02 section 4.6). A running `plak` finds its sidecars beside the
 snapshot file it executes, not beside the `PATH` symlink. Each snapshot also
 holds a mode-0444 `binary-id` manifest (`id dev ino size mtime_ns`). After the
 executable's final chmod and before renaming the staging directory, the
@@ -1435,13 +1392,13 @@ git tree, and never point `PLAK_HOME` at the worktree. `just dev home-reset`
 wipes the `state/`, `telemetry/`, `logs/`, and `secrets/` roots in that home
 while keeping `config.toml` and `agents/`.
 
-The launcher defaults to `target/release/plak` (`PLAK_DEV_PROFILE=debug`
+The development wrapper defaults to `target/release/plak` (`PLAK_DEV_PROFILE=debug`
 selects debug, `maintainer` the `just build maintainer` output) and clears `PLAK_TEST_EXCHANGE_CAPTURE_DIR`, so the binary
 uses its own passive capture. It retains argv and cwd and uses `exec` so
 signals reach the binary directly. A `maintainer` binary captures inference
 passively into a fresh private run/process directory under
 `$PLAK_HOME/wire-captures/` (mode 0700; an insecure root disables capture),
-including normal installed CLI, headless and TUI use. The run is selected on
+including installed CLI and hosted use. The run is selected on
 the first inference transport, not at process startup; commands that send
 no inference create no capture directory. An explicit
 `PLAK_TEST_EXCHANGE_CAPTURE_DIR`, available with `maintainer` or `test-hooks`,
@@ -1463,8 +1420,8 @@ git pull && just install release
 (Maintainers install the dogfood snapshot with `just install maintainer`.)
 
 Either installs a new snapshot and moves the symlinks from §6.1 to it, so
-new launches use the new binary once the install succeeds; a running TUI shows
-`new build installed · /reload`. There is no in-product updater.
+new launches use the new binary once the install succeeds. Existing processes
+retain their immutable image until an explicit restart or host upgrade. There is no in-product updater.
 Installation removes an obsolete `monty` launch symlink only when it points
 into the Plak sidecar or snapshot roots; independent files and links remain.
 
@@ -1478,8 +1435,8 @@ the ownership-receipt format is **1**, independently checked before drain.
 The coordinator adds `--host-upgrade-service <file>` to validate resolved
 service arguments, web assets and required paired placements without binding
 the service or adopting lines. Its `--host-upgrade-reopen --reopen-probe <id>`
-uses remote qualification only for host upgrade; an ordinary embedded reload's
-`--reopen-probe` does not acquire this new runner dependency.
+uses remote qualification only for host upgrade; ordinary `--reopen-probe`
+inspection does not acquire this runner dependency.
 
 Required placements use authenticated read-only exact-triple qualification,
 including the configuration/window builder's runner workspace and skill reads.
@@ -1745,7 +1702,7 @@ restriction. The install is exactly the §6.1 layout: the snapshot
 installation directories and their physical ancestors, and `~/.local/bin`
 links that replace only links already pointing into the maintainer, release
 or sidecar roots. A release install and a `just install release` of the same bytes
-therefore share one snapshot, and `plak doctor`, carry discovery and `/reload`
+therefore share one snapshot, and `plak doctor`, carry discovery and host upgrade
 behave identically. `~/.cargo/bin` is not touched; the installer notes a `plak`
 earlier on `PATH`. Downloads use `curl`, which sets no quarantine attribute on
 macOS.
@@ -1982,11 +1939,7 @@ client or official native host binary is part of this execution path.
   execution; admission's statement budget includes that fixed overhead and
   remains independent of retained-history size.
 - Provider SDKs are absent from the production graph.
-- `syntect` (default syntaxes, `regex-fancy`, no HTML/themes dumps) is the
-  TUI highlighter for Compose programs and markdown fences. It is a `plak`
-  presentation dependency, not a Plakous engine crate. A keyword list would
-  mis-paint template strings and comments; the crate is MIT-licensed and
-  matches the MSRV. Default features stay off.
+
 
 Exact pins (`=`) are used where a version is a reviewed artifact rather than a
 range: `filedescriptor`, `jsonwebtoken`, `nix`, `portable-pty`, `rusqlite`,
@@ -2237,7 +2190,7 @@ count. Internally parallel crash campaigns reserve the whole pool at late
 priority -50; priority plus full reservation keeps them separate from shared
 work. Ledger campaigns reserve `ceil(N/4)`, and the signature-sensitive
 closed-cell campaign the whole pool at early priority.
-Restart/recovery and TUI approval cases reserve `ceil(N/4)` slots; independent restart
+Restart/recovery and approval cases reserve `ceil(N/4)` slots; independent restart
 groups run concurrently at early priority. No crash cuts are omitted. Gate commands pin
 the reviewed thread counts against environment overrides. Ignored full-tier
 soaks retain explicit one-thread execution (chapter 05 §2.3).
@@ -2290,7 +2243,7 @@ that fully meets the current architecture wins**, without speculative
 abstraction, configuration, or indirection. **Visibility stays as narrow as it
 can be** — private, then `pub(crate)`, then public — with parsing and
 presentation kept at the product boundary, so neutral core types never depend on
-the CLI or TUI and provider names never enter `plakous-model` or
+the CLI or client presentation and provider names never enter `plakous-model` or
 `plakous-agent`.
 
 Credentials, authorization headers, private session data, and unsanitized
@@ -2303,3 +2256,16 @@ diff, the internal edges, the feature forwarding, and the facade exposure, then
 update only the reported changed digest entries and rerun the checker with its
 structure unit tests. A digest change is never by itself evidence that the new
 surface is acceptable.
+
+The public product is server/operator-only; no application client is packaged,
+installed or published. Neutral protocol libraries remain published-internal,
+not a newly supported client SDK. Package classes and the cohort are unchanged
+by removing presentation modules. Bare invocation is help, terminal resume and
+hidden launch/re-exec flags are removed, and explicit run/agent/wire session
+resume remains supported. The runnable Python example is test-only support.
+
+The default/reduced feature policy omits terminal/clipboard entries and their
+forwarding/closure witnesses; all remaining 2n+3 witnesses, supported-package
+standalone checks, portable builds, contracts and package verification remain.
+Public host tests do not build or require any external client repository.
+Human client review is independent evidence, not a public gate dependency.

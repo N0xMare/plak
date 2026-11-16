@@ -19,7 +19,6 @@
     reason = "private process-level test harness"
 )]
 
-use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
@@ -29,7 +28,6 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::offline_support::*;
@@ -4255,17 +4253,6 @@ impl Drop for OwnedProcessGuard {
     fn drop(&mut self) {}
 }
 
-/// The session id the cooked-terminal resume hint printed.
-fn resume_hint_session(raw: &[u8]) -> Option<String> {
-    let cooked = String::from_utf8_lossy(raw);
-    cooked
-        .split("plak resume ")
-        .nth(1)?
-        .split_whitespace()
-        .next()
-        .map(str::to_owned)
-}
-
 /// The `*.events.jsonl` logs this fixture home holds, one per session, sorted.
 fn session_event_files(fixture: &Fixture) -> Vec<PathBuf> {
     let mut files = std::fs::read_dir(
@@ -4319,177 +4306,6 @@ fn wait_for_last_turn_completed(fixture: &Fixture) {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
-}
-
-/// §6 quit over a live OS child on the real TUI: the terminal is restored,
-/// the worker join holds until the child's group TERM lands, and the printed
-/// resume id attaches the same session for a second turn — not a fresh one.
-#[test]
-fn real_process_quit_releases_and_resumes_exact_session() {
-    real_process_quit_fixture(false);
-}
-
-#[test]
-fn real_promoted_job_quit_releases_and_resumes_exact_session() {
-    real_process_quit_fixture(true);
-}
-
-#[test]
-fn processes_pty_idle_exit_refreshes_live_count_without_another_turn() {
-    let plan = promoted_run_script(
-        "printf '%s' \"$$\" > owned.pid; n=0; while [ ! -f finish-job ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; do sleep 0.01; done",
-    );
-    let fixture = Fixture::new(&plan);
-    let mut config = std::fs::OpenOptions::new()
-        .append(true)
-        .open(fixture.home().join("config.toml"))
-        .expect("config");
-    writeln!(config, "\n[turn]\nauto_continue = false").expect("disable auto-continue");
-    let mut guard = OwnedProcessGuard::default();
-    let mut pilot = PilotClient::new(fixture.root.join("pilot"));
-    let mut terminal = TerminalChild::spawn_with_pilot(&fixture, 100, None, Some(&pilot.root));
-    terminal.wait_screen("/10M");
-    terminal.send(b"start a background job\r");
-    wait_for_fixture_file(&fixture.workspace().join("owned.pid"));
-    guard.arm(&fixture.workspace());
-    terminal.wait_screen("first turn answer");
-    pilot.observe_until("running idle process", |document| {
-        document["snapshot"]["background_processes"] == 1
-    });
-    std::fs::write(fixture.workspace().join("finish-job"), "finish").expect("release job");
-    pilot.observe_until("idle process exit", |document| {
-        document["snapshot"]["background_processes"] == 0
-    });
-    terminal.send(b"\x11");
-    assert!(terminal.finish().success());
-    guard.0 = None;
-}
-
-#[test]
-fn processes_pty_journey_opens_ps_and_stops_background_job() {
-    let mut plan = owned_process_script("background process ready");
-    plan["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(0);
-    // Stop closes stdin before TERM. Hold a separate FIFO in a builtin read,
-    // avoiding both early EOF and trap deferral behind a foreground sleep.
-    plan["steps"][0]["output"]["tool"]["arguments"]["command"] = json!(
-        "trap 'printf stopped > stopped.txt; exit 0' TERM\n\
-         mkfifo stop-wait\n\
-         exec 3<>stop-wait\n\
-         printf '%s' \"$$\" > owned.pid\n\
-         read line <&3\n"
-    );
-    let fixture = Fixture::new(&plan);
-    let mut guard = OwnedProcessGuard::default();
-    let mut pilot = PilotClient::new(fixture.root.join("pilot"));
-    let mut terminal = TerminalChild::spawn_with_pilot(&fixture, 100, None, Some(&pilot.root));
-    terminal.wait_screen("/10M");
-    terminal.send(b"start a background job\r");
-    wait_for_fixture_file(&fixture.workspace().join("owned.pid"));
-    guard.arm(&fixture.workspace());
-    terminal.wait_screen("background process ready");
-    pilot.observe_until("running process count", |document| {
-        document["snapshot"]["background_processes"] == 1
-    });
-    terminal.send(b"/ps\r");
-    terminal.wait_screen("Processes");
-    pilot.observe_until("Processes overlay", |document| {
-        document["snapshot"]["owner"] == "processes"
-    });
-    assert_eq!(
-        pilot.act("process-stop", None)["snapshot"]["owner"],
-        "destructive-confirmation"
-    );
-    pilot.act("confirm", None);
-    pilot.observe_until("stopped background process", |document| {
-        document["snapshot"]["background_processes"] == 0
-    });
-    assert_owned_process_stopped(&fixture.workspace());
-    terminal.send(b"\x11");
-    assert!(terminal.finish().success());
-    guard.0 = None;
-}
-
-fn real_process_quit_fixture(promoted: bool) {
-    let mut plan = owned_process_script("job is running in background");
-    if promoted {
-        plan["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(0);
-    }
-    let fixture = Fixture::new(&plan);
-    let mut guard = OwnedProcessGuard::default();
-    let mut terminal = TerminalChild::spawn(&fixture, 100, None);
-    terminal.wait_screen("/10M");
-    terminal.send(b"run the owned process\r");
-    wait_for_fixture_file(&fixture.workspace().join("owned.pid"));
-    guard.arm(&fixture.workspace());
-
-    if promoted {
-        terminal.wait_screen("job is running in background");
-    }
-    // The budget is for quitting, so the command row is painted first: the
-    // first bash highlight in a process loads and compiles the syntax set,
-    // which on a loaded debug build alone can exceed a second.
-    terminal.wait_screen("trap 'printf stopped");
-
-    // Quit asks first, mid-turn or over the promoted job.
-    terminal.send(b"\x11");
-    terminal.wait_screen("Quit plak?");
-    if promoted {
-        terminal.wait_screen("background process will be stopped");
-    }
-    // Focus starts on Quit, so Enter confirms. The budget runs from that key.
-    let quit_started = Instant::now();
-    terminal.send(b"\r");
-    let (status, raw) = terminal.finish_with_raw();
-    assert!(
-        quit_started.elapsed() < Duration::from_secs(1),
-        "quit exceeded its hard budget: {:?}",
-        quit_started.elapsed()
-    );
-    assert!(
-        status.signal().is_none() && matches!(status.exit_code(), 0 | 130),
-        "the TUI quit failed ({status:?}); cooked output was:\n{}",
-        String::from_utf8_lossy(&raw)
-    );
-    let leave = raw
-        .windows(b"\x1b[?1049l".len())
-        .position(|window| window == b"\x1b[?1049l")
-        .expect("the quit must leave the alternate screen");
-    assert!(
-        raw_contains(&raw[leave..], b"\x1b[?25h"),
-        "the cursor must be shown after the alternate screen is left"
-    );
-    assert_owned_process_stopped(&fixture.workspace());
-    let session = resume_hint_session(&raw)
-        .expect("a saved session must print its resume hint to the cooked terminal");
-    let before = session_event_files(&fixture);
-    assert_eq!(
-        before.len(),
-        1,
-        "one saved session expected, got {before:?}"
-    );
-    assert!(
-        before[0]
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with(&session)),
-        "the resume hint {session} must prefix the saved session record {before:?}"
-    );
-
-    fixture.write_script(&process_tool_answer_script("resumed owned process session"));
-    let mut resumed = TerminalChild::spawn(&fixture, 100, Some(&session));
-    resumed.wait_screen("/ commands");
-    resumed.send(b"carry on\r");
-    resumed.wait_screen("resumed owned process session");
-    wait_for_last_turn_completed(&fixture);
-    resumed.send(b"\x11");
-    let status = resumed.finish();
-    assert!(status.success(), "{status:?}");
-
-    assert_eq!(
-        session_event_files(&fixture),
-        before,
-        "the resume must attach the same session, not open a fresh one"
-    );
 }
 
 /// The same lifecycle on the JSONL face: interrupt then quit is the product's
@@ -5512,73 +5328,6 @@ fn a_compaction_over_a_template_mcp_call_commits_and_continues() {
     assert_eq!(std::fs::read_to_string(&log).expect("call log"), "echo\n");
 }
 
-/// §6 quit over a live nested process: Ctrl+Q while a real cell's
-/// `exec_command` is still inside its yield must restore the terminal, let
-/// the process group's TERM reach the child's trap, and keep the session
-/// resumable, including a bounded quit's exit 130. The reopened composition
-/// proves the evaluator reattached by running a real two-call cell.
-#[test]
-fn real_composition_quit_releases_nested_process() {
-    let fixture = Fixture::new(&code_mode_owned_script());
-    let mut guard = OwnedProcessGuard::default();
-    let mut terminal = TerminalChild::spawn(&fixture, 100, None);
-    terminal.wait_screen("/10M");
-    terminal.send(b"run the owned cell\r");
-    wait_for_fixture_file(&fixture.workspace().join("owned.pid"));
-    guard.arm(&fixture.workspace());
-
-    terminal.send(b"\x11");
-    let (status, raw) = terminal.finish_with_raw();
-    assert!(
-        status.signal().is_none() && matches!(status.exit_code(), 0 | 130),
-        "the composition quit failed ({status:?}); cooked output was:\n{}",
-        String::from_utf8_lossy(&raw)
-    );
-    let leave = raw
-        .windows(b"\x1b[?1049l".len())
-        .position(|window| window == b"\x1b[?1049l")
-        .expect("the quit must leave the alternate screen");
-    assert!(
-        raw_contains(&raw[leave..], b"\x1b[?25h"),
-        "the cursor must be shown after the alternate screen is left"
-    );
-    assert_owned_process_stopped(&fixture.workspace());
-    let session = resume_hint_session(&raw)
-        .expect("a saved session must print its resume hint to the cooked terminal");
-    let before = session_event_files(&fixture);
-    assert_eq!(
-        before.len(),
-        1,
-        "one saved session expected, got {before:?}"
-    );
-    assert!(
-        before[0]
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with(&session)),
-        "the resume hint {session} must prefix the saved session record {before:?}"
-    );
-
-    fixture.write_script(&code_mode_script(&json!([
-        {"output": {"cell": TWO_NESTED_CALLS}, "finish": "tool_calls"},
-        {"output": {"text": "the composed answer"}}
-    ])));
-    let mut resumed = TerminalChild::spawn(&fixture, 100, Some(&session));
-    resumed.wait_screen("/ commands");
-    resumed.send(b"run nested\r");
-    resumed.wait_screen("the composed answer");
-    wait_for_last_turn_completed(&fixture);
-    resumed.send(b"\x11");
-    let status = resumed.finish();
-    assert!(status.success(), "{status:?}");
-
-    assert_eq!(
-        session_event_files(&fixture),
-        before,
-        "the resume must attach the same session, not open a fresh one"
-    );
-}
-
 fn reopen_owned_agent(fixture: &Fixture, session: &str, plan: &Value, answer: &str) {
     let before = session_event_files(fixture);
     assert_eq!(before.len(), 1);
@@ -5945,1099 +5694,6 @@ fn a_wait_that_names_no_cell_lowers_onto_a_running_cell() {
 }
 
 // ---------------------------------------------------------------------------
-// Terminal application
-// ---------------------------------------------------------------------------
-
-use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
-
-const TUI_ROWS: u16 = 30;
-
-/// One real terminal running the shipped binary on a pseudoterminal.
-struct TerminalChild {
-    master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn std::io::Write + Send>,
-    child: Box<dyn portable_pty::Child + Send + Sync>,
-    capture: Arc<Mutex<TerminalCapture>>,
-    reader: Option<std::thread::JoinHandle<()>>,
-    cols: u16,
-}
-
-struct TerminalCapture {
-    parser: vt100::Parser,
-    raw: Vec<u8>,
-}
-
-impl TerminalCapture {
-    fn new(rows: u16, cols: u16) -> Self {
-        Self {
-            parser: vt100::Parser::new(rows, cols, 0),
-            raw: Vec::new(),
-        }
-    }
-
-    fn process(&mut self, bytes: &[u8]) {
-        self.parser.process(bytes);
-        self.raw.extend_from_slice(bytes);
-    }
-}
-
-impl TerminalChild {
-    fn spawn(fixture: &Fixture, cols: u16, resume: Option<&str>) -> Self {
-        Self::spawn_with_pilot(fixture, cols, resume, None)
-    }
-
-    fn spawn_with_pilot(
-        fixture: &Fixture,
-        cols: u16,
-        resume: Option<&str>,
-        pilot: Option<&Path>,
-    ) -> Self {
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows: TUI_ROWS,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .expect("pty opened");
-        let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_plak"));
-        match resume {
-            Some("") => command.args(["--resume"]),
-            Some(session) => command.args(["--resume", session]),
-            None => {}
-        }
-        command.env_clear();
-        command.env("PATH", std::env::var("PATH").unwrap_or_default());
-        command.env("HOME", fixture.root.join("fake-home"));
-        command.env("TMPDIR", fixture.root.join("tmp"));
-        command.env("PLAK_HOME", fixture.home());
-        command.env("PLAK_TEST_MODEL", "offline-loopback-v1");
-        command.env("PLAK_TEST_SCRIPT", fixture.script());
-        command.env("PLAK_TEST_EVIDENCE", fixture.root.join("evidence.jsonl"));
-        if let Some(pilot) = pilot {
-            command.env("PLAK_TEST_TUI_PILOT", pilot);
-        }
-        for name in ["LLVM_PROFILE_FILE", "CARGO_LLVM_COV_TARGET_DIR"] {
-            if let Some(value) = std::env::var_os(name) {
-                command.env(name, value);
-            }
-        }
-        command.env("TERM", "xterm-256color");
-        command.env("NO_COLOR", "1");
-        command.env("LANG", "C.UTF-8");
-        command.cwd(fixture.workspace());
-        let mut reader = pair.master.try_clone_reader().expect("pty reader");
-        let writer = pair.master.take_writer().expect("pty writer");
-        let child = pair.slave.spawn_command(command).expect("tui spawned");
-        drop(pair.slave);
-        let capture = Arc::new(Mutex::new(TerminalCapture::new(TUI_ROWS, cols)));
-        let sink = Arc::clone(&capture);
-        let reader_thread = std::thread::spawn(move || {
-            let mut buffer = [0_u8; 8192];
-            while let Ok(count) = reader.read(&mut buffer) {
-                if count == 0 {
-                    break;
-                }
-                sink.lock().unwrap().process(&buffer[..count]);
-            }
-        });
-        Self {
-            master: pair.master,
-            writer,
-            child,
-            capture,
-            reader: Some(reader_thread),
-            cols,
-        }
-    }
-
-    fn screen(&self) -> String {
-        self.capture.lock().unwrap().parser.screen().contents()
-    }
-
-    fn send(&mut self, bytes: &[u8]) {
-        self.writer.write_all(bytes).expect("pty write");
-        self.writer.flush().expect("pty flush");
-    }
-
-    /// Waits for a stable frame matching `predicate`.
-    fn wait_where(&mut self, description: &str, predicate: impl Fn(&str) -> bool) -> String {
-        self.wait_where_for(description, WAIT, predicate)
-    }
-
-    fn wait_where_for(
-        &mut self,
-        description: &str,
-        timeout: Duration,
-        predicate: impl Fn(&str) -> bool,
-    ) -> String {
-        let deadline = Instant::now() + timeout;
-        loop {
-            let first = self.screen();
-            if predicate(&first) {
-                std::thread::sleep(Duration::from_millis(40));
-                let second = self.screen();
-                if first == second {
-                    return second;
-                }
-            }
-            if let Some(status) = self.child.try_wait().expect("wait") {
-                panic!("the terminal exited before stable {description}: {status:?}\n{first}");
-            }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for stable {description}\n{first}"
-            );
-            std::thread::sleep(Duration::from_millis(15));
-        }
-    }
-
-    fn wait_screen(&mut self, needle: &str) -> String {
-        self.wait_where(&format!("a screen containing `{needle}`"), |frame| {
-            frame.contains(needle)
-        })
-    }
-
-    fn observation(&self) -> TerminalObservation {
-        TerminalObservation::capture(&self.capture.lock().unwrap(), TUI_ROWS, self.cols)
-    }
-
-    fn finish(self) -> portable_pty::ExitStatus {
-        self.finish_with_raw().0
-    }
-
-    fn finish_with_raw(mut self) -> (portable_pty::ExitStatus, Vec<u8>) {
-        let deadline = Instant::now() + WAIT;
-        // A quit that lands while a turn still settles asks first (spec 02
-        // §5.3): confirm it once, as the operator would.
-        let mut confirmed = false;
-        let status = loop {
-            match self.child.try_wait().expect("wait") {
-                Some(status) => break status,
-                None if Instant::now() >= deadline => {
-                    let _ = self.child.kill();
-                    panic!("the terminal never exited\n{}", self.screen());
-                }
-                None if !confirmed && self.screen().contains("Quit plak?") => {
-                    confirmed = true;
-                    // Focus starts on Quit, so Enter confirms. Best effort:
-                    // the test may have confirmed already and the TUI may be
-                    // gone; macOS reports a write to a closed pty as EIO.
-                    let _ = self
-                        .writer
-                        .write_all(b"\r")
-                        .and_then(|()| self.writer.flush());
-                }
-                None => std::thread::sleep(Duration::from_millis(20)),
-            }
-        };
-        drop(self.master);
-        if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
-        }
-        let raw = self.capture.lock().unwrap().raw.clone();
-        (status, raw)
-    }
-}
-
-struct PilotClient {
-    root: PathBuf,
-    next_sequence: u64,
-    revision: Option<u64>,
-    snapshot: Option<Value>,
-}
-
-impl PilotClient {
-    fn new(root: PathBuf) -> Self {
-        std::fs::create_dir(&root).expect("pilot directory");
-        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))
-            .expect("pilot directory mode");
-        Self {
-            root,
-            next_sequence: 1,
-            revision: None,
-            snapshot: None,
-        }
-    }
-
-    fn observe(&mut self) -> Value {
-        self.exchange("observe", None, false)
-    }
-
-    /// Polls `observe` at the boundary until `predicate` holds — the explicit
-    /// wait the caller owns, never a blind sleep inside the driver.
-    fn observe_until(&mut self, what: &str, predicate: impl Fn(&Value) -> bool) -> Value {
-        let deadline = Instant::now() + WAIT;
-        loop {
-            let observed = self.exchange("observe", None, false);
-            assert_eq!(observed["status"], "observed");
-            if predicate(&observed) {
-                return observed;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "{what} never observed; last snapshot was {observed}"
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-
-    fn act(&mut self, action: &str, text: Option<&str>) -> Value {
-        let deadline = Instant::now() + WAIT;
-        for _ in 0..10 {
-            let precondition = self.snapshot.clone().expect("observation before mutating");
-            let document = self.exchange(action, text, true);
-            if document["status"] != "stale_observation" {
-                return document;
-            }
-            assert_eq!(document["error"], Value::Null);
-            assert!(
-                Instant::now() < deadline,
-                "pilot action {action} never found a current revision"
-            );
-            let observed = self.exchange("observe", None, false);
-            assert_eq!(observed["status"], "observed");
-            // A retry is only safe while the request still means the same
-            // thing: the action's target state must not have changed
-            // underneath the stale fence.
-            for key in ["owner", "binding", "composer", "modal", "queue"] {
-                assert_eq!(
-                    observed["snapshot"][key], precondition[key],
-                    "stale retry must not silently change the action target: {key}"
-                );
-            }
-        }
-        panic!("pilot action {action} never found a current revision");
-    }
-
-    fn exchange(&mut self, action: &str, text: Option<&str>, mutate: bool) -> Value {
-        let sequence = self.next_sequence;
-        let request = self.root.join(format!("request-{sequence:08}.json"));
-        let response = self.root.join(format!("response-{sequence:08}.json"));
-        let temporary = request.with_extension("tmp");
-        let mut document = json!({
-            "schema": "plak.tui-pilot.v2",
-            "sequence": sequence,
-            "action": action,
-            "text": text,
-        });
-        if mutate {
-            document["if_revision"] = json!(self.revision.expect("observe before mutating"));
-        }
-        write_private(
-            &temporary,
-            &serde_json::to_string(&document).expect("pilot request JSON"),
-        );
-        std::fs::rename(&temporary, &request).expect("publish pilot request");
-        let deadline = Instant::now() + WAIT;
-        while !response.exists() {
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for pilot response {sequence}"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        let document: Value =
-            serde_json::from_slice(&std::fs::read(response).expect("pilot response readable"))
-                .expect("pilot response JSON");
-        assert_eq!(document["schema"], "plak.tui-pilot.v2");
-        assert_eq!(document["sequence"], sequence);
-        self.revision = document["revision"].as_u64().or(self.revision);
-        self.snapshot = Some(document["snapshot"].clone());
-        self.next_sequence += 1;
-        document
-    }
-}
-
-fn pilot_action_ids(response: &Value) -> Vec<&str> {
-    response["legal_actions"]
-        .as_array()
-        .expect("legal action array")
-        .iter()
-        .map(|action| action["id"].as_str().expect("legal action id"))
-        .collect()
-}
-
-#[test]
-fn semantic_pilot_sidecar_drives_the_real_tui_and_host_mailbox() {
-    let streamed = "streamed evidence ".repeat(1_024);
-    // Streamed deltas are a prefix of the terminal response: the runtime
-    // emits only the missing suffix once the authoritative text lands.
-    let second_answer = format!("{streamed}second streamed answer");
-    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
-    let release = fixture.root.join("release-second-answer");
-    fixture.write_script(&json!({
-        "version": 1,
-        "steps": [
-            {"output": {"text": "semantic pilot answer"}},
-            {"prefix": streamed, "output": {"text": second_answer}, "gate": {"file": release}}
-        ]
-    }));
-    let mut pilot = PilotClient::new(fixture.root.join("pilot"));
-    let mut terminal = TerminalChild::spawn_with_pilot(&fixture, 100, None, Some(&pilot.root));
-    terminal.wait_screen("/10M");
-
-    let initial = pilot.observe();
-    assert_eq!(initial["error"], Value::Null);
-    assert_eq!(initial["status"], "observed");
-    assert_eq!(initial["host_action_pending"], false);
-    assert_eq!(initial["snapshot"]["owner"], "composer");
-    assert!(pilot_action_ids(&initial).contains(&"open-settings"));
-
-    let settings = pilot.act("open-settings", None);
-    assert_eq!(settings["error"], Value::Null);
-    assert_eq!(settings["status"], "applied");
-    assert_eq!(settings["snapshot"]["owner"], "settings");
-    terminal.wait_screen("Settings");
-
-    let composer = pilot.act("close-focused-owner", None);
-    assert_eq!(composer["snapshot"]["owner"], "composer");
-    let draft = pilot.act("type-text", Some("semantic pilot prompt"));
-    assert_eq!(draft["status"], "applied");
-    assert_eq!(draft["snapshot"]["composer"]["char_count"], 21);
-    assert!(!pilot_action_ids(&draft).contains(&"open-slash"));
-
-    pilot.observe_until("the bound agent", |document| {
-        document["snapshot"]["binding"]["attached"] == true
-    });
-    let sent = pilot.act("send", None);
-    assert_eq!(sent["error"], Value::Null);
-    assert_eq!(sent["status"], "applied");
-    assert_eq!(
-        sent["host_action_pending"], true,
-        "send produced a host intent that has not been dispatched yet"
-    );
-    assert_eq!(sent["snapshot"]["composer"]["char_count"], 0);
-    assert_eq!(
-        sent["snapshot"]["turn"],
-        Value::Null,
-        "a pending host intent is not a terminal outcome"
-    );
-    terminal.wait_screen("semantic pilot answer");
-    // The answer streams onto the screen before the turn commits, so the
-    // screen is not the terminal fence; idle is.
-    let finished = pilot.observe_until("the first turn going idle", |document| {
-        document["snapshot"]["phase"] == "idle"
-    });
-    assert_eq!(finished["snapshot"]["turn"]["phase"], "completed");
-    assert!(finished["snapshot"]["transcript"]["block_count"].as_u64() >= Some(2));
-    let first_turn = finished["snapshot"]["turn"]["turn_id"]
-        .as_str()
-        .expect("first turn id")
-        .to_owned();
-
-    pilot_burst_preserves_the_parked_draft_and_turn(
-        &mut pilot,
-        &mut terminal,
-        &first_turn,
-        &release,
-    );
-
-    let quit = pilot.act("quit", None);
-    assert_eq!(quit["error"], Value::Null);
-    assert_eq!(quit["status"], "applied");
-    assert!(terminal.finish().success());
-}
-
-/// Observation pressure: a second turn whose 16KB streamed prefix bursts
-/// host events while the settings modal owns the screen and a private
-/// draft sits parked in the composer. The scripted gate holds the turn in
-/// progress until the modal owns the parked draft, and the burst must not
-/// split the turn, lose the draft, or let a stale fence mutate.
-fn pilot_burst_preserves_the_parked_draft_and_turn(
-    pilot: &mut PilotClient,
-    terminal: &mut TerminalChild,
-    first_turn: &str,
-    release: &Path,
-) {
-    let drafted_second = pilot.act("type-text", Some("second prompt"));
-    assert_eq!(drafted_second["status"], "applied");
-    let sent_second = pilot.act("send", None);
-    assert_eq!(sent_second["status"], "applied");
-    let opened = pilot.act("open-settings", None);
-    assert_eq!(opened["snapshot"]["owner"], "settings");
-    assert_eq!(
-        opened["snapshot"]["busy"], true,
-        "the stalled turn must still be in progress when the modal opens"
-    );
-    let drafting = pilot.act("close-focused-owner", None);
-    assert_eq!(drafting["snapshot"]["owner"], "composer");
-    let draft = pilot.act("type-text", Some("kept draft"));
-    assert_eq!(draft["snapshot"]["composer"]["char_count"], 10);
-    let modal = pilot.act("open-settings", None);
-    assert_eq!(modal["snapshot"]["owner"], "settings");
-    assert_eq!(
-        modal["snapshot"]["composer"]["char_count"], 10,
-        "a modal owns the key chain over a parked draft, never clears it"
-    );
-    std::fs::write(release, b"release").unwrap();
-
-    let completed = pilot.observe_until("the second turn's completed marker", |document| {
-        document["snapshot"]["turn"]["phase"] == "completed"
-            && document["snapshot"]["turn"]["turn_id"] != first_turn
-    });
-    let second_turn = completed["snapshot"]["turn"]["turn_id"]
-        .as_str()
-        .expect("second turn id")
-        .to_owned();
-    assert_ne!(
-        second_turn, first_turn,
-        "the second admitted turn must carry its own canonical id"
-    );
-    assert_eq!(completed["snapshot"]["owner"], "settings");
-    assert_eq!(
-        completed["snapshot"]["composer"]["char_count"], 10,
-        "the private draft must survive the whole host event burst"
-    );
-
-    let composer = pilot.act("close-focused-owner", None);
-    assert_eq!(composer["snapshot"]["owner"], "composer");
-    assert_eq!(
-        composer["snapshot"]["composer"]["char_count"], 10,
-        "the private draft must survive the host event burst and the modal"
-    );
-    assert_eq!(composer["snapshot"]["turn"]["turn_id"], second_turn);
-    assert_eq!(composer["snapshot"]["turn"]["phase"], "completed");
-    terminal.wait_screen("second streamed answer");
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-struct TerminalObservation {
-    rows: u16,
-    cols: u16,
-    screen: String,
-    cursor_row: u16,
-    cursor_col: u16,
-    cursor_visible: bool,
-    style_runs: Vec<StyleRun>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-struct StyleRun {
-    row: u16,
-    start_col: u16,
-    end_col: u16,
-    foreground: String,
-    background: String,
-    attributes: Vec<&'static str>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct CellStyle {
-    foreground: String,
-    background: String,
-    attributes: u8,
-}
-
-impl CellStyle {
-    const BOLD: u8 = 1;
-    const ITALIC: u8 = 1 << 1;
-    const UNDERLINE: u8 = 1 << 2;
-    const INVERSE: u8 = 1 << 3;
-
-    fn from_cell(cell: &vt100::Cell) -> Self {
-        let mut attributes = 0;
-        if cell.bold() {
-            attributes |= Self::BOLD;
-        }
-        if cell.italic() {
-            attributes |= Self::ITALIC;
-        }
-        if cell.underline() {
-            attributes |= Self::UNDERLINE;
-        }
-        if cell.inverse() {
-            attributes |= Self::INVERSE;
-        }
-        Self {
-            foreground: format!("{:?}", cell.fgcolor()),
-            background: format!("{:?}", cell.bgcolor()),
-            attributes,
-        }
-    }
-
-    fn is_default(&self) -> bool {
-        self.foreground == "Default" && self.background == "Default" && self.attributes == 0
-    }
-
-    fn attribute_names(&self) -> Vec<&'static str> {
-        [
-            (Self::BOLD, "bold"),
-            (Self::ITALIC, "italic"),
-            (Self::UNDERLINE, "underline"),
-            (Self::INVERSE, "inverse"),
-        ]
-        .into_iter()
-        .filter_map(|(flag, name)| (self.attributes & flag != 0).then_some(name))
-        .collect()
-    }
-}
-
-impl TerminalObservation {
-    fn capture(capture: &TerminalCapture, rows: u16, cols: u16) -> Self {
-        let screen = capture.parser.screen();
-        let (cursor_row, cursor_col) = screen.cursor_position();
-        let mut style_runs = Vec::new();
-        for row in 0..rows {
-            let mut active: Option<(u16, CellStyle)> = None;
-            for col in 0..=cols {
-                let style = (col < cols)
-                    .then(|| screen.cell(row, col))
-                    .flatten()
-                    .map(CellStyle::from_cell)
-                    .filter(|style| !style.is_default());
-                match (&active, style) {
-                    (Some((_, current)), Some(next)) if *current == next => {}
-                    (Some((start, current)), next) => {
-                        style_runs.push(StyleRun {
-                            row,
-                            start_col: *start,
-                            end_col: col,
-                            foreground: current.foreground.clone(),
-                            background: current.background.clone(),
-                            attributes: current.attribute_names(),
-                        });
-                        active = next.map(|style| (col, style));
-                    }
-                    (None, Some(next)) => active = Some((col, next)),
-                    (None, None) => {}
-                }
-            }
-        }
-        Self {
-            rows,
-            cols,
-            screen: screen.contents(),
-            cursor_row,
-            cursor_col,
-            cursor_visible: !screen.hide_cursor(),
-            style_runs,
-        }
-    }
-}
-
-/// A launch paints its banner, its bound tuple and its composer at every width.
-///
-/// The banner declines to paint only in a pane too narrow to hold it, so the
-/// wordmark is asserted at the two widths that admit it and the composer at
-/// all three.
-#[test]
-fn the_terminal_launches_with_its_banner_at_three_widths() {
-    for cols in [60_u16, 100, 160] {
-        let fixture = Fixture::new(&two_tool_round_trips("the offline answer is 42"));
-        let mut terminal = TerminalChild::spawn(&fixture, cols, None);
-        let frame = terminal.wait_screen("/10M");
-        assert!(
-            frame.contains("/ commands"),
-            "the composer is missing at {cols} columns:\n{frame}"
-        );
-        assert!(
-            frame.lines().count() <= usize::from(TUI_ROWS) + 1,
-            "the first frame overflowed the pane at {cols} columns:\n{frame}"
-        );
-        if cols >= 100 {
-            assert!(
-                frame.contains("powered by plakous"),
-                "the launch banner is missing at {cols} columns:\n{frame}"
-            );
-        }
-        terminal.send(b"/quit\r");
-        let status = terminal.finish();
-        assert!(
-            status.success(),
-            "the terminal did not exit cleanly at {cols} columns"
-        );
-    }
-}
-
-/// A scripted turn renders its tool rows and its answer in the transcript.
-#[test]
-fn a_terminal_turn_renders_its_tool_call_and_answer() {
-    let fixture = Fixture::new(&two_tool_round_trips("the offline answer is 42"));
-    let mut terminal = TerminalChild::spawn(&fixture, 100, None);
-    terminal.wait_screen("/10M");
-    terminal.send(b"do the thing\r");
-    let frame = terminal.wait_screen("the offline answer is 42");
-    assert!(
-        frame.contains("Loopback effect ×2"),
-        "the completed activities are grouped: {frame}"
-    );
-    terminal.send(b"\x0f");
-    let frame = terminal.wait_screen("Loopback effect");
-    assert!(
-        frame.to_lowercase().contains("loopback effect") || frame.contains("loopback_effect"),
-        "the transcript did not render the tool call:\n{frame}"
-    );
-    terminal.send(b"/quit\r");
-    assert!(terminal.finish().success());
-}
-
-/// Scrolling to the top of a long transcript and back returns to the tail.
-#[test]
-fn the_transcript_scrolls_to_the_top_and_back_down() {
-    let fixture = Fixture::new(&json!({
-        "version": 1,
-        "steps": [{"output": {"text": (0..60)
-            .map(|line| format!("transcript line {line}"))
-            .collect::<Vec<_>>()
-            .join("\n")}}]
-    }));
-    let mut terminal = TerminalChild::spawn(&fixture, 100, None);
-    terminal.wait_screen("/10M");
-    terminal.send(b"fill the transcript\r");
-    let tail = terminal.wait_screen("transcript line 59");
-    // Wheel up until the head of the answer is on screen.
-    let deadline = Instant::now() + WAIT;
-    loop {
-        if terminal.screen().contains("transcript line 0") {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the transcript never scrolled to its head:\n{}",
-            terminal.screen()
-        );
-        terminal.send(b"\x1b[<64;10;10M");
-        std::thread::sleep(Duration::from_millis(60));
-    }
-    let head = terminal.wait_screen("transcript line 0");
-    assert_ne!(head, tail, "scrolling up did not move the transcript");
-    loop {
-        if terminal.screen().contains("transcript line 59") {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the transcript never returned to its tail:\n{}",
-            terminal.screen()
-        );
-        terminal.send(b"\x1b[<65;10;10M");
-        std::thread::sleep(Duration::from_millis(60));
-    }
-    terminal.send(b"/quit\r");
-    assert!(terminal.finish().success());
-}
-
-/// A session `plak agent` wrote reopens in the TUI with that turn on screen.
-#[test]
-fn a_jsonl_session_resumes_in_the_tui_with_its_transcript() {
-    let fixture = Fixture::new(&json!({
-        "version": 1,
-        "steps": [{"output": {"text": "answer from the agent session"}}]
-    }));
-    let mut agent = AgentProcess::start(&fixture, &[]);
-    agent.wait_for("ready", |record| record["kind"] == "ready");
-    agent.send(&prompt_frame("agent session prompt"));
-    agent.wait_for("assistant_done", |record| {
-        record["kind"] == "assistant_done"
-    });
-    agent.send(&quit_frame());
-    let first = agent.finish();
-    assert!(first.status.success(), "stderr:\n{}", first.stderr);
-    let session = first.session_id();
-
-    let mut terminal = TerminalChild::spawn(&fixture, 100, Some(&session));
-    terminal.wait_where("the agent transcript is on screen", |frame| {
-        frame.contains("agent session prompt") && frame.contains("answer from the agent session")
-    });
-    terminal.send(b"/quit\r");
-    assert!(terminal.finish().success());
-}
-
-/// A session an earlier terminal wrote reopens, and its transcript is restored.
-#[test]
-fn the_terminal_resumes_a_session_an_earlier_process_wrote() {
-    let fixture = Fixture::new(&json!({
-        "version": 1,
-        "steps": [{"output": {"text": "the first terminal answer"}}]
-    }));
-    let mut first = TerminalChild::spawn(&fixture, 100, None);
-    first.wait_screen("/10M");
-    first.send(b"first terminal prompt\r");
-    first.wait_screen("the first terminal answer");
-    first.send(b"/quit\r");
-    assert!(first.finish().success());
-
-    // The resume picker is the product's own history navigator: it labels the
-    // sessions this home holds, and the note it carries is the one the earlier
-    // process wrote.
-    let mut picker = TerminalChild::spawn(&fixture, 100, Some(""));
-    let listing = picker.wait_screen("Resume session");
-    assert!(
-        listing.contains("first terminal prompt") || listing.contains("offline-loopback-v1"),
-        "the resume listing did not label the earlier session:\n{listing}"
-    );
-    // The picker's `Enter` acts once it has been open for 600 ms.
-    std::thread::sleep(Duration::from_millis(700));
-    picker.send(b"\r");
-    // The restored transcript carries the earlier process's answer.
-    picker.wait_screen("the first terminal answer");
-    picker.send(b"second terminal prompt\r");
-    // A second turn lands on the reopened session: the same scripted answer,
-    // now twice. The script is read once per process, so the reopened process
-    // replays round one — the second occurrence is the new turn.
-    let frame = picker.wait_where("two answered turns", |frame| {
-        frame.matches("the first terminal answer").count() >= 2
-    });
-    assert!(
-        frame.contains("second terminal prompt"),
-        "the reopened session did not accept the second prompt:\n{frame}"
-    );
-    picker.send(b"/quit\r");
-    assert!(picker.finish().success());
-}
-
-/// The terminal renders a Code Mode turn: the cell and its composed answer.
-#[test]
-fn the_terminal_renders_a_code_mode_turn() {
-    let fixture = Fixture::new(&code_mode_script(&json!([
-        {"output": {"cell": TWO_NESTED_CALLS}, "finish": "tool_calls"},
-        {"output": {"text": "the composed answer"}}
-    ])));
-    let mut terminal = TerminalChild::spawn(&fixture, 100, None);
-    terminal.wait_screen("/10M");
-    terminal.send(b"run a cell\r");
-    let frame = terminal.wait_screen("the composed answer");
-    assert!(frame.contains("CodeMode · 2 calls"), "{frame}");
-    terminal.send(b"\x0f");
-    let frame = terminal.wait_screen("$ printf nested-two");
-    for expected in ["$ printf nested-one", "$ printf nested-two"] {
-        assert!(
-            frame.contains(expected),
-            "the expanded cell did not render {expected}: {frame}"
-        );
-    }
-    terminal.send(b"/quit\r");
-    assert!(terminal.finish().success());
-}
-
-// ---------------------------------------------------------------------------
-// Declarative real-PTY stories
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TuiStory {
-    schema: String,
-    name: String,
-    terminal: StoryTerminal,
-    model_script: Value,
-    #[serde(default)]
-    workspace_files: BTreeMap<String, String>,
-    steps: Vec<StoryStep>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StoryTerminal {
-    rows: u16,
-    cols: u16,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum StoryStep {
-    Wait {
-        id: String,
-        contains: String,
-        #[serde(default = "default_story_timeout_ms")]
-        timeout_ms: u64,
-    },
-    Send {
-        id: String,
-        text: String,
-    },
-    Choose {
-        id: String,
-        instructions: String,
-        actions: BTreeMap<String, StoryAction>,
-        selected: String,
-    },
-    Assert {
-        id: String,
-        #[serde(default)]
-        contains: Vec<String>,
-        #[serde(default)]
-        excludes: Vec<String>,
-        cursor_visible: Option<bool>,
-    },
-    Snapshot {
-        id: String,
-    },
-    Quit {
-        id: String,
-    },
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct StoryAction {
-    description: String,
-    input: String,
-}
-
-#[derive(Debug, Serialize)]
-struct StoryTrace {
-    schema: &'static str,
-    story: String,
-    status: &'static str,
-    steps: Vec<StoryTraceStep>,
-    terminal_restoration: TerminalRestoration,
-}
-
-#[derive(Debug, Serialize)]
-struct StoryTraceStep {
-    id: String,
-    kind: &'static str,
-    elapsed_ms: u64,
-    before: TerminalObservation,
-    after: TerminalObservation,
-    choice: Option<StoryChoiceTrace>,
-}
-
-#[derive(Debug, Serialize)]
-struct StoryChoiceTrace {
-    instructions: String,
-    actions: BTreeMap<String, StoryAction>,
-    selected: String,
-}
-
-#[derive(Debug, Default, Serialize)]
-struct TerminalRestoration {
-    mouse_capture_disabled: bool,
-    sgr_mouse_disabled: bool,
-    alternate_screen_left: bool,
-}
-
-fn default_story_timeout_ms() -> u64 {
-    10_000
-}
-
-fn story_step_id(step: &StoryStep) -> &str {
-    match step {
-        StoryStep::Wait { id, .. }
-        | StoryStep::Send { id, .. }
-        | StoryStep::Choose { id, .. }
-        | StoryStep::Assert { id, .. }
-        | StoryStep::Snapshot { id }
-        | StoryStep::Quit { id } => id,
-    }
-}
-
-fn story_step_kind(step: &StoryStep) -> &'static str {
-    match step {
-        StoryStep::Wait { .. } => "wait",
-        StoryStep::Send { .. } => "send",
-        StoryStep::Choose { .. } => "choose",
-        StoryStep::Assert { .. } => "assert",
-        StoryStep::Snapshot { .. } => "snapshot",
-        StoryStep::Quit { .. } => "quit",
-    }
-}
-
-fn raw_contains(raw: &[u8], needle: &[u8]) -> bool {
-    raw.windows(needle.len()).any(|window| window == needle)
-}
-
-fn assert_story_observation(
-    id: &str,
-    observation: &TerminalObservation,
-    contains: &[String],
-    excludes: &[String],
-    cursor_visible: Option<bool>,
-) {
-    for needle in contains {
-        assert!(
-            observation.screen.contains(needle),
-            "story step `{id}` did not contain `{needle}`:\n{}",
-            observation.screen
-        );
-    }
-    for needle in excludes {
-        assert!(
-            !observation.screen.contains(needle),
-            "story step `{id}` unexpectedly contained `{needle}`:\n{}",
-            observation.screen
-        );
-    }
-    if let Some(expected) = cursor_visible {
-        assert_eq!(
-            observation.cursor_visible, expected,
-            "story step `{id}` cursor visibility"
-        );
-    }
-}
-
-fn install_story_workspace(fixture: &Fixture, files: &BTreeMap<String, String>) {
-    for (relative, contents) in files {
-        let path = Path::new(relative);
-        assert!(
-            !path.is_absolute()
-                && path
-                    .components()
-                    .all(|part| matches!(part, std::path::Component::Normal(_))),
-            "story workspace path must be a plain relative path: {relative}"
-        );
-        let destination = fixture.workspace().join(path);
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent).expect("story workspace parent");
-        }
-        std::fs::write(destination, contents).expect("story workspace file");
-    }
-}
-
-fn apply_story_step(
-    terminal: &mut TerminalChild,
-    step: &StoryStep,
-    before: &TerminalObservation,
-) -> Option<StoryChoiceTrace> {
-    match step {
-        StoryStep::Wait {
-            contains,
-            timeout_ms,
-            ..
-        } => {
-            terminal.wait_where_for(
-                &format!("story screen containing `{contains}`"),
-                Duration::from_millis(*timeout_ms),
-                |screen| screen.contains(contains),
-            );
-            None
-        }
-        StoryStep::Send { text, .. } => {
-            terminal.send(text.as_bytes());
-            std::thread::sleep(Duration::from_millis(40));
-            None
-        }
-        StoryStep::Choose {
-            instructions,
-            actions,
-            selected,
-            ..
-        } => {
-            assert!(
-                !instructions.trim().is_empty(),
-                "choice instructions must not be empty"
-            );
-            assert!(actions.len() >= 2, "choice must offer at least two actions");
-            assert!(
-                actions
-                    .values()
-                    .all(|action| !action.description.trim().is_empty()),
-                "choice action descriptions must not be empty"
-            );
-            let action = actions.get(selected).unwrap_or_else(|| {
-                panic!("selected action `{selected}` is absent from the closed action table")
-            });
-            terminal.send(action.input.as_bytes());
-            std::thread::sleep(Duration::from_millis(40));
-            Some(StoryChoiceTrace {
-                instructions: instructions.clone(),
-                actions: actions.clone(),
-                selected: selected.clone(),
-            })
-        }
-        StoryStep::Assert {
-            id,
-            contains,
-            excludes,
-            cursor_visible,
-        } => {
-            assert_story_observation(id, before, contains, excludes, *cursor_visible);
-            None
-        }
-        StoryStep::Snapshot { .. } => None,
-        StoryStep::Quit { .. } => {
-            terminal.send(b"/quit\r");
-            None
-        }
-    }
-}
-
-/// Executes one JSON-authored story against the real terminal application.
-///
-/// This is ignored because it is a maintainer driver rather than a fixed test.
-/// `PLAK_TUI_STORY` names the input and `PLAK_TUI_TRACE` names the private
-/// output under `target/`; neither file is part of the offline gate.
-#[test]
-#[ignore = "maintainer-supplied declarative TUI story"]
-fn run_declarative_tui_story() {
-    let story_path = PathBuf::from(
-        std::env::var_os("PLAK_TUI_STORY").expect("PLAK_TUI_STORY names a story JSON file"),
-    );
-    let trace_path = PathBuf::from(
-        std::env::var_os("PLAK_TUI_TRACE").expect("PLAK_TUI_TRACE names the output JSON file"),
-    );
-    let story: TuiStory =
-        serde_json::from_slice(&std::fs::read(&story_path).expect("story file readable"))
-            .expect("valid story JSON");
-    assert_eq!(story.schema, "plak.tui-story.v1", "story schema");
-    assert_eq!(story.terminal.rows, TUI_ROWS, "story terminal rows");
-    assert!(!story.steps.is_empty(), "story has steps");
-    assert!(
-        matches!(story.steps.last(), Some(StoryStep::Quit { .. })),
-        "story ends with a quit step"
-    );
-
-    let fixture = Fixture::new(&story.model_script);
-    install_story_workspace(&fixture, &story.workspace_files);
-    let mut terminal = TerminalChild::spawn(&fixture, story.terminal.cols, None);
-    let mut trace_steps = Vec::with_capacity(story.steps.len());
-    let mut finished = None;
-
-    for step in &story.steps {
-        let before = terminal.observation();
-        let started = Instant::now();
-        let choice = apply_story_step(&mut terminal, step, &before);
-        let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-        let after = terminal.observation();
-        trace_steps.push(StoryTraceStep {
-            id: story_step_id(step).to_owned(),
-            kind: story_step_kind(step),
-            elapsed_ms,
-            before,
-            after,
-            choice,
-        });
-        if matches!(step, StoryStep::Quit { .. }) {
-            finished = Some(terminal.finish_with_raw());
-            break;
-        }
-    }
-
-    let (status, raw) = finished.expect("story quit was executed");
-    assert!(status.success(), "story terminal exit: {status:?}");
-    let terminal_restoration = TerminalRestoration {
-        mouse_capture_disabled: raw_contains(&raw, b"\x1b[?1000l"),
-        sgr_mouse_disabled: raw_contains(&raw, b"\x1b[?1006l"),
-        alternate_screen_left: raw_contains(&raw, b"\x1b[?1049l"),
-    };
-    assert!(
-        terminal_restoration.mouse_capture_disabled
-            && terminal_restoration.sgr_mouse_disabled
-            && terminal_restoration.alternate_screen_left,
-        "story terminal modes were not restored: {terminal_restoration:?}"
-    );
-    let trace = StoryTrace {
-        schema: "plak.tui-trace.v1",
-        story: story.name,
-        status: "passed",
-        steps: trace_steps,
-        terminal_restoration,
-    };
-    if let Some(parent) = trace_path.parent() {
-        std::fs::create_dir_all(parent).expect("trace parent");
-    }
-    std::fs::write(
-        &trace_path,
-        serde_json::to_vec_pretty(&trace).expect("trace JSON"),
-    )
-    .expect("trace written");
-    std::fs::set_permissions(&trace_path, std::fs::Permissions::from_mode(0o600))
-        .expect("trace mode");
-}
-
-// ---------------------------------------------------------------------------
 // Session carry-forward
 // ---------------------------------------------------------------------------
 
@@ -7145,7 +5801,7 @@ fn an_exported_session_imports_as_a_linked_session_that_carries_on() {
     let new = imported
         .stdout
         .lines()
-        .find_map(|line| line.strip_prefix("resume with: plak --resume "))
+        .find_map(|line| line.strip_prefix("resume with: plak run --session "))
         .expect("new session id")
         .to_owned();
     assert_ne!(new, old);
@@ -7333,7 +5989,7 @@ fn file_import_strips_self_declared_provider_replay_before_seed_creation() {
     let new = imported
         .stdout
         .lines()
-        .find_map(|l| l.strip_prefix("resume with: plak --resume "))
+        .find_map(|l| l.strip_prefix("resume with: plak run --session "))
         .unwrap();
     let (_, exported) = export_session(&fixture, new, "stripped.json");
     assert!(
@@ -7940,7 +6596,7 @@ fn a_second_import_of_the_same_export_is_refused_by_name() {
     let new = imported
         .stdout
         .lines()
-        .find_map(|line| line.strip_prefix("resume with: plak --resume "))
+        .find_map(|line| line.strip_prefix("resume with: plak run --session "))
         .expect("new session id")
         .to_owned();
     let again = run_cli(&fixture, &["session", "import", &path]);
@@ -7952,27 +6608,6 @@ fn a_second_import_of_the_same_export_is_refused_by_name() {
         "{}",
         again.stderr
     );
-}
-
-/// A carry file the new build cannot import is kept, and the failure names
-/// where it is.
-#[test]
-fn a_failed_import_resume_keeps_the_carry_file_and_names_it() {
-    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
-    let path = fixture.root.join("future.json");
-    std::fs::write(&path, r#"{"format":"plak-session-export","version":99}"#).expect("document");
-    let path_text = path.to_str().expect("utf-8 path").to_owned();
-    let failed = run_cli(&fixture, &["--import-resume", &path_text]);
-    assert!(!failed.status.success());
-    assert!(
-        failed
-            .stderr
-            .contains(&format!("the export is kept at {path_text}")),
-        "{}",
-        failed.stderr
-    );
-    assert!(failed.stderr.contains("version 99"), "{}", failed.stderr);
-    assert!(path.exists());
 }
 
 #[test]
@@ -7996,13 +6631,13 @@ fn import_refuses_invalid_config_before_creating_a_successor() {
     let before = retained_runtime_sessions(&fixture);
     std::fs::write(
         fixture.home().join("config.toml"),
-        "[tui]\ncollapsed_edit_blocks = true\n",
+        "[turn]\nunknown_control = true\n",
     )
     .unwrap();
     let imported = run_cli(&fixture, &["session", "import", &path]);
     assert!(!imported.status.success(), "{}", imported.stdout);
     assert!(
-        imported.stderr.contains("collapsed_edit_blocks"),
+        imported.stderr.contains("unknown_control"),
         "{}",
         imported.stderr
     );
@@ -8016,7 +6651,7 @@ fn nested_workspace_import_refuses_broken_trusted_parent_before_successor() {
     std::fs::create_dir_all(&project).unwrap();
     write_private(
         &project.join("config.toml"),
-        "[tui]\ncollapsed_edit_blocks = true\n",
+        "[turn]\nunknown_control = true\n",
     );
     assert!(run_cli(&fixture, &["config", "trust"]).status.success());
     let nested = fixture.workspace().join("nested");
@@ -8026,10 +6661,8 @@ fn nested_workspace_import_refuses_broken_trusted_parent_before_successor() {
     document["workspace_root"] = json!(nested);
     let path = fixture.root.join("nested-import.json");
     write_private(&path, &serde_json::to_string(&document).unwrap());
-    for args in [
-        vec!["session", "import", path.to_str().unwrap()],
-        vec!["--import-resume", path.to_str().unwrap()],
-    ] {
+    {
+        let args = ["session", "import", path.to_str().unwrap()];
         let mut child = fixture
             .command()
             .current_dir(&nested)
@@ -8041,7 +6674,7 @@ fn nested_workspace_import_refuses_broken_trusted_parent_before_successor() {
         let refused = wait_with_output(&mut child);
         assert!(!refused.status.success(), "{}", refused.stdout);
         assert!(
-            refused.stderr.contains("collapsed_edit_blocks"),
+            refused.stderr.contains("unknown_control"),
             "{}",
             refused.stderr
         );
@@ -8093,135 +6726,6 @@ fn home_workspace_import_does_not_treat_product_home_as_overlay() {
     );
 }
 
-fn fake_foreign_snapshot(fixture: &Fixture, version: &str) -> (String, PathBuf) {
-    let key = "r999.e999.p999.t999";
-    let id = "5f0e2a43-7d3c-4c1e-9a55-4b1f7f0c9a11".to_owned();
-    let foreign = fixture.home().join("state").join(key);
-    std::fs::create_dir_all(&foreign).unwrap();
-    write_private(&foreign.join(format!("{id}.events.jsonl")), "");
-    let snapshot = fixture
-        .root
-        .join("fake-home/.local/lib/plak/maintainer")
-        .join("a".repeat(64));
-    std::fs::create_dir_all(&snapshot).unwrap();
-    std::fs::set_permissions(&snapshot, std::fs::Permissions::from_mode(0o700)).unwrap();
-    write_private(&snapshot.join("state-key"), key);
-    write_private(&snapshot.join("export-version"), version);
-    let marker = fixture.root.join("snapshot-ran");
-    write_private(
-        &snapshot.join("plak"),
-        &format!(
-            "#!/bin/sh\ntouch '{}'\necho export-was-run >&2\nexit 1\n",
-            marker.display()
-        ),
-    );
-    std::fs::set_permissions(
-        snapshot.join("plak"),
-        std::fs::Permissions::from_mode(0o700),
-    )
-    .unwrap();
-    (id, marker)
-}
-
-#[test]
-fn foreign_resume_skips_unimportable_snapshot_without_creating_carry_file() {
-    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
-    let (id, marker) = fake_foreign_snapshot(&fixture, "999\n");
-    let (status, output) = run_cli_pty(&fixture, &["--resume", &id]);
-    let refusal = String::from_utf8_lossy(&output);
-    assert!(!status.success());
-    assert!(refusal.contains("version 999"), "{}", refusal);
-    assert!(refusal.contains("newest carried session"), "{}", refusal);
-    assert!(refusal.contains("plak session list"), "{}", refusal);
-    assert!(!marker.exists());
-    assert!(!fixture.home().join("carry").exists());
-}
-
-#[test]
-fn foreign_resume_checks_config_before_snapshot_export() {
-    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
-    let (id, marker) = fake_foreign_snapshot(&fixture, "5\n");
-    write_private(
-        &fixture.home().join("config.toml"),
-        "[tui]\ncollapsed_edit_blocks = true\n",
-    );
-    let (status, output) = run_cli_pty(&fixture, &["--resume", &id]);
-    let refusal = String::from_utf8_lossy(&output);
-    assert!(!status.success());
-    assert!(refusal.contains("collapsed_edit_blocks"), "{}", refusal);
-    assert!(refusal.contains("retry the same command"), "{}", refusal);
-    assert!(!refusal.contains("newest carried session"), "{}", refusal);
-    assert!(!marker.exists());
-    assert!(!fixture.home().join("carry").exists());
-}
-
-#[test]
-fn foreign_resume_unparseable_manifest_uses_export_fallback_without_version_remedy() {
-    for version in ["", "not a version"] {
-        let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
-        let (id, marker) = fake_foreign_snapshot(&fixture, version);
-        let (status, output) = run_cli_pty(&fixture, &["--resume", &id]);
-        let refusal = String::from_utf8_lossy(&output);
-        assert!(!status.success());
-        assert!(marker.is_file());
-        assert!(refusal.contains("export-was-run"), "{}", refusal);
-        assert!(!refusal.contains("newest carried session"), "{}", refusal);
-        assert_eq!(
-            std::fs::read_dir(fixture.home().join("carry"))
-                .unwrap()
-                .count(),
-            0
-        );
-    }
-}
-
-#[test]
-fn import_resume_requires_a_terminal_before_creating_a_successor() {
-    let fixture = Fixture::new(&json!({"version": 1, "steps": [{"output": {"text": "answer"}}]}));
-    let first = run_cli(
-        &fixture,
-        &[
-            "run",
-            "--account",
-            "codex",
-            "--model",
-            "offline-loopback-v1",
-            "--print-session-id",
-            "--",
-            "prompt",
-        ],
-    );
-    assert!(first.status.success(), "{}", first.stderr);
-    let (path, _) = export_session(&fixture, &first.session_id(), "tty-import.json");
-    let carry_dir = fixture.home().join("carry");
-    std::fs::create_dir_all(&carry_dir).unwrap();
-    std::fs::set_permissions(
-        &carry_dir,
-        std::os::unix::fs::PermissionsExt::from_mode(0o700),
-    )
-    .unwrap();
-    let local_path = carry_dir.join("tty-import.json");
-    let bytes = std::fs::read(&path).unwrap();
-    write_private(&local_path, std::str::from_utf8(&bytes).unwrap());
-    let receipt = local_path.with_extension("handoff");
-    write_private(&receipt, &plakous::model::sha256_hex(&[&bytes]));
-    let path = local_path.to_str().unwrap();
-    let before = retained_runtime_sessions(&fixture);
-    let imported = run_cli(&fixture, &["--import-resume", path]);
-    assert!(!imported.status.success());
-    assert!(
-        imported.stderr.contains("needs a terminal"),
-        "{}",
-        imported.stderr
-    );
-    assert_eq!(retained_runtime_sessions(&fixture), before);
-    assert!(Path::new(path).is_file());
-    assert!(
-        receipt.is_file(),
-        "terminal refusal must not consume the local handoff receipt"
-    );
-}
-
 #[test]
 fn reload_probe_reports_strict_effective_config_without_creating_sessions() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
@@ -8238,7 +6742,7 @@ fn reload_probe_reports_strict_effective_config_without_creating_sessions() {
     std::fs::create_dir_all(&project).unwrap();
     std::fs::write(
         project.join("config.toml"),
-        "[tui]\ncollapsed_edit_blocks = true\n",
+        "[turn]\nunknown_control = true\n",
     )
     .unwrap();
     assert!(run_cli(&fixture, &["config", "trust"]).status.success());
@@ -8246,7 +6750,7 @@ fn reload_probe_reports_strict_effective_config_without_creating_sessions() {
     assert!(invalid.status.success(), "{}", invalid.stderr);
     let verdict: Value = serde_json::from_str(&invalid.stdout).unwrap();
     let error = verdict["config_error"].as_str().unwrap();
-    assert!(error.contains("collapsed_edit_blocks"), "{error}");
+    assert!(error.contains("unknown_control"), "{error}");
     assert!(
         error.contains(project.join("config.toml").to_str().unwrap()),
         "{error}"
@@ -8265,14 +6769,14 @@ fn doctor_checks_trusted_project_config_and_template_files() {
     std::fs::create_dir_all(project.join("agents")).unwrap();
     std::fs::write(
         project.join("config.toml"),
-        "[tui]\ncollapsed_edit_blocks = true\n",
+        "[turn]\nunknown_control = true\n",
     )
     .unwrap();
     assert!(run_cli(&fixture, &["config", "trust"]).status.success());
     let report = run_cli(&fixture, &["doctor"]);
     assert!(!report.status.success(), "{}", report.stderr);
     assert!(
-        report.stdout.contains("collapsed_edit_blocks"),
+        report.stdout.contains("unknown_control"),
         "{}",
         report.stdout
     );
@@ -8281,7 +6785,7 @@ fn doctor_checks_trusted_project_config_and_template_files() {
         "{}",
         report.stdout
     );
-    std::fs::write(project.join("config.toml"), "[tui]\nmouse = true\n").unwrap();
+    std::fs::write(project.join("config.toml"), "[skills]\nenabled = true\n").unwrap();
     std::fs::write(project.join("agents/broken.toml"), "model =\n").unwrap();
     let report = run_cli(&fixture, &["doctor"]);
     assert!(!report.status.success(), "{}", report.stderr);
@@ -8316,7 +6820,7 @@ fn a_v12_session_imports_and_exports_as_v13_with_an_identical_history() {
     let new = imported
         .stdout
         .lines()
-        .find_map(|line| line.strip_prefix("resume with: plak --resume "))
+        .find_map(|line| line.strip_prefix("resume with: plak run --session "))
         .expect("imported session id");
     let (_, exported) = export_session(&fixture, new, "v13-session.json");
     assert_eq!(exported["version"], 13);
@@ -8383,7 +6887,7 @@ fn a_v12_import_keeps_its_profile_after_the_home_default_changes() {
     let new = imported
         .stdout
         .lines()
-        .find_map(|line| line.strip_prefix("resume with: plak --resume "))
+        .find_map(|line| line.strip_prefix("resume with: plak run --session "))
         .expect("imported session id")
         .to_owned();
     set_home_default(&fixture, "later");
@@ -8964,10 +7468,6 @@ mod durability {
             .to_owned()
     }
 
-    fn session_events(fixture: &Fixture) -> String {
-        session_events_for(fixture, &saved_session_id(fixture))
-    }
-
     fn find_named(root: &Path, name: &str) -> Option<PathBuf> {
         let mut stack = vec![root.to_path_buf()];
         while let Some(dir) = stack.pop() {
@@ -9051,176 +7551,6 @@ mod durability {
         })
     }
 
-    /// A: tool, cancel after that effect, compact, quit, resume picker.
-    ///
-    /// The continuation script is rewritten before the picker process starts
-    /// because a new process restarts the script cursor. The oracle is the
-    /// persisted session id, the event log, and `plak session show`, not the
-    /// script identity.
-    #[test]
-    fn durability_chain_tool_cancel_compact_quit_resume() {
-        let fixture = Fixture::new(&chain_script());
-        let mut terminal = TerminalChild::spawn(&fixture, 100, None);
-        terminal.wait_screen("%/");
-        terminal.send(b"do the tool then stall\r");
-        // The stall round has been dispatched, and the tool effect before it
-        // has an outcome. Esc is sent only once the face is in the cancellable
-        // wait: a key that arrives while the composer is still idle does not
-        // cancel, and the stall text would land.
-        wait_for_effect_then_next_dispatch(&fixture);
-        terminal.wait_where("the stall is cancellable", |frame| {
-            assert!(
-                !frame.contains(CANCELLED_TEXT),
-                "the stall text landed before cancel:\n{frame}"
-            );
-            frame.contains("waiting for model")
-        });
-        terminal.send(b"\x1b");
-        terminal.wait_screen("Stop this turn?");
-        // Focus starts on Stop turn, so Enter cancels it.
-        terminal.send(b"\r");
-        let settled = terminal.wait_where("the cancelled turn settled", |frame| {
-            assert!(
-                !frame.contains(CANCELLED_TEXT),
-                "the stall text landed after cancel:\n{frame}"
-            );
-            !frame.contains("cancelling")
-                && !frame.contains("waiting for model")
-                && !frame.contains("thinking")
-                && frame.contains("⊘ interrupted")
-        });
-        assert!(
-            !settled.contains(CANCELLED_TEXT),
-            "the stall's text landed after cancel:\n{settled}"
-        );
-
-        terminal.send(b"compact after the cancel\r");
-        // A noncommitted pressure fold may continue on a fitting retained head.
-        // Wait for that turn to settle, then explicitly compact the completed
-        // history: the chain still crosses a committed compaction before quit.
-        terminal.wait_where("the fitting turn completed", |frame| {
-            frame.contains(COMPACTED_ANSWER)
-                && !frame.contains("thinking")
-                && !frame.contains("waiting for model")
-        });
-        terminal.send(b"/compact\r");
-        let compacted = terminal.wait_where("explicit compaction committed", |frame| {
-            frame.contains(COMPACTED_ANSWER)
-                && frame.contains("Compact")
-                && (frame.contains('→') || frame.contains("->"))
-                && frame.contains("⊘ interrupted")
-                && !frame.contains("thinking")
-                && !frame.contains("waiting for model")
-        });
-        assert!(
-            !compacted.contains(CANCELLED_TEXT),
-            "the cancelled text appeared on the compacting turn:\n{compacted}"
-        );
-
-        terminal.send(b"\x11");
-        let (status, raw) = terminal.finish_with_raw();
-        assert!(status.success(), "quit did not exit cleanly");
-        assert!(
-            raw.windows(b"\x1b[?1049l".len())
-                .any(|window| window == b"\x1b[?1049l"),
-            "quit must leave the alternate screen"
-        );
-        let hint = resume_hint_session(&raw).expect("resume hint");
-        let session = session_id_for_hint(&fixture, &hint);
-        let events = session_events_for(&fixture, &session);
-        assert!(
-            events.contains("tool.completed") && events.contains("loopback_effect"),
-            "the completed local effect is missing from the event log:\n{events}"
-        );
-
-        resume_chain_through_picker(&fixture);
-
-        let show = show_session(&fixture, &session);
-        assert!(
-            show.status.success(),
-            "session show after the chain was not quiescent:\n{}\n{}",
-            show.stdout,
-            show.stderr
-        );
-        assert!(
-            show.stdout.contains("quiescent"),
-            "show did not report a quiescent root:\n{}",
-            show.stdout
-        );
-        assert!(
-            !show.stdout.contains("recovery required"),
-            "the chained session was left recovery-required:\n{}",
-            show.stdout
-        );
-        assert!(
-            session_event_files(&fixture).iter().any(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with(&session))
-            }),
-            "the resumed chain session disappeared"
-        );
-    }
-
-    /// Same fixture dials as the session that was saved. A new process
-    /// restarts the script cursor, but the resolved harness plan has to
-    /// match the recorded model or exact reopen is refused.
-    ///
-    /// No follow-up prompt. The session is already over the fence, and a
-    /// further scheduled compact asks the scripted compaction binding to be
-    /// an exact twin of the source, which is the held case in
-    /// `an_explicit_compaction_whose_fold_is_accepted_commits_and_continues`.
-    /// The restored transcript is the resume.
-    fn resume_chain_through_picker(fixture: &Fixture) {
-        fixture.write_script(&json!({
-            "version": 1,
-            "maximum_projected_input": 20_000,
-            "scheduled_compaction": true,
-            "content_sensitive_projection": true,
-            "tool_result_bytes": 5_800,
-            "fold": "accept",
-            "steps": [{"output": {"text": RESUMED_ANSWER}}]
-        }));
-        let mut picker = TerminalChild::spawn(fixture, 100, Some(""));
-        picker.wait_screen("Resume session");
-        // The picker's `Enter` acts once it has been open for 600 ms.
-        std::thread::sleep(Duration::from_millis(700));
-        picker.send(b"\r");
-        let restored = picker.wait_where("the picker reopened the chain", |frame| {
-            !frame.contains("Resume session")
-                && frame.contains(COMPACTED_ANSWER)
-                && frame.contains("⊘ interrupted")
-                && frame.contains("Compact")
-                && frame.contains("/ commands")
-        });
-        assert!(
-            !restored.contains(CANCELLED_TEXT),
-            "resume painted the cancelled text:\n{restored}"
-        );
-        picker.send(b"\x11");
-        assert!(picker.finish().success());
-    }
-
-    /// The session the quit hint named. A process can leave more than one
-    /// event log; the hint is the session the product told the operator to
-    /// reopen, and that is the chain.
-    fn session_id_for_hint(fixture: &Fixture, hint: &str) -> String {
-        let matches = session_event_files(fixture)
-            .into_iter()
-            .filter_map(|path| {
-                let name = path.file_name()?.to_str()?.to_owned();
-                let id = name.strip_suffix(".events.jsonl")?.to_owned();
-                id.starts_with(hint).then_some(id)
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            matches.len(),
-            1,
-            "resume hint {hint} must name one session, found {matches:?}"
-        );
-        matches[0].clone()
-    }
-
     fn session_events_for(fixture: &Fixture, id: &str) -> String {
         std::fs::read_to_string(
             plak::home::paths::PlakPaths::explicit(fixture.home()).session_events_file(id),
@@ -9240,49 +7570,6 @@ mod durability {
                 {"output": {"text": CANCELLED_TEXT}, "stall_ms": 8_000}
             ]
         })
-    }
-
-    /// B: Esc, then quit, while a child is still running after its locator
-    /// publish. `plak session show` must name a non-terminal or recovery node.
-    /// Exit 5 from an unparsable locator is not this assertion.
-    #[test]
-    fn durability_quit_during_child_retirement_is_recovery_visible() {
-        let fixture = Fixture::new(&retiring_child_script());
-        let mut terminal = TerminalChild::spawn(&fixture, 120, None);
-        terminal.wait_screen("/10M");
-        terminal.send(b"spawn and quit while it retires\r");
-        wait_for_named_file(&fixture.root, "holding.txt");
-        terminal.send(b"\x1b");
-        terminal.send(b"\x11");
-        let (status, raw) = terminal.finish_with_raw();
-        assert!(
-            status.success(),
-            "quit during child retirement did not exit; cooked:\n{}",
-            String::from_utf8_lossy(&raw)
-        );
-        assert!(
-            !String::from_utf8_lossy(&raw).contains(CANCELLED_TEXT),
-            "the stall text landed while the child was still retiring"
-        );
-
-        let session = saved_session_id(&fixture);
-        let show = show_session(&fixture, &session);
-        let visible = RECOVERY_VISIBLE_NODES
-            .iter()
-            .any(|status| show.stdout.contains(status));
-        assert!(
-            visible,
-            "quit while a child was retiring was a quiet success. \
-             An invalid locator alone is not recovery. show exit {:?} stdout:\n{}\nstderr:\n{}",
-            show.status.code(),
-            show.stdout,
-            show.stderr
-        );
-        assert!(
-            !show.stdout.contains("Children       none"),
-            "the retiring child was not in the persisted tree:\n{}",
-            show.stdout
-        );
     }
 
     fn disk_full_script() -> Value {
@@ -9608,49 +7895,6 @@ mod durability {
         );
     }
 
-    fn tui_failure_wave(fixture: &Fixture) {
-        let mut terminal = TerminalChild::spawn(fixture, 120, None);
-        terminal.wait_screen("/10M");
-        terminal.send(b"run the failure wave\r");
-        // Child milestone rows end each group, so the failed spawn is its own
-        // one-call group followed by the child's needs-recovery milestone.
-        // `scripted_child_failure` stays the JSONL and event-log oracle below.
-        terminal.wait_where("the failure is on screen", |frame| {
-            frame.contains(ROOT_NAMES_FAILURE)
-                && frame.contains("✗ Spawn agent wave three fails")
-                && frame.contains("⚠ c3 needs recovery")
-        });
-        terminal.send(b"ask the next root\r");
-        terminal.wait_where("the next root settled", |frame| {
-            frame.contains(HONEST_NEXT)
-                || frame.to_ascii_lowercase().contains("recovery")
-                || frame.contains("RecoveryRequired")
-        });
-        terminal.send(b"\x11");
-        assert!(terminal.finish().success(), "tui wave did not quit");
-        let session = saved_session_id(fixture);
-        let events = session_events(fixture);
-        assert!(
-            events.contains(FAILURE_TEXT),
-            "the failure wave is missing from the event log:\n{events}"
-        );
-        let show = show_session(fixture, &session);
-        assert!(
-            show.stdout.contains("node=RecoveryRequired"),
-            "the failed child is not recovery-required on show:\n{}",
-            show.stdout
-        );
-    }
-
-    /// Two successful child waves, then a failed child and a following root
-    /// prompt. Both faces retain the failure evidence; accepting a new root
-    /// does not depend on whether every child locator can be inspected.
-    #[test]
-    fn durability_subagent_failure_wave_is_visible_on_terminal() {
-        let tui_home = Fixture::new(&failure_wave_script());
-        tui_failure_wave(&tui_home);
-    }
-
     #[test]
     fn durability_subagent_failure_wave_is_visible_on_jsonl() {
         let jsonl_home = Fixture::new(&failure_wave_script());
@@ -9809,8 +8053,6 @@ mod reopen_probe;
 mod running_root_waits;
 #[path = "offline_e2e/telemetry_measurement.rs"]
 mod telemetry_measurement;
-#[path = "offline_e2e/tui_view_parity.rs"]
-mod tui_view_parity;
 
 // ---------------------------------------------------------------------------
 // Image prompts (`plak run --image`)

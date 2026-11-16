@@ -1,6 +1,6 @@
 //! The product carry crash law (spec 05): the real `/rebind` carry
-//! (`carry::rebind_session`) and the reload's orchestration carry
-//! (`carry::apply_on_reload`), each killed before its runtime create and
+//! (`carry::rebind::session::rebind_session`) and settlement of an already
+//! persisted orchestration carry intent, each killed before its runtime create and
 //! after the create returned but before the record that binds it is saved.
 //! A relaunch settles the write-ahead intent and must show exactly one
 //! carried record at the line's head, with the source redirecting to it.
@@ -90,8 +90,8 @@ fn product_carry_crash_child() -> TestResult {
 }
 
 /// One source session with a turn, bound like the offline product binding;
-/// the reload path also freezes a tree whose spawn cap the config since
-/// changed, so its orchestration carry applies.
+/// the orchestration-intent path also freezes a tree whose spawn cap the
+/// config since changed, and persists the interrupted carry's own identity.
 async fn setup(layout: &Layout, path: &str) -> TestResult {
     std::fs::create_dir_all(&layout.workspace)?;
     let paths = PlakPaths::explicit(layout.home.clone());
@@ -132,7 +132,7 @@ async fn setup(layout: &Layout, path: &str) -> TestResult {
         crate::test_support::ProductJournal::create(layout.home.clone(), layout.workspace.clone())?;
     journal.bind_locator(locator)?;
     journal.set_product_binding("codex", "offline-loopback-v1", "medium")?;
-    if path == "reload" {
+    if path == "orchestration-intent" {
         let workspace_paths =
             PlakPaths::explicit(layout.home.clone()).for_workspace(&layout.workspace);
         let mut config = crate::product_config::ProductConfig::default_product();
@@ -153,6 +153,19 @@ async fn setup(layout: &Layout, path: &str) -> TestResult {
             .map_err(|error| error.message())?;
         config.max_children = 10;
         config.save(&workspace_paths)?;
+        let services = crate::shell::services::Services::for_home(workspace_paths);
+        let mut intent = crate::store::sessions::SessionRecord::new(layout.workspace.clone());
+        intent.link_carried_forward(
+            journal.product_session_id(),
+            &crate::home::state::state_key(),
+        );
+        intent.carry_intent = Some(plakous_hosted::sessions::CarryIntent {
+            source: locator,
+            continues_line: true,
+            cause: CAUSE.into(),
+            orchestration: true,
+        });
+        services.session_records()?.save(&mut intent)?;
     }
     std::fs::write(
         &layout.state,
@@ -174,10 +187,10 @@ fn carry(layout: &Layout, path: &str) -> TestResult {
     // The child runs in the workspace, as the product's CLI edge would name it.
     let paths = PlakPaths::explicit(layout.home.clone()).for_workspace(&layout.workspace);
     let services = crate::shell::services::Services::for_home(paths);
-    let mut record = services.session_records()?.load(&source_id(layout)?)?;
-    if path == "reload" {
-        crate::carry::epoch::apply_on_reload(&services, &mut record)
-            .ok_or("no orchestration carry")?;
+    let record = services.session_records()?.load(&source_id(layout)?)?;
+    if path == "orchestration-intent" {
+        let _ = crate::carry::intent::settle_workspace(&services, &layout.workspace);
+        crate::carry::intent::resolve_open(&services, record)?;
     } else {
         crate::carry::rebind::session::rebind_session(&services, &record, CAUSE)
             .map_err(|error| error.message().to_owned())?;
@@ -185,7 +198,7 @@ fn carry(layout: &Layout, path: &str) -> TestResult {
     Err("the carry finished past its cut".into())
 }
 
-/// Startup's settlement and the source's open, as a relaunched TUI runs
+/// Startup's settlement and the source's open, as a relaunched host runs
 /// them; writes where the source's open landed.
 fn relaunch(layout: &Layout) -> TestResult {
     // The child runs in the workspace, as the product's CLI edge would name it.
@@ -251,7 +264,7 @@ fn child(
 fn product_carry_cuts_relaunch_to_one_successor_at_the_line_head() -> TestResult {
     use std::os::unix::process::ExitStatusExt as _;
 
-    for path in ["rebind", "reload"] {
+    for path in ["rebind", "orchestration-intent"] {
         for cut in ["prepared", "runtime-returned"] {
             let scenario = format!("{path}/{cut}");
             let root = PlakPaths::isolated_tempdir();

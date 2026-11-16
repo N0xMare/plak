@@ -645,7 +645,7 @@ pub(crate) async fn record_root_bind_view(
 }
 
 /// The no-hub half of [`install_successor_epoch`]: a headless `plak config
-/// set` in another process than the TUI. Its save is the store's
+/// set` in another process than the client. Its save is the store's
 /// compare-and-swap, so when a hub in that other process publishes first this
 /// refuses instead of overwriting, and when this publishes first the hub's
 /// next save is refused — either way the operator hears about it.

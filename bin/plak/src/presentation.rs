@@ -71,7 +71,7 @@ pub struct CliStatus {
     pub credential: CredentialState,
 }
 
-/// One native catalog model row for TUI presentation.
+/// One native catalog model row for host catalog presentation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CliModelSummary {
     /// Live contract refusal; absent on an admitted row.
@@ -97,7 +97,7 @@ pub struct CliModelSummary {
 /// Provider rows plus the Ready catalog and full-catalog native model facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HostCatalogBundle {
-    /// Provider rows for the TUI auth picker.
+    /// Provider rows for external clients auth picker.
     pub providers: Vec<plakous_host_protocol::views::ProviderDef>,
     /// The exact Ready catalog: one section per account for the hosted session.
     pub sections: plakous_host_protocol::views::ReadyCatalog,
@@ -133,7 +133,7 @@ where
     first
 }
 
-/// Minimal backend for building TUI provider/model presentation.
+/// Minimal backend for building host provider/model metadata.
 pub trait PresentationBackend {
     /// Offline native-subscription status for one provider.
     fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus>;
@@ -212,7 +212,7 @@ impl PresentationBackend for NativePresentationBackend {
     }
 }
 
-/// Build TUI picker rows and full-catalog native model facts from the
+/// Build host catalog rows and full-catalog native model facts from the
 /// persisted catalog snapshot. Does not refresh live catalogs.
 pub fn catalog_bundle(paths: &PlakPaths) -> CliResult<HostCatalogBundle> {
     let state_home = paths::application_state_home().map_err(CliFailure::new)?;
@@ -224,7 +224,7 @@ pub fn catalog_bundle(paths: &PlakPaths) -> CliResult<HostCatalogBundle> {
     ))
 }
 
-/// Build provider and model sections for the TUI from the persisted catalog
+/// Build provider and model sections for external clients from the persisted catalog
 /// snapshot. Does not refresh live catalogs.
 pub fn catalog_values(
     paths: &PlakPaths,
@@ -365,7 +365,7 @@ fn native_model_entry(
         .flatten()
         .collect::<Vec<_>>()
         .join(" · "),
-        effort_options: tui_efforts(&reasoning_efforts)?,
+        effort_options: model_effort_options(&reasoning_efforts)?,
         extras: model
             .service_tiers
             .into_iter()
@@ -383,7 +383,7 @@ fn native_model_entry(
     })
 }
 
-/// Build TUI picker rows and full-catalog native model facts using an injected backend.
+/// Build host catalog rows and full-catalog native model facts using an injected backend.
 #[allow(
     clippy::too_many_lines,
     reason = "Presentation joins native and API model facts, credentials, compatibility, and composition choices into one ordered picker bundle."
@@ -625,7 +625,7 @@ pub fn catalog_bundle_with_backend_and_composition(
     }
 }
 
-fn tui_efforts(efforts: &[ReasoningEffort]) -> Option<Vec<String>> {
+fn model_effort_options(efforts: &[ReasoningEffort]) -> Option<Vec<String>> {
     efforts
         .iter()
         .filter(|effort| **effort != ReasoningEffort::Ultra)

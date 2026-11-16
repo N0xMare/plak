@@ -230,7 +230,7 @@ fn attached_no_effort_openrouter_usage_and_compact_use_real_host_workflows() {
 
 /// A manual `/compact` published no activity at
 /// all, so the HUD stayed empty for the whole paid dispatch and
-/// the TUI's `Compacting…` branch was unreachable. Spec 02 §5.4 segment 2.
+/// the client's `Compacting…` branch was unreachable. Spec 02 §5.4 segment 2.
 /// Status and busy are latest-state events, so this drains between the two
 /// phases exactly as the frame loop does.
 #[test]

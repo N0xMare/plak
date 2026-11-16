@@ -6,9 +6,7 @@ binary you just built. Run those first if anything here looks stale.
 ## Shape of the grammar
 
 ```
-plak                              open the TUI (new session in the cwd)
-plak --runner <name> --workspace <path>
-                                  open the TUI on a host-selected runner/workspace
+plak                              print help and exit 0
 plak <command> [options]
 plak help                         the command list
 plak <command> --help             one command's help
@@ -17,21 +15,14 @@ plak <command> --help             one command's help
 A bare command that needs an argument prints that command's help instead of
 failing — `plak run`, `plak login`, `plak key set`, `plak session show` — and
 that is a successful exit, not an error. `plak version` prints, for example, `plak 0.0.3 (release; binary 0123456789ab)`.
-The binary ID identifies the executable in `/reload` and handoffs.
+The binary ID identifies the executable in build checks and host upgrades.
 
 `plak wire schema` prints this build's wire v2 JSON Schema, including the exact
 protocol version and binary id. It is a supported release command; see the
-[integration guide](integrating.md) for transports and a small socket client.
+[integration guide](integrating.md) for transports and protocol frame examples.
 
-`--runner` and `--workspace` are TUI launch flags, not `run` or `agent`
-options. They require a running host and never fall back to an embedded/local
-session. The runner name must be returned by that host's picker; local means
-the host machine, not the client. The host validates the workspace on the
-selected runner and returns its canonical spelling before creation. With no
-workspace flag, the picker uses that runner's most recent workspace or its
-default. New hosted sessions use the host's default profile; embedded `/new`
-keeps the current binding and tools. A placement or workspace refusal
-creates no session.
+Placement is selected through the host wire operations, not top-level launch
+flags. The host validates runner/workspace choices before session creation.
 
 ## A persistent host and the stdio bridge
 
@@ -63,9 +54,7 @@ started host/unit. Missing-key diagnostics name the resolving process.
 `key set`/`key clear` themselves still run locally and obey their own process's
 environment-first precedence; the bridge does not perform target-host writes.
 
-This does not change bare `plak`: it attaches to an existing current-key host,
-otherwise runs embedded, and never auto-starts a host. Its hosted transport
-stays direct. `run` and `agent` also remain in-process.
+Bare `plak` prints help and exits 0 without starting a host or session.
 
 `plak host install --web unix:<absolute-socket> --ui <absolute-directory>
 [--dry-run]` writes a Linux systemd user unit or a macOS per-user LaunchAgent.
@@ -163,10 +152,8 @@ URL. An SSH session refuses a local login outright and tells you to re-run
 with `--remote` rather than switching mode silently.
 
 The SuperGrok account answers to `grok` and `supergrok`; bare `xai` is refused
-as ambiguous. API keys use `plak key set` instead. In the public TUI, login
-uses the CLI; its Providers tab shows status and names this command.
-Current-protocol host clients can also offer confirmed Accounts login forms; the
-public TUI does not yet include those forms.
+as ambiguous. API keys use `plak key set` instead. Host clients can also
+implement the confirmed Accounts login operations.
 
 ### `plak logout <codex|grok|claude> [--local]`
 
@@ -260,8 +247,8 @@ that one account cannot be read. The four columns stay put, so
 `set` prompts for the key and writes it to the secrets store; `clear` removes
 the file; `status` reports presence without printing the key. Environment
 variables override files, `plak key clear` cannot unset a process environment
-variable, and Plak never loads a `.env` file. In the public TUI, key entry uses
-the CLI; current-protocol host clients can also offer masked, confirmed key forms.
+variable, and Plak never loads a `.env` file. Host clients can also implement
+masked, confirmed key operations.
 
 ### `plak secret set|rm <name>`, `plak secret list`
 
@@ -503,7 +490,7 @@ plak run --account codex --model gpt-5.6-luna --effort low --image shot.png -- '
 | `--effort <level>` | `none`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. Required for a reasoning model, refused for the rest. `none` is explicit; omitting the flag is not `none`. There is no default; the catalog row decides. |
 | `--composition <c>` | `direct`, `plakous-default`, `native-ptc`, `js-ptc`, `py-ptc`, `py-sdk`. `py-sdk` selects the typed, fresh-cell Python SDK for a core-tools-only single-agent root; it never follows from `plakous-default`. `native-ptc` is the vertical's own programmatic tool calling; today only Codex Code Mode is enrolled (Codex `CodeModeOnly` rows and OpenAI API models enrolled as `CodeModeOnly`), and elsewhere it is refused naming the vertical. `js-ptc` and `py-ptc` are harness PTC on every account. `plakous-default` (the default when omitted) is the per-model recommendation: `native-ptc` where Codex Code Mode is enrolled, `direct` on Grok, Claude, OpenRouter and the Anthropic and xAI API accounts. |
 | `--protocol <p>` | `auto`, `chat`, `responses`, `messages`. OpenRouter only, default `auto` → `chat`. Other accounts reject it at parse time. |
-| `--session <id>` | Continue an idle session: the full UUID or the short id `plak resume` accepts, resolved among this directory's sessions. Its recorded binding wins, so `--account`, `--model`, `--effort`, `--composition` and `--protocol` are refused alongside it. |
+| `--session <id>` | Continue an idle session: the full UUID or an unambiguous session prefix, resolved among this directory's sessions. Its recorded binding wins, so `--account`, `--model`, `--effort`, `--composition` and `--protocol` are refused alongside it. |
 | `--max-turns <n>` | Admitted turns including the first, 1..=100; default 25. |
 | `--timeout <seconds>` | Whole-run wall clock, including authentication/catalog preparation and idle waiting; default none. |
 | `--leave-jobs-running` | Leave shell `&` leftover jobs alive and unowned at exit; the caller must clean them up. Budget-promoted jobs hold the run open while their leaders live. |
@@ -520,7 +507,7 @@ must match the one the session was created in.
 `run` never asks you to approve an effect. If a coordination effect requests
 approval, it denies it and prints the tool name with `run is non-interactive` on stderr.
 This also applies to an approval restored by `--session`; the restored turn
-finishes before your new prompt starts. Use the TUI to allow an effect instead.
+finishes before your new prompt starts. Use an approval-capable wire client to allow an effect instead.
 
 Only the last turn answer is written to stdout, once after release, with
 separate text blocks of the answer split by a blank line and a final line break;
@@ -530,7 +517,7 @@ answer and exits with code 4. `--print-session-id` still prints before the turn.
 
 Shell `&` leftovers become jobs but never hold `run` open. They stop at exit
 unless `--leave-jobs-running` gives up ownership; redirect service output to
-a file or `/dev/null` if it must survive output capture closing. TUI and JSONL
+a file or `/dev/null` if it must survive output capture closing. Hosted and JSONL
 jobs remain owned until stop or session release.
 
 Waiting and continuation summaries go to stderr. A bound stops owned jobs,
@@ -552,7 +539,7 @@ Intel macOS, fail closed.
 
 ### `plak agent`
 
-The same host loop the TUI drives, speaking newline-delimited JSON (`v=1`) on
+The hosted session loop, speaking newline-delimited JSON (`v=1`) on
 stdin and stdout. Stdio is the pipe; there is no `plak agent stdio` subcommand.
 Binding flags match `plak run` (`--account`, `--model`, `--effort`,
 `--composition`, `--protocol`, `--session`); an omitted flag
@@ -575,7 +562,7 @@ printf '{"v":1,"kind":"prompt","id":"1","text":"hi"}\n' | plak agent --account g
 Stdin commands: `prompt`, `interrupt`, `compact`, `resume_queue`, `resume`, `tree`,
 `interrupt_node`, `close_node`, `stop_all`, `clear`,
 `invoke_tool`, `fork`, `recover`, `background`, `resolve_approval`, `quit`.
-`clear` starts a new session, as `/new` does in the TUI.
+`clear` starts a new session.
 `resume` with `agent_id` resumes that loss-held child; without it, it resumes
 all held work and the restored queue. It admits continuation instructions,
 not a replay of the interrupted turn. `resume_queue` only resumes queue delivery.
@@ -621,14 +608,6 @@ exits 4 after `error` and `bye`; idle, it quits with exit 0.
 
 See [agents and orchestration](agents-and-orchestration.md) for a worked
 session.
-
-### `plak resume [uuid]`
-
-Opens a prior session in the TUI. With no argument you get a picker scoped to
-the current directory; with an id you get that session — the full UUID, or the
-short id Plak prints when you quit. `plak --resume [uuid]` is the same command.
-
----
 
 ## Inspecting things
 
@@ -692,7 +671,7 @@ make space. An unreadable probe warns without assuming zero free space.
 
 ### `plak usage [--account codex|grok|claude|openrouter|supergrok] [--session <uuid>]`
 
-Usage, status, and the TUI Usage/Providers pages show the last failed credential
+Usage and status show the last failed credential
 refresh when telemetry has it, with its local `HH:MM`, cause, and repair action.
 A successful refresh clears that notice; starting another refresh does not.
 `credential unchanged` means the old credential was restored, not an unknown
@@ -799,7 +778,7 @@ read-only until explicitly unarchived. It refuses running or uncertain work;
 unarchive starts nothing. `--include-archived` includes hidden sessions.
 Rename, archive and unarchive require full ids. Other session ids may be the
 full id or an unambiguous prefix of at least
-four characters among this workspace's sessions, as `plak resume` and the
+four characters among this workspace's sessions, as the other session commands and the
 exit line print it. For `show` and `log`, append `.cN` to select child `cN` in that root session's
 agent tree, for example `plak session log <uuid>.c1`. These are read-only child
 views; other session commands do not accept child selectors. `log <uuid>.cN`
@@ -819,7 +798,7 @@ killed process, or a turn that ended `recovery required` — records once what
 that turn left unobserved, and releases it again. It never re-sends a model
 request or re-runs a tool. It exits 0, printing the one line that says what was
 recovered, or `nothing to recover`. You rarely need it: the next `plak run
---session` or TUI prompt does the same thing on its own.
+--session` or explicit host attach does the same thing on its own.
 
 `export` and `import` link a session to another plak build, one whose
 stored format differs (each build keeps its state in its own
@@ -835,7 +814,7 @@ session continues from the full conversation, including tool exchanges and inlin
 image bytes. It does not restore live tools, processes, topology, children,
 usage or prompt caches. Queued prompts stay paused; workflow facts stay
 reference-only. The first request rebuilds the prompt cache. File import strips provider replay regardless of the document's declared
-binding. Only a locally produced `/reload` handoff may retain replay, on the
+binding. Only a locally produced, validated carry may retain replay, on the
 identical account/model and after offline destination decoding.
 Before creating the successor, import warns if the estimated history exceeds
 the destination route's admitted input window, naming that route/window and
@@ -859,25 +838,24 @@ into this workspace is refused, naming its existing successor.
 `session list` and `session show` name the lineage link. A build imports its
 own document version and the immediately previous one.
 
-`reload` asks a running interactive session to reload onto the installed build
-at its next idle boundary. It is off unless `~/.plak/config.toml` sets
-`tui.reload_requests = true`. It is refused unless the `plak` you run is
-exactly build `<binary-id>` and a live interactive `plak` announced that
-session. It prints `reload requested for session <id> onto build <binary-id>;
-it runs when the session is idle; outcome: <path>`. See
-[the hint line and /reload](tui.md#the-hint-line-and-reload).
+`reload` submits a same-user request for a running session when the home sets
+`host.reload_requests = true`. The caller must match `--expect-binary` and a
+live session listener must have announced the session. The outcome is recorded
+in a private file. Hosted sessions record a refusal naming the host-restart
+remedy; a client reload does not upgrade the host. Use the host upgrade workflow
+in [host service setup](host-service.md) to change the serving build.
 
 `delete` removes a session and its retained `~/.plak/references/<id>.json` archive,
 plus all of its retained history, together with the
 history of its finished sub-agents and its agent tree, and prints
 `deleted session <id>`. It is how you free space when the session store is
-full; `/new`, compaction and `/recover` do not. It asks first unless `--yes`
+full; a new session, compaction and recovery do not. It asks first unless `--yes`
 is given, and refuses while the session is open in a running plak (or its
 process died less than half a minute ago), while its agent tree has a
 sub-agent that is still running or resumable, or one that needs recovery
-(let Plak recover it first, or retry it with `u` in the Agents tab, or explicitly abandon that obligation
+(let Plak recover it first, retry through explicit client operations, or abandon that obligation
 with `--abandon-children`), or while other sessions continue from
-it or share its history (forks, rebinds, `/new` targets); the
+it or share its history (forks, rebinds, new-session targets); the
 refusal names them. These checks run before the question and again after it,
 and nothing is removed until the session itself has been closed for deletion.
 `--abandon-children` exempts only recovery-required children in this session's
@@ -905,7 +883,7 @@ session store is full. It prints `reclaimed <n> checkpoints, <n> objects, <n>
 bytes (<n> sessions pruned, <n> interrupted deletes finished)`, then one
 `skipped <id>: <reason>` line for each session it left alone: one open in a
 running plak, one with an unfinished turn (run `plak session recover` first),
-or one with a workflow (`/compact`, `/fork`, a model change) that a crash cut
+or one with a workflow (a compact operation, a fork operation, a model change) that a crash cut
 short before it started (`workflow pending`: open the session, or run `plak
 session recover`, first). With `--all` it covers
 every plak session (product record) in this home, not just this workspace, and
@@ -1006,12 +984,10 @@ plak config trust         # admits the discovered project .plak
 plak config untrust       # revokes project trust
 ```
 
-`[roster] working_set` and `[orchestration]` are config-only — there is no
-roster editor in the TUI. Agent templates are one file each under
+`[roster] working_set` and `[orchestration]` are configuration fields. Agent templates are one file each under
 `~/.plak/agents/<name>.toml` (or a project's `.plak/agents/`).
 `config edit` uses `vi` only at a terminal; headless use requires `VISUAL` or
-`EDITOR`. Bare set aliases `mouse`, `theme` and `compaction_enabled` are refused;
-use `tui.mouse`, `tui.theme` and `compaction.enabled`.
+`EDITOR`. Keys use their dotted names, for example `compaction.enabled`.
 See [configuration](configuration.md).
 
 ## Maintainer commands

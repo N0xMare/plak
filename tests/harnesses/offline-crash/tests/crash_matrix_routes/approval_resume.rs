@@ -4,9 +4,6 @@ use super::*;
 #[path = "approval_resume/jsonl.rs"]
 mod jsonl;
 use plakous::sessions::feed::{FeedCursor, FeedFact, FeedPage, FeedPageRequest};
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use std::io::Read;
-use std::sync::Mutex;
 
 const ANSWER: &str = "approval completed";
 
@@ -139,6 +136,86 @@ pub(super) fn assert_terminals(fixture: &FaceFixture, count: usize) -> TestResul
 }
 
 #[test]
+fn jsonl_repeated_approval_sigkill_keeps_the_original_decision() -> TestResult {
+    let fixture = FaceFixture::new(&script())?;
+    let (session, original) = cut(&fixture)?;
+    let mut again = FaceAgent::start(&fixture, &["--session", &session])?;
+    let restored = again.wait_for("first restored approval", |row| row["kind"] == "approval")?;
+    assert_same_approval(&original, &restored);
+    again.sigkill()?;
+    let mut again = FaceAgent::start(&fixture, &["--session", &session])?;
+    let restored = again.wait_for("second restored approval", |row| row["kind"] == "approval")?;
+    assert_same_approval(&original, &restored);
+    assert_eq!(
+        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
+        1
+    );
+    assert_eq!(evidence_count(&fixture, EvidenceKind::EffectDispatched)?, 0);
+    again.send(&json!({"v":1,"kind":"interrupt"}))?;
+    again.wait_for("cancelled terminal", |row| {
+        row["kind"] == "turn_lifecycle" && row["phase"] == "cancelled"
+    })?;
+    again.send(&quit_frame())?;
+    let (success, _, stderr) = again.finish()?;
+    assert!(success, "{stderr}");
+    assert_eq!(
+        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
+        1
+    );
+    assert_eq!(evidence_count(&fixture, EvidenceKind::EffectDispatched)?, 0);
+    assert_terminals(&fixture, 1)
+}
+
+#[test]
+fn run_denial_commits_before_a_continuation_cut_is_abandoned() -> TestResult {
+    let fixture = FaceFixture::new(&script())?;
+    let (session, _) = cut(&fixture)?;
+    let mut continuation = script();
+    continuation["steps"] =
+        json!([{"gate":{"file":"release-denied-continuation"},"output":{"text":ANSWER}}]);
+    fixture.write_script(&continuation)?;
+    let mut command = fixture.command();
+    command.args(["run", "--session", &session, "--", "continue after the cut"]);
+    let mut runner = FaceAgent::start_command(command)?;
+    let deadline = Instant::now() + FACE_WAIT;
+    while evidence_count(&fixture, EvidenceKind::ProviderDispatched)? != 2 {
+        if Instant::now() >= deadline {
+            return Err("run never reached its continuation provider step".into());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    runner.sigkill()?;
+    let mut again = face_reopen(&fixture, &session)?;
+    again.send(&quit_frame())?;
+    let (success, records, stderr) = again.finish()?;
+    assert!(success, "{stderr}");
+    assert!(!records.iter().any(|row| row["kind"] == "approval"));
+    assert_eq!(evidence_count(&fixture, EvidenceKind::EffectDispatched)?, 0);
+    assert_eq!(
+        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
+        2
+    );
+    let kinds = fixture.session_log_kinds()?;
+    let resolved = kinds
+        .iter()
+        .position(|kind| kind == "effect.decision.resolved")
+        .ok_or("decision resolution not logged")?;
+    let abandoned = kinds
+        .iter()
+        .position(|kind| kind == "turn.abandoned")
+        .ok_or("continuation abandonment not logged")?;
+    assert!(resolved < abandoned, "{kinds:?}");
+    assert_eq!(
+        feed(&fixture)?
+            .iter()
+            .filter(|fact| matches!(fact, FeedFact::TurnTerminal { .. }))
+            .count(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
 fn jsonl_restored_approval_accepts_interrupt_after_hello() -> TestResult {
     let fixture = FaceFixture::new(&script())?;
     let (session, approval) = cut(&fixture)?;
@@ -253,266 +330,6 @@ fn run_session_denies_restored_approval_and_drives_the_requested_prompt() -> Tes
     assert_eq!(
         evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
         3
-    );
-    Ok(())
-}
-
-struct Terminal {
-    child: Box<dyn portable_pty::Child + Send + Sync>,
-    writer: Box<dyn Write + Send>,
-    screen: Arc<Mutex<vt100::Parser>>,
-    _master: Box<dyn portable_pty::MasterPty + Send>,
-}
-
-impl Drop for Terminal {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-impl Terminal {
-    fn start(fixture: &FaceFixture, session: &str) -> TestResult<Self> {
-        let pair = native_pty_system().openpty(PtySize {
-            rows: 40,
-            cols: 140,
-            pixel_width: 0,
-            pixel_height: 0,
-        })?;
-        let mut command = CommandBuilder::new(&fixture.binary);
-        command.arg("--resume");
-        command.arg(session);
-        command.cwd(&fixture.workspace);
-        command.env_clear();
-        for (key, value) in fixture.command().get_envs() {
-            if let Some(value) = value {
-                command.env(key, value);
-            }
-        }
-        command.env("TERM", "xterm-256color");
-        let child = pair.slave.spawn_command(command)?;
-        drop(pair.slave);
-        let writer = pair.master.take_writer()?;
-        let mut reader = pair.master.try_clone_reader()?;
-        let screen = Arc::new(Mutex::new(vt100::Parser::new(40, 140, 0)));
-        let sink = screen.clone();
-        std::thread::spawn(move || {
-            let mut buffer = [0; 8192];
-            while let Ok(count) = reader.read(&mut buffer) {
-                if count == 0 {
-                    break;
-                }
-                if let Ok(mut screen) = sink.lock() {
-                    screen.process(&buffer[..count]);
-                }
-            }
-        });
-        Ok(Self {
-            child,
-            writer,
-            screen,
-            _master: pair.master,
-        })
-    }
-
-    fn wait_for(&mut self, text: &str) -> TestResult {
-        let deadline = Instant::now() + FACE_WAIT;
-        loop {
-            let screen = self
-                .screen
-                .lock()
-                .map_err(|_| "screen lock")?
-                .screen()
-                .contents();
-            if screen.contains(text) {
-                return Ok(());
-            }
-            if self.child.try_wait()?.is_some() || Instant::now() >= deadline {
-                return Err(format!("terminal never showed {text:?}:\n{screen}").into());
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-
-    fn send(&mut self, bytes: &[u8]) -> TestResult {
-        self.writer.write_all(bytes)?;
-        self.writer.flush()?;
-        Ok(())
-    }
-
-    fn finish(mut self) -> TestResult {
-        self.send(b"/quit\r")?;
-        let deadline = Instant::now() + FACE_WAIT;
-        loop {
-            if let Some(status) = self.child.try_wait()? {
-                if !status.success() {
-                    return Err(format!("terminal failed: {status:?}").into());
-                }
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err("terminal quit hung".into());
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-}
-
-fn tui_decision(allow: bool, in_process: bool) -> TestResult {
-    let fixture = FaceFixture::new(&script())?;
-    let (session, _) = cut(&fixture)?;
-    let mut terminal = if in_process {
-        let mut source = FaceAgent::start(&fixture, &[])?;
-        let hello = source.wait_for("source hello", |record| record["kind"] == "hello")?;
-        let source_id = hello["session_id"].as_str().ok_or("source session id")?;
-        source.wait_for("source ready", |record| record["kind"] == "ready")?;
-        source.sigkill()?;
-        let mut terminal = Terminal::start(&fixture, source_id)?;
-        terminal.wait_for("/ commands")?;
-        terminal.send(format!("/resume {session}\r").as_bytes())?;
-        terminal
-    } else {
-        Terminal::start(&fixture, &session)?
-    };
-    terminal.wait_for("awaiting decision")?;
-    assert_eq!(
-        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
-        1
-    );
-    terminal.send(if allow { b"\x1ba" } else { b"\x1bd" })?;
-    terminal.wait_for(if allow {
-        "Allow loopback effect?"
-    } else {
-        "Deny loopback effect?"
-    })?;
-    terminal.send(b"\r")?;
-    terminal.wait_for(ANSWER)?;
-    let deadline = Instant::now() + FACE_WAIT;
-    loop {
-        if feed(&fixture)?.iter().any(|fact| {
-            matches!(
-                fact,
-                FeedFact::TurnTerminal {
-                    outcome: plakous::sessions::feed::FeedTurnOutcome::Completed { .. },
-                    ..
-                }
-            )
-        }) {
-            break;
-        }
-        if Instant::now() >= deadline {
-            return Err("approval turn never completed".into());
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    terminal.finish()?;
-    assert_eq!(
-        evidence_count(&fixture, EvidenceKind::EffectDispatched)?,
-        usize::from(allow)
-    );
-    assert_eq!(
-        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
-        2
-    );
-    assert_terminals(&fixture, 1)
-}
-
-#[test]
-fn tui_resume_approval_allow_has_one_terminal() -> TestResult {
-    tui_decision(true, false)
-}
-
-#[test]
-fn tui_resume_approval_deny_has_one_terminal() -> TestResult {
-    tui_decision(false, false)
-}
-
-#[test]
-fn tui_in_process_resume_approval_allow_has_one_terminal() -> TestResult {
-    tui_decision(true, true)
-}
-
-#[test]
-fn tui_in_process_resume_approval_deny_has_one_terminal() -> TestResult {
-    tui_decision(false, true)
-}
-
-#[test]
-fn jsonl_repeated_approval_sigkill_keeps_the_original_decision() -> TestResult {
-    let fixture = FaceFixture::new(&script())?;
-    let (session, original) = cut(&fixture)?;
-    let mut again = FaceAgent::start(&fixture, &["--session", &session])?;
-    let restored = again.wait_for("first restored approval", |row| row["kind"] == "approval")?;
-    assert_same_approval(&original, &restored);
-    again.sigkill()?;
-    let mut again = FaceAgent::start(&fixture, &["--session", &session])?;
-    let restored = again.wait_for("second restored approval", |row| row["kind"] == "approval")?;
-    assert_same_approval(&original, &restored);
-    assert_eq!(
-        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
-        1
-    );
-    assert_eq!(evidence_count(&fixture, EvidenceKind::EffectDispatched)?, 0);
-    again.send(&json!({"v":1,"kind":"interrupt"}))?;
-    again.wait_for("cancelled terminal", |row| {
-        row["kind"] == "turn_lifecycle" && row["phase"] == "cancelled"
-    })?;
-    again.send(&quit_frame())?;
-    let (success, _, stderr) = again.finish()?;
-    assert!(success, "{stderr}");
-    assert_eq!(
-        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
-        1
-    );
-    assert_eq!(evidence_count(&fixture, EvidenceKind::EffectDispatched)?, 0);
-    assert_terminals(&fixture, 1)
-}
-
-#[test]
-fn run_denial_commits_before_a_continuation_cut_is_abandoned() -> TestResult {
-    let fixture = FaceFixture::new(&script())?;
-    let (session, _) = cut(&fixture)?;
-    let mut continuation = script();
-    continuation["steps"] =
-        json!([{"gate":{"file":"release-denied-continuation"},"output":{"text":ANSWER}}]);
-    fixture.write_script(&continuation)?;
-    let mut command = fixture.command();
-    command.args(["run", "--session", &session, "--", "continue after the cut"]);
-    let mut runner = FaceAgent::start_command(command)?;
-    let deadline = Instant::now() + FACE_WAIT;
-    while evidence_count(&fixture, EvidenceKind::ProviderDispatched)? != 2 {
-        if Instant::now() >= deadline {
-            return Err("run never reached its continuation provider step".into());
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    runner.sigkill()?;
-    let mut again = face_reopen(&fixture, &session)?;
-    again.send(&quit_frame())?;
-    let (success, records, stderr) = again.finish()?;
-    assert!(success, "{stderr}");
-    assert!(!records.iter().any(|row| row["kind"] == "approval"));
-    assert_eq!(evidence_count(&fixture, EvidenceKind::EffectDispatched)?, 0);
-    assert_eq!(
-        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
-        2
-    );
-    let kinds = fixture.session_log_kinds()?;
-    let resolved = kinds
-        .iter()
-        .position(|kind| kind == "effect.decision.resolved")
-        .ok_or("decision resolution not logged")?;
-    let abandoned = kinds
-        .iter()
-        .position(|kind| kind == "turn.abandoned")
-        .ok_or("continuation abandonment not logged")?;
-    assert!(resolved < abandoned, "{kinds:?}");
-    assert_eq!(
-        feed(&fixture)?
-            .iter()
-            .filter(|fact| matches!(fact, FeedFact::TurnTerminal { .. }))
-            .count(),
-        1
     );
     Ok(())
 }

@@ -59,8 +59,8 @@ about three, so a long session of small turns reaches the limit with very few
 tokens in use. With auto compaction on, Plak compacts once the session holds
 3,072 segments, even far below the token trigger. Near the limit (4,032
 segments) a new prompt is refused with a context-capacity error. Run
-`/compact` to compact this session, `/fork-then-compact` to compact a fork and
-keep this session as it is, or `/new` to start a new session, or turn
+a wire compact operation to compact this session, fork then compact to keep
+this session as it is, start a new session, or turn
 auto compaction on. The refused session still resumes and exports. A session an earlier build left stuck at
 the limit (a turn that never finished, with every later resume failing)
 cannot be resumed or exported.

@@ -18,7 +18,6 @@ import long_session  # noqa: E402
 import qualification  # noqa: E402
 import smoke  # noqa: E402
 import soak  # noqa: E402
-import tui_soak  # noqa: E402
 
 
 class CompactionFoldTests(unittest.TestCase):
@@ -309,44 +308,6 @@ class LiveOracleTests(unittest.TestCase):
         root.symlink_to(self.capture_workspace / "tests", target_is_directory=True)
         with self.assertRaises(live.ScenarioFailure):
             env.environ(source={})
-
-    def test_all_launch_surfaces_automatically_install_capture(self):
-        base = self.capture_workspace
-        env = live.Env(base / "plak", base / "home", base)
-        with patch.object(
-            live.subprocess, "run", return_value=Mock(returncode=0, stdout="ok", stderr="")
-        ) as run:
-            live.run_cli(env, base, [], base / "run.log")
-            self.assertEqual(
-                run.call_args.kwargs["env"]["PLAK_TEST_EXCHANGE_CAPTURE_DIR"],
-                str(env.capture_segments[-1]),
-            )
-
-        def ready(agent, *args):
-            agent.session_id = "synthetic"
-            return {"kind": "ready"}
-
-        with (
-            patch.object(live.subprocess, "Popen") as popen,
-            patch.object(live.threading, "Thread"),
-            patch.object(live.Agent, "wait_for", ready),
-        ):
-            agent = live.Agent(env, base, "agent", args=[], faults="fault")
-            self.assertEqual(
-                popen.call_args.kwargs["env"]["PLAK_TEST_EXCHANGE_CAPTURE_DIR"],
-                str(agent.capture_dir),
-            )
-            self.assertEqual(popen.call_args.kwargs["env"]["PLAK_TEST_FAULTS"], "fault")
-            agent.transcript.close()
-            agent.stderr.close()
-        with (
-            patch.object(live.pty, "fork", return_value=(123, 456)),
-            patch.object(live.fcntl, "ioctl"),
-        ):
-            tui = live.Tui(env, base, base / "pty.log")
-            self.assertEqual(tui.capture_dir, env.capture_segments[-1])
-            tui.log.close()
-        self.assertEqual(len(set(env.capture_segments)), 3)
 
     def test_smoke_cannot_qualify_missing_or_incomplete_raw_evidence(self):
         binary = self.capture_workspace / "plak"
@@ -992,7 +953,7 @@ class LiveOracleTests(unittest.TestCase):
             self.assertNotIn("--capture-exchanges", parser._option_string_actions)
             raise RuntimeError("stop before any launch")
 
-        for driver in (smoke, soak, tui_soak):
+        for driver in (smoke, soak):
             with (
                 self.subTest(driver=driver.__name__),
                 patch.object(driver.argparse.ArgumentParser, "parse_args", inspect),
@@ -1010,9 +971,7 @@ class LiveOracleTests(unittest.TestCase):
         self.assertEqual([name for name, _ in smoke.selected_scenarios(set())], default)
         self.assertEqual([name for name, _ in smoke.selected_scenarios({"wrap_up"})], ["wrap_up"])
         self.assertEqual(smoke.selected_scenarios({"missing"}), ())
-        self.assertEqual(
-            [name for name, _ in smoke.selected_scenarios({"tui", "wrap_up"})], ["tui", "wrap_up"]
-        )
+        self.assertEqual([name for name, _ in smoke.selected_scenarios({"wrap_up"})], ["wrap_up"])
 
     def test_pin_max_model_rounds_appends_the_turn_cap(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1268,75 +1227,6 @@ class LiveOracleTests(unittest.TestCase):
             live._absorbed_injection("RateLimited", 429, "429", "provider rate limited")
         )
 
-    def test_output_limit_failure_is_model_on_every_surface(self):
-        typed = live.Turn(
-            phase="failed",
-            model_error_kind="OutputLimit",
-            errors=["agent turn failed: model request failed"],
-        )
-        with self.assertRaises(live.ScenarioFailure) as raised:
-            live.classify_incomplete(typed, "jsonl turn")
-        self.assertEqual(raised.exception.outcome, live.MODEL)
-        self.assertIn("OutputLimit", str(raised.exception))
-        rendered = "plak: agent turn failed: response reached its output bound before completion\n"
-        with self.assertRaises(live.ScenarioFailure) as raised:
-            live.classify_cli_failure(5, rendered, "cli_task")
-        self.assertEqual(raised.exception.outcome, live.MODEL)
-        responses = (
-            "plak: agent turn failed: Responses provider stopped at the output bound "
-            "before the response was complete\n"
-        )
-        with self.assertRaises(live.ScenarioFailure) as raised:
-            live.classify_cli_failure(5, responses, "cli_task")
-        self.assertEqual(raised.exception.outcome, live.MODEL)
-        # Only the final stderr line is the turn's failure: an earlier line
-        # quoting the diagnostic (a recovered retry, a log) does not decide it.
-        with self.assertRaises(live.ScenarioFailure) as raised:
-            live.classify_cli_failure(
-                5, rendered + "plak: agent turn failed: session store is closed\n\n", "cli_task"
-            )
-        self.assertEqual(raised.exception.outcome, live.HARNESS)
-        with self.assertRaises(live.ScenarioFailure) as raised:
-            live.classify_cli_failure(5, "plak: retrying\n" + rendered + "\n", "cli_task")
-        self.assertEqual(raised.exception.outcome, live.MODEL)
-        # Another failure that merely mentions an output bound stays harness.
-        with self.assertRaises(live.ScenarioFailure) as raised:
-            live.classify_cli_failure(
-                5, "plak: requested output bound exceeds the admitted maximum", "cli_task"
-            )
-        self.assertEqual(raised.exception.outcome, live.HARNESS)
-        # TUI: the lifecycle row has no kind; the turn's `turn.failed` text does.
-        records = [
-            {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "t1"},
-            {"kind": "turn.output_limit_retry", "detail": "retrying"},
-            {"kind": "turn.lifecycle", "phase": "failed", "turn_id": "t1"},
-            {
-                "kind": "turn.failed",
-                "disposition": "definite",
-                "msg": "agent turn failed: response reached its output bound before completion",
-            },
-            {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "t2"},
-            {"kind": "turn.lifecycle", "phase": "failed", "turn_id": "t2"},
-            {"kind": "turn.failed", "msg": "agent turn failed: protocol"},
-        ]
-        first, second = smoke.durable_terminals(records)
-        self.assertIn("output bound", first["message"])
-        self.assertEqual(second["message"], "agent turn failed: protocol")
-        self.assertNotIn("message", records[2])
-        with self.assertRaises(live.ScenarioFailure) as raised:
-            smoke.require_durable_completed(first, "first TUI turn")
-        self.assertEqual(raised.exception.outcome, live.MODEL)
-        with self.assertRaises(live.ScenarioFailure) as raised:
-            smoke.require_durable_completed(second, "second TUI turn")
-        self.assertEqual(raised.exception.outcome, live.HARNESS)
-        home = self.capture_workspace / "home"
-        log = home / "state" / "k" / "sessions" / "s.events.jsonl"
-        log.parent.mkdir(parents=True)
-        log.write_text("".join(json.dumps(record) + "\n" for record in records))
-        self.assertTrue(tui_soak.output_limit_terminal(home, "s", 0))
-        self.assertFalse(tui_soak.output_limit_terminal(home, "s", 1))
-        self.assertFalse(tui_soak.output_limit_terminal(home, "s", -1))
-
     def test_unaccepted_compatibility_notice_names_its_remedy(self):
         for stderr in (
             "plak: the codex compatibility notice needs an answer on stdin and none came; "
@@ -1370,31 +1260,6 @@ class LiveOracleTests(unittest.TestCase):
             smoke._require_cli_answer(
                 "session_id=abc\n", [{"kind": "turn.assistant", "text": "DONE"}], "wrap-up turn"
             )
-
-    def test_tui_soak_tasks_have_independent_oracles(self):
-        first = tui_soak.task(0, 0)
-        later = tui_soak.task(1, 2)
-        self.assertNotEqual(first.name, later.name)
-        self.assertIn(first.name, first.prompt)
-        self.assertIn(first.name, first.check)
-
-    def test_tui_soak_terminal_filter_ignores_admission(self):
-        with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            log = home / "state" / "r1" / "sessions" / "abc.events.jsonl"
-            log.parent.mkdir(parents=True)
-            log.write_text(
-                "\n".join(
-                    json.dumps(record)
-                    for record in (
-                        {"kind": "turn.lifecycle", "phase": "admitted"},
-                        {"kind": "tool.completed", "state": "succeeded"},
-                        {"kind": "turn.lifecycle", "phase": "completed"},
-                    )
-                )
-                + "\n"
-            )
-            self.assertEqual(tui_soak.terminals(home, "abc"), ["completed"])
 
     def test_headless_soak_records_reopen_failure_instead_of_losing_report(self):
         with tempfile.TemporaryDirectory() as directory:

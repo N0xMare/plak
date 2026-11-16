@@ -128,37 +128,6 @@ pub(crate) fn import_document(
     import_prepared(services, PreparedImport::new(document, local_handoff)?)
 }
 
-/// The `--import-resume` half of a reload handoff: the source names the
-/// session's own profile and, when it carries a changed binding, why.
-pub(crate) fn import_reload_handoff(
-    services: &crate::shell::services::Services,
-    document: crate::carry::CarryDocument,
-    local_handoff: bool,
-    cause: Option<&str>,
-    profile: Option<crate::profiles::SessionSelection>,
-) -> CliResult<(product_sessions::SessionRecord, String)> {
-    let estimated_tokens = document.estimated_tokens();
-    let messages = document.message_count();
-    let carried = match cause {
-        Some(cause) => document.into_noticed_import(cause, local_handoff)?,
-        None => document
-            .into_import_with_replay(local_handoff)
-            .map_err(|e| CliFailure::new(e.to_string()))?,
-    };
-    crate::build_features::admit_session(&carried.record)?;
-    import_prepared(
-        services,
-        PreparedImport {
-            upgrade_successor: None,
-            carried,
-            estimated_tokens,
-            messages,
-            profile,
-            carry: None,
-        },
-    )
-}
-
 pub(crate) fn import_prepared(
     services: &crate::shell::services::Services,
     prepared: PreparedImport,
@@ -367,7 +336,7 @@ fn refuse_carried_twice(
         && resumed.is_none_or(|intent| intent.id != existing.id)
     {
         return Err(CliFailure::new(format!(
-            "session {source_id} ({source_key}) was already carried forward as {}; resume it with `plak --resume {}`",
+            "session {source_id} ({source_key}) was already carried forward as {}; resume it with `plak run --session {}`",
             existing.id, existing.id
         )));
     }
@@ -457,7 +426,7 @@ fn keep_source_profile(
             });
         }
         // The import's summary line carries it once: the CLI prints it and the
-        // TUI opens the successor with it as its opening note.
+        // A client opens the successor with it as its opening note.
         Err(notice) => note.push_str(&format!("; {notice}")),
     }
 }

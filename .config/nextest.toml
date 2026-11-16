@@ -149,7 +149,6 @@ not (
   test(foreground_awake_clock_excludes_suspend_then_expires_once)
   |
   test(a_daemon_exits_when_its_endpoint_disappears_or_is_replaced)
-  | test(a_host_tui_fixture_reaps_its_host_and_daemon_on_drop_and_panic)
   |
   test(a_committed_reopen_joins_a_late_idle_quit_before_opening)
   |
@@ -178,7 +177,6 @@ not (
   | test(ledger_retirement_low_threshold_direct_batches)
   | test(ledger_retirement_low_threshold_closed_cells_reopen_both_stores)
   | test(ledger_retirement_nested_refusal_cell_finishes_and_next_cell_succeeds)
-  | test(review_a_slow_installed_probe_does_not_delay_the_host_tui)
   | test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
   | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
   | test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
@@ -188,33 +186,18 @@ not (
   | test(a_stuck_worker_request_after_nested_reply_is_killed)
   | test(sdk_foreground_stop_is_typed_and_reaps_the_worker)
   | test(real_python_sdk_driver_foreground_stop)
-  | test(product_terminal_e2e_tests::)
   | test(product_runtime_e2e_tests::)
   | test(product_compaction_runtime_e2e_tests::)
-  | test(capture_real_client_host_control_traces)
-  | test(run_app_paints_usage_decoration_through_the_wake_pipe)
-  | test(lifecycle_tests::)
-  | test(real_composition_quit_releases_nested_process)
   | test(real_composition_jsonl_quit_releases_nested_process_and_reopens_exactly)
   | test(real_promoted_jsonl_quit_stops_its_job_and_reopens_exactly)
-  | test(real_process_quit_releases_and_resumes_exact_session)
   | test(real_process_jsonl_quit_releases_and_resumes_exact_session)
-  | test(real_promoted_job_quit_releases_and_resumes_exact_session)
-  | test(tui_exit_bound_idle_and_stalled_turn)
-  | test(an_idle_send_paints_the_host_row_without_waiting_out_a_poll)
-  | test(a_parked_shell_wakes_only_for_its_five_second_build_check)
-  | test(a_parked_shell_stays_parked_over_a_stranded_input_burst)
   | test(a_busy_turn_takes_an_intent_without_waiting_for_the_coalesce_tick)
   | test(a_busy_turn_rereads_allowances_only_while_the_usage_tab_is_open)
-  | test(tui_local_launch_budget_new_and_resume_with_network_faults)
-  | test(a_reload_onto_the_same_state_key_resumes_exactly)
-  | test(tui_shutdown_deadlines_are_at_most_one_second)
   | test(interactive_exit_batches_real_root_and_child_leases_without_settling)
   | test(thinking_settle_tests::)
   | test(quit_projection_stages_share_the_original_deadline)
   | test(interactive_observation_timeout_releases_gate_and_joins_without_masking_failure)
   | test(failed_interactive_publication_recovers_in_place_on_the_next_prompt)
-  | test(fresh_real_binary_shell_keeps_controls_and_draft_usable)
   | test(deferred_startup_never_claims_attachment_before_failed_open_falls_back)
   | test(exec_command_with_zero_yield_returns_the_joined_output)
   | test(leftover_jobs_leader_exit_wakes_an_already_held_quiet_poll)
@@ -263,13 +246,7 @@ not (
   | test(host_cancel_and_future_drop_join_the_owned_process_group)
   | test(joined_process_sessions_join_cancelled_group)
   | test(a_slow_jsonl_reader_does_not_make_the_writer_fail_the_stream)
-  | test(paging_to_the_head_of_a_long_transcript_and_back_moves_on_every_key)
   | test(unread_mail_yields_are_bounded_within_one_tool_batch)
-  | test(a_queued_prompt_sent_now_shows_its_steer_row_while_the_turn_runs)
-  | test(a_focused_queue_ctrl_s_shows_its_steer_row_while_the_turn_runs)
-  | test(control_center_chords_switch_tabs_edit_rows_search_scroll_and_copy)
-  | test(settings_save_keeps_local_theme_and_mouse_across_reconnect)
-  | test(the_launch_picker_lists_earlier_sessions_and_reopens_the_chosen_one)
   | test(terminate_contention_is_bounded_and_preserves_correlated_owner)
   | test(join_all_handles_free_children_and_retains_contended_child_for_retry)
   | test(running_children_still_count_against_the_session_limit)
@@ -293,7 +270,6 @@ not (
   | test(a_refusal_raised_before_any_spawn_reaches_the_model_as_a_tool_failure)
   | test(sixty_fifth_running_start_is_refused_before_spawn)
   | test(host_capacity_refuses_the_129th_start_across_services_before_spawn)
-  | test(resizing_between_160_and_60_columns_under_a_long_transcript_refits_the_banner)
   | test(full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape)
   | test(the_idle_wait_wakes_on_an_intent_and_not_before)
   | test(host_service_ignoring_sigterm_is_killed_after_the_grace)
@@ -312,7 +288,6 @@ not (
   | test(a_recycling_waiter_is_an_owner_that_recovery_never_waits_on)
   | test(user_stop_grants_the_term_grace_without_blocking_the_caller)
   | test(jj_cli_doctor_bounds_output_wait_after_leader_exit)
-  | test(pending_wakes_return_the_wait_and_are_consumed)
   | test(durability::)
   | test(host_skeleton::root_wake::)
   |
@@ -334,8 +309,6 @@ not (
   test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)
   | test(lifecycle_commit_crash_cuts_reopen_exactly_before_or_after)
   | test(lifecycle_deletion_crash_cuts_finish_without_recovery_or_cascade)
-  | test(tui_host_restart)
-  | test(review_tui_host_restart_switch)
   | test(wire_host_restart)
   | test(image_residency_crash_cuts_recover_without_redispatch)
   | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
@@ -485,7 +458,6 @@ default-filter = '''
   test(foreground_awake_clock_excludes_suspend_then_expires_once)
   |
   test(a_daemon_exits_when_its_endpoint_disappears_or_is_replaced)
-  | test(a_host_tui_fixture_reaps_its_host_and_daemon_on_drop_and_panic)
   |
   test(a_committed_reopen_joins_a_late_idle_quit_before_opening)
   |
@@ -514,7 +486,6 @@ default-filter = '''
   | test(ledger_retirement_low_threshold_direct_batches)
   | test(ledger_retirement_low_threshold_closed_cells_reopen_both_stores)
   | test(ledger_retirement_nested_refusal_cell_finishes_and_next_cell_succeeds)
-  | test(review_a_slow_installed_probe_does_not_delay_the_host_tui)
   | test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
   | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
   | test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
@@ -524,33 +495,18 @@ default-filter = '''
   | test(a_stuck_worker_request_after_nested_reply_is_killed)
   | test(sdk_foreground_stop_is_typed_and_reaps_the_worker)
   | test(real_python_sdk_driver_foreground_stop)
-  | test(product_terminal_e2e_tests::)
   | test(product_runtime_e2e_tests::)
   | test(product_compaction_runtime_e2e_tests::)
-  | test(capture_real_client_host_control_traces)
-  | test(run_app_paints_usage_decoration_through_the_wake_pipe)
-  | test(lifecycle_tests::)
-  | test(real_composition_quit_releases_nested_process)
   | test(real_composition_jsonl_quit_releases_nested_process_and_reopens_exactly)
   | test(real_promoted_jsonl_quit_stops_its_job_and_reopens_exactly)
-  | test(real_process_quit_releases_and_resumes_exact_session)
   | test(real_process_jsonl_quit_releases_and_resumes_exact_session)
-  | test(real_promoted_job_quit_releases_and_resumes_exact_session)
-  | test(tui_exit_bound_idle_and_stalled_turn)
-  | test(an_idle_send_paints_the_host_row_without_waiting_out_a_poll)
-  | test(a_parked_shell_wakes_only_for_its_five_second_build_check)
-  | test(a_parked_shell_stays_parked_over_a_stranded_input_burst)
   | test(a_busy_turn_takes_an_intent_without_waiting_for_the_coalesce_tick)
   | test(a_busy_turn_rereads_allowances_only_while_the_usage_tab_is_open)
-  | test(tui_local_launch_budget_new_and_resume_with_network_faults)
-  | test(a_reload_onto_the_same_state_key_resumes_exactly)
-  | test(tui_shutdown_deadlines_are_at_most_one_second)
   | test(interactive_exit_batches_real_root_and_child_leases_without_settling)
   | test(thinking_settle_tests::)
   | test(quit_projection_stages_share_the_original_deadline)
   | test(interactive_observation_timeout_releases_gate_and_joins_without_masking_failure)
   | test(failed_interactive_publication_recovers_in_place_on_the_next_prompt)
-  | test(fresh_real_binary_shell_keeps_controls_and_draft_usable)
   | test(deferred_startup_never_claims_attachment_before_failed_open_falls_back)
   | test(exec_command_with_zero_yield_returns_the_joined_output)
   | test(leftover_jobs_leader_exit_wakes_an_already_held_quiet_poll)
@@ -599,13 +555,7 @@ default-filter = '''
   | test(host_cancel_and_future_drop_join_the_owned_process_group)
   | test(joined_process_sessions_join_cancelled_group)
   | test(a_slow_jsonl_reader_does_not_make_the_writer_fail_the_stream)
-  | test(paging_to_the_head_of_a_long_transcript_and_back_moves_on_every_key)
   | test(unread_mail_yields_are_bounded_within_one_tool_batch)
-  | test(a_queued_prompt_sent_now_shows_its_steer_row_while_the_turn_runs)
-  | test(a_focused_queue_ctrl_s_shows_its_steer_row_while_the_turn_runs)
-  | test(control_center_chords_switch_tabs_edit_rows_search_scroll_and_copy)
-  | test(settings_save_keeps_local_theme_and_mouse_across_reconnect)
-  | test(the_launch_picker_lists_earlier_sessions_and_reopens_the_chosen_one)
   | test(terminate_contention_is_bounded_and_preserves_correlated_owner)
   | test(join_all_handles_free_children_and_retains_contended_child_for_retry)
   | test(running_children_still_count_against_the_session_limit)
@@ -629,7 +579,6 @@ default-filter = '''
   | test(a_refusal_raised_before_any_spawn_reaches_the_model_as_a_tool_failure)
   | test(sixty_fifth_running_start_is_refused_before_spawn)
   | test(host_capacity_refuses_the_129th_start_across_services_before_spawn)
-  | test(resizing_between_160_and_60_columns_under_a_long_transcript_refits_the_banner)
   | test(full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape)
   | test(the_idle_wait_wakes_on_an_intent_and_not_before)
   | test(host_service_ignoring_sigterm_is_killed_after_the_grace)
@@ -648,7 +597,6 @@ default-filter = '''
   | test(a_recycling_waiter_is_an_owner_that_recovery_never_waits_on)
   | test(user_stop_grants_the_term_grace_without_blocking_the_caller)
   | test(jj_cli_doctor_bounds_output_wait_after_leader_exit)
-  | test(pending_wakes_return_the_wait_and_are_consumed)
   | test(durability::)
 '''
 
@@ -680,8 +628,6 @@ default-filter = '''
   test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)
   | test(lifecycle_commit_crash_cuts_reopen_exactly_before_or_after)
   | test(lifecycle_deletion_crash_cuts_finish_without_recovery_or_cascade)
-  | test(tui_host_restart)
-  | test(review_tui_host_restart_switch)
   | test(wire_host_restart)
   | test(image_residency_crash_cuts_recover_without_redispatch)
   | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
@@ -797,22 +743,12 @@ threads-required = 4
 # parity checks are not restart cuts and keep the ordinary priority.
 [[profile.durability.overrides]]
 filter = '''
-test(/::(tui_host_restart|review_tui_host_restart_switch|wire_host_restart|wire_host_restart_switch)::(root|child)_[0-7]$/)
+test(/::(wire_host_restart|wire_host_restart_switch)::(root|child)_[0-7]$/)
 | test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)
 | test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss)
 '''
 priority = 90
 threads-required = 4
-
-# Several simultaneous PTY fixtures can spend their unchanged stop/quit
-# watchdogs waiting for CPU and child recovery rather than making progress.
-[[profile.durability.overrides]]
-filter = 'package(=plakous-offline-crash-harness) & test(approval_resume::tui_)'
-threads-required = 4
-
-[[profile.default.overrides]]
-filter = 'test(tui_host_restart)'
-slow-timeout = { period = "600s", terminate-after = 2 }
 
 [[profile.default.overrides]]
 filter = 'test(wire_host_restart)'

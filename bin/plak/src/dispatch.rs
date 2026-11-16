@@ -81,7 +81,7 @@ pub(super) fn execute_config_set(
         })
         .map_err(|error| CliFailure::new(error.into_message()))?;
         let note = if crate::config_key_changes_orchestration(&key) {
-            " · saved; applies to new sessions and at the next /reload of an idle session"
+            " · saved; applies to new sessions and explicit profile switches"
         } else {
             ""
         };
@@ -97,7 +97,7 @@ pub(super) fn execute_config_set(
             .map_err(|error| CliFailure::new(error.into_message()))?;
         let disposition = match outcome {
             topology_product::RosterApplyOutcome::Saved => {
-                "saved; applies to new sessions and at the next /reload of an idle session"
+                "saved; applies to new sessions and explicit profile switches"
             }
             topology_product::RosterApplyOutcome::Applied
             | topology_product::RosterApplyOutcome::AppliedDurabilityUncertain(_) => "applied",
@@ -106,12 +106,8 @@ pub(super) fn execute_config_set(
             .map_err(|_| CliFailure::new("stdout failed"))?;
         return Ok(ProcessOutcome::Success);
     }
-    (if key.starts_with("tui.") {
-        product_config::ProductConfig::save_terminal_key(paths, scope, &key, &value)
-    } else {
-        cfg.save_scoped(paths, scope)
-    })
-    .map_err(|error| CliFailure::new(error.into_message()))?;
+    cfg.save_scoped(paths, scope)
+        .map_err(|error| CliFailure::new(error.into_message()))?;
     let scope_note = if scope == product_config::ConfigWriteScope::Project {
         " · project"
     } else {

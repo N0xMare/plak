@@ -1,7 +1,7 @@
 //! Documented config keys and the parsers that admit their values.
 
 use super::load::ProductConfig;
-use super::policy::{CEILING_MAX_MODEL_ROUNDS, MAX_SCROLL_LINES, MIN_SCROLL_LINES};
+use super::policy::CEILING_MAX_MODEL_ROUNDS;
 
 /// A value on its way into one documented key: the TOML value a file carried,
 /// or the single unquoted argument `plak config set` takes.
@@ -155,10 +155,6 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
         "api",
         "Direct API-key routes: the input window new sessions are admitted under.",
     ),
-    (
-        "tui",
-        "Terminal-app preferences; nothing here reaches a provider.",
-    ),
     ("compaction", "Automatic transcript compaction."),
     (
         "skills",
@@ -270,19 +266,7 @@ pub enum ConfigField {
     JobsMaxRuntimeHours,
     /// `[api] full_window`.
     ApiFullWindow,
-    /// `[tui] mouse`.
-    TuiMouse,
-    /// `[tui] theme`.
-    Theme,
-    /// `[tui] scroll_lines`.
-    ScrollLines,
-    /// `[tui] show_thinking`.
-    ShowThinking,
-    /// `[tui] group_tool_calls`.
-    GroupToolCalls,
-    /// `[tui] reduced_motion`.
-    ReducedMotion,
-    /// `[tui] reload_requests`.
+    /// `[host] reload_requests`.
     ReloadRequests,
     /// `[compaction] enabled`.
     CompactionEnabled,
@@ -587,65 +571,11 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         scope: ConfigScope::Immediate,
     },
     ConfigKey {
-        path: "tui.mouse",
-        field: ConfigField::TuiMouse,
-        kind: "bool",
-        constraint: "",
-        doc: "Mouse capture; turning it off hands text selection back to the terminal. Takes effect on the next launch.",
-        example: "true",
-        scope: ConfigScope::Immediate,
-    },
-    ConfigKey {
-        path: "tui.theme",
-        field: ConfigField::Theme,
-        kind: "enum",
-        constraint: "default-dark|default-light|catppuccin-latte|catppuccin-frappe|catppuccin-macchiato|catppuccin-mocha; dark and light are accepted aliases that normalize on the next save",
-        doc: "Color palette for the whole product shell.",
-        example: "\"default-dark\"",
-        scope: ConfigScope::Immediate,
-    },
-    ConfigKey {
-        path: "tui.scroll_lines",
-        field: ConfigField::ScrollLines,
-        kind: "integer",
-        constraint: "1..=10",
-        doc: "Transcript lines moved per wheel tick.",
-        example: "3",
-        scope: ConfigScope::Immediate,
-    },
-    ConfigKey {
-        path: "tui.show_thinking",
-        field: ConfigField::ShowThinking,
-        kind: "bool",
-        constraint: "subject to the provider's reasoning policy",
-        doc: "Render reasoning blocks where the provider admits them.",
-        example: "true",
-        scope: ConfigScope::Immediate,
-    },
-    ConfigKey {
-        path: "tui.group_tool_calls",
-        field: ConfigField::GroupToolCalls,
-        kind: "bool",
-        constraint: "",
-        doc: "Collapse consecutive tool activities to a summary when assistant prose resumes; false keeps action lines visible.",
-        example: "true",
-        scope: ConfigScope::Immediate,
-    },
-    ConfigKey {
-        path: "tui.reduced_motion",
-        field: ConfigField::ReducedMotion,
-        kind: "bool",
-        constraint: "",
-        doc: "Suppress the spinner, the pulse and camera easing.",
-        example: "false",
-        scope: ConfigScope::Immediate,
-    },
-    ConfigKey {
-        path: "tui.reload_requests",
+        path: "host.reload_requests",
         field: ConfigField::ReloadRequests,
         kind: "bool",
         constraint: "true or false; home-scoped",
-        doc: "Let this user's own processes, including an agent's shell, ask a running interactive session to reload onto the installed build (plak session reload <session> --expect-binary <id>) at its next idle boundary. Takes effect when a session next attaches.",
+        doc: "Permit this user's own processes to request a hosted-session reload (plak session reload <session> --expect-binary <id>). The serving host records the outcome and names the explicit host upgrade workflow; replacing a client does not upgrade its sessions.",
         example: "false",
         scope: ConfigScope::Immediate,
     },
@@ -844,15 +774,6 @@ pub(super) fn parse_max_model_rounds(value: FieldValue<'_>) -> Result<u16, Strin
         Some(rounds) if (1..=CEILING_MAX_MODEL_ROUNDS).contains(&rounds) => Ok(rounds),
         _ => Err(format!(
             "[turn] max_model_rounds must be an integer between 1 and {CEILING_MAX_MODEL_ROUNDS}"
-        )),
-    }
-}
-
-pub(super) fn parse_scroll_lines(value: FieldValue<'_>) -> Result<u16, String> {
-    match value.integer().and_then(|lines| u16::try_from(lines).ok()) {
-        Some(lines) if (MIN_SCROLL_LINES..=MAX_SCROLL_LINES).contains(&lines) => Ok(lines),
-        _ => Err(format!(
-            "[tui] scroll_lines must be an integer between {MIN_SCROLL_LINES} and {MAX_SCROLL_LINES}"
         )),
     }
 }

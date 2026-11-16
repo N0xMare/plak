@@ -8,6 +8,22 @@ use crate::carry::{CarryDocument, read_document};
 use crate::shell::services::Services;
 use crate::{CliFailure, CliResult};
 
+impl CarryDocument {
+    pub(crate) fn source(&self) -> (&str, &str) {
+        (&self.source.session_id, &self.source.state_key)
+    }
+
+    pub(crate) fn workspace_root(&self) -> &std::path::Path {
+        &self.workspace_root
+    }
+
+    pub(crate) fn runner_id(&self) -> &str {
+        self.runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str())
+    }
+}
+
 fn document(services: &Services, receipt: &Receipt, mapping: &Mapping) -> CliResult<CarryDocument> {
     let path = receipt
         .path(services.paths()?)

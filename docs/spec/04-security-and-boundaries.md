@@ -326,8 +326,7 @@ and Codex `view_image`, use the same workspace path admission for ordinary
 files. Job-output paths and skill-root paths (below) stay on the text read.
 `view_image` has neither exception. Any other path that lexically starts with
 `<jobs root>/` (a sibling, a parent spelling, another agent's or another
-session's file, or a path issued by an earlier process before a restart or
-`/reload`) is refused without any I/O as `WorkspacePolicy`: `job output file
+session's file, or a path issued by an earlier process before a restart) is refused without any I/O as `WorkspacePolicy`: `job output file
 <path> was issued by an earlier process or another agent and cannot be read
 with this tool`. It is not re-issued. Every other spelling falls through to
 ordinary containment. Admission is process-local: issued paths are never
@@ -403,7 +402,7 @@ and refuses a link escaping it; links within that root are permitted, with the
 same file and discovery bounds as local skills. An unavailable runner refuses
 with its reason, without falling back to the host filesystem. The user root
 is admitted only if it existed as a directory when the node's tools were
-built (session construction, and again at each reopen or attach; a reopen
+built (session construction, and again at each reopen or attach; an exact reopen
 admits it only when the session froze a skills listing or the `Skill` tool,
 and a fork or rebind successor only when the source's skills are on),
 canonicalized then and fixed for that runtime; a root created later is not
@@ -551,7 +550,7 @@ other promoted jobs; cold reopen does not signal stored PIDs.
 leftover groups alive at exit, transfers read ends to separate unowned,
 EOF-bound drain processes and gives up all
 future ownership and cleanup guarantees (chapter 02 §4.1). It is not a sandbox
-or a detached-service supervisor. TUI and JSONL have no such release exception.
+or a detached-service supervisor. The host and JSONL have no such release exception.
 
 It reports **process-group cleanup, never hostile process-tree containment**.
 
@@ -1200,20 +1199,19 @@ returned unchanged to the calling product command.
 
 `plak host --web` (chapter 02 §4.5) serves the host's sessions to browsers
 on the tailnet with the serving user's shell authority. Session and directory
-controls have TUI equivalents, except the local-face intents of §4.6. This is
-not a claim that the retained embedded TUI Providers view implements console
-account writes: it remains read-only (§3.6); host-client TUIs use the same
-confirmed operator wire as web. Session controls include (`retry_attach`,
-`resume_session`, `rebind`), which act on the serving user's own sessions
-as the TUI's `/attach`, `/resume` and rebind do, the session directory's
-(chapter 02 §4.4), and `stop_session`. The directory reads every session of
+controls use the same typed host operations as other integrator clients,
+subject to the local-face restrictions of section 4.6. Confirmed account writes
+use the operator wire described in section 3.6. Session controls include
+`retry_attach`, `resume_session`, `rebind`, the directory operations
+(chapter 02 section 4.4) and `stop_session`. They act on the serving user's own
+sessions. The directory reads every session of
 the home (titles, workspaces, profiles and states), attaches any of them,
 and creates a session in any existing directory the user can reach. A
 workspace allowlist would add no boundary: an attached session already runs
 shell wherever the user can. A project's `.plak/` overlay still applies to
 a session only when the project is trusted (`plak config trust`), and no
 web client can trust one. `stop_session` stops the served session's work as
-the TUI's interrupt, process stop and stop-all together do (every face can
+interrupt, process stop and stop-all together do (every face can
 already send those) and leaves it resumable. It names a session rather than
 an attachment, so it is bounded: a host stops only a session it serves (any
 other is `unknown_session`, and a session another live host holds is that
@@ -1230,8 +1228,7 @@ never retargets itself when the slot moves to a successor. The stop is answered 
 settles (a detach, an attach of another session, a `release_session`): the
 session connection, and with it its hold on the session's residency, stays
 until the stop is answered, at most 90 s, so the session is not released
-under the stop. What it is shown is what
-the TUI shows, redacted as the TUI's rows are: the session's process rows
+under the stop. The session's process rows
 (chapter 02 §4.4) carry each command redacted as the raw command it shows
 (§5) and each output tail through the same display redactor as a tool
 row's detail, whole lines only, so a secret the model typed into
@@ -1507,9 +1504,9 @@ definition digest, a frozen session record, an error line or a log.
 The same API-key label rule applies to Usage account lines and rejection
 messages. A provider-reported key label, even a masked prefix or suffix, is
 not a display label; the OpenRouter allowance decoder never decodes it. OpenRouter rejection messages name the winning source
-and its repair command without key material. `/reload` execs the installed
-binary with the current process environment unchanged: unsetting an overriding
-variable in a shell requires a fresh Plak process, not `/reload` in the old one.
+and its repair command without key material. Unsetting an overriding variable
+in another shell does not change a running host's environment; start a fresh
+resolving process with the intended environment.
 
 ### 3.2 Permissions are verified, not merely set
 
@@ -1584,7 +1581,7 @@ disposition value is accepted as authority to clear one.
 The durable Unknown record a claim writes first is not yet a quarantine while
 its claim is in flight. A reader that finds Unknown while a live process (this
 one or another) holds the refresh execution lock reads **refreshing**: status,
-doctor and the TUI say so, a usage read reports contention, and dispatch
+doctor and host notices say so, a usage read reports contention, and dispatch
 admission (model catalog, child spawn) waits up to 30 seconds for the outcome
 before judging it. Only an Unknown whose lock is free is quarantined. The login
 recovery gate treats an Unknown under the login it cleared as that record's own
@@ -2072,7 +2069,7 @@ checkpoint carry that.
 Typed protocol extensions carry opaque product intents and observations.
 Their handlers receive immutable host facts and a bounded observation sender,
 never a mutable session, canonical driver, or checkpoint authority. Plak owns
-its settings/theme types and returns a durable construction fact only after
+its product settings types and returns a durable construction fact only after
 its product save succeeds; that fact cannot bypass the hosted admission rules.
 
 Product read models — queues, session indexes, tree projections — never
@@ -2120,14 +2117,10 @@ terminal receipt, command, workflow, child or tool-call record becomes authority
 in the new session, and historical tool calls are never executed by import.
 Export documents also carry non-secret account-binding digests (linkable
 pseudonyms, never raw account identifiers or credentials) that are self-declared
-and grant no replay authority outside a local `/reload` handoff.
-Replay bindings in an export are self-declared, not authenticated. File import
-strips provider replay by default (including nested opaque tool-result parts).
-Only `/reload` with this machine's private one-use exact-bytes handoff receipt
-may retain replay on an identical account/model binding. Each retained replay
-segment is passed through the destination dialect decoder offline before seed
-creation; rejected replay falls back to the ordinary stripping path and a
-one-line notice, never an unusable saved session or a failed carry. A receipt cannot authorize tool execution or a foreign binding. Export files remain
+and grant no replay authority. File import strips provider replay by default;
+retained replay requires independent local authority, an identical binding and
+offline destination dialect validation. Historical tools are never executed.
+Export files remain
 0600 in private directories, and neutral-history debug output never includes
 message contents or opaque replay. A user must trust a document's conversation
 contents before importing it; typed validation is not prompt-injection filtering.
@@ -2234,9 +2227,8 @@ workspace and under `~/.agents/skills`) are model-visible instructions, not
 configuration: they
 carry no authority, credential or tool grant, and the workspace's own files
 are read at construction without a trust step. A session keeps the instruction
-bytes it was compiled with across reopen, `/resume` and `/reload`. Only a new
-session or a fork the user asks for (`/fork`, `/fork-then-compact` and a
-profile Fork now, each recompiling for its target) reads them again, so an
+bytes it was compiled with across exact reopen. Only a new
+session or a fork the user asks for (each recompiling for its target) reads them again, so an
 `AGENTS.md` the agent itself edited reaches model instructions no sooner than a
 new session started in that directory would, and the transcript names every
 file a fork re-read. A fork a crash interrupted is either published (its feed
@@ -2248,103 +2240,46 @@ same rule; a skill's body is not frozen: the model reads it, and Claude's
 the model sees. Nothing in `SKILL.md` grants a tool, an authority or a
 permission: Claude Code front matter such as `allowed-tools` is ignored.
 
-### 4.5 Reload handoffs are private files
+### 4.5 Installed-build inspection and private carry files
 
-A reload that `exec`s another build passes what the export document does not
-carry (chapter 02 §2.5.1) in a handoff sidecar, never in the process
-environment, which every later process of the session would inherit. The old
-build writes it with `create_new`, mode 0600, directly under the product home's
-private (0700) `carry/` directory, and names it with the hidden
-`--reload-handoff <file>` argument; nothing else selects a sidecar. The
-destination reads it once and deletes it, and treats one that is not a regular
-file this user owns, is group- or world-accessible, lies elsewhere, exceeds
-64 KiB or names another version as absent. Its fields are bounded and
-validated before use, and none grants authority the destination would not
-otherwise have: it can only name why a carry happened, which of the
-operator's own templates the successor freezes (resolved against the home's
-files as any profile is), and which reload request the destination completes
-(§4.6). A same-user process
-could write such a file, but only a reload's own argument makes a build read
-it.
+Build inspection, carry exports and host-upgrade receipts remain product-owned.
+A client MUST NOT treat a probe verdict or a local executable path as session,
+credential or effect authority. Export files contain private conversation data;
+host-upgrade receipts coordinate custody but carry no session encoding. The
+export and upgrade rules are chapter 02 sections 2.5.1 and 4.6.
 
 ### 4.6 Reload requests are a same-user local channel
 
-`plak session reload <session> --expect-binary <id>` lets a process ask a
-running interactive session to reload onto the installed build (chapter 02
-§5.1). The permission model is the product home's own boundary:
+`plak session reload <session> --expect-binary <id>` submits a same-user
+request; it does not grant client authority to restart the host.
 
-- It is off unless the home's `config.toml` sets `tui.reload_requests = true`.
-  The key is home-scoped: a trusted project's configuration cannot turn it on.
-- The channel is files, not a listener: a 0700 `run/reload-requests/`
-  directory under the product home's transient `run/` directory, outside
-  `state/` and every state key's directory, owned by the user. `run/` holds
-  only process state between live processes, so no legacy-state notice,
-  report or prune lists or removes it. It holds the host's `<session>.listener`, one
-  `<session>.request` and `<request>.outcome` files, each 0600, published by
-  rename and carrying a `version`; readers ignore fields they do not know.
-  Because the directory does not depend on the state key, a requester of any
-  build finds the session through the listener file, not through its own
-  key's store, and the destination of a carry to another key still writes the
-  outcome. A requester must already be able to write this user's product
-  home; there is no socket, no port and no network surface. The directory is
-  refused when it is not a private directory this user owns, and a file that
-  is not a private regular file this user owns (a link, a group- or
-  world-accessible file) is discarded unread.
-- Any process of the same user may target any announced session, not only its
-  own: the home is the boundary, not the session. The listener names the
-  host's pid, its start time, its state key and a random instance nonce; a
-  request must echo that nonce, so a request written for an earlier host of
-  the session (or replayed later) is refused, with an outcome saying so. A
-  host that announces itself discards any request left from before it, and a
-  host whose announcement vanished or was replaced re-announces on its next
-  check; a host never removes an announcement that is no longer its own. A
-  well-formed request of another version is refused with an outcome saying
-  so. Every file is opened without following links and validated on the
-  opened descriptor. Only a session's UUID ever names a file in the
-  channel, and a session's host announces and takes requests only for the
-  session it serves, never for a session a face names; a face can only
-  acknowledge a request the host offered it and refuse one the host handed
-  over to it. These requests, the installed-build check (`check_build`)
-  and probe (`probe_reload`, which execs the installed build and answers
-  with its path, its configuration errors and the carry's capacity), are
-  for a local face only: a wire v2 connection whose acceptor did not mark
-  it local (the web endpoint, however its client authenticated) is refused
-  them `refused_for_role` with row `local_face`, and nothing is run, and its
-  attachments never receive what answers them or announces a request (the
-  build status, the probe's answers, a handed-over request) nor the
-  launch's lookup progress, whether as it happens or replayed on attach.
-  stdio's `plak agent --wire v2` and the embedded TUI are local. A host-mode
-  TUI is a remote face on the control socket: it checks installed build facts
-  locally. The service owns resident-session announcements, instance-bound
-  request polling and refusals even without a client. Clients do not read or
-  write this hosted request channel. Host-generated refusal observations use
-  the current service generation and wake attached clients; they cannot
-  trigger a continuation, redispatch or runtime handoff. The TUI's hand
-  `/reload` replaces only the client, even with running
-  processes; embedded reload's process refusal is unchanged. A persistent
-  build-mismatch notice names both builds and the shared host-level remedy:
-  "run the installed build's `plak host upgrade --expect-binary <id>` with its
-  binary id",
-  without granting the TUI
-  authority to restart the host. A request that replaces one the host has not yet taken gives the replaced one
-  a `superseded` outcome. Outcomes nobody collected are pruned after seven
-  days.
-- A request names the installed build it expects. The requester refuses
-  unless it is itself that build, and the host refuses when the `plak` its
-  `PATH` resolves reports another binary id. The destination checks its own
-  binary id against the request once more; a mismatch records a refused
-  outcome and the root's continuation says the requested build is not
-  running rather than that the request was met.
-- What crosses into the new build travels in the private reload handoff
-  sidecar (§4.5), never in the environment. Its request id and session id
-  must be UUIDs and its build a binary id before anything uses them, so the
-  host-authored continuation interpolates only those validated values.
-- A request grants no authority beyond `/reload` itself: the host performs
-  it only at an idle boundary with no turn, sub-agent or background process
-  live, through the same exact-reopen verdict and carry, and never interrupts
-  or replaces work. An agent that can already run commands as the user could
-  equally edit that user's state; the opt-in exists so a home that never
-  wants agents to restart its sessions is not asked.
+- The home MUST set `host.reload_requests = true`. The key is home-scoped;
+  trusted project configuration cannot enable it.
+- The channel is private files, not a listener socket or network endpoint:
+  `run/reload-requests/` under the product home, outside state keys, mode 0700,
+  owned by the user. Listener, request and outcome files are private mode-0600
+  regular files, opened without following links and checked on the opened
+  descriptor. Unsafe files are discarded unread.
+- The listener binds the session UUID, pid, start time, state key and instance
+  nonce. Requests echo the nonce; stale-instance and other-version requests
+  refuse. The service announces and polls only sessions it actually serves.
+  Missing or replaced announcements are renewed; it never removes another
+  instance's announcement. Replacing an untaken request records `superseded`.
+  Uncollected outcomes are pruned after seven days.
+- The requester MUST match the expected installed binary. Resident hosted
+  sessions record the host-restart refusal and publish its notice even with no
+  client attached. This never submits a continuation, redispatches input or
+  hands off the runtime. Clients do not read or write the hosted request files.
+- Installed-build check/probe and request-acknowledgement intents remain
+  local-face-only. Remote faces, including the private control socket and web
+  endpoint, receive `refused_for_role` with `row: local_face` before dispatch;
+  their attachments never receive local-only build/probe/request observations.
+  The hidden single-session stdio transport is locally stamped by its acceptor.
+  Client authentication cannot mint that stamp.
+
+An explicit `plak host upgrade --expect-binary <id>` remains the separate host
+upgrade authority. Client reload, disconnect or reconnect cannot run it or
+claim an upgrade succeeded.
 
 ### 4.7 The host socket is a same-user local channel
 
@@ -2521,7 +2456,7 @@ the product home. Its authority is exactly the user's own:
   caller signals; a separate reaping supervisor bounds stderr to a private
   regular, owned, single-link, no-symlink 1 MiB log. The host still takes both home and
   state-key locks before serving. No live socket or lock is unlinked to start.
-- Socket clients, including the TUI, check the private run directory,
+- Socket clients, check the private run directory,
   socket ownership and connected peer uid through the same client transport.
   A failed same-user check refuses, never embeds. The client welcome has a
   10 s watchdog that shuts down an unanswered transport and is cancelled
@@ -2646,7 +2581,7 @@ passes the same redaction and bounds as a live row. Every read of a stored
 row bounds it again, so a redactor change takes effect on read for rows an
 earlier redactor stored, whatever build wrote them (chapter 02 §2.6).
 
-The terminal interface displays only tool data already in the attached
+The host exposes only tool data already in the attached
 session's canonical history or its own retained transcript rows, or in the
 canonical history of a child node of the attached session's agent tree (shared
 by its fork and rebind lineage). A call detail (spec 02
@@ -2954,3 +2889,10 @@ clock in supported builds; documented API review dates never refuse a route.
 Hidden clock injection is restricted to the non-default `test-clock` feature
 for offline fixtures; default, maintainer and release closures must not enable
 it. It is not an embedder-supported authority override.
+
+The public product ships no application client. This removes terminal rendering,
+clipboard capture and terminal launch/re-exec, not host wire authorization,
+terminal/job authority or native-login secret-input restoration. Product
+settings metadata, credential operations and reload/upgrade remain server-owned.
+The `[tui]` appearance section is not admitted; the operational reload-request
+switch is `host.reload_requests`, with the same home scope and service authority.

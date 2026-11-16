@@ -44,7 +44,7 @@ fn seed_at(
     String::from_utf8(imported.stdout)
         .unwrap()
         .lines()
-        .find_map(|line| line.strip_prefix("resume with: plak --resume "))
+        .find_map(|line| line.strip_prefix("resume with: plak run --session "))
         .unwrap()
         .to_owned()
 }

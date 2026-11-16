@@ -986,10 +986,10 @@ impl<P: ProtocolExtension> ObservationQueue<P> {
     }
 }
 
-/// Bounded nonblocking producer for observational TUI events.
+/// Bounded nonblocking producer for observational client events.
 pub struct ObservationSender<P: ProtocolExtension = Core>(Arc<ObservationQueue<P>>);
 
-/// Bounded consumer for observational TUI events.
+/// Bounded consumer for observational client events.
 pub struct ObservationReceiver<P: ProtocolExtension = Core>(Arc<ObservationQueue<P>>);
 
 impl<P: ProtocolExtension> Clone for ObservationSender<P> {

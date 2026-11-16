@@ -530,7 +530,7 @@ fn a_headless_config_set_fences_every_persisted_tree() {
     );
     assert_saved_config_matches(&paths, &next);
 
-    // A vacuous singleton every TUI session leaves behind at genesis. It
+    // A vacuous singleton every host session leaves behind at genesis. It
     // reopens `RestoredPaused`, but it is quiescent: judging the reopen
     // state would fence `plak config set` for ever after the first session
     // with no CLI verb able to lift it.

@@ -137,12 +137,3 @@ pub(crate) fn login_shell() -> Option<String> {
         .and_then(|value| value.into_string().ok())
         .filter(|shell| shell.starts_with('/'))
 }
-
-#[cfg_attr(
-    not(feature = "tui"),
-    allow(dead_code, reason = "only the interactive launch reloads")
-)]
-pub(crate) fn reload_epoch_requested() -> bool {
-    std::env::var_os("PLAK_RELOAD_APPLY_ORCHESTRATION").as_deref()
-        == Some(std::ffi::OsStr::new("1"))
-}

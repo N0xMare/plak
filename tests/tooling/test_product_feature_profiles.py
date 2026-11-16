@@ -27,15 +27,16 @@ class ProductFeatureProfilesTests(unittest.TestCase):
             name: (set(selected), default)
             for name, selected, default in gate.named_variants(self.manifest())
         }
-        self.assertEqual(set(profiles), {"default", "headless", "api", "minimal"})
+        self.assertEqual(set(profiles), {"default", "api", "minimal"})
         self.assertTrue(profiles["default"][1])
-        self.assertFalse({"tui", "clipboard"} & profiles["headless"][0])
-        self.assertTrue({"codex", "grok", "claude", "python", "mcp"} <= profiles["headless"][0])
+        defaults = set(self.manifest()["features"]["default"])
+        self.assertFalse({"tui", "clipboard"} & defaults)
+        self.assertTrue({"codex", "grok", "claude", "python", "mcp"} <= defaults)
         self.assertFalse({"codex", "grok", "claude"} & profiles["api"][0])
         self.assertTrue(
-            {"openai", "anthropic", "xai-api", "openrouter", "tui", "python"} <= profiles["api"][0]
+            {"openai", "anthropic", "xai-api", "openrouter", "python"} <= profiles["api"][0]
         )
-        self.assertEqual(profiles["minimal"], ({"git-cli", "openrouter", "tui"}, False))
+        self.assertEqual(profiles["minimal"], ({"git-cli", "openrouter"}, False))
 
     def test_compile_covers_bin_and_lib_and_warning_failure_is_not_cached(self):
         warning = json.dumps(
@@ -48,15 +49,15 @@ class ProductFeatureProfilesTests(unittest.TestCase):
             }
         )
         results = [subprocess.CompletedProcess([], 0, warning, "")] + [
-            subprocess.CompletedProcess([], 0, "", "") for _ in range(7)
+            subprocess.CompletedProcess([], 0, "", "") for _ in range(5)
         ]
         with mock.patch.object(gate.subprocess, "run", side_effect=results) as run:
             errors = gate.check_product_profiles(
                 {"plak": self.manifest()}, operation="check", target="reviewed-triple"
             )
         self.assertEqual(len(errors), 1)
-        self.assertIn("headless", errors[0])
-        self.assertEqual(run.call_count, 8)
+        self.assertIn("api", errors[0])
+        self.assertEqual(run.call_count, 6)
         for call in run.call_args_list:
             command = call.args[0]
             for flag in [
@@ -74,8 +75,8 @@ class ProductFeatureProfilesTests(unittest.TestCase):
             else:
                 self.assertIn("--message-format=json", command)
             features = command[command.index("--features") + 1].split(",")
-            self.assertNotEqual(set(features), {"git-cli", "tui", "clipboard", "images", "mcp"})
-            self.assertNotEqual(set(features), {"git-cli", "tui", "clipboard", "images", "python"})
+            self.assertNotEqual(set(features), {"git-cli", "clipboard", "images", "mcp"})
+            self.assertNotEqual(set(features), {"git-cli", "clipboard", "images", "python"})
 
     def test_complete_external_closure_pins_catch_a_planted_headless_ratatui_edge(self):
         with mock.patch.object(gate, "full_closure", return_value={"ratatui"}):

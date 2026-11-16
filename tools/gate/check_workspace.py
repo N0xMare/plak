@@ -412,7 +412,6 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "SSH_CLIENT"),)),
         ("var_os", (("string", "SYSTEMD_UNIT_PATH"),)),
         ("var_os", (("string", "SHELL"),)),
-        ("var_os", (("string", "PLAK_RELOAD_APPLY_ORCHESTRATION"),)),
     ],
     # Maintainer/test-hooks private inference capture, explicitly selected per process.
     ("plak", "src/commands/exchange_capture.rs"): [
@@ -451,7 +450,6 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var", (("string", "PLAK_TEST_MODEL"),)),
         ("var_os", (("string", "PLAK_TEST_ASSISTANT_DONE_RELEASE"),)),
         ("var_os", (("identifier", "name"),)),
-        ("var_os", (("string", "PLAK_TEST_TUI_PILOT"),)),
         ("var_os", (("string", "PLAK_TEST_SCRIPT"),)),
         ("var_os", (("string", "PLAK_TEST_EVIDENCE"),)),
         ("var_os", (("string", "PLAK_TEST_PROVIDER_RELEASE"),)),
@@ -462,7 +460,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     ("plakous-hosted", "src/runtime/oneshot/test_support_run_deadline.rs"): [
         ("var_os", (("string", "PLAK_TEST_RUN_DEADLINE"),)),
     ],
-    # cfg(test)-only process-test seam: the PTY latency budgets scale with an
+    # cfg(test)-only process-test seam: process latency budgets scale with an
     # explicit operator knob instead of flaking under nextest load.
     ("plak", "src/test_support.rs"): [
         ("var", (("string", "PLAK_TEST_TIME_SCALE"),)),
@@ -476,7 +474,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     ("plak", "src/commands/run/face.rs"): [
         ("var_os", (("string", "PLAK_VERBOSE"),)),
     ],
-    # `/reload` resolves its own argv[0] on PATH the way the shell did.
+    # Installed-build inspection resolves argv[0] on PATH as the shell did.
     ("plak", "src/build_identity/interactive.rs"): [
         ("var_os", (("string", "PATH"),)),
     ],
@@ -504,9 +502,6 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "EMAIL"),)),
     ],
     # A pasted `~/` image path resolves against the operator's home.
-    ("plak", "src/tui/ui/image_paths.rs"): [
-        ("var_os", (("string", "HOME"),)),
-    ],
     ("plak", "src/home/paths.rs"): [
         ("var_os", (("string", "PLAK_HOME"),)),
         ("var_os", (("string", "HOME"),)),
@@ -542,7 +537,7 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # files under `bin/plak/help/` included at compile time — three global
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
-    ("plak", "src/cli/render.rs"): ("include_str",) * 29,
+    ("plak", "src/cli/render.rs"): ("include_str",) * 28,
     # The source revision the build recipe states, half of the version
     # triple a runner binds on (chapter 01 §8.4); `unknown` when unset.
     ("plak", "src/build_identity.rs"): ("option_env",),
@@ -591,22 +586,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
         ("std::process::Command", (("string", "xdg-open"),)),
         ("std::process::Command", (("string", "rundll32"),)),
     ],
-    # `/reload` execs the installed `plak` its own argv[0] resolves to.
-    ("plak", "src/tui_launch/supervisor.rs"): [
-        ("std::process::Command", (("identifier", "executable"),)),
-    ],
-    # The socket TUI replaces only its client, with the locally probed build.
-    ("plak", "src/tui_launch/hosted.rs"): [
-        (
-            "std::process::Command",
-            (
-                ("punct", "&"),
-                ("identifier", "target"),
-                ("punct", "."),
-                ("identifier", "executable"),
-            ),
-        ),
-    ],
+    # Explicit config editing launches the operator-selected editor.
     ("plak", "src/commands/support.rs"): [
         ("std::process::Command", (("identifier", "program"),)),
     ],
@@ -628,7 +608,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     # destination/config and carry-capacity probes, the exact-reopen verdict,
     # then the bare state-key fallback) and has a kept
     # maintainer snapshot export a session its own state holds.
-    ("plak", "src/carry/interactive.rs"): [
+    ("plak", "src/carry/installed.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
         (
             "std::process::Command",
@@ -641,7 +621,6 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
         ),
         ("std::process::Command", (("identifier", "executable"),)),
         ("std::process::Command", (("identifier", "executable"),)),
-        ("std::process::Command", (("identifier", "snapshot"),)),
     ],
     ("plak", "src/oauth_ui.rs"): [
         ("Command", (("identifier", "prog"),)),
@@ -721,9 +700,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # repair or a refused snapshot logs its cause, scope and key shape, never rows.
     ("plakous-hosted", "src/runtime/projection/transcript.rs"): {"debug_assert", "warn"},
     ("plakous-hosted", "src/sessions/transcript.rs"): {"debug_assert"},
-    ("plak", "src/tui/ui/host_events.rs"): {"warn"},
     # A reload request dropped or settled at a session switch logs its id.
-    ("plak", "src/tui/ui/reload.rs"): {"info"},
     ("plak", "src/reload_request.rs"): {"info", "warn"},
     # Fold integrity refusals: fixed diagnostics and the affected agent id only.
     # An effect run as neither a stage nor an unstaged scope is a defect.
@@ -738,16 +715,12 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # A published export whose directory sync failed is kept and logged.
     ("plak", "src/carry/document.rs"): {"warn"},
     ("plak", "src/carry/history.rs"): {"tags", "stringify"},
-    # A TUI attach refused over an unusable stored login logs the CLI's
-    # remedy text, which names no secret.
-    ("plak", "src/commands/host_config.rs"): {"warn"},
     ("plakous-hosted", "src/mcp_binding/available.rs"): {"warn"},
     # The instruction-read wire of the hidden runner seam (spec 01 §8.5).
     ("plakous-hosted", "src/runner_reader.rs"): {"json"},
     # `test-hooks` only: scripted offline model plans for child fixtures.
     ("plak", "src/test_hooks.rs"): {"json"},
     ("plak", "src/build_identity.rs"): {"cfg", "option_env"},
-    ("plak", "src/tui/launch_intro.rs"): {"cfg"},
     # The `test-support`-only persistence benchmark checks that its final
     # reload retained every transcript line it timed.
     ("plak", "src/store/benchmark.rs"): {"assert_eq"},
@@ -759,8 +732,6 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # Read-only child history projects its bounded JSONL response at the CLI boundary.
     ("plak", "src/commands/session/read_only.rs"): {"json"},
     ("plak", "src/lib.rs"): {"eprint", "info", "join"},
-    # `/reload` logs the exec of the installed build before replacing itself.
-    ("plak", "src/tui_launch/supervisor.rs"): {"info"},
     # The help pages; see EXPECTED_PRODUCT_GENERATED_MACROS.
     ("plak", "src/cli/render.rs"): {"include_str"},
     ("plak", "src/profiles.rs"): {"include_str"},
@@ -800,12 +771,9 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # The product half of the session record keeps the one-entry store cache.
     ("plak", "src/store/sessions.rs"): {"thread_local"},
     # The highlighter cache is thread-local because syntect parse/highlight
-    # state is mutable and TUI rendering may occur on more than one thread.
-    ("plak", "src/tui/highlight.rs"): {"thread_local"},
+    # state is mutable and host observation may occur on more than one thread.
     # cfg(test) counter of composer wrap calls. Production paint does not
     # include it; the macro is still in this source file.
-    ("plak", "src/tui/composer_view.rs"): {"thread_local"},
-    ("plak", "src/tui/activity.rs"): {"thread_local"},
     ("plakous-host-protocol", "src/jsonl.rs"): {"json"},
     ("plakous-host-protocol", "src/topology.rs"): {"json"},
     ("plakous-hosted", "src/session_log.rs"): {"thread_local"},
@@ -895,10 +863,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/sidecars/python_bundle.rs"): {"cfg"},
     # The sidecar's stdio loop multiplexes the client channel and the evaluator.
     # Presentation-only invariants and the per-frame tracing span.
-    ("plak", "src/tui/tree_navigator.rs"): {"debug_assert_eq"},
-    ("plak", "src/tui/ui/render.rs"): {"debug_span"},
     # Background panic: thread name and source location only, never payload.
-    ("plak", "src/tui/ui/terminal_panic.rs"): {"warn"},
 }
 # Rust keywords that may legally precede `!` without naming a macro (`if !x`).
 _NOT_MACRO_KEYWORDS = {"else", "if", "in", "match", "return", "while"}
@@ -2841,7 +2806,7 @@ def _split_top_level(tokens: list[RustToken]) -> list[list[RustToken]]:
 def _use_tree_paths(statement: list[RustToken]) -> list[list[str]]:
     """Expand one `use` tree into the full path of every leaf it imports.
 
-    `use crate::{tui::X, shell::Y}` is two paths, not one flattened path: the
+    `use crate::{presentation::X, shell::Y}` is two paths, not one flattened path: the
     flattened form let a second brace member name anything the first member's
     prefix allowed. An `as` alias ends the path; a glob leaf retains `*`.
     """
@@ -2952,7 +2917,7 @@ def _inline_modules(tokens: list[RustToken]) -> list[tuple[str, ...]]:
 
 def _file_module_path(path: str) -> list[str]:
     """The module a source file is, as `crate` path segments:
-    `src/tui/ui/reload.rs` is `crate::tui::ui::reload`, a `mod.rs` its
+    `src/shell/settings.rs` is `crate::shell::settings`, a `mod.rs` its
     directory's module."""
     parts = path.removeprefix("src/").removesuffix(".rs").split("/")
     if parts[-1] in {"mod", "lib", "main"}:
@@ -4020,13 +3985,7 @@ def production_rust_sources(
     sources = [
         source
         for source in sources
-        if source not in test_only
-        and "product_crash_tests" not in source.parts
-        and source.name
-        not in {
-            "product_terminal_e2e_tests.rs",
-            "product_compaction_terminal_e2e_tests.rs",
-        }
+        if source not in test_only and "product_crash_tests" not in source.parts
     ]
     return sources, errors
 
@@ -5782,7 +5741,7 @@ FIXTURE_SLEEP = re.compile(
 SLEEP_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 MAX_FIXTURE_SLEEP_SECONDS = 600
 # Shell text that is displayed or highlighted, never run.
-UNRUN_SHELL_SOURCES = {("plak", "src/tui/highlight.rs")}
+UNRUN_SHELL_SOURCES = set()
 
 
 def _string_runs(tokens: list[RustToken]) -> list[str]:
@@ -6191,8 +6150,6 @@ def _check_workspace() -> int:
                     f"plak {section}: hosted defaults must be disabled for product selection"
                 )
         for feature in (
-            "tui",
-            "clipboard",
             "images",
             "js",
             "python",
@@ -6208,12 +6165,9 @@ def _check_workspace() -> int:
         ):
             if f"plakous-hosted/{feature}" not in app_features.get(feature, []):
                 errors.append(f"plak/{feature} must forward the matching hosted capability")
-        if not {"tui", "images"} <= set(app_features.get("clipboard", [])):
-            errors.append("plak/clipboard requires tui and images")
         for dependency in ("ratatui", "crossterm", "pulldown-cmark", "syntect", "arboard"):
-            declared = app.manifest.get("dependencies", {}).get(dependency, {})
-            if not isinstance(declared, dict) or not declared.get("optional"):
-                errors.append(f"plak: {dependency} must remain a feature-selected dependency")
+            if dependency in app.manifest.get("dependencies", {}):
+                errors.append(f"plak: public terminal dependency {dependency} is not allowed")
         if set(app_features) != {
             "default",
             "maintainer",
@@ -6222,8 +6176,6 @@ def _check_workspace() -> int:
             "test-support",
             "git-cli",
             "jj",
-            "tui",
-            "clipboard",
             "images",
             "js",
             "python",
@@ -6244,8 +6196,6 @@ def _check_workspace() -> int:
             )
         elif set(app_features.get("default", [])) != {
             "git-cli",
-            "tui",
-            "clipboard",
             "images",
             "js",
             "python",
@@ -6297,8 +6247,6 @@ def _check_workspace() -> int:
             "test-support",
             "git-cli",
             "jj-lib",
-            "tui",
-            "clipboard",
             "images",
             "js",
             "python",
@@ -6318,8 +6266,6 @@ def _check_workspace() -> int:
         elif set(host_features.get("default", [])) != {
             "git-cli",
             "jj-lib",
-            "tui",
-            "clipboard",
             "images",
             "js",
             "python",

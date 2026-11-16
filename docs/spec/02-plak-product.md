@@ -1,7 +1,8 @@
 # The Plak product
 
-Plak is the terminal coding agent built on the Plakous library: one binary that
-is a TUI, a one-shot CLI, and a long-lived JSONL host. This chapter is the
+Plak is the host server and operator/batch CLI built on the Plakous library.
+The public repository ships no application clients; independently maintained
+clients consume its wire protocol. This chapter is the
 normative behavior of that product — what it stores, what it accepts on the
 command line, what a model sees, what the interface does, and what it refuses.
 
@@ -24,53 +25,51 @@ would change safety, portability, or a claimed contract. Everything else is
 ordinary description of shipped behavior.
 
 Product catalog construction and attachment eligibility are host-owned, not
-terminal adapters. CLI inspection, hosted session options and terminal
-presentation use the same catalog facts. Their admission tests run without
-the terminal feature; compaction-view rebuild laws likewise have headless
-JSONL tests.
+client adapters. CLI inspection and hosted session options use the same
+catalog facts. Admission and compaction-view rebuild tests require no
+application client.
 
 ## 1. Product shape
 
 One installed package, `plak`, with a library target and a `plak` binary. The
-binary has three faces over one runtime:
+binary exposes operator and machine interfaces over one runtime:
 
 | Face | Entry | Terminal | Stdout |
 | --- | --- | --- | --- |
-| TUI | bare `plak`, `plak --resume` | required, stdin **and** stdout | the alternate screen |
 | CLI | `plak <command>` | not required | human text, tables, or JSON |
 | JSONL host | `plak agent` | not required | machine-only newline-delimited JSON |
 
-All three drive the same `plakous-hosted` session and the same product store,
-so a session opened in one is resumable in the others. The TUI and `plak agent` are
-dispatched before the process takes its stdout lock, because each owns its own
-stream discipline.
+All session interfaces drive the same `plakous-hosted` runtime and product
+store. Machine transports are dispatched before standard-stream locks. Bare
+`plak` prints global help and exits 0 without home or runtime setup.
+`resume`, `--resume`, placement-only launch, `--host-resume`, `--import-resume`
+and `--reload-handoff` are absent. Continue recorded sessions with explicit
+`run --session`, `agent --session` or host wire operations.
 
-The launch banner distinguishes `maintainer release`, `maintainer debug`,
+Build identity distinguishes `maintainer release`, `maintainer debug`,
 `release`, and `debug`, and shows a binary ID: the first twelve hexadecimal
 digits of SHA-256 over the executable. A `test-hooks` build is labeled separately.
 `plak version` and global help carry the same build identity alongside the
 package version. `0.0.3` alone is package metadata, not proof of build recency.
 The default build's version label is unchanged. A build omitting product
-features appends `; features -clipboard,-tui` (the omitted names, sorted) inside
+features appends `; features -images,-python` (the omitted names, sorted) inside
 the build-identity parentheses. `plak doctor` reports a `build_features` row:
 `default` or `omitted <sorted names>`. An omitted Python worker has no doctor
 worker row and is never resolved as an installed sidecar.
 
-Source builds can omit `tui`, `clipboard`, `images`, `python`, or `mcp`
+Source builds can omit `images`, `python`, or `mcp`
 (chapter 06). A requested omitted capability returns typed
 `CapabilityUnavailable { id, kind, feature }`, rendered with the feature and
 the available build capabilities, and exits **2**. It never falls back to a
-different account, route, composition, or tool pack. Bare `plak` and the resume
-picker refuse without `tui`; CLI verbs, `run`, and JSONL remain available.
-Without `clipboard`, Ctrl+V reports `clipboard image paste is not in this build`;
-file attachments still work with `images`. Without `images`, `--image`, path
+different account, route, composition, or tool pack. There is no terminal or clipboard feature. Clients own local appearance and
+clipboard capture; server file and wire attachments still use `images`. Without `images`, `--image`, path
 attachments and JSONL image inputs refuse; CLI refusal precedes image file
 reads and retains `CapabilityUnavailable` as the `CliFailure` source.
 Canonical image history still replays without a decoder. Without `python`,
 composition options and model capability listings omit both `py-ptc` and
 `py-sdk`, and Python config/session bindings refuse before session writes, with
 the selected composition as the refusal id. Without `mcp`,
-`plak mcp` commands refuse, `/mcp` is omitted, and MCP-selecting templates
+`plak mcp` commands and MCP-selecting templates
 refuse session admission (server definitions alone enable nothing). Read-only session
 show/log/export and carry export do not require the bound evaluator.
 
@@ -101,7 +100,7 @@ nanosecond modification and inode-change times all match the running image;
 otherwise it is computed once per process with bounded-memory file reads. The
 inode-change time, which userspace cannot set, makes a copy that preserves the
 modification time miss. Only a command that uses product state (`run`, `agent`,
-the TUI, `resume` and the `session` commands that open the stores) records a
+`host` and the `session` commands that open the stores) records a
 fresh hash there; inspection commands (`version`, help, `status`, `doctor`,
 `session rehearse`) read a matching entry and never write the cache. The cache
 is read and written only when the home already exists as a mode-0700 directory
@@ -129,7 +128,7 @@ resolution and admission, context capacity, compaction, cache affinity,
 effects, rebind, and the one terminal `TurnResult`.
 
 What Plak owns is everything those crates deliberately have no opinion about:
-CLI and TUI behavior, product configuration and its defaults, the Plak home,
+CLI and host wire behavior, product configuration and its defaults, the Plak home,
 workspace and session presentation, prompt history, the durable prompt queue,
 the roster and the agent templates, account admission for
 children, the agent tree's presentation and its store location, and the product
@@ -142,7 +141,7 @@ future of one `block_on` on the attachment's thread, from open through
 release, and nothing it awaits blocks on an executor of its own. Its idle wait
 is a biased select that takes the control mailbox (whose urgent lane outranks
 everything queued) ahead of the idle observation deadline, and an intent wakes
-it on arrival. Its workflows (compact, fork, rebind, `/new`, resume and
+it on arrival. Its workflows (compact, fork, rebind, a new-session operation, resume and
 pre-turn preparation) are awaited inline while the mailbox is drained as
 intents arrive. Its background work runs on the attachment's task set, which
 release ends. What differs between node roles is a value the actor consults
@@ -174,7 +173,7 @@ the tree, never touches the tree's tasks: they are released with the tree's
 hub when the tree goes dormant or its host shuts the session down (chapter 03
 §14), except work that owns a child's session or runtime authority, which
 runs until it returns (chapter 03 §16). Every release of a session is that
-shutdown (quit, headless exit, a failed open, and the session a fork, `/new`,
+shutdown (quit, headless exit, a failed open, and the session a fork, a new-session operation,
 a session switch or a recovery leaves behind) except a rebind's release of its
 predecessor, which is a detach: the tree's live children keep running in its
 custody, and the host's quit ends every tree its detaches left behind.
@@ -249,26 +248,9 @@ Registry iteration preserves the shipped catalog, doctor, profile and Usage
 ordering, rendered prompts and recommendation aliases. The common
 `multi-default` profile remains product data rather than a provider route.
 
-The `tui` module of `bin/plak` is inert: typed views in, typed intents out, no
-Plakous and no persistence import — only `plakous-host-protocol`, itself, and
-the named `crate::config` doors, a constraint the workspace policy checks per
-module. It holds no scheduler and paints no optimistic transition — a key emits
-an intent, and the next host snapshot is what is drawn. The one exception is
-the marked, reversible `sending…` row of a draft the host has not yet
-answered (§5.4), which never stands in for host state. The binary owns
-`PlakExtension`, the concrete settings/theme vocabulary, and its surface intents
-and observations. Hosted sessions carry these through the generic bounded
-protocol mailboxes and dispatch extension intents to the binary's handler.
-The observation mailbox calls a consumer's notifier on each empty to
-non-empty edge. The embedded TUI's connection waits on its client's lines and
-those wakes in one channel, and the wire client wakes the TUI on each
-observation it takes, so neither polls for host observations (§4.4, §5.8). The
-intent mailbox resolves an async readiness wait that a busy turn selects on
-beside its event stream, so an intent arriving mid-turn is taken at once
-rather than at the next 20 ms delta-coalescing tick; the idle host still
-waits on the intent mailbox with a bounded observe tick between its own
-idle work. Readiness changes no intent
-order: the turn still takes deferred actions first and one action per pass.
+Clients are external to the product. The host owns catalogs, settings metadata,
+credential resolution and session/runtime authority; `plakd-wire-types` owns
+serialized vocabulary only. No client owns a second agent loop.
 
 The product handler sees immutable phase, attached-one-shot configuration,
 Ready-catalog, queue-length, and immutable session presentation facts (root
@@ -394,7 +376,7 @@ the macOS `/var`, `/tmp`, and `/etc` links. An absolute `PLAK_HOME` such as
 operator chose, before the leaf was ever inspected.
 An existing home MUST already be mode `0700` and owned by the effective uid;
 Plak refuses rather than repairing it, on every command that writes to the home
-(`config set`, `key set`, `session`, `run`, `agent`, the TUI), and the
+(`config set`, `key set`, `session`, `run`, `agent`, `host`), and the
 refusal names the path and `chmod 700 <path>`. Read-only inspection (`status`,
 `config show`, `key status`) still reports, and `doctor` flags the home as an
 ERROR with the same fix; no command changes the mode of an existing home that
@@ -517,7 +499,7 @@ result or silently reopen an owner that is still alive.
 An interrupted product write retains queue identities and leaves the host
 loop available for further operator actions; it is not a generic host failure.
 Quit releases the runtime cleanly even if final product projection remains
-storage-unavailable. Root Esc affects only the attached root's storage wait;
+storage-unavailable. Root interrupt affects only the attached root's storage wait;
 child waits observe their own cancellation or latched process shutdown. No
 probe is shared through a store: the product store takes the interrupt per
 handle, every runtime-store handle the attachment's roots hand out stops on
@@ -563,7 +545,7 @@ operations, not standalone row deletion. Withdrawal records its explanatory
 notice in the same commit; operator notices are authored through record commits.
 
 The CLI composition root owns one lazy product-record service per invocation.
-Commands, repeated state-root construction, TUI attach/retry, shell fallback,
+Commands, repeated state-root construction, session attach/retry, shell fallback,
 and hosted workers share it through `SessionRecordStore`. Its single retained
 SQLite connection opens on the first record operation and serializes whole
 operations, including the projector's atomic successor publication. There is no
@@ -825,8 +807,8 @@ presentation, coding selection, Code Mode eligibility, attach admission,
 rows. A test in the hosted
 crate walks every row of every route through presentation, selection and
 admission, so a model enrolled in one place and missing from another fails
-offline. A new binding's account and model pair (`plak agent`, the TUI's
-seeded root template) is admitted the same way, before any attach: the model
+offline. A new binding's account and model pair (`plak agent`, a hosted
+session's root template) is admitted the same way, before any attach: the model
 must be a row of that account's table, never a name that merely looks like the
 provider's. OpenRouter ids are dynamic gateway selections and are left to its
 authenticated discovery, which refuses an id the gateway catalog does not list
@@ -918,8 +900,8 @@ still covers it; when the digest no longer matches today's facts (the provider
 moved a published output limit or effort, or this build's reviewed table
 changed them) or the full window shrank below the stored window, the reopen is
 refused before compiling with "`<account>`
-model `<id>` changed since this session was created ...; rebind with Fork now
-in the Agents tab, or start a new session". OpenAI and xAI bind admitted facts the same way. Empty admitted-fact bytes
+model `<id>` changed since this session was created ...; explicitly rebind or
+start a new session". OpenAI and xAI bind admitted facts the same way. Empty admitted-fact bytes
 leave the previous xAI evidence bytes unchanged.
 
 `models <API-account>` prints a header naming the source (`live list`,
@@ -942,7 +924,7 @@ Anthropic and xAI rows are Direct. On a `CodeModeOnly` OpenAI row
 Codex nested catalog) and `direct` remains the second presentation;
 `native-ptc` on any other API row is refused before inference. One decision
 function owns this table's composition rule, and every path that binds an API
-composition uses it: `plak run`, `plak agent`, a new TUI session seeded from
+composition uses it: `plak run`, `plak agent`, a new hosted session seeded from
 the root template, a rebind or fork onto an API root, an API child's pin,
 template load, command parse, `plak models` and `plak doctor`. A selection the
 table refuses is refused on every path, never substituted; a seed whose model
@@ -1139,7 +1121,7 @@ normal-mode `BEGIN IMMEDIATE` transactions with a 250 ms busy timeout coexist
 with idle WAL connections, including connections with committed writes. They
 exclude concurrent inventory writers throughout removal so a newly committed
 session cannot claim artifacts after the membership check. During removal,
-current product/tree writes from a running TUI wait under their ordinary 5 s
+current product/tree writes from a running host wait under their ordinary 5 s
 busy timeout and can fail cleanly if removal holds the fence longer. The current
 `runtime.sqlite3` is not read by inventory and is never fenced. Inspection drops
 its holder locks and database transactions before the interactive prompt;
@@ -1303,24 +1285,18 @@ key or refuses; its target must agree with its vertical on both import and resum
 Valid unbound empty shells remain valid.
 Export uses v13, importing v13 and v12; this refusal changes no encoding.
 
-Before leaving a resumable session, `/reload` asks the destination build for
-its state key, importable export versions, and a strict configuration verdict
-in the session workspace. An unreadable configuration or incompatible carry
-version keeps the source session open with the cause and a repair instruction.
-After this verdict, a cross-key reload produces a transient private export and
-asks `version --carry-probe <file>` for the destination capacity, before any
-teardown. The verdict applies whenever the destination answers the probe, for exact
-resume as well as carry. Builds without the probe retain the
-`version --state-key` fallback; unverified resume proceeds without a verdict.
-A timed-out probe does not trigger another probe, and the TUI's answer is
-reused by the handoff, so a hung destination spends only one five-second budget.
+Installed-build inspection remains a host product service. The reload probe
+reports the destination state key, accepted export versions and configuration
+verdict for the session workspace. Exact-reopen and carry-capacity probes
+perform bounded inspection without creating a session or dispatching inference.
+A timed-out probe does not trigger another probe. Host upgrade authority,
+preflight and receipts are specified in section 4.6, not delegated to a client.
 
 Import discovers the nearest project root from the document's workspace and
 validates its effective configuration before creating any successor; the
 workspace directory itself is not necessarily a project root, and the product
-home is never an overlay. `--import-resume` additionally checks terminal availability and
-workspace equality before import. A failure after commit names the successor:
-`session <new> was carried forward from <old>; fix the error and run: plak --resume <new>`.
+home is never an overlay. A failure after commit names the successor:
+`session <new> was carried forward from <old>; fix the error and run: plak run --session <new>`.
 Foreign resume validates effective configuration before running snapshot
 export. A config refusal says to fix the config and retry the same command;
 only version or unimportable-document refusals recommend this workspace's
@@ -1474,23 +1450,9 @@ The document's replay account/model are declared, not authenticated. Ordinary
 `session import <file>` strips all provider-opaque replay by default, including
 reasoning envelopes, native compaction ciphertext and opaque result parts; only
 portable visible text and declared semantic fallback remain. Binding equality
-alone does not authorize external replay. `/reload` alone may keep replay: the
-source creates a separate private, one-use receipt under its own `carry/` home,
-pinning the exact exported bytes. `--import-resume` consumes and checks this
-local receipt; an unreceipted/modified file takes the default stripping path.
-The receipt is not part of the export or a cross-machine carrier. Even then,
-`retains_replay_for` must prove the identical account/model and every retained
-replay segment must pass the destination route's offline dialect decoding before
-seed creation. If the new build cannot validate retained replay, carry continues
-with the ordinary stripping path and records a one-line notice in the new
-session, plus a log-only `session.replay_stripped` record whose `reason` field
-identifies the destination validation refusal (binding fact categories,
-never rejected thinking, signatures or credentials); replay incompatibility never
-fails the handoff. Nested opaque tool-result
-parts never survive a carry because no production dialect accepts them; they
-follow this stripping fallback even on an identical binding. Config, terminal and
-workspace preconditions run before consuming the receipt. A failed exec removes
-the receipt, so the kept export can only be imported with replay stripped. Historical tools, children and workflows never execute.
+alone does not authorize external replay. Retained opaque replay requires an
+identical account/model and destination offline dialect validation. Historical
+tools, children and workflows never execute during import.
 
 A document is bounded to 256 MiB before parsing, its encoded neutral history
 to 128 MiB and 100,000 messages/groups. Runtime constructors enforce per-content
@@ -1520,23 +1482,17 @@ billing or admission authority.
 Before carrying, `session import` resolves the destination route and warns on
 stderr when the estimated history exceeds its admitted input ceiling. The
 warning names the route, admitted input window and reported total window, and
-says the first prompt will refuse unless history compacts. `/reload` performs
-the same destination inspection through hidden `version --carry-probe <file>`
-while the old session remains attached, using a transient private export that
-is removed after inspection. The background probe can resolve credentials,
-catalogs and provider configuration, but stops before the tool plan and never
-starts MCP servers, creates a runtime session or dispatches inference. Import
-reuses the actual seed binding for its advisory warning. An unavailable capacity
-contract is reported as `destination window unknown`, skips the comparison, and
-does not block import or the probe. A failed inspection keeps the old TUI open. An oversized estimate
-opens the existing confirmation pop-up with message/token counts, the cache
-rebuild note and capacity warning; `Carry anyway` proceeds and `Cancel` leaves
-the old session open. A root prompt/turn or binding change while inspection is
-pending invalidates the estimate and requires `/reload` again. Below-window
-carry keeps the normal handoff without an extra confirmation.
+says the first prompt will refuse unless history compacts. Installed-build
+capacity inspection uses a transient private export through hidden
+`version --carry-probe <file>`, removed after inspection. The probe can resolve
+credentials, catalogs and provider configuration, but stops before the tool plan
+and never starts MCP servers, creates a runtime session or dispatches inference.
+Import reuses the actual seed binding for its advisory warning. An unavailable
+capacity contract is reported as `destination window unknown`, skips the
+comparison and does not block import or the probe.
 
 Typed transcript rows remain independently bounded to 10,000 rows/16 MiB and
-use the live normalization, redaction and re-bounding rules (§5.4). Import
+use the live normalization, redaction and re-bounding rules (section 2.6 and chapter 04 section 5). Import
 stores their keyed imported-transcript intents atomically with the product
 record at anchor 0, lane 1 (§2.6); it writes no view rows. The new runtime's
 seeded `Created` record derives no transcript rows. Ordinary projection and
@@ -1573,7 +1529,7 @@ session starts a new tree: a virtual tree of one with no tree rows until it
 spawns, whose record keeps the profile its genesis froze. An import starts
 a new agent line (chapter 01 §5.1) whose provenance names the source key and
 id. The same-state carries,
-the binding-repair `/rebind` carry and the `/reload` orchestration carry,
+the binding-repair carry and settlement of persisted orchestration carries,
 instead continue the source's line: the new runtime session becomes the line's
 next head in its create transaction, takes the source head's process rows and
 pending notices, and the source's runtime branch becomes read-only history. The
@@ -1581,18 +1537,17 @@ carry holds the source head's lease from reading its rows to that transaction,
 so it is refused while the source is open in any plak or held lease-only, and
 while its head has an unfinished turn (chapter 01 §5.10). Its successor's
 record is written ahead of the runtime create and settled after a crash
-(§2.6), and an open of the superseded source resumes the successor. A profile rebind
-(Fork now) and a binding rebind instead start a new agent line, as a fork does
+(section 2.6), and an open of the superseded source resumes the successor. A profile fork and a binding rebind instead start a new agent line, as a fork does
 (chapter 01 §5.7): the successor keeps the job numbers and the rows, with their
 pending notices, of jobs that already exited, so a notice the source still owed
 reaches the successor too; running processes are never carried (a transition
-with running processes is refused before durable work, §5.1), and the source
-keeps its line. A profile switch (Switch now, §5.5) is not refused for running
+with running processes is refused before durable work, section 4.4), and the source
+keeps its line. A profile switch (Switch now, section 4.4) is not refused for running
 processes: it advances the source's own line, so its head-advancing rebind
 hands the running processes and every job row to the successor in the
 publishing transaction. Importing the same source session/key into the same
 workspace twice refuses and names its existing successor. `session list`,
-`session show` and the TUI opening note name the link. Opening notes follow the
+`session show` and the host opening note name the link. Opening notes follow the
 same pre-open transcript anchoring rules as ordinary resume notes: no duplicates
 on republication, and permanent removal when the anchor is no longer provable.
 The export file remains in place for ordinary import.
@@ -1604,90 +1559,18 @@ reference files are never read or used as import authority;
 session deletion cleans them up, and `state prune-legacy
 --prune-orphaned-references` still explicitly removes orphaned files.
 
-`/reload` (§5.1) resolves the installed build and asks its state key with the
-hidden `plak version --state-key` while the session is still attached, before
-any teardown; a build that does not answer within 5 seconds, or answers
-anything but one key, counts as unknown. Same key: the source then asks the
-installed build, still before teardown, whether exact reopen of this session
-would attach there (hidden `plak version --reopen-probe <id>`, 60 seconds,
-off the UI thread). The destination answers with the revalidation an open
-runs: it reads the session record and its projected head without writing,
-resolves the recorded binding exactly as an attach does, then runs the open's
-authority check, runtime compilation and Plakous construction comparisons
-through `AgentSessions::verify_open`, which loads the exact head, takes no
-lease, registers no driver, publishes no recovery, reattaches no children and
-drops what it built (a head that trails the runtime is adopted once, as the
-open adopts it). A session with an agent tree compiles its tree tools over a
-detached in-memory copy of the tree (of the persisted rows, or of the tree a
-process already holds): the probe never attaches the tree, takes its lease,
-applies the reopen law to the stored rows, folds startup effects, saves, or
-binds anything to a live tree's driver, so the live owner's next tree save
-finds the revision and host generation it wrote. A session whose root tools
-name MCP servers rebuilds those tools from the records it froze at creation
-with no server behind them (`McpToolPack::unbound`, chapter 01): the probe
-never starts, connects or leases an MCP server, so it never renews an MCP
-login; a session whose MCP tools were never frozen answers `unknown`
-(`mcp_tools_unfrozen`) instead of listing the servers. A head with unsettled
-work (the source's own running root turn) answers `unknown` (`unsettled_work`):
-only an owning open settles it, so nothing past the head was compared. The
-source then asks again after its handoff released the turn and settled the
-head, printing `checking the installed build…` on the plain terminal; if that
-answer is `refused`, `binding_changed`, `unknown` again or none, nothing is
-exec'd or carried (a carry's successor is another session, which the handoff
-does not reach, and an unverified exec could leave the handed-off work with no
-build that reopens it): the session stays open in this build, which continues
-the handed-off work once, with `reload kept this session open: the installed
-build would not reopen it exactly: its <change> differs; this build reopens
-it`, `reload kept this session open: the installed build could not confirm it
-would reopen it; this build reopens it`, or the `refused` note. The note claims
-no handoff: a running turn whose cancel outlasted the handoff grace was held as
-a loss instead (chapter 03 §14.1), and the reopen's own notices say what
-continues and what is held. The verdict is one of
-`opens`, `binding_changed` with the named change (chapter 01 §5.4), `refused`
-with the open's refusal, or `unknown`. It runs in the destination because only the
-destination derives its own binding; it reads the real home because the route,
-catalog and credential it must resolve are the operator's, the same reads the
-carry-capacity probe already performs. It writes no session, product, tree or
-credential state, and it never renews a credential: the source kills a probe
-that overruns its deadline, and a renewal killed mid-exchange could leave a
-rotating credential quarantined. A native login that is renewing, needs
-renewal, or whose access token expires within ten minutes answers `unknown`
-(`needs_refresh`) before anything resolves; a signed-out, quarantined,
-revoked, earlier-build or newer-build login answers `refused` with its login
-remedy, never a binding change. A model capability binding that differs only by digest
-(chapter 01 §5.4) is named by that category, since the recorded side keeps only
-the digest, and adds `this build: <revision>` when the destination's route
-reports its adapter revision. `opens` is a plain `plak --resume <id>`.
-`binding_changed` on a quiescent session (no root turn, live sub-agent or
-background process; the TUI's own refusals and export's quiescence checks
-hold) carries in one step through the same export/import handoff as another
-key, and the successor records `carried forward from <id>: the installed build
-would not reopen it exactly: its <change> differs; the provider cache rebuilds
-on the first request; N finished sub-agents are not restored` (the clause is
-omitted for none). That line reaches the destination in the reload handoff
-sidecar, never in the export: a private file (mode 0600, this user's, directly
-under the home's private `carry/` directory, at most 64 KiB) holding a JSON
-object with a `version` and additive optional fields, named by the hidden
-`--reload-handoff <file>` argument after `--import-resume <file>` (or after
-`--resume <id>` when a requested reload resumes, §5.1). The
-destination honors a sidecar only when that argument names it, reads it once
-and deletes it; one that is missing, not private, elsewhere, oversized or of
-another version reads as none. `refused` keeps the session open on this build:
-`reload kept this session open: the installed build would not reopen it:
-<reason>`. `unknown`, a build that predates the question, one that fails it and
-one that does not answer in time give no verdict, and the reload resumes
-plainly as before.
-Another key: after the TUI's ordinary handoff, this build reloads the session
-record from the store (the loop's copy can trail the host's last commit),
-exports it into a carry file and `exec`s the installed build with the hidden
-`plak --import-resume <file>`, which imports, deletes the file, and opens the
-TUI on the new session with the carried-forward note. Unknown key: a plain
-resume; the fact is reported only if `exec` fails. If export is refused, the
-session stays open in this build and the note names the reason. If `exec` or
-the import fails, the carry file is kept and its path named; `plak doctor`
-lists kept carry files.
+Exact-reopen inspection asks the destination's hidden
+`version --reopen-probe <id>` for `opens`, `binding_changed`, `refused` or
+`unknown`. It verifies the exact recorded head and construction inputs without
+acquiring session authority, registering a driver, publishing recovery or
+reattaching children. Tree tools compile over a detached in-memory copy; MCP
+tools rebuild from frozen records without starting a server. Unsettled work,
+unfrozen MCP tools or credentials needing refresh can produce `unknown`.
+Inspection writes no session, tree or credential state and never renews a
+credential. It is evidence for the host's upgrade decision, not permission for
+a client to execute a new runtime or replay an effect.
 
-`plak --resume <id>` carries only when the id can name nothing in this build:
+`plak run --session <id>` carries only when the id can name nothing in this build:
 at least the shortest accepted prefix, and no local session in this workspace
 matching it (a full id this store lacks, or a prefix matching none). An
 ambiguous or too-short id is this build's own refusal. The id must then match
@@ -1856,7 +1739,7 @@ Stop semantics.
 `plak session delete <id> [--yes] [--abandon-children]` removes one session and all of its retained
 runtime history. It is a remedy when logical retention bounds are full; physical
 disk exhaustion may first require freeing disk space: Plakous never
-refuses archive or delete for capacity (Plakous section 5.2), while `/new`,
+refuses archive or delete for capacity (Plakous section 5.2), while a new-session operation,
 compaction and recovery do not reclaim retained state. It resolves the id like
 every session command (full id or unambiguous prefix in this workspace) and
 refuses with one typed reason. The tree and dependency refusals are checked
@@ -1977,7 +1860,7 @@ home uses state <key> of another build; this gc ran as build state <key> and
 did not touch that store; ...`: each build reclaims only its own state key's
 store. A process holding a store open holds an exclusive lock on its own lock
 file in that key's `runtime.sqlite3-holders` directory, which the kernel
-releases when it exits or re-executes (a `/reload`); gc probes each lock file
+releases when it exits or re-executes; gc probes each lock file
 with a non-blocking exclusive lock it releases at once, as the store's own
 holder probe does, so a lock file left by a gone or re-executed process does
 not count.
@@ -1992,7 +1875,7 @@ between pages, each committed under the cursor CAS. Partial ancestor pages
 preserve the successor's recorded branch binding until its own head is
 projected. The source publication settles the canonical receipt before
 stopping successor catch-up: the source stays attached and any saved successor
-remains available through `/resume`.
+remains available through an explicit resume operation.
 
 Plakous is the only authority for what an agent did (chapter 01 §5.11). The
 product store holds exactly two kinds of state:
@@ -2024,11 +1907,11 @@ view, and nothing is both.
 | Queue items: text, position, submit time, revision | intent | item id and revision | operator edits bump the revision |
 | Command submissions (root start, send-now steer) | intent | command id; exact canonical command bytes, target turn, the queue item and revision, `submitted_at_ms` | written immediately before submission; never updated; removed only for an unrecorded definite refusal (§4.2) or settled as consumed (rule 3 below) |
 | Delivery done-ness: pending, accepted (item consumed), rejected | view | `CommandAccepted` and `CommandRejected` with the submission's command id | accepted removes the item from the queue view; rejected marks it rejected with its typed kind; neither leaves it pending |
-| Prompt history | intent | position | appended when the composer action is durably accepted |
+| Prompt history | intent | position | appended when the prompt action is durably accepted |
 | Transcript rows | view, intent or live-only, per field | the row provenance table below | each field has exactly one source |
 | Imported transcript | intent | the import's create operation id; anchor 0, lane 1 | written once by import (§2.5.1); a seeded `Created` record derives no rows |
 | Operator notices: product-authored rows no feed fact implies (settings and configuration notes, plan notes, carry replay-stripping notices, unrecorded refusals, withdrawn requests, `queued prompt already ran`, and the retry, milestone and tree rows the provenance table names) | intent | notice id; anchor | written with its anchor (below) |
-| Workflow requests: compact (with reason), fork, rebind (with selection), new (`/new`; recorded as `clear` before product 36), switch (with its selection: the rebind selection, the profile name, its root template and working set, the frozen roster's digest and, for a root whose tree has no rows, the frozen pending snapshot's exact bytes, which must decode as a snapshot under that digest; written by Switch now, §5.5) | intent | workflow operation id; source locator | written immediately before submission; a definite synchronous no-commit answer permits live discard after the tail pass under the session CAS only if no fact exists, terminalizing the binding with no notice (rule 4); open withdraws a remaining request without a fact with one notice, never resubmits it (§4.2 step 3) |
+| Workflow requests: compact (with reason), fork, rebind (with selection), new (a new-session operation; recorded as `clear` before product 36), switch (with its selection: the rebind selection, the profile name, its root template and working set, the frozen roster's digest and, for a root whose tree has no rows, the frozen pending snapshot's exact bytes, which must decode as a snapshot under that digest; written by Switch now, section 4.4) | intent | workflow operation id; source locator | written immediately before submission; a definite synchronous no-commit answer permits live discard after the tail pass under the session CAS only if no fact exists, terminalizing the binding with no notice (rule 4); open withdraws a remaining request without a fact with one notice, never resubmits it (section 4.2 step 3) |
 | Workflow completion | view | `WorkflowAdmitted`, `WorkflowSettled` with the request's operation id; for new, the successor session's `SessionCreated` with the derived create operation id | admitted without settlement belongs to the runtime; settled ends the request; neither means never admitted |
 | Pause causes | intent-backed view | the facts that pause (a context-capacity or `RecoveryRequired` `TurnTerminal`, a session-wide `CommandRejected`, a `WorkflowSettled` of a scheduled pass that did not compact) and `pause_cause` intents the host writes for causes no fact carries (an unrecorded session-wide refusal, a failed wake preflight); a workflow fact joins its request by the request's operation id, never by the derived workflow identity | the newest applied cause, by anchor, for the restored note; drain itself is process-local and never stored |
 | Counters: root turns, tool calls, compactions | view | root `CommandAccepted`; the distinct call ids of effect `OperationAdvanced` facts and of the tool results `HistoryAppended` commits (so a call rejected before preparation counts once); each `WorkflowSettled { Compacted }` once, whatever its reason (endpoint or turn fence) | monotonic over the applied records; a successor starts from its source's values at the `Branched` record; after a `BehindRetention` rebuild they restart from zero |
@@ -2036,15 +1919,14 @@ view, and nothing is both.
 | Agent attention acknowledgements | intent | `(tree, agent, attempt, attention)` | operator-authored presentation bookkeeping |
 | Identity registry | intent | each identity and its content digest | permanent; a discarded unadmitted workflow binding refuses even identical replay; it holds no runtime outcomes |
 | Carry and export bookkeeping: carried-forward lineage, carry files, retained references, deleted-artifact tombstones | intent and files | §2.5 | lineage is written by import; files and tombstones live outside the store and keep their own rules |
-| Node: `node_tree_id`, `node_agent_id`, the agent node the session is | intent | `plak:create:<id>` | written once with the record and never rewritten (a save that moved it is refused): a created, new (`/new`) or imported session and a carry's successor are the root of a tree named after their own id, whose root agent id is that id too (the genesis tree's own naming); a rebind successor takes the node of the tree it compiled against, recorded in its request (`own_tree`): the root of the tree named after its id when it has a tree of its own (sub-agents on) or is a py-sdk root, otherwise its source's node; a fork successor is the root of a tree of its own named after its id (chapter 03 §1.2); a switch continues its source's node. Tree resolution walks the lineage only from a record whose node is its source's, so a record that opened a tree of its own never resolves its predecessor's (chapter 03 §1.2) |
-| Root profile (`root_profile`: the root template and working set) | intent | `plak:create:<id>` | the profile the record's genesis froze, which is the session's profile while its tree has no rows (a virtual tree of one; a tree with rows records its own epochs, §5.5): what the roster source (the session's own workspace context, a trusted project's templates included; chapter 03 §1.2) answers for the root bind, the same answer a tree genesis freezes. Written once, at genesis, and never moved: by the first runtime create of a created, imported or carried session (an import or carry successor takes its source's profile when it still resolves, else the home default it binds), into a `/new` reservation before its runtime create, from a rebind request onto a tree of its own (the profile it was frozen on), copied by a rebind that stays on its source's tree and by a fork, and from a switch request's profile. A record has none only before its first runtime create, or while it has no bound tuple. Export reads it (§2.5.1) |
+| Node: `node_tree_id`, `node_agent_id`, the agent node the session is | intent | `plak:create:<id>` | written once with the record and never rewritten (a save that moved it is refused): a created, new or imported session and a carry's successor are the root of a tree named after their own id, whose root agent id is that id too (the genesis tree's own naming); a rebind successor takes the node of the tree it compiled against, recorded in its request (`own_tree`): the root of the tree named after its id when it has a tree of its own (sub-agents on) or is a py-sdk root, otherwise its source's node; a fork successor is the root of a tree of its own named after its id (chapter 03 section 1.2); a switch continues its source's node. Tree resolution walks the lineage only from a record whose node is its source's, so a record that opened a tree of its own never resolves its predecessor's (chapter 03 section 1.2) |
+| Root profile (`root_profile`: the root template and working set) | intent | `plak:create:<id>` | the profile the record's genesis froze, which is the session's profile while its tree has no rows (a virtual tree of one; a tree with rows records its own epochs, chapter 03 section 1.2): what the roster source (the session's own workspace context, a trusted project's templates included; chapter 03 section 1.2) answers for the root bind, the same answer a tree genesis freezes. Written once, at genesis, and never moved: by the first runtime create of a created, imported or carried session (an import or carry successor takes its source's profile when it still resolves, else the home default it binds), into a new-session reservation before its runtime create, from a rebind request onto a tree of its own (the profile it was frozen on), copied by a rebind that stays on its source's tree and by a fork, and from a switch request's profile. A record has none only before its first runtime create, or while it has no bound tuple. Export reads it (section 2.5.1) |
 | Runner display copy (`runner_display`: runner name and id, workspace root and working directory on it) | intent | `plak:create:<id>` | a display copy of the runner and workspace the root's binding names, never authority; NULL is the host's own local runner at the record's workspace root, which every session is today; successors copy it; no reader yet |
 | Frozen MCP placement: each frozen MCP tool record's `placement` (`host` or `runner`) | intent | `plak:create:<id>` | frozen with the record's MCP tool records (above): the placement its server ran under at creation, `runner` for a server placed on the node's runner (chapter 07 §3.5) whether that runner is remote or this host; one server never freezes two placements; no reader yet |
 | Root interrupt cause and continuation decision of the root (`interrupt_cause`: the stopped turn or command and `operator`, `owner_lost`, `handoff` or `stopped`; `continuation_decision`: the anchor, host generation, cause `transient`, `owner_lost` or `handoff`, a round from 1, the decision time and a `new_turn`, `resubmit` or `withdrawn` decision) | intent | kind, anchor and ordinal | defined and decoded with unknown fields refused; the root's loss writes the interrupt cause (`owner_lost`, anchored on the lost turn), a planned handoff of its running turn `handoff`, the operator's stop of its running turn or of a held continuation `operator` and a stop of the tree `stopped`, and its Resume writes the continuation decision (a `new_turn` under a `plak:resume-loss:root:` command id), each at the applied cursor (chapter 03 §14.1), whether or not the root's tree has rows |
-| Carry intent: the write-ahead marker of a same-store carry (`carry_intent`: the source locator, that it continues the source's line, the carry's cause and whether it is the reload's orchestration carry) | intent | the successor's `plak:create:<id>` | written with the successor's record, locator unset, before the runtime create; cleared in the save that binds the locator; settled on open and at startup (below) |
+| Carry intent: the write-ahead marker of a same-store carry (`carry_intent`: the source locator, that it continues the source's line, the carry's cause and whether it is a persisted orchestration carry) | intent | the successor's `plak:create:<id>` | written with the successor's record, locator unset, before the runtime create; cleared in the save that binds the locator; settled on open and at startup (below) |
 
-**Write-ahead carries.** A same-store carry (the binding-repair `/rebind`
-carry and the `/reload` orchestration carry, §2.5.1) saves its successor's
+**Write-ahead carries.** A same-store binding-repair carry saves its successor's
 record, with its stable create operation id, its carried-forward link and its
 `carry_intent`, before the runtime create, and saves the locator, clearing the
 intent, only after it. A crash in between leaves a record that names exactly
@@ -2053,13 +1935,13 @@ asked to open a record that still has a `carry_intent` refuses to create an
 empty session under its operation. A record with neither a locator nor a
 `carry_intent` is a create that has not reached the runtime (`plak host`'s
 `new_session`, or a crash between a new session's product save and its
-runtime create): every working face's open (`plak agent --session`, the
-TUI's resume, `plak host`'s attach) creates its runtime session under its
+runtime create): every working face's open (`plak agent --session`,
+`plak run --session`, `plak host`'s attach) creates its runtime session under its
 `plak:create:<id>`, which the runtime store creates once; a read refuses it
 as having no locator.
 
-Every startup of a working face (TUI launch and resume, the in-TUI session
-switch, `plak run --session` and `plak agent --session`) settles the
+Every startup of a working face (`plak run --session`, `plak agent --session`
+and explicit host session operations) settles the
 workspace's pending intents, and every open of a record settles its own first.
 Settlement is owned: it takes the source branch's lease
 (`AgentSessions::hold_branch`), the same lease the carry itself holds from
@@ -2204,7 +2086,7 @@ Terminal usage applied during the post-release pass is drained to the session
 log only; the closed presentation receives no events or session-ledger update.
 
 The readers that do not first write a projection are session list and the
-resume picker (first prompt, transcript suffix and counters), session show/log
+session directory (first prompt, transcript suffix and counters), session show/log
 and child show/log (stored presentation plus read-only canonical head/history
 inspection), doctor, session deletion/dependency checks, and telemetry/usage
 queries (already-emitted numbers, not recovery authority). None treats the
@@ -2252,7 +2134,7 @@ A permanent create-identity claim with no session record means that a previously
 materialized successor was deleted: source replay settles the request but never
 resurrects that successor. This rule is identical in SQLite and memory.
 
-A `new` request (`/new`, called a clear below) writes its empty successor record and derived product and
+A `new` request (a new-session operation, called a clear below) writes its empty successor record and derived product and
 runtime genesis identities in the same revision-CAS transaction as the source
 intent, before runtime create. Clear copies no conversation or notices. The
 successor projector joins its `SessionCreated` fact to the source clear request
@@ -2273,7 +2155,7 @@ withdrawal. Permanent identity bindings are retained.
 A missing reservation is already deleted: the source pass skips its join, and
 withdrawal still removes the request and records its one notice without it.
 
-**Row provenance.** Every persisted `TranscriptRow` field (§5.4) has exactly one
+**Row provenance.** Every persisted `TranscriptRow` field (section 2.6) has exactly one
 source: (a) a feed fact, including the record header's `committed_at_ms`; (b) a
 bounded read at the record's checkpoint (`feed_items`, `feed_call`,
 `feed_terminal`, chapter 01 §5.11); (c) a join with a product intent; (d) a
@@ -2332,7 +2214,7 @@ start and finish timestamps rather than time spent qualifying the operation.
 | interrupted marker | — | (a) a `Cancelled` `TurnTerminal` whose cause is the operator's interrupt: cause `Requested`, or any `Cancelled` cause of a turn an accepted `Cancel` `CommandAccepted` named (a cancel of in-flight work may be settled by an abandonment closure); such a turn derives the marker, not the recovery line |
 | truncation marker | — | the transcript bound (§2.2), a function of the rows in key order: the projector's rows and the notices and imported rows anchored before the record being applied, so an incremental and a rebuilt view truncate alike; only projector rows are dropped, and a product row older than the oldest kept projector row goes with them |
 | auto-continue | — | never derived; only an imported transcript carries one |
-| session header | — | not stored: the session record intent (§5.4) |
+| session header | -- | not stored: the session record intent (section 2.6) |
 
 A field this table does not name is not persisted. A live row may carry more
 (an `elapsed_ms`, a streamed preview); the persisted row the projector writes,
@@ -2384,11 +2266,11 @@ Source operator notices anchored strictly below `Branched` are copied to the
 successor, retaining their keys; later source notices are not inherited.
 Plain forks keep their source's plan-state executor authority, following only
 lineage edges whose source workflow request is a fork; rebinds use their own.
-Plain `/fork` writes no two-phase workflow journal and never replays a request
+A plain fork operation writes no two-phase workflow journal and never replays a request
 on reopen. A recorded fork is published by projection even if its target's own
 projection or live attach refuses; the live source stays attached and promptable.
 Reopening the source leaves that source selected and the saved
-successor available through `/resume`.
+successor available through an explicit resume operation.
 
 The projector runs in exactly one code path, called live after every feed
 notification and before the host reports an outcome it received from a live
@@ -2449,11 +2331,8 @@ owns its single saved row. The warning names the prepared wire limit when known.
 The live path has no shortcut: a terminal shown live is the projector's row,
 streamed previews are observation until the projector replaces them.
 Finished tool observations are replaced by the committed tool row, including
-its commit-stamped elapsed time. The TUI replaces an existing tool row in place
-by call identity, including rows restored from a snapshot; repeated settlements
-do not append another row or move the tool past its answer.
-Settlements and terminal snapshots retain operator fold and detail choices by
-the same call identity.
+its commit-stamped elapsed time. Call identity keys replacement rather than
+appending duplicate tool rows on repeated settlement.
 Provider-hosted calls follow the same row
 publication path despite having no local tool lifecycle observations. Before
 the host advertises idle it refreshes its transcript and counters from the
@@ -2559,7 +2438,7 @@ assistant and reasoning deltas update their existing provisional key, tool
 updates use call identity, and retry discards delete the provisional response
 tail. Deltas append in place to staged live rows; they do not clone accumulated
 text or publish keyed patches. Root raw observations and scoped
-`TranscriptStream` appends for an agent drive the same TUI live reducer between
+`TranscriptStream` appends for an agent expose the same scoped live state between
 boundaries. These scoped appends are in-process only, not JSONL v1 events.
 Keyed live publication occurs at assistant completion, a new user/tool row,
 sealed reasoning, retry discard, status or idle boundaries. Consecutive queued
@@ -2584,51 +2463,10 @@ prepared-request boundary before consuming its model output. The earlier
 `SteeringApplied` observation alone is not commit evidence. This places the
 applied steer after the completed round's prose/tools, including during live
 viewing, and never adds a row for a steer accepted but not applied.
-Live tool observations and keyed/restored tool rows use one TUI tool presenter
-and lifecycle-label function. All terminal outcomes retain their elapsed time,
-including rejection, cancellation and overflow; host start/finish stamps take
-precedence over duration-only reports and the local monotonic fallback.
-The retained indexed blocks own their consumed row payloads once. Revision
-validation retains only key sizes and the canonical tail's boundary kind, not
-a second map of row content. Snapshot clock restoration borrows incoming rows
-before their payloads move into those blocks, and patches move only upserts.
-The TUI keeps a keyed baseline and applies only exact-revision patches,
-updating only the indexed blocks named by changed keys. Tool and thinking UI
-state stays on its existing block; local approval rows, refusal messages and
-product notices remain after the keyed block they followed. Inserts and deletes
-remap the remaining block indexes without rebuilding unchanged block content.
-Full same-session snapshots restore folds and item detail by row key, with
-call/location correlation for provisional settlement; duplicate settled text
-does not transfer another row's UI state. Busy-resync local blocks and pending
-opening diagnostics move into the replacement without cloning their payloads,
-preserving their relative order, including before the first canonical row.
-Camera, focus and selection follow surviving identities. Selection survives
-only an unchanged contiguous block span with unchanged rendered selected rows;
-changed or deleted selected content, an insertion inside its span, or a new
-session namespace invalidates it. Selection and pending tool clicks belong to
-their pane, so hidden-root updates cannot alter a visible child's gesture.
-An unchanged remapped selection adopts the current projection revision and
-remains copyable after a patch, resync or retention trim. Selection measures
-only its block span plus the ordinary viewport/anchor window; unselected
-history remains estimated. Only the copy action materializes the complete
-projection, resolving block-space endpoints again before extracting text.
-Starting another root session does not carry folds, details or fallback clocks
-across reused row keys.
-Root snapshots scope those keys by their typed session header, including when
-a successor snapshot precedes its binding observation. That presentation
-namespace never changes the effective binding itself.
-The key-to-block index uses ordered slot queries for local anchors and group
-boundaries. Splices visit only slots in the affected range; appending at the
-tail or moving a key within the tail does not scan older history. Surviving
-slots keep their coordinates behind a head offset, so retention advances the
-origin and removes only evicted slots rather than shifting survivors, including
-at the 10,000-block ceiling. Deterministic
-root/child regressions count index lookups and entries visited as well as
-changed-block conversions at 0, 2,000, 8,000 and the 10,000-row ceiling.
-A gap keeps the last good presentation and requests one scope resync; later
-patches are ignored until a valid snapshot replaces it. A pending request has
-a one-second floor between retries, including when newer baseline evidence
-arrives; repeated refused patches do not each send a request.
+Tool rows retain their terminal elapsed time and call identity. The host's
+keyed baseline, live reducer and scope resync are protocol facts. Clients own
+folds, selection and rendering; no terminal block index or selection state is
+product authority.
 An observation-channel gap is
 scoped: a root snapshot does not pay an agent's presentation debt. Replacing
 the one open agent view retires its previous scope's queued patches and gap
@@ -2707,8 +2545,7 @@ identity:
      batch is withdrawn with its mail unread; it is never resubmitted (chapter
      03 §8).
    - A workflow request (compact, fork, rebind, clear) is withdrawn with one
-     operator notice and never resubmitted: a compact says `compaction did not
-     start; run /compact again`, the others name their own retry. A scheduled
+     operator notice and never resubmitted: a compact says a compaction-not-started notice with an explicit compact remedy, the others name their own retry. A scheduled
      or capacity-recovery pass is recomputed when the paused queue is resumed.
 
    A cursor that reached the tail through a `BehindRetention` rebuild proves
@@ -2761,7 +2598,7 @@ joined from intents and views.
 cursor equals the tail it last observed. A refused projector transaction is
 debt; every action applies it first, and an action that cannot is refused with
 the store's reason while observation controls and quit stay available. Debt is
-never a recovery fence and never needs a reopen.
+never a recovery fence and never needs an exact reopen.
 
 ## 3. The command line
 
@@ -2794,14 +2631,19 @@ The parser is hand-driven over clap with clap's own help, version, subcommand
 inference, and short flags disabled, so every message the binary prints is
 product text. The grammar below is the complete shipped surface.
 
-**Top level.** Bare `plak` opens the TUI on a new session in the current
-directory. `plak --resume [<uuid>]` opens the TUI on the cwd-scoped session
-picker, or directly on that session. `plak help`, `plak --help`, `plak -h`
-print global help; `plak version`, `plak --version`, `plak -V` print the
-version. There is no top-level prompt positional.
+**Top level.** Bare `plak` MUST print global help and exit 0 without opening
+product state, a session or a host. `plak help`, `plak --help` and `plak -h`
+print the same help. `plak version`, `plak --version` and `plak -V` print the
+version. There is no top-level prompt positional or terminal resume command.
 
 | Command | Arguments and flags |
 | --- | --- |
+| `host [--web <unix:path\|127.0.0.1:port>] [--ui <dir>]` | Serve the home's session directory; section 4.6 owns host and web options. |
+| `host connect --stdio [--auto-start]` | Discover the host and relay client wire frames; only explicit local `--auto-start` permits startup. |
+| `host install --web unix:<absolute socket> --ui <absolute dir> [--dry-run]` | Install a Linux user unit or macOS LaunchAgent without starting it. |
+| `host upgrade --expect-binary <id> [--wait <seconds> \| --drain <duration\|idle>]`, `host upgrade --abandon <successor-uuid-or-runner-id>` | Explicit host upgrade and receipt recovery (section 4.6). |
+| `wire schema` | Print the exact build's wire JSON Schema without opening a session. |
+| `accounts list`, `accounts rm <vertical>/<name> [--yes]` | Inspect or remove local named account selections without implicit remote logout. |
 | `login [<codex\|grok\|claude>] [--remote]` | `grok` and `supergrok` name the SuperGrok vertical; bare `xai` is refused as ambiguous; `--remote` is the device-code flow for `codex` and a pasted code for `grok` and `claude` (§8.3) |
 | `logout [<account>] [--local]` | revokes a usable credential, retires an unusable one locally; `--local` never contacts the provider |
 | `status [<account>]` | credential readiness; bare form reports every vertical; compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6) |
@@ -2811,7 +2653,6 @@ version. There is no top-level prompt positional.
 | `mcp add <id> [--scope user\|project] [--env K=V]… [--secret-env K=SECRET_NAME]… [--tools a,b] [--resources] [--startup-seconds <n>] [--call-seconds <n>] [--replace] -- <command> [args…]`, `mcp add <id> --url <url> [--scope user\|project] [--bearer-secret SECRET_NAME \| --oauth [--oauth-issuer <url>] [--oauth-client-id <id>] [--oauth-client-secret SECRET_NAME] [--oauth-callback-port <port>]] [--header N=V]… [--header-secret N=SECRET_NAME]… [--tools a,b] [--resources] [--startup-seconds <n>] [--call-seconds <n>] [--replace]`, `mcp list`, `mcp show <id>`, `mcp test <id>`, `mcp remove <id> [--scope user\|project] [--force]`, `mcp enable <id> --template <name> [--tool <t>]…`, `mcp disable <id> --template <name>`, `mcp login <id> [--scope <scopes>] [--remote]`, `mcp logout <id> [--local]`, `mcp prompts <id> [<prompt> [--arg NAME=VALUE]…]` | MCP server setup (spec 07 §3.5). `add` writes `[mcp_servers.<id>]` in place, validated by the load parser, and refuses an existing id without `--replace`; secrets are names only; `--oauth` writes `auth = "oauth"` and the `oauth_*` keys given, and `--resources` writes `resources = true`. `list` and `show` print transport, scope, the templates that enable each server, the secrets it names that are not stored, whether resources are enabled, and an OAuth server's login state (§2.3). `test` starts or connects to the server through the bind's spawn, environment, secret and login path on a pool of its own, lists the tools `mcp:<id>` would bind (with `read_resource` when resources are enabled) and the ones left out with the reason (schema not representable, not in the allowlist), reports with resources enabled how many resources and resource templates the server lists, stops it, and exits non-zero with the cause on failure; it calls no model. `login` runs the server's OAuth login (§8.3): discovery, registration, the browser or remote flow, and the token exchange, then stores the login; `--scope` replaces the discovered scope (space-separated, quoted as one argument) and is united with the replaced login's scope, so a step-up keeps earlier grants; it refuses for a server without `auth = "oauth"`. `logout` revokes at the authorization server when it offers revocation, else and with `--local` retires the login locally and says the grant may remain; a revocation that fails retires nothing and names `--local`. `prompts <id>` lists the server's prompts with their arguments; `prompts <id> <prompt>` gets one with the given arguments and prints its flattened expansion, exactly the user message a prompt invocation would send, with control characters shown as `�`; neither calls a model. `enable`/`disable` edit only that template's `tools` array (spec 07 §1). `remove` refuses while a template would be left listing what its layer no longer serves unless `--force`, which removes those entries first; it leaves a stored login in place, which `logout` retires; every edit is checked against the home alone and with the trusted project over it (spec 07 §3.5); secret flags take `SECRET_NAME`s and a rejected one is never echoed |
 | `run [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] [--leave-jobs-running] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
 | `agent [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>]` | the long-lived JSONL host client |
-| `resume [<session>]` | the TUI picker, or an exact id |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
 | `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags |
 | `usage [--account <id>] [--session <uuid>]` | the two options conflict |
@@ -2899,7 +2740,7 @@ root `show`,
 route before state admission, telemetry and file-diagnostic setup.
 
 Value sets: `--effort` is `none`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` —
-the same ladder the TUI offers. Parsing this ladder does not imply admission
+the parser's closed ladder. Parsing this ladder does not imply admission
 for every route: Codex offers only `low` through `max` at the catalog row
 intersection. A Codex catalog default of `ultra` becomes no default without
 dropping the row. It withholds `ultra` as multi-agent orchestration, outside the
@@ -2937,10 +2778,7 @@ and continuation refuse a drifted row with Auth-class exit 3 and that reason
 before checking effort or composition, with the newer-build remedy rather than
 a re-login hint.
 
-Two hidden forms exist for `/reload` only and are not in help:
-`plak version --state-key` prints this build's state key, and
-`plak --import-resume <file>` imports an export document and opens the TUI on
-the new session (§2.5.1).
+`plak version --state-key` remains a machine inspection form.
 The hidden install-time machine form `plak version --write-binary-manifest <dir>`
 writes binary identity metadata without creating product state (§1).
 
@@ -3010,7 +2848,7 @@ Global help closes with the warning that agents use full coding tools by
 default with no approval gates, and that process tools are worker-isolated,
 not workspace-isolated.
 
-Every command line the TUI prints as a remedy is drawn from one catalogue that
+Every command line the product prints as a remedy is drawn from one catalogue that
 a test walks through this parser, so no surface can name a command `plak` does
 not have or a command that would only print help.
 
@@ -3019,7 +2857,7 @@ not have or a command that would only print help.
 | Code | Meaning |
 | --- | --- |
 | 0 | success, including every help and version page |
-| 2 | usage: any parse error, bad or ambiguous session prefixes, confirmation-required refusals without `--yes`, invalid config-set values, an OAuth account given to `key status`, an invalid model id, a model, effort or composition the authenticated catalog or the provider's resolution does not offer, conflicting binding flags, and the non-TTY refusal of the TUI or the picker |
+| 2 | usage: any parse error, bad or ambiguous session prefixes, confirmation-required refusals without `--yes`, invalid config-set values, an OAuth account given to `key status`, an invalid model id, a model, effort or composition the authenticated catalog or the provider's resolution does not offer, conflicting binding flags |
 | 3 | auth: login, logout, refresh, and `plak status <account>` failures, a credential that is not ready, a missing, declined or inactive subscription compatibility acceptance, and an unsafe credential store |
 | 4 | the turn was interrupted, or `SIGTERM` or `SIGHUP` stopped the process |
 | 5 | agent or product failure, model refusal, a `plak run` answer committed truncated at its output limit (`turn_failed:output-limit`), or `RecoveryRequired` |
@@ -3114,10 +2952,6 @@ and its parents are directories they own and can write.
   and a declined answer exits 3 before any network request. An inactive or
   withdrawn profile is refused without a prompt.
 
-- **The TUI needs a real terminal on both ends.** Stdin and stdout must both
-  be terminals; otherwise bare `plak` exits 2 pointing at `plak run`, and
-  `plak --resume` exits 2 pointing at `plak session list` and
-  `plak run --session <uuid> -- <prompt>`.
 - **`run --session` uses the recorded binding.** It refuses alongside
   `--account`, `--model`, `--effort`, `--composition`, or `--protocol`: a
   resume reconstructs, it does not rebind. `agent --session` is the same.
@@ -3158,7 +2992,7 @@ truncates at 512 characters with `…`. That applies in both modes, because
 the threat is terminal injection from model-authored or workspace-authored
 text, not display width.
 
-The non-TUI faces apply the multi-line form of the same rule to free text:
+The CLI output faces apply the multi-line form of the same rule to free text:
 newlines and tabs survive, `\r\n` becomes `\n`, and every other control
 character and bidirectional override becomes the replacement character, so no
 ESC, OSC or CSI sequence reaches the terminal. `plak run` passes every stderr
@@ -3250,7 +3084,7 @@ jobs still wait while their leaders live; when a leader exits with live group
 members, that job converts to leftover and no longer holds the run open. An
 unavailable group scan is not evidence of leftover members; a promoted job
 keeps the run waiting until membership or completion is observed. This is a CLI
-flag, not a configuration key. The TUI and JSONL `plak agent` keep leftover jobs
+flag, not a configuration key. The host and JSONL `plak agent` keep leftover jobs
 owned until stop, session release, attempt end, or the hard runtime cap.
 There is no consecutive-wake limit; the explicit max-turns and timeout bounds
 below still apply. It exits with the last turn status. Refused, failed and
@@ -3320,11 +3154,11 @@ before the catalog GET. `--print-session-id`
 writes `session_id=<uuid>` to stdout *before* the turn starts, so a caller can
 bind to the session even when the turn later fails or is interrupted.
 
-A turn has no wall clock in any face: `plak run`, the TUI and the JSONL host
+A turn has no wall clock in any face: `plak run`, `plak host` and the JSONL host
 all build the agent with no turn deadline and the product's
 `turn.max_model_rounds` cap (spec 07 §3.2), and a turn that reaches that cap
-answers from a tool-free wrap-up round. SIGINT in `plak run` and Esc in the
-TUI are the operator's stops. The subscription request gate carries no elapsed
+answers from a tool-free wrap-up round. SIGINT in `plak run` and explicit wire interrupt operations
+are the operator's stops. The subscription request gate carries no elapsed
 clock either; a turn's auth and catalog refreshes are charged to that turn.
 
 The terminal outcome maps to the process: a completed turn exits 0, an
@@ -3339,8 +3173,7 @@ the diagnostic text. An attach refused because another live `plak` process
 holds the session's agent tree (chapter 03 §14) prints the typed
 `tree_hosted_elsewhere (<binary id>)` refusal naming that process's host,
 machine and instance, exits 7, and in `plak agent` emits one JSONL `error`
-with `code: "tree_hosted_elsewhere"` and one terminal `bye`. The TUI shows the
-same refusal as its attach failure and stays detached. A session that runs
+with `code: "tree_hosted_elsewhere"` and one terminal `bye`. A session that runs
 without a hub keeps the refusal typed when a later tree write meets it (the
 root batch written ahead of a prompt, the prompt's tree pass, the wait-receipt
 settlement): the turn ends with the same exit 7 and JSONL `code`, and nothing
@@ -3356,18 +3189,15 @@ those failures or that the requested task succeeded.
 
 A model refusal is a settled canonical terminal, but it did not fulfill the
 request: `plak run` exits 5 after product publication and session release.
-The hosted one-shot result distinguishes `Refused` from `Completed`. CLI stderr
-and TUI report `model refused the request`; JSONL emits the typed, turn-correlated
+The hosted one-shot result distinguishes `Refused` from `Completed`. CLI stderr reports `model refused the request`; JSONL emits the typed, turn-correlated
 `model_refusal` observation after publication, including recovered refusals.
 An optional bounded, sanitized `detail` carries the provider-supplied diagnostic;
 Plak does not infer a refusal category when none was supplied.
 Canonical assistant output stays exact and appears once; an empty refusal leaves
 stdout empty. Streamed previews are provisional and must not be treated as a
-completed response when the provider discards them at refusal. The TUI and the
-hosted transcript drop or dim only the assistant text and thinking of that
+completed response when the provider discards them at refusal. The hosted transcript drops only the assistant text and thinking of that
 refused response, including text that preceded a tool call of it, and keep
-text from earlier model calls of the same turn. The TUI restores
-the published transcript before showing refusal; JSONL consumers discard refused
+text from earlier model calls of the same turn. JSONL consumers discard refused
 provisional output when they receive `model_refusal`. The JSONL host
 stays available for explicit user action. Refusal does not trigger automatic
 retry, clearing, fallback, or another dispatch. Pending prompts remain durable
@@ -3437,7 +3267,7 @@ old attachment (§2.6). It performs no source-finalization reconciliation.
    observed after it, in pages, one product transaction per page. This is the
    same code that runs live (§2.6).
    Converged-state crash checks assert this tail cursor before any harness
-   projector pass; that final pass must be idempotent, not repair a reopen
+   projector pass; that final pass must be idempotent, not repair an exact reopen
    that failed to project.
 3. Intents without a fact are resubmitted or withdrawn by kind (§2.6 rule 3):
    a command submission stays pending behind the paused queue and is submitted
@@ -3458,16 +3288,14 @@ old attachment (§2.6). It performs no source-finalization reconciliation.
    Withdrawal deletes the unadmitted request and inserts its anchored notice
    in one durable, revision-CAS'd transaction. Admitted requests remain for the
    runtime to settle; an unsuccessful projector pass never authorizes
-   withdrawal. The notice is `compaction did not start; run /compact again`,
-   `fork did not start; run /fork again`, `new session did not start; run /new
-   again`, or `model change did not start; choose the model again`.
+   withdrawal. The notice names the operation that did not start and its explicit retry
+   remedy. It MUST NOT automatically resubmit that workflow.
 
 A turn restored at a pending decision is driven only after surface attachment,
 through the same `TurnDrive` as live work, with its original identity and result.
 Its early bounded receiver retains the restored decision event. Launch,
 in-process session switch and in-place recovery all drive a restored turn
-before another prompt. The TUI asks for the pending approval again;
-JSONL emits `hello` before the approval,
+before another prompt. JSONL emits `hello` before the approval,
 and remains responsive to `resolve_approval`, interrupt and quit. JSONL clients
 answer the newly offered opaque handle under §4.3.1. A restored decision is not
 an abandonment or a replay of the provider request or tool effect.
@@ -3555,7 +3383,7 @@ from the closure its projector applied, and a crash between them loses it as
 above. The transcript carries one line either way, because the line is a
 projection of the record, not of the log.
 
-In-process recovery (eager at idle, or the next action or `/recover` after a
+In-process recovery (eager at idle, or the next action or a recovery operation after a
 failed reopen) is the same reopen against a
 replacement attachment. The eager reopen is skipped while a quit is already
 deferred (the next open recovers the turn), and what the operator sends while
@@ -3601,10 +3429,9 @@ A definite admission rejection says `prompt was not admitted` and publishes
 terminal status detail `prompt not admitted`, never `turn complete`. It sends
 no recovery-pending note and does not set the host recovery fence. Retained
 queue text is the only carrier: the host sends a `prompt remains queued` note,
-not `DraftRejected`, so the composer cannot produce a duplicate submission.
+not `DraftRejected`, so clients do not receive a duplicate input draft.
 A recorded rejection (`CommandRejected`) marks the item rejected in the view,
-for editing or explicit new submission. Queue snapshots and JSONL rows expose `rejected`, and the TUI labels
-those revisions rejected rather than pending. Later drainable items may continue
+for editing or explicit new submission. Queue snapshots and JSONL rows expose `rejected` rather than pending. Later drainable items may continue
 past a settled item-specific rejection, but session-wide storage pressure,
 physical storage exhaustion or corruption stops that live drain pass.
 Unrecorded definite refusals (ingress `Backpressure`, root `QueueFull`, storage
@@ -3622,10 +3449,7 @@ identity when it next drains. For convenience API callers, ledger exhaustion is
 a definite `Session` error, not `OutcomeUnknown`. If removing a refused
 submission cannot be saved, it stays and is resubmitted under its own identity;
 the runtime refuses or accepts it exactly once.
-A pre-queue refusal restores the draft through `DraftRejected`. If a restored
-draft and newer composer text exceed the composer bound, the older text may be
-left out of the composer only when it is known to be in prompt history; otherwise
-it is retained on the local history shelf across host history snapshots.
+A pre-queue refusal restores the draft through `DraftRejected`.
 Physical disk exhaustion is distinguished from logical storage pressure and
 names `plak session gc --all`, `plak session delete <id>`, or freeing disk
 space; the logical reserve cannot guarantee writes on a full disk.
@@ -3661,7 +3485,7 @@ resubmitted command carries its stored bytes, never a reselected batch.
 
 When scheduled compaction ends without a compacted checkpoint, its prompt
 remains queued and automatic drain pauses. The diagnostic names the terminal
-outcome and the explicit retry control or `/new`. A pass that found nothing to
+outcome and the explicit retry control or a new-session operation. A pass that found nothing to
 compact (`NoEligibleRange`) paid nothing and changed nothing and never follows
 on; the session log records it as `compact.finished` outcome `no_eligible_range`. A
 prompt that fits is sent as is, with one note that nothing could be compacted.
@@ -3669,8 +3493,8 @@ One that does not fit is withheld by its turn and the draft is restored with the
 resend-shorter remedy as its one note, as for any over-window prompt; the
 paid-retry guidance never applies, and it carries no child mail (chapter 03
 §8). A host wake withheld or refused at the window is not a draft: nothing is
-restored into the composer, and auto-continue pauses until the next prompt
-(§5.2, chapter 03 §8). A scheduled pass that fails definitively never follows on: a prompt that
+returned as an input draft, and auto-continue pauses until the next prompt
+(section 4.4, chapter 03 section 8). A scheduled pass that fails definitively never follows on: a prompt that
 fits is sent, and the feed's single outcome line is followed by the product's
 prompt-sent notice, so no resume pays for the same refused fold; one that does
 not fit stays queued as above. A
@@ -3703,7 +3527,7 @@ applied by the runtime from that record and settles `Compacted`. The notice
 does not imply that a manual compact produced a new answer. A request with
 `WorkflowAdmitted` and no settlement is the runtime's to close; a request with
 neither fact was never admitted and is withdrawn at open with one notice,
-`compaction did not start; run /compact again`, so no summary is first
+a compaction-not-started notice with an explicit compact remedy, so no summary is first
 dispatched without a new operator action. A Scheduled or CapacityRecovery pass
 is recomputed when the paused queue is resumed. An abandoned or withdrawn
 request leaves no parked compact result for a later manual, scheduled or
@@ -3712,7 +3536,7 @@ capacity-recovery compact: that action is a new operation. `Compacted` and
 Scheduled and CapacityRecovery requests, the queue-drain remeasurement through
 the same projection path live and on reopen.
 
-**No fenced session ends in `/new`.** When a turn ends recovery-required, or an
+**No fenced session ends in a new-session operation.** When a turn ends recovery-required, or an
 attached open finds the head still recovery-required, the root **recovers in
 place eagerly**: as soon as the host is idle, with no action needed, it releases
 the stopped attachment and runs the reopen above (the runtime closes what it
@@ -3725,11 +3549,11 @@ the reopen's closure commits leaves the claim in the turn's terminal record,
 and the next open derives the line from it (§4.2). Projection debt
 alone is not a fence: the next action applies it first. If the eager reopen
 fails — offline, a quarantined credential — the host says so, and the next
-action that needs the session — a prompt, a follow-up, `/compact`, `/fork`, a
+action that needs the session -- a prompt, a follow-up, a compact operation, a fork operation, a
 model, account or effort change, a queue action, a tool invocation — first
 **recovers in place** the same way and then performs the action; if that
 reopen fails too, the action is refused with the reason, the draft is handed
-back, and the next action tries again. `/recover` retries at once. A one-shot
+back, and the next action tries again. A recovery operation retries at once. A one-shot
 `plak run` does not reopen in place: it exits 5 and the next `run --session`
 recovers at open. Children and the agent tree keep their own recovery (chapter
 03 §14.1). The shared hosted exact-reopen helpers also serve children
@@ -3797,7 +3621,7 @@ JSONL attachment requests an initial tree snapshot only when topology is
 enabled for the host. A single-agent prompt does not issue an implicit
 navigator command. Explicit tree commands still report an unavailable hub.
 
-`plak agent` is a long-lived stdio client of the same host the TUI drives. It
+`plak agent` is a long-lived stdio face of the hosted session. It
 is a **closed projection** of the same user actions and host events, not a
 second control plane, and it owns no session or tree authority of its own.
 Stdio is the only pipe; there is no `plak agent stdio` subcommand.
@@ -3875,19 +3699,7 @@ JSONL v1 kind) and is an ordinary observation: saturation may drop the one
 answer. At most one answer arrives per request; the surface asks again when
 it is missing.
 
-The TUI asks when the operator opens a finished item (§5.4), never for a call
-still running, keeps at most one request per call outstanding and asks again
-after 5 s while the item stays open. It caches canonical answers by attached
-session id, agent id and call id (64 entries), so reopening an item or
-rebuilding the same session's transcript does not ask again; preview and
-unavailable answers are kept on the row only while it stays open and are not
-cached, so closing the item drops them and reopening asks again. A `busy`
-refusal is no answer: the row keeps its retained preview unlabelled and the
-call is asked again after 5 s while open, or at once when reopened. A
-`preview` answer for a call the TUI saw end within the last 30 s may only mean
-its canonical history was not committed yet, so that call is asked once more
-after 5 s while open. It drops an answer whose `session_id` is not the
-session it has attached.
+
 
 **Framing.** One JSON object per line in both directions. Every line carries
 `v`, and every line the client sends MUST carry `v` equal to the presentation
@@ -3970,8 +3782,7 @@ it resumed, what was not held and what did not start; `invoke_tool` of
 model catalog presents (chapter 03 §4.5a); chapter 03 §15 owns their semantics
 and their refusals.
 
-`resolve_approval` uses the same single-use `ResolveApproval` intent as the
-TUI. The handle belongs to the offered decision in the currently attached
+`resolve_approval` uses the single-use `ResolveApproval` intent. The handle belongs to the offered decision in the currently attached
 session and turn; it is not a call id or durable runtime decision address.
 A live child's turn offers its own decisions the same way, as `approval`
 rows in that child's transcript. The host routes such a handle to the child
@@ -4001,7 +3812,7 @@ or ambiguous outcomes do not re-arm it. Refusals are nonfatal; interrupt, quit a
 commands remain usable. Other unknown `kind` values remain nonfatal codec
 diagnostics. This command adds no record kind and does not change v1 envelopes.
 
-**The queue law is the TUI's, expressed on a pipe.** A `prompt` with no steer
+**The queue law applies on the pipe.** A `prompt` with no steer
 flag is a root prompt when idle and a durable follow-up when busy. A `prompt`
 with `steer: true` is a steer **only while busy**; sent idle it is a diagnostic
 naming that fact on both stdout and stderr, and the connection stays open. The
@@ -4023,8 +3834,7 @@ Internal `SessionObservation::Status` carries typed `HostPhase` and optional
 `compacting`, `clear`, `resume`, `fork` and `rebind`. Tree and queue pauses,
 transition stages with cumulative integer milliseconds, direct versus queued
 steering, and cancellation refusal versus settlement timeout remain typed
-facts. Phase-dependent TUI and hosted terminal-boundary decisions match those
-enums. Bounded external diagnostics are data, not remedy-selection authority.
+facts. Hosted terminal-boundary decisions match those enums. Bounded external diagnostics are data, not remedy-selection authority.
 Plak renders Status and visible Notice observations before the neutral JSONL
 envelope projection; host-protocol does not format these product-owned cases.
 JSONL v1 keeps its phase/detail spellings, queue length, correlation and absent
@@ -4078,19 +3888,19 @@ closes. This does not change the v1 command or event encoding.
 | `turn` | terminal usage: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cached_input_tokens`, `cache_write_tokens` |
 | `turn_lifecycle` | `turn_id`, `phase` ∈ `admitted` \| `completed` \| `refused` \| `cancelled` \| `failed` \| `recovery_required` \| `unresolved`, and where known `model_error_kind`, `http_status` |
 | `recovered` | `operations[]`, and when the reopen closed an unfinished turn its `claim` ∈ `running_tool` \| `model_request` \| `compaction_not_applied` \| `nothing_started` \| `tool_round_completed` and `cause` ∈ `process_lost` \| `interrupted`; correlated with the `prompt` or `recover` that triggered it, or emitted on its own when the host recovered a fenced turn in place at idle, or after `ready` when the attach itself recovered a crash |
-| `tree` | `tree_id`, `revision`, `state`, `restored_paused` (always `false`; a reopened tree is live), `nodes[]` |
+| `tree` | `tree_id`, `revision`, `state`, `restored_paused` (always `false`; an exact reopened tree is live), `nodes[]` |
 | `error` | `message`, and `code` for a typed refusal a client keys on (`tree_hosted_elsewhere`) |
 | `bye` | — |
 
 `hello.capabilities` is additive in v1: a sorted, duplicate-free array with
 one canonical id per compiled route (`anthropic`, `claude`, `codex`, `grok`,
 `openai`, `openrouter`, `xai-api`) plus the compiled `BUILD_CAPABILITIES`
-feature names (`clipboard`, `images`, `js`, `mcp`, `python`, `tui`, `web-fetch`). This is the closed current
+feature names (`images`, `js`, `mcp`, `python`, `web-fetch`). This is the closed current
 vocabulary, also used by capability refusals' `available:` list. Account
 aliases (`chatgpt`, `supergrok`, `xai-oauth`) and composition names (`py-ptc`,
 `py-sdk`) are not entries. `js` and `web-fetch` are explicit build capabilities,
 not inferred from a chosen composition or route. The default product reports
-all fourteen ids; reduced products omit every route or feature not compiled.
+all twelve ids; reduced products omit every route or feature not compiled.
 When Python is omitted, `python_host` and `python_host_target` are absent.
 
 `hello`, `ready`, `tool`, `error`, `turn`, `turn_lifecycle`, `tree`, `bye`, `model_refusal`, and `recovered` MUST NOT be dropped
@@ -4127,7 +3937,7 @@ lossy rather than complete:
   `blocked` rather than defaulting them — a client that read `tier:
   "read_only"` where the host held nothing would be told a node cannot write.
 - **Presentation and settings chrome is dropped.** The projection carries what
-  a machine client can act on; it is not a mirror of the TUI's frame.
+  a machine client can act on, not application-local presentation state.
 
 #### 4.3.3 Handshake and shutdown
 
@@ -4344,34 +4154,19 @@ Publication replies distinguish Saved from published/durability-uncertain
 or runner protocol changes are introduced by these console operations.
 
 Remote `SaveSettings`, `ApplyProfile {apply:default}` and the legacy
-`RefreshUsageCredential` are now local-face-only: refusal is
+`RefreshUsageCredential` are local-face-only: refusal is
 `refused_for_role {row:local_face}` before dispatch, with no config/credential
-write. Private remote web and host-client TUI forms use the consented host requests.
-The public socket-attached TUI is also a remote face, even on the same machine.
-Until it has those forms, host-owned Settings rows are read-only, Set as default
-is not an offered button, and Usage has no credential-refresh control. The
-screen names the host remedies: `plak config set <key> <value>` for settings;
-materialize the selected profile's templates on the host and edit `root.agent`
-and `roster.working_set` in its `config.toml` for new-session defaults (a profile
-id is not a template name or config key); and `plak refresh <account>` followed
-by `plak usage --account <account>` for credentials. A late refusal of any of these legacy writes
-is a visible transcript error (also shown in an open Menu), not background work
-to rearm: restore the Settings product draft to its last authoritative snapshot and clear any active
-Usage refresh. An unknown outcome also clears pending UI state but tells the
-operator to reread before writing again. Terminal-local preferences remain editable.
-Switch/Fork/Use now remain explicit session binding actions. Local-face
-legacy behavior is unchanged.
-Remote Use now still binds its session, but never seeds a fresh home's
-default as a side effect. That publication uses the confirmed etag path.
-This remains true after a wire `moved` handoff, including one that preserves
-the virtual tree address: the continued requester retains its held face.
-Only local Use now retains automatic default bootstrap. Transport-stamped
-request provenance, not the client's correlation text, distinguishes them
-and survives an asynchronous answer window.
+write. Remote clients use the confirmed host operations for settings, profile
+defaults and credential refresh. Session switch/fork/use remain explicit binding
+actions. Remote Use now never bootstraps a fresh home's default; only the local
+operation retains that behavior. Transport-stamped provenance, not client
+correlation text, distinguishes them and survives asynchronous answers.
+Operator defaults select materialized agent templates through `root.agent` and
+`roster.working_set`; a profile id is neither a config key nor a template name.
 
 `plakd-wire-types` owns the serialized product extension DTOs and their
 protocol classification, over `plakous-host-protocol`. Product handlers,
-configuration, local appearance wrappers and reload-file/probe authority stay
+configuration and reload-file/probe authority stay
 outside that crate. Moving these types changes neither wire bytes nor schema.
 
 On protocol 5, directory attention is independent of activity:
@@ -4518,38 +4313,19 @@ Legacy reads never consume the console cache: they retain fresh provider reads,
 their existing per-session 60 s aging and their unchanged freshness law.
 A console read never refreshes a token or retries a rejected token with a grant.
 
-Wire v2 is the framed protocol every frontend will speak to a host; it
-replaces the JSONL host of §4.3, which stays byte-identical until it is
-removed. Its types live in `plakous-host-protocol` (`wire`, the observation
-classes, and serde on every intent and observation). The embedded TUI
-speaks it to its session (below). The hidden, unsupported `plak agent --wire v2` speaks it on
-stdio through the session's host service: one attachment at a time, on the
-session's root node or a child of its tree, every observation sent to it
-with its class, the attach's baseline asked for as a resync of its scope. Plak's
-extension traffic travels as the `extension` kind; the settings view never
-carries the terminal preferences, which stay client-local. A settings save
-on the host preserves its current `[tui]` values and never copies terminal
-preferences from a wire update. The TUI applies preference edits locally and
-publishes its own home's `[tui]` section; received settings views and save
-acknowledgements update product settings only, never theme or render preferences.
-A terminal-only edit sends no host settings update.
-The same is true for a confirmed terminal reset, including a no-op reset of
-a row already at its default.
-Config publication is serialized by the home's `config.lock`; writers re-read under that lock and
-apply only their own fields: `[tui]` for a terminal and the changed product
-fields for host settings. Other config writers restore fresh `[tui]` values
-under the lock before publication, so they never revert terminal preferences.
-If that baseline cannot be read, the save refuses before staging new templates.
-Terminal and host settings writers merge deltas; other whole-config writers
-remain last-writer-wins for product fields. An explicit `config set tui.*`
-edits that terminal key under the lock rather than publishing a stale snapshot.
-Confirmed resets use the same local publication path as other terminal
-preference edits, including integer and theme rows.
-The wheel notch uses the local launch preferences or open draft even after
-a host settings refresh.
-The views a
-surface opens (settings, usage, profiles, MCP, acknowledgements, profile
-verdicts) are addressed, the session profile and workspace chrome states.
+Wire v2 is the framed host protocol. The closed JSONL projection in section
+4.3 remains a separate surface. Neutral frames, intent/observation types and
+views live in `plakous-host-protocol`; product extension traffic uses
+`plakd-wire-types`. The hidden, unsupported `plak agent --wire v2` form exposes
+a single-session stdio transport. Application clients SHOULD use the public
+`plak host connect --stdio` bridge, the host socket or authenticated WebSocket.
+
+Settings views carry product fields, never client-local appearance preferences.
+Config publication serializes on the home's `config.lock`; host settings merge
+only fields changed from the original view into the fresh effective baseline.
+If that baseline cannot be read, publication refuses before staging templates.
+Other whole-config writers remain last-writer-wins for product fields. Addressed
+settings, usage, profiles, MCP and verdict views remain host-owned metadata.
 
 - **Framing.** One JSON object per line in both directions, each carrying
   `frame`, at most 16 MiB including the newline. A longer line is refused
@@ -4580,7 +4356,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   never holds it; a terminating signal during the wait, or later, ends the
   connection the same way. A session that ends on its own ends its
   connection with `bye`, whether or not the client still reads. A connection serves the session its welcome
-  names until that session switches to another (`/new`, a resume, a
+  names until that session switches to another (a new-session operation, a resume, a
   rebind): the host then ends the attachment with `moved {attachment,
   node, request_id?}`, naming the new session's root and, when a session
   request caused the switch, that request's client id, and the client
@@ -4601,8 +4377,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   leaving client's does.
 - **Local faces.** A connection's acceptor marks it a local face (stdio's
   `plak agent --wire v2`) or a remote one (the web endpoint); a connection
-  is remote unless marked; the embedded TUI's connection, which its
-  launcher accepts in process, is a local face. A remote face is refused, `refused_for_role` with row
+  is remote unless marked. A remote face is refused, `refused_for_role` with row
   `local_face`, the intents that exec or hand off the host's own build or
   answer with the installed build's path and probe output: `check_build`,
   `probe_reload`, `accept_reload_request` and `refuse_reload_request`
@@ -4659,7 +4434,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   opened first, as any attach of a dormant session opens it, so even a
   refused attach can leave it resident and running a continuation it owed. A
   connection that serves one session (`plak agent --wire v2`, the embedded
-  TUI's) refuses every directory request `unsupported`. A host of many
+  single-session host's) refuses every directory request `unsupported`. A host of many
   sessions is `plakous_hosted::host_service::wire::SessionHost` over its
   product's stores (`HostSessions`: the rows, the newest session of a
   tree, an open, an open's refusal and a create), and each of its
@@ -4804,7 +4579,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   explicit check/resend of the same client_id, session, target and exact
   payload: `draft_pending` means
   wait for a verdict, and `accepted {duplicate:true}` confirms admission
-  without enqueueing again. The TUI/web check gesture follows separately;
+  without enqueueing again. A client check gesture follows separately;
   this is not yet a product UI action. Do not mint a new id for that check.
   Reconnect refreshes attachments and baselines, not effects. A changed host_generation
   loses the registry and requires reconciliation
@@ -4913,7 +4688,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   asks the actor to decide now rather than after the idle release
   (`AttachmentCount::request_release_now`); every other condition stands. An
   attach racing the timer therefore either comes first and keeps the
-  session, or finds it released. An embedded face's session (the TUI, `plak agent`,
+  session, or finds it released. An in-process face's session (`plak agent`,
   `plak run`) is never released for being idle. A host serves each session
   through a slot (`host_service::wire::SessionSlot`), resident (the host
   worker and the wire service its connections share) or dormant (the
@@ -4933,8 +4708,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   attachment, and a `request_id` the client chooses, unique among its own.
   A child attachment is refused them `refused_for_role` (rows `readiness`
   and `workflow`), and a connection has one in flight (`one_in_flight`).
-  They act on the user's own sessions as the TUI's `/attach`, `/resume`
-  and rebind do, so a remote face may send them (chapter 04 §2.10). The
+  They act on the user's own sessions, so a remote face may send them (chapter 04 section 2.10). The
   response comes when the request is settled: `moved` with the new root,
   just before the requester's own `moved` frame, or `session_unavailable`
   when the session could not be opened and the served session is
@@ -4944,10 +4718,10 @@ verdicts) are addressed, the session profile and workspace chrome states.
   are unique only per connection, so the response answers the connection
   whose attachment asked, never another that used the same id. The session host serves `resume_session` as the
   session's own resume; `retry_attach` and `rebind` reopen the session,
-  which only a launcher that owns the session's host can do, so a host
-  that does not own its sessions' launcher (`plak agent --wire v2`)
+  which only the owner of the session worker can do, so a host
+  that does not own its session workers (`plak agent --wire v2`)
   refuses them `session_unavailable` and keeps its session.
-  `plak host` owns its launchers: an actor-side, process-local release fence
+  `plak host` owns its session workers: an actor-side, process-local release fence
   refuses a running turn, child work or background processes without stopping
   them. Once admitted, the host joins that exact worker before re-resolution
   (`retry_attach`) or the existing durable history carry (`rebind`). No wire
@@ -4959,7 +4733,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   worker owned by the resident slot. The actor checks cancellation atomically
   when settling the fence, so a cancelled fence cannot quit later, whether
   it resumes idle, busy or with processes. If settlement wins that race,
-  the launcher takes its outcome and joins a successful release normally.
+  the worker owner takes its outcome and joins a successful release normally.
   No timed-out carry is performed.
   Every viewer receives `moved` and reattaches fresh. A failed carry reopens the source;
   a committed carry is never undone if its target's open fails: the target
@@ -5012,7 +4786,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
 - **Host service.** `plakous_hosted::host_service::HostService` is one
   session's side of the wire, the only consumer of its observations and the
   only sender of its attachments' intents; `plak agent --wire v2` speaks
-  through it, and the TUI and JSONL v1 are its faces (below). One wire
+  through it, and JSONL v1 is one of its faces (below). One wire
   connection's side (the handshake, its one attachment, the answers to a
   child's mail, the frames it writes) is
   `plakous_hosted::host_service::wire::WireConnection`, which carries
@@ -5073,7 +4847,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   included) closes it. The attachment takes no root state, root
   transcript, pending approval, credential wait, root event or root answer.
   It is an attachment to the node, not to one actor: when `recover_node`
-  (chapter 03 §14) rebinds the node after a reopen, the attachment stays and
+  (chapter 03 section 14) rebinds the node after an exact reopen, the attachment stays and
   its controls reach the rebound child. Its intents are the node's
   controls, sent through the session's mailbox tagged with the attachment.
   It gets back the `IntentStarted` of each, and of what the session sends
@@ -5178,86 +4952,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   and `job_terminal`'s output are redacted as a row's are, while JSONL v1
   (§4.3.2) keeps them as the runtime displays them. A child
   attachment gets none, and JSONL v1 never projects
-  it. The TUI sends the intent
-  `promptable` once after its first painted frame and after queuing the initial
-  binding's topology refresh, always in that client order regardless of whether
-  paint, binding or attach observations arrive first: it sets the flag that
-  gates passive maintenance and never enters the session's queue, so it
-  has no answer window; it is refused to a child attachment
-  (`refused_for_role`, row `readiness`), and `plak agent` never sends it.
-- **The embedded TUI.** The TUI speaks only wire v2 to its session, through
-  the same wire client that can instead say hello to a session directory
-  without attaching: directory operations receive their own correlated
-  answers, then the client attaches the root selected from the directory.
-  A client-side root selection switches only that connection, not any
-  other face of the session. In embedded mode it connects through
-  `client` over a socket pair inside its process. Each round, the session
-  supervisor (the product side of an interactive launch that owns its
-  rounds) serves one connection of the session's own host service on a
-  thread: a local face that quits the session when it leaves, as stdio's
-  does, and that names no tree, so a switch inside the host (`/new`,
-  `/resume`, a rebind) reaches the TUI as the session's own observations,
-  not as `moved`. `/resume` does not eagerly refresh the source attachment's
-  topology: the successful target binding is the sole owner of its snapshot
-  request. Attach/readiness observations never independently re-arm it, so
-  splitting them across event drains cannot duplicate a request. The same
-  publication path orders initial topology before the face's one `promptable`;
-  subsequent bindings refresh topology without repeating `promptable`.
-  The connection answers the client's root attach before it
-  takes any of the session's observations, so the TUI sees what the session
-  said from its start. That attach asks the session for no root baseline:
-  the session publishes one when it opens, and it reaches the attachment,
-  unless the session's mailbox had already lost root content, when the
-  attach asks as any attach without a kept baseline does. The connection
-  blocks on one channel that carries its client's lines and the session
-  mailbox's wakes, so it forwards what the session says the moment it says
-  it; only a connection with a stop hook (stdio's signal watch) looks at
-  that hook on a 20 ms timer. The launch's pre-bind lookup progress is a
-  `lookup_status` observation the supervisor publishes to the connection's
-  service, so it reaches the TUI as a frame too. The TUI's sends never wait
-  for the session: the client gives an intent the session refused, or one
-  with no verdict, back to the TUI later. What the user wrote comes back: a
-  draft or a queued edit is restored beside what the composer holds now (two
-  in a row keep both), its pending record dropped, and a `/new` the session
-  never acknowledged is no longer pending, each with a row that says why:
-  the refusal (for this face's role, its role-table row, as `transcript`:
-  another attachment holds the session's agent view), or that no answer came
-  and the session may still run it. A refused reload check ends as failed.
-  Every other intent is the TUI's own background work (a resync, the build
-  check, the composer chrome, an agent view): it paints nothing and is armed
-  again after one second. Each further refusal of that same kind waits twice
-  as long, up to 30 seconds, and then its own sender sends it again. The
-  wait returns to one second when that kind succeeds or the state it serves
-  changes. An agent view the session would not open is no longer counted as
-  served, and closing or reopening the view starts its wait over. A reload
-  answer is not that work: the session's refusal is armed again on the frame
-  that learns it, so a reload in progress is not held for the doubling. A draft, a queued edit and a `/new` the session did not take
-  still come back at once. What the TUI has not taken waits in the client
-  under the session mailbox's own rules (a state supersedes its older
-  value, deltas coalesce, and only what a later baseline repays is dropped,
-  its transcript read as lost until that baseline); an observation the
-  client can neither hold nor drop is an overflow, and the client attaches
-  again. Every byte between the
-  TUI and its session is a frame, apart from two process-local signals of
-  the supervisor, each with its reason. Abandon-and-release (and its
-  planned-handoff form for a reload) is a flag on the session's mailbox, not
-  an intent: it is this process's exit, decided after the terminal is
-  restored, and it must outrank queued work and hold when the mailbox or the
-  connection is full, so it is set on the mailbox itself, before the
-  supervisor lets the TUI's connection go, whose leaving would otherwise
-  quit the session the joined way first. Before it sets the flag the
-  supervisor waits up to a second for the session's verdict on every intent
-  the TUI sent, so the flag never outranks an intent still on its way. The
-  `/new` and resume publication cells are written by the host for the
-  supervisor's next round, not for the TUI, and they outlive any connection.
-  A round whose connection cannot be made asks its session to abandon and
-  release, and joins it within the product's error bound. The TUI hands the
-  terminal back with a session request (retry the attach, resume another
-  session, rebind, release for a reload, or the config editor), and the
-  supervisor settles the round in today's order (the terminal restored
-  before any abandon, a reload's handoff record before its release) and
-  answers by opening the next session for the next round, the in-process
-  form of `moved`.
+  it. The root-only `promptable` intent gates passive maintenance and has no
+  answer window. A child attachment is refused (`refused_for_role`, row
+  `readiness`); `plak agent` does not send it.
 - **Serde.** Frames, intents and observations refuse unknown fields;
   intents and observations are tagged objects (`kind`, and `body` when
   they carry one), snake case. A
@@ -5277,11 +4974,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   `plak-<version>-<triple>-wire-schema.json`, with checksums and provenance
   (chapter 06 §6.6). Clients match versions exactly; the asset is not a
   compatibility or negotiation layer. The user guide's integration map and
-  stdlib socket client demonstrate hello, directory lookup and root attach;
-  the tooling gate checks that transcript against an offline real host.
+  frame examples demonstrate hello, directory lookup and root attach;
+  a test-only socket driver checks that transcript against an offline real host.
 - **Client.** `plakous-host-protocol`'s `client` is the typed wire v2
-  client a frontend embeds, over any byte transport (a child `plak agent
-  --wire v2`'s stdio, a socket pair, the host's socket; Plak's
+  helper over byte transports (the public stdio bridge, a socket pair,
+  the host's socket; Plak's
   `wire_transport::host_socket` connects to that socket only in a
   directory private to the user, when it is the user's socket, and only
   to a peer of the user's own uid).
@@ -5851,8 +5548,7 @@ only select the destination. An executable/configuration failure after commit
 requires repairing and retrying that destination, not reopening the source.
 `host connect --stdio` follows recorded successor keys, and attaching a carried
 root (or its full former session UUID) receives the existing `moved` refusal
-with its current root address. Children receive no revival alias. Bare public
-TUI discovery keeps its current-key attach-or-embedded rule.
+with its current root address. Children receive no revival alias.
 
 After acknowledgement, a receipt-aware old-key `plak host` start follows the
 recorded destination, and old source session addresses redirect to their
@@ -5861,7 +5557,7 @@ does not resume them. An Aborted attempt, by contrast, never redirects a later
 destination-key start. Embedded/headless paths retain their existing custody
 and daemon-process restrictions rather than becoming upgrade owners.
 
-Client `/reload` still replaces only the client. It does not run this command,
+Reloading an integrator's client does not run this command,
 read ownership receipts, acquire custody or resend an ambiguously accepted
 submission. The upgrade command reports success only after destination
 acknowledgement; a timeout names an unknown outcome and the retry remedy.
@@ -5883,25 +5579,7 @@ session of the home, across workspaces, to the clients of its control
 socket and, with `--web`, of its web endpoint (§4.5), through the session
 directory (§4.4).
 
-The TUI is another client of this socket (§5). A TUI started after this
-host never opens a competing embedded session; a web face and a terminal
-face may attach the same session at once. An embedded TUI already running
-when the host starts keeps its custody, and the per-tree
-`tree_hosted_elsewhere` refusal is unchanged.
-
-Before a host-mode `/reload` detaches, the installed build's reload probe must
-advertise support for the private host-only resume marker. A build that does
-not compile the TUI never advertises that capability. A build that does
-not advertise it refuses in the TUI with an install-compatible-client remedy;
-the terminal stays attached, rather than execing an unsupported option or
-falling back to an embedded-capable resume command.
-
-During the client split the public TUI keeps this launch rule: bare `plak`
-attaches to a running host for the home and state key, otherwise it runs
-embedded. It never auto-starts a host and retains its direct hosted transport.
-Adding a public stdio bridge for independent clients does not rewire this
-terminal. Bridge-only launch belongs to the later private client.
-The service refreshes native catalogs at startup without requiring a terminal.
+The service refreshes native catalogs at startup without requiring a client.
 
 `plak host connect --stdio [--auto-start]` is the public byte bridge for independent clients.
 It resolves the home and inspects all live state keys before connecting;
@@ -5913,8 +5591,7 @@ handshake through the relay; the bridge does not consume a second handshake.
 Each direction uses bounded fixed buffers (one 8 KiB copy buffer) and flushes forwarded
 bytes promptly. Input EOF closes the socket's write half and detaches that
 client, not its host or session. A broken link is not automatically reconnected
-and no ambiguous input is replayed. The public TUI does not use this bridge;
-its current launch rule and direct hosted transport remain unchanged.
+and no ambiguous input is replayed.
 
 Only proven absence and explicit local `--auto-start` permit an unmanaged
 start. SSH-session markers refuse such a start; the remote client does not
@@ -6038,8 +5715,7 @@ settles asynchronously after endpoint binding, before local admission.
   An open refused because another live process holds the session is
   `tree_hosted_elsewhere` with that process's machine, binary (when it
   recorded one) and pid; any other failed open is `session_unavailable`
-  with why. A working face (`plak agent --session`, `plak run --session`,
-  the TUI's resume) whose open is refused for a lease another live process
+  with why. A working face (`plak agent --session`, `plak run --session`) whose open is refused for a lease another live process
   holds is refused the same way, exit 7, naming that process, and a running
   `plak host` as such with how to release the session there; the lease's
   own refusal, with its retry time, follows. Only the open's refusal is
@@ -6058,7 +5734,7 @@ settles asynchronously after endpoint binding, before local admission.
   lease, whose holder record names the process (spec 01's runtime store
   holder proof; `plakous::sessions::holder::sqlite_branch_holder`); either is
   named only when it is not this process and not proven gone: a holder on
-  this machine whose lock is free is a crashed host's or TUI's, and its
+  this machine whose lock is free is a crashed session process's, and its
   session reads free; one on another machine reads held. A missing lock
   file reads a custody holder held (it may have been removed under a live
   one, chapter 03 §14) and a lease holder free (a live holder keeps its
@@ -6362,3112 +6038,45 @@ UMask=0077
 # WorkingDirectory is unset: the systemd user default is HOME.
 ```
 
-## 5. The terminal interface
-
-Before opening a session, `plak` and every resume path that opens a TUI
-try this home's `host/run/<state-key>.sock`. With an answering host of the
-same wire version they use wire v2 over that socket, not an embedded
-session. A missing or refused connection (a stale socket included) falls
-back to embedding only when the host lock is free; a starting or stopping
-host gets the bounded retry below. Once a connection answers, handshake failures refuse
-the launch; a different wire version names the remedies: stop the host
-by sending SIGTERM to the plak host process, or running
-`systemctl --user restart plak-host.service` if it runs as the installed unit;
-or run its build. It never embeds beside that peer.
-
-A starting host re-asks a contended `host.lock` up to forty times, 5 ms apart, before
-refusing an existing holder. A momentary discovery probe therefore does not
-make the host fail to start; the held lock remains the authority.
-Discovery treats a proved-dead pid as absent. Live, inaccessible, empty or
-unparseable pid hints are confirmed against the kernel lock: a contended lock
-means a starting/stopping host, while a briefly acquired and immediately
-released lock proves a stale file. PID reuse never proves a host present.
-Normal host drop truncates the pid text while still holding the lock; crash
-leftovers remain safe through the same kernel confirmation.
-
-In host mode the resume picker reads `list_sessions` for the workspace,
-and `/new` sends `new_session` with a fresh request id, then attaches the
-created root. Resuming or creating switches this terminal's attachment
-only; other faces and the old session's work remain in the host. Quit,
-terminal close and terminating signals detach. `/stop` sends
-`stop_session` for the attached session and leaves the face attached.
-Its acknowledgement is local terminal chrome, not a host transcript preview:
-it survives a same-session presentation baseline, including when a repeated
-stop writes no new notice. It is not persisted or carried to another session.
-After transport loss the TUI reports `product host disconnected`; it
-never retries a prompt automatically. Once the host restarts, `/attach`
-makes a fresh connection and root attach, or the operator can quit and
-run `plak resume` again.
-
-The hosted launch API is frontend-neutral: `HostLaunchPreparation`,
-`HostLaunchMode` and `HostLaunchNativeModelFact` carry launch facts;
-`spawn_deferred_host` starts the host independently of a terminal driver.
-`StartupTimingPhase` and `ProductObservation::StartupTiming` carry lifecycle
-measurements. Their telemetry kind spellings (`tui_process_start`,
-`tui_first_frame_local`, `tui_ready_to_type_local`,
-`tui_host_ready_background`, `tui_key_to_restore`, `tui_restore_to_exit`)
-remain unchanged.
-
-The TUI is a chat surface, not a dashboard: the transcript is the main activity
-area, with a composer beneath it and exactly one row of motion between them.
-Everything else — settings, models, providers, usage, context, session facts,
-keybinds — lives in one modal, and the agent tree lives in Activity's Agents list.
-
-The `tui` module of `bin/plak` renders typed views and emits typed intents. It reads no
-configuration file, resolves no session id, holds no scheduler, and paints no
-optimistic transition. A key emits an intent; the next host snapshot is the
-frame.
-
-Local process-start, first-frame and ready-to-type timings are observed
-separately from background host readiness. The warm-machine local targets
-are a first frame under 200 ms and typing under 500 ms. Catalog and credential
-checks run off the UI thread; a draft can be edited while submission waits on
-host readiness. Transcript replay does not block input. Once the first
-interactive frame is painted, the attached host schedules one passive runtime
-WAL checkpoint in the background, never before that promptable boundary.
-Finite launch timings, and the previous exit's timings this open imports at its
-first frame, are buffered while telemetry is not ready, emitted on writer
-registration and retried at TUI teardown, without requiring another phase.
-
-Executable SHA-256 identity calculation also runs in the background: the launch
-banner shows `binary calculating` until the cached twelve-digit identity is
-available, then repaints without waiting on the input thread. Version and export
-commands still use the completed identity. The syntax highlighter's grammar set is
-likewise loaded, and the shell grammar compiled, on a background thread at
-launch, so the first command row never pays for either inside a draw; a
-warm-up that has not finished, failed to start or panicked leaves a draw to
-initialize on demand as before. Launch timing observations retain
-their measured timestamps until the background telemetry writer is registered;
-recording them never opens or flushes a database on the input thread.
-
-Startup refreshes every Ready native provider except the provider of an
-attached host, whose catalog was resolved during attachment preparation. A
-selected account in a detached shell does not suppress refresh. Refreshed rows
-are published to the TUI; `/attach` retries attachment against that catalog.
-
-### 5.1 The slash catalog
-
-The protocol-5 host TUI launches with optional `--runner <name>` and
-`--workspace <path>`. Resolve aliases through host options and validate the
-selected runner's path before creation; do not canonicalize remote paths on
-the client. These are not run/agent flags. A missing/refusing host is an
-explicit failure, never embedded/local fallback. Host `/new` uses the home
-default profile on its selected placement; embedded NewSession stays
-payload-free. A chosen profile is frozen by host new_session, not by changing
-the process-wide roster source.
-
-Changing branches or sessions while the source has running promoted processes
-is refused before durable product work: `N background processes are running;
-stop them first (/ps)`. This applies to profile rebinds, ordinary
-forks and fork-then-compact, a new session (`/new`), resume/session switch,
-and their workflow requests. Pending terminal notices alone do not refuse a
-transition.
-Same-branch recovery and authority refresh transfer the process service instead;
-compaction preserves that branch's jobs.
-
-The catalog is **closed**. Twenty-five commands ship, and a command that does
-nothing but announce a deferred capability is not one of them:
-
-`/help`, `/keybinds`, `/status`, `/settings`, `/agents`, `/providers`, `/mcp`,
-`/usage`, `/context`, `/attach`, `/recover`, `/new`, `/compact`,
-`/config`, `/resume`, `/tree`, `/ps`, `/stop`, `/stop-all`, `/fork`, `/fork-then-compact`,
-`/drop`, `/image`, `/reload`, `/rebind`, `/quit`. Two spellings are accepted aliases rather than extra rows:
-`/stop_all` for `/stop-all` and `/exit` for `/quit`.
-
-A command whose grammar is the bare word — every row except `/agents`,
-`/resume`, `/tree` and `/image` — refuses trailing
-text with a one-line system note, `usage: /<name>  —  takes no arguments`, and
-does nothing else. `/compact now` starts no paid compaction and `/new all`
-starts no session. `/clear` is not a command and answers the unknown-command
-note. `/fork` and `/fork-then-compact` refuse with their own usage line. The
-argument-taking commands keep their grammar below.
-
-`/new` starts a new session in the same TUI: a new runtime session and agent
-tree with empty history, on the current binding, composition and frozen root
-tools. It runs the session workflow §2.6 records as `new` (its operation ids
-are `plak:new:<uuid>`), submitted by the host intent `NewSession`; the JSONL
-`clear` command and the `clear` host phase, which are wire vocabulary, keep
-the name. The
-previous session is not changed and stays resumable with `/resume`. One TUI
-hosts one session, so `/new` while this session has running agents or
-background processes does not switch. A confirmation names that work (`N
-running agents: interrupted, resumable.`, `N background processes: stopped;
-work in flight is lost.`) and offers `[ Stop work + new ]`. That button stops
-every background process, as the Processes tab's stop-all does, and starts the
-new session once none runs; the switch's release of the previous session
-interrupts its running agents, which resume with it. A process still running
-10 seconds later drops the switch with `new session not started: N background
-processes are still running; stop them in /ps, then run /new`; a prompt or
-another session command sent meanwhile drops it too. While the root turn runs,
-`/new` answers `new session: available when idle (finish or interrupt the
-turn)`.
-
-`/mcp` opens a read-only panel: every configured MCP server with its
-transport, scope, the templates that enable it and any secret it names that is
-not stored; whether the current session bound it and with how many tools, and
-when the session was bound with a different definition than the current one,
-`bound with an earlier definition; new sessions get the current one`; the
-tools the session's bind left out with their reasons, as far as the session's
-bounded transcript still holds those notices (an omission is not otherwise
-recorded with the session, so an old one may no longer be listed); and the
-`plak mcp` commands that add, test and enable a server. It edits nothing,
-starts no server, and reads the session's frozen tools only when it opens.
-
-`/image <path>...` attaches image files to the draft (§5.9); bare `/image`
-answers `usage: /image <path>...  —  attach png, jpeg, gif or webp files; Ctrl+V
-(not Cmd+V) attaches a clipboard image`.
-
-Bare `/tree` opens the Agents list. Any tree argument is refused with its
-usage.
-
-`/rebind` carries the full neutral conversation, committed session-owned named
-JSON state and typed transcript into a new
-session at genesis, resolving the source account, model, effort, composition
-and target selection under the current login. Only an account removed from
-the product or a model/tuple missing from a Ready catalog permits fallback to
-the configured root binding, with an explicit notice. A policy, presentation,
-feature-admission or non-Ready catalog failure keeps the source selected and
-reports the cause, never substitutes the config root. It works
-when the root is unattached: export reads canonical history without exact
-runtime reopen. The source is unchanged, the new session is linked as
-`carried forward from <id>`, and a transcript notice names the cause. Provider
-replay is kept with offline replay validation when the binding is unchanged;
-a changed binding strips it rather than relabeling it for a new account. Missing or invalid
-configuration, an unexportable source or failed import leaves the selected
-source open with a repair notice. It is refused while the root turn, children
-or background processes are live, including non-terminal children in the
-persisted source tree even when the root is unattached. Queued prompts carry paused, never dispatch
-automatically. No shell export/import round trip is required.
-
-An unattached exact reopen refusal names the account or the specific frozen
-binding input that differs (`resolved harness plan is bound to a different
-<change>`, chapter 01 §5.4). When the current credential belongs to another
-provider account than the one the session was recorded under, the refusal is
-the account change (`AccountChanged`, with the restore-account-or-rebind
-remedy) even if an account-scoped binding input, such as a Claude OAuth context
-contract naming the account, differs with it; that input stays named for
-`/reload`'s carry. Its repair notice carries the binding remedy
-(§5.4), which the TUI renders with the one carry command first: carry the full
-history into a new session with `/rebind`; restoring the original
-account/configuration with the named login command reopens it exactly instead.
-The detached notice is the `attach failed: <diagnostic>` row, with no remedy,
-then one repair row that carries the remedy. The repair row's text neither
-restates the remedy nor repeats the diagnostic's cause, so each remedy is
-stated once; an agent tree held by another plak process is the exception,
-whose row also names quitting that plak or `plak tree release --force
-<tree-id>`, which the generic repair remedy cannot name.
-`plak --resume <id>` of such a session opens unattached with that reason and
-guidance. `/reload`
-from that refusal takes the same in-process carry path. A missing login or
-quarantined credential alone is not a binding mismatch and is repaired with the
-named login command.
-
-`/reload` restarts on the installed build before applying changed epoch-scoped
-orchestration/roster settings. On a same-state resume, the destination process
-compares the effective orchestration values and template selection fields
-stored in the source snapshot with the current effective values. It does not
-compare rendered epoch digests: build-owned bind hints and digest/render-recipe
-changes alone keep exact resume, including across
-successive builds that still reopen the original snapshot. Changed effective
-bounds, roster or template values (including description, cost tier, model
-visibility and template names) carry whether the change came from an
-explicit config edit or a changed default. A changed value on an idle session
-with no live children or background processes takes
-the same carry and
-records `orchestration settings changed; carried into a new session to apply
-them`, linked to the source. The new tree freezes current bounds and roster
-and recompiles root tool descriptions at genesis. The source account, model,
-effort, composition and target selection are preserved and revalidated under
-the current login, never replaced by config defaults; replay is validated as
-for a local reload handoff. The source tree is not mutated. Committed named
-state survives both `/rebind` and the orchestration carry;
-neither path treats transient program variables as portable state. Unchanged settings
-keep the exact reopen path. An unreadable config or tree skips orchestration
-apply with a notice (`settings apply to new sessions`) and continues the normal
-reload. A cross-state import already freezes the destination's current roster
-and bounds at genesis and never creates a second carry for the same reload.
-Ready-catalog classification is only a `/rebind` fallback decision. Attached
-actions, carry-capacity probes and plain imports resolve their bound target
-even when the picker catalog is not Ready; runtime admission still validates it.
-If canonical creation commits but release or product persistence fails, the
-carry returns the committed successor and its locator with that failure. The
-TUI selects that successor and names it in a repair notice, rather than
-remaining on the source and creating another successor at the next reload.
-
-For a host-mode launch with `--runner local` and no `--workspace`, the client
-probes its own launch directory as the workspace (§2.1), not the host's launch
-directory, a recent or the runner's default. The probe goes through normal
-workspace admission; launching inside the product home still receives the
-typed product-home refusal and creates no session.
-
-In host mode `/reload` probes and re-execs the terminal client only. It
-restores the terminal and detaches, then execs the installed client with
-the same session id; the session remains resident in the host, with no
-export, carry, planned handoff, release or host restart. Build checks and
-the installed-client probe run locally, never as local-face-only intents
-on the host socket. A target with another or unknown state key refuses
-with a stop-host/run-its-build remedy, rather than accidentally opening
-an embedded session on another key. Running processes do not refuse a hand
-reload in host mode: they belong to the host or its daemon and survive the
-client replacement. Embedded reload keeps its background-process refusal.
-The exec carries a private host-only resume marker: if no host answers the
-replacement client, it refuses with `the host stopped; start it, then plak
-resume <id>`, never embedding or taking session custody.
-
-Socket discovery applies the same-user run-directory, socket-owner and
-peer-uid checks (§4.6, chapter 04 §4.7). An unbindably long socket path
-cannot name a host and embeds. For a missing or refused connection it
-try-locks `host.lock` without blocking: only a free lock permits embedding.
-A held lock retries connection for at most 10 s, then refuses with
-`plak host (pid N) is starting or stopping; retry`. Other connection errors
-refuse with their message. Only the welcome is bounded by the 10 s
-handshake deadline; no socket receive timeout remains on the follower.
-
-A directory row held elsewhere refuses locally, naming its holder and
-pid with the use/release/stop remedy. A refused attach is a per-request
-outcome, not a transport end: it preserves the previous attachment and
-selection. The selected session changes only after `attached` or `binding`.
-Transport-loss notes include the ended reason. Stop and resume refusals,
-and stop/attach outcomes unknown at timeout or transport end, are visible.
-An unanswered `new_session` retains its request id across reconnect; the
-next operator `/new` reuses that id rather than creating an orphaned second
-session. It is never replayed automatically. An explicit resume or selection
-retires that unknown creation identity; automatic reselection after retrying
-an attachment or returning from the config editor preserves it. An accepted creation also retires
-it, so successive `/new` acts create distinct sessions. `/stop` is host-mode only and
-hidden from the embedded palette. Config-editor return reloads terminal
-preferences before opening the terminal again.
-Every hosted-client UI loop iteration re-reads local preferences, including
-relaunches after session resume and rebind as well as retry and config editing.
-Declining the launch resume picker explicitly creates and attaches a fresh
-session; reconnecting with an unknown creation instead lists sessions and
-waits for the operator's next act.
-
-In embedded mode the normal reload handoff carries the session forward when
-that build has another state key, or the same key and an exact-reopen verdict
-of `binding_changed` (§2.5.1). It is refused while background processes are
-live, or when no installed `plak` resolves on `PATH`, so a refusal never
-closes the TUI. A running root turn and running or parked sub-agents do not
-refuse a reload that resumes the same session: the reload is a planned
-handoff, the host records each of them as handed off before it releases, and
-the new build continues each once by itself (chapter 03 §14.1). A reload that
-carries into a new session (another state key, or a binding the new build
-derives differently) still refuses while a turn or sub-agents run, since its
-successor is another session; the host's probe decides that, from its phase
-and its attached tree. A prompt that starts a turn while the installed-build
-check runs refuses the reload as a changed conversation. Asking the installed
-build its state key is the session's host's (the product surface's
-`probe_reload`, answered off its thread by `reload_probed` with the target and
-this build's refusal of it, or `reload_probe_failed`): the transcript reads
-`checking installed build…` while the TUI stays responsive, and the refusals
-are checked again when the answer lands.
-Otherwise the TUI quits through the ordinary
-handoff path — host worker joined and session released, then the terminal
-restored — and the process replaces itself (`exec`) with the executable its own
-`argv[0]` now resolves to on `PATH`, invoked as `plak --resume <id>` with the
-same `argv[0]`, so the successor keeps detecting newer installs; a shell that
-never committed a session starts fresh instead. If `exec` itself fails, the
-process prints the ordinary resume line and exits. Every five seconds the TUI asks
-its session's host (the product surface's `check_build` intent, answered by
-`build_status`), which compares that resolved file (path, inode,
-modification time) with the one it is running; while they differ the
-composer's hint-line guidance reads `new build installed · /reload`. A process started by absolute path resolves to
-that path, so a rebuild in place is still detected. The exception is a path
-inside an installer snapshot (`<prefix>/lib/plak/{maintainer,release}/<64
-hex>/plak`, chapter 06): snapshots are immutable, so such a launch follows its
-flavor's current install instead, the file `plak` on `PATH` resolves to when
-that is a snapshot under the same `<prefix>/lib/plak/<flavor>` directory. A
-`PATH` that resolves to another flavor, a development build or nothing leaves
-the snapshot itself. A reload whose target is the very file the process runs
-prints, before it re-executes, a line beginning `reload reopened the same build
-<path>` that says no newer install of its flavor resolves on `PATH` and that
-moving to another build means quitting and running it with `--resume <id>`.
-The background-process refusal is `reload refused: background processes are
-running; stop them first (/ps)`. A process-local shared count reaches the shell
-before the host publishes an idle boundary. The idle host re-reads live jobs on
-each observation poll, and the TUI refreshes its process snapshot before handling
-input; a process exiting while the root idles stops blocking `/reload` without
-another turn. Pending notices alone do not refuse reload. This count is neither
-a JSONL command nor durable authority.
-
-A running interactive session can also be asked to reload by this user's own
-processes, including the agent's shell: `plak session reload <session>
---expect-binary <binary-id>`. Requests are off unless the operator sets the
-home-scoped `tui.reload_requests = true` (chapter 07 §3).
-In host mode the service announces every resident session in
-`run/reload-requests/`, polls the channel and refuses requests without any
-client connected. Every request it takes is settled as `refused`, with the transcript note
-``requested reload refused: this session runs in plak host (build <host
-binary id>); restarting the host moves it onto the installed build (send SIGTERM
-to the plak host process, or run `systemctl --user restart plak-host.service`
-if it runs as the installed unit)``; the build parenthetical is omitted when the
-host build is unknown. It never records `reloaded`, posts a continuation,
-redispatches work or hands the session off. A hand `/reload` still replaces
-only the client. Moving a hosted session to another build is a host restart
-(the SIGTERM handoff and start scan), not a client act.
-
-The service validates its announcing nonce, leaves another live announcement
-in place and removes only announcements it owns. A private, transient
-announcements lock serializes the live-pid check with publication. Client
-disconnect never withdraws the announcement; release or movement of the
-session removes the old announcement. An embedded requested reload landing in a running
-host takes its handed-off request and settles `refused` with `the session
-now runs in plak host` and the same restart remedy, never `reloaded` or a
-host-authored continuation.
-
-For an embedded TUI the command refuses
-unless the requesting `plak` is itself build `<binary-id>` (the agent runs the
-installed `plak`), and unless an interactive `plak` announced the session (a
-full id, or a prefix that only one announcement matches) and that announcing
-process is alive; the host checks the installed build again before it acts
-(hidden `version --reload-probe` carries the answering build's binary id when
-that build's manifest or the home's identity cache names it; an id it does not
-report is unknown, never assumed, and refuses the request). The
-channel lives in the home's transient `run/reload-requests/` directory,
-outside `state/` and so outside every state key's directory, so a requester of any build
-reaches a session whose host runs another state key. The command queues the
-request, echoing the announcing host's instance nonce, and returns at once,
-printing `reload requested for session <id> onto build <binary-id>; it runs
-when the session is idle; outcome: <path>`. A request still waiting is
-replaced by a newer one and its outcome reads `{"outcome":"superseded",
-"by":<request>}`; a request for another instance of the host (one that was
-restarted since the request was written) is refused with an outcome saying so,
-and a host discards any request it finds when it announces itself. A host
-whose announcement file vanished, or now carries another instance's nonce,
-re-announces on its next installed-build check. The announcement belongs to
-the session's host (its product surface), made on the TUI's build check and
-withdrawn when that host ends. A request of another version
-is refused with `unsupported request version`. Because `run/` is not state, no
-legacy-state notice, `plak doctor` report or `plak state prune-legacy` lists
-or removes it. The
-channel, its permission model and its targeting rules are chapter 04 §4.6. The
-session's host takes a queued request for the session it serves on the
-TUI's installed-build check (every five seconds, one check outstanding at a
-time) and offers it to the TUI (`reload_requested`) on every check until
-the TUI acknowledges it (`accept_reload_request`); a request no face took
-before the host ended is refused `not taken`. A request belongs to its
-session: when the host leaves the session for another in place (`/new`,
-`/resume`, a fork or a rebind), it records every request it holds for the
-session it leaves (accepted, offered or still waiting) as `not taken: the
-session switched` before the switch completes, and withdraws that session's
-announcement; none reaches the next session, and the TUI drops any it holds
-for another session. A round that hands the terminal back to resume another
-session reports the requests its TUI still held, and the launch settles them
-the same way once the old host has ended; a reload carries its own request in
-its handoff instead, and a switch back to the same session settles nothing. An
-outcome that cannot be written is logged (`plak.reload`) and the request
-dropped, never carried over. The TUI notes `reload
-requested onto build <binary-id>; it runs when this session is idle`, and performs it at the next idle boundary: never during a turn, so a
-request from the agent's own turn runs after that turn ends. If
-background processes are live at that boundary it refuses instead of waiting
-(running sub-agents are handed off)
-(`requested reload refused: <reason>`). Otherwise it runs exactly `/reload`:
-the same probes, exact-reopen verdict and one-step carry. It refuses, and does
-not hand off, when the installed build now reports another binary id, when the
-probe or verdict refuses, or when a carry would need the capacity confirmation
-an operator gives (`/reload` by hand confirms it). Every refusal is noted in
-the transcript and written to the outcome file as
-`{"outcome":"refused","reason":...}` by the session's host, which the TUI
-hands the refusal (`refuse_reload_request`, after the request's own
-acknowledgement and retried while the host's mailbox is full; the TUI
-records it itself when no host that handed the request over is left);
-every outcome file carries a `version`.
-A handoff passes the request to the new build in the reload handoff sidecar
-(§2.5.1), never the environment, whether the reload resumes (`--resume <id>
---reload-handoff <file>`) or carries; the new build honors it only with a
-well-formed request id and session id (UUIDs) and binary id. When its own
-binary id is the requested one it writes `{"outcome":"reloaded","binary":...,
-"session":...}` (the carried successor when it carried) and posts one
-host-authored continuation to the root at its first idle boundary: `Plak
-reloaded this session onto build <binary-id> exactly, as requested.` (or `and
-carried into session <new> from <old>`) followed by `Continue the current task,
-or reply briefly if nothing remains.` When it is another build it records a
-refused outcome and the continuation says the reload landed on build
-`<binary-id>` but the request named another, so the requested build is not
-running. The continuation is a root host wake: the same journaled instruction
-submission, crash and reopen rules as an idle wake (§2.6), so a crash before
-its fact withdraws it with one notice and never resubmits it. The host
-consumes a request file when it takes it; a crash before the outcome is
-written leaves no outcome and the request is not retried, and a crash after
-the handoff but before the new build records its outcome leaves the reload
-itself governed by the ordinary handoff rules (§2.5.1). Requests are
-process-local intent, never session state: none is exported, carried or
-recovered. Outcomes nobody collected are pruned after seven days.
-
-There is no `/skills`, `/sandbox`, `/workflows`, `/login`,
-`/connect`, or `/load-api-key` — not in the catalog and not in completion.
-There is no `/model`, `/account` or `/effort` either: the session's binding
-(account, model, effort, Fast, composition, protocol) changes only through
-templates and profiles — the Agents tab's **Fork now**, **Use now** on an
-unattached session with no conversation, **Set as default** for new sessions, or a new session
-(including `/rebind` carrying history under the current root configuration).
-Each of those names is an unknown command with the ordinary unknown-command
-note.
-`/help` names deferred capabilities in prose instead, which is the honest place
-for them.
-
-What the argument-taking ones do:
-
-| Command | Arguments |
-| --- | --- |
-| `/resume` | bare opens the cwd-scoped picker; a uuid resumes exactly; any further word is refused and does nothing |
-| `/agents` | bare opens the Agents tab; `<profile>` resolves the name against the product's list (an exact id, then an alias the list shows) and asks whether to use that profile in this session now or set it as the default for new sessions |
-| `/fork` | takes no argument. Forks on the current binding with the source's history into a new node in a tree of its own (chapter 03 §1.2): the fork's tree, keyed by its session id, starts from the source tree's current epoch byte for byte, records the source node, line and branch it came from, and carries none of the source's children, mail, workspaces or candidates, so a source candidate is not adoptable from the fork; while the source's tree has a live child or a spawn mid-mint the fork is refused with `cannot fork while this session's sub-agents run: ...`, since they stay with the source. Recompiling the session's current configuration for the same target: the `AGENTS.md` files and the skills listing as they are now, under the source's skills on or off rather than the live `skills.enabled` (§6.1.1), harness settings and tool presentation (chapter 01 §5.6). A fork whose tool authority changed since the session started is refused with `cannot fork: this session's tools changed; start a new session`. When any `AGENTS.md` or the skills listing differs from the source's, the transcript note names each by scope as changed, added, or removed (`AGENTS.md re-read for this branch: ...`, or `AGENTS.md and skills re-read for this branch: ...` when either side has a skills listing), also when the fork is saved without attaching. Recovery of an interrupted fork first reads its receipt before anything opens: a recorded fork becomes current; otherwise the source opens and the fork recompiles the same way, with the same note. A recovered fork that is refused outright (another target, changed tool authority, an operation published with other semantics, storage pressure) is abandoned: the session opens unchanged with the abandoned-fork note and the refusal, and does not retry it. A different profile is `/agents <profile>`. If the canonical fork lands but its session cannot attach, the fork is saved as its own resumable session, the workflow resolves, and this session stays attached and promptable; the note names the saved session. A stop before canonical dispatch leaves the exact source unchanged; a stop during successor projection says `fork stopped; saved as session X` and offers `/resume X` with the source still attached |
-| `/fork-then-compact` | takes no argument. Forks on the current binding, then compacts only the new session. If compaction fails, the fork stands and `/compact` retries it |
-| `/stop-all` | the whole-tree verb (chapter 03), sent only from the destructive confirmation pop-up (§5.7) |
-
-The `--effort` CLI flag, a template's `effort`, and a persisted session effort
-share one ladder — `none`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` —
-parsed case-insensitively from one table, so the surfaces cannot drift. `none`
-is an explicit level; an unset effort stays non-explicit and is not rewritten
-as `none`. An unknown stored spelling is refused rather than reconstructed as a
-default. A token budget is deliberately not a named level.
-
-Login, logout, and API keys have **no slash command**, and templates, the
-roster, and orchestration have no editor: those are `plak config set` and the
-config file. `/help` states both routes rather than leaving the absence to be
-discovered.
-
-The palette opens whenever the draft starts with `/`. Arrow keys wrap through
-the fuzzy-filtered list. `Tab` completes the highlighted row into the draft
-only when the typed command word begins its name, and otherwise does nothing.
-`Enter` selects the highlighted row when the filter is a bare word that begins
-its name, and otherwise submits the line as typed: a fuzzy match is never run
-by `Enter` or written into the draft by `Tab`, so `/tmp` reaches the
-unknown-command note, not `/fork-then-compact`. The irreversible commands,
-`/new`, `/compact`, `/fork-then-compact`, `/fork`, `/drop` and `/recover`,
-run from `Enter` only when the typed word is the full name: `Enter` on a
-shorter word completes it exactly as `Tab` does and runs nothing, and an
-`Enter` within 600 ms of that completion, the draft unchanged, runs nothing
-either. Every other command keeps the prefix rule.
-Each row is the command and a short first-time-user sentence of the effect —
-`View session status`, `Select a model` — not the Menu tab name.
-Rows that take an argument also show a short hint (`<id>`, `<profile>`,
-`[resume]`, `<path>...`). The full grammar stays in `/help` notes and in the
-refusal line when a command is invoked wrongly. `/resume` with more than one
-word refuses and does nothing.
-
-`/help` is a **generated sheet**. Its body is one row per catalog entry with
-that command's own help text, the deferred-capability paragraph, the CLI-only
-directions built from the same account placeholders the Providers tab uses,
-and then the whole keymap sheet — the same generated text the Keybinds tab
-renders. It scrolls with the same scrolled-text renderer as that tab, by line,
-by page, and to either end.
-
-### 5.2 Keybinds
-
-On kitty-protocol terminals the UI requests exactly disambiguated escape
-codes, event types and alternate keys (flags 1 | 2 | 4), never report-all.
-Printable input remains the terminal's own composed text, preserving the
-active keyboard layout, dead keys and IME input. For encoded shifted printable
-keys, crossterm supplies the shifted character and clears `Shift`; bindings
-accept that form as well as an explicit `Shift` modifier. Non-printable keys
-such as `Enter`, `Tab` and arrows retain `Shift`. Bare modifier-key events and
-key releases are ignored before they change typing state, double-tap arms or
-input routing. Terminals without the protocol retain their legacy encodings:
-some chords are indistinguishable, so the fallbacks below remain necessary.
-Even with event types requested, repeats of unmodified `Enter` and printable
-keys arrive as ordinary presses, just as on legacy terminals; repeat filtering
-cannot distinguish those from separate presses.
-
-`Ctrl+B` backgrounds top-level foreground process calls already running. It is
-a no-op when no foreground command runs, including while idle or while only a
-nested command runs. It leaves the composer draft unchanged.
-
-
-One registry is both the input layer's source and the sheet's, and a test
-asserts the two agree exactly — a binding in one and not the other is a defect.
-The sheet groups by the context in which a binding applies: **global**,
-**composer**, **transcript and queue**, **agent transcript**, **Menu**, **Agents list**,
-**Activity processes**, **resume picker**, **help overlay**, and **confirmation**. Double-tap bindings
-print their window in milliseconds on the sheet rather than leaving it to be
-learned.
-
-**Global.** `Esc` closes the focused owner and opens the turn stop pop-up (§5.3) for a running turn, including a prompt or follow-up sent before its busy edge.
-`Esc Esc` within 800 ms clears an idle draft, recoverably. `Ctrl+C` is the
-ladder of §5.3 with its 1000 ms confirm window. `Ctrl+Q` quits (§5.3). `Ctrl+X` cuts
-the composer selection, and **with no selection opens Menu on its last-used
-tab** (initially Session) — the sheet states that dual role rather than leaving it implicit,
-and there is no `Ctrl+.` alias. `Ctrl+T` opens the last Activity tab, or closes Activity when it is already open (including while an agent's transcript is the Agents body), `Ctrl+O`
-opens or closes the focused transcript row (or the last clickable one), `Ctrl+D` drops the selected queued follow-up when the queue is focused and otherwise is the composer's forward delete,
-`Ctrl+Shift+O` (or `Alt+O` without the kitty keyboard protocol) clears every
-per-row override and folds everything that is open; with nothing open it opens
-every group, code cell and thinking row, never every item's detail, and `/` opens the palette only from an empty composer. `?` on an empty composer opens Keybinds when no typing key came in the last 300 ms; in a draft, or right after typing (a draft just emptied with `Backspace`), it is literal text.
-
-**Composer.** It is a readline-class editor: `Enter` sends when idle and queues
-when busy, `Shift+Enter` and `Alt+Enter` insert a newline, `Ctrl+Enter` and
-`Ctrl+S` steer when busy and send-now when idle, `Ctrl+A`/`Ctrl+E` move to the
-line ends, `Ctrl+U`/`Ctrl+K` kill to them, `Ctrl+W` and `Alt+Backspace` delete
-the word before the caret, `Alt+B`/`Alt+F` and `Ctrl+←`/`Ctrl+→` move by word, `Alt+D` deletes the word after
-the caret when no effect decision is open, `Ctrl+D` deletes the character after it,
-and `Ctrl+Z`/`Ctrl+Shift+Z` undo and redo. Killed text goes to the same
-clipboard target as a cut, and select-all is its own gesture rather than a
-kill key. `↑` on an empty draft opens prompt history. While busy, `Enter` on an
-empty draft sends the oldest queued follow-up now, but only when no typing key,
-`Enter` included, came in the last two seconds, so a doubled `Enter`, even a
-beat apart, or a paste's trailing newline sends nothing more.
-
-The Command key (macOS) or Super key, which kitty-protocol terminals report as
-the same modifier, mirrors the common chords: Cmd/Super+C copies a selection,
-Cmd/Super+X cuts in the composer, Cmd/Super+A selects all, and Cmd/Super+Z /
-Cmd/Super+Shift+Z undo / redo. Cmd/Super-modified keys never insert text in
-any input. Terminal-managed Cmd+V remains bracketed paste. Ctrl+C copies
-and clears an active selection; modal dismissal outranks copy, and without a
-selection the interrupt/quit ladder applies.
-
-Transcript drag endpoints are stable block-space anchors, resolved after
-rebuilds, including front eviction. A drag arms only beyond the down cell.
-Composer clicks set the caret without selecting or unnecessarily scrolling;
-caret-follow moves the visible window only when the caret leaves it. Wheel
-scrolling retains the gesture for 100 ms after the last event so the caret
-cannot flicker the view back.
-A composer selection dragged past the top or bottom row of the composer's
-visible window scrolls the draft one visual row per autoscroll tick at the
-transcript's drag-autoscroll cadence and keeps extending the selection to
-the newly exposed row; it stops when the pointer returns inside the box or
-the button is released. Copy then takes the whole selected range, including
-rows scrolled out of view.
-A modal or overlay taking input, or a pane switch, cancels the composer drag
-without changing its selected range; a release swallowed by that surface cannot
-leave background autoscroll running.
-
-**Transcript and queue.** The wheel scrolls; a click on
-an activity summary focuses and toggles it in one gesture; `Enter` toggles the
-focused activity group or code cell. `Tab` focuses a non-empty queue, where only
-the arrows act: `↑`/`↓` select and `Shift+↑`/`Shift+↓` reorder. Every other
-key (any printable key, `Backspace`, `Delete`, `←`/`→`, `Home`/`End`) leaves
-the queue for the composer and acts there, at any typing speed and after any
-pause, and so does a paste; `Esc` and `Tab` leave it. `Enter` sends the
-selected follow-up now, as `Ctrl+S` does, including on a restored-paused drain,
-and returns focus to the composer, leaving the draft untouched. A doubled or
-held `Enter` then reaches the composer: with an empty draft it sends nothing
-within the 2 s empty-Enter gap; with a non-empty draft it sends the draft.
-Where delivery is unavailable, `Enter` only leaves the queue. The queue's commands are chords and chips, never typing,
-and the chords act only on the focused queue: `Ctrl+D` drops the selected
-follow-up, `Ctrl+E` loads it into the draft to edit, and the queue title reads
-`editing queued follow-up · Enter saves · Esc cancels` while the queue is
-unfocused. The draft it replaced returns as one undoable step when the edit
-ends: `Esc` cancels it, an applied save restores it, and an item that leaves
-the queue mid-edit merges its text with it. `Ctrl+R` resumes a restored drain (it is the one Resume after a lost host: it also resumes the root's held continuation and every held child, chapter 03 §14.1), and `Ctrl+S` (or
-`Ctrl+Enter`) sends the selected follow-up now, whatever the draft holds. A click on a row's `[now]` or `[drop]`
-chip fires that action; the hit target is the painted chip, not the panel's
-trailing edge, and a chip fires only once it has been painted at that position
-for the same row for 300 ms, so a row the drain just moved under the pointer
-is not hit. `Alt+A`/`Alt+D` on the composer path ask to allow or deny an open
-effect decision in the destructive pop-up (§5.7), which names the tool and the
-subject (on macOS the terminal must send Option as Meta); a legacy terminal
-reads a typed `Esc` and the next letter as one `Alt` chord, so the chord never
-resolves on its own.
-The open approval row carries clickable `[allow]` and `[deny]` chips; a click
-resolves in one step once that approval's chip has held its place for 300 ms
-(the settle is keyed by approval, position and choice, so the next approval's
-chips start fresh even where the last one's were painted). Their hit
-targets are recorded from the header row's chip columns: the status that
-carries them ends the header after the model-written subject, so text in the
-subject or the prompt never moves them. The hint reads `[allow] Alt+A · [deny]
-Alt+D`. A bare `a` or `d` is always typed, focused approval row or not. Over the
-composer a printable key that reaches the pop-up closes it and goes into the
-draft, so typing never resolves the approval. `Esc`, or another `Alt` chord,
-cancels.
-
-**Transcript item navigation.** `Alt+↑` and `Alt+↓` move a focus marker
-through the drawn transcript items: a prompt or steer, an answer, a tool
-block, a process or retry row, a notice, and a thought, mail, milestone or
-approval that is actually drawn. A session header is not an item. A row folded
-into a group or a cell is skipped until that fold is opened. The first
-`Alt+↑` from the composer focuses the last item; the first `Alt+↓` focuses
-the first. Further presses, and bare `↑` and `↓` while the marker is active,
-move it and stop at the ends without wrapping. The viewport scrolls only as
-far as that move, or a resize, needs to keep the focused item on screen; the
-wheel and page keys are not pulled back. `Enter` or `Space` toggles the
-focused block where that block folds today, and does not send the draft or
-insert a space. `Alt+C` copies the focused item: the same text as a drag that
-covers every row of that item from its first cell through the width of the
-transcript. `Esc` leaves navigation and clears the marker. It does not clear
-the draft, open the stop pop-up, or pause auto-continue; the next `Esc` is
-the ordinary key of §5.3. A printable key, or a composer caret key, leaves
-navigation and is handled by the composer, including `/` and `?`. `Ctrl+C`
-is never part of this mode: with or without the marker, including during the
-sent-prompt window of §5.3, it is the copy-or-ladder key and nothing else.
-The slash palette, prompt history and the focused queue keep their own arrows;
-navigation does not take those keys, and a key that leaves the queue for the
-composer also leaves navigation. The same marker works on an agent transcript.
-There `Esc` leaves navigation before returning to the Agents list, bare `↑`
-and `↓` move the marker only while it is active and otherwise scroll, and
-the agent's letter keys keep their meanings. Each transcript keeps its own
-marker, so the root's is still there when the agent view closes.
-
-**Menu, Agents list, Activity processes, resume picker, help overlay, and
-confirmation** are covered in §5.5 and §5.7.
-
-Idle interactive roots auto-continue on pending process notices or unread
-child results or questions when `[turn] auto_continue` is enabled (default true). A 2 s
-quiet window coalesces completions. Content-free `plak.wake` logs report each
-wake decision/reason transition with mail and process-exit counts and quiet
-window age. Admission of any root turn resets idle starvation accounting and
-decision deduplication, so each idle period logs its first decision. Earlier
-automatic work records a deferred wake decision (`automatic_precedence`, or
-`placement_pending` while its runner is held), rather than appearing starved.
-If wake work stays unread with host wakes enabled and no decision
-runs for over ten seconds, tree observation warns once until a decision runs
-or the work clears. The warning includes received action-class counts and
-host-wide transcript gap-repair ask counts by root/agent scope since the last
-check; these counters are diagnostic, never wake or delivery authority. A wake leaves no transcript row: the
-host neither persists nor emits one for it, and the host-authored prompt
-itself is model input, never a transcript row. The woken turn's own rows
-follow the previous turn's. User prompts, follow-ups, settings/profile
-extensions, queued structural work, shutdown and interrupts take precedence.
-Only the explicit non-mutating host-read allowlist may remain deferred without
-abandoning automatic admission; new intents preempt by default. After a read
-action, an idle iteration that observed the tree polls ingress without consuming
-Esc and checks automatic work only without pending preemptors, with the same
-retry/loss-resume, continuation and wake precedence as a receive timeout.
-Reads neither prevent scheduling nor cancel a transient resume. Mutating actions cross the ordinary
-idle-entry projection boundary before automatic work. A stream of transcript
-resyncs cannot starve child-result or process-exit wakes. Esc
-confirms interruption of that turn as usual and disables auto-continue until the next prompt.
-A wake whose turn ends at the context window disables it the same way, as a
-failed wake preflight does, so the mail it returned to unread waits for the
-next prompt (chapter 03 §8). Recovery fences, paused restored queues, and shutdown also prevent waking.
-During an active root turn, only when `prompt_host_facts().host_wakes` is
-true and `session.child_wake_suppressed` is false, unread child mail requests `ToolPreempt::Notice` through an exact-turn,
-checkpoint-qualified, nonblocking control. A snapshot preceding a consumer or
-boundary commit is ignored. The live runtime supplies unread ids, not cloned
-mail bodies. Own promoted-job terminals are observed by the driver, not a
-host snapshot, and only when completion notices are earned. Waiting tools yield
-honest partial observations without cancellation, so a quiet poll or long
-Bash foreground hint cannot hide the mail for its entire wait. This signal
-does not acknowledge mail or author a user instruction; existing mail
-selection and delivery remain the sole consumers. Unread mail signals at
-most once per model tool batch and once more for an active repeat hold. While
-mail stays unread, subsequent polls retain their ordinary bounded windows
-rather than holding for 900 seconds. Their partials carry the fixed reason
-`New messages are waiting; end this turn to receive them.` This bounds forced
-yields even if a model keeps polling instead of ending the turn.
-A job terminal signals once per turn, excluding in-band terminal observations
-already pending consumption. Notices-off hosts emit neither automatic signal. Hosted process packs enable repeat quiet holds only
-where `host_wakes` is earned (chapter 01 §8.5).
-Child-wake suppression is an intent-backed product view (§2.6), with no wake
-counter. It is set by the cancel of a running wake turn, a wake's
-context-capacity terminal, or any root turn's failed terminal typed
-`QuotaExceeded` (feed facts), or by a `wake_suppression` intent the
-host writes on an idle interrupt and on a failed or discarded wake; a user
-prompt's accepted root anchored after it clears it. Acceptance of the exact
-new-turn command in a recorded root handoff or owner-loss continuation decision
-also rearms child wakes, but only for suppression intents recorded before
-that decision in `(anchor, ordinal)` order. An idle interrupt entered after
-the decision but before acceptance vetoes this rearm; a suppression intent at
-or after the acceptance record takes precedence in the joined view without
-rewriting the earlier fact. Cancelling work to release its host is therefore
-not a lasting operator pause once that work is continued, but a new operator
-pause is never undone. The decision must be anchored strictly before acceptance.
-Recording the decision or reopening alone does not clear suppression; ordinary
-host wakes and transient retries do not clear it. A later operator Stop or
-interrupt suppresses wakes again in anchor order. These transitions survive
-reopen and view rebuild. Fresh completions can keep waking the root without
-a user prompt. While the root is idle, one `PendingContinuation` observation carries
-undelivered root results, undelivered root questions, process exits not yet
-seen by a turn, auto-continue paused, and tree paused. Auto-continue counts as
-paused only while suppressed, enabled for this face, and something could wake
-the root: the session's tree has a node besides the root, or the session has
-background processes. It is emitted on attach, on a session switch and on
-change, is presentation-only, and is omitted from JSONL. The composer HUD shows
-it only while idle. Each idle check recomputes the counts from the hub's tree
-(a held tree lock waits); when the hub does not hold the tree, fresh store
-reads are limited to the tree observation interval. A failed read skips the
-observation and pause-row updates rather than publishing old facts or treating
-the tree as unpaused. A refused observation is retried on the next eligible
-check, even when the facts have not changed. The indicator's last accepted
-zero cannot be evicted by admission or lifecycle traffic. The same protection
-applies to every latest-state observation, including `SetBusy`, `Status`,
-`QueueSnapshot` and `TopologyNavigatorSnapshot`: only a newer observation of
-the same kind supersedes its accepted value. Coalescing retains one value per
-kind within the unchanged 512-slot mailbox. This keeps a
-consumed child result from remaining displayed when the host has no changed
-facts to send. On an interactive face, pausing
-auto-continue also writes one typed `tree` warning as a notice intent —
-`auto-continue paused until the next prompt` — once per pause episode; a JSONL
-face writes no row and its output is unchanged. An episode ends when a prompt is
-admitted (the admitted-turn count advances). A wake that did not fit at
-preflight or failed writes its own pause row, and that episode writes no
-second line, live or after reopen. Attaching to a session, or
-switching to it in place, keeps an already recorded row instead of writing a
-second copy. The suppression intent is written
-immediately even with live children, and an attached host re-reads the view at
-the wake check. A suppression first observed there (including a quota terminal
-not yet folded into the host's session view) publishes its pause line on that
-observation, not only on a later attach. Wake failures write an error notice intent and a
-`wake_suppression` intent, and leave the host attached; if that write fails the
-suppression is kept in memory for the process. Undispatched wakes are
-disposable: their queue item and submission are removed, with mail left
-unread, so they cannot block the next user prompt, and a wake submission found
-without a fact at open is discarded the same way (§2.6).
-JSONL never auto-continues; `plak run` follows its separate until-idle policy.
-A withheld `plak run` continuation still sets the suppression view through its
-context-capacity terminal (the run stops waking on that batch), so a later TUI
-open of the session starts with auto-continue paused until the next prompt.
-Excluding `plak run` would let that open wake the same batch that did not fit.
-Spec 03 §8 owns delivery and
-exactly-once acknowledgement across reopen.
-
-### 5.3 Interrupt and quit
-
-While the TUI owns the terminal, only a panic on its owning thread restores
-terminal modes and the screen, then invokes the previous panic hook to print.
-A panic on any other thread, caught or uncaught, leaves the terminal intact
-and reports only thread name and source location to the diagnostics log when
-one is enabled, never the payload or terminal output. The most recent such
-site is also retained in memory without requiring diagnostics configuration.
-After restoration, a failed worker join reports that site as one exit line
-without replacing its original typed failure; the payload is never retained
-or printed.
-With no terminal owned, the previous panic hook
-retains its normal behavior. Normal exit and error returns still restore through
-the terminal guard; in-process session handoffs keep its ownership and alternate
-screen. Terminal initialization does not install an unconditional library panic
-hook that could bypass this owner-thread boundary.
-
-`Esc` is the interrupt key and **`Esc` never quits.** In precedence order: a
-modal, dropdown, secret field, search, history shelf, selection, or transcript
-item navigation consumes it first; an agent transcript consumes it next: it
-goes back to Activity > Agents at that agent, however the transcript was
-opened (§5.7), so it never stops the
-turn; mid-turn it opens the destructive confirmation pop-up (§5.7) titled
-`Stop this turn?`: it says the root turn is cancelled and its work in flight
-lost, and that the host-reported running descendants are interrupted,
-resumable. Its buttons are `[ Cancel ]`, `[ Stop turn ]` (the interrupt: the
-turn and agents only) and, with running background processes,
-`[ Stop turn + processes ]`, which also requests user-attributed process stops
-through the host action channel; the pop-up then says
-`N background processes keep running unless you stop them too`. A prompt or
-follow-up the operator sent counts as mid-turn, for Esc and `Ctrl+C` alike,
-from the moment it is sent until the host's busy edge for it:
-unacknowledged, acknowledged, or with its row already echoed. Quit asks in
-that same window, and cancel is offered for it, rather than only once the
-host reports busy. Esc then opens
-the same pop-up and never sends the idle interrupt, which would stop the
-prompt unconfirmed. A host refusal that ends
-the prompt before any busy edge closes the pop-up and settles a stop already
-pressed for it. It follows the
-pop-up's rules (§5.7): focus starts on `[ Stop turn ]`, `Enter` presses the
-focused button at once, `Esc` cancels, and over the composer a printable key
-closes it into the draft instead of confirming. Background processes never
-stop just because the pop-up opened. The pop-up closes if the turn settles
-first, and loses its `+ processes` button when none runs. Focus that sat on
-the dropped button clamps to the last button that remains, so it stays on
-`[ Stop turn ]` rather than moving to `Cancel` or past the end. A second Esc
-during an in-flight cancel is a no-op rather than an escalation; idle with a
-draft, the first press arms and a second within 800 ms clears the draft,
-recoverably by one undo; idle with an empty draft it does nothing. No dialog
-anywhere offers "Esc again to quit".
-
-During fork or rebind, busy `Esc` instead opens `Stop this operation?` with
-`[ Cancel ]` and `[ Stop operation ]`. It says `Stops before the fork attaches
-when possible; any saved fork stays resumable.` The HUD shows `cancelling…`
-while the stop is pending. A stop after attachment cannot undo the fork; the
-notice says that it attached before the stop could be applied.
-
-`Ctrl+C` is a ladder: a non-empty draft is cleared and that is all; an empty
-draft with a turn running, or a sent prompt before its busy edge, opens the
-same `Stop this turn?` pop-up as a busy `Esc` (a further `Ctrl+C` cancels the pop-up, as any `Ctrl` chord does); a
-cancel already in flight and unsettled escalates to a quit confirmed by a
-second press within 1000 ms; and idle with an empty draft, the first press arms
-and a second within 1000 ms quits. It reaches every modal, including a secret
-field, where it cancels the field rather than typing a `c`.
-
-**Cancel is bounded and reported truthfully.** An interrupt submits the cancel
-and observes settlement under a 5-second timeout rather than blocking on a
-joined settle; at most 64 KiB of pending reasoning is retained while it
-settles. Within the timeout, a cancelled turn keeps its coherent assistant
-prefix with a `⊘ interrupted` marker and the conversation stays open. If the
-timeout expires, the composer HUD and the transcript say the cancel did not
-complete and name what is still running: the product MUST NOT assert
-`interrupted` for a turn it did not observe settle. An interrupted turn leaves
-`interrupted` as its resting status: the host publishes no `idle` over it,
-because status is a latest-state observation and an `idle` would erase the
-phase before a consumer read it; the next prompt's `running` status replaces
-it. Long-running host
-operations — compact, rebind, fork — poll the interrupt channel so `Esc` is not
-silently swallowed while they run.
-
-Before root-turn admission the host reports `preparing` and busy presentation;
-busy is not an admission receipt. Native authority
-refresh, wait-receipt settlement and tree projection use the same watched
-mechanism: the current step reaches its receipt, rather than dropping a
-partly committed operation. Interrupt stops at the next checkpoint, before
-scheduled compaction or root dispatch. Quit stays in the ordinary FIFO but
-also prevents preparation from starting a turn ahead of it. Stopped preparation
-leaves the exact prompt and images queued, durably pauses drain and returns
-to idle; it neither admits nor cancels or abandons a root turn. An idle
-prompt whose row the host already echoed is ended by a `⊘ interrupted` row,
-as a stopped turn is, never left as a bare prompt row. Other ordinary
-intents remain deferred in arrival order. A later explicit retry starts with
-a fresh interrupt watch. Paid canonical operations already dispatched still
-run to their own receipts. A stopped one-shot reports interruption without
-manufacturing a root-turn terminal.
-
-An operator stop of a child wake preserves the paused drain for operator
-items behind it, including after undispatched-wake cleanup, and suppresses
-automatic wakes until the next user prompt, just like an idle Escape. It is not a
-capacity-preflight failure and records no `WakePreflightFailed` cause or fit
-warning. Every undispatched preparation returns a terminal idle/error status;
-all stop checkpoints publish the same stop detail. A prompt publishes only
-one final busy-false observation, whether it stops before dispatch or finishes
-an admitted turn.
-
-Preparation checkpoints skip subsequent work, not only turn admission: a stop
-after authority refresh skips wait settlement, one after settlement skips tree
-projection, one after tree projection skips the context query, and one after
-the context query skips scheduled compaction. A genuine preparation error takes
-precedence over a concurrent stop, including compaction errors: its pause cause
-and one-shot failure remain the error, and idle then observes the deferred stop.
-An interrupt of compaction itself remains an ordinary parked result. A stop
-status is published even when persisting its queue pause fails.
-
-The UI paints one last frame reading `quitting…` and stops reading input.
-Restoration disables mouse reporting and bracketed paste, pops the keyboard
-enhancement flags pushed at entry (disambiguation, event types and alternate
-keys, never report-all), disables focus events, discards queued tty input,
-ends raw mode, leaves the alternate screen, and shows the cursor. Mouse
-reporting is never enabled while raw mode is off. Normal exit and terminal
-handoff pop the pushed mode; panic and forced-exit restoration also pop it
-before leaving the alternate screen. While a light theme is active and this
-process holds the terminal, the text cursor color is that theme's text color
-(OSC 12). Dark themes do not change the cursor color. A frame painted after
-the terminal is released does not set the color. Exit, handoff, panic and
-forced-exit restoration send OSC 112 on those same paths, and only if this
-process set the color, before the alternate screen is left. A frame does not
-hide or show the caret again, and moves it only when the caret moved or the
-frame drew cells. While the TUI owns the terminal the caret is a steady
-block, because that move restarts the terminal blink timer. Those same
-restoration paths restore the terminal's cursor shape before the alternate
-screen is left.
-
-Quit is `/quit` (or `/exit`), `Ctrl+Q`, or the `Ctrl+C` ladder; each opens the
-quit pop-up (§5.7) while a root turn runs with no stop of it in flight, while
-a prompt or follow-up the operator sent has not reached its busy edge and no
-stop of it is in flight, while child agents are live, or while background
-processes run, and its lines name what stops (the root turn, the running
-agents, which stay resumable, the processes). Idle with nothing running it
-quits at once, and so does the ladder's second press over a stuck cancel. A bare
-`quit`, `exit` or `:q` without the slash is an ordinary prompt, idle or
-mid-turn. An embedded TUI owns its session, so its quit stops the session's work;
-a wire client of a host detaches instead and stops a session's work by
-`stop_session` (§4.4), after which the session stays served.
-The host-mode TUI therefore quits without the stop-work confirmation,
-even while a turn, child or background process runs; `/new` likewise
-leaves the previous session's work running rather than offering to stop it.
-
-`SIGTERM` and `SIGHUP` are quit requests. A watcher thread armed before the
-terminal is taken records the signal and wakes the event loop (§5.8), which
-quits exactly as `Ctrl+Q` does: the same restoration, the same resume hint,
-the same bounded host grace. The process then exits 4, the status a signalled
-CLI turn reports. A second signal, or a loop that has not exited one second
-after the first, makes the watcher restore the terminal itself — the same mode
-sequence, written straight to the descriptor — and exit 4 at once. The watcher
-leaves no disposition behind for `/reload`: caught signals revert to their
-default across `exec`, none is ignored or blocked, and the new process arms
-its own.
-
-**Quit restores the terminal and abandons runtime ownership.** The cooked
-terminal prints a resume hint only for a published session, then requests
-bounded cancellation of the root, giving it up to 300 ms to settle. A cancel
-the runtime already accepted for the turn (a busy stop sends an interrupt
-before its quit) is not requested again, even when it has already settled:
-quit bounds the settlement of that one request. An interrupt the runtime
-refused at ingress accepted no cancel, so quit requests one; a turn whose
-terminal the host already holds needs none. A quick
-local cancel retains its ordinary interrupted terminal and transcript. After
-settlement, quit gives the terminal result another 100 ms to become observable;
-if it remains late, the host abandons without synthesizing an interrupted
-result. A ready terminal result takes precedence over the expired join timer:
-host scheduling or projection work must not abandon a result already available
-when the drive resumes. Every explicit host `Quit` intent and a disconnected control plane use
-this same bounded-settle rule,
-regardless of whether its producer also requested process-exit abandonment,
-except a planned handoff (`/reload`, chapter 03 §14.1), whose cancel is bounded
-by the host's 5 s cancel bound instead and which, past it, releases as an
-ordinary held loss with a warning rather than escalating with an error.
-An idle quit or one whose terminal joined uses normal joined release, including
-child retirement and its failures; it retains the settled terminal and pauses
-the queue. Only when no terminal joined at the bound does a host-local
-escalation flag select lease-only abandonment of the root and live children
-(chapter 01 §2.4). That selection records a typed, process-local quit receipt
-on the host worker handle before cleanup finishes. The TUI reads it after
-restoring the terminal without extending its release bound; JSONL receives
-the same typed outcome when joining the host. An escalated quit exits **130**;
-an idle quit, or one whose terminal joined, exits **0**. A frontend's cancel
-dialog, pending-cancel flag or elapsed exit deadline alone cannot select 130.
-The receipt is not a turn terminal, wire record or persisted state. An
-unsettled cancel is reported with its timeout in ms.
-Before release, the host stops admission; it writes no
-handoff. Whatever the runtime committed while stopping (a cancelled terminal,
-stopped-process records, the lease release) is in the feed, and the projector
-applies it before exit when the hard bound allows, or the next open applies it.
-A failed release is retained in the typed shutdown failure. The TUI's outer
-process bound still applies to all stages.
-Registry process stops run concurrently across slices, with a 200 ms grace.
-An escalated quit starts process stops without joining the driver and uses at
-most 400 ms of its remaining hard-bound budget for process stopping and
-recording, reserving time for lease release and the final projector transaction.
-Idle or settled quits retain the normal joined release's 5-second stop bound.
-Attached Quiescent owners record terminal evidence before their leases are released. Stop or record
-errors do not skip lease release or the projector transaction that applies it. If the exit bound cuts off settlement, the next open reports
-`outcome_unknown`, not an inferred clean stop.
-After release the projector applies the records through the release's
-`LeaseReleased`; the head locator it derives is the released head, never a
-guess.
-Long provider cancel settle, hub retirement, WAL checkpoints and telemetry
-flushes are not on the escalated path. The TUI process exits when release commits
-or at a hard one-second bound from the confirmed key or first signal (typically under
-500 ms). A timeout leaves crash recovery to the next open; it is not proof of
-cancel settlement. The restored TUI error path also joins for at most one
-second and reports failed or overdue cleanup as failure.
-
-Ordinary attachment release and child retirement are terminal releases, even
-for interrupted children: they close process admission, stop jobs with
-`SessionExit` attribution, and record terminal evidence before releasing the
-owner's lease. Only same-branch recovery and authority refresh transfer live
-jobs and their numbers. The abandon and joined-release paths both run the
-projector after release; a post-release error leaves the cursor behind, never a
-wrong head.
-
-`/reload` restores the terminal and prints `reloading…` before the same bounded
-release, then execs the replacement. If release times out, the replacement
-opens through recovery. Other reattachments and session transfers retain
-joined ownership. Exit writes one synchronous, content-free JSON line under
-`logs/tui-exit-<id>.jsonl`: session correlation, resume flag, key-to-restore and
-restore-to-exit durations. The next promptable open imports these disposable
-lines into telemetry without blocking input or flushing on exit; it claims them
-only once its telemetry writer is registered, so an open that never registers
-one leaves them for the next.
-
-### 5.4 The transcript grammar
-
-Workspace viewer content is inert exact data, never transcript markup, HTML,
-inline SVG, executable content or a navigable download. Clients retain UTF-8
-decoder state across byte pages and may render bounded hex for binary data;
-classification describes only the inspected extent. No same-origin blob
-navigation or download is part of this increment. Viewer reads are not agent
-observations or transcript rows.
-
-Host-protocol derives `ToolOperation` from each tool's canonical and exposed
-names, host-populated activity kind and input detail. Structured write input exactly
-ETX (`U+0003`), or a raw detail consisting of that exact byte, means interrupt for
-canonical `process_session_write` and native `write_stdin`; other input stays
-input, and read-only process reads stay reads. These facts take precedence
-over legacy host-authored process subject prefixes, which remain a fallback
-when input facts are absent. Classification happens on the host, never on
-clients. `ToolItem::operation()` uses that classifier.
-Process control arguments retain their structured input and polling mode in
-one compact JSON line, omitting cursor and output-budget metadata, rather than
-being reduced to a patch body or wait-only line, so
-live, completed and reconstructed rows classify identically.
-Compaction requires the tool's process-route identity and applies only to
-arguments. Result previews and non-process tools retain their normal detail
-projection; id-shaped fields alone never authorize dropping other facts.
-The same host-protocol function supplies live labels and row operations,
-including exposed-route defaults. Only a decoded argument object supplies
-facts: scalar detail and result text do not imply a default read.
-The operation is not a field in the persisted or exported row. A process-local
-`wire_operation` overlay may retain the host-supplied operation after decoding;
-it is excluded from serde, JSON Schema and row equality. Without that overlay,
-`operation()` uses the classifier. Protocol 5
-projects an explicit WireToolItem carrying required `operation` in snapshots,
-patches, streaming updates and row events. Clients consume that host field,
-including every existing ToolOperation variant; they do not reclassify names.
-Stored/exported ToolItem bytes remain unchanged. Plak maps the
-semantic operation to terminal labels and keeps no separate canonical-name
-classification table. Plan detail carries neutral status labels; terminal
-plan bullets and Activity status glyphs belong to the TUI, not a host library.
-
-Delivered child mail remains one stored `tree` notice per message (chapter 03).
-In the TUI each recognized `<purpose> · #<agent> · <body>` notice is one
-collapsed row: purpose, sender and the body's first line, ellipsized to the
-available display width. Enter/Ctrl-O or the row's expand hit opens the full
-body; the usual fold-all chord also folds mail. Consecutive delivered-mail
-notices form a collapsed `N messages · #sender #sender` group (senders in
-first-seen order, deduplicated). Opening the header reveals the compact rows;
-each row then opens independently. A non-mail row ends the group. Grouping
-uses adjacency, not guessed arrival timing, so live and restored transcripts
-agree. Result and question mail also starts compact: purpose stays visible
-when the group is open and important mail remains available without making
-an orchestrating transcript unbounded. Selection/copy and search retain the
-full text. Non-mail tree notices keep their ordinary rendering.
-
-**Transient root continuation.** After a committed definite model failure,
-the host applies the shared transient classifier (03 §10.2). An eligible root
-gets at most `[orchestration] transient_resumes` new continuation turns per
-user prompt (default one, zero disables, maximum two). A connect failure, or
-transport failure during authentication, waits for the exact route's shared
-content-free DNS/connect/TLS probe. Other transient failures honor retry advice
-clamped to 1-60 seconds (30 seconds without advice); a model without a probe
-uses a 30-second fallback. This is a new turn, not a replay of the failed
-request or completed actions, and ordinary admission/revalidation still applies.
-The host shows a Notice such as `<human failure>; will continue automatically
-when the network returns (1/1) · Esc cancels`. No transcript row type or export
-encoding is added. The pending wait owns no turn and never blocks input: a
-user prompt, steer, Esc, quit, or session-switching action cancels it, with
-ordinary input dispatch preserved. Queued user work outranks continuation.
-After modal and selection precedence, idle TUI Esc on an empty draft sends the
-existing interrupt intent (a sent prompt before its busy edge is not idle,
-§5.3); with no automatic work to pause the host makes no
-state or visible change. An Esc that arms or performs a draft clear, or that
-cancels a queue edit, edits the draft and never sends the interrupt. Busy-turn Escape confirmation is unchanged.
-Readiness admits one host instruction, with command identity
-`plak:resume-transient:root:{failed_turn}`, through the ordinary immutable queue
-journal, without a result-mail batch or user echo/history entry. The wait is
-attachment-local: reload/reopen drops it rather than deriving it from history.
-`plak run` honors its whole-run timeout and maximum turn count while waiting;
-single-turn one-shot commands never continue automatically. Unsafe hosted
-effects, unknown outcomes, recovery-required terminals, cancellation, permanent
-failures and context-capacity remedies never enter this path.
-
-**Typed rows.** JSONL `tool.detail` and notice `message`/`detail` are the
-product sentences for a typed remedy (see §4.3.2). The stored and exported row
-keeps the remedy code; it does not store that sentence. Every transcript row is one typed `TranscriptRow`
-(`plakous-host-protocol` `views::transcript`): session header, user and steer
-(text and an optional send time `sent_at_ms`), assistant, sealed thinking, tool
-item (call id, canonical `name`, `exposed_name` when the model called the tool
-by another name (omitted when equal to `name`), the host-set activity kind the
-renderer never re-derives, state, subject, detail, start/finish stamps,
-composition lineage, and wait facts: requested timeout, what woke it, actual
-wait, settled agent), process notice (job exited or
-stopped, with an optional `subject`: its command, passed through the tool
-subject redactor (04 §5) and bounded like a tool subject to one line of 240
-bytes cut with `…`; with a command the label is `p261 just check`
-and the outcome and duration are the row's meta (`exited 0`, `21m40s`), so a
-narrow row cuts the command first, down to the job id (`p261…`), then drops
-the duration, and keeps the outcome while the label is cut further. A row without a command stays one
-label, `job p261 exited 0 · 21m40s`. Duration uses the group meta's format:
-`12.3s`, `1m02s`, `1h05m`), retry item (`retry 2/4 · cause`), agent milestone (spawned,
-re-tasked, finished, failed, needs recovery, asks, adopted, adopt conflict,
-with child id, template, brief/result/reason text, duration, candidate, file
-count and conflict paths), classified notice, the interrupted marker, and the
-truncation marker. The auto-continue row (agents finished, processes exited,
-agent ids) stays in the persisted enum: the host no longer writes it, and one
-a session stored earlier is not shown, live or restored, and ends no group. The session header is derived from the session record (its id and,
-for an imported session, the carried-from session and state key) and leads
-every presentation snapshot; it is never stored in the bounded transcript, so
-truncation cannot drop it. The projection itself enforces its row rules for
-every write, live or imported: a header row is never appended, the truncation
-marker exists only as the first row, a tool or process row's subject is
-bounded to 240 bytes on one line, a tool row's detail to 2 KiB, and a thinking row to 64 KiB.
-Child lifecycle milestones derive from retained tree attempts, not from the
-host having sampled an intermediate running state. Each attempt's start
-(spawned, or re-tasked for a followup) and terminal milestone (finished,
-failed, needs recovery) is a host-authored notice intent keyed by tree,
-attempt and event (§2.6). A child already finished on the first observation
-still earns its start and terminal notices. Finished duration uses the
-attempt's durable start/end stamps. Retained notice identities prevent
-duplicates after reattachment or bounded-transcript truncation; a failed
-notice write is retried rather than counted as published. The
-terminal transition of a root-owned background process persists as a process
-row derived from its process session's facts, including one started on the
-root's own fork or rebind lineage. A child-owned process shows in Activity >
-Processes with its owner, not as a transcript row. A finished milestone carries
-the child's submitted result as it was sent, bounded to 16 KiB, a failed one
-its failure message, and a needs recovery one the tree's fault reason (or the
-failure message), each bounded to 2 KiB. A text over its bound keeps its head
-(cut at a line end when it has several lines) and ends with a line that says so,
-`… cut at 16 KiB of 40 KiB`. A question a child addresses
-to the root is an `asks` milestone keyed by tree and message id, including a
-question already present at the first observation. A snapshot loads recorded
-notice identities once, also recognizes named pending notices, and adds ids
-only after successful commits. The root's own `adopt_candidate` operation
-earns an `adopted` milestone keyed by tree, candidate and durable operation id,
-with the landed file count from its receipt; reused or absent presentation
-call ids do not merge distinct adoptions. A receipt with `reverted:true` does
-not earn an `adopted` milestone. It publishes an existing tree-info notice,
-`reverted <candidate> · N files` (`1 file` in the singular), keyed
-`tree:<tree>:revert:<candidate>:<operation>`; the revert's tool row remains.
-A call may instead earn an `adopt conflict`
-milestone with the conflicting paths (at most 16, each whole as the VCS named
-it), which the committed result does not carry and the host takes from the
-call's tool-boundary facts. Conflict notice identity is
-`tree:<tree>:adopt-conflict:<candidate>:<operation>`: the operation id is the
-canonical invocation id used by the topology executor, never the display
-call id. The retained root `merge_conflict` operation supplies the requested
-candidate. Reused, absent or empty display ids neither merge nor suppress
-notices. Conflict details remain process-local until their notice is committed;
-this does not add a durable refusal payload or a tree-store format.
-The producing child is the candidate's sealer, and
-the milestone's template is that child's template when the tree names one. The
-VCS landing reports a file count, not the landed paths, so an `adopted`
-milestone carries no text. Wait
-facts belong to `wait_agent` and process waits: the requested timeout is read
-from the call's arguments (`wait_agent`'s effective ceiling), what woke it
-(`c39 finished`, `mail from c7`, `timeout`, `steer`, `process exited`, or a
-process's `exited 0` / `stopped`) and the settled agent from the call's
-committed result, read whole through `feed_call` and never from the bounded
-result preview, which a fan-out wait outgrows, and the actual wait is the tool
-row's own start-to-finish span; a failed wait keeps its timeout and actual
-wait. The live tool line carries the same wait facts as the persisted row. The
-projector writes rows into the product transcript
-(`transcript_rows.row`, one JSON payload per row with its ordering key,
-schema 38) by the provenance rules of §2.6; the export document carries them
-(§2.5.1), the host emits the same row live as one `Row` observation once the
-projector wrote it, and restore reads them as the rows of the presentation
-snapshot. Live and restored rows are the same values; the renderer maps a row
-to its block in one place, so a restore matches the live session for every row
-type. Tool items update in place by call id; streamed assistant text, reasoning
-and tool progress stay live observations whose settled results are the
-persisted rows. A tool row is labelled by its `exposed_name` when present, and
-by `name` otherwise; its activity kind follows the canonical `name`.
-
-Rows that end a group: user, steer, assistant, thinking,
-milestone, error, the interrupted marker, the session header, notice rows and
-the compaction tool row; tool, process and retry items and item-scoped notices
-stay inside it.
-
-**Notice classification.** Every notice producer names a `NoticeScope`, and
-the scope alone decides placement, so an unclassified notice cannot be written:
-`retry` (retry causes, output-limit retries) and `clipped` (observation
-clipped) are items inside the group; `turn`, `queue`, `recovery`, `tree`,
-`compaction`, `session`, `settings`, `approval` and `host` are gutter notice
-rows with an info, warning or error tone (an error tone is an error row);
-`diagnostic` (history projection) is never emitted live and goes to the
-session log only; it is never persisted, and no surface renders it.
-
-**Hint ownership.** Library diagnostics and stored notice `text` carry neutral
-facts, not terminal keys, slash commands, CLI flags or product sidecar repair
-instructions. A notice may carry one closed `NoticeRemedy` (including compound
-alternatives), with the original account/credential condition or exact saved
-session UUID when required. Every error composition and notice conversion
-preserves those facts. The product store, disposable-view rebuild, restore,
-export and import retain the code and targets; renderers never search the
-diagnostic for a remedy. Plak renders TUI, `run` and JSONL guidance separately.
-No new JSONL envelope fields, kinds or phases expose this internal metadata.
-
-The TUI retains the tree, queue, attach, profile, binding, recovery, compaction,
-process-stop, login, storage-reclamation and saved-fork actions. `run` opens
-`plak --resume <id>` for actions only the TUI supports;
-it does not invent compact/rebind/queue flags. JSONL notice prose deliberately
-uses `resume_queue`, `recover`, `compact`, `fork`, `clear` and
-`interrupt` where those commands exist; queue send-one and arbitrary profile
-rebind remain TUI actions. Ordinary typed host status phase/detail spellings,
-pause combinations, steering punctuation, transition labels, queue counts,
-correlation IDs and omitted-detail behavior remain stable. Notice-derived
-`note` details/messages change to the frontend-specific recipes. A row without
-a remedy is displayed verbatim, including previous-version imports. The
-`resume_tree` remedy is a retained spelling: stored rows and previous-version
-exports still carry it, and no frontend renders an action for it.
-
-Transient refusals retain structured model/effort, child-credential,
-MCP-server/scope, missing-secret and incompatible-session facts until the
-product formats them. Usage projections retain credential state and inference
-key source, and child activity retains the waiting account. A restored open
-warning carries typed queue pause facts; it remains live-only and does not
-write a second stored pause notice. Log-only retained compaction overflow is a
-typed presentation fact whose Plak log adapter preserves the `/new` hint.
-Preventive low-storage refusal carries a typed live-only admission warning and
-`CheckStorage` refusal advice. Every existing frontend retains `plak doctor`;
-the warning never enters transcript/export history and adds no stored remedy code.
-
-A known structured tool refusal keeps its code and repair targets intact in
-the existing detail payload, rather than flattening them together with its
-argument preview. Plak renders those facts before terminal wrapping or CLI
-reason clipping; no surface prints that payload as opaque JSON. MCP's bounded
-authorization payload retains its original server and canonical scope string,
-so even the largest admitted scope list fits the existing tool-preview bound.
-The same decoder serves live previews and canonical expanded output. This does
-not add a field to stored `ToolItem` or a JSONL envelope.
-Output-bound rederivation is a `settings` warning,
-because it names an operator action; a child live-stream gap (the host's
-reattach marker and the observation channel's coalescing marker alike) is a
-`tree` notice in the agent transcript view, live only because it describes the
-stream rather than the child's conversation. On an interactive face, an
-auto-continue pause persists one `tree` warning per pause episode (`auto-continue paused until the next prompt`; §5.2), written by the host's pause tracker as a
-notice intent (§2.6). A later attach or in-place switch does
-not write a second copy while that row is still current and no user row follows
-it; a JSONL face writes no pause row. A pinned table test fixes
-the placement of every scope.
-
-**Persisted and live-only notices.** The scope decides whether a notice can
-be part of the session's transcript (`NoticeScope::persisted`): `retry`,
-`turn`, `queue`, `recovery`, `tree`, `compaction`, `session` and `host`
-notices describe the conversation; `settings` and `approval` feedback and the
-`clipped` item are live only; `diagnostic` is never shown. Every persisted row
-has exactly one writer, named by the provenance table of §2.6:
-
-- A row the projector derives from a feed record (a terminal's rows, a
-  recovery line, a recorded rejection, a compaction outcome) is written by the
-  projector transaction that applies the record, once, whichever process
-  applies it, and the host emits that same row live after the transaction
-  commits. On the definite failure path the stored error row is the rendered
-  text the operator is shown.
-- A host-authored notice in a persisted scope (a retry, a milestone, a pause or
-  wake-failure line, an unrecorded refusal, a withdrawn request) is a notice
-  intent: the host writes it with its anchor, at the cursor it had applied, to
-  the session it was authored for, and emits the same row live.
-  Notice authoring is explicit and separate from observation emission:
-  emitting an event, including a row, writes no intent or transcript. Pending
-  notice intents use the full-durability record commit, never a transcript
-  catch-up or per-event projection write.
-- A notice that restates state every attach, open or in-place switch
-  re-announces is live only: the restored-paused queue note, an unreadable
-  context report (at open, recover, `/new` and `/resume`) and the automatic
-  child-recovery run's report (an explicit `/recover` answer is a notice intent). It is never
-  stored, so a session's transcript does not grow per open; the state itself
-  persists and the next attach announces it again. An event that happened once
-  during an open (an abandoned turn, a recovered turn outcome, a rejected
-  queued prompt) is a fact or an intent and persists.
-
-A publisher that outlives the host's current step (the background child
-recovery pass, the source's release after a clear, resume, fork or rebind)
-writes through a sender pinned to the session it was started for; the host
-drops and logs (`transcript.notice_dropped`) a notice intent pinned to a
-session it no longer owns. Leaving a source session is the source's release and
-the projector pass that applies its `LeaseReleased`; it runs off the host
-thread so the target is active at once, and the host keeps each one it started.
-The release is bounded by the host's 25-second release deadline. A release
-that fails in owned children but still releases the parent lands like a clean
-one and then reports the child failure, as the host's own release does. A
-switch back onto that source (`/resume`, including after `/new`, a fork or a
-rebind) waits for that pass before reading the source's views: it shows
-`finishing the previous session…` and waits at most 5 seconds, then refuses
-with `session <id> is still finishing its previous switch; try again` and
-keeps tracking it. A release that failed or panicked reports an error row when
-it happens; the next open of the source is the ordinary reopen (§4.2), which
-needs nothing from the failed release. An ending host waits up to 20 seconds
-for its outstanding releases, below the launcher's 30-second worker join, and
-then detaches them; an interactive quit or `/reload` stops waiting when its
-exit budget ends. A detached or cut-off release leaves at most a lease to
-expire and a cursor behind the feed, both of which the next open handles.
-What a recovery that runs before an action reports is written before that
-action runs, so it is never written into a session the action switches to. The
-not-ready shell stores no notices: everything it shows is live only. Pinned
-table tests fix the persistence of every scope and the writer of every row
-field, and host tests enforce that a terminal error is stored once as shown and
-that reopening an unchanged session stores nothing new.
-
-**User and assistant.** A user turn renders as a full-width elevated band with
-a `❯` prompt glyph on its first row and no `you:` label; the same treatment
-supplies a sticky preview at the top of the transcript once the turn has
-scrolled past, and clicking it jumps back. A steer is that same user band with
-a small muted `steer` tag at the right of its first row, which wraps short of
-the tag so a long steer keeps it: the host persists and
-publishes a typed steer row and the renderer maps it to the tagged band, live
-and restored alike. A user or steer row with a send time shows it dimmed and
-right-aligned on its first row (after the steer tag), in local time: `14:32`
-on the local today, `Oct 7 14:32` otherwise. The offset is the process zone's
-offset at that stamp, loaded once at startup, so a daylight-saving change
-does not move an older time; today is the zone's date when the row is drawn.
-The first row wraps short of the time.
-At narrow widths it is dropped first, whenever it would leave the row fewer
-than 20 text columns; a row without a send time renders as before. The host
-stamps the time once and the live echo and the stored row carry the same
-value: a prompt's is the submit time of its queue item (when the operator's
-prompt entered the host queue, kept across edits and moves, stored with the
-item in `queue_items.submitted_at`), or the admission time for a prompt that
-never entered the queue. Applied steering has no send time because its
-canonical entry has no exact submission-time join (§2.6). A queue carried in by
-import is stamped at import. `steer_ack` is protocol chrome and MUST NOT add a second grey
-system row. Assistant text sits behind a
-two-space gutter and renders as markdown against theme tokens. Fenced and
-indented code in that markdown is syntax-highlighted. Prose, including inline
-code and URLs, wraps at the pane width; an over-wide token hard-breaks at
-grapheme boundaries without dropping text or its styles. Fenced and indented
-code listings keep their source line breaks. An over-wide source line
-soft-wraps under the code rail: each continuation row repeats that rail and a
-`↳` marker. A continuation row narrower than two cells, or narrower than a
-grapheme, clips instead of wrapping. The language label, table rows and rules
-stay clipped rather than wrapped. A selection that covers every visual row of one source line through
-the end of the last row copies that source line once, without the rail or the
-marker; a selection inside one visual row copies only the cells it covers.
-A partial selection across wrapped rows copies the covered cells as one line.
-GFM tables are laid out
-with measured columns and a full grid in the muted rule colour: top and bottom
-rules, outer edges, a rule under the header, and a rule between every body row,
-including wrapped rows. The width budget counts four outer edge/padding cells.
-When the pane is too narrow, columns narrower than an
-even share keep their width and the rest share what remains, and each cell
-word-wraps inside its own column, so content is never cut and a row never
-wraps at the pipe. When fitting would squeeze a column below 12 cells, or the
-column separators alone would overflow the pane, the table renders instead as
-labelled records, one `header: value` line per cell, with values wrapped under
-their label; a thin rule separates records. A table whose columns slam onto the next visual line, or
-whose cells lose text, is a defect. Markdown is
-presentation only: the durable source stays the raw text, and malformed input
-is inert.
-
-**Tool activities.** One tool lifecycle updates one durable block in place,
-without a duplicate start/done pair. A group is a run of tool items inside one
-root turn; the rows listed above end it, and a new root turn always starts a
-new one. Hidden thinking (`show_thinking = false`) neither renders nor ends a
-group. A sealed thought followed by a call, before any row that ends the group,
-belongs to that call's group in every model family: a thought between two
-calls of a group stays inside it, and the sealed thoughts immediately
-before a group's first call open that group. The summary counts them
-(`Read 2 files, ran 1 command, 2 thoughts`), the fold hides them, and
-opening the group shows each in order on the group's rail. A sealed thought
-after a group's last call that is followed by assistant text, a turn end or
-any other row that ends a group stays a visible row of its own; a streaming
-thought renders at the tip, and the next call arriving pulls it into the
-group once it is sealed. A sealed thought without displayable text renders
-no row anywhere and never ends a group; inside a group it is counted in the
-summary's thoughts and nothing else, only when followed by a call of that
-group. A body-less trailing thought with no later call is counted nowhere.
-The one-call rule applies regardless of
-thoughts: a lone call shows its item line, a lone cell its outline, and their
-sealed thoughts with text stay visible as their own rows in order. Empty
-thoughts have no row or count when there is no summary. Before a summary
-exists, a sealed leading thought stays above the live tip; it folds into the
-summary once one exists. A thought-less one-call group keeps its existing
-summary and item rows when opened by fold-all or a manual open; thoughts do not add a summary to a
-lone call. Live and
-restored transcripts group alike. Retry, process and clipped-observation items stay inside the group and
-fold with it; every other notice is a gutter row that ends it. Every row keeps
-the two-cell transcript gutter: nothing renders flat at column 0. Errors are
-gutter rows behind `⚠`. Rendering does not rewrite the durable projection, so
-restored and resumed transcripts use the same grouping and retain block-space
-selection, wheel and paging identities. Row plans are cached by transcript
-revision and render preferences, not rebuilt for an idle, spinner,
-viewport-only or width-only repaint; a 200-call group animates its tips
-without being replanned.
-
-**Summary plus tip.** While a call in a group is in flight, the group shows
-one summary line for its finished calls and, below it, one tip line per call
-still in flight, with a spinner and its elapsed time; parallel calls each get
-a line. A call that finishes folds into the summary at once and the counts
-update. Before the first call finishes there is no summary, only the tips.
-Once no call is in flight the group is one line, for example
-`✓ Read 3 files, ran 4 commands   1m02s ▸` or
-`✗ Read 1 file, ran 2 commands (1 failed)   exit 2 · 1m02s ▸`; a group of
-exactly one call shows that call's item line instead, regardless of thoughts. The summary's
-right-aligned meta is the first three distinct failed exit codes (then `+N`)
-and its elapsed span (`12.3s`, `1m02s`, `1h05m`): from its first call's
-start to its last call's finish, on the host's stamps, so parallel calls are
-not counted twice. Live tool lines carry the same start and finish stamps the
-persisted tool row does, and a call the host closes by sweep (cancelled, or
-an observation gap) records its finish like any other terminal, so a live and a
-restored group agree. When a call reports a duration without the host's stamps
-(a live call the host held no start for), the meta falls back to the summed
-durations. The tip's
-elapsed is painted beside its `▸` in whole seconds from one second on; it is
-paint-only, like the spinner, and never reflows the row: a running item keeps
-a five-cell slot free before its `▸` for it, which drops like any meta under
-the 12-cell subject rule. A restored call still in flight takes its tip clock
-from the row's host `started_at_ms`, so a tip after `/reload` shows the same
-elapsed as it did live. Enter, Ctrl-O or a
-click on a summary opens it (`▾`) to every item in order, with live items
-appending; hover highlights the clickable summary. A manual open survives
-repaint and lifecycle updates; fold-all (Ctrl-Shift-O) clears it.
-`tui.group_tool_calls` defaults to true; false folds nothing and keeps every
-item visible.
-
-Summary nouns never say "actions": `read N files` (reads, listings and
-fetches), `ran N searches`, `edited N files (+a −b)` (totals only when every
-edit's diffstat is known and nonzero), `wrote N files`, `ran N commands`,
-`CodeMode · N calls` (`CodeMode ×2 · 7 calls` for more than one code cell,
-N totalled over the group's cells; ` · N calls` is omitted when N is 0), `checked N processes` (waits, polls and output reads),
-`sent input to N processes`, `interrupted N processes`, `stopped N processes`,
-`spawned N agents`, `N agents finished` (host-supplied identities,
-deduplicated), `messaged N agents`, `listed agents`, `closed N agents`,
-`interrupted N agents`, `recovered N agents`, `adopted N candidates`,
-`discarded N workspaces`, `submitted N results`, `updated plan`, and any other
-tool by its own humanized name (`web search ×2`). Failures are never hidden by
-a fold: the summary uses `✗` and counts `(1 failed)`, `(1 interrupted)` or
-`(1 failed, 1 interrupted)`. Interrupted and cancelled calls never merge into
-successful lines, failed spawns say `attempted N spawns` and never claim a
-child finished, and code-cell summaries retain nested interruptions without
-counting the cell's cancellation again. A tool that completed before the turn
-was interrupted retains its successful outcome; the turn marker remains
-visible. Edit totals accept only a complete trailing ` +A/-R` diffstat, never
-digits in a filename.
-
-**Item rows.** An item is exactly one terminal row: rail, status glyph (`✓`,
-`✗`, or a spinner while in flight), verb and subject, right-aligned meta (exit
-code, then duration: `12.3s` under a minute, then the group meta's `21m40s`,
-`1h05m`, live and restored alike), then `▸`. Embedded newlines show as `↵` and the subject
-is cut with `…`. At narrow widths meta parts drop from the right before the
-subject would fall below 12 cells (a process row: below its job id, and its
-outcome never drops); `▸` always stays. A summary's or merged
-row's failure count (`(1 failed)`, `(1 interrupted)`) is never cut: the label
-before it gives way. Verbs: `$ <command>`,
-`Read <path>`, `Searched <subject>`, `Edited <path> +a −b`, `Wrote <path>`,
-`Listed <path>`, `Fetched <host>`, `Messaged <agent> · <first line>`,
-`Listed agents`, `Updated plan · <progress>`; other tools use their humanized
-name. Web rows read as one action each, in the progressive form while the call
-runs: `Searching the web "<query>"` / `Searched the web "<query>"`
-(`web_search`, `WebSearch`), `Searching X "<query>"` / `Searched X "<query>"`
-(`x_search`), and `Fetching <host>` / `Fetched <host>` (`web_fetch`,
-`WebFetch`, `fetch_url`, `fetch`, `open_url`). A fetch subject is the URL's
-host (and port) only, never its scheme, credentials, path or query; the
-detail keeps the whole URL. A row stored with an older subject renders that
-subject. A tool exposed as `mcp__<server>__<tool>` reads
-`mcp:<server> <tool> <arguments>`, where the arguments are a `key=value`
-summary of the call's scalar arguments in key order (strings quoted and cut at
-40 characters, nested values `…`), bounded to 120 bytes. The classification is
-presentation only: the canonical call's owner stays the execution authority.
-Group summaries count web searches as `web search ×N` and `X search ×N`,
-fetches among reads, and MCP calls by their `mcp:<server> <tool>` label. Commands are coloured with syntect's bash grammar: `$` muted, the
-program name in the accent, arguments in body text and quoted strings in the
-string colour, through four theme tokens every built-in theme defines. Inside
-an open or ungrouped group, consecutive reads and searches merge into one
-`Explored N files, M searches` item and consecutive agent spawns and results
-into `⠼ N agents working` / `✓ N agents finished`; only live, unmatched spawns
-say working, and a lone read or search keeps its own line. A merged row opens
-(`▾`) to its calls as items one rail level deeper, each with its own detail.
-A wait that carries host wait facts is its own item, never merged:
-`Waited for agents · up to 60m · woke after 12m (c39 finished)` (requested
-timeout, actual wait and what woke it, in the coarsest exact unit: `45s`,
-`12m`, `1m30s`, `1h05m`), `Waiting for agents · up to 60m` while it runs, and
-a failed wait appends its error; a process wait appends the same facts to its
-own label. The activity kinds and verbs share the composer's HUD classification,
-not a second tool-name vocabulary.
-
-Process waits and blocking polls show `Waiting on process <id> · <command>`;
-on completion they show `Waited on process <id> · <command> · exited <code>`
-or `· still running` when the wait ended before the process. Non-blocking
-reads show `Read output of process <id> · <command>`, input shows
-`Sent input to process <id> · <N> bytes`, never the input text. Sending the
-interrupt byte shows `Sent interrupt to process <id> · <command>`; it does not
-claim that the process stopped. Explicit stop operations show
-`Stopped process <id> · <command>`. Wait outcomes come from the wait's own
-observation result, not a later registry snapshot; termination shows `· stopped`.
-An `exec_command` poll without a command is a wait unless `yield_time_ms` is zero.
-The host resolves commands from the session-and-branch-scoped job/process
-registry used by Processes, falling back to the command recorded on the
-process's start row; unknown commands leave the id alone. Invalid process ids
-show `(unknown)`, never model-supplied text. Subjects are redacted before bounding.
-The same operation and subject are persisted and rendered live and after restore.
-
-Close, interrupt, recover, discard, stop-all and result submission retain their
-own action labels, never an invented finished-agent count. Adoption actions
-name their candidate. Retained child-result activity is a durable product
-projection and restores like live activity; it is not canonical conversation.
-An unavailable agent navigator is Agents-view state, never a transcript notice.
-Subjects are single-line, with embedded newlines shown as `↵`, bounded to 240
-UTF-8 bytes including a single trailing `…` when truncated. Preview marker
-text is not a subject. A completed process wait keeps its outcome after a
-truncated command, with `…` at the command's cut instead of after the outcome.
-Host edit diffstats take precedence over bare paths. Summary and item rows
-never wrap. In an open group each member hangs on the rail and the last
-member's `└─` ends it; a cell's nested calls sit one rail level deeper
-(`│   ├─`). Copied text uses the same projection.
-
-The transcript follows new output only at the tip: while detached, streaming, appended rows
-and full snapshot replacements (including attach/resume and host wake turns)
-retain the visible row's stable presentation key and intra-row offset, keeping
-the jump-to-bottom affordance until the operator returns to the tip by that
-affordance, End, or scrolling down.
-The transcript reserves its rightmost column for an always-visible scrollbar,
-including an agent transcript shown as the Activity > Agents body. While that body is showing, the track pages on a click and the thumb drags, unless a confirmation pop-up, Menu, an overlay or the resume picker owns input. Other overlay bodies have no track and use
-their full width; wheel and keyboard scrolling remain available. Its track is
-one shade lighter than the background on dark themes and darker on light;
-the mid-grey thumb is proportional to the visible fraction. Track clicks page
-and the thumb drags to a document position. Neither text nor selection/copy
-includes the reserved column. Scrollbar colours remain constant while scrolling.
-Drag and release are consumed only by an active scrollbar drag. A transcript
-selection reaching the track column still extends, copies on release, and
-clears its drag pointer and autoscroll.
-
-**Item detail.** Every item opens on its own: a click on its row or its `▸`,
-or Enter / Ctrl-O on the focused row, toggles it to `▾`. Opening a group or a
-cell never opens its items. The detail shows the input first: the full
-command, coloured like the item row and over as many lines as it has; an edit
-as a unified diff (`patch` bodies as written, `old_string`/`new_string` as one
-hunk with up to three context lines) in the diff colours; a write as its path
-and first 20 lines; any other tool as indented `key: value` arguments, nested
-values indented further, never raw JSON. After a `┄` row comes the output
-exactly as the model saw it, in the muted output colour, windowed to its first
-20 and last 10 lines around a `… N lines hidden ▸` row that shows the rest
-when clicked. A `full output: <path>` line in the hidden middle stays visible
-below that row, so a spilled result always names its file. An open web search
-or fetch row lists its sources between the input and the `┄` row: a muted
-`sources` label, then one `<title>  <url>` row per source. The host parses
-them from the result's trailing block, a `Sources:` line followed only by
-`- <title> <url>` lines with `http(s)` URLs (at most 64), and carries them on
-the call-detail answer; prose that is not such a final block yields none, and
-nothing about them is persisted. Every detail row carries the item's rail continued and a `│`
-under its label; wrapped rows hang two cells further. The text comes from the
-call-detail read (§4.3, `source = canonical`); until it answers, and for a
-call still running, the row's retained preview renders (a running row's
-arguments, a finished row's subject and result preview). A `preview` answer or
-an unavailable call shows the retained preview under a muted `preview` label;
-a canonical side cut at the bound says `… input truncated` or `… output
-truncated`. The TUI displays only text already in the session's canonical
-history or its own retained rows. Detail state is presentation only and is
-never persisted; a restored transcript opens items the same way.
-
-**Agent milestones and notices.** Milestone rows end the group and stack
-without blank rows between them: `◆ spawned c23 · worker · <brief first line>`,
-`◇ re-tasked c23 · <first line>`, `✓ c23 finished · 14m`, `✗ c23 failed ·
-<reason>`, `⚠ c23 needs recovery · u retries`, `? c23 asks · <first
-line>`, `⇲ adopted cand-c23-a1 · 16 files`, `✗ adopt conflict · <path>`
-(`+N more` for further paths). A row whose milestone carries text (brief,
-result, reason or question) or several conflict paths ends `▸` and opens to
-all of it under a rail. An `adopted` row always opens, to its facts:
-`candidate <id>`, `agent <child> · <template>` (the template when the row
-has one), `N files landed`, then any text the row carries; a finished child's result that is one line of compact
-JSON opens indented two spaces per level, keys in the child's order, the cut
-line under it. The session header is a muted gutter row
-(`session 0a1b2c3d`, or `carried from 4e5f6a7b (r21.e19.p27.t2) · session
-0a1b2c3d`); the turn marker is `⊘ interrupted` with
-`⊘` in the warning colour; error rows are in the error colour behind `⚠`.
-
-**Row interaction.** A click on a group summary, a merged row, an item, a
-thinking row, a milestone row with text or a hidden-lines row toggles it on
-release; a drag that starts there still selects. Hover highlights the one
-clickable row under the pointer. Clickable rows are derived from the cached
-row plans, not from a per-frame rebuild. Copying a selection that runs through
-the end of a one-line row from its first cell copies that row's full text
-(rail, glyph, untruncated label with the subject's own newlines rather than
-`↵`, and meta) instead of its `…` cut, without layout padding or the caret. A
-thinking lead uses that same full text: its rail, `◆` or the running mark,
-the full summary, and the elapsed meta. Its indent is decoration of the
-rail's width, so a selection that starts in the indent does not highlight it.
-A prompt or steer row copies its
-text without the send time or the `steer` tag. Assistant text drops its leading
-decoration when the selection starts at or before that decoration: the
-two-space block indent, a quote rail or a code rail (`│ ` or a fence's
-`┌ `), and a soft-wrap continuation marker (`↳`) with its rail. An open
-item's detail rows, including a diff, drop their visual rail the same way:
-the item rail continued and `│ `, plus two spaces of hanging indent on a
-wrapped continuation. Diff markers and the line text stay. A thinking
-block's detail rows drop the indent under the bullet (a thought inside a
-group continues that group's rail as `│`), and an open milestone's detail
-rows drop `    │ ` plus two spaces of hanging indent on a wrapped
-continuation. The selection
-highlight paints the cells that copy includes and no others, including when
-the selection starts or ends inside a rail: a dropped indent, rail, or marker
-is not highlighted, a language label the copy omits is not highlighted, and a
-prompt or steer row does not highlight its send time or `steer` tag. Cells the
-copy includes stay highlighted. Two cases differ from the painted cells: a row
-whose whole-row copy substitutes text (a one-line item's full text or a
-code row's source line) highlights its painted cells, including a caret or
-`…` the copy leaves out. A selection edge on part of a wide grapheme copies
-and highlights the whole grapheme. List markers and table rails are
-content and stay. A fenced or indented
-code row selected through its end copies the source line whole, including text
-a narrow pane clipped instead of reflowing. That copy keeps the line's tabs,
-drops a CR that preceded LF, and replaces every other control character; the
-painted row may still show a tab or a CR as a space. A fence's language label
-(`┌ lang`, when it is its own row) is left out when the selection covers that
-row from the decoration through its end; a selection that starts inside the
-label, or stops short of the row's end, copies the cells it covers. Any other
-selection that starts inside a row copies the cells it covers, and does not
-expand a clipped code line. An agent transcript shown as the Activity > Agents
-body uses the same copy. Process, retry and in-group notice items are
-one row each, cut with `…`, never wrapped. The
-focused row (the last one toggled, of any type) carries one subtle background
-highlight; no glyph changes with focus. The transcript paints no scroll
-position badge; the scrollbar shows the position.
-
-**Code cells.** A host-classified composition cell (Codex Code Mode
-`exec`/`wait`, `exec_js`/`wait_js`, `exec_py`/`wait_py`) is one item that
-carries its own outline. Collapsed, it is a header row
-`✓ CodeMode · 3 calls   4.2s ▸` and, under it, one row per nested call one
-rail level deeper, drawn with its own tree glyphs (`├─` and, for the last
-row, `└─`). Each outline row is an ordinary item row (status glyph or
-spinner, verb and subject, meta) cut to one line. The outline shows at most
-10 nested-call rows: in-flight calls first, then failed and interrupted
-calls, then the rest in call order fill the 10; the chosen rows render in
-call order and a final `… N more` row counts the hidden ones (a click on it
-opens the cell). A cell with no nested calls has no outline rows. The header omits
-` · N calls` when N is 0, so it reads `✓ CodeMode   4.2s ▸`.
-Nested failures and interruptions are counted in the header label and their
-exit codes in its meta. While the cell runs its header shows a spinner and
-failures only in the count; when it finishes failures make the glyph `✗`.
-
-Enter, Ctrl-O or a click on the header opens the cell (`▾`): the outline
-stays, and below it come the cell's syntax-highlighted JavaScript or Python
-source under the cell's rail, then one `output ▸` row. The cell's own
-output (from the call-detail read, windowed and labelled like item output)
-shows only when that row is toggled to `output ▾`. Each outline row opens
-its own item detail. Opening a group never opens its cells, and opening a
-cell never opens its rows or its output.
-
-While it runs, a cell renders at the transcript tip like any in-flight call:
-its header with a spinner and elapsed time and its outline growing live,
-in-flight nested calls with their own spinners. When it finishes it folds
-into its group like any finished call. Inside an opened group each cell
-renders as its collapsed outline on the group's rail; a group of exactly one
-cell shows that cell's outline instead of a summary, regardless of thoughts.
-Its sealed thoughts with text stay as their own one-line rows in order;
-body-less thoughts draw nothing and have no summary count. Nesting uses
-host-supplied caller lineage, never inferred names or arrival order; the
-outline preserves recursive order but caps indentation at one cell rail level.
-The call tally is supplied by the host. A yield on an existing cell does not
-open a second cell.
-
-A header or outline row selected through its end copies its full text like any
-one-line row; the source copies like a fenced code block.
-The code cell's own success bit remains the tool result's recorded bit: a
-script-level error returned as a successful outer-tool result does not change
-that bit. Known failed nested calls still contribute to the cell's failure tally.
-
-**Thinking.** Reasoning renders only where the provider's reasoning visibility
-and replay policy admits it — that policy travels on the model event stream,
-and ignoring it is a provider-contract violation rather than a presentation
-choice. Thinking is one row: `Thinking…` behind a spinner while it streams. Once
-sealed, the row is `◆ <summary line>` with its elapsed time as right-aligned
-meta (`12.3s`, the item meta units) and `▸`. The summary line is the
-body's first non-empty line with markdown markers removed (heading `#`s,
-`**`/`__`/`*`/`_` emphasis, inline-code backticks, a leading list or quote
-marker), whitespace collapsed to single spaces, cut with `…` to the row's
-width. Literal inline HTML and angle-bracket text (such as Rust generics)
-are preserved. If stripping leaves no text, or the line is solely block HTML
-or a comment, the next line with stripped text is
-used, or the raw trimmed first line if none has text. A thought whose whole body is that one line has no `▸` and does not
-toggle. Where it stands outside a group it ends the group before it. Enter,
-Ctrl-O or a click toggles it to `▾` and its body, which carries no rail outside
-a group. A thought inside an opened group renders the same row on the
-group's rail and toggles on its own. Every
-wrapped body line keeps a four-space hanging indent
-under the header; wrapping the prefixed line as a whole so continuations slam
-to column 0 is a defect. What the operator sees is whatever that route admitted:
-Codex and Grok OAuth auto-summaries (often a few words), OpenRouter
-Messages/Chat thinking when the upstream emits a visible body (DeepSeek-class
-full blocks included). Encrypted replay stays opaque. Claude OAuth
-`thinking.display: "updates"` still yields empty bodies.
-
-Sealed operator-visible thinking is part of the product transcript projection
-and MUST come back on resume as the same thinking blocks, in order with the
-user, assistant, and tool rows around them. It is never copied into a prompt,
-a canonical history turn, a summary, or an export the model can read back.
-
-**Payload and bounds.** Tool input and output render only in an item the
-operator opened (Item detail above), formatted, never as a raw JSON dump; a
-closed item, group or cell shows none of it. Assistant markdown and
-admitted reasoning remain ordinary transcript content. Wrapping is cell-based,
-moving whole words and splitting only overlong ones at grapheme boundaries.
-The live transcript is bounded in both blocks and bytes; evicted content is
-replaced by an explicit omission marker rather than vanishing.
-
-**Spacing.** Exactly one blank row separates an assistant text block from a
-following tool or Compose row and separates consecutive Compose cells; a block
-closes on its own blank row and takes no second one.
-
-**The composer region and HUD.** There is no separate turn-status row. The
-raised composer's top border carries the context meter (§5.6), then one
-short state label, non-zero live counters, and the active profile id aligned
-right when it fits. Both borders use the transcript body text colour; the
-bottom border is a plain line. HUD vocabulary, highest priority first:
-
-| Condition | State |
-| --- | --- |
-| Quitting | `quitting…` |
-| A model lookup before the session opens is retrying (published by the launch's supervisor, `lookup_status`) | `retrying model lookup (N/3): <cause>` |
-| Session opening | `starting…` |
-| An approval is pending (dormant in ordinary Plak) | pulsing `◆ approval needed` |
-| Idle, with pending continuation (yields to a problem label) | steady `◆` plus the pending parts joined by ` · `: `1 result pending` / `N results pending`, `1 question pending` / `N questions pending`, `1 process exited` / `N processes exited`, and `auto-continue paused` |
-| Idle, no pending indicator, product-home capacity refused (§2.2) | `storage low · new turns refused` |
-| Idle, no pending indicator, session store at 70% or more of where new work stops (§2.2) | `session store <n>% full · plak session gc --all` |
-| Idle, no pending indicator, product-home capacity warning (§2.2) | `storage warning · plak doctor` |
-| Stop in progress | `cancelling…` |
-| Native credential unavailable before send | ``waiting for login: run `plak login <provider>` `` |
-| Compaction | spinner + `compacting` + elapsed |
-| Provider retry | spinner + `retrying Xs`; attempt and cause in the transcript |
-| Running tool | spinner + `running command`, `editing`, `reading` (also web fetches), `searching` (also web and X searches), `waiting`, `waiting on agents`, or `calling mcp:<server>` for a tool exposed as `mcp__<server>__<tool>`, plus elapsed |
-| Code cell computing without a live nested action | spinner + `working` + elapsed |
-| Unsealed reasoning | spinner + `thinking` + elapsed |
-| Answer streaming | spinner + `responding` |
-| Request sent without streamed output | spinner + `waiting for model` + elapsed |
-
-A cell's live nested activity wins over its computing label. Problem labels
-replace work: `error: <short reason>` in the error colour, `interrupted`, or
-`switching model…`. Codex does not expose thought blocks (§9), so its busy
-fallback is waiting for the model. The HUD never carries a tool subject,
-stream-token badge, stop button, duplicate turn clock, or send-now sentence.
-`CredentialWait { account }` is a live host
-observation (`credential_wait` in JSONL); `None` clears it without terminalizing
-the turn. A saturated observation mailbox admits a credential park and its
-clear by dropping a streaming delta, then a transcript row other than a
-notice or a transcript patch, and a tool line only when neither is queued.
-A dropped row or patch is already marked for resnapshot. It never evicts a
-queued credential wait, and it does not drop a notice or a latest-state
-snapshot to make room. The named login
-command is a live `settings` notice, not persisted
-recovery authority. The host observes root waits through the turn event stream
-and idle compaction waits through the agent's read-only live wait scope. Operator
-interruption also ends an idle compaction's credential wait.
-The waiting-for-model clock starts at each host-observed model request dispatch,
-not at the turn, last tool, or compaction phase start. The typed
-`ModelRequestStarted` observation is presentation-only and omitted from JSONL.
-Streaming text or reasoning, tool start, and compaction clear that clock.
-The host's pending, running and sealing descendants appear as `N agents` with their own
-motion glyph, including while the root is idle. The count highlights on hover
-and opens the Agents list; one descendant reads `1 agent`. The hover
-highlight and the click target of both counters are the count text alone
-(`2 agents`, `1 process`), never the separator or motion glyph before it. Counters use ` · `
-separators. The HUD carries no queue count: the queue panel directly above the
-composer already shows the queue. The host's process snapshot supplies the independent
-`⠴ N processes` counter, also shown while idle and opening Activity's Processes
-tab on click; one reads `1 process`. The last left HUD segment always leaves
-one blank cell before the border line, included in its width budget but outside
-the counter hits. The TUI does not infer process counts from tool rows. Reduced motion freezes glyphs
-but repaints timers once a second. Durations format `0.5s`, `5.2s`, `10s`,
-then the one whole-second ladder every TUI duration shares (transcript meta,
-tips, Agents list elapsed, Usage ages): `45s`, `1m05s`, `1h05m`, minutes and
-seconds always zero-padded.
-
-The hint line below the plain border reads `/ commands · Ctrl+X menu · ?
-keybinds`, plus error-coloured `Esc stop` while busy. Its right side carries
-one bare running-turn timer while a turn runs. While the root is idle it
-carries `last user prompt · 25m ago` instead: how long ago the operator last
-sent the root a prompt or steer in this session (auto-continue wakes do not
-count), coarse (`9s`, then `25m`, then `3h05m`) and repainted only when that
-text changes. A narrow line drops the `last user prompt ·` words before the
-hint labels, and the clock itself before the keys. The clock lives in the
-TUI's memory and is reset by a session switch. It survives `/reload`, resume
-and rebind without storing anything new: every attach of a root session
-sends one in-process `LastUserPromptAt` observation (presentation-only,
-omitted from JSONL, never persisted) carrying the Unix milliseconds of the
-newest operator prompt or steer in the attached branch's committed canonical
-history (`OpenedSession::last_operator_input_unix_ms`, chapter 01), or nothing
-when no entry qualifies. The TUI seeds the clock from it unless a prompt it
-sent since is newer, and an empty read keeps what it shows. The time is the
-one the driver stamped into the entry's `UUIDv7` identity; host wakes, mail,
-harness notes and compaction entries are skipped, and so is any entry whose
-identity is not version 7, so a session whose prompts were all compacted away
-shows no clock until the next prompt.
-
-For a fork and its later rebind successors, the projected branch lineage and
-operator rows additionally prove that the operator wrote after the fork
-boundary. Host wakes and unaccepted queued input do not qualify. A new fork
-therefore has no clock even though it carries the source's canonical history;
-exact resume restores only its own clock. This uses existing intents and views,
-not a new persisted timestamp.
-
-The workspace facts
-`~/path · branch` sit right-aligned in the composer's bottom border, styled
-like the profile id in the top border, with at least one border cell left
-after the corner. A narrow border shortens the path to its tail behind `…`
-(at least four cells of it) before dropping it, and clips the branch last;
-it carries no hover or click. Product
-workspace facts are typed path, home-prefix and branch fields, rendered only
-by the TUI. Path and home-prefix are supplied at launch; only the branch arrives
-asynchronously. The workspace library supplies only the raw branch or detached
-revision; the product owns home shortening. They use the session's launch workspace and are re-read off-thread
-at attach, every observed turn end and terminal focus regain, outside the inert TUI and without
-blocking its surface handler. Profile matching shares that background refresh;
-a generation check discards stale profile/workspace pairs. Narrow hints drop label words
-while retaining keys; stop and timer are the last to disappear. Border text
-and click geometry are clipped to terminal-cell widths and never overlap.
-
-Hovering the profile id opens a box above the top-right border with each
-available role's model, effort and flags, and `Menu → Agents`. It has no click
-action or button highlight. The product publishes `SessionProfile` separately
-from the config's `Profiles` list. It identifies a saved profile only when the
-root binding (including normalized default effort and fast lane) and the
-session's frozen roster match. The popup always uses the session's own frozen
-cards, including after resume; config edits and default saves cannot invent
-roles. When no saved profile matches exactly, the product names the nearest
-profile (fewest differing fields and cards; profile-list order breaks ties)
-with the known root and frozen cards (no cards if the session has no frozen
-roster) and typed differences that carry the session's and the profile's own
-values for the root account, model, effort and Fast. The chip names the nearest
-profile and at most two differences, such as `claude-default · root effort
-xhigh (profile: high)` or `claude-default · worker card differs`, with a count
-for any others. Values and card names are cell-bounded; no template body or
-credential enters these labels.
-When `config.toml` fails to load, the product does not match the session
-against the default product and does not label it `custom`. `SessionProfile`
-names the chip `unavailable` with no differences, and still carries the
-session's own root and frozen cards.
-The inert TUI performs no profile matching.
-
-The queue panel is absent when the durable queue, admitted, unapplied steers
-and provisional follow-up and steer rows are all empty. It sits on the
-transcript background with body-text previews in every built-in theme, not on
-the menu surface. `[now]` and `[drop]` retain their identity/revision-based
-keyboard and click actions and highlight on hover without moving focus. The
-focused title's `Enter send now`, and the unfocused title's
-`Ctrl+S sends now`, live in this panel, not the HUD. A `SteerAck` of `queued`
-keeps a row visible as `sent · ` plus the steer text retired from the accepted
-draft, with that captured text clipped to a few hundred characters. When
-that acknowledgement arrives before `DraftAccepted`, the row is the
-informational `sent · waiting for the current reply` line. Each `applied`
-acknowledgement retires one row. These are not durable queue items,
-cannot be sent or dropped again, and add no duplicate transcript row. When
-only steers remain, the title advertises neither Tab focus, Enter send now,
-nor Ctrl+S sends now. Turn settlement retires their in-process projection.
-
-**Provisional rows.** The hosted face never echoes a draft itself, and the
-host acknowledges one only after its intent commit (§2.6), which can take a
-slow fsync. So that Enter is never followed by nothing, the TUI draws every
-prompt, follow-up and steer the mailbox took and the host has not yet answered
-with its own row as a dim provisional row ending in `sending…`. When more
-idle prompts are waiting than the shelf shows (three rows), the last shelf
-row reads `+N sending`, where N is how many idle prompts are not drawn. The
-queue panel has four content rows. Follow-ups and steers the host has not
-acknowledged share those rows with the host's queue rows; when they do not
-all fit, the last row reads `+N sending`, and N counts only those
-unacknowledged rows that are not drawn. A sent steer uses a remaining row
-after them and is not part of N; sent steers that do not fit are omitted,
-with no second overflow line. A host row that is not drawn has no `[now]`
-or `[drop]` target. The overflow line is reserved before host rows are
-chosen, so it never covers a row whose chips stay live.
-An idle prompt
-is a dimmed user band on a shelf directly under the transcript; a follow-up is
-` · text · sending…` and a steer ` steer · text · sending…` in the queue
-panel, under the host's rows. Provisional rows carry no `#N` and no chips, and
-never shift the host's numbering: queue numbers stay the host's alone. They
-are drawn from the TUI's pending-draft list, never stored as transcript blocks
-or persisted. A `DraftRejected` removes the row and restores the draft to the
-composer as before. A `DraftAccepted` keeps the row until the host's own row
-is present, so a frame drawn between the acknowledgement and that row never
-loses the text. An idle prompt retires on its `UserMessage` (the one after the
-`PromptStarted` naming its item); a steer on its `SteerAck` queued or applied
-acknowledgement, when the host's sent/waiting chrome takes over. Its transcript
-row arrives later in the applied canonical patch, not as a live acceptance row. A queued
-retirement is counted until its applied acknowledgement, so applying one steer
-cannot retire a later steer's shelf row. An applied acknowledgement retires a
-provisional steer only when no queued retirement is pending, including when
-the queued acknowledgement preceded `DraftAccepted`. A queued
-prompt retires on the queue snapshot that shows the item its `PromptAdmitted`
-named: at once when the queue already shows it, or else on the next snapshot
-applied, even one the item has left again. The host publishes the snapshot
-holding the item before the admission and the mailbox keeps only the newest
-snapshot, at the back, so that next snapshot is at least as new, and a
-provisional row is never drawn beside its own `#N`. A `PromptCorrelationReset`
-(a receipt lost at saturation) retires every accepted prompt no admission has
-named. A busy edge, a presentation snapshot, an applied transcript patch,
-`ClearView`, a draft restore or a
-host disconnect retires every acknowledged provisional row.
-
-Compaction is a transcript row, the same grammar as a tool call: `◌ Compact`
-while the paid dispatch runs, then `✓ Compact  199.7k → 12.4k · 29.3s` when
-the successor fits, or `× Compact  199.7k → 178.1k · still over capacity`
-when it committed and still overflows. The composer HUD still says
-`compacting` for the duration. Figures are the unanchored `bytes÷4`
-estimate of the whole request, taken by Plakous before and after the pass on
-that one basis (chapter 01 §10.3), so the two compare like for like. The
-composer meter and the Context header show the anchored measure instead,
-which can differ from the row's before figure. Prepared-input remains its own
-labelled fact on the Context tab; a successful Compact row has no duplicate
-system note containing prepared-input accounting. A quiet
-provider is the short system note that context is unchanged and `/compact`
-retries; the raw `deadline elapsed` dump stays in the session log.
-
-A retained child result is a typed agent activity row (`child_result`, `done`),
-with a bounded subject naming the message id, child, and terminal status; its
-payload is not printed in the transcript. It is not a completed tool execution
-despite sharing the activity-line projection. The JSONL surface carries the
-same synthetic activity line rather than an English system note.
-The notice is keyed by the durable result message, whether or not the root
-consumed it before the host's first observation. The host captures lifecycle
-milestones and retained result messages in one tree read and publishes the
-start and finished milestones before the result activity. Observation cadence
-and unread-mail transitions cannot suppress the notice or create another one.
-A live result line is sent when the attachment commits the notice or the
-mail remains unread. A fresh attachment marks already-recorded, consumed
-results as observed without replaying their live activity lines.
-
-Queue refresh reads the submission/delivery join through
-`SessionRecordStore::load_queue_commands`, in one store snapshot without
-hydrating transcript rows or per-call views. A queue refresh while an attached
-projector is busy cannot cause another cold transcript load; the attachment
-keeps its cached views across turns.
-An unstored attachment may own a projector task, but requests no background
-pass until its product session is stored. A pre-storage read cannot warm the
-persistent cache and must not race the first stored cold load.
-
-The context meter and HUD share the composer's upper-left border. During a
-turn the meter reads the newest provider input count the turn has seen plus
-the `bytes÷4` estimate of what was added since; each new request of the turn
-keeps that count as its anchor rather than the older one the turn started
-from. Within a turn the reading never falls: only a provider count or a
-committed compaction may state a lower figure. Recovery
-attention shows red (`error: needs recovery · reopening`) until the host's
-eager reopen settles; if that reopen fails, `/recover` or the next prompt
-retries it, and in a detached shell `/attach` reopens the session, which
-recovers it.
-
-One-shot admission rejection and consumed delivery both return non-zero
-classified failures; consumption says `queued prompt already ran; its result
-is no longer kept` rather than reporting an empty successful answer.
-
-**The prompt-history shelf.** `↑` on an empty composer opens a shelf of recent
-prompts above it, newest first. Browsing loads the selected text into the
-composer for editing and **never submits it**; typing leaves browse mode.
-History is host-authoritative, scoped to the exact session, bounded, and
-duplicate-suppressed; it survives restart and exact resume as product data and
-is never reconstructed into canonical history.
-Fork and clear successors start with an empty shelf; the source shelf stays
-unchanged. Rebind preserves the shelf of the conversation it carries.
-
-When a context-capacity stop has saved prompt history, the recovery panel says
-the prompt is saved and names the empty-composer `↑` shelf and `Enter`/`←`
-retrieval keys. Retrieval only loads the selected text; it neither sends a
-duplicate prompt nor overwrites a draft merely because a failure arrived.
-Every terminal context overflow of an operator prompt also restores the
-withheld prompt into the composer automatically through the distinct `DraftRestored` observation,
-which never retires a JSONL prompt origin. If a new draft is already present,
-it is preserved after the restored prompt with a blank line between them.
-Restoration is one undoable edit. If the merged text exceeds the composer
-bound, the newer draft and its undo history remain intact, and a note directs
-retrieval of the withheld prompt from history. Restoration never submits a prompt.
-Recovery consumes Plakous's `context_overflow_remedy`: `ResendShorter` asks
-the operator to shorten and explicitly resend the restored draft, `Compact`
-offers compaction without replaying the failed turn, and `ClearOrFork` asks
-for a larger model, a fork, or `/new`. An unverified source presents
-protected recovery without a compact action.
-With auto compaction on, a `Compact` terminal on the exact attached head
-compacts once (a CapacityRecovery pass) unless the session's newest finalized
-provider call is a fold that failed after dispatch, read from the attached
-checkpoint: the same source would fail the same way, so the host shows the
-guidance instead and pays for nothing until a model round runs or a fold
-commits (chapter 01 §10.3). The segment-limit refusal of chapter 01 §10.3 is a
-`ContextLimit` failure with the `Compact` remedy. Its headline stays the
-generic context-limit one, since the typed model kind is the only classifier
-the host reads, and its diagnostic line names the segment limit. When the
-attached head holds at least the refusal limit's 4,032 segments, read from the
-attached checkpoint in memory and never persisted, the guidance names the
-segment limit instead of token or tool growth, on native routes too: `/compact`
-compacts this session's earlier history, `/fork-then-compact` compacts a fork
-and leaves this session unchanged, and `/new` starts a new session.
-A failed turn's retry hint renders the provider's retained advice in whole
-seconds; advice at its 24 h retention ceiling (chapter 01 §13.1) renders as `retry
-after 24 h or more`, never as an exact delay.
-These are in-process host observations, not new JSONL v1 lines.
-
-### 5.5 The Menu
-
-Host-client Accounts/Providers/login and config-builder presentation belongs
-to the private clients. Both use host operator requests introduced in protocol 7 (current client protocol 10), host
-identity, consequence/Confirm affordance, masked secret input and typed
-remedies. No credential form uses the chat composer. The retained embedded
-menu's local-face operations remain unchanged; this public increment does not
-claim those private client forms or their human TUI review are implemented.
-The retained public socket TUI does not have those forms either: its host-owned
-Settings rows are marked read-only before activation (including reset), its
-profile dialog explains the host CLI default-setting remedy without offering
-Set as default, and Usage explains the host CLI refresh remedy without offering
-`[refresh]`. Theme, mouse, scrolling and other terminal-local preferences still
-save locally. Refused legacy writes remain visible and roll back pending UI
-state as §4.4 specifies; they never silently retry or leave refresh stuck.
-
-The embedded local-face Usage's explicit `[refresh]` action (§7.2) appears only on a subscription
-vertical whose credential needs a refresh (an expired access token, a
-`RefreshRequired` posture, or SuperGrok's reclaimable quarantine), refreshes it
-and re-reads Usage; the retained embedded view offers CLI login repair.
-Private host clients use Accounts/Providers operator forms introduced in
-protocol 7 (current client protocol 10) instead. The label is muted until the pointer
-hovers it or Up/Down has focused it.
-
-No Menu read blocks the host's action loop. A subscription posture read takes
-the provider's compatibility lock and may wait behind any other holder
-(chapter 01 §7.2), so the product surface never performs one, nor any network
-read, inline: Usage's offered `[refresh]` set, the explicit refresh and the
-Providers tab's readiness re-read each run on a thread of their own and publish
-when they settle, while the loop keeps accepting prompts and every other
-action. A readiness re-read is applied between actions, and only the newest
-one: an older re-read that settles later is discarded.
-
-Transcript child-mail folding uses the shared expandable-row controls (§5.4),
-independently of the Menu's `group tool calls` preference.
-
-One full-page frame, seven tabs, one row renderer: **Settings · Agents · Providers ·
-Usage · Context · Session · Keybinds**. Menu and Activity (§5.7) share that
-frame: the whole terminal at every size, the same title row, tab row, footer and
-close glyph; only the body differs. At 136 usable inner columns (140 terminal
-columns with the full-page frame
-and padding), Menu switches to a wide layout: title, tabs, divider and footer
-span the frame. Settings and Providers put the focused row's description and
-current/default value and enum options in a right-hand detail pane; Agents puts its existing
-profile detail there. The list takes 60% of the usable width, capped at 120
-columns, followed by a two-column gutter. The detail pane uses the remaining
-width, capped at 76 columns so prose stays readable, and wraps to its height
-instead of the narrow floating panel's three-row budget. These dimensions keep
-common list labels and values together at the breakpoint. Usage and Context
-data tables use the whole width; Session and Keybinds, which have no separate
-focused-row description, also retain their whole body. Hit rectangles follow
-the actual list, tabs and close glyph; detail prose is not a list hit target.
-Below the breakpoint the existing centered, at-most-120-column layout and
-bottom description panels are unchanged. Activity remains uncapped. Nothing
-of the main view is drawn or hit-tested beneath either. Divergent hand-drawn chrome per pane is
-a defect.
-
-`Ctrl+X` without a composer selection reopens the last-used tab; with a
-selection it cuts instead. Keybinds opens on **While typing**, a short page
-(at most 24 binding rows) generated from the global and composer registry
-entries: the Cmd/Super chords fold into one `Cmd/Super` row, and readline extras
-(`Alt+D`, `Alt+B / Alt+F`) and legacy-terminal twins (`Alt+O`, `Ctrl+Shift+A`)
-appear only on the full sheet. `Enter` opens **All
-keybinds**, the full context-grouped sheet; `Esc` returns to While typing
-before closing Menu. Both pages have section headings and aligned key/action
-columns. Mouse gestures and generic printable-key rows appear only on the full
-sheet. The full sheet retains exact parity with the binding registry.
-
-`←`/`→` and `Tab`/`Shift+Tab` always switch tabs, a click on a tab label
-switches to it, and each tab keeps its own scroll cursor. Every tab scrolls —
-by page, to either end, and with the wheel — and an unscrollable pane is a
-defect regardless of content length. `Esc` closes the modal. The tab strip
-wraps onto extra rows on a narrow terminal rather than truncating, because a tab
-that cannot be drawn cannot be clicked. Below a hard floor Menu draws one line,
-`Menu · terminal too small` (shortened to fit), and clears every hit rect, so a stale click cannot fire. Opening a
-Menu tab parks the composer draft without clearing it; closing the
-panel restores access to that draft. Slash-command text is consumed by the
-command submission path, not by opening the panel.
-
-Rows are one line. Focus and hover are a highlight and nothing else, so moving
-the pointer never reflows the list; the focused row's description appears in a
-floating panel at the foot of the narrow body (in the right detail pane when
-wide), with a `now x · default y` footnote
-where the row holds a value. **A click focuses, a double-click activates**:
-a click only focuses a row, and a second click on the same row within the
-500 ms multi-click interval activates it exactly as Enter does — the operator
-must be able to read a description before changing anything. A slow second
-click only keeps the focus. A value column (a Settings switch, the resume
-picker's binding) still focuses and activates in one click. The same rule
-holds for every selectable list in the TUI: the slash menu, each Settings
-page and its choosers (Theme applies on double-click as on Enter), the
-Agents profile list, the resume picker, Activity's Agents (opens the agent
-view as Enter does) and Processes (opens the full process view), and the
-queue panel (sends the prompt now while busy, as `Ctrl+S` and `Enter` on the focused
-queue do). Lists without an Enter action (Providers, the keybind sheets, the
-Session tab's copy-on-click values) keep their single-click behaviour. Footer hints name the effect
-rather than the key's generic meaning.
-
-`/status` opens the **Session** tab; it is never again an unscrollable floating
-overlay. Usage, Context, and Session are peer tabs rather than sections of one
-page. `y` copies the body of a read-only tab; on Session a click on a value
-copies that row.
-
-**Settings** is generated from a metadata registry — key, kind, default taken
-from the config schema, owner, restart flag, search keywords, and a
-one-sentence description — rather than from per-row match arms, and a test pins
-every registry default to the schema default. Eight rows ship, in order:
-Theme, Mouse capture, Scroll lines, Show thinking blocks,
-Group tool calls, Auto compaction, Reduced motion, and
-the Edit raw config action.
-
-Product `SettingsSnapshot` contains only binding defaults and compaction
-policy. Mouse, scroll lines, thinking visibility, tool grouping, reduced motion
-and theme belong to TUI-owned preferences; the typed settings view carries
-both values for the one explicit save. The product persists them; the TUI
-does not read configuration, SQLite or credential storage to render Settings,
-Session, Usage or catalog rows. Usage refresh-failure decoration runs on one
-latest-only background reader constructed by the launcher and passed into the
-TUI as an endpoint; stale results cannot overwrite a newer read or
-a switched session, and completion wakes the terminal loop. Focus-triggered
-composer refreshes use one worker with at most one latest follow-up read. An
-unwinding read panic produces a content-free warning and does not strand
-pending or future refreshes. The read-only MCP
-overview similarly carries configured-server and frozen-binding facts, not a
-preformatted panel. Unreadable configuration does not imply empty configuration;
-bound servers absent from the current configuration have their own heading.
-Configured-server lines share one product formatter with `plak mcp list`.
-These product observations are not JSONL v1 wire values.
-
-A binding naming a different session is the session boundary, including open,
-clear, fork, exact resume and rebind. The host publishes it before every target
-transcript, prompt-history and queue snapshot; fork and rebind publish prompt
-history explicitly. The TUI retires source state at that binding, so every
-subsequent target publication survives. Opening a target must succeed before
-this boundary; exact resume still publishes the restored frame before releasing
-the source, preserving failed-open fallback. `ClearView` clears transcript
-presentation, not session queue or history, including when the session is unchanged.
-
-The boundary retires source-session turn usage, context and capacity-recovery
-state and action, prompt/phase/request clocks, credential and request-slot waits,
-retry and cancel state, busy/phase/status detail and clear/quit/escape arms,
-approval handles, pending continuation,
-draft/queue correlations and queue UI selection, steer counters, composer chrome,
-tree state, acknowledgement/item-detail caches, Session-tab facts and cached
-copy/overlay text and hit targets. A queue
-edit restores its displaced draft; source prompt history, recovered drafts and
-history-browse state are retired. Terminal preferences, account-level usage limits,
-subscription usage and refresh-failure decoration, and an ordinary
-unsent draft remain. Outstanding decoration reads are invalidated at the boundary.
-An attempted open or a same-session binding is not a
-confirmed switch and preserves the source observations.
-
-**Every editable row applies on change.** There is no Save row or staged batch:
-a toggle, committed chooser or stepper, and confirmed reset persist immediately.
-Terminal preferences save locally; host-owned settings use one typed save
-intent on the embedded local face, and the host's answer leaves the tab open.
-Those host-owned rows are read-only on the public socket face as above. `Esc`
-in a live-preview chooser reverts and writes nothing. `Space` toggles a switch,
-`Enter` opens a chooser or stepper or fires an action, `/` searches label,
-description and keywords, and `d` resets a row to its schema default behind the
-shared confirmation pop-up (`Reset <label>?`, `[ Reset ]`), which names the
-setting and the default it would restore. The pop-up binds that row's key.
-Focus starts on Reset. `Enter` confirms from the live draft, so a settings
-echo that arrives while the pop-up is open is not reverted; `Esc` cancels,
-and a click presses the button it lands on. Cancel returns with no change.
-`d` asks at once.
-
-Exactly one row needs a restart — Mouse capture — and
-they carry a `· restart` pill. Everything else is live, including **Scroll
-lines**: the wheel handler reads the open settings draft before the persisted
-snapshot, so the stepper previews as it moves, and a fast flick adds a small
-bonus over the configured notch. **There is no `tui.show_timestamps`**: the key
-is rejected by the config parser and named by no row.
-
-**No row is identity-bearing.** Composition, protocol, the default account,
-model, effort, and fast mode are configuration-file settings that apply to new
-sessions; Settings therefore never offers a rebind and never paints an
-optimistic binding. And there are no navigation-only rows: navigation is the
-tab bar.
-
-**Agents** is the profile list and nothing else. The product owns the list:
-opening the tab sends `ListProfiles`, and the product answers with a typed
-`Profiles` view — the rows, the row the config already points at, and one
-line for every profile file it left out and why (a file named like a
-built-in, an unknown key, a template that does not exist). When `config.toml`
-itself fails to load, that view has no rows and exactly one diagnostic,
-`templates could not be loaded because config.toml failed: <error>`. It does
-not fall back to the default product, and it does not report
-`agents/<name>.toml does not exist` once per profile. The tab paints that
-view; it reads no file and resolves no name itself. An empty list whose only
-content is that diagnostic is not `No matching profiles`. The list has a Profiles
-heading and a filter line (`type to filter`; every printable key filters,
-`/` included, and Esc clears the filter). `❯` marks the highlighted row and
-`default` marks the row the product reports: the profile brand-new sessions
-bind (`[root] agent` and `[roster] working_set`). The wheel scrolls, the pointer
-moves `❯`, and a double-click or Enter opens the apply dialog; Enter does nothing while
-the filter hides every row. The box under the list names the highlighted
-profile in its border, then the root account, model, and effort, then each
-sub-agent. Fast is shown only when that role has it on. The built-in names are
-`codex-default`, `claude-default`, `grok-default`, and `multi-default` (root
-and reviewer on Claude, worker on Codex, researcher on Grok); further names
-come from `~/.plak/profiles/<name>.toml`. Every built-in has the default role
-set of chapter 07 §8: a root with core tools only, and a working set of
-`worker`, `reviewer` and `researcher`. A built-in also answers to short
-aliases (`codex`, `chatgpt`, `claude`, `grok`, `supergrok`, `multi`) unless a
-user profile owns that stem. A built-in loads whether or not every account it
-names is ready; only its root's account gates the apply, a spawn of a role on
-an unready account is refused `model_not_admitted` naming the `plak login`
-that fixes it, and `plak doctor` lists each such role under
-`spawn_templates`.
-
-The dialog is the destructive confirmation pop-up (§5.7), titled `Apply
-profile <name>?`: `[ Cancel ]`, then `[ Switch now ]` when the root is idle
-with an empty queue, then `[ Fork now ]` when the root is idle with no running
-child, then `[ Set as default ]`. A session with no model yet offers only
-`[ Use now ]` (when the root is idle) in place of both. Focus starts on the
-first action offered. `Enter` applies the focused button at once; `←`/`→` and
-`Tab` move between the buttons; `Esc` writes nothing. A line names each action
-that is not offered and what it waits for (`Switch now waits until the root is
-idle and nothing is queued.`, `Fork now waits until the root is idle and no
-child is running.`).
-
-Profile choice is per session. A session's profile is the root template and
-working set its tree's current epoch froze (its record's root profile while
-the tree has no rows), and it persists with that tree. Switch now and Fork now
-change only that session: they never write `[root] agent` or `[roster]
-working_set`. Set as default is the explicit action that writes them (the
-documented config path, chapter 07 §3): it saves the pointers that brand-new
-sessions bind, and never changes an existing session. Use now is offered only
-while a session has no model; the local face saves its profile as the default only when the
-home has no loadable default root template, so the next `plak` on a fresh home
-is bound and an existing default is never replaced. Remote Use now never saves
-home defaults; clients use the confirmed etag path for that separate action.
-
-**Switch now** continues this session's root node as the profile, on its own
-agent line (chapter 01 §5.1; chapter 03 §1.2). It needs an idle root, an empty
-queue and no unresolved product work; running children and background
-processes do not block it and keep running. It closes the Agents tab and
-returns to the transcript. The conversation carries as Fork now carries it,
-and the session continues as a successor session that is the line's next head:
-the predecessor becomes a read-only branch of the line, and opening it follows
-to the successor (`session <old> switched profile and continues as <new>;
-resuming it`). The successor keeps the node, the tree, its children, their
-mailboxes and the line's processes; the root's optional tools are unchanged.
-The directory, wire welcome and `moved` advertise the same recorded
-`SessionRecord.node`, whether or not the tree has rows or a live hub; a
-successor session id never replaces that address merely because its tree is
-virtual. An attachment uses that recorded node after the switch and on reopen.
-Future root spawns use the profile's roster, and every existing child keeps the
-epoch, cards, bounds and spawn-parent inputs it was spawned under. The write
-order is the product `Switch` intent (§2.6), the tree's `epoch_pending` row
-(when the tree has rows and the roster changes), the runtime's head-advancing
-rebind publication, the product projection of the successor, the tree's epoch
-append from the recorded bytes, then the host's hand-off release of the
-predecessor (no process stops, the tree stays in custody), the activation of
-the successor it attached and one notice `switched to profile <name>; N agents
-and M processes kept running`. A tree with no rows (a virtual tree of one)
-writes no tree rows: the profile's frozen snapshot travels in the `Switch`
-intent and the successor's record keeps the profile. A profile whose roster
-equals the tree's current epoch apart from the root's account, model and
-effort writes no tree intent at all: only the tree's view of the root binding
-moves. A crash before the publication withdraws the request with `profile
-switch did not start; choose it again`, and the tree's pending row with it; a
-crash after it opens the successor, which first installs its epoch from the
-recorded bytes so it reopens exactly, and moves the tree's view of the root
-binding to its own when a switch that kept the roster stopped before that
-view moved. A successor that cannot be projected or attached after the
-publication is tried once more in process; if it fails again, the host hands
-the tree to custody as a completed switch does (its children keep running and
-the host's quit ends it) and says to open the session again, which follows to
-the successor. A switch past the tree's epoch bound (chapter 03 §1.2) is
-refused before it publishes.
-
-Fork now needs an idle root with no running child; it closes the Agents tab and
-returns to the transcript:
-
-- On an attached session it branches onto the profile's root. The new session
-  opens a tree of its own, frozen at genesis on the profile's roster, so it is
-  briefed as that profile with that profile's spawn cards. The previous session
-  keeps its own tree, epoch, and cards, and reopens with exactly the tools it
-  sealed. This holds when the root tuple is unchanged and only the cards
-  differ. The branch recompiles for its target, so it is built from the
-  `AGENTS.md` files and the skills listing as they are now (chapter 01 §5.7,
-  §6.1.1); when any differ from the source's, a transcript note names each one
-  by scope (`global`, `workspace root`, `nested directory`, `skills listing`)
-  as changed, added, or removed. Recovery that
-  completes an interrupted Fork now after a crash recompiles the same way and
-  prints the same note. `/fork` and `/fork-then-compact` land the same way on
-  the current binding (see the `/fork` command). Exact reopen and `/resume` keep the sources a
-  session sealed.
-- When the branch opens no tree of its own (sub-agents off, or a `py-sdk`
-  root) it stays on the source's tree, and that tree keeps its profile: a
-  successor epoch installs on the quiescent tree with the same working set,
-  cards, bounds, tool tables and root template, and only the root's account,
-  model and effort move. The home roster is not re-read.
-- When the session already runs that root with those cards, nothing branches
-  and the outcome says so. With topology admitted, a session without a tree
-  is not already active: Fork now seeds the successor's own tree.
-- On an unattached session with no conversation (a fresh home) it binds the
-  profile's root to that session, and the agent attaches on it.
-- A refusal — a running turn, queued or unresolved work, an unready account, an
-  effort the catalog does not offer — changes no default and creates no session.
-- A root on an OpenRouter or direct API account lands through Fork now and Use
-  now like a subscription root. The apply carries the root template's
-  `protocol` and `composition`, and the root binds what a new session from that
-  template binds: OpenRouter on the gateway-managed route over the template's
-  wire (`auto` when unset) with no effort, a direct API account on its own route
-  at the template's effort, which load requires to be on the model's published
-  ladder (nothing defaults it). OpenRouter follows no catalog (`plakous-default` binds
-  `direct`) and offers no `native-ptc`; a direct API account binds the
-  composition its enrolled row admits (`plakous-default` binds `native-ptc` on
-  a `CodeModeOnly` OpenAI API row and `direct` elsewhere). Fork now persists
-  the same prepared rebind row as a subscription fork, and recovery after a
-  crash completes it onto the target's own tree.
-
-What landed comes back as a typed `ProfileApplied` (saved as the default,
-switched, forked, bound, or already active) or `ProfileRefused` with its reason; the
-transcript line and the `default` mark follow that answer, never the key press.
-Saved reads `profile <name> is the default for new sessions; existing sessions
-keep their own`.
-
-/reload, resume, the reload and orchestration carries and binding-repair
-`/rebind` keep the session's own profile: the carried successor's genesis
-freezes the source's root template and working set re-resolved against the
-template files as they are now (a built-in profile's `{id}-{role}` templates
-that the home never saved resolve to the built-in bodies), and its root tools
-follow that root template. An edit to one of those files therefore applies to
-that session at its next `/reload`, through the epoch-scoped carry of §5.1 when
-it changes an effective value; a change of the home default never does. Only
-when the source's templates no longer load does the successor fall back to the
-home default, with the notice `this session's profile could not be loaded
-(<reason>); the home default profile applies`. A session whose tree has no
-rows keeps on its record the profile its genesis froze (a virtual tree of
-one). A reload handoff passes the profile to the destination in its private
-sidecar (§2.5.1); otherwise an import binds the saved profile its v13 or v12
-document names, and the successor's record keeps it. Version 11 and older are
-refused; missing-profile fallback does not admit them. `/new`, `/fork`,
-and `/fork-then-compact` keep the binding they already have. Applying a
-built-in publishes its templates as `{name}-root`, `{name}-worker`,
-`{name}-reviewer`, and `{name}-researcher` together with the pointers; every
-role under the root is a leaf. A template
-that already exists under one of those names is kept as it is, never rewritten.
-The apply does not touch theme or orchestration bounds. A project whose
-`.plak/config.toml` owns the root or the working set refuses the apply. Account,
-model, and effort live in the templates the profile names. Login, logout, and
-key entry stay out of the TUI.
-
-**Providers** is a read-only status view that performs no provider call of its
-own. Opening it re-reads credential readiness off the action loop (above) and
-republishes the provider rows and the template projection when the read
-settles. Each vertical is one block: its name, then `account`, `status`, and `cli`.
-The account line is only what the host already knows — an OAuth vertical's
-account identity from the usage projection, or an API-key account's fingerprint
-or winning environment variable — and reads `not reported` when nothing was
-reported. The ordinary credential wording is closed and colour-coded: `ready`,
-`login required`, `re-login required (expired)`, `refresh outcome unknown` for
-a quarantined credential, and `unavailable (<reason>)` for a store Plak could
-not read. A recorded last failed refresh uses the shared §7.2 failure detail
-instead of generic expiry prose; Ready remains Ready with a failure note, and
-the credential's colour does not change. The `cli` line is drawn from the same remedy catalogue the CLI parser
-test walks, and it is printed on every vertical, ready or not, because running
-that command is the only thing an operator can do about any of them.
-
-**Usage**, **Context**, and **Session** are §7.2, §5.6, and the session facts
-below. Usage limit rows wrap whole words to the body width, including reported
-reset clauses, rather than clipping a partial word on a narrow terminal.
-
-**Session** lists the Plak version, the running build's binary id (with
-`new build installed · /reload` while a newer build is installed), session id,
-and working directory, then one
-compact cluster for the root agent: model, effort, tool policy, options, API
-kernel, turn, context, tree epoch, and queue. There is no `Binding` row
-restating what the cluster already says, and no standing template row: a
-template is named once, only when it differs from the model line, and a string
-the host did not project as a template is not printed at all. Every value the
-host did not report renders `not reported` — never blank, and never
-`unavailable`, which is reserved for a thing that genuinely does not exist.
-
-Opening `/usage` explicitly refreshes even mid-turn, coalescing to one
-in-flight read. While the Usage tab stays open during a turn, the host
-re-reads allowances every 60 seconds on that same coalesced path, and stops
-when the tab closes. Idle refreshes are spaced in minutes. The view retains
-fetch time; a 429 does not renew freshness, and a dropped read clears loading.
-
-### 5.6 The context gauge
-
-Context-meter refreshes use the attached driver's descriptor-bound in-memory
-canonical accounting, not a cold store reconstruction. The driver still checks
-the exact session, branch and checkpoint locator. A surviving store `Busy`
-refusal makes only that refresh unavailable and logs a content-free WARN under
-`plak.context` with its refresh stage; it does not add a red transcript row.
-Other refresh failures retain a stage-specific transcript error. Wake and
-compaction preflight queries retain their typed refusal and retry semantics.
-
-The composer's upper-left border carries `XX%/YYYk`. The percent is display
-occupancy over the model's **total context window** — never the admitted
-input ceiling under it — and without a known window the meter reads
-`awaiting context` rather than borrowing the ceiling (`awaiting…` when the
-composer is too narrow to hold the words). With a known window and no
-occupancy yet it reads `0%/YYYk`. Before any vertical has reported, every field
-is unknown: after a cross-provider rebind, a stale reading is not a smaller
-truth than a dash, so the previous window is retired immediately and the host
-reports the new binding's own window without waiting for a turn. The host
-re-emits this projection after every compact outcome that leaves the session
-attached — parked, recovered, not-needed, already-resolved, and the main
-committed or failed exit — including a successful manual `/compact`. The meter
-must not sit on the pre-compact percent until the operator types `/context`.
-Its counters come from the post-outcome projector pass, so a committed fold
-is counted in this refresh without waiting for a background tick or reopen.
-
-During a running turn, provider usage updates re-anchor occupancy on that
-request’s input tokens; what streams after is added as `bytes÷4`, the same
-anchored measure Plakous states at the next context query, computed by the
-same Plakous function over the host's held estimate. Separate requests are
-never summed into occupancy.
-When a route supplies no intermediate usage, the host advances a typed
-`bytes÷4` estimate from streamed assistant text (at bounded byte intervals)
-and model-visible tool results, with a refresh at each model-round boundary.
-Provider input usage supersedes that estimate whenever it is available.
-Every prepared request publishes fresh parts, occupancy and its configured
-tool names during the turn. The Context tab labels the exact count as
-"N tools on the last request; tokens est." and lists coding and agent names
-separately. The same names stay on the Context tab after the turn, for this
-process and this attachment only, until a clear, resume, rebind or a new
-process drops them. They are not stored. Only provider-limit queries remain
-rate-limited. After an in-turn compaction, the old request
-parts and prepared bound do not constrain live occupancy: the committed
-compaction summary refreshes the meter immediately, then the next positive
-provider input count supplies an unattributed provider-observed reading against
-the same bound window. Missing usage does not fabricate a zero reading.
-
-The Context tab is the same numbers at length, and it comes only from the
-Plakous context projection:
-
-- A header of occupancy over total with the percent recomputed from them, and
-  the model label. Occupancy is UTF-8 part bytes divided by four (the same
-  method as §6.7), anchored as Plakous measures it (chapter 01 §10.3): the
-  last provider `input_tokens` of a sent request plus `bytes÷4` of only what
-  was appended since, or whole-request `bytes÷4` before any report and after a
-  committed compaction. It is not the admission bound.
-- The prepared-input bound as its **own labelled fact**, marked `≤` when it is
-  an upper bound, next to the admitted input ceiling. The ceiling is shown only
-  when it sits below the window — it is the dispatch gate, not the meter's
-  denominator, and it is omitted when the two are equal.
-- A categorical grid of **exactly 100 cells** — five rows of twenty, ten of ten
-  when narrow — occupying cells `⛁`, free space `⛶`, and, when a compaction
-  fence is configured, the unused tail past that fence as `⛝` so the reserved
-  compact buffer is visible on the board rather than only named below it. When
-  the body is wide enough for the legend to sit beside the board without
-  clipping, the model, totals, and legend occupy that right-hand column; when
-  it is not, they stack so a cell is never clipped.
-- A legend of one row per occupying category under `Estimated usage by
-  category`: core system prompt, tool definitions, auto-loaded instruction
-  files (`AGENTS.md`, and the skills listing in the same row) when enrolled,
-  messages, and reasoning replay when present.
-  **Every occupying category is an estimate and is labelled `est.`**, because
-  no provider reports per-part token counts: the host converts the prepared
-  request body's measured byte parts by four. Envelope JSON (`model`,
-  `stream`, options) is the unattributed occupying remainder of that byte
-  split. The categories are fitted to the anchored occupancy: when it exceeds
-  their `bytes÷4` sum the excess is its own `Provider-observed (est.)` row
-  rather than being folded into envelope; when it is smaller every category
-  is scaled down proportionally. Enrolled
-  `AGENTS.md` bytes are the last compiled instruction-source facts inlined into
-  the harness plan, not a filesystem rediscovery at paint. A category the
-  projection does not carry is absent rather than a zero. Informational
-  rows marked `◈` report their own cost and **never enter the bar** — including
-  admission padding (`prepared_input − occupancy`) on verticals whose local
-  bound is larger than `bytes÷4`.
-- The **compaction gauge**: `Auto-compact at 80% (400k) · ~<n> tokens
-  remaining` for the capacity-derived token trigger (provider-specific where
-  enrolled, otherwise ceiling minus summary/round headroom). Remaining is measured from occupancy
-  (the same quantity as the header and composer), so Compact, Context, and
-  chrome agree. The host carries the exact trigger in tokens; percentages are
-  derived only for display, never converted back into a token threshold. The
-  fence named is the one the host envelope carries; the
-  product setting enables or disables it; the TUI invents no percentage fallback. Past the
-  fence it reads `Auto-compact triggers next turn (at <n>%)` when a provider
-  count anchors occupancy, and `Over <n>%: auto-compact waits for a provider
-  token count` when it does not, because the fence acts only on an anchored
-  measure (spec 01 §10.3); the host projects that as
-  `ContextBreakdownView::occupancy_anchored`. When `settings.compaction` is false,
-  the line reads `Auto compaction is off.`. When it is enabled but the route
-  reports no trigger, it reads `Auto compaction is on; trigger not reported for
-  this route.`.
-- Turn, tool-call, and compaction counters read from durable host counts. A
-  count the host did not report prints `not reported`, never `0`. The
-  compaction counter counts every committed compaction exactly once: an
-  in-turn fold, a scheduled or `/compact` fold, and a recovered fold whose
-  commit an earlier process did not record.
-- When the fence fires and neither the provider-native facet nor the fold can
-  act — the cut selects nothing, or the fold's own request cannot be prepared —
-  the host **replaces** the oldest completed tool-result bodies instead of
-  refusing the next prompt.
-  The operator sees one Compact transcript row with occupancy sizes
-  before and after (the same occupancy as the composer meter and Context
-  header), not a grey system dump of the replacement essay. The
-  placeholders name the tool and call id and invite re-running the call.
-  Nothing is paid for and no call loses its result. A turn that trips the fence
-  again folds its newly sealed middle — or replaces again while the fold cannot
-  act — and a turn after a placeholder pass is still foldable, so a long
-  reading session keeps going rather than working once and then refusing.
-- The **model** is told as well, which is what stops it answering from memory.
-  Where a removed body was, it reads a placeholder saying that this is not the
-  tool's output, naming the tool and the arguments it sent — the path, offset
-  and limit, or the command — the removed byte count, and that the same call
-  may be reissued. It also gets one note at the end of the conversation listing
-  what was removed this pass and asking it to write down what it still needs
-  before continuing. Results the current round just received are never removed.
-- Explicit `/compact` on a protected-only overflow is **dispatched**, not refused at the
-  key. That compaction's protected-capacity notice appears when the ladder is exhausted —
-  every body replaced and the projection still over capacity — and it still
-  says to choose a larger model or `/new`.
-  Terminal overflow recovery follows the canonical remedy rather than
-  reclassifying the capacity tuple; a withheld oversized prompt instead asks
-  for shortening and resending, without automatic compaction or replay.
-- A tip band suggesting `/compact`, rendered only in the half-open range from
-  80 % to the fence, so the tip and the past-fence warning can never stack.
-- In-turn, the board is the current request's: every prepared request
-  publishes its own parts and live occupancy, so an ordinary running turn
-  shows no stale or age marker. It must not claim `unavailable` for data it
-  holds.
-
-### 5.7 Activity
-
-The web operator console may inspect the root or an explicitly selected
-child's saved workspace and Changes independently of Activity attachments.
-Selection never changes another workspace destination implicitly. This is not
-a public TUI file viewer and adds no TUI Files or Changes tab.
-
-One overlay has Agents and Processes tabs, one centered `Activity` title and
-the full-page frame Menu also uses (§5.5), with computed tab and close hits. Activity
-takes the whole screen at every size, narrow terminals included (the modal
-narrow rules do not apply to it): no composer, shelf or hint line is drawn or
-hit-tested beneath it, and the close glyph or `Ctrl+T` returns to the root view. `Esc` does too once the body no longer
-owns it. Below the modal floor it draws one line,
-`Activity · terminal too small` (shortened to fit), clears every Activity and transcript hit rect, and `Esc` still closes it. Each tab carries
-the facts it needs in its own body (the Agents header counts, the process
-rows). While the root waits on a prompt only the root view answers, the footer
-leads with the agent view's error-coloured `root needs approval · Esc` (or
-`root needs a context decision · Esc`); the top border carries the root turn's
-timer (`root · 1m5s`) or its idle clock (`root · last user prompt · 25m ago`,
-then `root · 25m ago`) left of the title when it fits.
-Switching tabs changes only the body and tab selection. The tree's live/paused label belongs
-in the Agents body. When the tree is unavailable its host-reported reason stays
-in that body as a muted line, not a transcript notice.
-`/tree` and the HUD agents count
-open Agents; `/ps` and the independently animated, hover-highlighted HUD
-`N processes` count (`1 process` for one) open Processes. The count appears after the state and
-agents, only when nonzero, including while the root is idle.
-Reduced motion freezes its glyph. `Ctrl+T` opens the last Activity tab, or closes Activity when it is already open;
-`Tab`/`Shift+Tab` switches between tabs. From the agent transcript, `Tab`, `Shift+Tab` or a click on a tab leaves the transcript: Processes shows Processes, and Agents — a click on the Agents tab while the transcript is open, or coming back to Agents — shows the list at that agent.
-
-The hosted action mailbox publishes an immutable process snapshot beside its
-running count: opaque host-local id, one-line command, product owner (`root`
-or the topology caller id), UTC start, elapsed, status and bounded output tail.
-It includes running jobs and terminal jobs observed in the last five minutes.
-Parked child services remain included with their child owner even without a
-live agent attachment; their running jobs also contribute to the HUD count.
-Recent rows are in memory only, keyed by runtime session/branch and process
-number, captured before notice consumption; they are not durable process
-authority. Status is running, stopping, exited with optional code, stopped, or
-unknown.
-Session/branch switching leaves recent rows with the source. Each service
-belongs to the product tree named when its host was built (chapter 03: a
-tree is keyed by its session), not to whichever root is current at attach
-and not to the first root that attaches. The snapshot shows the current
-root branch's own jobs and every child service of that same tree, including
-a child that attached before the root and one that re-attaches while another
-tree is current. Another tree's jobs stay there: switching trees hides them,
-and stop-one and stop-all act only on rows in this snapshot. A user stop-one
-or stop-all returns at once: each target gets the same two-second SIGTERM
-grace before SIGKILL as a model stop (chapter 01), on a worker thread that
-never blocks the host loop or the UI, and its row reads `stopping` until the
-process group is reaped. A failed stop is reported as an error notice when the
-host next refreshes processes. Fork now opens
-a new tree, so source-tree children stay with the source. An earlier branch
-of this tree keeps its own rows with that branch. Owner maps for a retired
-service are dropped once its recent rows leave the five-minute window.
-
-Processes rows carry a running spinner, success checkmark, failure cross and
-exit code, or explicit stopping/stopped/unknown label, then the owner id and the
-elapsed time in columns aligned across rows (elapsed right-aligned), then the
-command cut with `…`; the full command is in the process view.
-Selection is by identity and survives snapshot replacement. `Enter` opens a
-live terminal-safe output tail (up to 40 lines / 4 KiB), wrapped and scrollable
-with wheel and keyboard scrolling, without a scrollbar; its footer reads
-`↑/↓ PgUp/PgDn Home/End scroll · Esc back`. In the list, `s` asks to stop the
-selected running process and `S` to stop all running processes, each in the
-destructive confirmation pop-up below; a click on the footer's `s stop` or
-`S stop all` does the same. A footer narrower than its keys reads
-`Enter · s · S`, each still clickable. The output view maps no stop key.
-The host resolves ids against
-the registry, rejects foreign/stale handles, and records stopper `user`.
-`Esc` returns from output or closes Activity; `q` does nothing.
-The shared chrome omits its `Esc close` hint when the body owns Escape
-(process output or the loaded Agents view). The close glyph
-brightens under the pointer, just like the Menu's. Command-key composer edits
-do not affect the hidden draft while Activity is open.
-
-**Typing never acts destructively.** Over the composer, a printable key or
-`Backspace` closes any open pop-up and goes into the draft, and the `Enter`
-that follows sends that draft: no sequence of printable keys confirms the
-pop-up. In full-page views (Activity, the agent view, process output and
-Menu) there is no composer, so typing there is not prompt typing: a key the
-view maps acts at once, a key it does not map does nothing, and every
-destructive action asks in the pop-up, where `Enter` presses the focused
-button. There is no typing burst, no grace window and no footer hint about
-pausing or typing. The keys that open the destructive pop-up or act for good
-(Agents `i`, `c`, `s`, `r`, `x`, `y` and `Enter`; the agent view's `i`, `c`,
-`x`, `y`; the Processes tab's `s`, `S`) act the moment they are pressed.
-The resume picker has no prompt either and maps no letter
-(`↑`/`↓` select, `Enter` resumes, `Esc` declines): `Enter` resumes the moment
-it is pressed, and a double-click on a row resumes it at once. `Alt` and
-`Super` chords do nothing there. Of the `Ctrl` chords only those that are not
-composer commands act there (`Ctrl+T`, `Ctrl+X`, `Ctrl+O`, `Ctrl+B`, `Ctrl+Q`;
-`Ctrl+C` dismisses Activity and goes back from the agent view); `Ctrl+S`,
-`Ctrl+Enter`, `Ctrl+D` and the draft-editing chords do nothing, so the hidden
-root draft is never typed into, edited, pasted into or sent, and no queued
-prompt is dropped. A paste never reaches a draft under the pop-up or a dialog.
-
-**The destructive confirmation pop-up.** Stopping the root turn or a
-fork/rebind operation (busy `Esc`, §5.3), interrupting or closing an agent,
-stopping every agent, stopping one or all
-background processes, quitting over running processes, and `/new` over running
-agents or processes (§5.1) are sent only from one pop-up, shared by the root
-view (busy `Esc` and the busy `Ctrl+C`), Activity > Agents (`i`, `c`, `s`,
-`r`), the agent view (`i`, `c`), `/stop-all`, `/new`, the Processes tab (`s`,
-`S`), `Ctrl+Q`, the confirmed `Ctrl+C` and `/quit` (§5.3), `Alt+A`/`Alt+D` on
-an open effect decision (§5.2), the Menu's profile dialog (§5.5), and Settings
-`d` (`Reset <label>?`, `[ Reset ]`, binding that row's key and writing the live
-draft at confirm). Interrupt and close never target the root row. It is centred
-over a scrim and says what will happen: its title names the target (`Stop this
-turn?`, `Stop this operation?`, `Interrupt #c3?`, `Close #c3?`, `Stop all
-agents?`, `Resume all agents?`, `Stop this process?`, `Stop all processes?`,
-`Quit plak?`, `Start a new session?`, `Allow <tool>?`, `Deny <tool>?`, `Reset
-<label>?`), its lines the agent id or the count of open
-agents (or processes, or the process's owner and command), that running turns
-are cancelled and work in flight is lost, and for stop-all that no new agents
-start until the next prompt. Lines wrap at narrow widths rather than clip, and
-buttons that do not fit one row stack right-aligned. `[ Cancel ]` comes first,
-then the action (`[ Stop turn ]` and `[ Stop turn + processes ]`,
-`[ Stop operation ]`, `[ Interrupt ]`, `[ Close ]`, `[ Stop all ]`,
-`[ Resume all ]`, `[ Stop ]`, `[ Quit ]`, `[ Stop work + new ]`, `[ Allow ]`,
-`[ Deny ]`, `[ Reset ]`, `[ Recover ]`); focus starts on the primary action, and a dim
-`Enter confirms · Esc cancels` under the lines says how to confirm. Focus is
-absolute and moves the moment a key arrives: `←` and `→` move it one button
-without wrapping, and `Tab` moves right while `Shift+Tab` moves left.
-The pop-up ignores events explicitly reported as repeats, but unmodified
-`Enter` and printable repeats are not marked in the requested keyboard mode
-or on legacy terminals; a held `Enter` can therefore press a button.
-`Enter` presses the focused button the moment it arrives, so the pop-up opens
-already confirmable and a `←` then `Enter` cancels. Over the composer a
-printable key or `Backspace` closes the pop-up and is typed into the draft;
-in a full-page view it does
-nothing and is not typed into the draft. A click on a button presses it (a
-hovered button brightens). `Esc`, a `Ctrl` or `Alt` chord or a click outside
-cancels; the wheel and a paste do nothing. Wherever a modal owns input and
-confirms on `Enter` (this pop-up, the resume picker, Menu with its dialogs,
-the help overlay), an `Alt` chord is that modal's `Esc`: a legacy terminal
-delivers `Esc` coalesced with the next key as one `Alt` chord (`Esc Enter` as
-`Alt+Enter`), and it closes or declines, never confirms or resumes. The pop-up
-binds its exact intent when it opens (an agent id, not a selection), so
-snapshots do not retarget it; it closes when its target stops being active
-(the turn settles, the agent settles, the process exits, the tree is no longer
-paused, no agent or process is left) and a session switch closes it. The
-painted controls that open it (the Agents footer's `r resumes`, `i interrupt`,
-`c close`, `s stop all`, `u recover`, the agent view's controls, the Processes footer's
-`s stop`, `S stop all`, and their short forms on a narrow footer) are
-clickable, so it is reachable and usable by mouse alone.
-
-The quit pop-up names what stops: `The root turn is cancelled; its work in
-flight is lost.` while a turn runs, `N running agents are interrupted,
-resumable.` while child agents are live, and over live background processes
-`N background processes will be stopped; work in flight is lost.`
-(`1 background process` for one).
-Terminal restoration and the existing one-second bounded exit start only after
-`[ Quit ]`. SIGTERM/SIGHUP bypass the question and stop jobs.
-
-#### Agents Body
-
-`/tree` and a click on the composer HUD `N agents` segment open the Agents
-list: a live projection of the agent tree, one row per shown agent in
-preorder, with `├─`/`└─` ownership connectors and continuing `│` rails so a
-child's owner is unambiguous. Siblings keep spawn order (start time, then id),
-so rows never reorder under the operator. Unknown parents, self-links, and
-cycles degrade to a forest rather than failing. The host never drops a node;
-the projection only decides what the list shows.
-
-The live scope shows active agents (pending, running, paused, sealing,
-adopting, and interrupted, which paints as waiting), parked live work, the
-root, agents whose current attempt finished within the last five minutes
-(dimmed after two), agents that need attention until acknowledged, and every
-ancestor needed to explain a shown agent (dimmed when it is settled). A
-dormant child — parked, a retired conversation, a reclaimed checkout, or
-closed — dims its row body immediately and names the reason. Several facts
-may be true together; the row's one reason is closed, then retired
-conversation, then reclaimed checkout, then parked (`waiting on p3, c2` when
-the wait is named). The inspector lists every fact and says whether a
-followup can revive it: a reclaimed checkout can, a retired conversation
-cannot. Retirement does not delete work or candidates. An outstanding
-attention mark stays bright, and the inspector keeps the recovery remedy.
-Parked live work stays in the live scope. Settled dormant rows use the same
-five-minute window and attention and ancestor exceptions; retiring an old
-conversation does not make it newly recent. Ages come from the current
-attempt's durable end stamp, so a restart does not reset them. `f` switches
-to every agent and back, and every row is available there.
-
-Attention is read from the node's **current** attempt only: failed (including
-a provider cancel and a refused recovery), blocked by a quota, finished
-without `submit_result`, or recovery required. The root and a node with no
-attempt never carry attention. Closing a node resolves it, as does an attempt
-whose status is closed or cancelled: neither is attention. A `followup` opens
-a new attempt, so the superseded one loses attention without an acknowledgement.
-`x` acknowledges one attention occurrence of the selected agent: that attempt's
-attention label and end stamp. Acknowledgement is
-product-layer state in `product.sqlite3` (`agent_acknowledgements`, keyed by
-tree id, agent id, attempt id, attention label and end stamp; the end stamp
-may be null): the TUI asks for a tree's set when it first
-sees the tree, again after a failed read, and when the operator presses `R`.
-`x` sends the acknowledgement and paints only the product's
-answer, never an optimistic one. An acknowledgement covers that one occurrence
-only. The same attempt needs a new one when it returns to attention: a refused
-recovery keeps the end stamp and changes the label, and a later failure takes
-a new end stamp. It never covers a later
-attempt of the same agent. Deleting a session deletes that session's tree
-acknowledgements.
-
-The header counts non-root agents: `● N active   ✓ N completed   ⚠ N
-attention` (acknowledged attention is in none of them). `completed` counts
-only current attempts whose status is `completed` or `adopted`; closed and
-cancelled attempts are in none of the counts. The tree
-state follows when it is not live. The footer first explains what is hidden
-(`active + last 5m · 24 older hidden · f all`, or `all agents · f live`), then
-names the keys, wrapping rather than truncating.
-
-A row is one line, in this order: status glyph, elapsed (running time while
-active, run time once finished; right-aligned so ids line up), short `#id`,
-the role, then one live fact right-aligned at the row's end (the current tool
-verb while it runs, else what a parked child waits on, `waiting on p3, c2`
-(chapter 03 §5.2), or `parked` when it waits on nothing named yet, else its
-status, a blocked quota reset, or an adopted candidate), cut at its end with
-`…` when longer (a `waiting on p3, c2` too long for its room reads `on p3,
-c2`, keeping the ids); and last a three-cell mark, `⚠` while it needs
-attention and blank otherwise. The bound model, admitted turns, tokens and
-process count are not on the row; the inspector carries them with the
-description. The fact's column is reserved first, so the left part never
-depends on the fact and a fact that changes length (waiting, thinking, running
-a command) never moves the rest of the row; live and restored rows lay out
-identically. The role is the template's card label in the session's profile
-(`my-profile-worker` reads `worker` in `my-profile`); a template the profile
-does not carry, or any template under `custom`, reads in full, and the root
-reads `root`. Narrow widths truncate the role first, then the fact. Fewer than three cells left for the role omits it instead of painting a lone `…`. Glyph, elapsed, `#id`
-and the mark are not truncated to make room; only a width smaller than the
-identity itself may cut those. The agent view's agent
-bar paints the same row. Running and
-submitted agents animate a spinner glyph that reduced motion freezes; waiting
-is `◐`, done `✓`, failed `✕`, no result `!`, blocked `⊘` and closed `○`.
-Settled context is dimmed; the selected row is one selection.
-
-Selection binds to the agent id. While the selected agent is not shown, its
-nearest shown ancestor stands in for it, and it returns when the agent is shown
-again; rows appearing and disappearing never move it to an unrelated agent.
-`↑`/`k` and `↓`/`j` select the previous and next row without wrapping,
-`←`/`h` the parent, `→`/`l` the remembered child (or first child), and `Home`
-the root; the list scrolls to keep the selection in view. A docked inspector is six lines.
-It names the selected agent, its description and its status (`u recovers` when
-recovery is required, and `x acknowledges` only while the selected row needs
-attention and an acknowledgement can be recorded), its task or
-fault, model with attempt and workspace, turns, tokens, process count and times, its place in
-the tree with its full id, and what it is authorised to do; it is dropped when
-the overlay is too short.
-
-`Enter` on an agent row shows that agent's transcript as the Agents tab's body, keeping the Activity frame and the row selected for the return; `Enter` on the
-root row closes Activity and shows the root transcript. `i`
-asks to interrupt the selected agent, `c` to close it (neither on the root
-row), and `s` to stop every non-root agent, each in the destructive
-confirmation pop-up (above), which is the only place they are sent. `u`
-asks to recover the selected child when that child is a failed or recovery-required child,
-in the same pop-up: `Recover #id?` and `Settle this child's recorded session recovery. No task is retried and no model call or tool is replayed.`
-The intent is `RecoverTopologyNode`, bound to the tree id, revision, agent
-id and attempt id the pop-up opened on. It is not the root `Recover` intent
-and not a model tool call (no model is granted one; chapter 03 §4.5a). A child that is not waiting on
-recovery, or the root, does nothing. The pop-up stays open while that same tree, agent and attempt are still
-eligible and the tree is not paused. Eligibility is the host's predicate:
-a non-root `failed` or `recovery_required` child that still has an attempt,
-on a live, interrupted, or terminal-cleanup tree. A moved revision does not
-close it; the revision stays only in the intent the host fences. The
-child need not be active. `u` through the pop-up is the only place it is
-sent. `r` resumes the selected child when a lost host left its continuation
-held (or recorded and not started; chapter 03 §14.1): it sends
-`ResumeLossContinuation` for that agent at once, with no pop-up, the footer
-names `r resume` only then, and the inspector's status reads `held after the
-lost host · r resumes` (`continuation pending`, or `continuing after the lost
-host` while it runs). Under `resume_after_loss = "hold"` the root's open sends
-one live attention warning with the `ResumeAfterLoss` remedy for everything a
-lost host left held: the root's turn first, then each held child a loss
-interrupted, by id and its clipped description (six named, the rest counted;
-a handed-off child continues by itself and is not named). The open's
-custody-attach recovery run sends it when it finishes, because a child whose
-turn was running when its host died is marked owner-lost by that run, not at
-load; with no run to carry it (a tree this process already held), the open
-sends it itself. It is sent once either way. A later recovery
-run that leaves children held (an operator retry, `/recover`, or a profile
-switch's custody take) sends the same warning for the children. Neither is
-ever stored. A key the
-list does not map does nothing. `y` copies the agent id, `R` requests a fresh
-snapshot and re-reads acknowledgements, and `Esc` dismisses the list (`q` does
-nothing). A footer that would need more rows than it has reads every key in
-short form (`↑/↓ · Enter · x · i · c · s · y · u · r · R · t · f all · Esc`, `u` and `r` only when offered), each still
-clickable. `t history`
-is clickable on the long footer.
-
-**History.** `t` replaces the outline with a flat history of this snapshot and
-restores the previous live/all scope when pressed again. History is
-presentation only: it does not query the host and it does not change the tree.
-The root, active work (including interrupted), and parked agents stay in the
-tree. Every other non-root agent is one row, dimmed, newest first inside a
-local-calendar-day group: `Today`, then `Earlier`, then `Unknown time` when
-the attempt has no readable end or start stamp. End time orders a row, else
-start time, else the agent id. The operator's zone decides the day, and the
-list regroups at the next local midnight without a host event. `f` from
-history leaves it and shows every agent.
-
-`/` opens history (from the tree or from history) and owns typed input,
-including `u`, `r`, `t`, `!` and `/`, until `Enter` keeps the query and leaves
-search or `Esc` clears the query and leaves search. `Backspace` deletes one
-character. A paste is admitted by the same single-line rule as other filters
-and stops at 128 characters. The query matches the agent id, its short id, its
-role, its template, or its description, case-insensitively. `!` toggles
-failures only: failed, blocked, unfinished (`completed_without_submission`),
-and recovery-required rows. Cancelled, closed, and resolved attempts are not
-failures. An acknowledgement does not remove a failure from history. While
-search is open those keys do not resume, interrupt, close, stop, toggle
-history, or toggle the failure filter.
-
-A filter never moves the selection onto another agent. A selected agent the
-filter hides stays selected, its row is absent, and the inspector reads
-`Hidden by the filter. Esc clears it.` The same line is the inspector when the
-filter matches nothing. `Esc` then, while search is closed, clears the query
-and the failures filter before a later `Esc` dismisses the list. An empty
-history with no filter reads `No settled agents`. A filter with no rows reads
-`No matches · Esc clears`. Headers and those notices are not selectable.
-`Home` and `End` move to the first and last history row; `←` and `→` do
-nothing. The history footer is
-`t tree · / search · ! failures · ↑/↓ select · Enter transcript · x acknowledge · R refresh · Esc back`,
-plus ` · u recover` only while the selection is eligible,
-led by `failures only ·` and `/ <query> ·` when those are set. A narrow
-history footer is `t · / · ! · ↑/↓ · Enter · x · R · Esc` (`failures ·` when
-that filter is on, and ` · u` when the selection is eligible). `t tree`, `/ search`, `! failures` and `u recover` are
-clickable, and so are the short `t`, `/`, `!` and `u`.
-
-**Agent transcript view.** An agent's transcript is the Agents tab's body, not a second main view, and it is shown in exactly that place. It is rendered by the root's block
-renderer from typed rows, live while the agent runs and readable after it
-finishes. The frame keeps the Activity title, the Agents and Processes tabs (Agents active) and the close glyph. The body is a breadcrumb, `root ›
-#<id> · <description>` (the session banner belongs to the root and is not
-drawn), the scrollable transcript, and the agent bar: the agent's row exactly as the Agents list paints it (the
-same row function, no second format). A recovery-required agent shows
-`u recovers`, warning-coloured, above the bar.
-The footer carries the view's keys: `Esc back`, `↑↓ PgUp/PgDn scroll`, `Enter expand`, `[ ] prev/next agent`, `i interrupt`, `c close`, `u recover` while this child is a failed or recovery-required child, `y copy`, and `x acknowledge` while the agent needs
-attention that can be acknowledged. `i`, `c`, `y` and `x` are clickable.
-The view has **no composer** and no line that says so: a key it does
-not map does nothing.
-While the root waits on a prompt only the root view answers (an approval, a
-context-capacity decision), the footer leads with an error-coloured `root
-needs approval · Esc` (or `root needs a context decision · Esc`).
-A click on the bar returns to the Agents list with that agent selected. `Tab`, `Shift+Tab` or a click on a tab leaves the transcript the same way: the Agents tab shows the list at that agent, and coming back to Agents after another tab does too. `[` and `]` show the previous and next agent in the Agents list's
-visible order (never the root, no wrap).
-The view offers the Agents list's per-agent controls for the agent on screen,
-with the same pop-up and the same intents: `i` and `c` ask to interrupt or
-close it in the destructive confirmation pop-up, `x` acknowledges its current
-attention occurrence, and `y` copies its id. The recovery retry stays on the
-list (`u`). Its identity is the agent id: tree snapshot revisions
-never reset, re-emit or close it. Opening another agent replaces it, and a
-session switch (`/new`, open, resume, fork: `ClearView`, `SessionOpening` or
-a binding naming another session) closes it; a same-session presentation
-snapshot does not. Leaving and re-entering an agent, or switching away and
-back, fetches its rows again, and a turn-end re-send keeps open items, their
-fetched detail, the focused row and the camera on the same rows. The root keeps its
-place while hidden: root host events always land in the root transcript and
-show on return, and going back restores the root's exact scroll anchor, or
-follows the tail if it was at the bottom. `Esc` leaves transcript item navigation when that marker is active, and otherwise goes back to the Agents list at this agent, however the transcript was opened (§5.3); `Esc` there, the close glyph and `Ctrl+T` close Activity to the root. `Enter` on the list's root row does the same. It
-never stops the root turn or pauses auto-continue. A key the view does not map
-does nothing, and `Enter` opens or closes the focused
-row, so a hidden root draft is never
-typed into or sent. The root's draft, queue, HUD and status row wait for the
-return. Scrolling, selection, copy, folding and
-item detail act on the transcript on screen; an agent's item detail asks the
-host with its agent id and is cached per session, agent and call. Showing an
-agent sends the in-process `OpenAgentTranscript` intent and leaving the view
-sends `CloseAgentTranscript`. The attachment is an agent-scope presentation
-snapshot; subsequent keyed patches apply through the same reducer as the root.
-A failed read supplies a notice row beside the last good rows. Updates for any
-other agent are dropped; a revision gap requests resync, never blind folding.
-No agent update reaches the root transcript or the root turn's HUD clocks.
-
-The list **observes**. It never asks the operator to adopt, discard, or
-choose between candidates; the root agent is the only interface for those. It
-holds no scheduler, mutates no topology state locally, and offers no control
-over epoch bounds, which are frozen at genesis and edited in configuration.
-Live updates arrive as revisioned host snapshots pushed on any node revision; a
-snapshot whose revision does not advance is dropped. While the Agents tab is
-open, a one-shot wake fires at the next age boundary so ages dim and expire
-without a host event: the soonest of two minutes and five minutes after a
-shown recent row ended, and not more often than once a second. Running rows
-keep the spinner cadence. The list does not repaint on the idle cadence.
-
-### 5.8 Themes and motion
-
-Six themes ship: `default-dark` (the default), `default-light`,
-`catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, and
-`catppuccin-mocha`. `dark` and `light` remain accepted aliases of the two
-defaults, and a save rewrites them canonically. The Theme row is the **only**
-row with a live preview: moving the chooser repaints the whole shell, `Esc`
-reverts, `Enter` commits and persists.
-
-A theme is semantic colour roles — surfaces, text weights, accent, state
-colours, selection, border — compiled into concrete styles. Each theme is
-contrast-tested: primary text and selection pairs must clear WCAG AA at
-4.5:1; secondary muted/faint chrome must clear 3:1. `default-light` is a complete high-contrast light theme, not a tinted
-dark one.
-
-Markdown strong text and headings use bold cream/gold on dark themes and
-near-black or deep amber on light themes. Links share the cream/gold on dark
-themes and use accent blue on light themes. Success green is reserved for
-check marks and rails, not prose emphasis. Tool action text uses body text;
-only its status glyph uses the success, busy or failure colour, while tool
-chrome stays muted. Catppuccin Latte has distinct strong and muted text
-weights, with subtext0 for muted/faint chrome. Command rows keep expanded
-cell rails muted without muting the command body. All these colours, including scrollbar track and thumb, are theme
-tokens rather than renderer literals.
-
-A new TUI process paints a **PLAK banner** as the first rows of the transcript:
-a six-row pixel wordmark with a double-line outline, and a right-hand column of
-`version`, `build`, a short session id, and `powered by plakous` under that
-session line. It is
-ordinary cell text so it paints in tmux, SSH, and every other pane. The
-version is the workspace package version supplied by the product launcher.
-The composer already carries model and workspace; the banner does not repeat them.
-The composer stays at the bottom and accepts input. A screen too small for the
-mark leaves the transcript flush-top. The identity is cream on dark themes
-and black on light; facts are the same hue, dimmer. User turns start on the
-next row below the banner. The banner is session content, not a sticky header:
-once the transcript fills the pane, it scrolls off with the rest of the
-document, and scrolling back to the top brings it back. Slash commands,
-typing, clicks, and paste do not dismiss it. `plak resume` skips it so the
-picker is the first surface, then arms it when that picker closes.
-The wordmark has no setting: it is drawn whenever the pane is wide and tall
-enough to hold it. `tui.reduced_motion` governs the spinner, the pulse and
-camera easing, and never the banner.
-
-Motion is optional and reduced-motion aware, and every mouse action has
-keyboard parity. Redraw is state-driven with a true idle: the frame timer is
-armed by demand, and with no spinner, stream, camera tween, or pending
-snapshot the loop parks and consumes no CPU. The loop has one wait point, a
-`poll` over the terminal input descriptor and a wake pipe, and a park has no
-polling ceiling. The pipe is written by the face's notifier: the wire
-client's reader on each observation, refused intent or session answer it
-takes and when the connection ends, by the stop-signal watcher on `SIGTERM` and `SIGHUP`, on `SIGWINCH`,
-and once when the background binary identity is ready, so a host observation,
-a stop or a resize reaches a parked loop at once. The loop drains terminal
-input and the mailbox before every wait, so the descriptor wait never misses
-an event the terminal reader already parsed. A park ends early only at a
-deadline the shell armed itself: a wheel gesture settling, an unanswered
-call-detail ask, an Agents row ageing, and the installed-build check, which
-re-arms every five seconds, so a parked shell wakes every five seconds for
-that check: its timer and the answer's arrival. The terminal reader takes an edge-triggered 1 KiB per arrival,
-so a larger burst can leave bytes it reads only when more input arrives. A
-readable wake that yields no event stops the wait on the descriptor: the loop
-waits on the pipe for 20 ms, then looks at the descriptor without waiting,
-until the reader yields an event or the descriptor has nothing left. The
-reader's zero-timeout poll can also stop at an internal reply it set aside
-while real events stay parsed behind it, so every readable wake is followed by
-one more look 20 ms later. A descriptor `poll` cannot watch gets the 20 ms
-look for the session. None of these is a spin. A hung-up descriptor (an error,
-or a hang-up with nothing to read) is a quit request, as `SIGHUP` is (§5.3),
-and is not read.
-Input is selected ahead of host events, and
-host events drain in a bounded batch, so a burst of stream deltas cannot starve
-a keypress. An unfollowed transcript camera is the last block-space anchor:
-stream growth remaps that row and must not move it, and a wheel or key notch
-is a delta on the remapped row rather than a from-bottom offset against the
-new height. Follow-live stays a zero offset and pins to the tail, including
-after a windowed measurement corrects the height of blocks above it and after
-the sticky user bar takes its final height. The reserved height only grows
-within one placement, so a bar that would shrink and then grow again cannot
-move the viewport back and leave the last row below the body. That placement
-settles the window once, and again only when the measurement changed the
-document length. The last row stays on screen and the jump-to-bottom control
-stays hidden. Targets are
-a first frame within 50 ms of terminal initialization with no network work,
-input echo within 16 ms, stream coalescing in 16–33 ms batches, and dirty
-redraw except on resize.
-
-Pointer input is modal: it cannot mutate obscured transcript, queue, tool, or
-composer state. The terminal cursor belongs to the composer. Only a gesture
-that starts in the transcript hides it; stray drags do not. A wheel burst hands
-the caret back when the burst settles. After a transcript click, drag, or
-selection ends, the caret returns on the next key press or composer click,
-decided once per frame. At a non-last hard-line end the caret stays at that
-row's end; soft-wrap boundaries and exact-width phantom rows own the caret
-on the next row at column zero.
-
-Every input path, paste included, traverses the same modal chain as a key, and
-paste never reaches the composer while a modal owns input. One accept function
-rejects control characters — tab and newline being the two deliberate
-exceptions the composer handles itself — plus an explicit blocklist of
-bidirectional marks, embeddings, overrides and isolates, joiners, the
-byte-order mark, soft hyphen, annotation and deprecated format controls, and
-the line and paragraph separators. The `Cf` category is **not** rejected
-wholesale: zero-width joiners and non-joiners, variation selectors, and emoji
-tag characters are load-bearing in family emoji, subdivision flags, and Indic
-and Persian shaping.
-
-### 5.9 Image attachments
-
-A prompt can carry images, attached to the draft three ways:
-
-- `/image <path>...` attaches each named file. The whole argument is first
-  tried as one path (so an unescaped path with spaces works); otherwise it is
-  split into words as a pasted path is.
-- A paste (a terminal file drop, or a path copied as text) attaches images
-  instead of typing text when every word of it names an existing png, jpeg,
-  gif or webp file; any other paste is typed as text. Each word may be
-  absolute, `~` or `~/...`, relative to the TUI's working directory,
-  backslash-escaped (`Screenshot\ 2026-10-16\ at\ 10.23.45 AM.png`), single-
-  or double-quoted, or a `file://` URL with `%XX` escapes; unquoted ASCII
-  whitespace separates several paths. The narrow no-break space macOS puts
-  before `AM`/`PM` in screenshot names is part of a word, and a path that
-  spells it as a plain space still finds the file. A whole single-line paste
-  that names an existing image is taken as one path first, so a terminal that
-  pastes a dropped path unescaped attaches it too.
-- `Ctrl+V` in the composer reads an image from the system clipboard (AppKit on
-  macOS, the X11 clipboard on Linux; Wayland sessions reach it through
-  XWayland), and so does an empty bracketed paste, which is what a terminal
-  sends for a clipboard that holds only an image. On macOS the pasteboard's
-  `public.png` flavour is read when present (a screenshot carries one beside
-  a much larger TIFF), else the image arboard decodes. Name `clipboard.png`.
-  It is `Ctrl+V`, not `Cmd+V`: a terminal sends nothing for `Cmd+V` while the
-  clipboard holds only an image, so the Keybinds sheet and the bare `/image`
-  note say so. A clipboard without an image, or no clipboard, is a system
-  note.
-
-The type of a file is sniffed from the bytes, never the extension. The bounds
-are the library's admission bounds (chapter 01): at most 8 images per message,
-3.75 MiB raw per image, and the 16 MiB per-message budget for the encoded
-message, in which an image counts as its base64 text (about 12 MiB of images:
-three maximum-size images or eight of up to about 1.4 MiB). The TUI does not
-attach an image that would take the draft's ready images past the budget: the
-token leaves the draft with a system note, `not attached: the message encodes
-to 20.0 MiB, over the 16 MiB per-message budget (three maximum-size images
-fit); attach fewer or smaller images`. `plak run --image` (exit 2), a JSONL
-`prompt` (a diagnostic) and queue admission (a notice) refuse such a message
-with the same sentence, counting its text as its JSON-escaped string; runtime
-admission remains the exact check (chapter 01 §3.1). Every attached image (a dropped or pasted path,
-`/image`, `Ctrl+V`, `plak run --image` and the JSONL `prompt.images`) passes
-one normalizer, `plakous-image`, which `plakous-hosted` wraps; a client that
-does not link the facade uses the same crate and constants:
-
-- An image whose long edge is at most 2048 px and whose bytes fit 3.75 MiB is
-  sent byte-identical.
-- Any other is decoded (png, jpeg, gif first frame, webp; the stored EXIF
-  orientation applied), resized with a Lanczos3 filter so its long edge is at
-  most 2048 px, aspect ratio kept, and re-encoded: PNG for a png or gif source
-  (and clipboard pixels) when the PNG fits, otherwise JPEG at quality 90 with
-  transparency composed over white. While the encoding is still over 3.75 MiB
-  the long edge shrinks by a quarter and it is encoded again; a JPEG that does
-  not fit at 64 px is refused.
-- Decoding is bounded at 16384 px per edge and 256 MiB of allocation.
-
-The image-file reader in `plakous-image` refuses a file over 64 MiB unread,
-naming the file, before any normalization.
-
-Terminal image rendering does not exist.
-
-An attachment is an inline token in the draft, `[image #N]`, inserted at the
-caret (with a following space) the moment the image is attached; `N` counts
-up within the draft. Reading, decoding and downscaling run on a worker
-thread, never on the UI thread: the token shows dimmed while its image is
-read and in the user-label style once it is ready, and a failure removes the
-token and posts a system note naming the file. The token is draft text for
-caret movement, selection, undo and history; `Backspace` with the caret just
-after it and `Delete` with the caret just before it remove it as one unit.
-Only a token whose number names an attachment of this draft is one; any
-other `[image #N]` is plain text. A draft that names a still-pending image is
-not sent: a system note says so and the draft stays.
-
-The composer's bottom border lists the draft's attachments in token order,
-`[image #1: shot.png 1280x720 412 KB]` (`[image #1: reading…]` while
-pending); they take the border ahead of the workspace facts, which shorten,
-and drop the file name (`[image #1: png 1280x720 412 KB]`) and then collapse
-to `[N images]` when they still do not fit. A downscaled
-image's chip and the live transcript line of the message that sends it name
-the attached dimensions:
-`[image #1: shot.png 2048x1324 1.9 MB, downscaled from 3456x2234]` and
-`[image: png 2048x1324 1.9 MB, downscaled from 3456x2234]`; `plak run --image`
-prints the chip on stderr as `plak: attached [image: ...]`. The note is
-presentation only: history, the queue store and a reopened transcript keep
-the sent image's facts alone.
-
-Submit sends one draft (prompt, queued follow-up or steer): the images its
-tokens name, in token order (an image named twice is sent once), and its
-text with those tokens renumbered `#1..#n` in that order, so `[image #k]` in
-the text is the k-th image of the message. The tokens stay in the text
-because a draft is one text part followed by its images (the delivery order
-below): the token is the only place the operator's reference survives, and it
-names the image by position. A draft that is only tokens and whitespace is
-an image-only message with no text. An attachment whose token was deleted is
-not sent. A refused draft, and a prompt the host withholds at the context
-window, return to the composer with their images as attachments `#1..#k`,
-ahead of (and renumbering) any attached since; an image the returned text
-does not name gets a token appended.
-
-A queued item keeps its images for its whole life: a queue edit replaces only
-the text, and may clear it when the item has images; the queue panel marks
-the item `[1 image]` / `[N images]`.
-Queued images live in the product store's `queue_attachments` table, written
-once with their item and removed with it (deleting, sending or dropping the
-item); all queued items of one session hold at most 64 MiB of images, and a
-draft over that is refused at queue admission. Delivery sends the item's
-text (with any child-mail batch), when there is text, and then its images as
-one user message; an image-only message has no text part.
-
-The pre-send context measurement (the composer meter, scheduled compaction
-and the send-or-park decision) measures the pending message with its images.
-Each image counts as its route's per-image token bound: Claude routes use
-Anthropic's documented rule (`ceil(width / 28) * ceil(height / 28)` after
-resizing to the model's resolution tier) at its high-resolution maximum of
-4784 tokens, because no enrolled fact tells a model's tier (chapter 01 §6.8),
-and every other route counts the conservative bound of 8192 tokens per image.
-
-The user row shows one chip line per image after the prompt text,
-`[image: png 1280x720 412 KB]`. The row is derived from committed history,
-which keeps the media type and bytes but no file name, so the transcript chip
-names the type where the composer chip names the file; live and rebuilt rows
-are identical. A route or model without image input refuses the prompt at
-runtime admission, naming the route and model; the item stays queued for an
-edit or delete.
-
-The `plak agent` JSONL `prompt` kind takes an optional `images` array of file
-paths, read and normalized as `plak run --image` reads them (a relative path
-resolves against the agent's working directory); with images, `text` may be
-omitted or empty. `plak run --image <path>` likewise needs no prompt words.
-The export document does not carry queued items' images (§2.5.1).
+## 5. External client boundary
+
+The public product ships no terminal or web application client. Independently
+maintained clients attach to the host protocol (§4); the server can serve an
+explicit external web build. Bare invocation is help, not an implicit session,
+embedded fallback or host startup. Only the stdio bridge's explicit
+`--auto-start` may request local startup.
+
+The product keeps catalog construction, attachment eligibility, settings
+metadata, configuration publication, credential resolution, reload/upgrade,
+runner and operator-terminal authority, stores and admission. Clients own
+appearance, input editing, clipboard capture, navigation and rendering. Local
+preferences are not host settings or serialized product settings fields.
+
+The configuration schema and authenticated host console remain the sources of
+settings metadata and effective write capability. Settings saves keep atomic
+publication, etag and changed-field merge rules. Unchanged binding fields do
+not mint or rewrite a root template; actual binding changes use validated
+rebind/fork workflows. Defaults select new sessions, never override an exact
+recorded binding during reopen. Native login and API key operations remain
+explicit, bounded operator operations (§8), including CLI terminal input.
+
+Queue controls, recovery, stop, compaction, profile and session lifecycle
+operations retain their typed wire semantics, identity fences and one-owner
+runtime. Detaching a client does not stop the host's session, infer job
+settlement or authorize replay. A failed or unknown operation is not permission
+to resend input with a new identity.
+
+`host.reload_requests` enables the existing same-user reload-request channel.
+A hosted session's service owns announcements and records the existing
+host-restart refusal, even without an attached client. This authority does not depend on an attached application client.
+Build identity/reopen/carry probes remain product services; client reload is
+not host upgrade. The host upgrade coordinator and its receipts remain §4.6's
+authority. A session export remains the only cross-build history carrier.
+
+Images remain admitted through explicit CLI files or wire inputs under the
+existing image count/byte/type/model limits. The server has no clipboard or
+terminal image-paste implementation. No persistence, export, retention or wire
+version changes merely because presentation adapters are absent.
 
 ## 6. What the model sees
 
@@ -9552,8 +6161,8 @@ silent, and an exact reopen or compaction reports nothing.
 
 Discovery runs when a node's tools are built. The listing is rendered for the
 node's family and enrolled as an instruction source exactly like `AGENTS.md`:
-an exact reopen, `/resume` and `/reload` keep the listing the session was
-compiled with; a new session, a child spawn, `/fork`, `/fork-then-compact` and
+an exact reopen keeps the listing the session was
+compiled with; a new session, a child spawn, a fork operation, fork-then-compact and
 a recompiling rebind read the roots again, and the fork note names `skills
 listing` as changed, added or removed.
 
@@ -9564,14 +6173,13 @@ nothing else is persisted). While they are on, every family's node registers
 that omits it leaves the canonical executor bindings unchanged (chapter 01
 §3), so tool authority never moves with the vocabulary. The live
 `skills.enabled` decides it only for a new session, a child spawn and
-`/new`. Every other construction follows the session:
+a new-session operation. Every other construction follows the session:
 
-- an exact reopen, `/resume`, `/reload` and a compaction carry exactly the
+- an exact reopen and a compaction carry exactly the
   sealed `Skill` and listing, and give the read tool the user root only when
   the session froze a listing or the tool;
-- a fork (`/fork`, the fork of `/fork-then-compact`, and a fork recompiled
-  on recovery) and a rebind or switch successor (`/rebind`, `/agents
-  <profile>`, the Agents tab's **Fork now**), whatever account, model, family
+- a fork (including fork-then-compact and a fork recompiled on recovery)
+  and a rebind or profile-switch successor, whatever account, model, family
   or composition it moves to, inherits the source's on or off and discovers
   the roots again under it for its own family's listing.
 
@@ -9645,7 +6253,7 @@ session, and it is deliberately narrower than the facts on any one machine:
   descriptor, not a sentence in a prompt, is the authority, and a model that
   believes a false containment claim errs in the unsafe direction.
 - It says **by default** nothing pauses a call, because a coordination effect
-  raises an `approval` event the operator answers (§4.3.2, §5.2), and global
+  raises an `approval` event the operator answers (section 4.3.2), and global
   help carries the same "by default" qualifier (§3.2).
 
 Being narrower than the truth is the safe direction here: the model is never
@@ -10249,7 +6857,7 @@ Concretely, per vertical:
 | Anthropic API | No costume. The Claude pack and its base instruction with none of the Claude OAuth client identity: no billing or identity system blocks and no Claude Code headers; only `x-api-key`, `anthropic-version`, `accept` and `content-type`, no user agent. Native Caching is admitted; prompt caching uses the same three `ttl: 1h` breakpoints as OAuth (last product system block, last customer tool, last message block), with no top-level `cache_control` or beta header |
 
 A Claude child spawned in a tree additionally sends the subagent marker, and
-child detection is the explicit session lineage Plak passes in — a TUI root, a
+child detection is the explicit session lineage Plak passes in -- a host root, a
 rebind, an attach, and a qualification run are all roots, and only a spawned
 child spec produces a child.
 
@@ -10323,8 +6931,6 @@ core catalog.
   Routes must admit ordinary structured tools and an exact Direct-capable
   configuration; refusals occur before inference. `plakous-default` never
   chooses the SDK.
-  The TUI uses the ordinary tool row for `run_py`, with safely fenced Python
-  source and bounded output; it needs no SDK-specific row type.
 
 Both PTC harnesses tell the model that if the user supplies JavaScript or
 Python, it calls the cell tool with that source rather than echoing it as
@@ -10445,7 +7051,7 @@ turns. Those captures are witnesses, not a target and not a benchmark.
 ### 7.1 The telemetry store
 
 Plak attaches a telemetry sink to every runtime it constructs — `plak run`,
-`plak agent`, and the TUI — and persists two families of typed, content-free
+`plak agent`, and hosted sessions -- and persists two families of typed, content-free
 observations into `telemetry/telemetry-v<schema>.sqlite3`. The one bounded
 provider-prose exception is the credential-filtered OAuth refresh
 `oauth_error_description`; it contains printable ASCII only, never raw bodies
@@ -10489,7 +7095,7 @@ argument, identifier, output or message body is a column. A read, search or
 listing stores `access_digest` (64 hex characters), the SHA-256 of a per-driver
 random salt, a NUL and the lexically normalized path or query; the salt is
 never written, so digests join within one process's driver and not across
-`/reload` or a reopen, and a driver without randomness stores no digest.
+an exact reopen, and a driver without randomness stores no digest.
 `range_first_line` and `range_lines` are the page a read returned, and
 `page_partial` is 1 when that page stops before the end of the file or cut
 lines, or a search or listing cut results (in its text or its typed value)
@@ -10699,9 +7305,9 @@ with the found and expected versions rather than silently wiping analytics the
 operator may still want.
 
 `PLAK_LOG` installs a content-free boundary-span log at `~/.plak/logs/plak.log`
-— JSONL command, TUI frame, store open and resume, attach and rebind, provider
+-- JSONL command, store open and resume, attach and rebind, provider
 request — carrying ids, counts, lengths, and durations only, never prompt or
-tool content, and never writing to the terminal while the TUI runs. A build
+tool content. A build
 with the `otel` feature adds an OTLP exporter for the **finished** observations
 as spans with deterministic ids; started kinds stay in SQLite, and exit does
 not synchronously flush.
@@ -10725,9 +7331,8 @@ I/O. Credential waits retain their existing scoped readiness recheck and
 admission behavior; a successful login never replays a paid turn. Private
 clients route the Login remedy to Accounts/Providers, retaining the CLI fallback.
 
-There is exactly one usage renderer. `plak usage` and the TUI Usage tab go
-through the same projection and the same text builder, so the CLI and the
-screen cannot disagree.
+`plak usage` renders the host-owned usage projection. Clients consume the
+typed usage facts rather than reconstructing provider policy.
 
 Until refresh telemetry attributes exact account references, a default account's
 status, doctor and Usage omit recorded refresh outcomes whenever any named slot
@@ -10773,7 +7378,7 @@ may perform an explicit credential refresh as described below.
 
 No usage read refreshes an expired token, on any account (chapter 01 §7.3): an
 expired access token is `RefreshRequired` without network I/O, and the next
-turn, `plak refresh <account>`, or the Usage tab's explicit `[refresh]` action,
+turn, `plak refresh <account>`, or a confirmed host credential-refresh operation
 refreshes it. A usage endpoint that rejects
 a fresh token (401/403) gets one forced claimed refresh and one more read; a
 failed grant shows the credential's resulting state, decorated with the
@@ -10809,49 +7414,7 @@ Unsafe local storage remains a local-state refusal. A settled quarantine names
 reclaims an ambiguous outcome: there the line names the next turn or
 `plak refresh grok` first and `plak login grok` only as the fallback.
 
-**Explicit TUI refresh.** Usage offers `[refresh]` beside the provider name of
-a subscription vertical (Codex, SuperGrok or Claude) only when its credential
-needs a refresh, under a current accepted compatibility profile: its offline
-posture is `RefreshRequired`; or it is `Ready` and the facade's offline
-`access_token_expired` check finds the stored access token expired (the offline
-posture stays `Ready` for such a token, and the vertical reads "credential
-needs a token refresh"); or it is SuperGrok's reclaimable `Quarantined`. The
-decision reads local state only, never a provider usage read. A `Ready`
-credential with a valid token, a `Refreshing` one, and states whose remedy is
-`plak login` (signed out, revoked, login-required, profile-changed, and a Codex
-or Claude quarantine) or another build (written by a newer build) offer no
-action, and there is no `[login]` action.
-The offered set is read off the host's action loop (§5.5), after the host's own
-usage read for the same open or re-read has settled: that read holds the
-compatibility lock across its exchange and only try-locks it, so a posture read
-from the same process while it runs would report it `Busy`. A set read for an
-older open or re-read is discarded, and until the newest arrives the previous
-set stays offered.
-The labels render muted. Hovering a label highlights it without moving the
-keyboard focus. Opening Usage shows no keyboard focus: the first Up or Down
-shows the focus on the current action, later presses move it, and Enter
-activates the focused action only once it is shown. Clicking a `[refresh]`
-label activates it directly. Page keys and the wheel still scroll the whole
-Usage page, and the wheel clears the hover; tab and close hits remain
-independent.
-The action revalidates the offline posture with the same local check, since a
-button may outlive its snapshot. A credential that still needs a refresh first
-gets the same
-in-process facade `refresh_now` operation as `plak refresh <account>`, with the
-same single-flight claim, rotation and quarantine rules. A credential renewed
-meanwhile (`Ready` with a valid token, or `Refreshing` under another claim) is
-not refreshed, only re-read; a posture that now needs `plak login` is refused
-with an inline reason. The action never logs in or accepts a profile.
-One explicit refresh runs per attached product surface; its button reads
-`[refreshing…]` and other refresh actions are disabled until it settles.
-Completion re-reads the host-owned Usage projection, bypassing held freshness;
-if a read predates the credential change, one follow-up read is queued rather
-than losing the request to coalescing. Failed refreshes use the recorded-failure
-notes below; local setup or posture refusals without a recorded failure show
-an inline reason. Closing Menu does not cancel a claimed refresh or reopen the
-modal when it completes.
-
-The Usage tab and `plak usage` decorate only their display copy with the newest
+The usage view and `plak usage` decorate only their display copy with the newest
 failed credential refresh recorded in telemetry. A newer `Began` row does not
 hide that failure; a later `Completed` clears it (equal timestamps use insertion
 order). Refresh-required and quarantine prose is replaced by the failure's local
@@ -10862,7 +7425,7 @@ no request was sent, and names `plak login <account>`), and remedy. A failure
 row whose claim generation is more than one behind the current credential
 record (a later login, logout, or refresh) is history and is not shown. Otherwise the failure
 is a separate note; valid allowance bars remain valid. `plak status` and the
-Providers page use the same reader and wording without changing credential
+provider status view uses the same reader and wording without changing credential
 readiness. Only a `Restored` result says `credential unchanged`; unknown or
 quarantined outcomes name that uncertainty. Missing or unreadable telemetry
 keeps the ordinary credential text. These read-only queries never rebuild the
@@ -10881,8 +7444,7 @@ that has been reached. Fill and unused cells are the same mid-cell black
 square so the track cannot sit taller than the fill and the bar sits on the
 same midline as `[` `]` in real terminal emulators (not on the cell baseline
 a lower-block occupies, and not as a hairline); unused cells recede by
-colour — a darker grey than muted chrome in the TUI, and a grey SGR in
-`plak usage`. The percent is floored to match provider truncation, and the reset
+colour -- a grey SGR in `plak usage`. The percent is floored to match provider truncation, and the reset
 clause is omitted rather than guessed when the provider reported none. Meters
 the provider groups render as an indented sub-block under the group name, so
 two windows can never be read as one. Balances close a block without a bar:
@@ -10919,10 +7481,7 @@ last Ready meters** rather than replacing a true observation with a lock-miss
 or rate-limit sentence. A projection that is only Busy is not treated as
 fresh: the next idle open retries, because a lock miss is contention, not a
 stable observation. A read during a turn is served with its age stated and does not re-query,
-except while the Usage tab is open: that tab re-reads every 60 seconds,
-coalesced to one in-flight read, and stops when the tab closes. A re-read
-keeps the previous allowance figures on screen. The loading note is shown
-only when the tab has no allowance observation yet.
+without claiming a new provider read.
 
 `plak usage --account <id>` narrows both the network read and output to that
 vertical; it accepts `codex`, `grok`, `claude`, `openrouter`, and `supergrok`,
@@ -10989,8 +7548,7 @@ and where new work stops, read-only against the default limits from the
 store's recorded counters in one row read, never a scan of retained history; the
 detail starts with the store file and its fill as a percentage of where new
 work stops, and each bound also names where child agents' new work stops; `full` is an
-error once new work is refused, `nearly_full` a warning from 70% of it (the
-TUI's first warning step, §2.2), both with the remedy `plak session gc --all`, then
+error once new work is refused, `nearly_full` a warning from 70% of it (section 2.2), both with the remedy `plak session gc --all`, then
 `plak session delete <id>`; the detail also shows the database file size and
 free bytes, the change feed's retained rows and encoded bytes summed from the
 sessions rows' feed counters, never by scanning the feed (informational: feed
@@ -11068,29 +7626,12 @@ authority. Warnings alone exit 0; one or more failures exit 5.
 
 ### 8.1 First run
 
-There is no wizard. Plak has an empty state rather than a setup flow: the TUI
-opens, notices that no default account or model is configured, and says what to
-do in the chrome — choose an agent profile on the Agents tab and **Use now**,
-after which the agent attaches by itself in that same session. An OpenRouter or
-direct API root needs a user template and a profile that names it, or the
-binding flags of
-`plak run` / `plak agent`.
-A refused turn in that state repeats the same route rather than failing
-silently.
-
-The Plak home is created lazily by the first command that actually needs
-state — a run, an agent session, a session query, a session-scoped usage read —
-not by `doctor`, `status`, `key status`, or `config show`. Those readers
-create no home, subscription state, diagnostic log or telemetry store, even
-in maintainer builds. `session show` and `session log`
-also inspect without state admission; a missing product database is an empty
-workspace session list for prefix resolution. That is deliberate: a diagnosis must not
-manufacture the thing it is diagnosing.
-
-Where the empty state has a specific cause, the chrome names it: missing
-defaults, a model that needs an explicit effort, or a resolve failure whose
-detail carries its own repair — including the two engine-locating environment
-variables, spelled the same way `plak doctor` spells them.
+There is no setup wizard or bundled application client. Configure an account
+and root profile explicitly, inspect with `status` and `doctor`, then start
+`host`, a bounded `run`, or an `agent` transport. A state-using command creates
+the product home lazily. Read-only diagnosis and bare help never manufacture
+stores, credentials or a host. A client presents the host's missing-default or
+admission facts; it does not resolve credentials or invent defaults.
 
 ### 8.2 The two credential routes
 
@@ -11188,10 +7729,8 @@ profile's provenance.
 
 **Login, logout and API keys are explicit operator operations:** the CLI and
 authenticated host console (introduced in protocol 7; current client protocol 10)
-share the account service. Private TUI
-and web forms consume that wire contract; they do not own credentials. The
-retained embedded TUI does not run an OAuth flow or capture key material; the Providers tab reads status
-and prints the exact command (§5.5).
+share the account service. Integrator clients consume that wire contract;
+they do not own credential resolution or storage.
 
 The product's `AccountOps` port contains account and catalog operations, with
 no terminal streams and no inference methods. Login begins with display
@@ -11343,21 +7882,6 @@ billing and usage-limit bodies and `x-should-retry: false` are terminal even
 with Retry-After; `true` never widens replay. The kernel announces each
 replay as a typed `ModelEvent::Retry`, and Plak shows it on every face:
 
-- **TUI.** The composer HUD reads `retrying Xs`, counting down, until the
-  replay streams or the turn ends. The attempt and cause stay on the
-  transcript retry row (`retry n/N · cause`). When the failed request had
-  streamed assistant text or reasoning, those blocks are redrawn
-  dimmed under the label `discarded -- retrying` (reasoning as
-  `discarded thinking -- retrying`, shown only while thinking is shown),
-  including assistant text and thinking that preceded a tool call of that
-  same response; the replay streams into new blocks. The session persists a model response's
-  sealed reasoning when that response completes (the Content view the host
-  drives carries the completion's kind, not its aggregate), so its thinking
-  rows precede the rows of the tools it requested and survive a later crash;
-  reasoning of a response still in flight persists when the turn ends by any
-  path, including a quit that abandons it, a lagged or closed event stream and
-  a terminal failure. A discarded response's reasoning never reaches the
-  resumable transcript, and earlier responses of the turn are unaffected.
 - **JSONL.** One `retry` frame, which is in the required (never dropped) kind
   set: `attempt`, `max_attempts`, `delay_ms`, `cause_kind` (`http_status`,
   `connect`, `record_rejected_in_transit`, `transport_after_send`, `stream_interrupted`), `cause` (operator
@@ -11379,9 +7903,9 @@ replay as a typed `ModelEvent::Retry`, and Plak shows it on every face:
   resend. This best-effort log queue is not telemetry or recovery authority.
 
 When the first hosted tool is enabled for live use, hosted unknown-outcome
-messaging on TUI, `plak run`, JSONL and child status rows must name the tool,
+messaging on host wire views, `plak run`, JSONL and child status rows must name the tool,
 its class, failure phase, that nothing was retried, and the remedy. Today the
-root waits for an explicit prompt or `/recover`; children show
+root waits for an explicit prompt or a recovery operation; children show
 `recovery_required`, which the host recovers, leaving the parent model to decide.
 No automatic "continue" is dispatched. Read-only hosted retrieval defaults to
 an isolated local wrapper whose failure is an ordinary tool observation;
@@ -11536,24 +8060,19 @@ These are shipped gaps, stated so that nothing above reads as a promise the
 product does not keep. The agent tree's own limits are chapter 03 §17, and the
 distribution and platform limits are chapter 06.
 
-**Deferred capabilities.** Skills are designed and not implemented. MCP
-servers bind through template tools (section 6.3); `plak mcp` sets them up,
-logs in to them and shows their prompts, and `/mcp` shows them read-only, with
-no editing in the TUI. A user runs an MCP prompt only through `plak mcp
-prompts`: the TUI has no prompt entry yet. MCP resource subscriptions,
-sampling and elicitation are not supported. Skills have no command,
-because a deferred capability that occupies a menu row is worse than an absent
-one; `/help` names them in prose.
+MCP servers bind through template tools (section 6.3); `plak mcp` provides
+setup, login and prompt inspection. Clients can request the read-only session
+MCP view. MCP resource subscriptions, sampling and elicitation are not supported.
 
 **Claude OAuth thinking has no body.** That route returns empty thinking
-blocks — billed, with a signature and no text — because it selects
-`thinking.display: "updates"`. The Session tab says so. Codex and Grok OAuth
+blocks -- billed, with a signature and no text -- because it selects
+`thinking.display: "updates"`. Codex and Grok OAuth
 admit auto-summaries; OpenRouter visible thinking is the upstream body.
 Those operator-visible blocks persist on the product transcript and restore
 on resume. They are not live-exercised on every model.
 
 **Context occupancy is `bytes÷4`; the admission bound is not.** No provider
-reports per-part token counts. Categories and the composer meter convert the
+reports per-part token counts. The host's context categories convert the
 prepared body's measured byte parts by four (the same method as §6.7), split
 enrolled `AGENTS.md` out of the system prompt from last-compiled instruction
 facts, and label every occupying row `est.` Envelope JSON is the unattributed
@@ -11573,8 +8092,7 @@ otherwise a plausible whole-input bytes/4 estimate may dispatch with explicit
 non-guaranteed provider-decision evidence and a typed overflow backstop. If
 even that estimate exceeds the ceiling, compaction runs before send (chapter
 01 §6.8). These rules drive `Fits` / `WouldOverflow`. The bound is a labelled fact;
-leftover bound above occupancy is `◈` admission padding and does not fill the
-board.
+leftover bound above occupancy is admission padding, not measured occupancy.
 
 **The token counts on prompt renders are bytes over four.** The workspace
 carries no tiktoken-compatible tokenizer, so the footprint table in §6.7 is a
@@ -11584,10 +8102,6 @@ proportional comparison between routes, not a provider-accurate token count.
 vendor client splices that in from a second settings read that Plak does not
 make, so the SuperGrok block carries no account line unless the billing body
 itself happens to carry a tier.
-
-**Compose has no outputs tally and there is no single-block viewer.** The cell
-renders its header, program, and children; a summary footer under the children
-and a full-screen view of one expanded block are both unbuilt.
 
 **Interrupt latency inside a composition cell is unverified.** The cancel token
 flips before the persist and the host does not block its poll branch on the

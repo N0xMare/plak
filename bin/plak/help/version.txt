@@ -3,4 +3,4 @@ plak version — executable identity
 USAGE:
   plak version
 
-Prints the version, build flavor and binary ID used by /reload and handoffs.
+Prints the version, build flavor and binary ID used by build checks and host upgrades.

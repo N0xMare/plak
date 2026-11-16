@@ -184,31 +184,6 @@ impl NodeDetachStatus {
     }
 }
 
-/// Content-free terminal lifecycle measurement phase.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StartupTimingPhase {
-    ProcessStart,
-    FirstFrameLocal,
-    ReadyToTypeLocal,
-    HostReadyBackground,
-    KeyToRestore,
-    RestoreToExit,
-}
-
-impl StartupTimingPhase {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::ProcessStart => "tui_process_start",
-            Self::FirstFrameLocal => "tui_first_frame_local",
-            Self::ReadyToTypeLocal => "tui_ready_to_type_local",
-            Self::HostReadyBackground => "tui_host_ready_background",
-            Self::KeyToRestore => "tui_key_to_restore",
-            Self::RestoreToExit => "tui_restore_to_exit",
-        }
-    }
-}
-
 /// Closed operator bounds for a non-interactive run.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RunBound {
@@ -243,13 +218,6 @@ pub enum ProductObservation {
         at: Timestamp,
         session_id: SessionId,
         bound: RunBound,
-    },
-    StartupTiming {
-        at: Timestamp,
-        session_id: SessionId,
-        phase: StartupTimingPhase,
-        resumed: bool,
-        elapsed: Duration,
     },
     /// Product sink observation from `TelemetrySink::observe_model_retry` for every
     /// runtime, not emitted by hosted event projection.
@@ -335,7 +303,6 @@ impl ProductObservation {
         match self {
             Self::TurnUsage { at, .. }
             | Self::RunBoundExit { at, .. }
-            | Self::StartupTiming { at, .. }
             | Self::ModelRetry { at, .. }
             | Self::TreeNodeSpawned { at, .. }
             | Self::TreeNodeAttached { at, .. }
@@ -354,7 +321,6 @@ impl ProductObservation {
         match self {
             Self::TurnUsage { session_id, .. }
             | Self::RunBoundExit { session_id, .. }
-            | Self::StartupTiming { session_id, .. }
             | Self::ModelRetry { session_id, .. }
             | Self::TreeNodeSpawned { session_id, .. }
             | Self::TreeNodeAttached { session_id, .. }

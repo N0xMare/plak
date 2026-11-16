@@ -389,7 +389,6 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             "tests/live/live.just",
             "tools/perf/perf.just",
             "tools/prompts/prompts.just",
-            "tools/tui/tui.just",
             "tools/dev/dev.just",
             "eval/harbor.just",
             "tools/gate/test-env.sh",

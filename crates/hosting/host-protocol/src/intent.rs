@@ -133,7 +133,7 @@ impl ProtocolExtension for Core {
     type WelcomeExtension = Option<Never>;
 }
 
-/// Typed intents a driver sends to the hosted session (today the TUI, the
+/// Typed intents a driver sends to the hosted session (today the client, the
 /// JSONL face, and `plak run`).
 ///
 /// The closed protocol is every variant but [`Self::Extension`]; that slot
@@ -222,7 +222,7 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
         /// Operator choice.
         choice: ApprovalChoice,
     },
-    /// Leave the TUI.
+    /// Leave the client.
     Quit,
     /// Clear / new in-process session (host drops conversation attachment).
     NewSession,
@@ -249,7 +249,7 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
     /// Re-read every vertical's credential readiness and republish both the
     /// provider snapshot and the agent-template readiness projection.
     RefreshReadiness,
-    /// Exit the TUI and ask the app host to re-resolve OAuth + re-attach the agent.
+    /// Exit the client and ask the app host to re-resolve OAuth + re-attach the agent.
     RetryAttach,
     /// Recover an interrupted turn now: reopen the session, record once what
     /// the turn left unobserved, and continue. The next prompt does the same

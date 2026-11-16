@@ -1,22 +1,18 @@
 //! Product-local mailbox and appearance adapters over the public wire DTOs.
 
-pub use crate::tui_preferences::SettingsTheme;
 pub use plakd_wire_types::{
     AgentAcknowledgement, McpOverview, PlakExtension, ProfileApply, ProfileDifference,
     ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SettingsCompositionOption,
     SettingsSnapshot, SurfaceIntent, SurfaceObservation, WorkspaceChrome,
 };
+pub use plakd_wire_types::{SettingsUpdate, SettingsView};
 use plakous_host_protocol::{
     IntentReceiver, IntentSendError, IntentSender, SessionIntent, SessionObservation,
     intent_channel,
 };
-mod settings;
-pub use settings::{SettingsUpdate, SettingsView};
 
 #[cfg(feature = "mcp")]
 pub(crate) mod mcp_lines;
-#[cfg(feature = "tui")]
-pub(crate) mod tui_channel;
 
 /// The intent enum Plak's surfaces send: the protocol plus [`SurfaceIntent`].
 pub type UserAction = SessionIntent<PlakExtension>;

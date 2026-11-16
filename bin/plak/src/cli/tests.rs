@@ -4,6 +4,22 @@
 )]
 
 #[test]
+fn bare_invocation_is_help_and_terminal_launch_grammar_is_absent() {
+    assert!(matches!(parse(args(&[])), Ok(Command::Help)));
+    for argv in [
+        vec!["resume"],
+        vec!["--resume", "session"],
+        vec!["--host-resume", "session"],
+        vec!["--import-resume", "export.json"],
+        vec!["--in-process"],
+        vec!["--runner", "buildbox"],
+        vec!["--workspace", "."],
+    ] {
+        assert!(parse(args(&argv)).is_err(), "{argv:?}");
+    }
+}
+
+#[test]
 fn host_step_drain_accepts_bounded_and_idle_without_settlement_or_abandon_flags() {
     for (value, expected) in [
         ("0", crate::command::HostDrain::Bounded { milliseconds: 0 }),
@@ -382,14 +398,6 @@ fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, Strin
 
 fn args(values: &[&str]) -> Vec<OsString> {
     values.iter().map(|s| OsString::from(*s)).collect()
-}
-
-#[test]
-fn bare_plak_opens_tui() {
-    assert!(matches!(
-        parse(Vec::<OsString>::new()),
-        Ok(Command::Tui { .. })
-    ));
 }
 
 #[test]
@@ -891,7 +899,14 @@ fn product_command_argv_matrix() {
             |c| matches!(c, Command::ConfigSet { key, value, scope } if key == "account" && value == "grok" && *scope == crate::product_config::ConfigWriteScope::User),
         ),
         (
-            &["config", "set", "tui.theme", "light", "--scope", "project"],
+            &[
+                "config",
+                "set",
+                "skills.enabled",
+                "false",
+                "--scope",
+                "project",
+            ],
             |c| matches!(c, Command::ConfigSet { scope, .. } if *scope == crate::product_config::ConfigWriteScope::Project),
         ),
         (&["config", "trust"], |c| matches!(c, Command::ConfigTrust)),
@@ -955,23 +970,6 @@ fn product_command_argv_matrix() {
         (&["version", "--state-key"], |c| {
             matches!(c, Command::StateKey)
         }),
-        (
-            &["--import-resume", "/tmp/x.json"],
-            |c| matches!(c, Command::ImportResume { path, handoff: None } if path.as_os_str() == "/tmp/x.json"),
-        ),
-        (
-            &[
-                "--import-resume",
-                "/tmp/x.json",
-                "--reload-handoff",
-                "/tmp/h.json",
-            ],
-            |c| matches!(c, Command::ImportResume { path, handoff: Some(handoff) } if path.as_os_str() == "/tmp/x.json" && handoff.as_os_str() == "/tmp/h.json"),
-        ),
-        (
-            &["--resume", "aaaaaaaa", "--reload-handoff", "/tmp/h.json"],
-            |c| matches!(c, Command::Resume { session_id: Some(id), handoff: Some(handoff) } if id == "aaaaaaaa" && handoff.as_os_str() == "/tmp/h.json"),
-        ),
         (&["status"], |c| matches!(c, Command::StatusAll)),
         (
             &["models", "claude"],
@@ -1131,28 +1129,6 @@ fn product_command_argv_matrix() {
             &["secret", "set"],
             |c| matches!(c, Command::CommandHelp { command } if command == "secret"),
         ),
-        (&["resume"], |c| {
-            matches!(
-                c,
-                Command::Resume {
-                    session_id: None,
-                    handoff: None
-                }
-            )
-        }),
-        (
-            &["resume", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
-            |c| matches!(c, Command::Resume { session_id: Some(id), handoff: None } if id.starts_with("aaaa")),
-        ),
-        (&["--resume"], |c| {
-            matches!(
-                c,
-                Command::Resume {
-                    session_id: None,
-                    handoff: None
-                }
-            )
-        }),
         (
             &["usage", "--session", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
             |c| {
@@ -1437,62 +1413,6 @@ fn mcp_add_takes_secret_names_never_values_and_one_transport() {
 }
 
 #[test]
-fn resume_aliases_accept_at_most_one_session_id() {
-    let session_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-    for argv in [["resume", session_id], ["--resume", session_id]] {
-        assert!(matches!(
-            parse(args(&argv)),
-            Ok(Command::Resume { session_id: Some(actual), .. }) if actual == session_id
-        ));
-    }
-
-    for argv in [
-        &["resume", session_id, "extra"][..],
-        &["--resume", session_id, "extra"][..],
-        &["--resume", "--unknown"][..],
-    ] {
-        assert!(parse(args(argv)).is_err(), "must reject {argv:?}");
-    }
-}
-
-#[test]
-fn the_private_host_resume_marker_is_distinct_from_embedded_resume() {
-    for argv in [&["--host-resume"][..], &["--host-resume", "aaaaaaaa"][..]] {
-        assert!(matches!(parse(args(argv)), Ok(Command::HostResume { .. })));
-    }
-    for argv in [
-        &["--host-resume", "--other"][..],
-        &["--host-resume", "id", "extra"][..],
-    ] {
-        assert!(parse(args(argv)).is_err());
-    }
-}
-
-#[test]
-fn placement_flags_only_launch_the_tui_and_preserve_runner_owned_path_bytes() {
-    assert!(
-        matches!(parse(args(&["--runner", "machine", "--workspace", "/remote/work"])),
-        Ok(Command::TuiPlacement { runner: Some(runner), workspace: Some(workspace) })
-            if runner == "machine" && workspace == "/remote/work")
-    );
-    assert!(matches!(
-        parse(args(&["--workspace", "/host/work"])),
-        Ok(Command::TuiPlacement {
-            runner: None,
-            workspace: Some(_)
-        })
-    ));
-    for argv in [
-        &["--runner"][..],
-        &["--workspace"][..],
-        &["--runner", "machine", "run", "--", "prompt"][..],
-        &["--runner", "machine", "agent"][..],
-    ] {
-        assert!(parse(args(argv)).is_err(), "{argv:?}");
-    }
-}
-
-#[test]
 fn top_level_init_and_setup_are_absent_but_config_init_remains() {
     for retired in ["init", "setup"] {
         assert_eq!(
@@ -1509,7 +1429,7 @@ fn top_level_init_and_setup_are_absent_but_config_init_remains() {
 #[test]
 fn parser_errors_preserve_useful_categories_without_payloads() {
     assert_eq!(
-        parse(args(&["config", "set", "tui.theme"])).unwrap_err(),
+        parse(args(&["config", "set", "skills.enabled"])).unwrap_err(),
         "config set requires a value: plak config set <key> <value>"
     );
     assert_eq!(
@@ -1620,13 +1540,9 @@ fn product_command_maintainer_argv_matrix() {
 /// Every remedy string any product surface can print must name a command
 /// this build actually has.
 ///
-/// The TUI prints these into the Models readiness header, the Usage
-/// not-connected lines, the notes and `/help`. Before this test they were
-/// free-form strings, and `plak login openrouter` — an OAuth verb on an
-/// API-key account — shipped to operators as advice that only produces a
-/// refusal.
+/// Account readiness remedies must remain valid for the operator CLI.
 #[test]
-fn every_tui_remedy_names_a_command_this_build_has() {
+fn every_account_remedy_names_a_command_this_build_has() {
     for remedy in crate::product_config::settings::remedy_catalog() {
         let mut tokens = remedy.split_whitespace();
         assert_eq!(
@@ -1671,10 +1587,10 @@ fn the_legacy_auth_tree_is_retired_and_the_canonical_verbs_remain() {
 fn product_argv_rejects_garbage_without_reflecting_payloads() {
     let rejected: &[&[&str]] = &[
         &["not-a-command"],
-        &["update"],                     // dropped until public releases exist
-        &["login", "openai"],            // API key account, not OAuth
-        &["run", "--account", "codex"],  // missing --model and prompt
-        &["config", "set", "tui.theme"], // missing value
+        &["update"],                          // dropped until public releases exist
+        &["login", "openai"],                 // API key account, not OAuth
+        &["run", "--account", "codex"],       // missing --model and prompt
+        &["config", "set", "skills.enabled"], // missing value
     ];
     for argv in rejected {
         let err = parse(args(argv)).unwrap_err();

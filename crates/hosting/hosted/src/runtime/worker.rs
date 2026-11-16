@@ -34,7 +34,7 @@ impl QuitReceipt {
 }
 
 /// The host thread and its authoritative, process-local quit receipt.
-/// A cooked TUI can read the disposition without waiting past its release bound.
+/// A cooked client can read the disposition without waiting past its release bound.
 #[derive(Debug)]
 pub struct HostWorkerHandle {
     thread: thread::JoinHandle<CliResult<()>>,

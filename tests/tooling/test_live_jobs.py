@@ -1,7 +1,6 @@
 """Offline checks of the job driver's pure oracles: no binary, no provider."""
 
 import json
-import sqlite3
 import sys
 import tempfile
 import unittest
@@ -23,9 +22,7 @@ def failure(test, call, outcome):
 class JobSelectionTests(unittest.TestCase):
     def test_selected_is_the_whole_set_or_a_named_subset(self):
         self.assertEqual(jobs.selected(set()), jobs.SCENARIOS)
-        self.assertEqual(
-            jobs.selected({"ctrl_b", "stop_jobs"}), (("ctrl_b", "tui"), ("stop_jobs", "tui"))
-        )
+        self.assertEqual(jobs.selected({"promotion_budget"}), (("promotion_budget", "jsonl"),))
 
     def test_unknown_scenario_is_a_usage_error(self):
         with self.assertRaises(ValueError):
@@ -42,8 +39,7 @@ class JobSelectionTests(unittest.TestCase):
         failure(self, lambda: jobs.pin_jobs(Path("unused"), 0), live.HARNESS)
         failure(self, lambda: jobs.pin_jobs(Path("unused"), 601), live.HARNESS)
 
-    def test_visible_drops_ansi_and_matching_requires_the_fixture_process(self):
-        self.assertEqual(jobs.visible(b"\x1b[32m1 process\x1b[0m"), "1 process")
+    def test_matching_requires_the_fixture_process(self):
         lines = [
             "python3 hold.py 8 plakjobbudget",
             "/usr/bin/python3 hold.py 8 plakjobbudget",
@@ -208,7 +204,7 @@ class JobOracleTests(unittest.TestCase):
             live.HARNESS,
         )
 
-    def test_steer_and_background_leave_the_process_running(self):
+    def test_steer_and_await_leave_the_process_running(self):
         self.assertIn(
             "still running",
             jobs.judge_steer(
@@ -273,101 +269,8 @@ class JobOracleTests(unittest.TestCase):
             ),
             live.HARNESS,
         )
-        self.assertIn(
-            "Ctrl+B",
-            jobs.judge_ctrl_b(
-                latency=0.4,
-                finished=False,
-                still_running=True,
-                returned=True,
-            ),
-        )
-        failure(
-            self,
-            lambda: jobs.judge_ctrl_b(
-                latency=0.4,
-                finished=True,
-                still_running=False,
-                returned=True,
-            ),
-            live.MODEL,
-        )
-        failure(
-            self,
-            lambda: jobs.judge_ctrl_b(
-                latency=None,
-                finished=False,
-                still_running=True,
-                returned=False,
-            ),
-            live.HARNESS,
-        )
 
-    def test_stop_notice_run_child_crash_wake_and_badge(self):
-        self.assertIn(
-            "woke",
-            jobs.judge_stop(
-                confirmed=True,
-                still_running=False,
-                finished=False,
-                woke=True,
-                origin="host_wake",
-            ),
-        )
-        self.assertIn(
-            "woke",
-            jobs.judge_stop(
-                confirmed=True,
-                still_running=False,
-                finished=False,
-                woke=True,
-                origin=None,
-            ),
-        )
-        failure(
-            self,
-            lambda: jobs.judge_stop(
-                confirmed=False,
-                still_running=True,
-                finished=False,
-                woke=False,
-                origin=None,
-            ),
-            live.HARNESS,
-        )
-        failure(
-            self,
-            lambda: jobs.judge_stop(
-                confirmed=True,
-                still_running=False,
-                finished=True,
-                woke=True,
-                origin="host_wake",
-            ),
-            live.MODEL,
-        )
-        failure(
-            self,
-            lambda: jobs.judge_stop(
-                confirmed=True,
-                still_running=False,
-                finished=False,
-                woke=False,
-                origin=None,
-            ),
-            live.HARNESS,
-        )
-        failure(
-            self,
-            lambda: jobs.judge_stop(
-                confirmed=True,
-                still_running=False,
-                finished=False,
-                woke=True,
-                origin="user_prompt",
-            ),
-            live.HARNESS,
-        )
+    def test_notice_run_child_and_crash(self):
         self.assertIn(
             "steering boundary",
             jobs.judge_notice(
@@ -733,113 +636,6 @@ class JobOracleTests(unittest.TestCase):
         self.assertIn("outcome unknown", jobs.judge_crash(unknown=True, warned=True))
         failure(self, lambda: jobs.judge_crash(unknown=False, warned=True), live.HARNESS)
         failure(self, lambda: jobs.judge_crash(unknown=True, warned=False), live.HARNESS)
-        self.assertIn(
-            "woke",
-            jobs.judge_wake(
-                idle_with_job=True,
-                hud=True,
-                second_admission=True,
-                origin="host_wake",
-                finished=True,
-            ),
-        )
-        self.assertIn(
-            "woke",
-            jobs.judge_wake(
-                idle_with_job=True,
-                hud=True,
-                second_admission=True,
-                origin=None,
-                finished=True,
-            ),
-        )
-        failure(
-            self,
-            lambda: jobs.judge_wake(
-                idle_with_job=True,
-                hud=True,
-                second_admission=True,
-                origin="user_prompt",
-                finished=True,
-            ),
-            live.HARNESS,
-        )
-        failure(
-            self,
-            lambda: jobs.judge_wake(
-                idle_with_job=False,
-                hud=True,
-                second_admission=False,
-                origin=None,
-                finished=False,
-            ),
-            live.MODEL,
-        )
-        self.assertIn(
-            "1 agent",
-            jobs.judge_badge(
-                root_idle=True,
-                child_alive=True,
-                agent=True,
-                process=True,
-                promoted=True,
-            ),
-        )
-        failure(
-            self,
-            lambda: jobs.judge_badge(
-                root_idle=True,
-                child_alive=True,
-                agent=False,
-                process=True,
-                promoted=True,
-            ),
-            live.HARNESS,
-        )
-        failure(
-            self,
-            lambda: jobs.judge_badge(
-                root_idle=True,
-                child_alive=True,
-                agent=False,
-                process=False,
-                promoted=None,
-            ),
-            live.HARNESS,
-        )
-        failure(
-            self,
-            lambda: jobs.judge_badge(
-                root_idle=True,
-                child_alive=True,
-                agent=False,
-                process=False,
-                promoted=False,
-            ),
-            live.MODEL,
-        )
-        failure(
-            self,
-            lambda: jobs.judge_badge(
-                root_idle=True,
-                child_alive=False,
-                agent=True,
-                process=True,
-                promoted=True,
-            ),
-            live.MODEL,
-        )
-        failure(
-            self,
-            lambda: jobs.judge_badge(
-                root_idle=False,
-                child_alive=True,
-                agent=True,
-                process=True,
-                promoted=True,
-            ),
-            live.MODEL,
-        )
 
 
 class JobEvidenceTests(unittest.TestCase):
@@ -853,19 +649,6 @@ class JobEvidenceTests(unittest.TestCase):
         )
         self.assertIn("timeout 0", jobs.immediate_hint(live.ROUTES["deepseek"]))
         self.assertIn("block_until_ms 0", jobs.immediate_hint(live.ROUTES["grok"]))
-        command = "python3 hold.py 25 token"
-        for route, hint, wait in (
-            ("codex", "yield_time_ms 0", "write_stdin"),
-            ("claude-sonnet55-low", "run_in_background true", "Read"),
-            ("deepseek", "timeout 0", "timeout_ms"),
-            ("grok", "block_until_ms 0", "get_command_or_subagent_output"),
-        ):
-            task = jobs.idle_child_task(live.ROUTES[route], command)
-            self.assertIn(hint, task)
-            self.assertIn(wait, task)
-            self.assertIn(command, task)
-            self.assertNotIn("no timeout", task)
-            self.assertIn("submit_result", task)
         self.assertIn(
             "steer applied with the job still running",
             jobs.judge_nested_steer(
@@ -886,15 +669,6 @@ class JobEvidenceTests(unittest.TestCase):
                 still_running=True,
             ),
             live.HARNESS,
-        )
-        self.assertIn(
-            "Ctrl+B",
-            jobs.judge_nested_ctrl_b(
-                promoted=True,
-                sent=True,
-                finished=False,
-                still_running=True,
-            ),
         )
 
     def test_crash_waits_for_a_terminal_exchange(self):
@@ -1096,26 +870,6 @@ class JobEvidenceTests(unittest.TestCase):
             live.MODEL,
         )
 
-    def test_tui_turn_failed_with_output_limit_is_model(self):
-        with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            log = home / "state" / "k" / "sessions" / "s.events.jsonl"
-            log.parent.mkdir(parents=True)
-            rows = [
-                {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "t1"},
-                {"kind": "turn.lifecycle", "phase": "failed", "turn_id": "t1"},
-                {
-                    "kind": "turn.failed",
-                    "disposition": "definite",
-                    "msg": "agent turn failed: response reached its output bound before completion",
-                },
-            ]
-            log.write_text("".join(json.dumps(row) + "\n" for row in rows))
-            failure(self, lambda: jobs.classify_tui_turn(home, "s", 0, "ctrl+b"), live.MODEL)
-            rows[2]["msg"] = "agent turn failed: protocol"
-            log.write_text("".join(json.dumps(row) + "\n" for row in rows))
-            failure(self, lambda: jobs.classify_tui_turn(home, "s", 0, "ctrl+b"), live.HARNESS)
-
     def test_submit_outcomes_read_live_work_then_a_receipt(self):
         refusal = json.dumps(
             {
@@ -1284,18 +1038,6 @@ class JobEvidenceTests(unittest.TestCase):
             self.assertIn("you may wait for it with wait_agent", prompt)
             self.assertNotIn("without waiting for it", prompt)
 
-    def test_cursor_split_hud_is_one_composer_row(self):
-        agent = " · \u280b 1 agent".encode()
-        process = " · \u2834 1 process".encode()
-        raw = b"\x1b[1;1H" + agent + b"\x1b[1;40H" + process
-        hud = jobs.latest_hud(raw, 0)
-        self.assertIn("1 agent", hud)
-        self.assertIn("1 process", hud)
-        # A later row that drops the process is the state to judge.
-        later = jobs.latest_hud(raw + b"\n" + " · \u2819 1 agent".encode(), len(raw))
-        self.assertIn("1 agent", later)
-        self.assertNotIn("1 process", later)
-
     def test_child_wait_does_not_judge_before_start_or_terminal(self):
         token = "plakjobchildabcd"
         started = [
@@ -1332,119 +1074,6 @@ class JobEvidenceTests(unittest.TestCase):
         )
         self.assertEqual(jobs.terminal_for(evicted, job_id), terminal)
 
-    def test_hud_bytes_and_idle_come_from_after_the_terminal(self):
-        screen = b"the model said 1 agent and 1 process\n" + b"\x1b[32m1 process\x1b[0m"
-        mark = len(b"the model said 1 agent and 1 process\n")
-        self.assertNotIn("1 agent", jobs.screen_after(screen, mark))
-        self.assertIn("1 process", jobs.screen_after(screen, mark))
-
-    def test_latest_hud_keeps_a_paint_from_before_the_terminal(self):
-        quote = b"the model said 1 agent and 1 process\n"
-        paint = " \u00b7 \u280b 1 agent \u00b7 \u2834 1 process ".encode()
-        screen = quote + paint + b"MARK" + b"root idle, no repaint\n"
-        mark = len(quote) + len(paint) + len(b"MARK")
-        hud = jobs.latest_hud(screen, mark)
-        self.assertIn("1 agent", hud)
-        self.assertIn("1 process", hud)
-        self.assertNotIn("the model said", hud)
-        # A quote after the mark is not a repaint.
-        quoted = quote + paint + b"MARK" + b"still says 1 agent and 1 process"
-        self.assertIn("1 process", jobs.latest_hud(quoted, mark))
-        # A later paint that dropped the process is the state to judge.
-        later = screen + " \u00b7 \u2819 1 agent ".encode()
-        dropped = jobs.latest_hud(later, mark)
-        self.assertIn("1 agent", dropped)
-        self.assertNotIn("1 process", dropped)
-        # wake_while_idle: a process-only border, including ANSI around it.
-        process = " \u00b7 \u2834 1 process ".encode()
-        ansi = b"before\x1b[32m" + process + b"\x1b[0m"
-        self.assertIn("1 process", jobs.latest_hud(ansi, len(b"before")))
-        quoted_process = b"quote 1 process\n" + process
-        self.assertNotIn("1 agent", jobs.latest_hud(quoted_process, len(quoted_process)))
-
-    def test_unpromoted_child_command_is_model_and_not_a_spawn_quote(self):
-        token = "plakjobbadgeabcd"
-        command = f"python3 hold.py 25 {token}"
-        open_start = [
-            {
-                "kind": "tool.started",
-                "name": "run_terminal_command",
-                "call_id": "c1",
-                "arguments": command + " block_until_ms 60000",
-            }
-        ]
-        self.assertIs(jobs.command_promoted(open_start, token), False)
-        done = [
-            *open_start,
-            {
-                "kind": "tool.completed",
-                "name": "run_terminal_command",
-                "call_id": "c1",
-            },
-        ]
-        self.assertIs(jobs.command_promoted(done, token), True)
-        self.assertIs(jobs.command_promoted([], token), None)
-        spawn = [
-            {
-                "kind": "tool.started",
-                "name": "spawn_agent",
-                "exposed_name": "spawn_agent",
-                "call_id": "s",
-                "arguments": command,
-            }
-        ]
-        self.assertIs(jobs.command_promoted(spawn, token), None)
-        # Canonical name on the row, model-facing name beside it.
-        bash = [
-            {
-                "kind": "tool.started",
-                "name": "process_session_start",
-                "exposed_name": "Bash",
-                "call_id": "b",
-                "subject": command,
-            }
-        ]
-        self.assertIs(jobs.command_promoted(bash, token), False)
-        with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            root = home / "state" / "k" / "sessions" / "root.events.jsonl"
-            child = home / "state" / "k" / "sessions" / "child.events.jsonl"
-            root.parent.mkdir(parents=True)
-            root.write_text(
-                json.dumps(
-                    {
-                        "kind": "turn.lifecycle",
-                        "phase": "completed",
-                        "turn_id": "t",
-                    }
-                )
-                + "\n"
-            )
-            child.write_text(json.dumps(bash[0]) + "\n")
-            self.assertIs(jobs.command_promoted(jobs.all_session_records(home), token), False)
-        idle = [
-            {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "t1"},
-            {"kind": "turn.lifecycle", "phase": "completed", "turn_id": "t1"},
-        ]
-        self.assertTrue(jobs.root_is_idle(idle))
-        self.assertFalse(
-            jobs.root_is_idle(
-                idle
-                + [
-                    {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "t2"},
-                ]
-            )
-        )
-        self.assertFalse(jobs.root_is_idle([]))
-        self.assertFalse(
-            jobs.root_is_idle(
-                [
-                    {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "t1"},
-                    {"kind": "turn.lifecycle", "phase": "failed", "turn_id": "t1"},
-                ]
-            )
-        )
-
     def test_observed_log_is_opt_in_and_drops_streamed_text(self):
         import inspect
         from collections import deque
@@ -1469,61 +1098,6 @@ class JobEvidenceTests(unittest.TestCase):
         bare.children = set()
         bare.note({"kind": "tool", "state": "running"})
         self.assertFalse(hasattr(bare, "observed"))
-
-    def test_tui_failure_uses_retry_telemetry_when_the_log_has_no_status(self):
-        with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            log = home / "state" / "k" / "sessions" / "sess.events.jsonl"
-            log.parent.mkdir(parents=True)
-            log.write_text(
-                json.dumps(
-                    {
-                        "kind": "turn.lifecycle",
-                        "turn_id": "t1",
-                        "phase": "failed",
-                    }
-                )
-                + "\n"
-            )
-            failure(self, lambda: jobs.classify_tui_turn(home, "sess", 0, "stop"), live.HARNESS)
-            database = home / "telemetry" / "telemetry-v14.sqlite3"
-            database.parent.mkdir()
-            connection = sqlite3.connect(database)
-            connection.execute(
-                "CREATE TABLE model_retries (turn_id TEXT, cause_kind TEXT, "
-                "next_attempt INTEGER, max_attempts INTEGER, declined_reason TEXT)"
-            )
-            connection.execute("INSERT INTO model_retries VALUES ('t1', 'connect', 1, 4, NULL)")
-            connection.execute("INSERT INTO model_retries VALUES ('t1', 'http_status', 2, 4, NULL)")
-            connection.commit()
-            failure(self, lambda: jobs.classify_tui_turn(home, "sess", 0, "stop"), live.HARNESS)
-            connection.execute(
-                "INSERT INTO model_retries VALUES ('t1', 'http_status', 3, 4, 'deadline')"
-            )
-            connection.commit()
-            failure(self, lambda: jobs.classify_tui_turn(home, "sess", 0, "stop"), live.HARNESS)
-            connection.execute("INSERT INTO model_retries VALUES ('t1', 'http_status', 4, 4, NULL)")
-            connection.commit()
-            failure(self, lambda: jobs.classify_tui_turn(home, "sess", 0, "stop"), live.PROVIDER)
-            connection.execute(
-                "INSERT INTO model_retries VALUES ('t1', 'http_status', 5, 4, 'budget')"
-            )
-            connection.commit()
-            connection.close()
-            failure(self, lambda: jobs.classify_tui_turn(home, "sess", 0, "stop"), live.PROVIDER)
-            log.write_text(
-                json.dumps(
-                    {
-                        "kind": "turn.lifecycle",
-                        "turn_id": "t2",
-                        "phase": "failed",
-                        "model_error_kind": "RateLimited",
-                        "http_status": 429,
-                    }
-                )
-                + "\n"
-            )
-            failure(self, lambda: jobs.classify_tui_turn(home, "sess", 0, "stop"), live.PROVIDER)
 
 
 if __name__ == "__main__":

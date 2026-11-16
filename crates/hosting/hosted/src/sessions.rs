@@ -267,7 +267,7 @@ pub struct CarryIntent {
     pub continues_line: bool,
     /// The notice the carry records on its successor.
     pub cause: String,
-    /// The orchestration carry of a reload, which has no root fallback.
+    /// An already-persisted orchestration carry intent, settled without root fallback.
     pub orchestration: bool,
 }
 

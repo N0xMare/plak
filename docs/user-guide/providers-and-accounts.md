@@ -40,30 +40,13 @@ informational blocks are skipped with a counted notice rather than failing the
 turn. Unknown tool-related or incomplete signed content still refuses when it
 cannot be continued faithfully; this does not enable additional hosted tools.
 
-In the public TUI, login and key entry use the CLI. Current-protocol host clients
-can instead use confirmed Accounts forms; the public TUI does not yet include
-those forms. Its Providers tab is read-only: per
-vertical it names the account, its status, and the command that connects it.
+Login and key entry use the operator CLI or the host's confirmed Accounts
+operations. Usage reads do not renew expired credentials. Run
+`plak refresh <account>` when a subscription token needs refresh, then
+`plak usage --account <account>`. Catalogs, readiness and credential writes
+remain host-owned; clients do not resolve credentials locally.
 
-A usage read never refreshes an expired token. An expired Codex, Grok or Claude
-access token shows that the credential needs a token refresh: the next turn
-refreshes it, or run `plak refresh <account>`. In the embedded TUI, the Usage tab offers
-`[refresh]` beside a Codex, SuperGrok or Claude account only when its token
-needs a refresh (or a SuperGrok refresh outcome is quarantined): click it, or
-use Up/Down and Enter. It runs the same refresh as `plak refresh <account>`
-and re-reads that account's usage. The label highlights under the pointer or
-once Up/Down has focused it. Accounts with a valid token, or that need
-`plak login`, get no action. If the provider rejects a token that is
-still fresh, the usage read forces one refresh and reads again; if that
-refresh fails, the provider line shows why. An ended usage window means stale provider
-data, not an expired local token.
-
-When bare `plak` attaches to `plak host` over its local socket, the public TUI
-is a remote face: Usage reads still work, but credential refresh is unavailable
-there. Run `plak refresh <account>` on the host, then
-`plak usage --account <account>` to read the result. Host-owned Settings and
-Set as default likewise require host-side changes. For settings, run
-`plak config set <key> <value>`. For a profile default, materialize its agent
+For a profile default, materialize its agent
 templates under the host home's `agents/` directory, then edit `[root] agent`
 and `[roster] working_set` in its `config.toml` to name those templates. A
 profile ID is not a template name: neither `root.profile` nor substituting
@@ -80,20 +63,17 @@ working_set = ["claude-default-worker", "claude-default-reviewer", "claude-defau
 
 Template file creation is separate; setting these pointers does not extract
 the built-in profile. See [writing a template](configuration.md#write-a-template).
-Terminal-local preferences remain editable. A refused pending write shows an error and restores the UI rather
-than appearing saved or leaving refresh spinning.
 
 API-key environment variables override stored key files. In particular,
 `OPENROUTER_API_KEY` wins over the OpenRouter key file even if the variable's
 key is invalid. Usage names that variable or the file's `sha256:` fingerprint,
 never a key prefix or suffix. To return to a stored key, run
 `unset OPENROUTER_API_KEY` and start Plak again. Remove the stale export from
-your shell startup configuration too. `/reload` retains the running process's
-environment; it does not pick up an unset in another shell.
+your shell startup configuration too. Restart the resolving process with the
+new environment; an unset in another shell does not change a running host.
 
 Claude OAuth is a first-class account route. Sonnet 5 and Sonnet 5.5 have
-live CLI, JSONL and TUI evidence; Opus 5.5 also has a captured TUI soak and a
-high-context profile-fork check. None of this is release qualification; the
+live CLI and JSONL evidence; Opus 5.5 also has a high-context profile-fork check. None of this is release qualification; the
 [live status](../../tests/live/STATUS.md) records the current state. Sonnet 5.5
 offers low–max effort; its multi-turn thinking replay has not been separately
 qualified.
@@ -226,8 +206,8 @@ tool rounds can pay that per round.
 
 A session keeps the window and the facts that change what it sends (effort
 ladder, output limit) as it was created; if the provider later changes those,
-reopening it says so and asks you to rebind with **Fork now** in the Agents tab,
-or start a new session.
+reopening it says so. Explicitly fork/rebind through the host operations, or
+start a new session.
 An edit to a price threshold alone does not. For example:
 
 ```sh
@@ -245,7 +225,7 @@ Mode) on the OpenAI API's `CodeModeOnly` models, `direct` on the Anthropic and
 xAI APIs. `--composition js-ptc` and
 `py-ptc` select the local workers. `py-sdk` selects the typed Python SDK on a
 Direct-capable route, for a single-agent root with core tools only.
-`plak run`, `plak agent` and a new TUI
+`plak run`, `plak agent` and a new hosted
 session from your root template all make the same choice for the same model.
 API sessions persist their exact credential binding. If you replace a key,
 Plak refuses to resume the old binding under it; select the new target explicitly.
@@ -288,27 +268,19 @@ ago`.
 Ordinary commands refresh their own tokens; `plak refresh <account>` claims a
 new grant immediately and prints when the new access token expires.
 
-A refresh by one Plak process does not interrupt another: running sessions
-and children renew their credential before their next model request, as long
-as the refresh kept the same account binding. For Claude, a new
-`plak login claude` with the same account continues at the next request and
-permits exact session reopen: retry the prompt or `/attach`.
-A different Claude account refuses exact reopen. Restore the original account,
-or use `/rebind` to carry its full history into a new session under
-the current configuration and login, even while the root is unattached.
-`/reload` from a binding mismatch takes the same carry path. Choosing `/agents`
-cannot repair a frozen binding. At the next prompt boundary, Codex and Grok
-re-resolve an unavailable or replaced receipt in the same process. If the
-fresh account, model and login-selection binding still match, the host reopens
-in place and continues. A changed login-selection fence needs `/reload` or
-`/rebind` to carry the history; restarting is not the remedy. They never reuse
-the old login's receipt or switch accounts implicitly. A different account
-needs explicit carry or rebind.
+A refresh by one Plak process does not interrupt another: sessions and children
+renew before their next model request while the account binding remains the
+same. A different account refuses exact reopen. Restore the original account
+or explicitly carry/rebind the conversation under the current configuration
+and login through the host operations. Codex and Grok re-resolve an unavailable
+or replaced receipt at the next prompt boundary; an unchanged binding permits
+in-place reopen, while a changed login-selection fence requires explicit carry.
+The host never reuses the old login's receipt or switches accounts implicitly.
 
 If a running turn reaches an unavailable native credential before sending, it
 waits rather than failing. The status line says `waiting for login` and names
 the `plak login <provider>` command to run in another shell. A same-account
-login resumes the captured request once; Esc/stop cancels the waiting turn.
+login resumes the captured request once; interrupt/stop cancels the waiting turn.
 Children already running can finish and their results stay queued while the
 root waits. A different-account login ends the wait with a refusal, not a send
 on that account.

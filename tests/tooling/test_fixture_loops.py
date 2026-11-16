@@ -107,10 +107,6 @@ class FixtureLoopTests(unittest.TestCase):
         source = 'let s = "failed while waiting; do not retry until the job is done";'
         self.assertEqual(self.errors(source), [])
 
-    def test_displayed_shell_is_exempt(self):
-        source = 'const SAMPLE: &str = "while :; do sleep 0.1; done";'
-        self.assertEqual(self.errors(source, "src/tui/highlight.rs", "plak"), [])
-
 
 if __name__ == "__main__":
     unittest.main()

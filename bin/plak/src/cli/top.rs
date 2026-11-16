@@ -226,10 +226,6 @@ impl TopCommand {
                 session,
             )
             .map(|command| command.speaking_wire(stdio_wire.as_deref() == Some("v2"))),
-            Self::Resume { session } => Ok(Command::Resume {
-                session_id: session,
-                handoff: None,
-            }),
             #[cfg(feature = "maintainer")]
             Self::Fork { session: None, .. } => Ok(Command::CommandHelp {
                 command: "fork".to_owned(),

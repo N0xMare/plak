@@ -25,7 +25,6 @@ LANES = {
     "jobs": "jobs",
     "long-session": "long_session",
     "soak": "soak",
-    "tui-soak": "tui_soak",
 }
 
 

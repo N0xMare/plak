@@ -897,7 +897,7 @@ fn probe_state_locks(
         connection
             // Current inventory must exclude writers until removal ends, so a
             // new session cannot claim artifacts after we checked membership.
-            // Normal-mode IMMEDIATE coexists with idle WAL TUI connections.
+            // Normal-mode IMMEDIATE coexists with idle WAL host connections.
             .execute_batch(if legacy {
                 "PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE;"
             } else {

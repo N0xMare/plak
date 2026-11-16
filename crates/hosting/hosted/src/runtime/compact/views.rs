@@ -23,7 +23,7 @@ use plakous_host_protocol::status::HostPhase;
 /// A compaction — manual `/compact` or the capacity-triggered scheduled one — is one
 /// paid round-trip the operator waits on, and the host published nothing
 /// while it ran: the HUD stayed empty for the whole dispatch and
-/// the TUI's `Compacting…` branch was unreachable. The
+/// the client's `Compacting…` branch was unreachable. The
 /// row has zero height unless the host says it is working, so busy is set
 /// with the label and cleared on every exit arm — including the refusals
 /// `handle_compact` returns.
@@ -134,7 +134,7 @@ fn compact_operator_detail(base: &str, diagnostic: Option<&str>) -> String {
     }
 }
 
-/// Transcript copy: never dump a Responses deadline diagnostic into the TUI.
+/// Transcript copy: never dump a Responses deadline diagnostic into the client.
 pub(super) fn compact_operator_note(base: &str, diagnostic: Option<&str>) -> String {
     if diagnostic.is_some_and(compact_diagnostic_is_provider_quiet) {
         COMPACT_PROVIDER_QUIET_NOTE.to_owned()

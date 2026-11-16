@@ -32,7 +32,7 @@ fn action_refusals_keep_typed_facts_in_each_frontend_without_parsing_prose() {
             session_id: "00112233-4455-6677-8899-aabbccddeeff".parse().unwrap(),
         },
     ];
-    for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+    for frontend in [Frontend::Wire, Frontend::Run, Frontend::Jsonl] {
         for advice in &facts {
             let failure =
                 crate::CliFailure::new("opaque neutral diagnosis").with_advice(advice.clone());
@@ -43,7 +43,8 @@ fn action_refusals_keep_typed_facts_in_each_frontend_without_parsing_prose() {
                     session_id: Some("current"),
                 },
             );
-            if matches!(advice, RefusalAdvice::ExplicitEffort { .. }) && frontend != Frontend::Tui {
+            if matches!(advice, RefusalAdvice::ExplicitEffort { .. }) && frontend != Frontend::Wire
+            {
                 assert!(rendered.starts_with("custom model `model` requires --effort "));
             } else {
                 assert!(rendered.starts_with("opaque neutral diagnosis; "));
@@ -96,7 +97,7 @@ fn mcp_login_help_preserves_scope_quoting_in_every_frontend() {
         scopes: vec!["mcp:tools".into(), "offline_access".into()],
     };
     assert!(
-        advice_text(&scoped, Frontend::Tui)
+        advice_text(&scoped, Frontend::Wire)
             .contains("plak mcp login docs --scope 'mcp:tools offline_access'")
     );
     let quoted = RefusalAdvice::McpLogin {
@@ -104,7 +105,7 @@ fn mcp_login_help_preserves_scope_quoting_in_every_frontend() {
         scopes: vec!["scope'word".into()],
     };
     assert!(advice_text(&quoted, Frontend::Run).contains(r"--scope 'scope'\''word'"));
-    for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+    for frontend in [Frontend::Wire, Frontend::Run, Frontend::Jsonl] {
         let raw = serde_json::json!({"mcp_authorization":{"message":"opaque authorization refusal; the call did not run","server":"docs","scope":"mcp:tools offline_access"}}).to_string();
         let text = tool_error_text(
             "mcp__docs__read",
@@ -156,7 +157,7 @@ fn hosted_tool_previews_preserve_refusal_targets_before_frontend_formatting() {
         detail, raw,
         "argument and readable-preview projection must not erase typed repair data"
     );
-    for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+    for frontend in [Frontend::Wire, Frontend::Run, Frontend::Jsonl] {
         let text = tool_error_text(
             "spawn_agent",
             &detail,
@@ -174,7 +175,7 @@ fn hosted_tool_previews_preserve_refusal_targets_before_frontend_formatting() {
     let detail =
         plakous_hosted::activity::tool_detail_text(Some(r#"{"query":"work"}"#), Some(&raw))
             .unwrap();
-    for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+    for frontend in [Frontend::Wire, Frontend::Run, Frontend::Jsonl] {
         let text = tool_error_text(
             "mcp__docs__read",
             &detail,

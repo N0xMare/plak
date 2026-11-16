@@ -54,7 +54,7 @@ fn every_notice_remedy_survives_store_reopen_and_disposable_view_rebuild() {
             panic!("notice lost")
         };
         assert_eq!(notice.remedy.as_ref(), Some(remedy));
-        for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+        for frontend in [Frontend::Wire, Frontend::Run, Frontend::Jsonl] {
             assert_eq!(
                 with_remedy(
                     &notice.text,

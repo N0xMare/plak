@@ -5,8 +5,8 @@ and permission to spawn, it can hand pieces of the job to children. By default
 they share your checkout; pass `workspace=fork` to mint an isolated copy and
 later fold sealed edits back with `adopt_candidate`.
 
-Everything here is driven by configuration files. There is no roster editor in
-the TUI.
+Configuration files define templates and the working set. Host clients can
+use the confirmed configuration and template operations.
 
 ## Templates
 
@@ -61,7 +61,7 @@ subagents = true
 ```
 
 `[root] agent` is the template a new session binds. With no `[root]`, a new
-session has no root template until you save one from the Agents tab.
+session has no root template until you configure one or save a host profile default.
 `plak run` and `plak agent` take the tuple from their own flags when those
 flags are set.
 
@@ -93,8 +93,7 @@ wakes it instead of costing a submit reminder. Every wake turn counts against
 the template's `max_turns`; interrupt or close a parked child as any other.
 `plak run` keeps waiting for a parked child and names it on its waiting line
 (`c2 (parked on p1)`), `plak agent` tree rows carry `waiting_on` (`[]` when it
-waits on nothing named yet), and the Agents tab shows `waiting on p1` or
-`parked`. Mail to a child whose attempt already submitted, sent as its last
+waits on nothing named yet). Mail to a child whose attempt already submitted, sent as its last
 turn ends, is refused `recipient_attempt_terminal` rather than left unread. Mail
 to a child you just interrupted, while its turn is still stopping, waits for the
 stop and then starts the child's resume turn; several such messages start it
@@ -110,13 +109,12 @@ never cuts a submission in flight: a Start that is admitted late is delivered
 late, and the child keeps running.
 After a
 restart, a parked child is interrupted (owner lost), keeps its attempt and is
-held: it waits for your Resume (`r` on it in the Agents tab, or JSONL
-`resume`), which continues it once with a new turn. Its parent can instead
+held: it waits for an explicit resume operation (JSONL `resume`), which continues it once with a new turn. Its parent can instead
 supersede the held attempt with `purpose=followup` and `acknowledge_recovery`
 set to its current `attempt_id`; plain mail or followup does not clear the hold.
 When the session opens, one warning lists everything the lost host left held
-(the root's turn and each held agent with what it was doing), and `Ctrl+R`
-resumes all of it. A parent's `wait_agent` rows say why a child stopped
+(the root's turn and each held agent with what it was doing). A root
+`resume` operation resumes all held work. A parent's `wait_agent` rows say why a child stopped
 (`cause`, for example `owner_lost`) and whether its continuation is `held`,
 `pending` or `running`, and the parent's next turn gets one `[harness]` note
 naming the children the loss interrupted (once per run of Plak; a handed-off
@@ -128,7 +126,7 @@ ending a turn. An idle wake
 failure pauses auto-continue, emits an error note and leaves the host attached;
 child mail remains unread until an admitted turn consumes it. A busy or
 unavailable session store, or a busy product store, does not pause it: the wake is retried, then
-re-armed every 60 s (see [tui](tui.md)). Each
+re-armed every 60 s. Each
 bound is a closed range up to its built-in ceiling; anything outside it is a
 load error. Full key list and defaults in
 [configuration](configuration.md). `max_nodes` counts live nodes, so closing a
@@ -162,7 +160,7 @@ retain the full body. Omitted message priority steers a running direct child
 (`urgent`); other recipients default to `deferred`. Set `deferred` explicitly
 to queue mail instead of steering.
 
-`list_agents` and the Agents tab also show per-attempt compaction counts
+`list_agents` and host tree views also show per-attempt compaction counts
 (committed, failed, no-eligible) and the latest committed pass's measured input
 before/after. These are derived from the retained child feed, not billed token
 totals; `complete=false` / `retained only` means retention prevents a complete
@@ -192,8 +190,8 @@ Direct calls or nested cells. They can still use their pack's plan tool
 (Claude's pack has none) and granted agent tools. Shell commands remain unconstrained: these tiers are not a sandbox.
 
 A session recorded under a different occupancy policy or native exec
-description cannot be exactly reopened by this build, so `/reload` does not
-carry it. It moves by export/carry into new bindings.
+description cannot be exactly reopened by this build. It moves by explicit
+export/carry into new bindings.
 
 Default: children share your checkout. Give them file-disjoint work, or run
 writers in sequence. Fork when more than one child must write at the same time,
@@ -276,13 +274,13 @@ runs:
   child's current `attempt_id`; this acknowledges that a tool may have changed
   the workspace, settles recovery, and admits a fresh attempt rather than
   replaying uncertain work;
-- when you run `/recover`;
-- when you retry one child: `u` on it in the Agents tab, or, from a JSONL
-  client, `invoke_tool` with `recover_agent` and its `agent_id`.
+- when you request root recovery;
+- when a JSONL client sends `invoke_tool` with `recover_agent` and the child's
+  `agent_id`.
 
 Recovery runs in the background and never holds up the session. Each run that
 did something posts one note naming the children it recovered and the ones it
-could not (with the reason). The one-child retry retries a refusal; `/recover`
+could not (with the reason). The one-child retry retries a refusal; a recovery operation
 only selects children with unresolved session outcomes. A child whose interrupted
 turn may have run a tool gets a warning that its workspace may have changed.
 The tool's unobserved conversation result is not kept or replayed; workspace
@@ -327,7 +325,7 @@ actually fails reports `mint_unavailable` with the seal diagnostic and leaves
 If the tree store refuses to publish the seal completion, recovery reports
 `recovery_storage_unavailable` instead of claiming it succeeded. For a child
 already failed and idle in this process, retry that one child (`u`) to retry the
-publication: `/recover` does not select that child. This does not rerun its
+publication: a recovery operation does not select that child. This does not rerun its
 seal. If a seal failed in the same drain, the storage refusal includes both
 diagnostics. A recorded `seal_failed` diagnostic survives restart and still
 names the retained copy's inspect/close remedy; it is not a guess about whether
@@ -409,7 +407,7 @@ Home-scoped `orchestration.workspace_idle_seconds` and
 - **Interrupt** — `interrupt_agent` cancels that child's current turn only. Any
   open `wait_agent` returns `interrupted`, the node stays listable, and it can
   still take follow-up mail. There is no separate resume tool.
-- **Your own Esc** — interrupting the root's turn also interrupts every
+- **Operator interrupt** -- interrupting the root's turn also interrupts every
   child that is running, so nothing keeps spending behind your back. They stay
   listable and resume on mail; nothing is closed.
 - **Close** — `close_agent` ends the child and its descendants permanently.
@@ -418,10 +416,9 @@ Home-scoped `orchestration.workspace_idle_seconds` and
   pending seal succeeds or fails. Recovery preserves the close and does not
   send you a new result from that child.
 
-From your side of the screen those are `i`, `c` and `s` (stop every non-root
-agent) in the Agents list, plus `/stop-all` in the composer, all behind the
-same confirmation pop-up: focus starts on the action, so `Enter` sends it and
-`←` then `Enter` declines. See [the TUI guide](tui.md#agents).
+Clients invoke the typed interrupt, close and stop-all operations. Confirmation
+and presentation belong to the client; the host retains cancellation and
+retirement authority.
 
 Interrupt and close return once the request is saved and cancellation is
 dispatched. Session release finishes in the background; the child cannot take
@@ -480,7 +477,7 @@ has a separate 64 KiB limit, and command ids have a 256-byte UTF-8 limit.
 Malformed JSON and ordinary command errors remain recoverable diagnostics.
 
 
-`plak agent` attaches the same host loop the TUI drives, over newline-delimited
+`plak agent` attaches the hosted session loop over newline-delimited
 JSON (`v=1`) on stdin and stdout. Every object carries `v` and `kind`; a
 command may also carry an `id` that the host echoes on its replies. Stdout is
 machine-only; diagnostics go to stderr. Flags match `plak run`.
@@ -517,8 +514,8 @@ carrying `duration_ms` when the host could stamp the call's wall time.
 
 `invoke_tool` is an idle-only host injection of the same grant-compiled
 executor the model uses, with an optional `agent_id` to target a node. During a
-turn, models still call the topology tools themselves. `fork` maps to
-the TUI's `/fork`.
+turn, models still call the topology tools themselves. `fork` explicitly
+branches the session.
 
 To attach to an existing session, `plak agent --session <uuid>`; its recorded
 binding wins over any flags.
@@ -555,20 +552,19 @@ files to accounts you are actually logged in to (`plak status`), then:
 
 ```sh
 cd ~/your-project     # a git or jj checkout; the tree needs one
-plak
+plak agent
 ```
 
-Ask the root to delegate — the wording matters only in that it must ask for
-work to be *handed off*:
+Send a JSONL prompt asking the root to delegate (or use your wire client).
+The request must ask for work to be handed off:
 
 > Have the worker, with workspace=fork, add a `NOTES.md` with three
 > bullet points about this repository, then have the reviewer read it, then
 > adopt the result.
 
-Press `Ctrl+T` while it runs. The Agents list shows the root, then a
-`worker` child appearing below it; its inspector names its tier and
-workspace. When the forked child seals, its row gains a `candidate_id` — that
-is the candidate row. Nothing has reached your checkout yet.
+Request the tree view while it runs. The root and `worker` child expose tier
+and workspace facts. When the forked child seals, its row gains a
+`candidate_id`. Nothing has reached your checkout yet.
 
 When the root calls `adopt_candidate`, the child's edits land in your working
 tree as **uncommitted changes**: `git status` shows `NOTES.md` as a new file,
@@ -581,6 +577,6 @@ template with no `description`, or `[orchestration] subagents` turned off.
 Transient child failures can continue automatically on the same assignment
 (default one continuation; `orchestration.transient_resumes = 0` disables it).
 A network wait is shown as `network`; interrupt or close cancels it. Pending
-child continuation survives reopen/reload. When continuation is exhausted, a
+child continuation survives session reopen and host restart. When continuation is exhausted, a
 failed fork still exposes its ordinary partial candidate for explicit adoption,
 or you can follow up on the same child copy.

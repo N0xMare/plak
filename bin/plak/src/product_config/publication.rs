@@ -61,10 +61,9 @@ impl ProductConfig {
     /// not written into `~/.plak/agents`.
     pub fn save_publication_aware(&self, paths: &PlakPaths) -> Result<(), ConfigSaveError> {
         let _lock = ConfigLock::take(paths)?;
-        let baseline = Self::load_config_file(&paths.config_file())
-            .map_err(ConfigSaveError::BeforePublication)?;
-        self.preserving_terminal_preferences(&baseline)
-            .save_user_unlocked(paths)
+        // Refuse a stale edit before staging any template if the baseline is unreadable.
+        Self::load_config_file(&paths.config_file()).map_err(ConfigSaveError::BeforePublication)?;
+        self.save_user_unlocked(paths)
     }
 
     /// Project-scope save: `<project>/.plak/config.toml` carries only the
@@ -73,40 +72,7 @@ impl ProductConfig {
     /// absent from) the user directory. Requires a trusted project.
     pub fn save_project_publication_aware(&self, paths: &PlakPaths) -> Result<(), ConfigSaveError> {
         let _lock = ConfigLock::take(paths)?;
-        let baseline = Self::load(paths).map_err(ConfigSaveError::BeforePublication)?;
-        self.preserving_terminal_preferences(&baseline)
-            .save_project_with_fault(paths, &mut |_, _| Ok(()))
-    }
-
-    fn preserving_terminal_preferences(&self, baseline: &Self) -> Self {
-        let mut config = self.clone();
-        for row in CONFIG_KEYS.iter().filter(|row| row.section() == "tui") {
-            config.assign_overlay_field(row.field, baseline);
-            config.set_origin(row.field, baseline.origin(row.field));
-        }
-        config
-    }
-
-    /// An explicit terminal-preference key edit, not a whole product snapshot.
-    pub(crate) fn save_terminal_key(
-        paths: &PlakPaths,
-        scope: ConfigWriteScope,
-        key: &str,
-        value: &str,
-    ) -> Result<(), ConfigSaveError> {
-        let _lock = ConfigLock::take(paths)?;
-        let mut config = match scope {
-            ConfigWriteScope::User => Self::load_user(paths),
-            ConfigWriteScope::Project => Self::load(paths),
-        }
-        .map_err(ConfigSaveError::BeforePublication)?;
-        config
-            .set_key(key, value)
-            .map_err(ConfigSaveError::BeforePublication)?;
-        match scope {
-            ConfigWriteScope::User => config.save_user_unlocked(paths),
-            ConfigWriteScope::Project => config.save_project_with_fault(paths, &mut |_, _| Ok(())),
-        }
+        self.save_project_with_fault(paths, &mut |_, _| Ok(()))
     }
 
     /// Changes home-only preferences against a fresh baseline under the lock.
@@ -121,8 +87,7 @@ impl ProductConfig {
         Ok(config)
     }
 
-    /// Publishes only this host settings edit, never terminal preferences or
-    /// another face's unchanged product fields.
+    /// Publishes only this host settings edit, never another face's unchanged product fields.
     pub(crate) fn save_settings_delta(
         &self,
         paths: &PlakPaths,
@@ -131,7 +96,7 @@ impl ProductConfig {
     ) -> Result<Self, ConfigSaveError> {
         let _lock = ConfigLock::take(paths)?;
         let mut config = Self::load(paths).map_err(ConfigSaveError::BeforePublication)?;
-        for row in CONFIG_KEYS.iter().filter(|row| row.section() != "tui") {
+        for row in CONFIG_KEYS {
             if !super::toml_file::same_value_opt(
                 self.field_value(row.field).as_ref(),
                 before.field_value(row.field).as_ref(),

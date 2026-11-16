@@ -2,7 +2,7 @@
 //!
 //! These are the small facade-mapping, state-root and process helpers the
 //! `plak` binary used to own inline. They live here so the binary keeps only
-//! clap dispatch, exit-code mapping and the TUI attach.
+//! clap dispatch, exit-code mapping and the host attach.
 
 use std::env;
 use std::io;
@@ -27,24 +27,6 @@ use plakous_hosted::subscription_usage as product_usage;
 // shutdown as overdue. An overdue worker is still joined: detaching it would
 // let process teardown interrupt recovery/persistence work.
 pub const HOST_WORKER_JOIN_TIMEOUT: Duration = Duration::from_secs(30);
-pub const TUI_ERROR_JOIN_TIMEOUT: Duration = Duration::from_secs(1);
-
-/// Join a TUI host worker after the terminal is already cooked, on a path
-/// where the process will report the outcome. Returns what the worker
-/// returned under the product's shutdown deadline; an overdue worker is a
-/// failure, not a quiet detach.
-pub fn join_tui_host_worker(
-    worker: plakous_hosted::runtime::HostWorkerHandle,
-    label: &str,
-) -> CliResult<()> {
-    join_host_worker_bounded(worker, TUI_ERROR_JOIN_TIMEOUT, label)
-}
-
-/// How long a voluntary quit may wait for the host to record a cancel and
-/// signal child processes. Session release is not joined past this: a release
-/// blocked in `spawn_blocking` used to hold the cooked shell on
-/// [`QUIT_NOTICE`] until the operator pressed Ctrl-C.
-pub const VOLUNTARY_QUIT_GRACE: Duration = Duration::from_secs(1);
 
 /// Product state roots for a session of `context`, the product context of
 /// its workspace, with the caller's extra telemetry sink attached. The
@@ -111,7 +93,7 @@ pub fn product_state_roots_from(
     Ok(roots)
 }
 
-/// Product (run + TUI host) subscription gate limits; the host owns the one
+/// Product (run and host) subscription gate limits; the host owns the one
 /// definition shared with rebind and child spawn.
 #[allow(
     clippy::result_unit_err,

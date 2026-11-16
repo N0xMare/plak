@@ -103,37 +103,6 @@ max_runtime_hours = 10
 # type: bool · default: false · true or false
 full_window = false
 
-# Terminal-app preferences; nothing here reaches a provider.
-[tui]
-
-# Mouse capture; turning it off hands text selection back to the terminal. Takes effect on the next launch.
-# type: bool · default: true
-mouse = true
-
-# Color palette for the whole product shell.
-# type: enum · default: "default-dark" · default-dark|default-light|catppuccin-latte|catppuccin-frappe|catppuccin-macchiato|catppuccin-mocha; dark and light are accepted aliases that normalize on the next save
-theme = "default-dark"
-
-# Transcript lines moved per wheel tick.
-# type: integer · default: 3 · 1..=10
-scroll_lines = 3
-
-# Render reasoning blocks where the provider admits them.
-# type: bool · default: true · subject to the provider's reasoning policy
-show_thinking = true
-
-# Collapse consecutive tool activities to a summary when assistant prose resumes; false keeps action lines visible.
-# type: bool · default: true
-group_tool_calls = true
-
-# Suppress the spinner, the pulse and camera easing.
-# type: bool · default: false
-reduced_motion = false
-
-# Let this user's own processes, including an agent's shell, ask a running interactive session to reload onto the installed build (plak session reload <session> --expect-binary <id>) at its next idle boundary. Takes effect when a session next attaches.
-# type: bool · default: false · true or false; home-scoped
-reload_requests = false
-
 # Automatic transcript compaction.
 [compaction]
 
@@ -167,7 +136,11 @@ max_age_days = 90
 # client_id_metadata_url = "https://plak.example/oauth/client.json"
 
 # The per-user host: how it treats work a lost host left.
-# [host]
+[host]
+
+# Permit this user's own processes to request a hosted-session reload (plak session reload <session> --expect-binary <id>). The serving host records the outcome and names the explicit host upgrade workflow; replacing a client does not upgrade its sessions.
+# type: bool · default: false · true or false; home-scoped
+reload_requests = false
 
 # Whether the root and the sub-agents whose host was lost (a crash, a lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). Read when the root attaches and opens, and by plak host's start scan, which under continue opens a session whose root's loss is held.
 # type: enum · default: (unset) · hold|continue; unset holds; home-scoped

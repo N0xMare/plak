@@ -12,4 +12,4 @@ there is no negotiation or downgrade. No session, credential or network is neede
 
   plak wire schema > wire-schema.json
 
-See docs/user-guide/integrating.md for transports and the Python socket example.
+See docs/user-guide/integrating.md for transports and protocol frame examples.

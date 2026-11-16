@@ -402,7 +402,7 @@ define_observations! {
         account: Option<String>,
     },
     /// The host finished opening the session. Carries the host's own
-    /// `session_open_ms` measurement (logged, not painted as TUI chrome).
+    /// `session_open_ms` measurement (logged, not painted as client chrome).
     SessionOpened {
         /// Wall time the canonical session open took, as the host logged it.
         /// `None` when the canonical open never completed: the startup row is

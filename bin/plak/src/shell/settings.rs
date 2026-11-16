@@ -470,15 +470,15 @@ fn refuse_profile_failure(
     let text = crate::refusal_text::host_failure_text(
         reason,
         crate::notice_text::RemedyContext {
-            frontend: crate::notice_text::Frontend::Tui,
+            frontend: crate::notice_text::Frontend::Wire,
             session_id: None,
         },
     );
     refuse_profile(name, text, events);
 }
 
-/// Publishes the template readiness projection to the TUI. Emitted
-/// at session open and whenever the TUI asks (spec 8.2, 8.7). A load failure
+/// Publishes the template readiness projection to an external client. Emitted
+/// at session open and whenever an external client asks (spec 8.2, 8.7). A load failure
 /// publishes an empty roster rather than a stale one: readiness is fail-closed.
 pub(super) fn emit_template_readiness(
     paths: &PlakPaths,
@@ -539,33 +539,6 @@ pub fn settings_view(config: &ProductConfig) -> crate::surface_protocol::Setting
             },
             compaction: config.compaction_enabled,
         },
-        tui: crate::tui_preferences::TuiPreferences {
-            mouse: config.tui_mouse,
-            scroll_lines: config.scroll_lines,
-            show_thinking: config.show_thinking,
-            group_tool_calls: config.group_tool_calls,
-            reduced_motion: config.reduced_motion,
-            theme: match config.theme {
-                crate::product_config::ProductTheme::DefaultDark => {
-                    crate::surface_protocol::SettingsTheme::DefaultDark
-                }
-                crate::product_config::ProductTheme::DefaultLight => {
-                    crate::surface_protocol::SettingsTheme::DefaultLight
-                }
-                crate::product_config::ProductTheme::CatppuccinLatte => {
-                    crate::surface_protocol::SettingsTheme::CatppuccinLatte
-                }
-                crate::product_config::ProductTheme::CatppuccinFrappe => {
-                    crate::surface_protocol::SettingsTheme::CatppuccinFrappe
-                }
-                crate::product_config::ProductTheme::CatppuccinMacchiato => {
-                    crate::surface_protocol::SettingsTheme::CatppuccinMacchiato
-                }
-                crate::product_config::ProductTheme::CatppuccinMocha => {
-                    crate::surface_protocol::SettingsTheme::CatppuccinMocha
-                }
-            },
-        },
     }
 }
 
@@ -619,7 +592,7 @@ pub(super) fn emit_settings(paths: &PlakPaths, events: &Sender<PlakExtension>) {
     match ProductConfig::load(paths) {
         Ok(config) => {
             let _ = events.send(ContentEvent::Extension(SurfaceObservation::SettingsView(
-                settings_view(&config).into(),
+                settings_view(&config),
             )));
         }
         Err(error) => {
@@ -731,7 +704,7 @@ pub(super) fn save_settings(
         ..current.root_template().cloned().unwrap_or_default()
     };
     // The host validates exactly what the save changes (readiness
-    // is an affordance, not a gate on unrelated writes). The TUI never
+    // is an affordance, not a gate on unrelated writes). The client never
     // validates, and `settings_snapshot` always echoes the file's root tuple
     // back into the draft, so a theme, mouse, or reading-width save carries the
     // root binding unchanged. Admitting it against the exact Ready catalog then
@@ -793,7 +766,7 @@ pub(super) fn save_settings(
         Ok(config) => {
             let note = settings_saved_note(&current, &config, changes_root_binding);
             let _ = events.send(ContentEvent::Extension(
-                SurfaceObservation::SettingsViewApplied(settings_view(&config).into()),
+                SurfaceObservation::SettingsViewApplied(settings_view(&config)),
             ));
             let _ = events.send(ContentEvent::Row(TranscriptRow::info(
                 NoticeScope::Settings,
@@ -817,36 +790,15 @@ pub(super) fn save_settings(
 
 /// The transcript line one settings save prints, naming what actually changed.
 ///
-/// The fixed text said `theme applied` after every toggle, so flipping
-/// `Show timestamps` reported a theme change the operator had not made — and
-/// had in fact just reverted. Each row names itself, a save that
-/// changed nothing says so, and only a theme change mentions the theme.
+/// Names only product settings whose values changed.
 pub(super) fn settings_saved_note(
     before: &ProductConfig,
     after: &ProductConfig,
     changed_root_binding: bool,
 ) -> String {
     let mut changed: Vec<&str> = Vec::new();
-    if before.theme != after.theme {
-        changed.push("theme applied");
-    }
-    if before.tui_mouse != after.tui_mouse {
-        changed.push("mouse capture");
-    }
     if before.compaction_enabled != after.compaction_enabled {
         changed.push("auto compaction");
-    }
-    if before.scroll_lines != after.scroll_lines {
-        changed.push("scroll lines");
-    }
-    if before.show_thinking != after.show_thinking {
-        changed.push("show thinking blocks");
-    }
-    if before.group_tool_calls != after.group_tool_calls {
-        changed.push("group tool calls");
-    }
-    if before.reduced_motion != after.reduced_motion {
-        changed.push("reduced motion");
     }
     if changed_root_binding {
         changed.push("defaults (next launch)");
@@ -866,7 +818,7 @@ const MAX_ACK_ID_BYTES: usize = 256;
 const MAX_ATTENTION_BYTES: usize = 64;
 
 /// Persists one acknowledgement, then answers with the tree's complete set so
-/// the TUI never paints an acknowledgement the store did not keep.
+/// an external client never paints an acknowledgement the store did not keep.
 fn acknowledge_agent(
     paths: &PlakPaths,
     tree_id: &str,
@@ -947,7 +899,7 @@ pub struct ProductSurface {
     chrome_generation: std::sync::Arc<std::sync::Mutex<u64>>,
     usage_accounts_generation: std::sync::Arc<std::sync::Mutex<u64>>,
     usage_refreshing: std::sync::Arc<std::sync::Mutex<bool>>,
-    /// True only while the TUI's Usage tab is the open control tab.
+    /// True only while an external client's Usage tab is the open control tab.
     usage_watch: std::sync::atomic::AtomicBool,
     state_home: Result<std::path::PathBuf, String>,
     reload: crate::shell::reload_surface::ReloadChannel,
@@ -1162,11 +1114,11 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             }
             SurfaceIntent::SaveSettings(update) => {
                 return SurfaceEffect {
-                    saved: save_settings(&self.paths, update.into(), facts.catalog, events).map(
-                        |saved| SurfaceSaved {
+                    saved: save_settings(&self.paths, update, facts.catalog, events).map(|saved| {
+                        SurfaceSaved {
                             root_template: saved.root_template_fact(),
-                        },
-                    ),
+                        }
+                    }),
                     ..SurfaceEffect::default()
                 };
             }

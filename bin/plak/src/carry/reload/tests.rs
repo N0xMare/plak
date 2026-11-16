@@ -3,7 +3,7 @@ use plakous::agent::BindingChange;
 use plakous::subscriptions::NativeAuthStatus;
 
 #[test]
-fn host_resume_capability_stays_local_to_the_installed_client_probe() {
+fn host_reload_probe_round_trips_without_terminal_capabilities() {
     let root = tempfile::tempdir().unwrap();
     let local = reload_probe(&PlakPaths::explicit(root.path().join("home")));
     let wire = plakd_wire_types::ReloadProbe::from(local.clone());
@@ -14,17 +14,8 @@ fn host_resume_capability_stays_local_to_the_installed_client_probe() {
             .is_none()
     );
     let restored = ReloadProbe::from(wire);
-    assert!(!restored.host_resume);
     assert_eq!(restored.state_key, local.state_key);
     assert_eq!(restored.binary_id, local.binary_id);
-}
-
-#[test]
-fn host_resume_capability_matches_the_compiled_client() {
-    let root = tempfile::tempdir().unwrap();
-    let probe = reload_probe(&PlakPaths::explicit(root.path().join("home")));
-    let advertised = serde_json::to_value(probe).unwrap();
-    assert_eq!(advertised["host_resume"], cfg!(feature = "tui"));
 }
 
 #[test]
@@ -59,7 +50,7 @@ fn the_probe_answers_unknown_rather_than_renew_a_login() {
     };
     assert_eq!(
         reason,
-        "the codex login is quarantined; run `plak login codex`, then /reload"
+        "the codex login is quarantined; run `plak login codex`, then retry the host upgrade"
     );
     assert!(matches!(
         credential_verdict("grok", Some(NativeAuthStatus::SignedOut), fresh),
@@ -68,7 +59,7 @@ fn the_probe_answers_unknown_rather_than_renew_a_login() {
     assert_eq!(
         credential_verdict("claude", Some(NativeAuthStatus::LoginRequired), fresh),
         Some(ReopenProbe::Refused {
-            reason: "the claude login is stored by an earlier build; run `plak login claude`, then /reload"
+            reason: "the claude login is stored by an earlier build; run `plak login claude`, then retry the host upgrade"
                 .to_owned()
         })
     );

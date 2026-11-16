@@ -22,12 +22,16 @@ use super::offline_support::*;
 const ANSWER: &str = "the wire client answer";
 
 #[test]
-fn a_real_wire_runtime_settings_save_preserves_nondefault_terminal_preferences() {
+fn a_real_wire_runtime_settings_save_preserves_other_product_settings() {
     use std::io::Write as _;
     let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
     let config_path = fixture.home().join("config.toml");
-    std::fs::OpenOptions::new().append(true).open(&config_path).unwrap()
-        .write_all(b"\n[tui]\ntheme = \"catppuccin-latte\"\nmouse = false\nscroll_lines = 9\nshow_thinking = false\ngroup_tool_calls = false\nreduced_motion = true\n").unwrap();
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&config_path)
+        .unwrap()
+        .write_all(b"\n[skills]\nenabled = false\n")
+        .unwrap();
     let before: toml::Value =
         toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
     let mut child = fixture
@@ -89,7 +93,7 @@ fn a_real_wire_runtime_settings_save_preserves_nondefault_terminal_preferences()
     }
     let after: toml::Value =
         toml::from_str(&std::fs::read_to_string(config_path).unwrap()).unwrap();
-    assert_eq!(after["tui"], before["tui"]);
+    assert_eq!(after["skills"], before["skills"]);
     assert_eq!(after["compaction"]["enabled"], toml::Value::Boolean(false));
     drop((sender, receiver));
     let until = Instant::now() + Duration::from_secs(30);

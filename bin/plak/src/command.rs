@@ -67,22 +67,11 @@ impl Command {
     pub(crate) fn resolved_against(self, launch: Option<&std::path::Path>) -> Self {
         let at = |path: PathBuf| against(path, launch);
         match self {
-            Self::Resume {
-                session_id,
-                handoff,
-            } => Self::Resume {
-                session_id,
-                handoff: handoff.map(at),
-            },
             Self::SessionExport { id, out } => Self::SessionExport {
                 id,
                 out: out.map(at),
             },
             Self::SessionImport { path } => Self::SessionImport { path: at(path) },
-            Self::ImportResume { path, handoff } => Self::ImportResume {
-                path: at(path),
-                handoff: handoff.map(at),
-            },
             Self::WriteBinaryManifest { directory } => Self::WriteBinaryManifest {
                 directory: at(directory),
             },
@@ -127,22 +116,6 @@ pub(crate) enum Command {
         command: String,
     },
     Version,
-    Tui {
-        session_id: Option<String>,
-        resume_picker: bool,
-    },
-    TuiPlacement {
-        runner: Option<String>,
-        workspace: Option<String>,
-    },
-    Resume {
-        session_id: Option<String>,
-        /// The reload handoff sidecar the old build named (hidden).
-        handoff: Option<PathBuf>,
-    },
-    HostResume {
-        session_id: Option<String>,
-    },
     Fork {
         session_id: String,
         confirmed: bool,
@@ -245,13 +218,6 @@ pub(crate) enum Command {
     /// `plak session gc <id>` or, with `None`, `plak session gc --all`.
     SessionGc {
         id: Option<String>,
-    },
-    /// Hidden `plak --import-resume <file> [--reload-handoff <file>]`:
-    /// import, delete the file, resume.
-    ImportResume {
-        path: PathBuf,
-        /// The reload handoff sidecar the old build named.
-        handoff: Option<PathBuf>,
     },
     /// Hidden `plak version --state-key`.
     StateKey,
@@ -491,8 +457,6 @@ impl Command {
             | Self::CarryProbe { .. }
             | Self::ReopenProbe { .. }
             | Self::ExportVersion => "version",
-            Self::Tui { .. } | Self::TuiPlacement { .. } => "tui",
-            Self::Resume { .. } | Self::HostResume { .. } | Self::ImportResume { .. } => "resume",
             Self::Fork { .. } => "fork",
             Self::Compact { .. } => "compact",
             Self::Doctor => "doctor",

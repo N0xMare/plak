@@ -628,7 +628,7 @@ pub(super) fn reconcile_authoritative_assistant(
     missing.filter(|suffix| !suffix.is_empty())
 }
 
-/// Flush coalesced assistant text deltas to the TUI.
+/// Flush coalesced assistant text deltas to the client.
 ///
 /// When `force` is false, only flushes if the buffer is non-empty and at least
 /// 20ms have elapsed since the last flush.

@@ -1,7 +1,7 @@
 //! Subscription allowance collection for `plak usage`.
 //!
 //! Every vertical is collected through the one host-owned Usage projection, so
-//! the CLI and the TUI Limits surface can never disagree.
+//! the CLI and an external client Limits surface can never disagree.
 
 use plakous_host_protocol::views::presentation::UsageVertical;
 

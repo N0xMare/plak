@@ -41,7 +41,6 @@ GATED_METRICS = {
     "cli_two_tool_turn_ms",
     "growth_turn_peak_rss_mb",
     "jsonl_bulk_throughput_mb_per_s",
-    "tui_transcript_20k_layout_ms",
 }
 
 

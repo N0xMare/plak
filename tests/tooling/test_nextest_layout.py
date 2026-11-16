@@ -39,9 +39,9 @@ class NextestLayoutTests(unittest.TestCase):
                 rules = durability["overrides"]
                 self.assertEqual(
                     [r["threads-required"] for r in rules],
-                    ["num-test-threads", "num-test-threads", quarter, quarter, quarter],
+                    ["num-test-threads", "num-test-threads", quarter, quarter],
                 )
-                self.assertEqual([r.get("priority", 0) for r in rules], [100, -50, 0, 90, 0])
+                self.assertEqual([r.get("priority", 0) for r in rules], [100, -50, 0, 90])
                 self.assertEqual(
                     [r["filter"] for r in rules],
                     [r["filter"] for r in original["profile"]["durability"]["overrides"]],

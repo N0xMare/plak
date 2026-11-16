@@ -1,8 +1,6 @@
 //! Attach-time host configuration: catalog eligibility, gated model resolution
-//! and the multi-turn host worker spawn the TUI and the attached one-shot
-//! commands share.
+//! shared by the server and attached one-shot commands.
 
-use plakous_host_protocol::status::{DetachedReason, DiagnosticText, HostFailure};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -36,22 +34,6 @@ pub(super) fn binding_presentation(
         });
     }
     catalog_bundle(paths)
-}
-
-pub fn attached_target_accepts_effort(
-    target: &product_config::ProductTargetSelection,
-    ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
-    account: &str,
-    model: &str,
-    effort_explicit: bool,
-) -> bool {
-    attach_eligibility(
-        target,
-        ready_catalog,
-        Some(account),
-        Some(model),
-        effort_explicit,
-    ) == AttachEligibility::Ready
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -112,233 +94,6 @@ pub fn attach_eligibility(
             AttachEligibility::Unavailable
         }
     }
-}
-
-/// The shell reason a TUI attach that was not attempted reports. A native
-/// account whose stored login cannot run is named by `credential_refusal`,
-/// the CLI's words for it, rather than as a model missing from the catalog.
-pub fn deferred_attach_refusal_reason(
-    eligibility: AttachEligibility,
-    product_needs_setup: bool,
-    credential_refusal: Option<HostFailure>,
-) -> DetachedReason {
-    use DetachedReason;
-    match eligibility {
-        AttachEligibility::Ready => {
-            DetachedReason::Other(DiagnosticText::new("canonical attach was not attempted"))
-        }
-        AttachEligibility::EffortRequired => DetachedReason::EffortRequired,
-        AttachEligibility::Unavailable if product_needs_setup => DetachedReason::MissingDefaults,
-        AttachEligibility::Unavailable => credential_refusal.map_or_else(
-            || {
-                DetachedReason::ResolveFailed(
-                    "selected model is absent from the discovered Ready catalog".into(),
-                )
-            },
-            DetachedReason::CredentialUnusable,
-        ),
-    }
-}
-
-/// The selected native account's offline refusal, with its original account and condition.
-pub fn native_credential_refusal(account: Option<&str>) -> Option<HostFailure> {
-    let account: plakous_hosted::account::AccountRef = account?.parse().ok()?;
-    let provider = account.vertical().capability().native_provider()?;
-    let state_home = crate::home::paths::application_state_home().ok()?;
-    let mut accounts = PlakousApplication::for_accounts(state_home).ok()?;
-    let status = super::application::AccountOps::offline_status(&mut accounts, &account);
-    if account.is_named() {
-        return match status {
-            Ok(status)
-                if status.credential == crate::presentation::CredentialState::Ready
-                    && status.compatibility == crate::presentation::CompatibilityState::Current =>
-            {
-                None
-            }
-            Ok(_) => Some(super::support::account_unavailable(&account).host_failure()),
-            Err(failure) => Some(failure.host_failure()),
-        };
-    }
-    credential_gate_refusal(provider, status)
-}
-
-pub(crate) fn credential_gate_refusal(
-    provider: plakous::subscriptions::NativeProvider,
-    status: plakous_hosted::CliResult<crate::presentation::CliStatus>,
-) -> Option<HostFailure> {
-    use crate::presentation::{CompatibilityState, CredentialState};
-    use plakous_host_protocol::notice_remedy::{CredentialCondition, NoticeRemedy};
-    use plakous_host_protocol::status::{AttachFailure, DiagnosticText, HostFailure};
-    let status = match status {
-        Ok(status) => status,
-        Err(failure) => return Some(failure.host_failure()),
-    };
-    if status.credential == CredentialState::Ready
-        && status.compatibility == CompatibilityState::Current
-    {
-        return None;
-    }
-    if status.credential == CredentialState::Ready {
-        use plakous::subscriptions::NativeSubscriptionError as E;
-        let failure = match status.compatibility {
-            CompatibilityState::Current => return None,
-            CompatibilityState::Inactive => {
-                super::support::profile_inactive_failure(Some(provider))
-            }
-            CompatibilityState::Required => super::support::native_subscription_failure(
-                E::AcceptanceRequired,
-                Some(provider),
-                Path::new(""),
-            ),
-            CompatibilityState::Unsupported => super::support::native_subscription_failure(
-                E::UnsupportedPlatform,
-                Some(provider),
-                Path::new(""),
-            ),
-        };
-        return Some(failure.host_failure());
-    }
-    let (condition, cause, text) = match status.credential {
-        CredentialState::WrittenByNewerBuild => (
-            CredentialCondition::NewerBuild,
-            AttachFailure::CredentialUnavailable,
-            "the stored login was written by a newer build; use that build or replace the login; the writing build must then log in again",
-        ),
-        CredentialState::ProfileChanged | CredentialState::LoginRequired => (
-            CredentialCondition::OlderProfile,
-            AttachFailure::CredentialUnavailable,
-            "the stored login was made by an older build or another profile and must be replaced",
-        ),
-        CredentialState::Quarantined | CredentialState::Revoked => (
-            CredentialCondition::Rejected,
-            AttachFailure::CredentialRejected,
-            "the credential is rejected or quarantined after an uncertain refresh",
-        ),
-        _ => (
-            CredentialCondition::Unavailable,
-            AttachFailure::CredentialUnavailable,
-            "no usable login is available for the selected account/profile",
-        ),
-    };
-    let refusal = HostFailure {
-        origin: None,
-        diagnostic: DiagnosticText::new(text),
-        cause,
-        advice: None,
-        remedy: Some(NoticeRemedy::RepairCredentialOrChooseProfile {
-            account: plakous_hosted::binding::account_target(provider),
-            condition,
-        }),
-    };
-    tracing::warn!(account = provider.as_str(), reason = %refusal, "TUI attach refused: stored subscription login cannot run");
-    Some(refusal)
-}
-
-/// Attempt to resolve a gated native model and spawn the multi-turn host worker.
-///
-/// Returns the session's mailbox ends + join handle when ready, for the
-/// launcher to serve to the TUI; `Err(reason)` falls back to shell TUI with
-/// an operator-visible attach failure reason.
-pub type HostedAgentChannels =
-    plakous_hosted::runtime::HostWorker<crate::surface_protocol::PlakExtension>;
-
-pub trait TuiAttacher {
-    /// Whether this attacher can be constructed inside Plak's deferred controller.
-    ///
-    /// Test/custom attachers own injected runtime state and therefore retain the
-    /// synchronous path unless they explicitly implement an equivalent handoff.
-    fn supports_deferred_preparation(&self) -> bool {
-        false
-    }
-
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "The attachment port accepts the session, explicit binding overrides, ready catalog, and resume-publication fence as separate host inputs."
-    )]
-    fn attach(
-        &self,
-        paths: &product_paths::PlakPaths,
-        state_roots: &product_agent::ProductStateRoots,
-        session: product_sessions::SessionRecord,
-        account: Option<&str>,
-        model_id: Option<&str>,
-        effort: ReasoningEffort,
-        effort_explicit: bool,
-        cwd: &Path,
-        ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
-        resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
-    ) -> Result<HostedAgentChannels, HostFailure>;
-}
-
-pub struct NativeTuiAttacher;
-
-impl TuiAttacher for NativeTuiAttacher {
-    fn supports_deferred_preparation(&self) -> bool {
-        true
-    }
-
-    fn attach(
-        &self,
-        paths: &product_paths::PlakPaths,
-        state_roots: &product_agent::ProductStateRoots,
-        session: product_sessions::SessionRecord,
-        account: Option<&str>,
-        model_id: Option<&str>,
-        effort: ReasoningEffort,
-        effort_explicit: bool,
-        cwd: &Path,
-        ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
-        resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
-    ) -> Result<HostedAgentChannels, HostFailure> {
-        try_spawn_hosted_agent(
-            paths,
-            state_roots,
-            session,
-            account,
-            model_id,
-            effort,
-            effort_explicit,
-            cwd,
-            ready_catalog,
-            resume_publication,
-        )
-    }
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Host spawning forwards the exact attachment inputs after obtaining the native-model facts used by configuration."
-)]
-pub fn try_spawn_hosted_agent(
-    paths: &product_paths::PlakPaths,
-    state_roots: &product_agent::ProductStateRoots,
-    session: product_sessions::SessionRecord,
-    account: Option<&str>,
-    model_id: Option<&str>,
-    effort: ReasoningEffort,
-    effort_explicit: bool,
-    cwd: &Path,
-    ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
-    resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
-) -> Result<HostedAgentChannels, HostFailure> {
-    let native_models = catalog_bundle(paths)
-        .map_err(|error| error.host_failure())?
-        .native_models;
-    let config = build_host_config(
-        paths,
-        state_roots,
-        session,
-        account,
-        model_id,
-        effort,
-        effort_explicit,
-        cwd,
-        ready_catalog,
-        resume_publication,
-        &native_models,
-    )
-    .map_err(|failure| failure.host_failure())?;
-    product_host::spawn_host_worker(config).map_err(|failure| failure.host_failure())
 }
 
 #[allow(
@@ -499,7 +254,7 @@ pub fn build_host_config(
                 source_releases: product_host::SourceReleases::default(),
                 idle_release: None,
                 lease_holder: lease_holder.clone(),
-                continuation: crate::reload_request::take_reload_continuation(),
+                continuation: None,
                 event_renderer: Some(crate::log_text::render),
             });
         }
@@ -621,7 +376,7 @@ pub fn build_host_config(
         source_releases: product_host::SourceReleases::default(),
         idle_release: None,
         lease_holder,
-        continuation: crate::reload_request::take_reload_continuation(),
+        continuation: None,
         event_renderer: Some(crate::log_text::render),
     })
 }

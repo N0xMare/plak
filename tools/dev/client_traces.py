@@ -253,7 +253,7 @@ def normalize(raw: dict) -> dict:
         entries.append(normalized)
     return {
         'fixture': raw['fixture'],
-        'source': 'real public TUI capture',
+        'source': 'real client capture',
         'seed_session': seed,
         'entries': entries,
     }

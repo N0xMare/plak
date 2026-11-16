@@ -5,7 +5,7 @@ USAGE:
 
 DESCRIPTION:
   Forks the session onto its exact active binding. A different binding is a
-  profile's Fork now in the TUI's Agents tab.
+  profile's fork operation through an attached external client.
 
 OPTIONS:
   --yes              Skip the confirmation (required non-interactively)

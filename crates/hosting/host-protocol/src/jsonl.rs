@@ -405,7 +405,7 @@ pub fn project_host_event<P: ProtocolExtension>(
             fields.insert("nodes".to_owned(), Value::Array(nodes));
         }
         // `turn` means the drive finished. A live cumulative usage
-        // snapshot (`terminal: false`) is TUI meter chrome; projecting it as
+        // snapshot (`terminal: false`) is client meter chrome; projecting it as
         // `turn` would tell a client the turn ended while the model is still
         // running, so it is dropped here.
         SessionObservation::TurnUsage {

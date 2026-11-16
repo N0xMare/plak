@@ -1194,7 +1194,7 @@ struct ToolSubjectStash {
 /// Shell-only host when the OAuth agent cannot attach (`NO_AUTH` / `AUTH_ONLY`).
 ///
 /// Handles a profile's Use now and session binding. Product prompts are
-/// refused until the TUI reattaches (automatically after Use now, or on an
+/// refused until the client reattaches (automatically after Use now, or on an
 /// explicit `/attach`) with a resolvable account+model (READY).
 pub struct ShellHostConfig<
     P: plakous_host_protocol::ProtocolExtension = plakous_host_protocol::Core,
@@ -1480,9 +1480,9 @@ enum ReasoningLocation {
     },
     /// `Visible` or `Summary`: deltas project straight through.
     Admitted {
-        /// Whether any delta has reached the TUI, so a seal is meaningful.
+        /// Whether any delta has reached the client, so a seal is meaningful.
         emitted: bool,
-        /// Operator-visible body already sent to the TUI, retained so resume
+        /// Operator-visible body already sent to the client, retained so resume
         /// can restore the block without copying it into model-facing history.
         text: String,
         /// First admitted emit for this location.

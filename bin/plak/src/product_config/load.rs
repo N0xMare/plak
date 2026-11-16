@@ -4,13 +4,12 @@ use super::atomic::{AtomicStage, atomic_file, sync_parent_directory};
 use super::keys::{
     CONFIG_KEYS, CONFIG_SECTION_DOCS, ConfigField, ConfigKey, FORWARD_ONLY_SECTIONS, FieldValue,
     ResumeAfterLoss, check_client_id_metadata_url, config_key, parse_bound, parse_max_model_rounds,
-    parse_positive, parse_scroll_lines, saturating_toml_integer,
+    parse_positive, saturating_toml_integer,
 };
 use super::policy::{
     AgentTemplate, CEILING_MAX_ATTEMPTS, CEILING_MAX_CHILDREN, CEILING_MAX_DEPTH,
-    CEILING_MAX_NODES, CEILING_REQUESTS_PER_ACCOUNT, DEFAULT_MAX_MODEL_ROUNDS,
-    DEFAULT_SCROLL_LINES, DefaultBinding, MINTED_ROOT_TEMPLATE_NAME, SessionPolicy,
-    TelemetryConfig, validate_template_name,
+    CEILING_MAX_NODES, CEILING_REQUESTS_PER_ACCOUNT, DEFAULT_MAX_MODEL_ROUNDS, DefaultBinding,
+    MINTED_ROOT_TEMPLATE_NAME, SessionPolicy, TelemetryConfig, validate_template_name,
 };
 use super::readiness::{TemplateReadinessRow, catalog_credential_readiness, template_readiness};
 use super::templates::{load_templates_dir, parse_template, render_template};
@@ -205,18 +204,8 @@ pub struct ProductConfig {
     /// `[api] full_window`: admit new API sessions under the model's full
     /// input window instead of its price threshold.
     pub api_full_window: bool,
-    pub tui_mouse: bool,
-    /// `[tui] scroll_lines`: transcript lines moved per wheel tick.
-    pub scroll_lines: u16,
-    /// `[tui] show_thinking`: subject to the provider reasoning policy.
-    pub show_thinking: bool,
-    /// `[tui] group_tool_calls`: collapse completed transcript activity groups.
-    pub group_tool_calls: bool,
-    /// `[tui] reduced_motion`: suppress spinner, pulse and camera easing.
-    pub reduced_motion: bool,
-    /// `[tui] reload_requests`: accept same-user reload requests (home-scoped).
+    /// `[host] reload_requests`: accept same-user reload requests (home-scoped).
     pub reload_requests: bool,
-    pub theme: ProductTheme,
     pub compaction_enabled: bool,
     /// `[skills] enabled`: Agent Skills discovery for new sessions.
     pub skills_enabled: bool,
@@ -267,17 +256,6 @@ pub(super) fn is_template_account(account: &str) -> bool {
         .is_ok()
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum ProductTheme {
-    #[default]
-    DefaultDark,
-    DefaultLight,
-    CatppuccinLatte,
-    CatppuccinFrappe,
-    CatppuccinMacchiato,
-    CatppuccinMocha,
-}
-
 #[derive(Debug, Eq, PartialEq)]
 pub enum ConfigSaveError {
     BeforePublication(String),
@@ -291,33 +269,6 @@ impl ConfigSaveError {
             Self::BeforePublication(message) | Self::PublishedDurabilityUncertain(message) => {
                 message
             }
-        }
-    }
-}
-
-impl ProductTheme {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::DefaultDark => "default-dark",
-            Self::DefaultLight => "default-light",
-            Self::CatppuccinLatte => "catppuccin-latte",
-            Self::CatppuccinFrappe => "catppuccin-frappe",
-            Self::CatppuccinMacchiato => "catppuccin-macchiato",
-            Self::CatppuccinMocha => "catppuccin-mocha",
-        }
-    }
-
-    pub(super) fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "default-dark" | "dark" => Ok(Self::DefaultDark),
-            // Spec 8.1: `dark` and `light` are aliases of the two default themes.
-            "default-light" | "light" => Ok(Self::DefaultLight),
-            "catppuccin-latte" => Ok(Self::CatppuccinLatte),
-            "catppuccin-frappe" => Ok(Self::CatppuccinFrappe),
-            "catppuccin-macchiato" => Ok(Self::CatppuccinMacchiato),
-            "catppuccin-mocha" => Ok(Self::CatppuccinMocha),
-            _ => Err(format!("unsupported product theme: {value}")),
         }
     }
 }
@@ -536,12 +487,6 @@ impl ProductConfig {
                 self.jobs_max_runtime_hours = source.jobs_max_runtime_hours;
             }
             ConfigField::ApiFullWindow => self.api_full_window = source.api_full_window,
-            ConfigField::TuiMouse => self.tui_mouse = source.tui_mouse,
-            ConfigField::Theme => self.theme = source.theme,
-            ConfigField::ScrollLines => self.scroll_lines = source.scroll_lines,
-            ConfigField::ShowThinking => self.show_thinking = source.show_thinking,
-            ConfigField::GroupToolCalls => self.group_tool_calls = source.group_tool_calls,
-            ConfigField::ReducedMotion => self.reduced_motion = source.reduced_motion,
             ConfigField::ReloadRequests => self.reload_requests = source.reload_requests,
             ConfigField::CompactionEnabled => {
                 self.compaction_enabled = source.compaction_enabled;
@@ -666,13 +611,7 @@ impl ProductConfig {
             jobs_foreground_seconds: 30,
             jobs_max_runtime_hours: 10,
             api_full_window: false,
-            tui_mouse: true,
-            scroll_lines: DEFAULT_SCROLL_LINES,
-            show_thinking: true,
-            group_tool_calls: true,
-            reduced_motion: false,
             reload_requests: false,
-            theme: ProductTheme::DefaultDark,
             compaction_enabled: true,
             skills_enabled: true,
             telemetry_max_bytes: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_BYTES,
@@ -979,12 +918,6 @@ impl ProductConfig {
             }
             ConfigField::JobsMaxRuntimeHours => Value::from(i64::from(self.jobs_max_runtime_hours)),
             ConfigField::ApiFullWindow => Value::from(self.api_full_window),
-            ConfigField::TuiMouse => Value::from(self.tui_mouse),
-            ConfigField::Theme => Value::from(self.theme.as_str()),
-            ConfigField::ScrollLines => Value::from(i64::from(self.scroll_lines)),
-            ConfigField::ShowThinking => Value::from(self.show_thinking),
-            ConfigField::GroupToolCalls => Value::from(self.group_tool_calls),
-            ConfigField::ReducedMotion => Value::from(self.reduced_motion),
             ConfigField::ReloadRequests => Value::from(self.reload_requests),
             ConfigField::CompactionEnabled => Value::from(self.compaction_enabled),
             ConfigField::SkillsEnabled => Value::from(self.skills_enabled),
@@ -1376,8 +1309,6 @@ impl ProductConfig {
 
     fn assign_key(&mut self, key: &str, value: &str) -> Result<(), String> {
         let replacement = match key {
-            "mouse" => Some("tui.mouse"),
-            "theme" => Some("tui.theme"),
             "compaction_enabled" => Some("compaction.enabled"),
             _ => None,
         };
@@ -1471,12 +1402,6 @@ impl ProductConfig {
                 self.jobs_max_runtime_hours = parse_bound(key.path, value, 24)?;
             }
             ConfigField::ApiFullWindow => self.api_full_window = value.boolean()?,
-            ConfigField::TuiMouse => self.tui_mouse = value.boolean()?,
-            ConfigField::Theme => self.theme = ProductTheme::parse(value.string(key)?)?,
-            ConfigField::ScrollLines => self.scroll_lines = parse_scroll_lines(value)?,
-            ConfigField::ShowThinking => self.show_thinking = value.boolean()?,
-            ConfigField::GroupToolCalls => self.group_tool_calls = value.boolean()?,
-            ConfigField::ReducedMotion => self.reduced_motion = value.boolean()?,
             ConfigField::ReloadRequests => self.reload_requests = value.boolean()?,
             ConfigField::CompactionEnabled => self.compaction_enabled = value.boolean()?,
             ConfigField::SkillsEnabled => self.skills_enabled = value.boolean()?,

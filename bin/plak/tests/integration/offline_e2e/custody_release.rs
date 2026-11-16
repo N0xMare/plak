@@ -82,20 +82,3 @@ fn a_clean_agent_quit_releases_its_tree_custody() {
     assert!(outcome.status.success(), "{}", outcome.stderr);
     assert_released(&fixture, Some(&outcome.session_id()));
 }
-
-#[test]
-fn a_clean_tui_quit_releases_its_tree_custody() {
-    let fixture = Fixture::new(&tree_answer_script());
-    let mut terminal = TerminalChild::spawn(&fixture, 120, None);
-    terminal.wait_screen("/10M");
-    terminal.send(b"answer once\r");
-    terminal.wait_screen(ANSWER);
-    terminal.send(b"\x11");
-    let (status, raw) = terminal.finish_with_raw();
-    assert!(
-        status.success(),
-        "the TUI did not quit cleanly:\n{}",
-        String::from_utf8_lossy(&raw)
-    );
-    assert_released(&fixture, None);
-}

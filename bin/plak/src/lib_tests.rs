@@ -12,23 +12,17 @@ use std::io::Cursor;
 
 use super::*;
 use crate::command::{RunEffort, run_effort_levels, run_effort_usage};
-use crate::commands::host_config::{
-    AttachEligibility, attach_eligibility, build_host_config, deferred_attach_refusal_reason,
-};
+use crate::commands::host_config::{AttachEligibility, attach_eligibility, build_host_config};
 use crate::commands::session::seed_new_session_binding;
-use crate::commands::support::{join_host_worker_bounded, join_tui_host_worker};
+use crate::commands::support::join_host_worker_bounded;
 use crate::presentation::catalog_values_with_backend;
 use crate::presentation::credential_locations_text;
-#[cfg(feature = "tui")]
-use crate::tui_launch::supervisor::{
-    apply_tui_handoff, apply_tui_handoff_after_host, handle_tui_handoff, restore_former_attachment,
-};
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::NativeLoginMode;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// `plak status` on an emptied home still says Ready. The line that
 /// explains why is text a reader depends on, so it is pinned.
@@ -1371,73 +1365,6 @@ fn host_catalog_discovery_requires_current_compatibility_and_ready_credentials()
     }
 }
 
-#[cfg(feature = "tui")]
-fn tui_test_locator(checkpoint: u8) -> plakous::sessions::SessionLocator {
-    format!(
-        "00000000-0000-0000-0000-000000000001/\
-             00000000-0000-0000-0000-000000000002/\
-             00000000-0000-0000-0000-{checkpoint:012}"
-    )
-    .parse()
-    .expect("valid exact session locator")
-}
-
-#[test]
-#[cfg(feature = "tui")]
-fn new_launch_exact_selection_keeps_selected_binding_instead_of_defaults() {
-    let root = tempfile::tempdir().expect("temporary product home");
-    let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
-    let workspace = root.path().join("workspace");
-    std::fs::create_dir(&workspace).expect("workspace directory");
-    let defaults = root_config("codex", "gpt-5.6-sol", Some("medium"));
-    let mut active = product_sessions::SessionRecord::new(workspace.clone());
-    seed_new_session_binding(&mut active, &defaults).expect("seed new session");
-    let former_id = active.id.clone();
-    let mut resume = false;
-    let mut resume_pending = false;
-    let mut former_attachment = None;
-
-    let mut selected = product_sessions::SessionRecord::new(workspace);
-    selected.account = Some("grok".to_owned());
-    selected.model = Some("grok-4.6".to_owned());
-    selected.effort = Some("high".to_owned());
-    selected
-        .bind_plakous_locator(tui_test_locator(7))
-        .expect("bind selected locator");
-    product_sessions::save_session(&paths, &mut selected).expect("persist selected session");
-
-    apply_tui_handoff(
-        &Services::for_home(paths.clone()),
-        &paths,
-        &store::session_records::SqliteSessionStore::new(paths.clone()),
-        &mut active,
-        &mut resume,
-        &mut resume_pending,
-        &mut former_attachment,
-        tui::SessionRequest::ResumeSession {
-            id: selected.id.clone(),
-            held_reload_requests: Vec::new(),
-        },
-        &mut None,
-    )
-    .expect("select exact session");
-
-    assert_eq!(active.account.as_deref(), Some("grok"));
-    assert_eq!(active.model.as_deref(), Some("grok-4.6"));
-    assert_eq!(active.effort.as_deref(), Some("high"));
-    assert_eq!(active.plakous_locator, Some(tui_test_locator(7)));
-    assert!(resume, "resume state follows the exact selected record");
-    assert!(resume_pending, "selected exact resume is not published yet");
-    assert_eq!(
-        former_attachment.as_ref().map(|(record, resume, pending)| (
-            record.id.as_str(),
-            *resume,
-            *pending
-        )),
-        Some((former_id.as_str(), false, false))
-    );
-}
-
 #[test]
 fn new_codex_session_seeds_priority_as_durable_target_authority() {
     let mut config = root_config("codex", "gpt-5.6-sol", Some("medium"));
@@ -1670,67 +1597,6 @@ fn deferred_unknown_native_model_is_refused_even_with_explicit_effort() {
         true,
     );
     assert_eq!(eligibility, AttachEligibility::Unavailable);
-    assert!(matches!(
-        deferred_attach_refusal_reason(eligibility, false, None),
-        plakous_host_protocol::status::DetachedReason::ResolveFailed(_)
-    ));
-}
-
-/// An unusable stored login retains its typed condition, not a missing-model
-/// diagnosis or an account inferred from display text.
-#[test]
-fn unusable_stored_login_names_the_credential_not_a_missing_model() {
-    let refusal = commands::host_config::credential_gate_refusal(
-        NativeProvider::Xai,
-        Ok(CliStatus {
-            compatibility: CompatibilityState::Current,
-            credential: CredentialState::ProfileChanged,
-        }),
-    );
-    let reason = deferred_attach_refusal_reason(AttachEligibility::Unavailable, false, refusal);
-    assert!(matches!(
-        reason,
-        plakous_host_protocol::status::DetachedReason::CredentialUnusable(_)
-    ));
-    for (credential, condition) in [
-        (
-            CredentialState::LoginRequired,
-            plakous_host_protocol::notice_remedy::CredentialCondition::OlderProfile,
-        ),
-        (
-            CredentialState::WrittenByNewerBuild,
-            plakous_host_protocol::notice_remedy::CredentialCondition::NewerBuild,
-        ),
-        (
-            CredentialState::SignedOut,
-            plakous_host_protocol::notice_remedy::CredentialCondition::Unavailable,
-        ),
-    ] {
-        let refusal = commands::host_config::credential_gate_refusal(
-            NativeProvider::Claude,
-            Ok(CliStatus {
-                compatibility: CompatibilityState::Current,
-                credential,
-            }),
-        )
-        .expect("unusable credential refused");
-        assert_eq!(refusal.remedy, Some(plakous_host_protocol::notice_remedy::NoticeRemedy::RepairCredentialOrChooseProfile {account: plakous_host_protocol::notice_remedy::AccountTarget::Claude, condition}));
-    }
-    assert_eq!(
-        commands::host_config::credential_gate_refusal(
-            NativeProvider::Codex,
-            Ok(CliStatus {
-                compatibility: CompatibilityState::Current,
-                credential: CredentialState::Ready,
-            }),
-        ),
-        None
-    );
-    // Missing defaults still win: there is no selected account to name.
-    assert_eq!(
-        deferred_attach_refusal_reason(AttachEligibility::Unavailable, true, Some("x".into())),
-        plakous_host_protocol::status::DetachedReason::MissingDefaults
-    );
 }
 
 #[test]
@@ -1754,203 +1620,7 @@ fn deferred_openrouter_target_attaches_without_catalog_membership_or_effort() {
 }
 
 #[test]
-#[cfg(feature = "tui")]
-fn recoverable_selected_attach_failure_restores_former_exact_attachment() {
-    let root = tempfile::tempdir().expect("temporary product home");
-    let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
-    let workspace = root.path().join("workspace");
-    std::fs::create_dir(&workspace).expect("workspace directory");
-    let mut former = product_sessions::SessionRecord::new(workspace.clone());
-    former.account = Some("codex".to_owned());
-    former.model = Some("gpt-5.6-sol".to_owned());
-    former.effort = Some("medium".to_owned());
-    former
-        .bind_plakous_locator(tui_test_locator(3))
-        .expect("bind former locator");
-    let mut selected = product_sessions::SessionRecord::new(workspace);
-    selected.account = Some("grok".to_owned());
-    selected.model = Some("grok-4.6".to_owned());
-    selected.effort = Some("high".to_owned());
-    selected
-        .bind_plakous_locator(tui_test_locator(9))
-        .expect("bind selected locator");
-    product_sessions::save_session(&paths, &mut selected).expect("persist selected session");
-    let former_id = former.id.clone();
-    let mut active = former;
-    let mut resume = false;
-    let mut resume_pending = false;
-    let mut rollback = None;
-
-    apply_tui_handoff(
-        &Services::for_home(paths.clone()),
-        &paths,
-        &store::session_records::SqliteSessionStore::new(paths.clone()),
-        &mut active,
-        &mut resume,
-        &mut resume_pending,
-        &mut rollback,
-        tui::SessionRequest::ResumeSession {
-            id: selected.id,
-            held_reload_requests: Vec::new(),
-        },
-        &mut None,
-    )
-    .expect("stage exact selected attachment");
-    assert_eq!(active.plakous_locator, Some(tui_test_locator(9)));
-    assert!(resume);
-    assert!(resume_pending);
-
-    assert!(restore_former_attachment(
-        &mut active,
-        &mut resume,
-        &mut resume_pending,
-        &mut rollback
-    ));
-    assert_eq!(active.id, former_id);
-    assert_eq!(active.account.as_deref(), Some("codex"));
-    assert_eq!(active.model.as_deref(), Some("gpt-5.6-sol"));
-    assert_eq!(active.effort.as_deref(), Some("medium"));
-    assert_eq!(active.plakous_locator, Some(tui_test_locator(3)));
-    assert!(!resume, "the restored record keeps its former launch state");
-    assert!(!resume_pending);
-    assert!(rollback.is_none());
-}
-
-#[test]
-#[cfg(feature = "tui")]
-fn failed_in_process_resume_switch_keeps_last_attached_rollback_authority() {
-    let root = tempfile::tempdir().expect("temporary product home");
-    let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
-    let workspace = root.path().join("workspace");
-    std::fs::create_dir(&workspace).expect("workspace directory");
-    let mut former = product_sessions::SessionRecord::new(workspace.clone());
-    former
-        .bind_plakous_locator(tui_test_locator(1))
-        .expect("bind former locator");
-    let former_id = former.id.clone();
-    let mut failed = product_sessions::SessionRecord::new(workspace.clone());
-    failed
-        .bind_plakous_locator(tui_test_locator(2))
-        .expect("bind failed locator");
-    let mut next = product_sessions::SessionRecord::new(workspace);
-    next.bind_plakous_locator(tui_test_locator(3))
-        .expect("bind next locator");
-    product_sessions::save_session(&paths, &mut failed).expect("persist failed selection");
-    product_sessions::save_session(&paths, &mut next).expect("persist next selection");
-
-    let mut active = former;
-    let mut resume = false;
-    let mut resume_pending = false;
-    let mut rollback = None;
-    apply_tui_handoff(
-        &Services::for_home(paths.clone()),
-        &paths,
-        &store::session_records::SqliteSessionStore::new(paths.clone()),
-        &mut active,
-        &mut resume,
-        &mut resume_pending,
-        &mut rollback,
-        tui::SessionRequest::ResumeSession {
-            id: failed.id,
-            held_reload_requests: Vec::new(),
-        },
-        &mut None,
-    )
-    .expect("stage failed selection");
-
-    apply_tui_handoff_after_host(
-        &Services::for_home(paths.clone()),
-        &paths,
-        &store::session_records::SqliteSessionStore::new(paths.clone()),
-        &mut active,
-        &mut resume,
-        &mut resume_pending,
-        &mut rollback,
-        tui::SessionRequest::ResumeSession {
-            id: next.id.clone(),
-            held_reload_requests: Vec::new(),
-        },
-        &mut None,
-    )
-    .expect("stage next selection after failed host");
-
-    assert_eq!(active.id, next.id);
-    assert!(resume_pending);
-    assert_eq!(
-        rollback
-            .as_ref()
-            .map(|(record, resume, pending)| (record.id.as_str(), *resume, *pending)),
-        Some((former_id.as_str(), false, false))
-    );
-}
-
-#[test]
-#[cfg(feature = "tui")]
-fn exact_session_selection_preserves_record_and_refuses_workspace_mismatch() {
-    let root = tempfile::tempdir().expect("temporary product home");
-    let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
-    let workspace = root.path().join("workspace");
-    let other_workspace = root.path().join("other-workspace");
-    std::fs::create_dir(&workspace).expect("workspace directory");
-    std::fs::create_dir(&other_workspace).expect("other workspace directory");
-    let mut active = product_sessions::SessionRecord::new(workspace.clone());
-    let active_id = active.id.clone();
-    let mut selected = product_sessions::SessionRecord::new(workspace);
-    selected.account = Some("grok".to_owned());
-    selected.model = Some("grok-4.6".to_owned());
-    selected.record_notice(product_sessions::TranscriptRow::warning(
-        plakous_hosted::sessions::NoticeScope::Tree,
-        "selected transcript",
-    ));
-    selected
-        .bind_plakous_locator(tui_test_locator(11))
-        .expect("bind selected locator");
-    product_sessions::save_session(&paths, &mut selected).expect("persist selected session");
-
-    handle_tui_handoff(
-        &Services::for_home(paths.clone()),
-        &paths,
-        &store::session_records::SqliteSessionStore::new(paths.clone()),
-        &mut active,
-        tui::SessionRequest::ResumeSession {
-            id: selected.id.clone(),
-            held_reload_requests: Vec::new(),
-        },
-        &mut None,
-    )
-    .expect("select exact session");
-    assert_eq!(active.id, selected.id);
-    assert_eq!(
-        active.transcript,
-        vec![product_sessions::TranscriptRow::warning(
-            plakous_hosted::sessions::NoticeScope::Tree,
-            "selected transcript"
-        )]
-    );
-    assert_eq!(active.plakous_locator, Some(tui_test_locator(11)));
-
-    let mut mismatched = product_sessions::SessionRecord::new(other_workspace);
-    product_sessions::save_session(&paths, &mut mismatched).expect("persist mismatched session");
-    let selected_id = active.id.clone();
-    let failure = handle_tui_handoff(
-        &Services::for_home(paths.clone()),
-        &paths,
-        &store::session_records::SqliteSessionStore::new(paths.clone()),
-        &mut active,
-        tui::SessionRequest::ResumeSession {
-            id: mismatched.id,
-            held_reload_requests: Vec::new(),
-        },
-        &mut None,
-    )
-    .expect_err("workspace mismatch refused");
-    assert!(failure.message().contains("different workspace"));
-    assert_eq!(active.id, selected_id);
-    assert_ne!(active.id, active_id);
-}
-
-#[test]
-fn tui_default_binding_rolls_back_before_publication_and_remains_usable() {
+fn host_default_binding_rolls_back_before_publication_and_remains_usable() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
     let mut record = product_sessions::SessionRecord::new(root.path().to_path_buf());
@@ -1960,7 +1630,7 @@ fn tui_default_binding_rolls_back_before_publication_and_remains_usable() {
     let mut candidate = record.clone();
     candidate.account = Some("grok".to_owned());
 
-    let failure = commit_tui_default_candidate(&paths, &mut record, candidate, || {
+    let failure = commit_host_default_candidate(&paths, &mut record, candidate, || {
         Err(product_config::ConfigSaveError::BeforePublication(
             "injected refusal".to_owned(),
         ))
@@ -1978,13 +1648,13 @@ fn tui_default_binding_rolls_back_before_publication_and_remains_usable() {
     );
     let mut retry = record.clone();
     retry.account = Some("grok".to_owned());
-    commit_tui_default_candidate(&paths, &mut record, retry, || Ok(()))
+    commit_host_default_candidate(&paths, &mut record, retry, || Ok(()))
         .expect("retry after rollback");
     assert_eq!(record.account.as_deref(), Some("grok"));
 }
 
 #[test]
-fn tui_default_binding_fences_post_publication_durability_uncertainty() {
+fn host_default_binding_fences_post_publication_durability_uncertainty() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
     let mut record = product_sessions::SessionRecord::new(root.path().to_path_buf());
@@ -1994,7 +1664,7 @@ fn tui_default_binding_fences_post_publication_durability_uncertainty() {
     let mut candidate = record.clone();
     candidate.account = Some("grok".to_owned());
 
-    let failure = commit_tui_default_candidate(&paths, &mut record, candidate, || {
+    let failure = commit_host_default_candidate(&paths, &mut record, candidate, || {
         Err(
             product_config::ConfigSaveError::PublishedDurabilityUncertain(
                 "injected directory sync failure".to_owned(),
@@ -2895,29 +2565,6 @@ fn host_worker_join_preserves_the_terminal_failure() {
     });
     let error = join_host_worker_bounded(worker, Duration::from_secs(1), "typed").unwrap_err();
     assert_eq!(error.message(), "owned root release refused");
-}
-
-/// The TUI error path joins the host worker under the product deadline
-/// and returns what it returned; a worker failure is not swallowed.
-#[test]
-fn tui_shutdown_deadlines_are_at_most_one_second() {
-    assert!(commands::support::VOLUNTARY_QUIT_GRACE <= Duration::from_secs(1));
-    let started = Instant::now();
-    let worker = plakous_hosted::runtime::HostWorkerHandle::spawn(|| {
-        thread::sleep(Duration::from_millis(1500));
-        Ok(())
-    });
-    assert!(join_tui_host_worker(worker, "test").is_err());
-    assert!(started.elapsed() < Duration::from_millis(1100));
-}
-
-#[test]
-fn tui_error_join_propagates_the_worker_failure() {
-    let worker = plakous_hosted::runtime::HostWorkerHandle::spawn(|| {
-        Err(CliFailure::new("release checkpoint refused"))
-    });
-    let error = join_tui_host_worker(worker, "TUI session").unwrap_err();
-    assert_eq!(error.message(), "release checkpoint refused");
 }
 
 #[test]
@@ -4469,7 +4116,7 @@ fn bare_login_parses_as_command_help() {
     );
 }
 
-fn commit_tui_default_candidate(
+fn commit_host_default_candidate(
     paths: &product_paths::PlakPaths,
     record: &mut product_sessions::SessionRecord,
     candidate: product_sessions::SessionRecord,
@@ -4489,18 +4136,18 @@ fn commit_tui_default_candidate(
                 Ok(()) => {
                     *record = prior;
                     Err(CliFailure::new(format!(
-                        "TUI default config write failed: {error}; session change rolled back"
+                        "host default config write failed: {error}; session change rolled back"
                     )))
                 }
                 Err(rollback) => Err(CliFailure::new(format!(
-                    "TUI default config write failed: {error}; session rollback failed: {rollback}; recovery required"
+                    "host default config write failed: {error}; session rollback failed: {rollback}; recovery required"
                 ))),
             }
         }
         Err(product_config::ConfigSaveError::PublishedDurabilityUncertain(error)) => {
             *record = candidate;
             Err(CliFailure::new(format!(
-                "TUI default config was published but directory sync failed: {error}; durability uncertain; recovery required"
+                "host default config was published but directory sync failed: {error}; durability uncertain; recovery required"
             )))
         }
     }

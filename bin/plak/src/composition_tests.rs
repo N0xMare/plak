@@ -397,7 +397,7 @@ fn scheduled_compaction_failure_keeps_host_worker_alive() {
         )),
         "scheduled compact Err must not kill the host worker, events={events:?}"
     );
-    // The paid round-trip blocks the host; the TUI must see it as work and
+    // The paid round-trip blocks the host; an external client must see it as work and
     // see it end, or every deferred prompt looks like a frozen surface.
     assert!(
         during.iter().any(|event| matches!(

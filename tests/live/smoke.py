@@ -4,7 +4,7 @@
 Usage: smoke.py [route] [--binary PATH] [--only NAME,...]
 
 Each scenario builds its own small git repo, drives the real `plak` (CLI
-one-shot, `plak agent` JSONL, or the TUI on a PTY) and checks product-level
+one-shot or `plak agent` JSONL) and checks product-level
 outcomes: files changed, tests pass, the session continues. A failure is
 classed as harness (Plak's), model (the turn completed but the work is
 wrong), provider (the real provider refused) or pending (a known gap that an
@@ -94,7 +94,7 @@ def require_completed(
 
 
 def continues(agent: live.Agent) -> None:
-    """The session answers a fresh prompt: no dead end that needs /new."""
+    """The same session answers a fresh prompt after the fault."""
     require_completed(agent.prompt(CONTINUE, timeout=180), "follow-up after the fault")
 
 
@@ -113,7 +113,7 @@ def durable_terminals(records: list[dict]) -> list[dict]:
 def require_durable_completed(
     record: dict, what: str, segments: list[Path] | None = None, home: Path | None = None
 ) -> None:
-    """Classify a durable TUI terminal with the same policy as JSONL turns."""
+    """Classify a durable turn terminal with the same policy as JSONL turns."""
     if home is not None and record.get("phase") != "completed":
         retry = jobs.last_retry(home, str(record.get("turn_id") or ""))
         if jobs.retry_budget_exhausted(retry):
@@ -697,88 +697,6 @@ class Smoke:
             raise ScenarioFailure(MODEL, f"children did not write {missing}")
         return "two forked children, both candidates adopted"
 
-    # --- TUI -----------------------------------------------------------------
-
-    def tui(self) -> str:
-        repo = self.repo("tui")
-        existing = set(self.env.home.glob("state/*/sessions/*.events.jsonl"))
-        tui = live.Tui(self.env, repo, self.env.artifacts / "tui" / "pty.log")
-        tui.pump(8)
-        tui.type("Create tui.txt containing the word ready.")
-        tui.key(b"\r")
-
-        session: str | None = None
-
-        def first_turn_terminal() -> bool:
-            nonlocal session
-            sessions = set(self.env.home.glob("state/*/sessions/*.events.jsonl")) - existing
-            if len(sessions) > 1:
-                raise ScenarioFailure(HARNESS, "TUI created more than one root session")
-            if len(sessions) == 1:
-                session = next(iter(sessions)).name.removesuffix(".events.jsonl")
-            return session is not None and bool(
-                durable_terminals(live.session_records(self.env.home, session))
-            )
-
-        finished = tui.wait_until(first_turn_terminal, 300)
-        if not finished or session is None:
-            failure = live.timeout_failure(
-                self.env,
-                tui.capture_dir if session else None,
-                "first TUI turn produced no durable terminal",
-                timeout=300,
-            )
-            tui.quit()
-            raise failure
-        first = durable_terminals(live.session_records(self.env.home, session))[0]
-        try:
-            require_durable_completed(
-                first, "first TUI turn", segments=[tui.capture_dir], home=self.env.home
-            )
-        except ScenarioFailure:
-            tui.quit()
-            raise
-        if not (repo / "tui.txt").exists():
-            tui.quit()
-            raise ScenarioFailure(MODEL, "first TUI turn completed without writing tui.txt")
-
-        tui.type(CONTINUE)
-        tui.key(b"\r")
-
-        def answered_on_durable_session() -> bool:
-            records = live.session_records(self.env.home, session)
-            return len(durable_terminals(records)) >= 2
-
-        answered = tui.wait_until(answered_on_durable_session, 180)
-        unanswered = (
-            None
-            if answered
-            else live.timeout_failure(
-                self.env,
-                tui.capture_dir,
-                "second TUI turn produced no durable terminal",
-                timeout=180,
-            )
-        )
-        code = tui.quit()
-        if code != 0:
-            raise ScenarioFailure(HARNESS, f"TUI exited {code} after Ctrl+Q")
-        if unanswered is not None:
-            raise unanswered
-        records = live.session_records(self.env.home, session)
-        require_durable_completed(
-            durable_terminals(records)[1],
-            "second TUI turn",
-            segments=[tui.capture_dir],
-            home=self.env.home,
-        )
-        if not any(
-            record.get("kind") == "turn.assistant" and record.get("text", "").strip() == "continued"
-            for record in records
-        ):
-            raise ScenarioFailure(MODEL, "second TUI turn completed without the requested answer")
-        return "two TUI turns, clean quit"
-
     SCENARIOS = (
         ("cli_task", "cli"),
         ("cli_resume", "cli"),
@@ -791,7 +709,6 @@ class Smoke:
         ("fault_reset", "jsonl"),
         ("fault_stall", "jsonl"),
         ("subagents", "jsonl"),
-        ("tui", "tui"),
     )
     # Named by `--only`, absent from the default run. Listing them on
     # SCENARIOS would make every paid smoke hit the round cap.

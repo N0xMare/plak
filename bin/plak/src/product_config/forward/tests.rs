@@ -92,27 +92,29 @@ fn malformed_forward_keys_are_named_load_errors() {
 }
 
 /// A file `plak` writes stays loadable by a 0.0.3 build until the operator
-/// sets a forward key: `config init` and a fresh save never write `[host]`
-/// live, a save of another key never adds one, and only an explicit set
-/// does — even of the default.
+/// sets a forward key. The host table also carries reload policy; only an
+/// explicit set writes the optional recovery key, even of its default.
 #[test]
 fn forward_keys_are_written_only_when_set_explicitly() {
     let (_tmp, paths) = PlakPaths::isolated_test_home();
     assert!(init_if_missing(&paths).unwrap());
     let initialized = fs::read_to_string(paths.config_file()).unwrap();
-    assert!(initialized.contains("# [host]\n"), "{initialized}");
-    assert!(!initialized.lines().any(|line| line == "[host]"));
-    assert!(!ProductConfig::default_product().render().contains("[host]"));
+    assert!(
+        !initialized
+            .lines()
+            .any(|line| line.starts_with("resume_after_loss"))
+    );
+    assert!(
+        !ProductConfig::default_product()
+            .render()
+            .contains("resume_after_loss")
+    );
 
-    ProductConfig::save_terminal_key(
-        &paths,
-        super::super::ConfigWriteScope::User,
-        "tui.scroll_lines",
-        "5",
-    )
+    ProductConfig::update_user(&paths, |config| {
+        config.set_key("jobs.foreground_seconds", "5")
+    })
     .unwrap();
     let saved = fs::read_to_string(paths.config_file()).unwrap();
-    assert!(!saved.lines().any(|line| line == "[host]"), "{saved}");
     assert!(
         !saved
             .lines()
@@ -129,8 +131,7 @@ fn forward_keys_are_written_only_when_set_explicitly() {
     assert_eq!(loaded.resume_after_loss, Some(ResumeAfterLoss::Hold));
     assert_eq!(loaded.forward_only_keys(), ["[host] resume_after_loss"]);
 
-    // Clearing the key takes its now-empty table with it: a bare [host]
-    // header is refused by a 0.0.3 build just the same.
+    // Clearing recovery policy must not resurrect it on the next load.
     let mut config = loaded;
     config.set_key("host.resume_after_loss", "").unwrap();
     config.save(&paths).unwrap();
@@ -138,7 +139,7 @@ fn forward_keys_are_written_only_when_set_explicitly() {
     assert!(
         !saved
             .lines()
-            .any(|line| line.starts_with("resume_after_loss") || line.trim() == "[host]"),
+            .any(|line| line.starts_with("resume_after_loss")),
         "{saved}"
     );
     assert_eq!(
@@ -147,15 +148,12 @@ fn forward_keys_are_written_only_when_set_explicitly() {
     );
 
     let fresh = PlakPaths::isolated_test_home();
-    ProductConfig::save_terminal_key(
-        &fresh.1,
-        super::super::ConfigWriteScope::User,
-        "tui.scroll_lines",
-        "5",
-    )
+    ProductConfig::update_user(&fresh.1, |config| {
+        config.set_key("jobs.foreground_seconds", "5")
+    })
     .unwrap();
     let rendered = fs::read_to_string(fresh.1.config_file()).unwrap();
-    assert!(!rendered.contains("[host]"), "{rendered}");
+    assert!(!rendered.contains("resume_after_loss"), "{rendered}");
 }
 
 /// A placement is spelled in the server's canonical table only when set, so

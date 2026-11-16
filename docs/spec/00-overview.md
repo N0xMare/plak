@@ -7,8 +7,8 @@ agent loop, canonical conversation, tools and effects, harness-plan
 compilation, provider integrations, authentication, admission and
 revalidation, durability, and semantic session recovery.
 
-Plak is the product built on it: a terminal application, CLI, and long-lived
-JSONL host that composes Plakous agents into a workspace-shaped coding tool
+Plak is the product built on it: a host server, operator/batch CLI, and long-lived
+JSONL transport that composes Plakous agents into a workspace-shaped coding tool
 with configuration, queues, presentation, and multi-agent topology.
 
 ## The crate-set rule
@@ -47,14 +47,14 @@ facade and owns product policy and execution; its serialized extension
 vocabulary is shared through `plakd-wire-types`.
 
 Product catalog construction and attachment eligibility are host services,
-independent of terminal presentation. CLI inspection, hosted session options
-and terminal adapters consume the same product-owned catalog facts.
+independent of client presentation. CLI inspection and hosted session options
+consume the same product-owned catalog facts.
 
 | Position | Owns | Does not own |
 | --- | --- | --- |
 | Plakous L0 (`plakous-model`, `plakous-tools`, `plakous-agent`, `plakous`) | the loop, canonical history, checkpoints, tools and effects, profiles and resolved plans, providers and dialects, credentials, admission, revalidation, durable store and its change feed, recovery | UI, product configuration and defaults, queues, workflow, live-test procedure, topology |
-| Plakous above the facade (`plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, `plakous-hosted`) | the neutral host wire vocabulary and its typed views, agent workspaces over `git`/`jj`, the durable agent tree and its store, and one hosted session — build, open, resume, the host loop, the queue and the session intents, the one change-feed projector and its views, children, catalog, and binding | product configuration, the CLI grammar, the terminal interface, the homes, and the product and telemetry stores |
-| Plak (`bin/plak`) | CLI, TUI, the JSONL transport, product configuration and defaults, the Plak home, the product and telemetry stores, agent templates and the roster, account admission for children, the tree's presentation and its store location, live-test procedure | the agent loop, canonical history, provider dispatch, credentials, checkpoint authority, the hosted session loop |
+| Plakous above the facade (`plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, `plakous-hosted`) | the neutral host wire vocabulary and its typed views, agent workspaces over `git`/`jj`, the durable agent tree and its store, and one hosted session -- build, open, resume, the host loop, the queue and the session intents, the one change-feed projector and its views, children, catalog, and binding | product configuration, the CLI grammar, application clients, the homes, and the product and telemetry stores |
+| Plak (`bin/plak`) | operator CLI, host and JSONL transport, product configuration and defaults, the Plak home, the product and telemetry stores, agent templates and the roster, account admission for children, the tree's presentation and its store location, live-test procedure | the agent loop, canonical history, provider dispatch, credentials, checkpoint authority, the hosted session loop |
 
 Plak resolves its defaults, makes them visible, and passes a **complete**
 configuration into the facade. Product defaults are never resume or
@@ -149,13 +149,9 @@ classes and directory policy.
 | `plakous-recursive-subagents` | `crates/orchestration/recursive-subagents` | `host` | One durable agent tree per root session, its epoch, its tools and their model-visible text, and its hub |
 | `plakous-recursive-subagents-store` | `crates/orchestration/recursive-subagents-store` | `host` | That tree's durable store, over its own `subagents.sqlite3` |
 | `plakous-hosted` | `crates/hosting/hosted` | `host` | One hosted session: build, open and resume, the host loop and the detached shell loop, the one-shot drive, the queue and session intents, the change-feed projector, child binding, the ready catalog, and the session record and its ports |
-| `plak` | `bin/plak` | `bin` | The product: CLI grammar and the `plak` binary, the Ratatui presentation shell as the `tui` module, the JSONL stdio transport, the Plak home, product configuration, the product and telemetry stores, and the composition root |
+| `plak` | `bin/plak` | `bin` | The product: CLI grammar and the `plak` binary, the JSONL stdio transport, the Plak home, product configuration, the product and telemetry stores, and the composition root |
 
-Two artifacts inside those packages are worth naming because they are often
-mistaken for packages of their own. `bin/plak/src/tui/` is an inert
-presentation module, not a crate: it imports only `plakous-host-protocol`
-values and the binary's own product settings vocabulary, a constraint the
-workspace policy checks per module. `plakous-js-host` is not a package either:
+`plakous-js-host` is not a package:
 it is a `[[bin]]` of `plakous-js-runtime`, and it is the rquickjs worker for Code Mode and js-ptc.
 
 The Monty interpreter and protocol remain external dependencies pinned at
@@ -330,7 +326,7 @@ Two directories are tracked, and together they are the documentation:
     and admission, auth, tools, Code Mode, compaction, telemetry, facade,
     errors.
   - `02-plak-product.md` — the product: the Plak home and its stores, the CLI
-    grammar and exit codes, the JSONL host protocol, the TUI, prompts and the
+    grammar and exit codes, the JSONL host protocol, external client boundaries, prompts and the
     coding packs, usage, doctor, and the login surfaces.
   - `03-orchestration.md` — the agent tree: templates and roster, grants and
     tiers, spawn, mail, sealing, adoption, capacity, cells, the copy shim,
@@ -347,7 +343,7 @@ Two directories are tracked, and together they are the documentation:
   - `07-config-reference.md` — every key `plak` reads from disk, with its type,
     default, constraint, and meaning, plus the shipped presets.
 - **`docs/user-guide/`** — operator-facing material: installing and running
-  Plak, logging in, configuring agents and templates, the TUI, and the CLI and
+  Plak, logging in, configuring agents and templates, the host and CLI/
   JSONL surfaces.
 
 Decision history is not tracked in this repository. This specification, not any

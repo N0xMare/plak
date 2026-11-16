@@ -11,12 +11,6 @@ pub(crate) fn require_account(account: &str) -> CliResult<()> {
 /// The agent entry owns capability admission so refusals retain its wire framing.
 pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
     match command {
-        Command::Tui { .. }
-        | Command::TuiPlacement { .. }
-        | Command::Resume { .. }
-        | Command::HostResume { .. } => {
-            require_feature("tui")?;
-        }
         Command::Mcp(_) => require_feature("mcp")?,
         Command::Run {
             composition: Some(composition),

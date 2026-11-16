@@ -1,4 +1,4 @@
-"""The guide's stdlib reference client against a real, offline-scripted host."""
+"""A test-only socket driver against a real, offline-scripted host."""
 
 import importlib.util
 import json
@@ -8,14 +8,13 @@ import queue
 import re
 import signal
 import subprocess
-import sys
 import tempfile
 import threading
 import unittest
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
-EXAMPLE = ROOT / "tools/examples/host_client.py"
+EXAMPLE = ROOT / "tests/tooling/fixtures/host_client.py"
 spec = importlib.util.spec_from_file_location("host_client", EXAMPLE)
 host_client = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(host_client)
@@ -115,17 +114,9 @@ class ReferenceClientTests(unittest.TestCase):
             )
             return answer["session"]
 
-    def test_guide_client_reads_a_real_attach_snapshot_without_a_turn(self):
+    def test_socket_driver_reads_a_real_attach_snapshot_without_a_turn(self):
         session = self.create_session()
-        result = subprocess.run(
-            [sys.executable, EXAMPLE, "--socket", self.socket, "--session", session],
-            env=self.env,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        frames = [json.loads(line) for line in result.stdout.splitlines()]
+        frames = host_client.inspect_session(self.socket, session)
         self.assertEqual(frames[0]["proto"], host_client.WIRE_VERSION)
         answers = [
             frame["outcome"]["ok"]["answer"] for frame in frames if frame["frame"] == "response"

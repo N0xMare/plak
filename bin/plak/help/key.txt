@@ -5,7 +5,7 @@ USAGE:
   plak key clear <account>
   plak key status [account]
 
-  Key entry is CLI-only: the TUI Providers tab shows status and names this command.
+  Key entry runs through this operator CLI; values are never printed.
   Use xai-api for the direct API key; grok for the subscription.
   Add /<name>, for example openai/work, for a separate file-only key.
   Env vars override default files only; named keys never read them. Plak never loads .env.

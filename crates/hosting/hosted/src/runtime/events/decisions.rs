@@ -151,7 +151,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         };
         flush_assistant_delta(delta_buf, last_flush, events, true);
         // this is the *only* constructor of an approval row.
-        // The decision address stays host-side; the TUI receives an opaque,
+        // The decision address stays host-side; the client receives an opaque,
         // session-scoped handle it can only echo back.
         let approval_id = format!("approval-{}", uuid::Uuid::new_v4());
         projection.approvals.insert(

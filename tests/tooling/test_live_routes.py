@@ -348,7 +348,7 @@ class EstimateTests(unittest.TestCase):
         self.assertEqual(len(report.cells), 2)
         self.assertIn("warning: openrouter estimate exceeds ceiling", estimate.render(report))
 
-    def test_lean_plan_has_one_soak_two_extra_crashes_and_optional_half_hour_tui(self):
+    def test_lean_plan_has_one_soak_and_two_extra_crashes(self):
         with self.assertRaisesRegex(estimate.EstimateError, "soak-row"):
             estimate.planned_cells()
         for invalid in ("nope", "api-openai", "claude"):
@@ -358,24 +358,12 @@ class EstimateTests(unittest.TestCase):
         self.assertEqual(
             [(c.platform, c.route_name) for c in cells if c.lane == "soak"], [("mac", "grok")]
         )
-        self.assertFalse(any(c.lane == "tui-soak" for c in cells))
         crashes = [c for c in cells if c.lane == "crash-jobs"]
         self.assertEqual(len(crashes), 5)
         for c in crashes:
             self.assertEqual(
-                estimate.lane_charge(c).input_tokens, (estimate.JOBS_INPUT * 2 + 5) // 11
+                estimate.lane_charge(c).input_tokens, (estimate.JOBS_INPUT * 2 + 3) // 7
             )
-        optional = estimate.planned_cells(soak_row="grok", tui_rows=("codex-sol", "deepseek"))
-        self.assertEqual(
-            [c.route_name for c in optional if c.lane == "tui-soak"], ["codex-sol", "deepseek"]
-        )
-        self.assertEqual(
-            estimate.lane_charge(next(c for c in optional if c.lane == "tui-soak")).input_tokens,
-            estimate.TUI_INPUT // 4,
-        )
-        for rows in (("nope",), ("grok", "grok"), ("api-openai",), ("codex",)):
-            with self.assertRaises(estimate.EstimateError):
-                estimate.planned_cells(soak_row="grok", tui_rows=rows)
 
     def test_default_sweep_runs_the_ladder_and_leaves_sparing_rows_out(self):
         cells = estimate.planned_cells(soak_row="grok")
@@ -497,7 +485,7 @@ class EstimateTests(unittest.TestCase):
         jobs = estimate.lane_charge(self.cell("codex", "gpt-6-luna", account="codex", lane="jobs"))
         self.assertEqual(jobs.input_tokens, estimate.JOBS_INPUT)
         self.assertEqual(jobs.output_tokens, estimate.JOBS_OUTPUT)
-        self.assertEqual(estimate.JOBS_INPUT, (241_039 // 12) * 11)
+        self.assertEqual(estimate.JOBS_INPUT, (241_039 // 11) * 7)
 
     def test_rate_card_is_read_from_a_local_file(self):
         with tempfile.TemporaryDirectory() as directory:

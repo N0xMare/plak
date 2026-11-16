@@ -161,7 +161,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                 // One model operation ends here, whether or not the turn
                 // that contains it ever reaches a terminal result.
                 // Some providers deliver final text only on completed output
-                // (no/partial TextDelta). Harvest so the TUI is not blank.
+                // (no/partial TextDelta). Harvest so the client is not blank.
                 if assistant.is_empty() {
                     let harvested = harvest_assistant_text(response);
                     if !harvested.is_empty() {

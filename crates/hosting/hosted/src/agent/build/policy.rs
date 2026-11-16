@@ -138,7 +138,7 @@ pub const NATIVE_RUN_TURN_RETRY_RESERVE: usize = 64;
 /// token envelope serialized at up to four bytes per token.
 pub(in crate::agent) const NATIVE_RUN_ROUND_INPUT_LIABILITY_CEILING: u64 = 8_000_000;
 
-/// Product (run + TUI host + spawned children) subscription gate limits.
+/// Product (run + client host + spawned children) subscription gate limits.
 ///
 /// Catalog-only probes may use zero inference allowance. Product coding turns
 /// must allow multi-round inference or every turn dies with gate denial /

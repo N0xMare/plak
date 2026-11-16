@@ -2,10 +2,9 @@
 //!
 //! Every field that names a lifecycle is the protocol's own enum, not a label.
 //! This is the only tree row the protocol has: the v1 JSONL `tree` frame is
-//! projected from it in [`crate::jsonl`], and the product's canvas reads it
-//! through an adapter of its own in `bin/plak/src/tui`. The stringly
-//! `TopologyNavigatorNode` that used to sit between them is gone, so a
-//! spelling is chosen in exactly one place per reader.
+//! projected from it in [`crate::jsonl`]. External clients render the typed
+//! fields through their own adapters, choosing a spelling in one place per
+//! reader rather than relying on an intermediate stringly view.
 
 use super::navigator::{AttemptUsage, BlockedObservation};
 use crate::topology::{

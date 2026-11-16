@@ -18,61 +18,9 @@ use plakous::subscriptions::NativeProvider;
 use crate::command::{Command, NATIVE_RUN_MAX_PROMPT_BYTES, RunEffort};
 use plakous_hosted::account::{AccountRef, Vertical};
 
-/// The hidden argument a reload passes to name its handoff sidecar.
-pub(crate) const RELOAD_HANDOFF_FLAG: &str = "--reload-handoff";
-pub(crate) const HOST_RESUME_FLAG: &str = "--host-resume";
-
 /// Parse argv tokens (without binary name) into a product [`Command`].
 pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> crate::CliResult<Command> {
     parse_with_image_capability(arguments, crate::build_features::require_feature("images"))
-}
-
-/// Splits a trailing hidden `--reload-handoff <file>` off a reload's argv.
-fn split_reload_handoff(values: &[String]) -> (&[String], Option<std::path::PathBuf>) {
-    match values {
-        [rest @ .., flag, path] if flag == RELOAD_HANDOFF_FLAG && !path.starts_with('-') => {
-            (rest, Some(path.into()))
-        }
-        _ => (values, None),
-    }
-}
-
-/// `plak --resume [uuid]` and the hidden `plak --import-resume <file>` that
-/// `/reload` onto a build with another state key execs, each optionally
-/// followed by the hidden `--reload-handoff <file>`.
-fn resume_command(values: &[String]) -> Option<Result<Command, String>> {
-    let (values, handoff) = split_reload_handoff(values);
-    Some(match values.first().map(String::as_str)? {
-        HOST_RESUME_FLAG if handoff.is_none() => match values {
-            [_] => Ok(Command::HostResume { session_id: None }),
-            [_, session_id] if !session_id.starts_with('-') => Ok(Command::HostResume {
-                session_id: Some(session_id.clone()),
-            }),
-            _ => Err("plak --host-resume accepts at most one session UUID".to_owned()),
-        },
-        "--import-resume" => match values {
-            [_, path] if !path.starts_with('-') => Ok(Command::ImportResume {
-                path: path.into(),
-                handoff,
-            }),
-            _ => Err("plak --import-resume takes exactly one export file".to_owned()),
-        },
-        "--resume" => match values {
-            [_] if handoff.is_none() => Ok(Command::Resume {
-                session_id: None,
-                handoff: None,
-            }),
-            [_, session_id] if !session_id.starts_with('-') => Ok(Command::Resume {
-                session_id: Some(session_id.clone()),
-                handoff,
-            }),
-            [_, option] if option.starts_with('-') => Err(
-                "unknown option for `plak --resume`; expected an optional session UUID".to_owned(),
-            ),
-            _ => Err("plak --resume accepts at most one session UUID".to_owned()),
-        },
-        _ => return None,
-    })
 }
 
 pub(super) fn parse_with_image_capability(
@@ -90,12 +38,9 @@ pub(super) fn parse_with_image_capability(
         .collect::<Result<Vec<_>, _>>()
         .map_err(usage)?;
 
-    // Bare `plak` → TUI.
+    // An operator must choose a command before any product state is opened.
     if values.is_empty() {
-        return Ok(Command::Tui {
-            session_id: None,
-            resume_picker: false,
-        });
+        return Ok(Command::Help);
     }
 
     match values.as_slice() {
@@ -104,12 +49,6 @@ pub(super) fn parse_with_image_capability(
         }
         [single] if single == "--version" || single == "-V" || single == "version" => {
             return Ok(Command::Version);
-        }
-        [single] if single == "--resume" => {
-            return Ok(Command::Resume {
-                session_id: None,
-                handoff: None,
-            });
         }
         _ => {}
     }
@@ -135,10 +74,6 @@ pub(super) fn parse_with_image_capability(
         return Ok(Command::CommandHelp {
             command: cmd.clone(),
         });
-    }
-
-    if let Some(resume) = resume_command(&values) {
-        return resume.map_err(usage);
     }
 
     let cli = Cli::try_parse_from(values.iter().map(String::as_str)).map_err(|error| {
@@ -287,7 +222,6 @@ fn is_known_command(name: &str) -> bool {
             | "run"
             | "agent"
             | "wire"
-            | "resume"
             | "session"
             | "state"
             | "tree"
@@ -321,10 +255,6 @@ fn is_maintainer_command(_name: &str) -> bool {
     infer_subcommands = false
 )]
 struct Cli {
-    #[arg(long, value_name = "RUNNER")]
-    runner: Option<String>,
-    #[arg(long, value_name = "PATH")]
-    workspace: Option<String>,
     #[arg(short = 'h', long = "help", action = ArgAction::SetTrue, hide = true)]
     help: bool,
     #[arg(short = 'V', long = "version", action = ArgAction::SetTrue, hide = true)]
@@ -341,20 +271,8 @@ impl Cli {
         if self.version {
             return Ok(Command::Version);
         }
-        if self.runner.is_some() || self.workspace.is_some() {
-            if self.command.is_some() {
-                return Err("--runner and --workspace are TUI launch flags; run and agent host clients are not supported".to_owned());
-            }
-            return Ok(Command::TuiPlacement {
-                runner: self.runner,
-                workspace: self.workspace,
-            });
-        }
         match self.command {
-            None => Ok(Command::Tui {
-                session_id: None,
-                resume_picker: false,
-            }),
+            None => Ok(Command::Help),
             Some(command) => command.into_command(),
         }
     }
@@ -473,9 +391,6 @@ enum TopCommand {
         /// supported wire v2 clients use the host socket or stdio bridge).
         #[arg(long = "wire", hide = true, value_parser = ["v1", "v2"])]
         stdio_wire: Option<String>,
-    },
-    Resume {
-        session: Option<String>,
     },
     /// The per-user host process, serving sessions on a private control socket.
     #[command(args_conflicts_with_subcommands = true)]

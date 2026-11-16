@@ -10,8 +10,8 @@ USAGE:
 
 The supported default build includes the host and web endpoint. A private
 same-user control socket serves the session directory; disconnecting a client
-does not stop its sessions. Bare plak attaches to a running host or runs
-embedded; it does not start a host.
+does not stop its sessions. Bare plak prints help and exits 0 without
+starting a host or session.
 
   connect --stdio relays bytes to an existing host after same-user and
   all-state-key discovery. Its stdout is protocol-only; the client sends

@@ -124,7 +124,7 @@ impl ShellHostRunner<PlakExtension> for ProductShellHost {
     }
 }
 
-/// Spawn the non-agent shell host used for TUI-first auth empty state.
+/// Spawn the non-agent shell host used for unconfigured host empty state.
 #[must_use]
 pub fn spawn_shell_host(
     config: ShellHostConfig<PlakExtension>,
@@ -133,24 +133,14 @@ pub fn spawn_shell_host(
     crate::surface_protocol::HostEventReceiver,
     plakous_hosted::runtime::HostWorkerHandle,
 ) {
-    crate::surface_protocol::face_of(spawn_shell_host_with_clear_publication(config, None))
-}
-
-/// The same as the session's mailbox ends, for the launcher to serve, with
-/// the `/new` publication cell the TUI reads back.
-#[must_use]
-pub fn spawn_shell_host_with_clear_publication(
-    config: ShellHostConfig<PlakExtension>,
-    clear_publication: Option<Arc<std::sync::Mutex<Option<String>>>>,
-) -> plakous_hosted::runtime::HostWorker<PlakExtension> {
     let (action_tx, action_rx) = crate::surface_protocol::user_action_channel();
     let (event_tx, event_rx) = plakous_host_protocol::observation_channel();
     let event_tx = Sender::over(event_tx);
     let handle = plakous_hosted::runtime::HostWorkerHandle::spawn(move || {
-        run_shell_host_loop(config, action_rx, event_tx, clear_publication);
+        run_shell_host_loop(config, action_rx, event_tx, None);
         Ok(())
     });
-    (action_tx, event_rx, handle)
+    crate::surface_protocol::face_of((action_tx, event_rx, handle))
 }
 
 /// State roots over Plak's own implementations of every product port, for

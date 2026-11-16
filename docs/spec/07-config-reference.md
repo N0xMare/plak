@@ -72,8 +72,7 @@ not session authority or an export carrier and introduce no format version.
 working directory, for host discovery. It is a transparent wire relay with no
 separate handshake and no implicit host start or embedded fallback. Its
 same-user checks are independent of web authentication and static-UI options.
-The existing public TUI still uses its direct transport and current-key
-attach-or-embedded launch rule; this command does not change that default.
+Bare `plak` prints help and starts no host or session.
 
 The explicit local `--auto-start` flag permits a detached service only after
 absence is proved and no `plak-host.service` is installed in the user/runtime
@@ -135,14 +134,10 @@ Product config publications, including project-scoped settings and MCP edits,
 serialize on the home's `config.lock` sidecar. The lock is held through the
 atomic rename and parent-directory sync and is released when the publication
 completes (or by process exit).
-Terminal preference writers re-read the home baseline under that lock and
-apply only `[tui]`; host settings merge only the product fields changed from
-their original view into the latest effective config. Neither writer republishes
-the other's stale values. Raw external editor writes do not participate in
-this advisory lock.
-Other whole-config writers preserve fresh `[tui]` values under that lock;
-their product fields remain last-writer-wins. An explicit `config set tui.*`
-is a terminal-key publication against the locked fresh baseline.
+Host settings writers re-read the home baseline under that lock and merge
+only product fields changed from their original view. Other whole-config
+writers remain last-writer-wins for product fields. Raw external editor writes
+do not participate in this advisory lock.
 
 **Project roots.** Launching below a directory that carries `.plak/config.toml`
 or `.plak/agents/` resolves that directory as the *project root*: the nearest
@@ -168,7 +163,7 @@ source as a warning.
 global `root.agent` or `working_set` name must name a **global** template — a
 project file can never satisfy a reference the global home made. A trusted
 `project/.plak/config.toml` then overrides only the keys it carries, except
-`[orchestration]`, `turn.auto_continue`, `tui.reload_requests`,
+`[orchestration]`, `turn.auto_continue`, `host.reload_requests`,
 `mcp.client_id_metadata_url`, `[host]`, `[runners.<name>]` and `[web]`: those
 controls are home-scoped. Project values for them are ignored with a warning,
 and their displayed origins remain user or default. The entire file still
@@ -199,24 +194,18 @@ rewrite only the `tools` array of the one template file the name resolves to
 `mcp:<id>` or `mcp:<id>/<tool>` entries, keeping every other line and the
 comments beside the remaining entries, and validating the result as both
 layers would load it (§3.5) before publishing it. A session that
-already exists keeps the tools it froze; new sessions pick the change up. The Agents tab selects a whole profile.
+already exists keeps the tools it froze; new sessions pick the change up.
 A user profile is `~/.plak/profiles/<name>.toml` with exactly two keys,
 `root = "<template>"` and `working_set = ["<template>", ...]` (at least one
 name, every entry a string); any other key, a wrong type, a missing template,
 or a stem that is a built-in's name (`codex-default`, `claude-default`,
 `grok-default`, `multi-default`) leaves that file out of the list with a line saying why.
-Nothing in a session changes the live root's binding except a profile's Fork
-now or Use now; no slash command rebinds it. A profile is per session: `[root]
-agent` and `[roster] working_set` are only the default profile brand-new
-sessions bind, written by the Agents tab's Set as default (or by `plak config
-set` and the file); Fork now never writes them, and local Use now, offered only
-while a session has no model and the home has no loadable default, also records
-its profile as the default. Remote Use now binds only its session; publishing
-home defaults requires the confirmed etag path introduced in protocol 7
-(current client protocol 10). Changing the
-default never changes an existing session, which keeps the root template and
-working set its tree froze, re-resolved against the template files at its next
-`/reload` (chapter 02 §5.5).
+Profile switch/fork and binding-repair operations are explicit. A profile is
+per session: `[root] agent` and `[roster] working_set` select defaults for new
+sessions, not an existing session's binding. Publishing host defaults uses the
+confirmed etag path or explicit file/CLI edits. Remote Use now binds only its
+session; it never publishes a home default as a side effect. An existing
+session retains its frozen epoch until an explicit profile transition.
 
 ## 2. Grammar
 
@@ -284,7 +273,7 @@ profile application) publish configuration changes; an incomplete bind cannot
 silently clear `[root] agent`.
 
 Thirteen key sections, in render order: `[root] [roster] [orchestration] [turn]
-[jobs] [api] [tui] [compaction] [skills] [telemetry] [mcp] [host] [web]`, plus
+[jobs] [api] [compaction] [skills] [telemetry] [mcp] [host] [web]`, plus
 three families of named tables, `[tools.<name>]` (§3.4), `[mcp_servers.<id>]`
 (§3.5) and `[runners.<name>]` (§3.6), sixteen in all. Any other section is an error.
 The families are not `plak config set` keys: they are authored in the file, a
@@ -333,13 +322,7 @@ repository can never grant web access.
 | `jobs.foreground_seconds` | integer | `30` | 1..=600 | Default process foreground budget before promotion. Bound at session construction and rebind; exact reopen keeps the stored value. |
 | `jobs.max_runtime_hours` | integer | `10` | 1..=24 | Hard runtime cap per background process. Bound at session construction and rebind; exact reopen keeps the stored value. |
 | `api.full_window` | bool | `false` | true or false | Admit direct API sessions (openai, anthropic, xai-api) under the model's full input window instead of the provider's price threshold. Bound at session construction and rebind; exact reopen keeps the stored value. |
-| `tui.mouse` | bool | `true` | — | Mouse capture; turning it off hands text selection back to the terminal. Takes effect on the next launch. |
-| `tui.theme` | enum | `"default-dark"` | default-dark\|default-light\|catppuccin-latte\|catppuccin-frappe\|catppuccin-macchiato\|catppuccin-mocha; dark and light are accepted aliases that normalize on the next save | Color palette for the whole product shell. |
-| `tui.scroll_lines` | integer | `3` | 1..=10 | Transcript lines moved per wheel tick. |
-| `tui.show_thinking` | bool | `true` | subject to the provider's reasoning policy | Render reasoning blocks where the provider admits them. |
-| `tui.group_tool_calls` | bool | `true` | — | Collapse consecutive tool activities to a summary when assistant prose resumes; false keeps action lines visible. |
-| `tui.reduced_motion` | bool | `false` | — | Suppress the spinner, the pulse and camera easing. |
-| `tui.reload_requests` | bool | `false` | true or false; home-scoped | Let this user's own processes, including an agent's shell, ask a running interactive session to reload onto the installed build (plak session reload <session> --expect-binary <id>) at its next idle boundary. Takes effect when a session next attaches. |
+| `host.reload_requests` | bool | `false` | true or false; home-scoped | Permit this user's own processes to request a hosted-session reload (plak session reload <session> --expect-binary <id>). The serving host records the outcome and names the explicit host upgrade workflow; replacing a client does not upgrade its sessions. |
 | `compaction.enabled` | bool | `true` | — | Automatic transcript compaction when a session approaches its context bound. |
 | `skills.enabled` | bool | `true` | true or false | Discover Agent Skills (<workspace>/.agents/skills, then ~/.agents/skills; both on the selected runner for a remote session, using that runner process's home, never the host's) when a session is constructed, list them in its instructions, let its read tool read files under that user skill root on the same machine, and give Claude-vocabulary sessions the Skill tool. Bound when a new session or spawn is constructed; exact reopen keeps the listing and tools it froze, and a fork, rebind or switch keeps the source session's on or off. |
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
@@ -404,8 +387,8 @@ earned, consecutive quiet repeats hold up to 900 seconds, interruptible by
 output, exit, steer, another own promoted job's terminal or a host notice
 (chapter 01 §8.5). Without notices every poll retains 5..300 seconds.
 Nonempty writes use 250 ms..30 seconds.
-Grok output awaits, pi `wait` and Claude blocking output waits cap at one hour. Ctrl+B and
-JSONL `background` are one-shot actions, not configuration or future-call defaults.
+Grok output awaits, pi `wait` and Claude blocking output waits cap at one hour.
+JSONL `background` is a one-shot action, not configuration or a future-call default.
 
 The four `[orchestration]` bounds — `max_depth`, `max_children`, `max_nodes`,
 `max_attempts` — take exactly `1..=` the built-in ceiling (4, 64, 65, 256). A
@@ -589,7 +572,7 @@ root, including foreground commands; clipping or withholding in L0 preserves
 that line. Small untruncated foreground commands create no output file.
 
 A root turn ends when the model answers, when the round cap's wrap-up round
-answers, when the operator interrupts it (Esc in the TUI, SIGINT for `plak
+answers, when the operator interrupts it (wire interrupt, SIGINT for `plak
 run`), or when one bounded operation fails: a model operation has its own
 five-minute bound, and each tool call has its own execution bound. There is no
 turn-level deadline, so a turn that polls a long build runs as long as the
@@ -603,13 +586,6 @@ bounded the turn. The ceiling, 1024, is the runtime's own bound, and the
 subscription gate's per-turn allowance is sized for it. A child agent inherits
 its parent's cap. Each turn keeps the cap it was admitted under, including a
 turn resumed after a restart.
-
-### 3.3 Theme aliases
-
-`dark` and `light` are accepted spellings of `default-dark` and
-`default-light`. They normalize on the next save: a file that says
-`theme = "dark"` is rewritten as `theme = "default-dark"` the next time
-anything persists the config. The four Catppuccin values have no aliases.
 
 ### 3.4 `[tools.<name>]`
 
@@ -946,18 +922,6 @@ trusted; its <config.toml and/or agents/> not applied (run `plak config trust`
 to enable it)`. `plak config show` prints it as `project=<home> (untrusted —
 ignored)` and still resolves the global configuration.
 
-`tui.collapsed_edit_blocks`, `tui.reading_width` and `tui.show_timestamps` were
-deleted. Each gets a named file-load removal error with a delete-this-line remedy;
-`plak config set` instead says there is nothing to set. A user
-file load error points at `plak config edit`; a project overlay error points at
-the project file path. These remedies do not require a successful config load.
-
-`tui.banner` was deleted too, along with the `tui.startup_animation` it was
-briefly renamed from. The PLAK wordmark is drawn at the top of every transcript
-the pane is wide and tall enough to hold it in, so there was nothing for the key
-to switch. All four spellings — both names, dotted and bare — get the removal
-message above; the fix is to delete the line.
-
 The boolean spellings `1`, `yes`, `0` and `no` were accepted by the removed
 grammar and are not values any more, in a file or on the command line. A file
 that still carries one gets *boolean config values must be true or false* with
@@ -967,8 +931,7 @@ Config publication has one commit point: the atomic replacement of
 `config.toml`. What is published is the file that was already there with only
 the keys whose value actually changed rewritten, so an operator's comments, key
 order, alignment and blank lines survive a save of one other key, and a key the
-file leaves out stays out and keeps its default. A theme alias is one such
-change and normalizes on that save (§3.3). A home with no `config.toml` yet is
+file leaves out stays out and keeps its default. A home with no `config.toml` yet is
 published with only changed preferences pinned. `plak config init` and
 `config edit` instead create a reference template with every key commented
 out and its section headers live, so uncommenting a key pins it in its own
@@ -1052,23 +1015,12 @@ template file mid-epoch changes nothing: the running tree keeps binding what
 was frozen. The same holds for a referenced tool table: editing an MCP server's
 command mid-epoch changes nothing a running tree binds. Editing a table no
 frozen list reaches changes no digest at all. The edit takes effect in a new
-session at genesis, including the in-process history carry `/reload` performs
-when these settings changed. Reload requires an idle root with no live children
-or background processes; it creates a linked session under current config and
-login, freezes the new tree's spawn bounds and roster, and recompiles root tool
-descriptions. It records `orchestration settings changed; carried into a new
-session to apply them`. The source epoch is unchanged. The decision compares
-every frozen effective value against the current frozen snapshot, with the
-same genesis bound clamping. Only `digest`, `templates_digest` and `bind_hints`
-are excluded; reached tool tables compare as TOML values, not rendering bytes.
-Changed descriptions, cost tiers, model visibility, template names and root
-template selection count, including values supplied by built-ins or defaults
-when not overridden by the user. Adding an always-rendered tool-option key
-also counts as a changed default and carries each affected idle session once.
-Hints or digest/render-recipe changes alone
-keep exact reopen, even through multiple build reloads. `/rebind` explicitly performs the same carry even when
-exact reopen cannot attach the root. Neither path relabels provider replay for
-another account; no prompt is automatically submitted. A profile's
+session at genesis or an explicit profile switch/fork. Existing sessions keep
+their frozen epoch; exact reopen does not apply newly edited orchestration,
+roster or template settings. Persisted orchestration carry intents are still
+settled on open/startup under the existing lease and identity fences. A binding
+repair carry remains explicit and submits no prompt automatically.
+A profile's
 Fork now does not touch the running tree at all: the new session opens a tree
 of its own whose genesis freezes the profile's roster (spec 03 §1.2). Two
 homes with byte-different but semantically identical templates produce the
@@ -1077,8 +1029,8 @@ file bytes.
 
 `plak config set` on `root.agent`, any `roster.*`, or an epoch-scoped
 `orchestration.*` key (all except `turn.auto_continue`) is accepted only with
-quiescent persisted trees and reports `saved; applies to new sessions and at
-the next /reload of an idle session`. It does not modify an attached epoch.
+quiescent persisted trees. Changes apply to new sessions and explicit profile
+switches; they do not modify an attached epoch.
 `turn.auto_continue` is home-only and Immediate:
 it saves without tree quiescence, and the attached interactive host re-reads
 it before waking. Every other immediate key saves immediately.
@@ -1115,7 +1067,7 @@ home and its trust state, each `warning=`, and an `origin.<key>` /
 `default`, `user`, or `project`.
 
 `<key>` is the dotted `section.key` from §3. Values are unquoted on the command
-line (`plak config set tui.theme catppuccin-mocha`); a bool key takes `true` or
+line (`plak config set compaction.trigger 0.8`); a bool key takes `true` or
 `false` and nothing else. A rejected key or value leaves the file byte
 identical: the same rule set the file load runs is run on a candidate copy
 first, and nothing is written unless it validates. An accepted value rewrites
@@ -1123,9 +1075,7 @@ its one key and leaves the rest of the file as the operator wrote it. An unknown
 message *unknown config key: `<key>`; run `plak config show` for the valid
 keys*.
 
-Only dotted configuration keys are accepted. Bare `mouse`, `theme` and
-`compaction_enabled` are refused with the corresponding dotted spelling
-(`tui.mouse`, `tui.theme`, `compaction.enabled`). Invalid command-line values
+Only dotted configuration keys are accepted. Invalid command-line values
 exit 2; an invalid configuration file remains exit 1.
 `config edit` selects nonempty `VISUAL`, then `EDITOR`, as a shell command with
 the config path passed separately. It uses `vi` only with interactive stdin and
@@ -1150,7 +1100,7 @@ Two keys take a value spelling the file grammar cannot:
 | path | what it is |
 | --- | --- |
 | `docs/reference-config/` | Every key and every template field, each with its meaning, type, default and constraint as a comment. It is the approved Codex provider preset annotated by the product's own renderer — regenerated by a test (`PLAK_REGENERATE_REFERENCE_CONFIGS=1 cargo test -p plak reference`), so it cannot describe a key the loader does not have or carry values the preset does not approve. It is a working home: `root-agent` bound as root, `worker`, `reviewer` and `researcher` in the working set. |
-| `bin/plak/presets/` | The default role set, one home per built-in profile: `codex`, `claude`, `grok`, and `multi` (root and reviewer on `claude`, worker on `codex`, researcher on `grok`). They live inside the `plak` package because the binary embeds their agent files; the Agents tab embeds these four as `codex-default`, `claude-default`, `grok-default` and `multi-default`. |
+| `bin/plak/presets/` | The default role set, one home per built-in profile: `codex`, `claude`, `grok`, and `multi` (root and reviewer on `claude`, worker on `codex`, researcher on `grok`). They live inside the `plak` package because the binary embeds their agent files; the host profile catalog exposes these four as `codex-default`, `claude-default`, `grok-default` and `multi-default`. |
 | `tests/fixtures/config-scenarios/` | Complete scenario homes — single-agent, mixed-account trees, direct and PTC compositions, OpenRouter-only. |
 
 Every built-in profile has the same four roles:

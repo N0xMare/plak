@@ -515,7 +515,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             "            message = 'already carried ' + LIVE + '/secrets/token ' + PRIVATE\n"
             "        fail(message)\n"
             "    print('session ' + NEW + ' linked from ' + OLD + ' (r21.e19.p27.t3, producer binary fixture)')\n"
-            "    print('resume with: plak --resume ' + NEW); sys.exit(0)\n"
+            "    print('resume with: plak run --session ' + NEW); sys.exit(0)\n"
             "if argv[:2] == ['session', 'rehearse']:\n"
             "    if argv[2:] != [NEW]: fail('rehearse id')\n"
             "    print('root: config=valid')\n"

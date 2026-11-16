@@ -17,28 +17,25 @@ cheapest rung first. The sparing `CONFIRM` rows are left out unless
 - `full`: also Mac long-session, jobs, two extra crash_jobs runs, and Linux smoke;
   a lane the route marks informational is priced and shows class `informational`
 - one selected `full` row: Mac headless soak for one hour
-- optional `--tui-rows a,b`: half-hour Mac TUI sessions on those full routes
 - the three direct API rows (`api-openai`, `api-anthropic`, `api-xai`): also a
   Linux smoke
 
-Linux does not run long-session, jobs or either soak (spec 05 §3.4).
+Linux does not run long-session, jobs or soak (spec 05 §3.4).
 
 Input is an uncached share plus a cached share. Cached tokens are billed at
-`cache_read` instead of `input`. The default cached share is 0.9 on soak and
-TUI soak. Smoke and jobs use the measured short-run share 0.64. Long-session
+`cache_read` instead of `input`. The default cached share is 0.9 on soak.
+Smoke and jobs use the measured short-run share 0.64. Long-session
 uses the measured DeepSeek share 0.22. Cache writes default to zero.
 Reasoning has no rate-card field.
 
 Defaults are measured volumes where a trial recorded them, and the previous
 upper band where it did not:
 
-- smoke, 12 scenarios: 241,039 input and 5,500 output. The DeepSeek trial
+- smoke budget: 241,039 input and 5,500 output from the earlier trial. The DeepSeek trial
   measured 201,039 input (64% cached). The compaction scenario now folds a
   20,000-token read that the compact request sees again (+40,000). Output
   was not remeasured
 - headless soak, 1 hour: 5,600,000 input and 60,000 output
-- TUI soak, 2 hours: 8,600,000 input; output is that input times the soak
-  output/input ratio, because the TUI logs did not report output
 - long-session, all four scenarios: 750,415 input and 4,673 output on the
   measured DeepSeek window (1,048,576). Other windows scale by
   catalog_window / that window. OpenRouter windows are not compiled into the
@@ -46,7 +43,8 @@ upper band where it did not:
   model's context length from the OpenRouter listing, and is refused without
   it. The previous per-scenario million-token bands priced one DeepSeek cell
   like the whole OpenRouter matrix
-- jobs, 11 scenarios: the smoke per-scenario share, at the smoke cache share.
+- jobs: the smoke per-scenario share times the current job scenario count,
+  at the smoke cache share. Both counts come from the runnable drivers.
   The jobs trial recorded no tokens, so this is the smoke measurement applied
   to the jobs scenario count
 
@@ -70,6 +68,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import live  # noqa: E402
+import jobs  # noqa: E402
+import smoke  # noqa: E402
 
 UNIT = "USD per million tokens"
 MILLION = Decimal(1_000_000)
@@ -77,7 +77,7 @@ DISPLAY = Decimal("0.000001")
 LINUX_SMOKE_ACCOUNTS = live.VERY_LIGHT_ACCOUNTS
 API_ACCOUNTS = frozenset(live.API_KEY_ENV)
 CLASS_ORDER = {live.FULL: 0, live.LIGHT: 1, live.INFORMATIONAL: 2}
-LANE_ORDER = {"smoke": 0, "long-session": 1, "jobs": 2, "crash-jobs": 3, "soak": 4, "tui-soak": 5}
+LANE_ORDER = {"smoke": 0, "long-session": 1, "jobs": 2, "crash-jobs": 3, "soak": 4}
 PLATFORM_ORDER = {"mac": 0, "linux": 1}
 
 # DeepSeek smoke, 2026-10-09 trial (201,039), plus 40,000 for the compaction
@@ -90,10 +90,6 @@ SOAK_INPUT = 5_600_000
 SOAK_OUTPUT = 60_000
 SOAK_CACHE_SHARE = Decimal("0.9")
 SOAK_HOURS = Decimal(1)
-TUI_INPUT = 8_600_000
-TUI_OUTPUT = TUI_INPUT * SOAK_OUTPUT // SOAK_INPUT
-TUI_CACHE_SHARE = Decimal("0.9")
-TUI_HOURS = Decimal(2)
 # Four scenarios on deepseek/deepseek-v4.1-flash-1017, same trial: 22% cached.
 GROWTH_SCENARIOS = ("in_turn_compaction", "overflow", "kill_reopen", "child_compaction")
 LONG_SESSION_INPUT = 750_415
@@ -101,9 +97,10 @@ LONG_SESSION_OUTPUT = 4_673
 LONG_SESSION_CACHE_SHARE = Decimal("0.22")
 # That model's catalog window. Other cells scale by their own window.
 LONG_SESSION_MEASURED_WINDOW = 1_048_576
-JOBS_SCENARIOS = 11
-JOBS_INPUT = (SMOKE_INPUT // 12) * JOBS_SCENARIOS
-JOBS_OUTPUT = (SMOKE_OUTPUT // 12) * JOBS_SCENARIOS
+SMOKE_SCENARIOS = len(smoke.Smoke.SCENARIOS)
+JOBS_SCENARIOS = len(jobs.SCENARIOS)
+JOBS_INPUT = (SMOKE_INPUT // SMOKE_SCENARIOS) * JOBS_SCENARIOS
+JOBS_OUTPUT = (SMOKE_OUTPUT // SMOKE_SCENARIOS) * JOBS_SCENARIOS
 JOBS_CACHE_SHARE = SMOKE_CACHE_SHARE
 
 
@@ -113,7 +110,7 @@ class EstimateError(Exception):
 
 @dataclass(frozen=True)
 class Assumptions:
-    """Lane totals. Soak and TUI figures are for the default duration and scale with hours."""
+    """Lane totals. Soak figures are for the default duration and scale with hours."""
 
     smoke_input_tokens: int = SMOKE_INPUT
     smoke_output_tokens: int = SMOKE_OUTPUT
@@ -123,10 +120,6 @@ class Assumptions:
     soak_input_tokens: int = SOAK_INPUT
     soak_output_tokens: int = SOAK_OUTPUT
     soak_cache_share: Decimal = SOAK_CACHE_SHARE
-    tui_soak_hours: Decimal = Decimal("0.5")
-    tui_soak_input_tokens: int = TUI_INPUT
-    tui_soak_output_tokens: int = TUI_OUTPUT
-    tui_cache_share: Decimal = TUI_CACHE_SHARE
     long_session_input_tokens: int = LONG_SESSION_INPUT
     long_session_output_tokens: int = LONG_SESSION_OUTPUT
     long_session_measured_window: int = LONG_SESSION_MEASURED_WINDOW
@@ -201,7 +194,6 @@ def planned_cells(
     routes: dict[str, live.Route] | None = None,
     *,
     soak_row: str | None = None,
-    tui_rows: tuple[str, ...] = (),
     confirm: tuple[str, ...] = (),
 ) -> list[Cell]:
     """Lean pre-release plan; choose the least-used full row from daily use."""
@@ -211,8 +203,6 @@ def planned_cells(
         raise EstimateError("--soak-row is required for the full plan")
     if soak_row is not None and soak_row not in full:
         raise EstimateError("--soak-row must name a full route")
-    if len(set(tui_rows)) != len(tui_rows) or any(name not in full for name in tui_rows):
-        raise EstimateError("--tui-rows must name distinct full routes")
     if len(set(confirm)) != len(confirm) or any(
         name not in routes or not routes[name].sparing for name in confirm
     ):
@@ -230,8 +220,6 @@ def planned_cells(
             cells.append(_cell("mac", "crash-jobs", route))
             if name == soak_row:
                 cells.append(_cell("mac", "soak", route))
-            if name in tui_rows:
-                cells.append(_cell("mac", "tui-soak", route))
             cells.append(_cell("linux", "smoke", route))
         elif route.account in LINUX_SMOKE_ACCOUNTS:
             cells.append(_cell("linux", "smoke", route))
@@ -317,14 +305,6 @@ def lane_charge(cell: Cell, assumptions: Assumptions | None = None) -> Charge:
             assumptions.soak_hours,
             SOAK_HOURS,
             assumptions.soak_cache_share,
-        )
-    if cell.lane == "tui-soak":
-        return _duration(
-            assumptions.tui_soak_input_tokens,
-            assumptions.tui_soak_output_tokens,
-            assumptions.tui_soak_hours,
-            TUI_HOURS,
-            assumptions.tui_cache_share,
         )
     if cell.lane == "jobs":
         return _from_share(
@@ -466,9 +446,6 @@ def main(argv: list[str]) -> int:
         "--soak-row", required=True, help="least-used full route; one Mac headless soak"
     )
     parser.add_argument(
-        "--tui-rows", default="", help="comma-separated full routes lacking root use"
-    )
-    parser.add_argument(
         "--confirm", default="", help="comma-separated sparing routes for a targeted confirmation"
     )
     parser.add_argument("--contingency", type=Decimal, default=Decimal("0.20"))
@@ -487,10 +464,6 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--soak-input", type=int, default=SOAK_INPUT)
     parser.add_argument("--soak-output", type=int, default=SOAK_OUTPUT)
     parser.add_argument("--soak-cache-share", type=Decimal, default=SOAK_CACHE_SHARE)
-    parser.add_argument("--tui-soak-hours", type=Decimal, default=Decimal("0.5"))
-    parser.add_argument("--tui-soak-input", type=int, default=TUI_INPUT)
-    parser.add_argument("--tui-soak-output", type=int, default=TUI_OUTPUT)
-    parser.add_argument("--tui-cache-share", type=Decimal, default=TUI_CACHE_SHARE)
     parser.add_argument("--long-session-input", type=int, default=LONG_SESSION_INPUT)
     parser.add_argument("--long-session-output", type=int, default=LONG_SESSION_OUTPUT)
     parser.add_argument(
@@ -509,10 +482,6 @@ def main(argv: list[str]) -> int:
         soak_input_tokens=args.soak_input,
         soak_output_tokens=args.soak_output,
         soak_cache_share=args.soak_cache_share,
-        tui_soak_hours=args.tui_soak_hours,
-        tui_soak_input_tokens=args.tui_soak_input,
-        tui_soak_output_tokens=args.tui_soak_output,
-        tui_cache_share=args.tui_cache_share,
         long_session_input_tokens=args.long_session_input,
         long_session_output_tokens=args.long_session_output,
         long_session_cache_share=args.long_session_cache_share,
@@ -524,10 +493,9 @@ def main(argv: list[str]) -> int:
         openrouter_window=args.openrouter_window,
     )
     try:
-        tui_rows = tuple(args.tui_rows.split(",")) if args.tui_rows else ()
         confirm = tuple(args.confirm.split(",")) if args.confirm else ()
         report = estimate_matrix(
-            planned_cells(soak_row=args.soak_row, tui_rows=tui_rows, confirm=confirm),
+            planned_cells(soak_row=args.soak_row, confirm=confirm),
             load_rate_card(args.rate_card),
             assumptions,
         )

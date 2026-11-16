@@ -63,19 +63,6 @@ pub(crate) const ROUTES: &[&ProductCapability] = &[
     &openrouter::OPENROUTER,
 ];
 
-#[cfg(feature = "tui")]
-pub(crate) fn usage_verticals() -> impl Iterator<Item = (&'static str, &'static str)> {
-    ROUTES
-        .iter()
-        .filter(|capability| capability.route.compiled)
-        .filter_map(|capability| {
-            capability
-                .route
-                .usage_label
-                .map(|label| (capability.route.account, label))
-        })
-}
-
 pub(crate) fn recommended_model(account: &str) -> Option<&'static str> {
     ROUTES
         .iter()
@@ -103,7 +90,6 @@ pub(crate) fn presets() -> impl Iterator<Item = &'static Builtin> {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "tui")]
     #[test]
     fn product_registry_is_the_hosted_registry_in_the_same_order() {
         assert_eq!(ROUTES.len(), plakous_hosted::capabilities::ROUTES.len());
@@ -113,15 +99,6 @@ mod tests {
         assert_eq!(
             crate::product_config::settings::oauth_accounts().collect::<Vec<_>>(),
             ["codex", "grok", "claude"]
-        );
-        assert_eq!(
-            usage_verticals().collect::<Vec<_>>(),
-            [
-                ("codex", "Codex"),
-                ("grok", "SuperGrok"),
-                ("claude", "Claude"),
-                ("openrouter", "OpenRouter"),
-            ]
         );
         assert_eq!(
             presets().map(|preset| preset.id).collect::<Vec<_>>(),

@@ -1,14 +1,15 @@
-//! Local history carry for explicit rebind and orchestration apply.
+//! Local history carry for explicit rebind and interrupted intent settlement.
 
 use super::{CarriedImport, CarryDocument, export_session};
 use crate::{CliFailure, CliResult};
 
-#[cfg(any(test, feature = "tui", feature = "web"))]
+#[cfg(any(test, feature = "web"))]
 pub(crate) mod session;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ReboundMode {
     Rebind,
+    /// Reachable only while settling an already-persisted orchestration carry intent.
     Orchestration,
 }
 
@@ -56,6 +57,27 @@ pub(super) fn ensure_carry_quiescence(
 
 impl CarryDocument {
     pub(crate) fn into_rebound_import(self, cause: &str) -> CliResult<CarriedImport> {
-        self.into_noticed_import(cause, true)
+        let mut carried = self
+            .into_import_with_replay(true)
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        let record = &mut carried.record;
+        let source = record
+            .carried_forward_from()
+            .map(|(id, _)| id)
+            .unwrap_or("unknown");
+        let notice = format!(
+            "carried forward from {source}: {}",
+            plakous::model::SafeDiagnostic::new(cause)
+        );
+        record.record_notice(plakous_hosted::sessions::TranscriptRow::info(
+            crate::store::sessions::NoticeScope::Session,
+            &notice,
+        ));
+        carried.note.push_str(&format!("; {notice}"));
+        Ok(carried)
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod tests;

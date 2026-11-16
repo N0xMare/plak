@@ -281,9 +281,7 @@ impl OfflineSelection {
             source_releases: product_host::SourceReleases::default(),
             idle_release: None,
             lease_holder,
-            continuation: (face == OfflineFace::Attached)
-                .then(crate::reload_request::take_reload_continuation)
-                .flatten(),
+            continuation: None,
             event_renderer: None,
         })
     }

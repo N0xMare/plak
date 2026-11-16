@@ -198,7 +198,7 @@ pub fn is_busy_reason(reason: &str) -> bool {
 ///
 /// A lock miss is contention, not a stable observation. Serving it as a
 /// fresh idle cache would paint Busy for a minute and make the operator
-/// bounce through `plak usage` to unstick the TUI.
+/// bounce through `plak usage` to unstick the client.
 #[must_use]
 pub fn projection_is_lock_contention(view: &UsageLimitsView) -> bool {
     let mut any_busy = false;

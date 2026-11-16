@@ -1,6 +1,6 @@
-//! Host projection of the inert TUI tree navigator.
+//! Host projection of the inert client tree navigator.
 //!
-//! The TUI never opens an Agent or store. This module snapshots `ProductAgentTree`
+//! The client never opens an Agent or store. This module snapshots `ProductAgentTree`
 //! in deterministic preorder. Missing hub fails closed.
 
 use crate::surface_protocol::{ContentEvent, UserAction};
@@ -476,7 +476,7 @@ pub(crate) fn apply_session_root_binding(snapshot: &mut TreeView, session: &Sess
     root.model_effort.clone_from(&session.effort);
 }
 
-/// The tree's own typed view. The JSONL wire and the TUI's canvas adapter are
+/// The tree's own typed view. The JSONL wire and the client's canvas adapter are
 /// the two readers, and each chooses its own spelling from these enums.
 #[must_use]
 pub fn project_snapshot(tree: &ProductAgentTree) -> TreeView {
@@ -595,7 +595,7 @@ pub(crate) fn mail_row(text: &str) -> Option<String> {
 
 /// Splits a root command that carries a child-mail batch back into the
 /// operator's own text and one row per `<child_message>` block, each read like
-/// [`mail_row`]: purpose, sender and the bounded body (the TUI folds its presentation).
+/// [`mail_row`]: purpose, sender and the bounded body (the client folds its presentation).
 ///
 /// The batch is appended after the operator's text as the fixed frame
 /// sentence and escaped blocks (`result_mail::select`), so the boundary is the

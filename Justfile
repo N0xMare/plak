@@ -8,7 +8,6 @@ mod musl 'tools/musl/musl.just'
 mod live 'tests/live/live.just'
 mod perf 'tools/perf/perf.just'
 mod prompts 'tools/prompts/prompts.just'
-mod tui 'tools/tui/tui.just'
 mod dev 'tools/dev/dev.just'
 mod harbor 'eval/harbor.just'
 

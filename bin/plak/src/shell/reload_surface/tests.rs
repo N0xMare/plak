@@ -7,7 +7,7 @@ fn home() -> (tempfile::TempDir, PlakPaths) {
     let root = tempfile::tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("home"));
     paths.ensure_layout().unwrap();
-    std::fs::write(paths.config_file(), "[tui]\nreload_requests = true\n").unwrap();
+    std::fs::write(paths.config_file(), "[host]\nreload_requests = true\n").unwrap();
     (root, paths)
 }
 
@@ -191,7 +191,7 @@ fn a_session_switch_settles_its_reload_requests_before_completing() {
         let root = tempfile::tempdir().unwrap();
         let (mut config, _, paths) =
             crate::composition_tests::product_injected_attached_host(root.path());
-        std::fs::write(paths.config_file(), "[tui]\nreload_requests = true\n").unwrap();
+        std::fs::write(paths.config_file(), "[host]\nreload_requests = true\n").unwrap();
         let switch = if resume {
             let (mut target, target_runtime, _) =
                 crate::composition_tests::product_injected_attached_host(root.path());

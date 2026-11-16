@@ -1188,7 +1188,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 run['args'][run['args'].index(flag) + 1],
             )
         self.assertNotIn('--ignore-default-filter', listing['args'])
-        self.assertIn('all four restart families contain all 16 groups', result.stdout)
+        self.assertIn('both wire restart families contain all 16 groups', result.stdout)
 
     def test_batch_mac_keeps_full_platform_clippy_but_no_wall_clock_lanes(self):
         result, calls, scripts = self.run_gate('--batch-mac')

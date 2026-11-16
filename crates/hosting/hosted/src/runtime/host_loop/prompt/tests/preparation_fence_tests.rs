@@ -14,7 +14,7 @@ fn pre_dispatch_stop_does_not_admit_a_turn() {
 }
 
 #[test]
-fn every_stop_stage_has_identical_tui_and_jsonl_terminal_records() {
+fn every_stop_stage_has_identical_host_and_jsonl_terminal_records() {
     let mut expected = None;
     for stage in [
         preparation::Stage::Refresh,
@@ -54,8 +54,8 @@ fn every_stop_stage_has_identical_tui_and_jsonl_terminal_records() {
                 )
             })
             .collect();
-        if let Some((tui, wire)) = &expected {
-            assert_eq!(&terminal, tui);
+        if let Some((host, wire)) = &expected {
+            assert_eq!(&terminal, host);
             assert_eq!(&jsonl, wire);
         } else {
             expected = Some((terminal, jsonl));

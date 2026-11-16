@@ -336,7 +336,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                 .u64("tokens_after", *tokens_after),
         );
         // The Compact row already carries before → after sizes. Dumping
-        // the operator essay as a grey SystemNote was the live TUI
+        // the operator essay as a grey SystemNote was the live client
         // transcript noise on Grok growth turns.
     }
 

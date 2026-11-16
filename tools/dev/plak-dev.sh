@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Isolated maintainer playground: same CLI/TUI as product, wipeable PLAK_HOME,
+# Isolated maintainer playground: same server/operator CLI as product, wipeable PLAK_HOME,
 # login-user OAuth (not PLAK_HOME). Does not touch ~/.plak.
 #
 # Usage:

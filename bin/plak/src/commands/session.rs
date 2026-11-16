@@ -30,12 +30,11 @@ pub(crate) use delete::refuse_stranding_a_carry;
 pub(crate) use delete::{delete_session, gc_sessions};
 
 pub(crate) use import_export::{
-    PreparedImport, export_session, import_prepared, import_reload_handoff, import_session,
-    request_reload,
+    PreparedImport, export_session, import_prepared, import_session, request_reload,
 };
 
 pub use lookup::load_exact_product_session;
-#[cfg(any(feature = "tui", test))]
+#[cfg(test)]
 pub(crate) use lookup::match_session_id_prefix;
 pub(crate) use lookup::{
     MIN_SESSION_ID_PREFIX, load_admitted_product_session, resolve_read_only_session_id,

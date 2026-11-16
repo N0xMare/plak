@@ -1,6 +1,6 @@
 # Embedding Plakous in your own Rust program
 
-Plakous is an embeddable single-agent library. Plak is the CLI/TUI product built
+Plakous is an embeddable single-agent library. Plak is the host and operator CLI built
 on it. Depend on `plakous` from crates.io, or on a source checkout by path.
 Use Rust **1.99.0** or later and edition **2024**. Supported platforms are Linux
 x86_64 musl and Apple Silicon macOS.

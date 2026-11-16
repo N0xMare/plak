@@ -14,7 +14,7 @@ use plakous::tools::CodingPresentation;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Inputs for building the product coding agent (run + TUI host).
+/// Inputs for building the product coding agent (run and host).
 #[allow(
     clippy::struct_excessive_bools,
     reason = "the frozen agent spec carries independent product policy switches"

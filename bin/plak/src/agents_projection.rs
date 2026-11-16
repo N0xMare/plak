@@ -1,6 +1,6 @@
-//! Host-computed template readiness (spec 02 §5.5).
+//! Host-computed template readiness (spec 02 §5).
 //!
-//! The TUI exposes no roster editor: `[roster]` and `[orchestration]`
+//! Roster editing is operator configuration: `[roster]` and `[orchestration]`
 //! are config-file only, applied by `plak config set` through
 //! `topology_product::apply_roster`, and templates are one file each under
 //! `~/.plak/agents/`. What is left here is the one read-only
