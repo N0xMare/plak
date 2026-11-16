@@ -26,6 +26,7 @@ where
     /// Completes the buffered batch's transport send attempt. Do not call when
     /// merely taking bytes from a buffer or before the asynchronous send ends.
     pub fn output_sent(&mut self) {
+        self.lifecycle_output_sent();
         for link in [&mut self.node, &mut self.draining].into_iter().flatten() {
             link.connection.output_sent();
         }

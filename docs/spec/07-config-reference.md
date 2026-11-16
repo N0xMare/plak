@@ -14,7 +14,7 @@ Operator-facing instructions live in
 ## 1. Files and discovery
 
 Host operators may edit a home template through confirmed, typed
-`template_put`, introduced in protocol 7 (current client protocol 10). This is
+`template_put`, introduced in protocol 7 (current client protocol 11). This is
 the explicit exception to file-authored template
 bodies: ordinary config saves and `config_patch` still refuse body changes.
 User-profile writes use root/working_set only; built-ins are read-only. No
@@ -49,7 +49,7 @@ release retained capacity without positive original-instance/process-loss proof.
 
 The current state directory is `state/r28.e38.p38.t11/`: runtime SQLite
 schema 28, runtime format epoch 38, product schema 38, and tree schema 11.
-These are format identities, not configuration keys. Client wire protocol 10
+These are format identities, not configuration keys. Client wire protocol 11
 and runner protocol 9 require separate exact matches, with no negotiation. Product schema 38 adds the semantic `session_move_seeds` base; tree schema 11
 adds `agent_move_seeds`. Runtime epoch 38 includes context codec 4
 with imported compaction strategy/count facts and no stale execution grants. Session export stays
@@ -940,11 +940,11 @@ fresh unshared name (`default`, `default-2`, and so on), preserving its other
 fields and leaving the previous template file untouched. Saves preflight all
 existing template bodies and refuse changes to them; edit user or project
 files directly, or use the confirmed home `template_put` exception introduced
-in protocol 7 (current client protocol 10).
+in protocol 7 (current client protocol 11).
 `config_patch` never edits a body. Unrelated settings saves do not rewrite templates.
 
 `config_patch`, `template_put` and `profile_put`, introduced in protocol 7
-(current client protocol 10), publish one file per request. All require a matching content etag and one-use consent; stale
+(current client protocol 11), publish one file per request. All require a matching content etag and one-use consent; stale
 etags return conflict and no write. The shared home publication lock covers
 read-current, comparison, complete candidate validation and atomic publication;
 CLI home key edits reread under this lock as well. Recheck actual bytes before

@@ -909,7 +909,7 @@ or claim they died. Closed/expired namespaces still allow list and close for
 this resolution. Fast double-fork escapes reparented before observation remain
 an explicit unsandboxed-shell residual, even when the original SID is absent.
 
-Client protocol 10 applies the startup-captured `web.terminal` switch to every
+Client protocol 11 applies the startup-captured `web.terminal` switch to every
 terminal request and its prepare/confirm flow. Verified same-user sockets are
 trusted independently of web switches, but use the same one-shot consent and
 principal/connection/generation binding. Open and attach/takeover cannot borrow a
@@ -1110,7 +1110,7 @@ before allocating bounded execution work. This does not sanitize workspace
 secrets or make an admitted shell a sandbox.
 
 An admitted web client is an operator acting with the serving user's authority.
-In addition to session and directory operations, console capabilities introduced in protocol 7 (current client protocol 10)
+In addition to session and directory operations, console capabilities introduced in protocol 7 (current client protocol 11)
 manage provider accounts and publish allowlisted home configuration.
 These are real credential and deferred-execution powers, not cosmetic settings.
 Capability switches and confirmations are product controls, not an OS sandbox
@@ -1857,7 +1857,7 @@ Chapter 03 §6.1 holds the exact list.
 
 Native login, logout, explicit refresh and API-key management are explicit
 operator operations on CLI or host console, introduced in protocol 7
-(current client protocol 10). Web writes require the
+(current client protocol 11). Web writes require the
 startup-captured credentials-write capability; verified same-user sockets are
 trusted, with identical consent and quota checks. Private clients own forms,
 not credential authority; the retained embedded Providers view remains
@@ -2282,6 +2282,14 @@ upgrade authority. Client reload, disconnect or reconnect cannot run it or
 claim an upgrade succeeded.
 
 ### 4.7 The host socket is a same-user local channel
+
+Wire-11 planned lifecycle notices are advisory only: they confer no prompt
+acceptance, replay permission, custody or admission authority. Bridge discovery
+refusals are closed product DTOs on stdout, not parser guidance from stderr.
+Absence and auto-start still require the existing verified sockets and
+kernel-held private locks; a stopping diagnostic is meaningful only while its
+verified lock is held. Unverifiable ownership, permissions, receipts or socket
+identity returns `verification_failed`, never absence or permission to start.
 
 An explicit `plakd host upgrade --expect-binary <id>` is operator authority,
 not a frontend reload request or a browser capability. Its separate control

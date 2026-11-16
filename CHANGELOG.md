@@ -12,6 +12,11 @@ for one version bump, without native protocol compatibility.
 - Advance the Rust workspace release cohort to `0.0.4`, including `plakd`.
   The vendored Code Mode protocol keeps its upstream version.
 
+- Breaking (0.0.4): host wire 11 requires `Welcome.state_key`, adds advisory
+  `host_lifecycle` notices for admitted planned shutdowns and upgrades (including
+  `running` on aborted drains), and types stdio bridge discovery refusals on
+  stdout. Exact-version handshakes remain mandatory; wire 10 is refused.
+
 - Breaking: `plakous-tools::ImageNormalizer::normalize` now returns the typed
   `ImageNormalizationError` instead of `String`. Its display text is unchanged;
   decoder failures remain available through `source()`. The internal-tier local

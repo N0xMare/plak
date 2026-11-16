@@ -8,6 +8,10 @@ use super::{
 
 /// What a host of many sessions needs of its product's stores.
 pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
+    /// Native state identity; an ephemeral host has no persisted state key.
+    fn state_key(&self) -> String {
+        String::new()
+    }
     /// Commits product stream visibility only after its addressed answer is written.
     fn host_response_sent(&self, _context: &HostRequestContext, _response: &P::HostResponse) {}
     /// One bounded product stream frame; control and attachment output drain first.

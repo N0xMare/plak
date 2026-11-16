@@ -2,6 +2,53 @@ use super::*;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 #[tokio::test(start_paused = true)]
+async fn planned_stop_finishes_frame_bytes_instead_of_cancelling_a_partial_line() {
+    let (write, mut read) = tokio::io::duplex(1);
+    let mut write = ProgressIo::new(write);
+    let reader = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut bytes = [0; 4];
+        read.read_exact(&mut bytes).await.unwrap();
+        bytes
+    });
+    write
+        .progress
+        .clone()
+        .finishing(write.write_all(b"{}\n\n"), || true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reader.await.unwrap(), *b"{}\n\n");
+}
+
+#[tokio::test(start_paused = true)]
+async fn planned_stop_bounds_an_unresponsive_transport_even_if_bytes_keep_progressing() {
+    let (write, mut read) = tokio::io::duplex(1);
+    let mut write = ProgressIo::new(write);
+    let reader = tokio::spawn(async move {
+        let mut count = 0_usize;
+        let mut byte = [0];
+        while read.read_exact(&mut byte).await.is_ok() {
+            count += 1;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        count
+    });
+    let began = Instant::now();
+    assert!(
+        write
+            .progress
+            .clone()
+            .finishing(write.write_all(&[42; 100]), || true)
+            .await
+            .is_err()
+    );
+    assert_eq!(Instant::now().duration_since(began), Duration::from_secs(1));
+    drop(write);
+    assert!(reader.await.unwrap() > 1);
+}
+
+#[tokio::test(start_paused = true)]
 async fn slow_link_stalled_reader_hits_idle_deadline() {
     let (write, _unread) = tokio::io::duplex(1);
     let mut write = ProgressIo::new(write);

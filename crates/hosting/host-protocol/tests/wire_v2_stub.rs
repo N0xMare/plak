@@ -68,6 +68,7 @@ fn stub_host(stream: UnixStream) {
         panic!("the first frame is a hello");
     };
     let welcome = Welcome {
+        state_key: String::new(),
         extension: None,
         proto: WIRE_VERSION,
         binary_id: "host".into(),

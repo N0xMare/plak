@@ -97,6 +97,7 @@ fn lifecycle_peer(
     stream
         .write_all(
             encode_line(&HostFrame::<PlakExtension>::Welcome(Welcome {
+                state_key: String::new(),
                 extension: None,
                 proto: WIRE_VERSION,
                 binary_id: "fixture".into(),

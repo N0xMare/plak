@@ -22,14 +22,23 @@ fn plak_bin() -> PathBuf {
 #[test]
 fn a_stdio_bridge_without_a_host_does_not_create_a_home_or_embed() {
     let root = tempfile::tempdir().unwrap();
-    let output = publication_command(root.path(), &["host", "connect", "--stdio"])
-        .stdin(std::process::Stdio::null())
-        .output()
+    let mut child = publication_command(root.path(), &["host", "connect", "--stdio"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"{\"frame\":\"hello\",\"proto\":11,\"binary_id\":\"fixture\",\"caps\":[]}\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
     assert!(!output.status.success());
-    assert!(
-        output.stdout.is_empty(),
-        "diagnostics reached protocol stdout"
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+        serde_json::json!({"frame":"refused","kind":"bridge_unavailable","reason":"absent","retry_after_ms":500})
     );
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("no running host"),

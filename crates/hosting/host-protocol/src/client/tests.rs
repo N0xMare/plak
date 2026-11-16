@@ -18,6 +18,9 @@ fn product_host_responses_route_by_id_without_attaching_a_session() {
         type HostRequest = u8;
         type HostResponse = u8;
         type HostStreamEvent = crate::Never;
+        type HostLifecyclePhase = crate::Never;
+        type HostLifecycleReason = crate::Never;
+        type HostLifecycleTarget = crate::Never;
         type WelcomeExtension = Option<crate::Never>;
     }
 
@@ -34,6 +37,7 @@ fn product_host_responses_route_by_id_without_attaching_a_session() {
     ));
     peer.write_all(
         encode_line(&HostFrame::<Reads>::Welcome(Welcome {
+            state_key: String::new(),
             extension: None,
             proto: WIRE_VERSION,
             binary_id: "host".into(),
@@ -95,6 +99,7 @@ fn node(tree: &str) -> NodeAddress {
 
 fn welcome() -> Welcome<Core> {
     Welcome {
+        state_key: String::new(),
         extension: None,
         proto: WIRE_VERSION,
         binary_id: "host".into(),
@@ -231,6 +236,7 @@ fn a_directory_client_selects_a_root_without_a_default_session() {
     let client = thread::spawn(move || connect_directory::<Core>(transport, hello()).unwrap());
     assert!(matches!(host.read(), ClientFrame::Hello(_)));
     host.send(&HostFrame::Welcome(Welcome {
+        state_key: String::new(),
         extension: None,
         session: None,
         ..welcome()
@@ -297,6 +303,7 @@ fn directory_responses_keep_refusals_and_disconnect_is_terminal() {
     let client = thread::spawn(move || connect_directory::<Core>(transport, hello()).unwrap());
     assert!(matches!(host.read(), ClientFrame::Hello(_)));
     host.send(&HostFrame::Welcome(Welcome {
+        state_key: String::new(),
         extension: None,
         session: None,
         ..welcome()
@@ -336,6 +343,7 @@ fn a_refused_selection_keeps_the_old_attachment_and_can_select_again() {
     let client = thread::spawn(move || connect_directory::<Core>(transport, hello()).unwrap());
     assert!(matches!(host.read(), ClientFrame::Hello(_)));
     host.send(&HostFrame::Welcome(Welcome {
+        state_key: String::new(),
         extension: None,
         session: None,
         ..welcome()
@@ -407,6 +415,7 @@ fn the_welcome_deadline_interrupts_only_a_missing_welcome() {
             continue;
         }
         host.send(&HostFrame::Welcome(Welcome {
+            state_key: String::new(),
             extension: None,
             session: None,
             ..welcome()
@@ -455,6 +464,7 @@ fn a_refused_hello_is_the_connect_error() {
 #[test]
 fn a_welcome_that_names_no_session_attaches_the_root_the_client_names() {
     let unnamed = || Welcome {
+        state_key: String::new(),
         extension: None,
         session: None,
         ..welcome()

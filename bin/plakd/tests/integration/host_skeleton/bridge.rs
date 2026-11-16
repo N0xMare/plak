@@ -7,6 +7,57 @@ use std::time::{Duration, Instant};
 use super::*;
 
 mod client_fixtures;
+mod refusals;
+
+pub(super) fn output_after_hello(
+    command: &mut std::process::Command,
+    proto: u32,
+) -> std::process::Output {
+    let mut child = Child::spawn(
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            encode_line(&ClientFrame::<PlakExtension>::Hello(Hello {
+                proto,
+                binary_id: "bridge-probe".into(),
+                caps: Vec::new(),
+            }))
+            .unwrap()
+            .as_bytes(),
+        )
+        .unwrap();
+    finished_output(child)
+}
+
+fn finished_output(mut child: Child) -> std::process::Output {
+    let status = child.wait().unwrap();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_end(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_end(&mut stderr)
+        .unwrap();
+    std::process::Output {
+        status,
+        stdout,
+        stderr,
+    }
+}
 
 struct Bridge {
     child: Child,
@@ -335,11 +386,11 @@ fn a_remote_or_unit_managed_bridge_never_starts_an_unmanaged_host() {
         if !unit {
             command.env("SSH_CONNECTION", "fixture remote session");
         }
-        let output = command.output().unwrap();
+        let output = output_after_hello(&mut command, WIRE_VERSION);
         assert!(!output.status.success());
-        assert!(
-            output.stdout.is_empty(),
-            "protocol stdout contains diagnostics"
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+            json!({"frame":"refused","kind":"bridge_unavailable","reason":"starting","retry_after_ms":500})
         );
         let message = String::from_utf8_lossy(&output.stderr);
         assert!(
@@ -569,8 +620,17 @@ fn the_stdio_bridge_does_not_consume_a_separate_handshake_or_mask_a_version_refu
     bridge.hello(WIRE_VERSION - 1);
     assert!(matches!(
         bridge.next(),
-        HostFrame::Refused(plakous_host_protocol::wire::HandshakeRefusal::VersionMismatch { .. })
+        HostFrame::Refused(
+            plakous_host_protocol::wire::HandshakeRefusal::VersionMismatch {
+                host: 11,
+                client: 10
+            }
+        )
     ));
+    assert!(
+        bridge.lines.recv_timeout(WAIT).is_err(),
+        "wire 10 received another frame"
+    );
     bridge.finish();
     let mut client = Client::connect(&host);
     assert_eq!(client.rows(1), []);

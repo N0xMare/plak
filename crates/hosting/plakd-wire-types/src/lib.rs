@@ -12,6 +12,7 @@ use plakous_host_protocol::{
 use std::fmt;
 
 pub mod console;
+pub mod lifecycle;
 
 mod reload;
 pub use reload::{CarryCapacityProbe, ReloadProbe, ReloadRequest, ReloadTarget, ReopenProbe};
@@ -173,6 +174,9 @@ pub type SettingsUpdate = SettingsView;
 pub struct PlakExtension;
 
 impl ProtocolExtension for PlakExtension {
+    type HostLifecyclePhase = lifecycle::HostLifecyclePhase;
+    type HostLifecycleReason = lifecycle::HostLifecycleReason;
+    type HostLifecycleTarget = lifecycle::HostLifecycleTarget;
     type HostStreamEvent = console::TerminalEvent;
     fn host_request_size_allowed(line: &str) -> bool {
         #[derive(serde::Deserialize)]

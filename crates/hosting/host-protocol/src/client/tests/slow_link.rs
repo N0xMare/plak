@@ -426,6 +426,9 @@ fn slow_link_attached_intent_is_serialized_once() {
         type HostRequest = crate::Never;
         type HostResponse = crate::Never;
         type HostStreamEvent = crate::Never;
+        type HostLifecyclePhase = crate::Never;
+        type HostLifecycleReason = crate::Never;
+        type HostLifecycleTarget = crate::Never;
         type WelcomeExtension = Option<crate::Never>;
     }
     let inner = Inner::<Counting>::new();

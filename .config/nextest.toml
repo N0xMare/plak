@@ -145,6 +145,7 @@ not (
   |
   test(an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists)
   | test(a_log_lock_without_a_host_retries_past_ten_seconds)
+  | test(bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed)
   |
   test(foreground_awake_clock_excludes_suspend_then_expires_once)
   |
@@ -454,6 +455,7 @@ default-filter = '''
   |
   test(an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists)
   | test(a_log_lock_without_a_host_retries_past_ten_seconds)
+  | test(bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed)
   |
   test(foreground_awake_clock_excludes_suspend_then_expires_once)
   |

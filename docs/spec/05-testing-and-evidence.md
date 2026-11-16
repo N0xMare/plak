@@ -6493,7 +6493,15 @@ never partial publication or false no-effect after rename. New template
 exclusive-link and replacement-rename paths are checked separately. The
 legacy remote settings/default/credential-refresh path refuses at role
 classification; local-face dispatch remains available. Schema/DTO and public
-compile contracts follow exact client protocol 10 and runner protocol 9.
+compile contracts follow exact client protocol 11 and runner protocol 9.
+Wire-11 lifecycle tests observe real host sockets through planned stop and
+same/cross-key upgrade, assert advisory notices precede EOF, and assert an
+aborted preparation returns to `running`. A wire-10 hello receives only
+`version_mismatch`. Bridge discovery tests distinguish typed stdout refusals
+for absence, starting, stopping, incompatible state and unverified authority;
+the schema pin includes typed bridge-unavailable handshake refusals. Existing
+upgrade tests remain in the durability partition; new wall-clock discovery
+budget tests belong to serial and its matching offline exclusion.
 Publication SIGKILL cuts run in the durability lane; injected parent-sync
 failures run offline. Connection-drop and forced-deadline contracts verify
 retirement of pending authority and an explicit unknown outcome for admitted

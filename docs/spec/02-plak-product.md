@@ -656,7 +656,7 @@ an already resident session and its recorded node workspace; acquiring its
 `ResidencyHold` must not open an agent or admit a turn. Every live or unresolved
 terminal retains that hold and prevents dormancy and host idle exit, including
 when another principal requests release. The private residency outcome is
-`operator_terminal` on client protocol 10. Release never implicitly closes another
+`operator_terminal` on client protocol 11. Release never implicitly closes another
 principal's shell; confirmed close of the requester's terminals precedes normal release.
 Completed unpinned rows
 are skipped, and ambiguous close dispatch reports `operation_outcome_unknown`.
@@ -3999,7 +3999,53 @@ latency, and nothing else. Prompt text never reaches a span.
 
 ### 4.4 Wire v2
 
-Current client protocol **10** adds required `created_at` Unix seconds to
+Current client protocol **11** requires `Welcome.state_key`, the serving host's
+native state identity, alongside its binary id and process generation. An
+ephemeral extension-free session host uses an empty key. Protocol 11 adds the
+product advisory frame `host_lifecycle {host_generation, phase, reason,
+target?, retry_after_ms?}`. `phase` is `draining`, `restarting`, `stopping` or
+`running`; `reason` is `operator_restart`, `paired_upgrade`, `cross_key_upgrade`
+or `shutdown`. A target has exactly `binary_id` and `state_key`. An optional
+retry hint is a u32 bounded to 30000 ms. These DTOs belong to `plakd-wire-types`;
+the neutral envelope carries the product's lifecycle extension.
+
+A source announces `draining` only after admission of a planned upgrade and
+its admission pause, `restarting` after preparation commits, and `running`
+when reversible preparation aborts and source admission reopens. That `running`
+notice omits both target and retry hint. A forced
+same-image restart uses `operator_restart`, a same-key binary upgrade uses
+`paired_upgrade`, and a changed key uses `cross_key_upgrade`. A planned stop
+(including SIGTERM handoff) announces `stopping` / `shutdown`. Socket and web
+writers make a bounded final send attempt before closing; slow or lost peers
+can miss notices, and duplicate final notices are allowed. Notices never
+acknowledge a prompt, authorize replay, or alter admission. Failure without a
+notice remains possible. A destination serves ordinary Welcome; committed,
+ready carried-root aliases use the existing `RequestRefusal::Moved`, not a new
+successor field. Versions still match exactly: a wire-10 hello gets only
+`version_mismatch`, no Welcome or lifecycle frame.
+
+The public stdio bridge reads exactly one bounded newline-terminated Hello,
+within the same ten-second handshake deadline and maximum line bound, before
+discovery or explicit auto-start. It forwards that Hello unchanged if discovery
+succeeds. A mismatch emits only `version_mismatch`, even if the host is absent,
+and no new frame is sent at wire 10. On a matching version, discovery failure
+emits one `HandshakeRefusal::BridgeUnavailable` and closes (exit 1):
+`{"frame":"refused","kind":"bridge_unavailable","reason":"absent","retry_after_ms":500}`.
+The closed `BridgeUnavailableReason` vocabulary is `absent`, `starting`,
+`stopping`, `incompatible_state`, and `verification_failed`. Optional hints use
+serde default/skip-none and are bounded to 30000 ms. Absence, starting and stopping
+are retryable; incompatible state and verification failure need operator repair.
+No path, socket, raw error or stderr parser is part of this shape.
+Absence requires no live socket or kernel-held host lock; incompatible state
+requires a proved live host under another key (or conflicting live hosts).
+Starting means readiness was not reached within the discovery budget, including
+an explicitly requested startup that refused. Stopping is backed by a stopping
+diagnostic on a verified kernel-held private lock; stale file text grants no
+authority. Verification failures never become absence or auto-start permission.
+These are neutral transport handshake reasons; product lifecycle phase, reason
+and target DTOs remain in `plakd-wire-types` beneath the generic host envelope.
+
+Protocol 10 adds required `created_at` Unix seconds to
 `SessionRow`, from the durable product `sessions.created_at`. Creation time is
 independent of `updated_at` and unchanged by attach, turns or reopen; it is not
 a zero/unknown sentinel. The shared neutral directory type remains in
@@ -4146,7 +4192,7 @@ repositories using jj answer `vcs_unsupported`; colocated ones say git view.
 The fixed execution policy is chapter 04 §2.6.
 
 `config_patch`, `template_put` and `profile_put`, introduced in protocol 7
-(current client protocol 10), use the P6
+(current client protocol 11), use the P6
 attachment-free seam, typed allowlisted fields and mandatory if_match etags.
 Prepare/confirm binds the exact target/revision; conflict never auto-merges.
 Publication replies distinguish Saved from published/durability-uncertain
@@ -5076,7 +5122,7 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
 
 ### 4.5 The web endpoint
 
-Console operations introduced in protocol 7 (current client protocol 10)
+Console operations introduced in protocol 7 (current client protocol 11)
 have structured host audit evidence: time,
 verified login or socket uid, face, connection/request ID, action and safe
 target, outcome category and applicable revision. This is an ordinary bounded
@@ -5563,7 +5609,7 @@ read ownership receipts, acquire custody or resend an ambiguously accepted
 submission. The upgrade command reports success only after destination
 acknowledgement; a timeout names an unknown outcome and the retry remedy.
 
-Native login, introduced in protocol 7 (current client protocol 10), runs in
+Native login, introduced in protocol 7 (current client protocol 11), runs in
 a dedicated account-service worker, never the
 session intent mailbox or host action loop. Only the owning authenticated
 connection receives its challenge; poll returns sanitized phase, not a replay
@@ -5587,9 +5633,10 @@ It resolves the home and inspects all live state keys before connecting;
 another key or multiple keys is a refusal, not a silently selected service.
 Without explicit `--auto-start` it does not start a host. It never falls back
 to embedded execution. Its stdout is
-protocol-only, with diagnostics on stderr. The client originates the single
-handshake through the relay; the bridge does not consume a second handshake.
-Each direction uses bounded fixed buffers (one 8 KiB copy buffer) and flushes forwarded
+protocol-only, with diagnostics on stderr. The client originates one Hello;
+the bridge checks it before discovery and forwards it unchanged on success.
+It does not perform another handshake. Hello is bounded by the protocol line
+cap and deadline; afterwards each direction uses one 8 KiB copy buffer and flushes forwarded
 bytes promptly. Input EOF closes the socket's write half and detaches that
 client, not its host or session. A broken link is not automatically reconnected
 and no ambiguous input is replayed.
@@ -7324,7 +7371,7 @@ product observations without moving product vocabulary into the agent sink.
 
 ### 7.2 Usage and allowances
 
-`account_refresh`, introduced in protocol 7 (current client protocol 10), is
+`account_refresh`, introduced in protocol 7 (current client protocol 11), is
 a confirmed, explicit claimed refresh, not
 `accounts_status`/`accounts_usage` or automatic login. The exact account is
 selected throughout; an unaccepted/inactive integration refuses before provider
@@ -7729,7 +7776,7 @@ caller-supplied endpoint, discovered client id, or copied token can promote a
 profile's provenance.
 
 **Login, logout and API keys are explicit operator operations:** the CLI and
-authenticated host console (introduced in protocol 7; current client protocol 10)
+authenticated host console (introduced in protocol 7; current client protocol 11)
 share the account service. Integrator clients consume that wire contract;
 they do not own credential resolution or storage.
 

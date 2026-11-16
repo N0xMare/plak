@@ -18,6 +18,25 @@ pub(crate) const MAX_PENDING_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) struct Progress(Arc<Mutex<Instant>>);
 
 impl Progress {
+    /// Finish an in-flight frame batch on planned stop, without appending a
+    /// final notice after a partially cancelled JSON line or WebSocket message.
+    pub(crate) async fn finishing<T>(
+        &self,
+        send: impl Future<Output = T>,
+        stopped: impl Fn() -> bool,
+    ) -> Result<T, ()> {
+        let stop_deadline = async {
+            while !stopped() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        };
+        tokio::select! {
+            result = self.stoppable(send, || false) => result,
+            () = stop_deadline => Err(()),
+        }
+    }
+
     fn mark(&self) {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Instant::now();
     }

@@ -13,6 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         request
     );
     let frame = HostFrame::<Core>::Welcome(Welcome::<Core> {
+        state_key: String::new(),
         extension: None,
         proto: WIRE_VERSION,
         binary_id: "fixture".into(),

@@ -771,6 +771,7 @@ fn handle(
     );
     match result {
         Ok((ready, receipt)) => {
+            runtime.block_on(super::lifecycle::restarting(host));
             caller.ready();
             crate::carry::upgrade::crash_cut("before-answer");
             let decision_pending = ready
@@ -793,6 +794,7 @@ fn handle(
         }
         Err(failure) => {
             resume_rollback(host, services, runtime, control);
+            super::lifecycle::running(host);
             write(
                 &mut stream,
                 &Answer::Refused {
@@ -883,6 +885,7 @@ fn prepare(
     }
     let standalone = crate::carry::upgrade::admission(paths, true)?;
     let pause = host.pause_admissions_for_upgrade(Arc::clone(cancelled))?;
+    super::lifecycle::draining(host, &request.expected_binary, &request.destination_key);
     let budget = step_drain::Budget::new(request.drain)?;
     progress("resolving earlier admission verdicts")?;
     host.resolve_paused_drafts(&pause, budget.barrier_deadline, cancelled)?;

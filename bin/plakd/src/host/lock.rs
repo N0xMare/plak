@@ -13,6 +13,7 @@ use plakous_hosted::error::{CliFailure, CliResult};
 #[derive(Debug)]
 pub(super) struct HostLock {
     file: File,
+    diagnostic: String,
 }
 
 impl Drop for HostLock {
@@ -24,6 +25,16 @@ impl Drop for HostLock {
 }
 
 impl HostLock {
+    /// A private, kernel-lock-backed discovery hint during planned transport closure.
+    pub(super) fn stopping(&self) -> CliResult<()> {
+        use std::os::unix::fs::FileExt as _;
+        // A planned stop must never wait for a cold image hash.
+        let bytes = format!("{} stopping\n", self.diagnostic);
+        self.file
+            .write_all_at(bytes.as_bytes(), 0)
+            .and_then(|()| self.file.set_len(bytes.len() as u64))
+            .map_err(|_| CliFailure::new("cannot mark the host lock stopping"))
+    }
     /// Serializes all current-key starts and refuses any already-live state key.
     pub(super) fn take_home(
         paths: &crate::product_paths::PlakPaths,
@@ -108,9 +119,10 @@ impl HostLock {
             Err(std::fs::TryLockError::Error(error)) => return Err(failed(error)),
         }
         file.set_len(0).map_err(failed)?;
-        writeln!(file, "{} {binary}", std::process::id()).map_err(failed)?;
+        let diagnostic = format!("{} {binary}", std::process::id());
+        writeln!(file, "{diagnostic}").map_err(failed)?;
         file.sync_all().map_err(failed)?;
-        Ok(Self { file })
+        Ok(Self { file, diagnostic })
     }
 }
 

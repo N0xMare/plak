@@ -9,11 +9,15 @@ impl ProtocolExtension for Extension {
     type HostRequest = bool;
     type HostResponse = u8;
     type HostStreamEvent = crate::Never;
+    type HostLifecyclePhase = crate::Never;
+    type HostLifecycleReason = crate::Never;
+    type HostLifecycleTarget = crate::Never;
     type WelcomeExtension = Option<bool>;
 }
 
 fn welcome() -> Welcome<Extension> {
     Welcome {
+        state_key: String::new(),
         proto: WIRE_VERSION,
         binary_id: "fixture".to_owned(),
         host_generation: 1,
@@ -56,6 +60,9 @@ fn host_extension_has_private_request_response_and_required_nullable_welcome() {
     let mut value = serde_json::to_value(welcome()).unwrap();
     assert!(value["extension"].is_null());
     assert!(serde_json::from_value::<Welcome<Extension>>(value.clone()).is_ok());
+    let mut missing_key = value.clone();
+    missing_key.as_object_mut().unwrap().remove("state_key");
+    assert!(serde_json::from_value::<Welcome<Extension>>(missing_key).is_err());
     value.as_object_mut().unwrap().remove("extension");
     assert!(serde_json::from_value::<Welcome<Extension>>(value).is_err());
     let schema = serde_json::to_value(schemars::schema_for!(Welcome<Extension>)).unwrap();
@@ -81,9 +88,9 @@ fn host_extension_has_private_request_response_and_required_nullable_welcome() {
 }
 
 #[test]
-fn protocol_ten_rejects_both_adjacent_versions_without_negotiation() {
-    assert_eq!(WIRE_VERSION, 10);
-    for proto in [9, 11] {
+fn protocol_eleven_rejects_both_adjacent_versions_without_negotiation() {
+    assert_eq!(WIRE_VERSION, 11);
+    for proto in [10, 12] {
         let hello = Hello {
             proto,
             binary_id: "fixture".to_owned(),
@@ -92,13 +99,13 @@ fn protocol_ten_rejects_both_adjacent_versions_without_negotiation() {
         assert_eq!(
             admit_hello(&hello, welcome()),
             Err(HandshakeRefusal::VersionMismatch {
-                host: 10,
+                host: 11,
                 client: proto
             })
         );
     }
     let hello = Hello {
-        proto: 10,
+        proto: 11,
         binary_id: "fixture".to_owned(),
         caps: Vec::new(),
     };

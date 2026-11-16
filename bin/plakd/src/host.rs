@@ -14,6 +14,7 @@
 mod bridge;
 mod console;
 mod idle;
+pub(crate) mod lifecycle;
 mod lock;
 mod requested_reload;
 pub(crate) mod send;
@@ -212,7 +213,11 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         scanning,
     ));
     receipt_recovery.cancel();
+    let _ = lock.stopping();
+    let _ = home_lock.stopping();
     let ready = upgrades.stop(&runtime, services.paths()?);
+    lifecycle::stopping(&host);
+    runtime.block_on(host.wait_lifecycle_delivery(Duration::from_secs(1)));
     stop_listeners(&runtime, reload_requests, web, idle_reload, ready.is_some());
     let stopping = Instant::now();
     // The socket goes first, so no client reaches a host that is handing

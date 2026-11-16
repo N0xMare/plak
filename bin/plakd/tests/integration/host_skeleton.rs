@@ -528,7 +528,12 @@ fn stop(host: &mut Host) {
     });
     let status = exited
         .recv_timeout(WAIT)
-        .expect("plakd host stopped")
+        .unwrap_or_else(|error| {
+            panic!(
+                "plakd host stop: {error}; diagnostics: {}",
+                host.lines.try_iter().collect::<Vec<_>>().join("\n")
+            )
+        })
         .unwrap();
     assert!(status.success(), "{status}");
 }

@@ -256,7 +256,7 @@ async fn send_pending<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     }
     let progress = socket.get_ref().progress.clone();
     match progress
-        .stoppable(
+        .finishing(
             async {
                 for line in lines {
                     socket
@@ -271,7 +271,6 @@ async fn send_pending<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
         .await
     {
         Ok(result) => result,
-        Err(()) if stopped() => Err(Ended::Stopping),
         Err(()) => Err(Ended::Lost("client too slow")),
     }
 }
@@ -310,6 +309,16 @@ async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended 
         })
         .buffered_output();
     let ended = attached(socket, served, &mut connection, &outbox, &mut pong).await;
+    if matches!(ended, Ended::Stopping) {
+        crate::host::lifecycle::stopping(&served.host);
+        let _ = connection.flush_lifecycle();
+        let _ = tokio::time::timeout(
+            Duration::from_secs(1),
+            send_pending(socket, &outbox, || false),
+        )
+        .await;
+        connection.output_sent();
+    }
     // Every way out detaches, so no session holds a dead attachment.
     connection.leave();
     ended
@@ -331,6 +340,9 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     let mut rate = Rate::new();
     loop {
         // A flush may read the session directory from the stores.
+        if served.stop.stopped() {
+            return Ended::Stopping;
+        }
         if connection_work(|| connection.flush()).is_err() {
             return Ended::Lost("client fell behind");
         }
@@ -339,6 +351,9 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
         connection.output_sent();
         if let Err(ended) = sent {
             return ended;
+        }
+        if served.stop.stopped() {
+            continue;
         }
         if began.elapsed() >= PING_EVERY {
             if let Some(sent) = pong {
@@ -378,12 +393,11 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                 }
                 // A peer that stopped reading must not hold the slot: the
                 // ping is bounded like every other send.
-                match socket.get_ref().progress.clone().stoppable(socket.send(Message::Ping(Bytes::new())), || served.stop.stopped())
+                match socket.get_ref().progress.clone().finishing(socket.send(Message::Ping(Bytes::new())), || served.stop.stopped())
                     .await
                 {
                     Ok(Ok(())) => {}
                     Ok(Err(_)) => return Ended::Lost("ping failed"),
-                    Err(()) if served.stop.stopped() => return Ended::Stopping,
                     Err(()) => return Ended::Lost("client too slow"),
                 }
             }

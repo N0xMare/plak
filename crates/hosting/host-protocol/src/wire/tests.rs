@@ -15,6 +15,7 @@ fn hello(proto: u32) -> Hello {
 
 fn welcome() -> Welcome<Core> {
     Welcome {
+        state_key: String::new(),
         extension: None,
         proto: WIRE_VERSION,
         binary_id: "b1".into(),
@@ -401,11 +402,12 @@ fn the_directory_answers_and_frames_round_trip_with_pinned_bytes() {
         ),
         (
             Host::Welcome(Welcome {
+                state_key: String::new(),
                 extension: None,
                 session: None,
                 ..welcome()
             }),
-            r#"{"frame":"welcome","extension":null,"proto":10,"binary_id":"b1","host_generation":7,"caps":[]}"#,
+            r#"{"frame":"welcome","extension":null,"proto":11,"binary_id":"b1","host_generation":7,"state_key":"","caps":[]}"#,
         ),
     ];
     for (frame, pinned) in host {

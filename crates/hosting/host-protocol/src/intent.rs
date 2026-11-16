@@ -46,6 +46,36 @@ pub trait ProtocolExtension: Clone + fmt::Debug + Eq + Send + Sync + 'static {
         + serde::de::DeserializeOwned
         + schemars::JsonSchema
         + 'static;
+    /// Product-owned advisory host lifecycle phase.
+    type HostLifecyclePhase: Clone
+        + fmt::Debug
+        + Eq
+        + Send
+        + Sync
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + schemars::JsonSchema
+        + 'static;
+    /// Product-owned advisory host lifecycle reason.
+    type HostLifecycleReason: Clone
+        + fmt::Debug
+        + Eq
+        + Send
+        + Sync
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + schemars::JsonSchema
+        + 'static;
+    /// Product-owned advisory host lifecycle target.
+    type HostLifecycleTarget: Clone
+        + fmt::Debug
+        + Eq
+        + Send
+        + Sync
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + schemars::JsonSchema
+        + 'static;
     /// Face-effective product capabilities included in the handshake.
     type WelcomeExtension: Clone
         + fmt::Debug
@@ -130,6 +160,9 @@ impl ProtocolExtension for Core {
     type HostRequest = Never;
     type HostResponse = Never;
     type HostStreamEvent = Never;
+    type HostLifecyclePhase = Never;
+    type HostLifecycleReason = Never;
+    type HostLifecycleTarget = Never;
     type WelcomeExtension = Option<Never>;
 }
 

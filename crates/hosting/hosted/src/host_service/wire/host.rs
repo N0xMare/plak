@@ -98,6 +98,7 @@ pub struct Creation<'a> {
     pub request_id: &'a str,
 }
 
+mod lifecycle;
 mod product;
 mod upgrade_controls;
 mod verdicts;
@@ -105,6 +106,9 @@ pub use product::HostSessions;
 
 /// The sessions one host serves.
 pub struct SessionHost<P: ProtocolExtension> {
+    lifecycle:
+        Mutex<BTreeMap<u64, lifecycle::Delivery<plakous_host_protocol::wire::HostLifecycle<P>>>>,
+    lifecycle_latest: Mutex<Option<plakous_host_protocol::wire::HostLifecycle<P>>>,
     upgrade_admission: Arc<std::sync::RwLock<bool>>,
     upgrade_cancelled: Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>,
     upgrade_committed: Arc<std::sync::atomic::AtomicBool>,
@@ -168,6 +172,8 @@ where
         let (changes, _) = watch::channel(0);
         let admission = admission::Admission::new(sessions.host_read_limits());
         Arc::new(Self {
+            lifecycle: Mutex::default(),
+            lifecycle_latest: Mutex::default(),
             upgrade_admission: Arc::default(),
             upgrade_cancelled: Mutex::default(),
             upgrade_committed: Arc::default(),
@@ -260,12 +266,14 @@ where
     /// The welcome every connection gets: it names no session.
     #[must_use]
     pub fn welcome_for(&self, principal: &HostPrincipal) -> Welcome<P> {
-        host_welcome(
+        let mut welcome = host_welcome(
             self.binary_id.clone(),
             self.generation,
             self.sessions
                 .welcome_extension(principal, &self.admission.limits),
-        )
+        );
+        welcome.state_key = self.sessions.state_key();
+        welcome
     }
 
     /// A new connection writing its frames to `out`, from a client its
@@ -298,8 +306,13 @@ where
         principal: HostPrincipal,
         stopped: impl Fn() -> bool + Send + Sync + 'static,
     ) -> HostConnection<P, W> {
+        let connection_id = self.next_connection.fetch_add(1, Ordering::Relaxed);
+        self.lifecycle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(connection_id, lifecycle::Delivery::default());
         HostConnection {
-            connection_id: self.next_connection.fetch_add(1, Ordering::Relaxed),
+            connection_id,
             principal_budget: self.admission.principal(&principal),
             login: match &principal {
                 HostPrincipal::Web(login) => Some(login.clone()),
@@ -526,6 +539,11 @@ pub struct HostConnection<P: ProtocolExtension, W: Write> {
 
 impl<P: ProtocolExtension, W: Write> Drop for HostConnection<P, W> {
     fn drop(&mut self) {
+        self.host
+            .lifecycle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.connection_id);
         self.host_reads.clear();
         self.host.sessions.host_disconnect(
             &self.principal,
@@ -1206,6 +1224,7 @@ where
     /// A lost output, a snapshot that cannot be paged, or a directory that
     /// cannot be read.
     pub fn flush(&mut self) -> CliResult<()> {
+        self.flush_lifecycle()?;
         self.flush_host_reads()?;
         self.flush_draining()?;
         if let Some(link) = &mut self.readonly {

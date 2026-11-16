@@ -1401,7 +1401,9 @@ impl<P: ProtocolExtension> Inner<P> {
         P::Intent: Serialize,
     {
         match frame {
-            frame @ HostFrame::TerminalStream { .. } => state.host_stream(frame),
+            frame @ (HostFrame::TerminalStream { .. } | HostFrame::HostLifecycle { .. }) => {
+                state.host_stream(frame)
+            }
             HostFrame::Response { id, outcome } => {
                 if let Some(root) = state.selections.remove(&id) {
                     self.selected(state, root, &outcome);

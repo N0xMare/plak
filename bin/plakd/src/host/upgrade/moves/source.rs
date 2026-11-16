@@ -43,6 +43,11 @@ pub(super) fn prepare(
     }
     let standalone = crate::carry::upgrade::admission(paths, true)?;
     let pause = host.pause_admissions_for_upgrade(Arc::clone(cancelled))?;
+    super::super::super::lifecycle::draining(
+        host,
+        &request.expected_binary,
+        &request.destination_key,
+    );
     let budget = step_drain::Budget::new(request.drain)?;
     host.resolve_paused_drafts(&pause, budget.barrier_deadline, cancelled)?;
     let drain = live

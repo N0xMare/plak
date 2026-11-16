@@ -1325,6 +1325,9 @@ fn saturated_snapshots_are_not_spent_and_a_queued_wait_survives_them() {
         type HostRequest = Never;
         type HostResponse = Never;
         type HostStreamEvent = Never;
+        type HostLifecyclePhase = Never;
+        type HostLifecycleReason = Never;
+        type HostLifecycleTarget = Never;
         type WelcomeExtension = Option<Never>;
     }
 

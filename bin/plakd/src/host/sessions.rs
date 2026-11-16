@@ -445,6 +445,9 @@ const fn environment_of(held_elsewhere: bool) -> SessionEnvironment {
 }
 
 impl HostSessions<PlakExtension> for ProductSessions {
+    fn state_key(&self) -> String {
+        crate::home::state::state_key()
+    }
     fn host_request_timeout(
         &self,
         request: &plakd_wire_types::console::HostRequest,

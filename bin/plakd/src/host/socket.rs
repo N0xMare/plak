@@ -127,8 +127,10 @@ impl Bound {
         let admitted = Arc::new(AtomicUsize::new(0));
         let mut next_idle_check = Instant::now();
         let mut idle = idle.map(super::idle::IdleGuard::new);
-        loop {
+        let mut connections = tokio::task::JoinSet::new();
+        'accepting: loop {
             tokio::select! {
+                _ = connections.join_next(), if !connections.is_empty() => {}
                 accepted = self.listener.accept() => {
                     let Ok((stream, _)) = accepted else {
                         tokio::time::sleep(ACCEPT_BACKOFF).await;
@@ -143,14 +145,14 @@ impl Bound {
                     if let Some(place) = Place::take(&pending, PENDING_LIMIT) {
                         let (host, stopped) = (Arc::clone(host), Arc::clone(&stopped));
                         let admitted = Arc::clone(&admitted);
-                        tokio::spawn(async move {
+                        connections.spawn(async move {
                             connection(stream, &host, stopped, place, &admitted).await;
                         });
                     }
                 }
                 _ = tick.tick() => {
                     if stopped() {
-                        return;
+                        break;
                     }
                     let now = Instant::now();
                     if now >= next_idle_check && let Some(idle) = &mut idle {
@@ -163,7 +165,7 @@ impl Bound {
                             match self.retire_idle_listener() {
                                 Ok(backlog) if backlog.is_empty() => {
                                     eprintln!("plakd host: auto-started service idle window elapsed; stopping");
-                                    return;
+                                    break 'accepting;
                                 }
                                 Ok(backlog) => {
                                     idle.activity();
@@ -174,7 +176,7 @@ impl Bound {
                                         if let Some(place) = Place::take(&pending, PENDING_LIMIT) {
                                             let (host, stopped) = (Arc::clone(host), Arc::clone(&stopped));
                                             let admitted = Arc::clone(&admitted);
-                                            tokio::spawn(async move {
+                                            connections.spawn(async move {
                                                 connection(stream, &host, stopped, place, &admitted).await;
                                             });
                                         }
@@ -182,7 +184,7 @@ impl Bound {
                                 }
                                 Err(error) => {
                                     eprintln!("plakd host: idle socket retirement failed: {error}");
-                                    return;
+                                    break 'accepting;
                                 }
                             }
                         }
@@ -190,6 +192,12 @@ impl Bound {
                 }
             }
         }
+        // Healthy peers get their final advisory before runtime shutdown;
+        // an unresponsive peer cannot hold the host's handoff deadline.
+        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+            while connections.join_next().await.is_some() {}
+        })
+        .await;
     }
 
     /// Hide discovery first, then drain the kernel backlog without waiting.
@@ -320,7 +328,7 @@ async fn send(
     match write
         .progress
         .clone()
-        .stoppable(write.write_all(&bytes), stopped)
+        .finishing(write.write_all(&bytes), stopped)
         .await
     {
         Ok(Ok(())) => Ok(()),
@@ -430,12 +438,19 @@ async fn connection(
         .connect(outbox.clone(), Face::Remote, principal, move || stop())
         .buffered_output();
     loop {
+        if stopped() {
+            close_planned(host, &mut connection, &mut write, &outbox).await;
+            break;
+        }
         // A flush may read the session directory from the stores.
         let flushed = tokio::task::block_in_place(|| connection.flush());
         let sent = send(&mut write, &outbox, &*stopped).await;
         connection.output_sent();
-        if flushed.is_err() || sent.is_err() || stopped() {
+        if flushed.is_err() || sent.is_err() {
             break;
+        }
+        if stopped() {
+            continue;
         }
         if let Some(line) = reader.queued.pop_front() {
             // An attach may open a session, which takes a while.
@@ -462,6 +477,18 @@ async fn connection(
     connection.leave();
     let _ = write.shutdown().await;
     drop(place);
+}
+
+async fn close_planned(
+    host: &SessionHost<PlakExtension>,
+    connection: &mut plakous_hosted::host_service::wire::HostConnection<PlakExtension, Outbox>,
+    write: &mut ProgressIo<impl AsyncWrite + Unpin>,
+    outbox: &Outbox,
+) {
+    super::lifecycle::stopping(host);
+    let _ = connection.flush_lifecycle();
+    let _ = tokio::time::timeout(Duration::from_secs(1), send(write, outbox, || false)).await;
+    connection.output_sent();
 }
 
 #[cfg(test)]

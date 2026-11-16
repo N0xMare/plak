@@ -196,8 +196,9 @@ async fn slow_link_web_send_pending_stop_preempts_progressing_baseline() {
     let ended = send_pending(&mut socket, &outbox, || stop.load(Ordering::Acquire))
         .await
         .unwrap_err();
-    assert_eq!(ended.as_str(), "host stopping");
-    assert!(began.elapsed() <= Duration::from_millis(2050));
+    assert_eq!(ended.as_str(), "client too slow");
+    assert!(began.elapsed() >= Duration::from_secs(3));
+    assert!(began.elapsed() <= Duration::from_millis(3050));
     drop(socket);
     stop_task.await.unwrap();
     reading.await.unwrap();

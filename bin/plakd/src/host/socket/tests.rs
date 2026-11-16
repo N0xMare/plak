@@ -37,7 +37,8 @@ async fn slow_link_stop_preempts_a_progressing_host_send() {
         super::send(&mut write, &outbox, || stop.load(Ordering::Acquire)).await,
         Err(())
     );
-    assert!(began.elapsed() <= Duration::from_millis(2050));
+    assert!(began.elapsed() >= Duration::from_secs(3));
+    assert!(began.elapsed() <= Duration::from_millis(3050));
     drop(write);
     reader.await.unwrap();
 }
@@ -312,11 +313,25 @@ fn an_admitted_connection_is_welcomed_to_the_directory_and_a_stop_ends_the_host(
     );
     stop.store(true, Ordering::Release);
     let bound = server.join().unwrap();
-    // The stop ended the connection too.
+    // A planned notice precedes the transport's EOF.
+    assert_stopping(next(&mut reader));
     let mut rest = String::new();
     assert_eq!(reader.read_line(&mut rest).unwrap(), 0, "{rest}");
     bound.remove();
     assert!(!socket.exists());
+}
+
+fn assert_stopping(frame: HostFrame<PlakExtension>) {
+    assert!(matches!(
+        frame,
+        HostFrame::HostLifecycle {
+            host_generation: 7,
+            phase: plakd_wire_types::lifecycle::HostLifecyclePhase::Stopping,
+            reason: plakd_wire_types::lifecycle::HostLifecycleReason::Shutdown,
+            target: None,
+            retry_after_ms: None,
+        }
+    ));
 }
 
 /// A hello of another protocol version is refused, typed, and closed.

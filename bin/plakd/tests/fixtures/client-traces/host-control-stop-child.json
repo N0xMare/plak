@@ -1,6 +1,6 @@
 {
   "fixture": "host-control-stop-child",
-  "source": "real public TUI capture; protocol-10 directory projection",
+  "source": "real public TUI capture; protocol-11 directory projection",
   "seed_session": "@uuid:0",
   "entries": [
     {
@@ -14,7 +14,7 @@
         "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
-        "proto": 10
+        "proto": 11
       }
     },
     {
@@ -137,7 +137,8 @@
         },
         "frame": "welcome",
         "host_generation": "@generation:0",
-        "proto": 10
+        "proto": 11,
+        "state_key": "r28.e38.p38.t11"
       }
     },
     {
@@ -388,7 +389,7 @@
         "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
-        "proto": 10
+        "proto": 11
       }
     },
     {
@@ -511,7 +512,8 @@
         },
         "frame": "welcome",
         "host_generation": "@generation:1",
-        "proto": 10
+        "proto": 11,
+        "state_key": "r28.e38.p38.t11"
       }
     },
     {

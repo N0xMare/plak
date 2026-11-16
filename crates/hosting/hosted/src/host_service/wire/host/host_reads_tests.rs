@@ -13,6 +13,9 @@ impl ProtocolExtension for Reads {
     type HostRequest = u8;
     type HostResponse = u8;
     type HostStreamEvent = Never;
+    type HostLifecyclePhase = u8;
+    type HostLifecycleReason = u8;
+    type HostLifecycleTarget = u8;
     type WelcomeExtension = Option<bool>;
 }
 
@@ -156,6 +159,94 @@ impl Output {
     }
 }
 type Connection = HostConnection<Reads, Output>;
+
+fn lifecycle_notice(phase: u8) -> plakous_host_protocol::wire::HostLifecycle<Reads> {
+    plakous_host_protocol::wire::HostLifecycle {
+        host_generation: 1,
+        phase,
+        reason: 0,
+        target: None,
+        retry_after_ms: None,
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn lifecycle_advisories_preserve_order_and_join_transport_attempts_not_admission() {
+    let (host, state) = fixture(limits());
+    let out = Output::default();
+    let mut connection = host
+        .connect(
+            out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        )
+        .buffered_output();
+    let web_out = Output::default();
+    let mut web = host
+        .connect(
+            web_out.clone(),
+            Face::Remote,
+            HostPrincipal::Web("fixture-login".into()),
+            || false,
+        )
+        .buffered_output();
+    host.publish_lifecycle(lifecycle_notice(1));
+    host.publish_lifecycle(lifecycle_notice(2));
+    connection.flush().unwrap();
+    web.flush().unwrap();
+    assert_eq!(
+        web_out.take(),
+        [
+            HostFrame::from(lifecycle_notice(1)),
+            HostFrame::from(lifecycle_notice(2))
+        ]
+    );
+    assert_eq!(
+        out.take(),
+        [
+            HostFrame::from(lifecycle_notice(1)),
+            HostFrame::from(lifecycle_notice(2))
+        ]
+    );
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(1),
+            host.wait_lifecycle_delivery(Duration::from_secs(10))
+        )
+        .await
+        .is_err()
+    );
+    connection.output_sent();
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(1),
+            host.wait_lifecycle_delivery(Duration::from_secs(10))
+        )
+        .await
+        .is_err()
+    );
+    web.output_sent();
+    tokio::time::timeout(
+        Duration::from_millis(1),
+        host.wait_lifecycle_delivery(Duration::from_secs(10)),
+    )
+    .await
+    .unwrap();
+    assert!(!*host.upgrade_admission.read().unwrap());
+    assert_eq!(
+        state.started.load(Ordering::SeqCst),
+        0,
+        "advisories started product work"
+    );
+    host.publish_lifecycle(lifecycle_notice(3));
+    connection.flush().unwrap();
+    assert_eq!(out.take(), [HostFrame::from(lifecycle_notice(3))]);
+    drop(connection);
+    drop(web);
+    host.wait_lifecycle_delivery(Duration::from_secs(10)).await;
+    assert!(host.lifecycle.lock().unwrap().is_empty());
+}
 
 #[test]
 fn dropping_a_connection_retires_operator_authority_even_without_explicit_leave() {

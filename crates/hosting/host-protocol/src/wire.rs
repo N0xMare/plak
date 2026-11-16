@@ -44,7 +44,9 @@ mod runner_label;
 pub use runner_label::RunnerLabel;
 mod draft;
 pub use draft::{ClientDraftId, InvalidClientDraftId};
+mod host_lifecycle;
 mod lifecycle;
+pub use host_lifecycle::{BridgeUnavailableReason, HostLifecycle};
 pub use lifecycle::{InvalidTitleKind, LifecycleReason, MAX_LIFECYCLE_IDS, validate_title};
 mod placement;
 mod tool;
@@ -69,7 +71,8 @@ pub use tool::WireToolItem;
 /// Files/Changes reads and per-account credential-refresh observations.
 /// 9 adds consented operator terminals, independent credited streams and residency.
 /// 10 adds directory creation timestamps and detailed semantic validation issues.
-pub const WIRE_VERSION: u32 = 10;
+/// 11 adds host state identity, advisory planned lifecycle and typed bridge refusals.
+pub const WIRE_VERSION: u32 = 11;
 
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
@@ -152,6 +155,8 @@ pub struct Welcome<P: ProtocolExtension> {
     pub binary_id: String,
     /// This host process's generation; it changes on every host start.
     pub host_generation: u64,
+    /// Native state identity; empty for an ephemeral, extension-free session host.
+    pub state_key: String,
     /// Optional functions the host supports.
     pub caps: Vec<String>,
     /// The session this connection serves, when it serves one: a host of
@@ -190,6 +195,19 @@ pub struct WelcomeSession {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HandshakeRefusal {
+    /// The bridge verified hello but could not reach a suitable host.
+    BridgeUnavailable {
+        /// Closed discovery classification, never raw diagnostics or paths.
+        reason: BridgeUnavailableReason,
+        /// Advisory retry delay, never permission to replay a request.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "host_lifecycle::retry"
+        )]
+        #[schemars(range(max = 30000))]
+        retry_after_ms: Option<u32>,
+    },
     /// The versions differ; neither side adapts.
     VersionMismatch {
         /// The host's version.
@@ -775,6 +793,26 @@ pub enum ClientFrame<P: ProtocolExtension> {
     bound = "P::Intent: schemars::JsonSchema, P::Observation: schemars::JsonSchema, P::HostStreamEvent: schemars::JsonSchema"
 )]
 pub enum HostFrame<P: ProtocolExtension> {
+    /// Advisory product lifecycle; never an acknowledgement of a client request.
+    HostLifecycle {
+        /// This process's generation, also carried by welcome.
+        host_generation: u64,
+        /// Product-owned lifecycle phase.
+        phase: P::HostLifecyclePhase,
+        /// Product-owned planned transition reason.
+        reason: P::HostLifecycleReason,
+        /// A validated destination, when known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<P::HostLifecycleTarget>,
+        /// Advisory retry hint, not admission or replay permission.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "host_lifecycle::retry"
+        )]
+        #[schemars(range(max = 30000))]
+        retry_after_ms: Option<u32>,
+    },
     /// Private operator output, with an independent gap-free stream sequence.
     TerminalStream {
         /// Process-local terminal identity.

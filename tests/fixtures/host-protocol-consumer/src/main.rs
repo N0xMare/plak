@@ -13,6 +13,9 @@ impl ProtocolExtension for Product {
     type HostRequest = bool;
     type HostResponse = u8;
     type HostStreamEvent = u8;
+    type HostLifecyclePhase = u8;
+    type HostLifecycleReason = u8;
+    type HostLifecycleTarget = u8;
     type WelcomeExtension = Option<bool>;
 }
 
@@ -41,6 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         response
     );
     let welcome = Welcome::<Product> {
+        state_key: String::new(),
         extension: Some(true),
         proto: WIRE_VERSION,
         binary_id: "fixture".into(),

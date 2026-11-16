@@ -298,7 +298,7 @@ both. Once a host/line becomes retention-only, reinstalling or downgrading
 cannot restore native control. An incompatible endpoint requires its matching
 build to settle the original jobs; if the original process is proved lost,
 follow the reported lost-job remedy rather than starting or replaying it.
-Retention endpoint 1, native runner protocol 9, host wire 10 and JSONL 1 are
+Retention endpoint 1, native runner protocol 9, host wire 11 and JSONL 1 are
 independent versions. Retention support does not remove `host upgrade`'s
 settled-job restriction across changed triples.
 

@@ -104,6 +104,7 @@ pub fn session_welcome<P: ProtocolExtension>(
     root: NodeAddress,
 ) -> Welcome<P> {
     Welcome {
+        state_key: String::new(),
         extension: Default::default(),
         proto: WIRE_VERSION,
         binary_id,
@@ -127,6 +128,7 @@ pub fn host_welcome<P: ProtocolExtension>(
     extension: P::WelcomeExtension,
 ) -> Welcome<P> {
     Welcome {
+        state_key: String::new(),
         extension,
         proto: WIRE_VERSION,
         binary_id,

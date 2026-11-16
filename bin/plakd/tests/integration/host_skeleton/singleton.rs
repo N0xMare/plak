@@ -44,21 +44,21 @@ fn an_opt_in_bridge_refuses_another_key_instead_of_starting_a_sibling() {
     let Some(fixture) = fixture() else { return };
     let key = "r00.e00.p00.t00";
     let _held = held(&fixture.home().join("state").join(key).join("host.lock"));
-    let output = fixture
-        .command()
-        .args(["host", "connect", "--stdio", "--auto-start"])
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
+    let output = bridge::output_after_hello(
+        fixture
+            .command()
+            .args(["host", "connect", "--stdio", "--auto-start"]),
+        WIRE_VERSION,
+    );
     assert!(!output.status.success());
     let message = String::from_utf8_lossy(&output.stderr);
     assert!(
         message.contains(key) && message.contains("no host was stopped"),
         "{message}"
     );
-    assert!(
-        output.stdout.is_empty(),
-        "diagnostics reached protocol stdout"
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+        json!({"frame":"refused","kind":"bridge_unavailable","reason":"incompatible_state"})
     );
     assert!(!fixture.home().join("host/auto-start.log").exists());
 }
