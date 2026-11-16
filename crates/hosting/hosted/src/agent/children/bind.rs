@@ -541,11 +541,10 @@ async fn start_spawned_child(
             let (template, workspace_path) = runtime
                 .read(|tree| {
                     let node = tree.node(&spawned.agent_id).ok()?;
-                    let template = node
-                        .template
-                        .as_ref()
-                        .map(|template| template.as_str().to_owned())
-                        .unwrap_or_else(|| "unknown".to_owned());
+                    let template = node.template.as_ref().map_or_else(
+                        || "unknown".to_owned(),
+                        |template| template.as_str().to_owned(),
+                    );
                     let workspace_path = tree
                         .workspace(&node.workspace_id)
                         .filter(|row| {
@@ -631,13 +630,17 @@ impl ChildBoundBind {
 /// The composition the child's Start prompt is written for.
 ///
 /// This used to be read off a full `spawned_child_spec`, which is the native
-/// OAuth path only: an OpenRouter child (including OpenRouter
-/// children of OpenRouter hub roots) was refused here with "spawn child
+/// OAuth path only: an `OpenRouter` child (including `OpenRouter`
+/// children of `OpenRouter` hub roots) was refused here with "spawn child
 /// account is not a supported native OAuth account" before
-/// `child_session_runtime_binding` ever got to route it to the OpenRouter
+/// `child_session_runtime_binding` ever got to route it to the `OpenRouter`
 /// branch. Building the spec twice also doubled the OAuth status, catalog, and
 /// provider-resolution round trips on every spawn. Resolve the one field the
 /// Start prompt needs instead, on the same two branches the binding uses.
+///
+/// # Errors
+/// Refuses missing or inconsistent frozen account/composition facts or unavailable
+/// child-route admission.
 pub fn spawn_child_start_composition(
     parent: &SpawnParent,
     agent_id: &str,
@@ -990,6 +993,10 @@ pub(in crate::agent) fn openrouter_frozen_pin(
     clippy::too_many_lines,
     reason = "Child specification resolution reconstructs native provider evidence, reasoning admission, frozen tools, and the exact spawned identity."
 )]
+///
+/// # Errors
+/// Refuses missing frozen roster/parent facts, unavailable exact credentials or
+/// model/tool construction failures.
 pub async fn spawned_child_spec(
     parent: &SpawnParent,
     agent_id: &str,
@@ -1202,6 +1209,10 @@ pub(crate) fn assignment_start_prompt(
     .render()
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "projection boundaries consume owned event facts rather than retaining borrowed inputs across settlement"
+)]
 fn child_provider_failure(
     error: NativeSubscriptionError,
     account: &crate::account::AccountRef,

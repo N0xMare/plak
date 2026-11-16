@@ -121,6 +121,10 @@ impl Applier<'_> {
         }
     }
 
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "projection boundaries consume owned event facts rather than retaining borrowed inputs across settlement"
+    )]
     pub(super) fn items(
         &mut self,
         turn_id: Option<String>,

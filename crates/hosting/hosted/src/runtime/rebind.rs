@@ -922,9 +922,9 @@ async fn rebind_model_capabilities<P: plakous_host_protocol::ProtocolExtension>(
         } => catalog_candidates
             .iter()
             .find(|candidate| candidate.account == account && candidate.exact_id == model),
-        HostTargetAuthority::OpenRouter { .. } | HostTargetAuthority::Platform { .. } => None,
-
-        HostTargetAuthority::Registered { .. } => None,
+        HostTargetAuthority::OpenRouter { .. }
+        | HostTargetAuthority::Platform { .. }
+        | HostTargetAuthority::Registered { .. } => None,
     };
     let (reasoning_efforts, service_tiers, native_tool_mode) = if let Some(candidate) = candidate {
         (
@@ -1396,6 +1396,10 @@ async fn bounded_rebind_lookup<T>(operation: impl Future<Output = T>) -> Result<
     bounded_transition_stage(REBIND_LOOKUP_TIMEOUT, operation).await
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "error adapters consume the failing operation error, matching Result::map_err ownership"
+)]
 fn rebind_catalog_failure(error: plakous::subscriptions::NativeSubscriptionError) -> CliFailure {
     match error {
         plakous::subscriptions::NativeSubscriptionError::ModelLookup { .. } => CliFailure::new(

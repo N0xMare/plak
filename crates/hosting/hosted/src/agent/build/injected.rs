@@ -56,6 +56,10 @@ pub fn injected_root_tool_registrations(
     Ok(extensions.registrations().to_vec())
 }
 
+///
+/// # Errors
+/// Refuses invalid creation/open inputs, binding mismatches, unavailable storage or lost
+/// ownership. Open failures retain their typed refusal facts.
 pub async fn build_or_open_bound_session(
     sessions: Arc<AgentSessions>,
     locator: Option<SessionLocator>,
@@ -107,6 +111,10 @@ pub async fn create_seeded_bound_session(
 
 /// Answers whether opening `locator` under an injected `runtime` would attach,
 /// without owning or attaching it.
+///
+/// # Errors
+/// Refuses invalid reconstruction or a canonical verification failure. Verification does
+/// not acquire an execution lease or recover admitted work.
 pub async fn verify_bound_session(
     sessions: Arc<AgentSessions>,
     locator: SessionLocator,

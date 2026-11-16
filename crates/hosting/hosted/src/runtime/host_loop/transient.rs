@@ -58,6 +58,10 @@ impl Drop for PendingResume {
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "transient settlement consumes the failed attempt facts at one ownership boundary"
+    )]
     pub(super) fn schedule_transient_resume(
         &mut self,
         failure: TransientFailure,

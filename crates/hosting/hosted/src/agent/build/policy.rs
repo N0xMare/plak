@@ -11,6 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[must_use]
 pub fn effective_presentation_label(
     composition: CompositionSelection,
     provider: Option<NativeProvider>,
@@ -54,6 +55,10 @@ pub(crate) fn composition_is_py_ptc(composition: CompositionSelection) -> bool {
 
 use crate::error::{CliFailure, CliResult};
 
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "the model budget port accepts an optional cap; this policy always supplies one"
+)]
 pub(super) fn observation_budget_cap_bytes(effective_input_tokens: u64) -> Option<usize> {
     // The product window cap uses text-byte units; L0 still independently
     // charges one token per byte against its actual headroom.
@@ -65,7 +70,7 @@ pub(super) fn observation_budget_cap_bytes(effective_input_tokens: u64) -> Optio
 }
 
 /// Upper bound on one response's output tokens on the subscription routes
-/// where Plak picks the request bound (SuperGrok). The direct API-key routes
+/// where Plak picks the request bound (`SuperGrok`). The direct API-key routes
 /// send each model's own limit instead. A model's own ceiling is held to it so one response stays
 /// cost-bounded and most of the window is left for input; it is large enough
 /// that a whole-file write or a long patch fits in one tool call.

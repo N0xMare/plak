@@ -26,6 +26,10 @@ impl Fixture {
         }
     }
 
+    #[allow(
+        clippy::unused_self,
+        reason = "fixture methods keep filesystem setup grouped under the owning test fixture"
+    )]
     fn skill(&self, root: &Path, name: &str, text: &str) {
         fs::create_dir_all(root.join(name)).unwrap();
         fs::write(root.join(name).join("SKILL.md"), text).unwrap();

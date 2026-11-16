@@ -23,6 +23,7 @@ use super::{
 };
 
 /// Seed the real presentation reducer without constructing a runtime.
+#[must_use]
 pub fn replace_transcript<P: plakous_host_protocol::ProtocolExtension>(
     sender: &Sender<P>,
     snapshot: plakous_host_protocol::views::PresentationSnapshot,
@@ -31,6 +32,7 @@ pub fn replace_transcript<P: plakous_host_protocol::ProtocolExtension>(
 }
 
 /// Republish the real reducer's current canonical and live presentation.
+#[must_use]
 pub fn resync_transcript<P: plakous_host_protocol::ProtocolExtension>(
     sender: &Sender<P>,
     scope: &plakous_host_protocol::views::transcript::TranscriptScope,
@@ -103,11 +105,13 @@ pub struct TestExtension(pub String);
 /// for the tests that drive a host's sessions over wire v2.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ProbeIntent {
+    /// Request a usage projection from the independent product surface handler.
     InspectUsage,
 }
 /// Observation owned by the independent test driver.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ProbeObservation {
+    /// Confirms that the test driver's surface observed the correlated usage intent.
     UsageObserved,
 }
 impl plakous_host_protocol::ProtocolExtension for TestExtension {
@@ -481,6 +485,11 @@ pub fn doubles_shell_host<P: plakous_host_protocol::ProtocolExtension>()
 
 /// Installs an idle owned topology hub without dispatching any provider.
 #[allow(clippy::unwrap_used, reason = "deterministic topology fixture")]
+#[must_use]
+///
+/// # Panics
+/// Panics if the deterministic fixture cannot create its tree, freeze its roster or
+/// acquire its test-owned topology hub.
 pub fn install_idle_topology_hub(
     tree_id: &str,
     workspace: &std::path::Path,
@@ -508,6 +517,10 @@ pub fn install_idle_topology_hub(
     clippy::unwrap_used,
     reason = "deterministic test fixture construction"
 )]
+///
+/// # Panics
+/// Panics if fixture tree creation, child spawn or attachment fails; these are test setup
+/// failures, never provider refusals.
 pub async fn install_failing_child_shutdown(
     tree_id: &str,
     workspace: &std::path::Path,
@@ -599,6 +612,10 @@ impl crate::topology_runtime::LiveChildHandle for FailedShutdownChild {
     clippy::unwrap_used,
     reason = "deterministic test fixture construction"
 )]
+///
+/// # Panics
+/// Panics if fixture tree creation, child spawn or attachment fails before the
+/// deliberately hanging shutdown is installed.
 pub async fn install_hanging_child_shutdown(
     tree_id: &str,
     workspace: &std::path::Path,
@@ -691,6 +708,10 @@ pub async fn child_release_with_feed(
 }
 
 /// Loads a fixture child's live feed through the production tree reader.
+///
+/// # Errors
+/// Returns the scripted child runtime or session-store read failure; no live provider is
+/// contacted.
 pub async fn child_feed(
     sessions: &plakous::sessions::AgentSessions,
     session_id: plakous::model::SessionId,
@@ -702,11 +723,14 @@ pub async fn child_feed(
 
 /// An offline route registered through the production host's construction port.
 pub struct ScriptedRuntimeFactory {
+    /// Credential-free transport builder selected by construction role.
     pub runtime: Arc<dyn Fn(RuntimeRole) -> Result<SessionRuntimeBinding, String> + Send + Sync>,
+    /// Exact target identity this fixture attests for explicit successor bindings.
     pub rebind_target: SessionTargetBinding,
     /// An exact account/model whose profile transitions use this transport.
     /// `None` retains the unrestricted in-process fixture registration.
     pub profile_route: Option<Arc<ScriptedProfileRoute>>,
+    /// Workflow-cut observer used to coordinate deterministic fixture failures.
     pub observe: Arc<dyn Fn(HostWorkflow, HostBoundary) + Send + Sync>,
     /// A child's binding, given the real binder's scoped construction roots.
     /// `None` retains the real child route rather than borrowing another host's
@@ -767,6 +791,10 @@ impl ScriptedRuntimeFactory {
     }
 }
 
+///
+/// # Errors
+/// Returns the same host admission, publication and release failures as the production
+/// loop, using only the installed scripted route.
 pub fn run_scripted_host<P: plakous_host_protocol::ProtocolExtension>(
     mut config: HostConfig<P>,
     injection: Arc<ScriptedRuntimeFactory>,
@@ -827,6 +855,9 @@ use std::{any::Any, thread, time::Duration};
     clippy::expect_used,
     reason = "fixture access requires a registered scripted route"
 )]
+///
+/// # Panics
+/// Panics unless this configuration holds a scripted runtime factory.
 pub fn scripted<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
 ) -> &ScriptedRuntimeFactory {
@@ -838,6 +869,9 @@ pub fn scripted<P: plakous_host_protocol::ProtocolExtension>(
     clippy::expect_used,
     reason = "fixture mutation requires an exclusive scripted route"
 )]
+///
+/// # Panics
+/// Panics unless the factory is scripted and its Arc has no other owners.
 pub fn scripted_mut<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
 ) -> &mut ScriptedRuntimeFactory {
@@ -845,6 +879,10 @@ pub fn scripted_mut<P: plakous_host_protocol::ProtocolExtension>(
         .downcast_mut()
         .expect("scripted route")
 }
+///
+/// # Panics
+/// Panics unless the removed factory is scripted. The configuration already contains the
+/// production factory when the downcast is checked.
 pub fn take_scripted<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
 ) -> Arc<ScriptedRuntimeFactory> {
@@ -1368,6 +1406,7 @@ impl super::TurnObserver for ScriptedTurnObserver {
 }
 
 /// Constructs repository-only authority; no constructor exists in production builds.
+#[must_use]
 pub fn registered_authority(
     provider: plakous::subscriptions::NativeProvider,
 ) -> super::HostTargetAuthority {
@@ -1388,6 +1427,7 @@ struct ChildBindings {
     overrides: Vec<(u64, Arc<ScriptedChildBinding>)>,
 }
 impl SwitchableChildRuntime {
+    /// Create a fixture-owned base registration without changing any product roots.
     #[must_use]
     pub fn new(binding: Arc<ScriptedChildBinding>) -> Self {
         Self {
@@ -1398,6 +1438,8 @@ impl SwitchableChildRuntime {
             })),
         }
     }
+    /// Install this factory into owned roots; other roots and registrations remain
+    /// untouched. The returned roots retain an immutable factory handle.
     #[must_use]
     pub fn with_roots(
         &self,
@@ -1405,6 +1447,8 @@ impl SwitchableChildRuntime {
     ) -> crate::agent::ProductStateRoots {
         roots.with_child_runtime_factory(Arc::new(self.clone()))
     }
+    /// Override the base until the guard drops. Nested guards remove only their
+    /// own registration, never restore a stale snapshot of another override.
     #[must_use]
     pub fn install(&self, binding: Arc<ScriptedChildBinding>) -> ChildRuntimeGuard {
         let mut state = self

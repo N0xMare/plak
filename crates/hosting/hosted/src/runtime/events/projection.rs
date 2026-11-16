@@ -106,10 +106,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnProjection<P> {
         );
         let admits = reasoning_visibility_admits(bound.visibility());
         match self.reasoning.get(&key) {
-            Some(ReasoningLocation::Suppressed) => return None,
             // Already admitted at `BlockStarted`; a later bound cannot un-emit
             // what shipped, and must not cost the block its seal.
-            Some(ReasoningLocation::Admitted { .. }) => return None,
+            Some(ReasoningLocation::Suppressed | ReasoningLocation::Admitted { .. }) => {
+                return None;
+            }
             Some(ReasoningLocation::Pending { .. }) | None => {}
         }
         let previous = self.reasoning.remove(&key);

@@ -5,6 +5,7 @@ use crate::session_log::{SessionEvent, SessionLog};
 use crate::session_store::SessionRecordStore;
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{CancelUnsettled, HostPhase, HostStatusDetail};
+use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
 use plakous::agent::{AgentError, TurnControl, TurnResult, TurnResultOutcome};
@@ -252,7 +253,7 @@ pub(super) fn operator_facing_model_context_suffix(
 ) -> String {
     let mut suffix = String::new();
     if let Some(status) = context.http_status() {
-        suffix.push_str(&format!(" · HTTP {}", status.get()));
+        let _ = write!(suffix, " · HTTP {}", status.get());
     }
     if let Some(code) = context.provider_code() {
         suffix.push_str(" · provider code: ");

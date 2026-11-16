@@ -41,7 +41,7 @@ where
     ClientFrame<P>: serde::de::DeserializeOwned,
 {
     /// Resolves reservations made before `pause`: safely withdraw unclaimed
-    /// mailbox inputs with upgrading DraftRejected, then join already-claimed
+    /// mailbox inputs with upgrading `DraftRejected`, then join already-claimed
     /// inputs' normal durable verdicts and their write attempts. A disconnected
     /// attachment loses delivery, not the durable admission fact.
     ///

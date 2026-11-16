@@ -177,6 +177,10 @@ pub(crate) enum AcceptanceFact {
     Absent,
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the ledger consumes one acceptance fact at the delivery boundary"
+)]
 pub(crate) fn duplicate_consumed(
     fact: AcceptanceFact,
     retained_from: u64,

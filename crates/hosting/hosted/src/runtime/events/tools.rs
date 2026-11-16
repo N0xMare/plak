@@ -137,6 +137,10 @@ pub(in crate::runtime) struct StartedToolText {
 /// The subject and detail a tool row starts with, from the facts its start
 /// carries. The root's live path and an agent transcript read both call this,
 /// so a call reads the same in either.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "one tool-terminal projection consumes its process context"
+)]
 pub(in crate::runtime) fn started_tool_text(
     name: &str,
     exposed_name: Option<&str>,
@@ -926,18 +930,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                     milestone,
                 ))
             })
+            && let Ok(mut ids) = crate::runtime::tree::known_notice_ids(store, session)
         {
-            if let Ok(mut ids) = crate::runtime::tree::known_notice_ids(store, session) {
-                let _ = crate::runtime::tree::publish_notice_once(
-                    store,
-                    home,
-                    session,
-                    events,
-                    &mut ids,
-                    &id,
-                    sessions::TranscriptRow::Milestone(milestone),
-                );
-            }
+            let _ = crate::runtime::tree::publish_notice_once(
+                store,
+                home,
+                session,
+                events,
+                &mut ids,
+                &id,
+                sessions::TranscriptRow::Milestone(milestone),
+            );
         }
         // A `wait*` terminal that closed the last child re-terminalises the
         // marker's persisted row, so the `Completed` sweep never rewrites a

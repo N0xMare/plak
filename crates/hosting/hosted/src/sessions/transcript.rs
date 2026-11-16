@@ -429,6 +429,10 @@ impl ProductTranscript {
     }
 
     /// [`Self::upsert_tool`] of a bounded row under `call_id`.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "projection boundaries consume owned event facts rather than retaining borrowed inputs across settlement"
+    )]
     fn upsert_row(&mut self, row: TranscriptRow, call_id: String) -> bool {
         if let Some(index) = self.call_index(&call_id) {
             let size = row_bytes(&row);

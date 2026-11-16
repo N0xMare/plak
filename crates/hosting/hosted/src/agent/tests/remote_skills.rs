@@ -217,7 +217,7 @@ fn a_native_claude_profile_lists_and_reads_runner_home_skills()
         "{error}"
     );
     let large = user_root.join("runner-only/large.txt");
-    let mut body = vec![b'x'; plakous_tools::MAX_STANDARD_TEXT_BYTES as usize];
+    let mut body = vec![b'x'; usize::try_from(plakous_tools::MAX_STANDARD_TEXT_BYTES).unwrap()];
     body.extend_from_slice(b"\nsecond remote slice\n");
     std::fs::write(&large, body)?;
     let before = reads.load(Ordering::Relaxed);

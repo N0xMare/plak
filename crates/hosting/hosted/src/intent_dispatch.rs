@@ -84,7 +84,9 @@ impl IntentClass {
             UserAction::Interrupt => Self::Urgent,
             UserAction::Quit => Self::Quit,
             UserAction::StopSession { .. } => Self::Stop,
-            UserAction::ReleaseForReopen { .. } => Self::IdleOnly { noun: "binding" },
+            UserAction::ReleaseForReopen { .. } | UserAction::RetryAttach => {
+                Self::IdleOnly { noun: "binding" }
+            }
             UserAction::NewSession => Self::IdleOnly {
                 noun: "new session",
             },
@@ -96,7 +98,6 @@ impl IntentClass {
             UserAction::InvokeTool { .. } => Self::IdleOnly {
                 noun: "invoke_tool",
             },
-            UserAction::RetryAttach => Self::IdleOnly { noun: "binding" },
             UserAction::Recover => Self::IdleOnly { noun: "recover" },
             UserAction::Prompt(_)
             | UserAction::FollowUp(_)

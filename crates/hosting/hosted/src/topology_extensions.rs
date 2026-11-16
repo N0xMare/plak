@@ -22,6 +22,10 @@ use crate::tools::ProductToolExtensions;
 /// runtime's own ports (`agent/build.rs`); this is the bare-tree convenience
 /// the prompt goldens and unit tests drive.
 #[cfg(any(test, feature = "test-support"))]
+///
+/// # Errors
+/// Refuses an invalid caller/grant or a noneligible/duplicate compiled registration
+/// before returning the extension set.
 pub fn topology_tool_extensions(
     tree: Arc<Mutex<ProductAgentTree>>,
     caller_id: impl Into<String>,
@@ -32,6 +36,10 @@ pub fn topology_tool_extensions(
 /// [`topology_tool_extensions`] with the await and interrupt slots spelled in
 /// `vocabulary` (Grok's output and kill tools on a Grok node).
 #[cfg(any(test, feature = "test-support"))]
+///
+/// # Errors
+/// Refuses caller/grant compilation or extension registration failures under the exact
+/// supplied tool vocabulary.
 pub fn topology_tool_extensions_in(
     tree: Arc<Mutex<ProductAgentTree>>,
     caller_id: impl Into<String>,

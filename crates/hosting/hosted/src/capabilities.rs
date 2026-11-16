@@ -67,7 +67,7 @@ pub struct RouteCapability {
     pub(crate) aliases: &'static [&'static str],
     /// Authentication and model-construction family, never a fallback order.
     pub kind: RouteKind,
-    /// OpenRouter resolves its wire from the explicit selection instead.
+    /// `OpenRouter` resolves its wire from the explicit selection instead.
     pub(crate) protocol: Option<ResolvedProtocol>,
     pub(crate) catalog_label: &'static str,
     pub(crate) native_ptc_refusal: &'static str,
@@ -82,11 +82,13 @@ pub struct RouteCapability {
 impl RouteCapability {
     /// Compiled review-window deadline as Unix seconds, absent when the route
     /// supplies no review deadline. Reading it neither refreshes nor admits it.
+    #[must_use]
     pub fn review_deadline(&self) -> Option<u64> {
         (self.review_deadline)()
     }
 
     /// Native identity only for subscription routes, never an API alias.
+    #[must_use]
     pub const fn native_provider(&self) -> Option<NativeProvider> {
         match self.kind {
             RouteKind::Native(provider) => Some(provider),
@@ -95,6 +97,7 @@ impl RouteCapability {
     }
 
     /// Direct API identity only; gateway and subscription routes return `None`.
+    #[must_use]
     pub const fn platform_provider(&self) -> Option<PlatformProvider> {
         match self.kind {
             RouteKind::Platform(provider) => Some(provider),
@@ -132,6 +135,7 @@ const fn same_id(left: &str, right: &str) -> bool {
 
 /// Parse an exact default or named account and return its route, including
 /// omitted routes. Invalid identities return `None`; credentials are not read.
+#[must_use]
 pub fn for_account(account: &str) -> Option<&'static RouteCapability> {
     account
         .parse::<crate::account::AccountRef>()
@@ -141,6 +145,7 @@ pub fn for_account(account: &str) -> Option<&'static RouteCapability> {
 
 /// Find a known native identity without checking build availability. An
 /// unregistered identity returns `None`, never another provider's entry.
+#[must_use]
 pub const fn for_native(provider: NativeProvider) -> Option<&'static RouteCapability> {
     let mut index = 0;
     while index < ROUTES.len() {

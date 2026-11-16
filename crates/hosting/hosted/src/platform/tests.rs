@@ -400,7 +400,7 @@ fn openai_api_code_mode_table_matches_the_codex_reference_catalog() {
     }
 }
 
-/// The OpenAI and xAI API routes configure exactly the tools (names, schemas
+/// The `OpenAI` and xAI API routes configure exactly the tools (names, schemas
 /// and descriptions) their OAuth vertical configures for the same model and
 /// composition: the pack without the costume.
 #[test]
@@ -466,7 +466,7 @@ fn api_routes_configure_their_oauth_pack_tools() {
     }
 }
 
-/// Code Mode on the OpenAI API needs the JavaScript host: with no sidecar the
+/// Code Mode on the `OpenAI` API needs the JavaScript host: with no sidecar the
 /// construction fails naming it, before any session exists.
 #[tokio::test]
 async fn openai_api_native_ptc_without_the_javascript_host_names_the_sidecar() {
@@ -612,7 +612,7 @@ async fn openai_api_native_ptc_creates_and_reopens_from_the_enrolled_table() {
     }
 }
 
-/// An OpenAI API Direct session bound under another pack (the generic pi
+/// An `OpenAI` API Direct session bound under another pack (the generic pi
 /// tools, projection and base under the unchanged
 /// `plak.openai.responses.direct.v1` profile id, as before the API routes wore
 /// the Codex pack) does not reopen under the Codex-pack runtime: the reopen
@@ -872,16 +872,15 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
         construct_platform_runtime(provider, &Credentials("fixture-key-one"), &spec, None)
             .await
             .unwrap();
-    let error = match sessions
+    let Err(error) = sessions
         .open(OpenSessionRequest::new(
             SessionOperationId::new("fixture:pre-pack:reopen").unwrap(),
             locator,
             runtime,
         ))
         .await
-    {
-        Ok(_) => panic!("a pre-pack OpenAI API session reopened under the Codex pack"),
-        Err(error) => error,
+    else {
+        panic!("a pre-pack OpenAI API session reopened under the Codex pack")
     };
     assert_eq!(
         error.kind(),
@@ -1183,15 +1182,14 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
         construct_platform_runtime(provider, &Credentials("fixture-key-one"), &spec, None)
             .await
             .unwrap();
-    let create_error = match sessions
+    let Err(create_error) = sessions
         .create(CreateSessionRequest::new(
             SessionOperationId::new("fixture:pre-w3b:admit").unwrap(),
             admitted,
         ))
         .await
-    {
-        Ok(_) => panic!("a Grok Direct create presenting wait_agent was admitted"),
-        Err(error) => error,
+    else {
+        panic!("a Grok Direct create presenting wait_agent was admitted")
     };
     assert_eq!(
         create_error.kind(),
@@ -1226,16 +1224,15 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
         construct_platform_runtime(provider, &Credentials("fixture-key-one"), &spec, None)
             .await
             .unwrap();
-    let error = match sessions
+    let Err(error) = sessions
         .open(OpenSessionRequest::new(
             SessionOperationId::new("fixture:pre-w3b:reopen").unwrap(),
             locator,
             runtime,
         ))
         .await
-    {
-        Ok(_) => panic!("a legacy Grok session reopened under the claimed vocabulary"),
-        Err(error) => error,
+    else {
+        panic!("a legacy Grok session reopened under the claimed vocabulary")
     };
     assert_eq!(
         error.kind(),
@@ -1535,16 +1532,15 @@ async fn pre_w3_b_grok_ptc_session_reopen_fails_closed() {
             construct_platform_runtime(provider, &Credentials("fixture-key-one"), &spec, None)
                 .await
                 .unwrap();
-        let error = match sessions
+        let Err(error) = sessions
             .open(OpenSessionRequest::new(
                 SessionOperationId::new("fixture:pre-w3b-ptc:reopen").unwrap(),
                 locator,
                 runtime,
             ))
             .await
-        {
-            Ok(_) => panic!("{composition:?}: a legacy Grok hub reopened"),
-            Err(error) => error,
+        else {
+            panic!("{composition:?}: a legacy Grok hub reopened")
         };
         assert_eq!(
             error.kind(),

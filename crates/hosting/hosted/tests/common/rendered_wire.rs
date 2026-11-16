@@ -11,6 +11,7 @@
 )]
 pub(crate) mod suite {
     use std::collections::{BTreeMap, BTreeSet};
+    use std::fmt::Write as _;
     use std::num::NonZeroU32;
     use std::path::Path;
 
@@ -308,7 +309,8 @@ pub(crate) mod suite {
         let protocol = match spec.provider {
             prompts::ProviderKind::Codex => OPENAI_CODEX_RESPONSES_PROTOCOL_ID,
             prompts::ProviderKind::Grok => "xai.responses.grok-subscription.2026-07",
-            prompts::ProviderKind::Claude => "anthropic.messages",
+            prompts::ProviderKind::Claude
+            | prompts::ProviderKind::Platform(PlatformProvider::Anthropic) => "anthropic.messages",
             prompts::ProviderKind::OpenRouter {
                 wire: ProductResolvedProtocol::Chat,
             } => OPENROUTER_CHAT_PROTOCOL_ID,
@@ -324,7 +326,6 @@ pub(crate) mod suite {
             prompts::ProviderKind::Platform(PlatformProvider::Xai) => {
                 "xai.platform.responses.2026-08"
             }
-            prompts::ProviderKind::Platform(PlatformProvider::Anthropic) => "anthropic.messages",
         };
         let family = match spec.provider {
             prompts::ProviderKind::Codex
@@ -758,7 +759,7 @@ pub(crate) mod suite {
             Some(b'{') => pretty_object(src, index, indent, out),
             Some(b'[') => pretty_array(src, index, indent, out),
             Some(b'"') => out.push_str(&take_string(src, index)),
-            Some(b't') | Some(b'f') | Some(b'n') | Some(b'-') | Some(b'0'..=b'9') => {
+            Some(b't' | b'f' | b'n' | b'-' | b'0'..=b'9') => {
                 out.push_str(&take_atom(src, index));
             }
             other => panic!("unexpected json at {index}: {other:?}"),
@@ -902,7 +903,7 @@ pub(crate) mod suite {
                 '\t' => out.push_str("\\t"),
                 ch if ch.is_control() => {
                     let code = ch as u32;
-                    out.push_str(&format!("\\u{code:04x}"));
+                    let _ = write!(out, "\\u{code:04x}");
                 }
                 ch => out.push(ch),
             }
@@ -1031,7 +1032,7 @@ pub(crate) mod suite {
     /// the agent's `harness_compaction_prefix_matches_rendered_summary_request_contract`
     /// test compares it with production, including a nonempty tool projection.
     /// The input shape follows production too: a trailing User item with
-    /// UserInput provenance in a RecentIntent segment, with default working.
+    /// `UserInput` provenance in a `RecentIntent` segment, with default working.
     fn compaction_model_request(turn: &ModelRequest) -> ModelRequest {
         let source = turn.stable_prefix();
         let bound = plakous_model::semantic_compaction_output_bound(
@@ -1192,7 +1193,7 @@ pub(crate) mod suite {
     /// What the summary request on one wire must carry, per design: the
     /// instruction as the last user message, tools kept with selection
     /// withdrawn (or both omitted where the Chat policy says so), the
-    /// compaction output bound, the turn's reasoning, OpenRouter's plugins and
+    /// compaction output bound, the turn's reasoning, `OpenRouter`'s plugins and
     /// parameter requirement, and the Messages cache breakpoint on the last
     /// message.
     fn compaction_wire_failures(
@@ -1410,11 +1411,10 @@ pub(crate) mod suite {
                 continue;
             };
             for item in items {
-                if item.get("role").and_then(Value::as_str) == Some("user") {
-                    if let Some(text) = message_text(item).or_else(|| responses_message_text(item))
-                    {
-                        return Some(text.to_owned());
-                    }
+                if item.get("role").and_then(Value::as_str) == Some("user")
+                    && let Some(text) = message_text(item).or_else(|| responses_message_text(item))
+                {
+                    return Some(text.to_owned());
                 }
             }
         }
@@ -1451,11 +1451,10 @@ pub(crate) mod suite {
                         .get("id")
                         .and_then(Value::as_str)
                         .is_some_and(|id| id.starts_with("msg_"));
-                if role == Some("system") || codex_instructions {
-                    if let Some(text) = message_text(item).or_else(|| responses_message_text(item))
-                    {
-                        texts.push(text.to_owned());
-                    }
+                if (role == Some("system") || codex_instructions)
+                    && let Some(text) = message_text(item).or_else(|| responses_message_text(item))
+                {
+                    texts.push(text.to_owned());
                 }
             }
         }
@@ -1537,10 +1536,8 @@ pub(crate) mod suite {
             enrolled_source_bytes += removed;
             instruction_text.push_str(&stripped);
         }
-        let tool_bytes = top_level_member_slice(compact, "tools")
-            .map(str::len)
-            .unwrap_or(0);
-        let assignment_bytes = first_user_turn(body).map(|text| text.len()).unwrap_or(0);
+        let tool_bytes = top_level_member_slice(compact, "tools").map_or(0, str::len);
+        let assignment_bytes = first_user_turn(body).map_or(0, |text| text.len());
         HarnessFootprint {
             instruction_bytes: instruction_text.len(),
             tool_bytes,

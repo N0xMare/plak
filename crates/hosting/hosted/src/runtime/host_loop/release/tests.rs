@@ -312,9 +312,8 @@ fn failed_projection_with_a_stale_head_names_debt_without_recovery_loop() {
             },
         ));
         let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let error = match RootActor::open_blocking(config, &rx, Sender::over(tx), None) {
-            Ok(_) => panic!("a stale head opened despite failed projection"),
-            Err(error) => error,
+        let Err(error) = RootActor::open_blocking(config, &rx, Sender::over(tx), None) else {
+            panic!("a stale head opened despite failed projection")
         };
         assert!(!error.is_recovery_required(), "{error}");
         assert!(

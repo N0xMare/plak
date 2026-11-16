@@ -102,6 +102,10 @@ pub(super) enum SourceRelease {
     Shutdown,
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the release task owns its sender for the complete asynchronous release lifetime"
+)]
 pub(super) fn release_source_attachment<P: plakous_host_protocol::ProtocolExtension>(
     previous: AttachedCodingSession,
     source_id: String,

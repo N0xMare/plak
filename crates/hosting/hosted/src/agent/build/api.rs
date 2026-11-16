@@ -56,6 +56,10 @@ pub(crate) struct ApiRuntimeSpec<'a> {
 }
 
 #[allow(
+    clippy::needless_pass_by_value,
+    reason = "API construction owns the frozen tool registry for the runtime being compiled"
+)]
+#[allow(
     clippy::too_many_lines,
     reason = "API runtime construction joins route admission, tool compilation, composition attachment, and topology ownership before returning one binding."
 )]
@@ -490,7 +494,7 @@ pub(crate) fn code_mode_nested_names(surface: &CompiledSurface) -> Vec<plakous::
 ///
 /// The agent revalidates the request policy against the effective provider
 /// behavior, so the bound has to come from the same place the behavior got it.
-/// A route that derives its own bound from discovery, as OpenRouter does, would
+/// A route that derives its own bound from discovery, as `OpenRouter` does, would
 /// otherwise disagree with a product constant read here and the session would
 /// refuse to initialize before any dispatch. One reader, one value.
 pub(crate) fn behavior_generation_limits(
@@ -667,7 +671,7 @@ mod tests {
     }
 
     /// `native-ptc` is refused before any non-Codex pack's base is chosen:
-    /// the Anthropic and xAI APIs and OpenRouter never fall through to their
+    /// the Anthropic and xAI APIs and `OpenRouter` never fall through to their
     /// Direct base under it.
     #[test]
     fn native_ptc_is_refused_before_a_non_codex_base() {

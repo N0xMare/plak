@@ -86,6 +86,7 @@ use events::{
 };
 /// Repository-only bounded restore projection preserving the supplied keys.
 #[doc(hidden)]
+#[must_use]
 pub fn rehearse_presentation_snapshot(
     items: Vec<plakous_host_protocol::views::transcript::TranscriptItem>,
 ) -> plakous_host_protocol::views::presentation::PresentationSnapshot {
@@ -218,8 +219,9 @@ pub use binding_document::{
 pub use clear::clear_session_rebuild;
 pub(crate) use host_loop::publication::RECOVERY_PENDING_NOTE;
 pub use info::effort_label;
+use models::native_compact_facet;
 pub use models::{
-    effort_from_config, effort_from_record, native_compact_facet, oauth_provider_for_account,
+    effort_from_config, effort_from_record, oauth_provider_for_account,
     ready_catalog_model_needs_effort,
 };
 pub use oneshot::{OneShot, OneShotOutcome, RunBounds};
@@ -323,12 +325,6 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     recorded: Option<Arc<std::sync::Mutex<Vec<ContentEvent<P>>>>>,
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> std::fmt::Debug for Sender<P> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("Sender").finish_non_exhaustive()
-    }
-}
-
 /// The correlation one `IntentStarted` carried.
 #[derive(Clone, Eq, PartialEq)]
 struct Started(Option<String>);
@@ -379,6 +375,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
     ///     upserts: Vec::new(), deletes: Vec::new(),
     /// }));
     /// ```
+    #[cfg_attr(
+        test,
+        allow(
+            clippy::missing_panics_doc,
+            reason = "only unit-test recording can panic on a poisoned fixture mutex"
+        )
+    )]
     pub fn send(&self, value: ContentEvent<P>) -> bool {
         #[cfg(test)]
         if let Some(recorded) = &self.recorded {
@@ -735,42 +738,19 @@ pub enum HostTargetAuthority {
 #[derive(Clone, Debug)]
 pub struct RegisteredRuntimeAuthority(());
 
-impl std::fmt::Debug for HostTargetAuthority {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Native { provider, .. } => formatter
-                .debug_struct("Native")
-                .field("provider", provider)
-                .finish_non_exhaustive(),
-            Self::Platform { provider, .. } => formatter
-                .debug_struct("Platform")
-                .field("provider", provider)
-                .finish_non_exhaustive(),
-            Self::OpenRouter { .. } => formatter.debug_struct("OpenRouter").finish_non_exhaustive(),
-            Self::Registered { provider, .. } => formatter
-                .debug_struct("Registered")
-                .field("provider", provider)
-                .finish_non_exhaustive(),
-        }
-    }
-}
-
 impl HostTargetAuthority {
     const fn native_provider(&self) -> Option<NativeProvider> {
         match self {
-            Self::Native { provider, .. } => Some(*provider),
             Self::OpenRouter { .. } | Self::Platform { .. } => None,
 
-            Self::Registered { provider, .. } => Some(*provider),
+            Self::Native { provider, .. } | Self::Registered { provider, .. } => Some(*provider),
         }
     }
 
     fn native_resolved(&self) -> Option<&Arc<ResolvedProvider>> {
         match self {
             Self::Native { resolved, .. } => Some(resolved),
-            Self::OpenRouter { .. } | Self::Platform { .. } => None,
-
-            Self::Registered { .. } => None,
+            Self::OpenRouter { .. } | Self::Platform { .. } | Self::Registered { .. } => None,
         }
     }
 
@@ -798,16 +778,6 @@ pub struct OpenRouterHostEvidence {
     evidence: crate::openrouter::OpenRouterChatModelEvidence,
 }
 
-impl std::fmt::Debug for OpenRouterHostEvidence {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("OpenRouterHostEvidence")
-            .field("literal_model", &self.literal_model)
-            .field("wire", &self.wire)
-            .finish_non_exhaustive()
-    }
-}
-
 impl OpenRouterHostEvidence {
     fn matches(&self, literal_model: &str, wire: crate::binding::ResolvedProtocol) -> bool {
         self.literal_model == literal_model && self.wire == wire
@@ -815,6 +785,10 @@ impl OpenRouterHostEvidence {
 }
 
 /// Configuration for a hosted multi-turn session.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "these independent host policy and settlement facts are not mutually exclusive states"
+)]
 pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host_protocol::Core> {
     /// The product home this session belongs to, as a fact.
     ///
@@ -1045,16 +1019,6 @@ pub(super) fn production_carry_input_window<P: plakous_host_protocol::ProtocolEx
     crate::openrouter::carry_input_window(config)
 }
 
-impl<P: plakous_host_protocol::ProtocolExtension> std::fmt::Debug for HostConfig<P> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("HostConfig")
-            .field("target", &self.target)
-            .field("model_id", &self.model_id)
-            .finish_non_exhaustive()
-    }
-}
-
 impl<P: plakous_host_protocol::ProtocolExtension> HostConfig<P> {
     pub(crate) fn prompt_host_facts(&self) -> plakous_host_protocol::PromptHostFacts {
         plakous_host_protocol::PromptHostFacts {
@@ -1098,15 +1062,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostConfig<P> {
     }
 }
 
-/// Wall-clock phases before the host loop opens the canonical session.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ReadyPathTiming {
-    /// `tui_presentation_bundle` (persisted catalogs, no live GET).
-    pub presentation_ms: u64,
-    /// `build_host_config` including Codex/Grok attach catalog HTTP.
-    pub resolve_ms: u64,
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct ProcessResources {
     rss_kb: u64,
@@ -1115,70 +1070,13 @@ struct ProcessResources {
     fds: u64,
 }
 
-/// Content-free process resource snapshot for telemetry (Linux + macOS).
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ProcessResourceSnapshot {
-    /// Current resident bytes, absent when the platform probe cannot supply them.
-    pub rss_bytes: Option<u64>,
-    /// Peak resident bytes observed by the OS, not a host-enforced memory limit.
-    pub peak_rss_bytes: Option<u64>,
-    /// Process user-mode CPU time accumulated at the snapshot.
-    pub user_cpu: Duration,
-    /// Process kernel CPU time accumulated at the snapshot.
-    pub system_cpu: Duration,
-    /// Live thread count, absent when unavailable.
-    pub threads: Option<u64>,
-    /// Open descriptor count, absent when unavailable.
-    pub fds: Option<u64>,
-}
-
-/// Purpose of a runtime construction, not an independent execution owner.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RuntimeRole {
-    /// Construct the session's ordinary root turn binding.
-    Primary,
-    /// Construct the one paid compaction binding for an admitted operation.
-    Compact,
-    /// Recompile an explicit successor binding without silently changing the source.
-    Rebind,
-}
+mod debug;
+mod lifecycle;
+pub use lifecycle::{
+    HostBoundary, HostWorkflow, ProcessResourceSnapshot, ReadyPathTiming, RuntimeRole,
+};
 
 use HostTransitionStage as HostLifecyclePhase;
-
-/// Workflow identity attached to host lifecycle observations and test crash cuts.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HostWorkflow {
-    /// Delivery of a queued root prompt to canonical admission.
-    RootDelivery,
-    /// Immediate operator send using the current turn's control path.
-    SendNow,
-    /// Construction and publication of a forked session.
-    Fork,
-    /// Explicit successor construction under a new bound tuple.
-    Rebind,
-    /// One paid compaction dispatch and its product publication.
-    Compact,
-    /// A switched-away attachment, after its runtime release.
-    SourceRelease,
-    /// A seeded create (a carry or an import): `Prepared` before its runtime
-    /// create, `RuntimeReturned` after it and before the record save.
-    SeededCreate,
-}
-
-/// Observable workflow boundary; observing it grants no mutation or replay authority.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HostBoundary {
-    /// Product preparation has completed before the canonical runtime call.
-    Prepared,
-    /// Canonical runtime work returned, before product-side publication.
-    RuntimeReturned,
-    /// Product projection or receipt was published for the workflow.
-    ProductPublished,
-    /// Product-side durable commit completed.
-    ProductCommitted,
-    /// The host has the workflow's authoritative terminal result ready.
-    TerminalReady,
-}
 
 /// Scripted prompt that deterministically races completion with an accepted quit.
 #[cfg(any(test, feature = "test-support"))]
@@ -1270,7 +1168,7 @@ enum NativeSubscriptionRefresh {
     TimedOut,
 }
 
-/// Pending tool row info stashed from model ToolCall blocks before ToolStarted.
+/// Pending tool row info stashed from model `ToolCall` blocks before `ToolStarted`.
 #[derive(Clone, Debug)]
 struct PendingToolInfo {
     subject: String,
@@ -1293,7 +1191,7 @@ struct ToolSubjectStash {
     by_call_id: HashMap<String, (String, PendingToolInfo)>,
 }
 
-/// Shell-only host when the OAuth agent cannot attach (NO_AUTH / AUTH_ONLY).
+/// Shell-only host when the OAuth agent cannot attach (`NO_AUTH` / `AUTH_ONLY`).
 ///
 /// Handles a profile's Use now and session binding. Product prompts are
 /// refused until the TUI reattaches (automatically after Use now, or on an
@@ -1308,13 +1206,15 @@ pub struct ShellHostConfig<
     pub binding: Arc<dyn RootBindingDocument>,
     /// The product's native-subscription service, when it has one.
     pub subscriptions: Option<NativeSubscriptions>,
-    /// The OpenRouter credential the Usage surface's fourth vertical probes.
+    /// The `OpenRouter` credential the Usage surface's fourth vertical probes.
     pub openrouter_credentials: Arc<dyn crate::openrouter::OpenRouterCredentials>,
     /// Where this session's event log lives.
     pub home: SessionHome,
     /// The port the shell's session record is saved through.
     pub store: Arc<dyn SessionRecordStore>,
+    /// Unattached product record; owning it does not own a canonical runtime.
     pub session: SessionRecord,
+    /// Frozen launch workspace for product binding and presentation.
     pub cwd: PathBuf,
     /// Typed detached reason; frontends own its status and repair text.
     pub reason: DetachedReason,
@@ -1345,6 +1245,10 @@ pub trait ShellHostRunner<P: plakous_host_protocol::ProtocolExtension = plakous_
     fn fallback_facts(&self) -> ShellFallbackFacts<P>;
 
     /// Run the shell host to completion on the calling thread.
+    ///
+    /// # Errors
+    /// Returns product shell failures, including binding publication or session-record
+    /// persistence failures; the implementation owns their rollback ordering.
     fn run(
         self: Box<Self>,
         config: ShellHostConfig<P>,
@@ -1358,9 +1262,13 @@ pub trait ShellHostRunner<P: plakous_host_protocol::ProtocolExtension = plakous_
 pub struct ShellFallbackFacts<
     P: plakous_host_protocol::ProtocolExtension = plakous_host_protocol::Core,
 > {
+    /// Separate product handler because the attached host owns its original handler.
     pub surface: Surface<P>,
+    /// Product-owned configuration publication authority, not a runtime binding.
     pub binding: Arc<dyn RootBindingDocument>,
+    /// Optional subscription service used for readiness and allowance inspection.
     pub subscriptions: Option<NativeSubscriptions>,
+    /// Exact-account gateway credential port for the fallback's product surfaces.
     pub openrouter_credentials: Arc<dyn crate::openrouter::OpenRouterCredentials>,
 }
 
@@ -1368,7 +1276,9 @@ pub struct ShellFallbackFacts<
 pub struct HostLaunchPreparation<
     P: plakous_host_protocol::ProtocolExtension = plakous_host_protocol::Core,
 > {
+    /// Provider readiness rows resolved before selecting a host mode.
     pub providers: Vec<plakous_host_protocol::views::ProviderDef>,
+    /// Exactly one attached or detached host shape, not two simultaneous owners.
     pub mode: HostLaunchMode<P>,
     /// Product-owned background work started once the host is up (the live
     /// catalog refresh); it receives the content-only Sender boundary, never
@@ -1395,7 +1305,9 @@ pub struct HostLaunchPreparation<
     reason = "one value, moved once into the host thread; boxing buys nothing"
 )]
 pub enum HostLaunchMode<P: plakous_host_protocol::ProtocolExtension = plakous_host_protocol::Core> {
+    /// Drive the admitted canonical attachment and its product record.
     Attached(HostConfig<P>),
+    /// Serve product settings and binding intents without a canonical attachment.
     Shell(ShellHostConfig<P>),
 }
 
@@ -1448,7 +1360,7 @@ enum RebindRoute {
         resolved: Option<Arc<ResolvedProvider>>,
         spec: Option<Box<ProductAgentSpec>>,
     },
-    /// A direct API account or OpenRouter, built from the target's own
+    /// A direct API account or `OpenRouter`, built from the target's own
     /// product record.
     Api(Box<SessionRecord>),
 }

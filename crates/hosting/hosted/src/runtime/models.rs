@@ -5,7 +5,8 @@ use plakous::subscriptions::NativeProvider;
 
 use crate::{CliFailure, CliResult};
 
-pub const fn native_compact_facet(provider: NativeProvider) -> bool {
+#[must_use]
+pub(super) const fn native_compact_facet(provider: NativeProvider) -> bool {
     matches!(provider, NativeProvider::Codex)
 }
 
@@ -21,6 +22,7 @@ pub use crate::binding::oauth_provider_for_account;
 /// `none`. Returns `(effort, explicit)`. When unset or unknown, effort is
 /// Medium for wire fallback only — callers must treat `explicit == false` as
 /// “operator has not chosen”. Unknown text is not `none`.
+#[must_use]
 pub fn effort_from_config(value: Option<&str>) -> (ReasoningEffort, bool) {
     let Some(value) = value else {
         return (ReasoningEffort::Medium, false);
@@ -40,9 +42,13 @@ pub fn effort_from_config(value: Option<&str>) -> (ReasoningEffort, bool) {
 /// The effort a persisted session record stored, or `None` when the record
 /// left it unset.
 ///
-/// Every route uses this, not only OpenRouter. An unknown spelling is refused:
+/// Every route uses this, not only `OpenRouter`. An unknown spelling is refused:
 /// reconstructing it as a default would send a different effort than the one
 /// that was saved.
+///
+/// # Errors
+/// Refuses an unknown saved effort token rather than silently reconstructing the provider
+/// default.
 pub fn effort_from_record(value: Option<&str>) -> CliResult<Option<ReasoningEffort>> {
     let Some(value) = value else {
         return Ok(None);
@@ -56,6 +62,9 @@ pub fn effort_from_record(value: Option<&str>) -> CliResult<Option<ReasoningEffo
     Ok(Some(effort))
 }
 
+#[must_use]
+/// Whether the exact ready account/model row offers an effort ladder. `None`
+/// means no admitted row was found, not permission to borrow another account's row.
 pub fn ready_catalog_model_needs_effort(
     ready_catalog: &[plakous_host_protocol::views::ProviderSection],
     account: &str,

@@ -37,6 +37,10 @@ pub enum ApiToolMode {
 /// enrolled tool mode, and `native-ptc` (the vertical's own PTC system) is
 /// admitted only where it is enrolled: Codex Code Mode on a `CodeModeOnly`
 /// `openai` API row. The result is never `FollowCatalog`.
+///
+/// # Errors
+/// Refuses explicit native programmatic tools on a model not enrolled for that tool mode.
+/// It never substitutes another evaluator.
 pub fn api_composition(
     provider: PlatformProvider,
     model: &str,

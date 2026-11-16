@@ -84,6 +84,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnHost<'_, P> {
     }
 }
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "these independent host policy and settlement facts are not mutually exclusive states"
+)]
 struct RootTurn<'a, P: plakous_host_protocol::ProtocolExtension> {
     turn_observer: Option<Box<dyn TurnObserver>>,
     host: TurnHost<'a, P>,
@@ -336,11 +340,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
     }
 
     fn urgent(&self) -> impl Future<Output = RootWake> {
-        let sleep = tokio::time::sleep(
-            self.quit_join_deadline
-                .map(|deadline| deadline.saturating_duration_since(Instant::now()))
-                .unwrap_or(Duration::MAX),
-        );
+        let sleep = tokio::time::sleep(self.quit_join_deadline.map_or(Duration::MAX, |deadline| {
+            deadline.saturating_duration_since(Instant::now())
+        }));
         async move {
             sleep.await;
             RootWake::QuitDeadline

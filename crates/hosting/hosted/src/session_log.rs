@@ -71,6 +71,7 @@ impl SessionEvent {
     }
 
     /// Append a text field; encoding, not this builder, bounds its size.
+    #[must_use]
     pub fn str(mut self, key: &str, value: impl Into<String>) -> Self {
         self.fields
             .push((key.to_owned(), JsonVal::Str(value.into())));
@@ -223,6 +224,10 @@ impl SessionLog {
     /// Refuses invalid session ids, exhausted sequence numbers, oversized
     /// records, lock timeouts and filesystem failures. It grants no retry or
     /// recovery authority over the session's canonical history.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "the append boundary consumes one event; retaining it would suggest replaying an observational append"
+    )]
     pub fn append_for(&self, session_id: &str, event: SessionEvent) -> Result<(), String> {
         canonical_product_session_id(session_id)?;
         let mut state = self.state.borrow_mut();
@@ -871,8 +876,7 @@ fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
 fn unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-        .unwrap_or(0)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
 fn bounded_string(value: &str) -> String {

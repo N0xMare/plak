@@ -154,10 +154,10 @@ pub(super) async fn release_after_settlement(
         .await
         .map_err(|error| CliFailure::new(error.to_string()));
     released?;
-    if let Err(error) = stopped {
-        if !retained {
-            return Err(error);
-        }
+    if let Err(error) = stopped
+        && !retained
+    {
+        return Err(error);
     }
     Ok(())
 }

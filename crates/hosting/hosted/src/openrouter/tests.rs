@@ -625,7 +625,7 @@ async fn default_enabled_reasoning_disable_admits_messages_not_chat_without_reas
     );
 }
 
-/// Every OpenRouter protocol wears the pi pack: pi 1.1.0's four tools plus
+/// Every `OpenRouter` protocol wears the pi pack: pi 1.1.0's four tools plus
 /// `wait` and `stop`, no search, plan or image tool.
 #[test]
 fn every_openrouter_protocol_wears_the_six_tool_pi_pack() {
@@ -667,7 +667,7 @@ fn every_openrouter_protocol_wears_the_six_tool_pi_pack() {
     }
 }
 
-/// An OpenRouter root granted agent tools presents its await and
+/// An `OpenRouter` root granted agent tools presents its await and
 /// interrupt as pi's `wait` and `stop`: the tree's capability claims the
 /// pack's process-only entries of the same names, nothing is presented
 /// twice, `wait_agent` and `interrupt_agent` are absent, and the claimed
@@ -906,7 +906,7 @@ fn host_environment(workspace: &Path) -> Arc<plakous_tools::ExecutionEnvironment
     )
 }
 
-/// Pi's `wait` and `stop` on an OpenRouter hub run through the compiled
+/// Pi's `wait` and `stop` on an `OpenRouter` hub run through the compiled
 /// hub projection and the tree's own tool (spec 03 §4.4): a Direct `wait`
 /// naming a child is the await in the topology envelope, a bare `wait`
 /// with nothing pending is the process tool's bare await, and a `stop` on
@@ -1437,7 +1437,7 @@ async fn endpoint_churn_within_a_rung_does_not_move_the_derived_bound() {
 /// The agent revalidates the policy it is handed against
 /// `effective_request_policy(configuration)`, which reads
 /// `behavior.output_bound`. When the hosted side built its limits from
-/// `NATIVE_RUN_MAX_OUTPUT_TOKENS` instead, every OpenRouter route failed
+/// `NATIVE_RUN_MAX_OUTPUT_TOKENS` instead, every `OpenRouter` route failed
 /// with "effective provider behavior disagrees with the agent request
 /// policy" before any dispatch. Both sides now read the behavior.
 #[tokio::test]
@@ -1559,7 +1559,7 @@ async fn the_session_request_policy_follows_the_route_bound_not_the_constant() {
     assert_ne!(bound.get(), NATIVE_RUN_MAX_OUTPUT_TOKENS);
 }
 
-/// The DeepSeek V4 Flash shape from the Harbor bakeoff: a large window and
+/// The `DeepSeek` V4 Flash shape from the Harbor bakeoff: a large window and
 /// a large attested completion budget. It still admits, and it no longer
 /// gets 4,096.
 #[tokio::test]
@@ -1909,7 +1909,7 @@ fn pi_hub_context_contract(
 
 /// The pi hub admission path, offline: the product's own registry, behavior,
 /// runtime binding and `ProductProjectionAdmission` over a loopback-route
-/// OpenRouter Chat model.
+/// `OpenRouter` Chat model.
 async fn pi_hub_local(
     composition: CompositionSelection,
     spawned_child: bool,
@@ -2111,7 +2111,7 @@ async fn pi_hub_local(
     result
 }
 
-/// An OpenRouter hub with the WaitStop vocabulary creates and reopens
+/// An `OpenRouter` hub with the `WaitStop` vocabulary creates and reopens
 /// through projection admission and `AgentSessions`, offline. Every
 /// composition meets every occupancy fence, and the root/spawned-child axis
 /// alternates so each of its values meets every composition and fence.
@@ -2218,7 +2218,7 @@ async fn chat_tool_omitting_catalog_drift_refuses_persisted_resume_before_infere
 }
 
 /// A legacy pi hub (Plak `wait_agent` / `interrupt_agent`) does not reopen
-/// on the live WaitStop host, on every composition. The live host no longer
+/// on the live `WaitStop` host, on every composition. The live host no longer
 /// binds those executors: `ExternalBindingUnavailable`, surfaced as
 /// [`plakous::sessions::AgentSessionsErrorKind::Internal`].
 #[tokio::test]

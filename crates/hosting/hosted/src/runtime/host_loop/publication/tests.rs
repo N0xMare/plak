@@ -515,7 +515,11 @@ fn cached_terminal_publication_matches_the_stored_projection_and_preserves_pendi
         views.rows.clear();
         for ordinal in 1..=MAX_TRANSCRIPT_LINES {
             views.rows.insert(
-                RowKey::new(views.cursor.get(), Lane::Runtime, ordinal as u32),
+                RowKey::new(
+                    views.cursor.get(),
+                    Lane::Runtime,
+                    u32::try_from(ordinal).unwrap(),
+                ),
                 TranscriptRow::assistant(format!("bounded row {ordinal}")),
             );
         }

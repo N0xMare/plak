@@ -416,8 +416,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
         let through = submission
             .as_ref()
             .and_then(|submission| submission.acknowledgement().feed_seq())
-            .map(plakous::sessions::feed::FeedSeq::get)
-            .unwrap_or(0);
+            .map_or(0, plakous::sessions::feed::FeedSeq::get);
         if let Err(error) = super::super::projection::root_tree_pass(
             runtime,
             rows,

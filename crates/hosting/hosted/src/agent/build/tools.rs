@@ -81,7 +81,6 @@ pub(crate) fn coding_tool_registry_for_plan(
     .map_err(|_| CliFailure::new("coding tools could not be initialized"))?;
     extensions.register_into(&mut builder)?;
     match composition {
-        CompositionSelection::Direct => {}
         CompositionSelection::NativePtc if attach_native => {
             CodexNativeLocalCodeModeV1::register_markers_into(&mut builder)
                 .map_err(|_| CliFailure::new("Code Mode markers could not be initialized"))?;
@@ -104,7 +103,9 @@ pub(crate) fn coding_tool_registry_for_plan(
                 CliFailure::new(format!("Python SDK registration is invalid: {error}"))
             })?;
         }
-        CompositionSelection::FollowCatalog | CompositionSelection::NativePtc => {}
+        CompositionSelection::Direct
+        | CompositionSelection::FollowCatalog
+        | CompositionSelection::NativePtc => {}
     }
     let live = builder.freeze();
     match extensions.frozen_presentation() {
@@ -287,13 +288,17 @@ pub(in crate::agent) fn frozen_parent_composition(
 
 /// Roster pin is bind authority. A child's composition comes from
 /// its own template or, unpinned, from the hub. Plak js-ptc/py-ptc
-/// is inherited by every unpinned child, Codex included: on a CodeModeOnly row
+/// is inherited by every unpinned child, Codex included: on a `CodeModeOnly` row
 /// it replaces the explicit Direct presentation, as on spark.
 /// Plakous-default and native-ptc are provider-bound: native-ptc is the
 /// vertical's own PTC system and only Codex enrolls one (Code Mode), so both
 /// are inherited only by a Codex child, and a native-ptc root can still spawn
 /// a Claude or Grok class — it resolves its own presentation through
 /// plakous-default instead of refusing.
+///
+/// # Errors
+/// Refuses a child composition not admitted by the frozen parent/roster inputs or
+/// unavailable evaluator capabilities.
 pub fn spawn_child_composition(
     parent_composition: CompositionSelection,
     target_provider: NativeProvider,
@@ -302,9 +307,11 @@ pub fn spawn_child_composition(
     let child_composition = match roster_composition {
         Some(pinned) => pinned,
         None => match (parent_composition, target_provider) {
-            (CompositionSelection::FollowCatalog, NativeProvider::Codex) => parent_composition,
+            (
+                CompositionSelection::FollowCatalog | CompositionSelection::NativePtc,
+                NativeProvider::Codex,
+            ) => parent_composition,
             (CompositionSelection::FollowCatalog, _) => CompositionSelection::Direct,
-            (CompositionSelection::NativePtc, NativeProvider::Codex) => parent_composition,
             (CompositionSelection::NativePtc, _) => CompositionSelection::FollowCatalog,
             _ => parent_composition,
         },
@@ -337,6 +344,7 @@ pub(in crate::agent) fn is_exact_code_mode_attachment(
 /// js/py-ptc overlay on it. Codex `Direct` rows are Direct by catalog;
 /// `CodeModeOnly` rows are Direct-capable through the explicit second
 /// presentation. Hybrid `CodeMode` stays unenrolled.
+#[must_use]
 pub fn direct_composition_capable(
     provider: NativeProvider,
     native_tool_mode: Option<NativeToolMode>,

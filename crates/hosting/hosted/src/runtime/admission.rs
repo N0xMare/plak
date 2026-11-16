@@ -69,7 +69,7 @@ pub(super) fn emit_prompt_history<P: plakous_host_protocol::ProtocolExtension>(
 }
 
 /// Idle Prompt that will drive immediately must not project a one-item queue
-/// chip. Remaining FIFO items are real chrome. UserMessage is emitted here so
+/// chip. Remaining FIFO items are real chrome. `UserMessage` is emitted here so
 /// hosted TUI shows the line before compaction / Plakous admit.
 pub(super) fn admit_idle_immediate_prompt<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,

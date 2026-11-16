@@ -29,11 +29,11 @@ where
             && let Slot::Resident { session, .. } = &*slot
         {
             let old = Arc::clone(session);
-            if !old.ended() {
-                if let Err(failure) = self.release_actor(&old, expected) {
-                    old.end_reopen(None);
-                    return Err(failure);
-                }
+            if !old.ended()
+                && let Err(failure) = self.release_actor(&old, expected)
+            {
+                old.end_reopen(None);
+                return Err(failure);
             }
             self.set_known(&source);
             self.busy.store(BUSY_RELEASING, Ordering::Release);

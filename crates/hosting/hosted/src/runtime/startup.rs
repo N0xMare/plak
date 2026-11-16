@@ -1,6 +1,7 @@
 //! Host startup: worker spawn, lifecycle phases, and session opening.
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{AttachFailure, DetachedReason, HostPhase, HostStatusDetail};
+use std::fmt::Write as _;
 use std::future::Future;
 #[cfg(test)]
 use std::thread;
@@ -73,6 +74,10 @@ pub type HostWorker<P = plakous_host_protocol::Core> = (
 );
 
 /// Spawn host worker thread and return channels for the TUI.
+///
+/// # Errors
+/// Refuses a worker startup or initial attachment failure before returning usable
+/// channels. The worker retains ownership of any cleanup it must settle.
 pub fn spawn_host_worker<P: plakous_host_protocol::ProtocolExtension>(
     config: HostConfig<P>,
 ) -> CliResult<HostWorker<P>> {
@@ -111,6 +116,10 @@ pub fn spawn_host_worker<P: plakous_host_protocol::ProtocolExtension>(
     await_host_startup(startup_rx, action_tx, event_rx, handle)
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "startup consumes its one-shot handshake receiver so it cannot be reused after readiness"
+)]
 pub(super) fn await_host_startup<P: plakous_host_protocol::ProtocolExtension>(
     startup_rx: std::sync::mpsc::Receiver<Result<(), CliFailure>>,
     action_tx: crate::surface_protocol::UserActionSender<P>,
@@ -159,6 +168,9 @@ pub fn spawn_deferred_host<P: plakous_host_protocol::ProtocolExtension>(
     spawn_deferred_host_with_clear_publication(prepare, None)
 }
 
+/// Start one deferred host, transferring the same mailbox into the prepared
+/// attached or shell mode. The optional shared slot records clear publication
+/// for the product supervisor; it is not canonical completion evidence.
 pub fn spawn_deferred_host_with_clear_publication<P: plakous_host_protocol::ProtocolExtension>(
     prepare: impl FnOnce() -> HostLaunchPreparation<P> + Send + 'static,
     clear_publication: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
@@ -285,7 +297,7 @@ impl SeededSessionCreation {
             );
             self.session
                 .record_notice(TranscriptRow::warning(NoticeScope::Session, &notice));
-            self.notes.push_str(&format!("\n{notice}"));
+            let _ = write!(self.notes, "\n{notice}");
         }
         (self.session, self.notes)
     }

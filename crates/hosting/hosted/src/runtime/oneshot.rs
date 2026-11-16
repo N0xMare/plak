@@ -12,6 +12,7 @@ use super::{HostConfig, HostEvent, Sender, TurnHostOutcome};
 /// Bounds for the non-interactive run-until-idle face.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RunBounds {
+    /// Maximum admitted turns before the run selects a bounded terminal outcome.
     pub max_turns: u8,
     /// Relinquish leftover process-group ownership at run exit.
     pub leave_jobs_running: bool,
@@ -33,19 +34,35 @@ impl Default for RunBounds {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OneShotOutcome {
     /// The root turn completed with its canonical visible text.
-    Completed { assistant: String },
+    Completed {
+        /// Canonical visible assistant text, not a transient streamed prefix.
+        assistant: String,
+    },
     /// A committed visible answer stopped at its output limit.
-    Truncated { assistant: String },
+    Truncated {
+        /// Committed visible text, retained even though the output bound was reached.
+        assistant: String,
+    },
     /// The provider refused; its canonical terminal was published and released.
     Refused {
+        /// Canonical visible text, if any, committed before the refusal terminal.
         assistant: String,
+        /// Optional redaction-safe provider refusal explanation.
         detail: Option<String>,
     },
     /// Preparation stopped before admission, or cancellation settled and its
     /// terminal projection was committed.
-    Interrupted { assistant: String },
+    Interrupted {
+        /// Committed visible text retained by cancellation settlement.
+        assistant: String,
+    },
     /// The whole run reached an operator bound after canonical settlement.
-    Bounded { assistant: String, bound: String },
+    Bounded {
+        /// Committed visible text after admitted work settled.
+        assistant: String,
+        /// Operator bound that stopped further admission, not a provider failure.
+        bound: String,
+    },
 }
 
 pub(super) struct OneShotState {
@@ -68,7 +85,11 @@ pub struct OneShot;
 impl OneShot {
     /// Drive one prompt through the same admission, turn and publication path as
     /// an interactive session. The callback may send controls such as Interrupt
-    /// or ResolveApproval; it is also called on idle polls with no observation.
+    /// or `ResolveApproval`; it is also called on idle polls with no observation.
+    ///
+    /// # Errors
+    /// Returns host startup, canonical execution, publication or release failures. A visible
+    /// observation alone is not successful completion.
     pub fn run<P: plakous_host_protocol::ProtocolExtension>(
         config: HostConfig<P>,
         prompt: String,
@@ -78,6 +99,10 @@ impl OneShot {
     }
 
     /// Admit distinct continuation turns until no processes or children remain.
+    ///
+    /// # Errors
+    /// Returns startup, canonical execution, publication or release failures after settling
+    /// admitted work under the supplied run bounds.
     pub fn run_until_idle<P: plakous_host_protocol::ProtocolExtension>(
         config: HostConfig<P>,
         prompt: plakous_host_protocol::Draft,
@@ -232,11 +257,11 @@ pub(super) fn terminal(drive: &Result<TurnHostOutcome, String>) -> CliResult<One
             ))
             .with_optional_remedy(remedy.as_ref()))
         }
-        Ok(TurnHostOutcome::AdmissionRejected { error, remedy, .. })
-        | Ok(TurnHostOutcome::Failed { error, remedy, .. }) => {
-            Err(CliFailure::classified(CliFailureKind::Agent, error.clone())
-                .with_optional_remedy(remedy.as_ref()))
-        }
+        Ok(
+            TurnHostOutcome::AdmissionRejected { error, remedy, .. }
+            | TurnHostOutcome::Failed { error, remedy, .. },
+        ) => Err(CliFailure::classified(CliFailureKind::Agent, error.clone())
+            .with_optional_remedy(remedy.as_ref())),
         Ok(TurnHostOutcome::ContextCapacity { error, .. }) | Err(error) => {
             Err(CliFailure::classified(CliFailureKind::Agent, error.clone()))
         }

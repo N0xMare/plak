@@ -97,7 +97,7 @@ async fn a_startup_in_flight_at_the_last_lease_shutdown_finishes_its_release() {
 
 /// Every spawn in the files that own child sessions is a release owner, at
 /// exactly these sites, so moving one onto the abortable tree task set (or a
-/// bare `tokio::spawn`) fails here. The other spawns are a local JoinSet
+/// bare `tokio::spawn`) fails here. The other spawns are a local `JoinSet`
 /// its caller joins, the thread a dropped turn waiter registration leaves
 /// on, and the child's actor, which every production caller starts on the
 /// driver's release owners.

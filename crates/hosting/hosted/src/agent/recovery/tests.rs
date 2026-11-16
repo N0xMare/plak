@@ -3912,7 +3912,7 @@ async fn refold_reread_spans_more_than_sixty_four_synthetic_pages() {
         let page = FeedPage::Records {
             records: records
                 .iter()
-                .skip(after as usize)
+                .skip(usize::try_from(after).unwrap_or(usize::MAX))
                 .take(MAX_FEED_PAGE_RECORDS)
                 .cloned()
                 .collect(),

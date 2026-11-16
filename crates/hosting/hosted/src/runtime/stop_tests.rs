@@ -876,6 +876,10 @@ fn a_crash_around_the_root_stop_record() {
 }
 
 /// What one stop-cut must leave behind.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the crash matrix names independent expected outcomes, not mutually exclusive states"
+)]
 struct CutExpect {
     at: &'static str,
     suppression: bool,
@@ -895,6 +899,10 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
         Cancel, CutExpect, Release, assert_cut, crash_busy, crash_idle, release_a_running_root_turn,
     };
 
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+    )]
     fn idle(expect: CutExpect) {
         let root = tempfile::tempdir().unwrap();
         let lost =
@@ -903,6 +911,10 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
         assert_cut(root.path(), &lost, "idle", &expect, &running, &held);
     }
 
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+    )]
     fn busy(expect: CutExpect) {
         let root = tempfile::tempdir().unwrap();
         let (lost, running, held) = crash_busy(root.path(), expect.at);
@@ -1282,9 +1294,8 @@ fn turn_terminal_applied(
                 let Ok(page) = page else {
                     return false;
                 };
-                let records = match page {
-                    FeedPage::Records { records, .. } => records,
-                    _ => return false,
+                let FeedPage::Records { records, .. } = page else {
+                    return false;
                 };
                 if records.is_empty() {
                     return false;

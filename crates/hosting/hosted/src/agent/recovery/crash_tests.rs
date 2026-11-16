@@ -938,7 +938,7 @@ fn await_owner(child: &mut std::process::Child, mode: &str) -> String {
         })
 }
 
-/// recover_node over an owed child whose lost turn waits at an effect
+/// `recover_node` over an owed child whose lost turn waits at an effect
 /// decision (a first-turn barrier on its assignment): the take's open closes
 /// that turn as abandoned with cause `process_lost`, nothing started, never
 /// restoring or cancelling it, so nothing tells the child not to act on its

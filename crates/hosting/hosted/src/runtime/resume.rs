@@ -76,6 +76,8 @@ pub(super) fn handle_resume_picker<P: plakous_host_protocol::ProtocolExtension>(
     }
 }
 
+/// Author an operator notice that an action requires idle state. This queues a
+/// product notice intent; it neither interrupts a turn nor applies the action.
 pub fn note_idle_only<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     action: &str,

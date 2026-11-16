@@ -34,7 +34,7 @@ impl RosterSource for UnpinnedRosterSource {
         _root_profile: Option<&crate::sessions::RootProfile>,
     ) -> CliResult<crate::orchestration::RosterInput> {
         let mut input = crate::orchestration::RosterInput::unpinned(root_tuple);
-        input.root.account = root_account.to_owned();
+        root_account.clone_into(&mut input.root.account);
         input.root.effort = root_effort.map(str::to_owned);
         Ok(input)
     }
@@ -66,7 +66,7 @@ impl plakous::tools::SidecarLocator for NoSidecars {
     }
 }
 
-/// No OpenRouter key is configured.
+/// No `OpenRouter` key is configured.
 #[derive(Debug)]
 pub struct NoOpenRouterCredential;
 

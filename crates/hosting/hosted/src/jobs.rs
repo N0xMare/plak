@@ -121,7 +121,7 @@ pub(crate) struct JobRegistry {
     opened_output_root: std::sync::OnceLock<Option<JobOutputRoot>>,
 }
 
-/// The TERM grace a user stop grants before SIGKILL, as TaskStop documents.
+/// The TERM grace a user stop grants before SIGKILL, as `TaskStop` documents.
 const USER_STOP_GRACE: Duration = Duration::from_secs(2);
 
 /// User stops run off the caller's thread so the grace never blocks a host
@@ -528,6 +528,10 @@ impl JobRegistry {
         self.spawn_user_stop(targets, rows)
     }
 
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "the publication boundary consumes a completed process-row snapshot"
+    )]
     fn spawn_user_stop(
         &self,
         targets: Vec<UserStopTarget>,

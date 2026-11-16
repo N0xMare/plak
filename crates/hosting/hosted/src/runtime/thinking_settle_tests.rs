@@ -404,6 +404,10 @@ enum QuitIntent {
     Disconnected,
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+)]
 fn quit_grace_fixture(deaf: bool, quit: QuitIntent, stuck_child: bool) {
     let root = tempfile::tempdir().unwrap();
     let plan = serde_json::json!({
@@ -575,7 +579,7 @@ fn quit_grace_fixture(deaf: bool, quit: QuitIntent, stuck_child: bool) {
         .unwrap();
 }
 
-/// Consume the same admission-created Content view as TurnDrive, without a
+/// Consume the same admission-created Content view as `TurnDrive`, without a
 /// canonical projector replacing the live transcript after the turn.
 #[test]
 fn real_content_view_settles_thinking_before_tools_and_discards_terminal_length() {

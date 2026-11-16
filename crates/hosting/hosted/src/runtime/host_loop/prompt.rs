@@ -917,6 +917,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         self.continue_prompt_queue(completed, admission_rejected, stop_drain)
     }
 
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "host step handlers share a fallible dispatch signature even when this step cannot currently refuse"
+    )]
     fn continue_prompt_queue(
         &mut self,
         completed: bool,
@@ -1031,11 +1035,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     }
 
     async fn reopen_after_native_authority_refresh(&mut self, changed: bool) -> CliResult<()> {
-        if changed {
-            if let Err(error) = self.reopen_in_place().await {
-                self.role.recovery = RootRecovery::Due;
-                return Err(error);
-            }
+        if changed && let Err(error) = self.reopen_in_place().await {
+            self.role.recovery = RootRecovery::Due;
+            return Err(error);
         }
         Ok(())
     }

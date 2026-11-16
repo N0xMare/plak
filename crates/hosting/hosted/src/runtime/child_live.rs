@@ -772,14 +772,10 @@ pub(super) fn transcript_ops(
             ops.push(HostEvent::Row(
                 TranscriptRow::info(NoticeScope::Settings, projection.progress.login_notice())
                     .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Login {
-                        account: projection
-                            .progress
-                            .account
-                            .as_deref()
-                            .map(plakous_host_protocol::notice_remedy::AccountTarget::from_account)
-                            .unwrap_or(
-                                plakous_host_protocol::notice_remedy::AccountTarget::Unspecified,
-                            ),
+                        account: projection.progress.account.as_deref().map_or(
+                            plakous_host_protocol::notice_remedy::AccountTarget::Unspecified,
+                            plakous_host_protocol::notice_remedy::AccountTarget::from_account,
+                        ),
                     }),
             ));
         }

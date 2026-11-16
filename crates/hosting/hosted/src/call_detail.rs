@@ -156,6 +156,10 @@ impl CallDetailRequest {
         self.spawn_on(tasks, sessions, events, process_gate());
     }
 
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "the detail task owns its publisher through asynchronous observation"
+    )]
     fn spawn_on<P: plakous_host_protocol::ProtocolExtension>(
         self,
         tasks: &crate::TaskSet,
@@ -471,7 +475,7 @@ impl ReadGate {
             let previous = inner.current.clone();
             *inner.generations.entry(previous).or_insert(0) += 1;
         }
-        inner.current = session_id.to_owned();
+        session_id.clone_into(&mut inner.current);
     }
 
     fn admit(&self, key: &ReadKey) -> Admit {

@@ -306,22 +306,21 @@ pub(super) async fn scheduled_pass_already_fits<P: plakous_host_protocol::Protoc
     // Manual compact is eligible-range gated. Scheduled compact
     // skips only when occupancy gauge Fits below the capacity-derived idle trigger.
     // Capacity recovery must still compact a Fits envelope.
-    if let Ok(projection) = query_context(run.opened, qualification).await {
-        if projection.disposition() == ContextDisposition::Fits
-            && !projection.compaction_verdict().is_due()
-        {
-            publish_compact_row(
-                config,
-                run.events,
-                &run.call_id,
-                "done",
-                Some("already fits".to_owned()),
-                Some(elapsed_ms(run.started_at)),
-            );
-            log_compact_finished(run.log, config, run.started_at, "not_needed");
-            emit_compact_meter(run.opened, config, run.events).await;
-            return true;
-        }
+    if let Ok(projection) = query_context(run.opened, qualification).await
+        && projection.disposition() == ContextDisposition::Fits
+        && !projection.compaction_verdict().is_due()
+    {
+        publish_compact_row(
+            config,
+            run.events,
+            &run.call_id,
+            "done",
+            Some("already fits".to_owned()),
+            Some(elapsed_ms(run.started_at)),
+        );
+        log_compact_finished(run.log, config, run.started_at, "not_needed");
+        emit_compact_meter(run.opened, config, run.events).await;
+        return true;
     }
     false
 }

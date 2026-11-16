@@ -77,11 +77,11 @@ pub(in crate::agent) async fn start_instruction_turn(
             })
             .await
             .map_err(String::from)?;
-        let (mut live_map, delivery) =
-            match crate::agent::live::lock_for_transition(live, agent_id, identity.turn).await {
-                Ok(locked) => locked,
-                Err(_) => return Err(InstructionStartError::Drained),
-            };
+        let Ok((mut live_map, delivery)) =
+            crate::agent::live::lock_for_transition(live, agent_id, identity.turn).await
+        else {
+            return Err(InstructionStartError::Drained);
+        };
         let admissible = if transient {
             resume_allowed(driver, agent_id, identity)
         } else {

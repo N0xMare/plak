@@ -94,11 +94,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             && self.role.recovery == RootRecovery::Due
             && !self.role.interrupt_state.borrow().has_deferred_quit()
             && !self.role.actions.abandon_and_release_requested()
+            && let Ok(HostStep::Quit) = self.recover_eagerly().await
         {
-            match self.recover_eagerly().await {
-                Ok(HostStep::Quit) => return Ok(HostStep::Quit),
-                Ok(_) | Err(()) => {}
-            }
+            return Ok(HostStep::Quit);
         }
         crate::call_detail::note_attached(&self.role.config.session.id);
         self.role
@@ -460,7 +458,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     }
                     None
                 }
-                Ok(UserAction::Background) => None,
+                Ok(UserAction::Background | UserAction::Promptable) => None,
                 Ok(UserAction::DropQueued) => {
                     match commit_session_update(
                         &*self.role.config.store,
@@ -1037,7 +1035,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 // Unreachable: `IntentSender::send_correlated` sets the promptable
                 // flag and returns before queueing on every send path, so the
                 // intent never enters the queue; the arm keeps the match exhaustive.
-                Ok(UserAction::Promptable) => None,
                 Ok(UserAction::ResyncTranscript { scope }) => {
                     self.role.events.resync_transcript(&scope);
                     None

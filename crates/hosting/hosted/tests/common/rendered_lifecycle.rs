@@ -11,6 +11,7 @@
 )]
 mod suite {
     use std::collections::BTreeMap;
+    use std::fmt::Write as _;
     use std::path::{Path, PathBuf};
     use std::str::FromStr;
 
@@ -274,7 +275,7 @@ mod suite {
     }
 
     /// Seven-tool nested catalog (`read_file` / `search_repository` / `inspect_image`
-    /// plus the Codex OAuth four). Product NativePtc goldens use the four-tool
+    /// plus the Codex OAuth four). Product `NativePtc` goldens use the four-tool
     /// minimal set; this is the full `CodexNativeLocalCodeModeV1` nested map.
     fn full_code_nested() -> ToolProjectionMap {
         let extras = empty_extras();
@@ -435,22 +436,26 @@ mod suite {
         let py_nested = py_ptc_nested();
 
         md.push_str("## Nested catalogs\n\n");
-        md.push_str(&format!(
-            "- Product NativePtc (`CodexMinimalLocalCodeModeV1`): `{}`\n",
+        let _ = writeln!(
+            md,
+            "- Product NativePtc (`CodexMinimalLocalCodeModeV1`): `{}`",
             catalog_names(&code_nested)
-        ));
-        md.push_str(&format!(
-            "- Full Code Mode nested (`CodexNativeLocalCodeModeV1`): `{}`\n",
+        );
+        let _ = writeln!(
+            md,
+            "- Full Code Mode nested (`CodexNativeLocalCodeModeV1`): `{}`",
             catalog_names(&full_code_nested)
-        ));
-        md.push_str(&format!(
-            "- JS PTC nested (SuperGrok OAuth Direct names): `{}`\n",
+        );
+        let _ = writeln!(
+            md,
+            "- JS PTC nested (SuperGrok OAuth Direct names): `{}`",
             catalog_names(&js_nested)
-        ));
-        md.push_str(&format!(
+        );
+        let _ = write!(
+            md,
             "- Python PTC nested (SuperGrok OAuth Direct names): `{}`\n\n",
             catalog_names(&py_nested)
-        ));
+        );
         md.push_str("Product NativePtc goldens use the four-tool minimal nested set: no `read_file` / `search_repository`. Those appear in the seven-tool `CodexNativeLocalCodeModeV1` nested map and in js-ptc/py-ptc cells. Every nested lineage raises the raw string (`RawUtf8V1`): js-ptc/py-ptc via `nested_cell_raising` (`coding_presentation.rs`), Code Mode nested via `capability_entry` (`codex_code_mode.rs`); Direct keeps `TextResultObjectV1`.\n\n");
 
         md.push_str("## Successful `read_file` (short)\n\n");
@@ -1088,7 +1093,7 @@ mod suite {
                     _ => None,
                 })
                 .collect();
-            body.push_str(&format!("  {:?}: {}\n", item.actor(), texts.join(" | ")));
+            let _ = writeln!(body, "  {:?}: {}", item.actor(), texts.join(" | "));
         }
         body
     }
@@ -1198,11 +1203,12 @@ mod suite {
             "text",
             &render_view(cut.summary_input()),
         ));
-        md.push_str(&format!(
+        let _ = write!(
+            md,
             "Selected segments: {}. Retained segments: {}.\n\n",
             cut.selected_segments().len(),
             cut.retained_segment_count()
-        ));
+        );
 
         let summary_item = ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(99)).expect("summary id"),
@@ -1250,6 +1256,10 @@ mod suite {
         md
     }
 
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+    )]
     fn topology_failure(code: TopologyErrorCode, message: String) -> String {
         json!({ "code": code, "message": message }).to_string()
     }
@@ -1865,14 +1875,16 @@ mod suite {
 
         md.push_str("## Another effort (Fork now or a new session)\n\n");
         md.push_str("`selected_harness_profile` applies `with_preferred_reasoning_effort`. Instructions and tools are unchanged; the next request's reasoning policy carries the new preferred effort. Codex `recommended()` defaults to High; the before row is an explicit Medium override.\n\n");
-        md.push_str(&format!(
+        let _ = write!(
+            md,
             "Before (effort `medium`): `preferred_reasoning_effort` = {:?}\n\n",
             medium.preferred_reasoning_effort()
-        ));
-        md.push_str(&format!(
+        );
+        let _ = write!(
+            md,
             "After binding effort `high`: `preferred_reasoning_effort` = {:?}\n\n",
             high.preferred_reasoning_effort()
-        ));
+        );
         md.push_str(&surface(
             "Identity tail is unchanged by effort",
             "Faithful product identity block.",
@@ -1925,15 +1937,18 @@ mod suite {
         md.push_str("`selected_harness_profile(..., opening_durable_session=true)` returns `None`: exact resume reconstructs the durable harness plan from the checkpoint and does not issue a new profile. A **fork** to another model builds a new session profile via `product_target_identity_profile`.\n\n");
         md.push_str("The model-history sentence is **not** reopen-only. `product_target_identity_profile` appends it on every product session, including genesis, so earlier model names in retained history cannot override the current target.\n\n");
         md.push_str("Fragments:\n\n");
-        md.push_str(&format!(
-            "- `PLAK_PRODUCT_ENVIRONMENT_TEMPLATE`: `{PLAK_PRODUCT_ENVIRONMENT_TEMPLATE}`\n"
-        ));
-        md.push_str(&format!(
-            "- `PLAK_PRODUCT_MODEL_IDENTITY_TEMPLATE`: `{PLAK_PRODUCT_MODEL_IDENTITY_TEMPLATE}`\n"
-        ));
-        md.push_str(&format!(
+        let _ = writeln!(
+            md,
+            "- `PLAK_PRODUCT_ENVIRONMENT_TEMPLATE`: `{PLAK_PRODUCT_ENVIRONMENT_TEMPLATE}`"
+        );
+        let _ = writeln!(
+            md,
+            "- `PLAK_PRODUCT_MODEL_IDENTITY_TEMPLATE`: `{PLAK_PRODUCT_MODEL_IDENTITY_TEMPLATE}`"
+        );
+        let _ = write!(
+            md,
             "- `PLAK_PRODUCT_IDENTITY_ENVIRONMENT_MARKER`: `{PLAK_PRODUCT_IDENTITY_ENVIRONMENT_MARKER}`\n\n"
-        ));
+        );
         md.push_str(&surface(
             "Fork/reopen target identity for `gpt-5.6-sol` (history may still name `gpt-5.6-luna`)",
             "Faithful `product_target_identity_profile`. History items are conversation content; this marker is the model-visible disclaimer.",

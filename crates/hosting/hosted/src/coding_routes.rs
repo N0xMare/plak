@@ -7,7 +7,7 @@
 //!
 //! Every route reaches that one site — the three native OAuth verticals, the
 //! API routes (which wear their OAuth vertical's pack), and every custom
-//! integration (OpenRouter), which has no provider-familiar vocabulary of its
+//! integration (`OpenRouter`), which has no provider-familiar vocabulary of its
 //! own and is therefore shown the generic pi pack.
 
 use std::sync::OnceLock;
@@ -32,7 +32,7 @@ const ROUTE_PROBE_MODEL: &str = "route-probe";
 
 /// The API route tuples (protocol, route, profile) the catalog rows and
 /// [`platform_route_presentation`] both read, so the two cannot drift. The
-/// OpenAI profile is per model ([`openai_platform_profile`]).
+/// `OpenAI` profile is per model ([`openai_platform_profile`]).
 const OPENAI_PLATFORM: (&str, &str) = ("openai.responses", "openai.platform");
 const ANTHROPIC_PLATFORM: (&str, &str, &str) = (
     "anthropic.messages",
@@ -144,7 +144,7 @@ impl ProjectionCandidateAdmission for ProductProjectionAdmission {
 /// W3-B replaced `wait_agent` and `interrupt_agent` on the Grok pack and did
 /// not bump the runtime-format epoch. Harness admission refuses a Grok
 /// projection that still presents them, so a create that would show the
-/// retired names fails closed. Pi is not matched: OpenRouter is
+/// retired names fails closed. Pi is not matched: `OpenRouter` is
 /// `IntegrationClass::Custom` and never reaches [`ProductProjectionAdmission`].
 fn refuse_retired_topology_names(
     presentation: Option<CodingPresentation>,
@@ -293,7 +293,7 @@ pub(crate) const fn platform_presentation(provider: PlatformProvider) -> CodingP
     }
 }
 
-/// The reviewed OpenAI Platform profile an enrolled literal runs under.
+/// The reviewed `OpenAI` Platform profile an enrolled literal runs under.
 fn openai_platform_profile(model: &str) -> Option<&'static str> {
     crate::platform::openai_profile(model)
 }

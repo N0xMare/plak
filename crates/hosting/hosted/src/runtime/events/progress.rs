@@ -95,6 +95,10 @@ impl Progress {
         }
     }
 
+    #[allow(
+        clippy::unused_self,
+        reason = "progress rendering stays on the event projection interface even when this notice needs no held state"
+    )]
     pub(in crate::runtime) fn login_notice(&self) -> String {
         "waiting for login".to_owned()
     }

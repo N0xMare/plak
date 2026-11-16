@@ -114,6 +114,10 @@ impl ProductToolExtensions {
     }
 
     /// Ordered nested-eligible product extensions, including topology tools.
+    ///
+    /// # Errors
+    /// Refuses a registration without explicit nested eligibility or duplicate tool names; no
+    /// partially admitted extension set is returned.
     pub fn from_nested_registrations(
         registrations: impl IntoIterator<Item = ToolRegistration>,
     ) -> CliResult<Self> {
@@ -339,6 +343,10 @@ impl ProductToolExtensions {
     }
 
     /// Registers this pack's executors through the pack seam.
+    ///
+    /// # Errors
+    /// Returns registration failures from the target tool registry rather than replacing
+    /// existing canonical tool names.
     pub fn register_into(&self, builder: &mut ToolRegistryBuilder) -> CliResult<()> {
         register_packs(&[Arc::new(self.clone()) as Arc<dyn ToolPack>], builder).map_err(|error| {
             CliFailure::new(format!(
@@ -362,6 +370,10 @@ impl ProductToolExtensions {
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "SDK admission consumes the assembled name inventory at its construction boundary"
+)]
 pub(crate) fn admit_sdk_extensions(names: Vec<String>) -> CliResult<()> {
     if names.is_empty() {
         return Ok(());

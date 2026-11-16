@@ -140,8 +140,8 @@ fn streaming_cost_is_constant_in_history_rows_and_does_not_copy_accumulated_text
             for event in receiver.try_iter() {
                 slots += 1;
                 bytes += match event {
-                    HostEvent::AssistantDelta(text) => text.len(),
-                    HostEvent::TranscriptStream {
+                    HostEvent::AssistantDelta(text)
+                    | HostEvent::TranscriptStream {
                         delta:
                             plakous_host_protocol::views::transcript::TranscriptStreamDelta::Assistant(
                                 text,

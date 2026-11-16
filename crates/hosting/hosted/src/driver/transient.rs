@@ -44,6 +44,10 @@ pub(crate) fn plan(
 }
 
 impl ResumePlan {
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "the resume owner token is consumed at this transition boundary"
+    )]
     pub(crate) fn for_round(
         gate: ResumeGate,
         owner: ResumeOwner<'_>,

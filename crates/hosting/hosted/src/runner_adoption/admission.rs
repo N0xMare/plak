@@ -168,6 +168,10 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "the test hook shares its optional retry signature with the disabled hook"
+    )]
     fn count_retry(retries: &Arc<AtomicUsize>) -> Option<Retry> {
         let recorded = retries.clone();
         Some(Box::new(move || {

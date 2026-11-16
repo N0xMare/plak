@@ -45,7 +45,7 @@ pub(in crate::runtime) fn canonical_items(
         // binding, even if earlier effects were omitted by the read budget.
         rows.ordinal = rows.ordinal.max(
             item.part_offset
-                .saturating_mul(MAX_SNAPSHOT_ROWS as u32)
+                .saturating_mul(u32::try_from(MAX_SNAPSHOT_ROWS).unwrap_or(u32::MAX))
                 .saturating_add(1),
         );
         rows.anchor = item.position;
@@ -137,7 +137,7 @@ pub(in crate::runtime) fn canonical_items(
                             wait: super::tool_facts::wait_started(tool, label, args.as_ref()),
                         },
                     );
-                    tool.state = UNSETTLED_STATE.to_owned();
+                    UNSETTLED_STATE.clone_into(&mut tool.state);
                     tool.parent_call_id = composition_owner
                         .clone()
                         .or_else(|| lineage.parent_call_id().map(|parent| parent.to_string()));
@@ -204,7 +204,7 @@ pub(in crate::runtime) fn canonical_items(
                             wait: None,
                         },
                     );
-                    tool.state = "succeeded".to_owned();
+                    "succeeded".clone_into(&mut tool.state);
                     rows.push(TranscriptRow::Tool(tool));
                 }
                 _ => {}

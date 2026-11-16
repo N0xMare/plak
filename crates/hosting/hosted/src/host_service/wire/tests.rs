@@ -1267,6 +1267,10 @@ fn overflow_after_a_switch<W: Write>(
     }
 }
 
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "test fixtures retain the fallible helper signature used by their callers"
+)]
 fn attach_line(id: RequestId, tree: &str) -> Result<String, WireError> {
     let attach = ClientFrame::<plakous_host_protocol::Core>::Request {
         id,

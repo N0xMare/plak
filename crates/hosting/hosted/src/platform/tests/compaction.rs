@@ -208,6 +208,10 @@ pub(super) async fn endpoint_with_requests(
 
 /// The endpoint, reporting `input_tokens[n]` provider input usage on the
 /// n-th response (the last value repeats).
+#[allow(
+    clippy::format_collect,
+    reason = "synthetic provider event framing mirrors the complete byte-exact fixture stream; allocation cost is irrelevant to this test"
+)]
 async fn endpoint_reporting(
     provider: PlatformProvider,
     model: &'static str,
@@ -429,7 +433,7 @@ async fn openai_product_tools_preserve_optional_schemas_on_production_wire() {
     }
 }
 
-/// Codex Code Mode on the OpenAI API, on the production Platform wire: the
+/// Codex Code Mode on the `OpenAI` API, on the production Platform wire: the
 /// free-form `exec` custom tool with its Lark grammar and the `wait` function
 /// are the only tools, parallel calls are off, nothing is stored, and the
 /// request carries no Codex OAuth client identity.
@@ -1037,7 +1041,7 @@ async fn api_working_window_is_measured_in_provider_tokens() {
 
 /// `none` is an explicit persisted effort. Startup reconstructs it and the
 /// production request carries `reasoning.effort: "none"` on the routes whose
-/// ladders publish it (OpenAI Responses `AllNamed`, xAI `NoneThroughXHigh`).
+/// ladders publish it (`OpenAI` Responses `AllNamed`, xAI `NoneThroughXHigh`).
 #[tokio::test]
 async fn explicit_none_effort_is_reconstructed_and_sent_on_the_api_wire() {
     for (provider, model) in [

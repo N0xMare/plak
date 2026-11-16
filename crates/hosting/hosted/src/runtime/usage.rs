@@ -138,7 +138,6 @@ pub(super) async fn query_context(
     Ok(match report.kind() {
         SessionContextStatusKind::Available(status) => project_context_status(status),
         SessionContextStatusKind::RecoveryRequired(_) => ContextProjection::recovery_required(),
-        SessionContextStatusKind::Unavailable(_) => ContextProjection::unavailable(),
         _ => ContextProjection::unavailable(),
     })
 }

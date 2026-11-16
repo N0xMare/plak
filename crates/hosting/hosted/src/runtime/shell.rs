@@ -29,6 +29,13 @@ use super::{
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the shell owns its mailbox endpoints until the loop exits"
+)]
+/// Serve product binding and settings intents while no canonical session is
+/// attached. Publication-relative binding errors determine rollback; observations
+/// do not acquire execution authority. The loop ends when its mailbox closes.
 pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
     mut config: ShellHostConfig<P>,
     actions: crate::surface_protocol::UserActionReceiver<P>,
@@ -175,7 +182,8 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         UserAction::Quit => return ShellStep::Quit,
         UserAction::Background
         | UserAction::StopSession { .. }
-        | UserAction::ReleaseForReopen { .. } => {}
+        | UserAction::ReleaseForReopen { .. }
+        | UserAction::Promptable => {}
         action @ (UserAction::Prompt(_) | UserAction::FollowUp(_) | UserAction::Steer(_)) => {
             refuse_not_ready(events, config, log);
             reject_draft(events, action);
@@ -308,7 +316,6 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         // Unreachable: `IntentSender::send_correlated` sets the promptable
         // flag and returns before queueing on every send path, so the
         // intent never enters the queue; the arm keeps the match exhaustive.
-        UserAction::Promptable => {}
         UserAction::OpenAgentTranscript { agent_id } => {
             super::child_live::send_agent_transcript(
                 events,
@@ -1107,7 +1114,7 @@ pub(super) fn handle_shell_set_model<P: plakous_host_protocol::ProtocolExtension
     let keeps_default = binding.current().is_some();
     let mut root = binding.current().unwrap_or_default();
     root.account = account;
-    root.model = model.clone();
+    root.model.clone_from(&model);
     root.effort.clone_from(&effort);
     root.extra = (candidate.target_selection == TargetSelection::NativePriority)
         .then(|| "priority".to_owned());

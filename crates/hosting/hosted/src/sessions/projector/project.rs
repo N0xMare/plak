@@ -511,7 +511,7 @@ fn settle(tool: &mut ToolItem, result: &ResultRead) {
 }
 
 fn workflow_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    plakous::model::hex_lower(bytes)
 }
 
 const fn compact_pass_label(pass: plakous::sessions::feed::FeedCompactPass) -> &'static str {
@@ -525,7 +525,7 @@ const fn compact_pass_label(pass: plakous::sessions::feed::FeedCompactPass) -> &
     }
 }
 
-/// The snake_case spelling of a recorded refusal kind.
+/// The `snake_case` spelling of a recorded refusal kind.
 fn control_error_label(kind: plakous::agent::ControlErrorKind) -> String {
     let debug = format!("{kind:?}");
     let mut label = String::with_capacity(debug.len() + 4);

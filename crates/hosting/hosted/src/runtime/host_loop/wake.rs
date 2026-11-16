@@ -142,7 +142,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
         self.role.config.session.child_wake_suppressed = true;
         self.role.child_wake.suppression_pending = true;
-        self.role.child_wake.pause_pending = reason.clone();
+        self.role.child_wake.pause_pending.clone_from(&reason);
         if self.role.storage_interrupted && self.role.config.store.storage_unavailable() {
             return Ok(());
         }
@@ -302,11 +302,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         // prompt's admission reads back.
         match self.fit_child_wake(&text).await {
             Ok(WakeFit::Fits) => {}
-            Ok(WakeFit::Deferred) => {
-                self.role.config.continuation = Some(text);
-                return Ok(HostStep::Continue);
-            }
-            Ok(WakeFit::Stopped(_)) => {
+            Ok(WakeFit::Deferred | WakeFit::Stopped(_)) => {
                 self.role.config.continuation = Some(text);
                 return Ok(HostStep::Continue);
             }
@@ -341,6 +337,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         })
     }
 
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "host step handlers share a fallible dispatch signature even when this step cannot currently refuse"
+    )]
     fn wake_deferred(&mut self) -> CliResult<HostStep> {
         self.publish_pending_continuation();
         Ok(HostStep::Continue)

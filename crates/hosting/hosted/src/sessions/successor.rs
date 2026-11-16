@@ -7,6 +7,10 @@ use plakous::sessions::SessionLocator;
 impl SessionRecord {
     /// Constructs a successor from an immutable request and its branch fact.
     /// Neither the source's mutable journal nor the host clock is authority.
+    ///
+    /// # Errors
+    /// Refuses a nonbranching request, a mismatched successor operation, or invalid
+    /// reconstructed successor facts. The source record is not changed.
     pub fn successor_from_request(
         &self,
         request: &crate::sessions::projector::WorkflowRequest,
@@ -65,6 +69,10 @@ impl SessionRecord {
     }
 
     /// Builds the empty successor reserved by an immutable clear intent.
+    ///
+    /// # Errors
+    /// Refuses a request that is not a new-session workflow, an invalid create identity, or
+    /// an invalid reconstructed record. It does not create a canonical runtime.
     pub fn new_session_from_request(
         &self,
         request: &crate::sessions::projector::WorkflowRequest,
@@ -88,7 +96,9 @@ impl SessionRecord {
         target.root_profile = None;
         target.created_at_unix = plakous::model::now_unix_secs();
         target.updated_at_unix = target.created_at_unix;
-        target.create_operation_id = operation.as_str().to_owned();
+        operation
+            .as_str()
+            .clone_into(&mut target.create_operation_id);
         target.store_revision = 0;
         target.source_product_session_id = Some(self.id.clone());
         target.source_workflow_operation_id = Some(request.operation_id.clone());

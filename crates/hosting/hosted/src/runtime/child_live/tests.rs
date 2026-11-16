@@ -189,6 +189,10 @@ async fn real_finished_cells_restore_nested_rows_and_failure_tally_from_the_ledg
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+)]
 pub(in crate::runtime) fn tool_lifecycle_event(
     name: &str,
     call_id: &str,
@@ -998,8 +1002,8 @@ async fn next_agent_transcript(
 
 fn carries_text(op: &HostEvent, text: &str) -> bool {
     match op {
-        HostEvent::AssistantDelta(delta) => delta.contains(text),
-        HostEvent::TranscriptStream {
+        HostEvent::AssistantDelta(delta)
+        | HostEvent::TranscriptStream {
             delta:
                 plakous_host_protocol::views::transcript::TranscriptStreamDelta::Assistant(delta)
                 | plakous_host_protocol::views::transcript::TranscriptStreamDelta::Reasoning {

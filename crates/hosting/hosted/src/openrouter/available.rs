@@ -1,4 +1,4 @@
-//! Plak-owned OpenRouter Chat construction through the supported facade.
+//! Plak-owned `OpenRouter` Chat construction through the supported facade.
 use super::{
     NonZeroU32, OpenRouterKeyUsageProbe, OutputBoundRederived, ProductOpenRouterRuntime,
     ProductOpenRouterSpec,
@@ -50,10 +50,10 @@ struct PreparedOpenRouter {
     output_bound_rederived: Option<OutputBoundRederived>,
 }
 
-/// The OpenRouter credentials a binder is handed.
+/// The `OpenRouter` credentials a binder is handed.
 ///
 /// The native path takes a `ResolvedProvider` resolved before construction; this
-/// is the same shape for OpenRouter. Everything else in this module is hosted —
+/// is the same shape for `OpenRouter`. Everything else in this module is hosted —
 /// route admission, endpoint eligibility, the wire behaviour — and none of it
 /// should know that the key comes from a product secret store keyed by a
 /// product home.
@@ -107,6 +107,10 @@ pub struct OpenRouterUsageRead {
 }
 
 /// Authenticates, discovers one literal model, and constructs its exact Chat runtime.
+///
+/// # Errors
+/// Refuses exact-account credentials, gateway model/protocol admission, tool construction
+/// or frozen-evidence revalidation failures.
 pub async fn construct_openrouter_runtime(
     spec: ProductOpenRouterSpec,
 ) -> CliResult<ProductOpenRouterRuntime> {
@@ -138,7 +142,11 @@ pub(crate) async fn construct_openrouter_runtime_with_fence(
     })
 }
 
-/// Compaction runtime: same OpenRouter coding binding with compact max output only.
+/// Compaction runtime: same `OpenRouter` coding binding with compact max output only.
+///
+/// # Errors
+/// Refuses gateway compaction construction or exact binding revalidation failures;
+/// construction never authorizes a second paid dispatch.
 pub async fn construct_openrouter_compaction_runtime(
     mut spec: ProductOpenRouterSpec,
 ) -> CliResult<SessionRuntimeBinding> {
@@ -619,7 +627,7 @@ fn reasoning_disposition(
 }
 
 /// A model that attests a reasoning token budget (`supports_max_tokens`) but
-/// enumerates no efforts takes OpenRouter's normalized `low`/`medium`/`high`,
+/// enumerates no efforts takes `OpenRouter`'s normalized `low`/`medium`/`high`,
 /// which the gateway maps onto a share of that budget.
 fn budget_mapped_efforts() -> Vec<String> {
     ["low", "medium", "high"].map(str::to_owned).to_vec()
@@ -712,7 +720,7 @@ pub(crate) fn openrouter_product_profile(
     )
 }
 
-/// Reads the OpenRouter inference key's own allowance with one authenticated
+/// Reads the `OpenRouter` inference key's own allowance with one authenticated
 /// `GET /api/v1/key`.
 ///
 /// This is invoked on demand when the Usage surface is opened, never on the

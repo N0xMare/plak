@@ -613,12 +613,13 @@ impl ContextProjection {
         self.non_guarantee
     }
 
-    /// Percent is [Self::occupied_tokens] over the working envelope for the
+    /// Percent is [`Self::occupied_tokens`] over the working envelope for the
     /// occupancy gauge; only the overflow excess is measured against the
     /// admitted ceiling (dispatch gate), from the admission bound. Fits /
-    /// WouldOverflow / `ceiling_excess` stay envelope-only; occupancy never
+    /// `WouldOverflow` / `ceiling_excess` stay envelope-only; occupancy never
     /// admits or refuses a turn. A zero window or ceiling yields no
     /// percentage rather than a misleading one.
+    #[must_use]
     pub fn actionable_utilization(self) -> Option<ActionableUtilization> {
         let occupied_tokens = self.occupied_tokens()?;
         let envelope_tokens = self.prepared_input?.tokens();
@@ -661,7 +662,6 @@ pub fn project_context_status(status: &ContextStatus) -> ContextProjection {
         ContextStatusKind::Fits { .. } => ContextDisposition::Fits,
         ContextStatusKind::WouldOverflow(_) => ContextDisposition::WouldOverflow,
         ContextStatusKind::ProtectedOverflow(_) => ContextDisposition::ProtectedOverflow,
-        ContextStatusKind::Unavailable(_) => return ContextProjection::unavailable(),
         _ => return ContextProjection::unavailable(),
     };
     let Some((evidence, non_guarantee)) =

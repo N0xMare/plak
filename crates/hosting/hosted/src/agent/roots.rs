@@ -70,6 +70,10 @@ pub trait RosterSource: Send + Sync {
     ///
     /// Re-asked on every recompile, so a change made from another shell is in
     /// force for the next one; an unreadable policy refuses creation.
+    ///
+    /// # Errors
+    /// Refuses a product-policy read failure rather than treating unavailable policy as
+    /// permission to create a tree.
     fn topology_admitted(&self) -> CliResult<bool>;
 }
 
@@ -204,7 +208,7 @@ pub struct ProductStateRoots {
     tree_store: Arc<Mutex<Option<Arc<dyn TreeStore>>>>,
     tree_store_factory: Arc<dyn TreeStoreFactory>,
     roster_source: Arc<dyn RosterSource>,
-    /// The OpenRouter credential the product binds: the
+    /// The `OpenRouter` credential the product binds: the
     /// hosted binder asks for a key source, never for the secret store under a
     /// product home.
     openrouter_credentials: Arc<dyn crate::openrouter::OpenRouterCredentials>,
@@ -276,6 +280,10 @@ impl ProductStateRoots {
         clippy::too_many_arguments,
         reason = "Takes the three absolute state roots and each injected product seam (telemetry, tree store, roster, sidecars, OpenRouter and platform credentials, session records) as separate trait objects so tests can replace each one."
     )]
+    ///
+    /// # Errors
+    /// Refuses a nonabsolute product, runtime-database or state-home path.
+    /// Construction does not create a database or fall back to another home.
     pub fn new(
         product: PathBuf,
         runtime_database: PathBuf,
@@ -501,6 +509,7 @@ impl ProductStateRoots {
     }
 
     /// Installs host terminal-pin admission without changing the frozen tool plan.
+    #[must_use]
     pub fn with_reclamation_fence(
         mut self,
         fence: Arc<dyn crate::workspace_reclamation::ReclamationFence>,
@@ -735,6 +744,10 @@ impl ProductStateRoots {
         self
     }
 
+    #[allow(
+        clippy::clone_on_copy,
+        reason = "the observer handle is Clone but only Copy when all observed API routes are omitted"
+    )]
     pub(crate) fn exchange_observer(&self) -> crate::exchange_observation::Observer {
         self.exchange_observer.clone()
     }
@@ -745,6 +758,7 @@ impl ProductStateRoots {
     }
 
     /// The product record service shared by every command and attach root.
+    #[must_use]
     pub fn session_records(&self) -> Arc<dyn crate::session_store::SessionRecordStore> {
         self.session_records.clone()
     }
@@ -1012,6 +1026,7 @@ impl ProductStateRoots {
         self
     }
 
+    #[must_use]
     pub fn with_roster_source(mut self, roster: Arc<dyn RosterSource>) -> Self {
         self.roster_source = roster;
         self
@@ -1037,7 +1052,7 @@ impl ProductStateRoots {
         Arc::clone(&self.named_secrets)
     }
 
-    /// The OpenRouter credential this product bound.
+    /// The `OpenRouter` credential this product bound.
     pub(crate) fn openrouter_credentials(
         &self,
     ) -> Arc<dyn crate::openrouter::OpenRouterCredentials> {
@@ -1132,6 +1147,10 @@ impl ProductStateRoots {
 
     /// The topology observer this process publishes tree transitions through:
     /// the product's, behind the children's usage ledgers.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "the topology port takes an optional observer; these product roots always install their observer"
+    )]
     pub(crate) fn topology_observer(&self) -> Option<Arc<dyn crate::agent_tree::TopologyObserver>> {
         Some(Arc::new(crate::node_usage::LedgerObserver(
             self.open_telemetry_cache().topology_observer(),
@@ -1139,10 +1158,12 @@ impl ProductStateRoots {
     }
 
     /// This process's opened telemetry, for the product's own emitters.
+    #[must_use]
     pub fn product_telemetry(&self) -> Arc<dyn ProductTelemetry> {
         self.open_telemetry_cache()
     }
 
+    #[must_use]
     pub fn telemetry_health(&self) -> TelemetryHealth {
         self.open_telemetry_cache().health()
     }

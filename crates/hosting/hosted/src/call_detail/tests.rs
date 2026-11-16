@@ -308,6 +308,10 @@ fn a_child_request_without_an_attached_tree_is_refused() {
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+)]
 fn script(steps: serde_json::Value, identity_namespace: u128) -> Arc<ScriptPlan> {
     Arc::new(
         serde_json::from_value(serde_json::json!({

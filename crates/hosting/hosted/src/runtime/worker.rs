@@ -69,17 +69,23 @@ impl HostWorkerHandle {
     }
 
     /// Whether the host thread has completed, including release.
+    #[must_use]
     pub fn is_finished(&self) -> bool {
         self.thread.is_finished()
     }
 
     /// The quit disposition selected so far, independent of presentation.
     /// Only the host can record escalation; an elapsed frontend deadline cannot.
+    #[must_use]
     pub fn quit_outcome(&self) -> HostQuitOutcome {
         self.receipt.outcome()
     }
 
     /// Joins cleanup and returns its typed quit disposition.
+    ///
+    /// # Errors
+    /// The outer result retains a worker panic payload; the inner result retains the host
+    /// cleanup/release failure. Neither can be replaced by frontend timeout evidence.
     pub fn join(self) -> thread::Result<CliResult<HostQuitOutcome>> {
         self.thread
             .join()

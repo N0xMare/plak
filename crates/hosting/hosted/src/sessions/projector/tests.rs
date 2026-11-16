@@ -107,6 +107,10 @@ impl Feed {
         self.next_id
     }
 
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+    )]
     fn push(
         &mut self,
         branch: BranchId,
@@ -149,7 +153,8 @@ impl Feed {
                     unreachable!("item reads are items");
                 };
                 let chunk = rest.as_mut().map(|rest| {
-                    let tail = rest.split_off((count as usize).min(rest.len()));
+                    let tail = rest
+                        .split_off((usize::try_from(count).unwrap_or(usize::MAX)).min(rest.len()));
                     std::mem::replace(rest, tail)
                 });
                 self.reads.insert(request, ReadValue::Items(chunk));

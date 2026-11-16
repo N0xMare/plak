@@ -509,9 +509,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                         catalog_candidates, ..
                     } => std::sync::Arc::clone(catalog_candidates),
                     HostTargetAuthority::OpenRouter { .. }
-                    | HostTargetAuthority::Platform { .. } => std::sync::Arc::from([]),
-
-                    HostTargetAuthority::Registered { .. } => std::sync::Arc::from([]),
+                    | HostTargetAuthority::Platform { .. }
+                    | HostTargetAuthority::Registered { .. } => std::sync::Arc::from([]),
                 },
             },
 

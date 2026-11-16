@@ -4,6 +4,10 @@ use plakous::model::CompiledProviderConfiguration;
 use plakous::tools::CodingPresentation;
 use std::path::Path;
 pub(crate) enum Attachment {}
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "available and unavailable composition attachment share a fallible builder signature"
+)]
 pub(crate) fn attach_local_composition(
     builder: AgentBuilder,
     attachment: Option<Attachment>,

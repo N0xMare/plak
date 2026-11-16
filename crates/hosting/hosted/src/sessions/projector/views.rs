@@ -176,6 +176,10 @@ pub struct LineageStep {
 
 /// Every non-row view of one product session. The skipped bookkeeping maps
 /// are stored in keyed tables and hydrated separately from this JSON state.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "feed projection retains independent durable and derived flags rather than one exclusive state"
+)]
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionViewState {

@@ -1019,7 +1019,7 @@ fn an_exact_reopen_keeps_the_skill_tool_the_session_froze_in_both_directions() {
 
 /// A rebind or switch successor inherits its source's skills on/off whatever
 /// tuple it moves to, so canonical tool authority never changes: Claude to
-/// OpenAI and back with skills on keeps `Skill` registered (presented only on
+/// `OpenAI` and back with skills on keeps `Skill` registered (presented only on
 /// Claude), and a toggle before the rebind changes nothing.
 #[test]
 fn a_cross_family_rebind_keeps_the_sources_skills_in_both_directions() {
@@ -1051,7 +1051,7 @@ fn a_cross_family_rebind_keeps_the_sources_skills_in_both_directions() {
     }
 }
 
-/// An OpenAI session made with skills on rebinds onto Claude keeping `Skill`,
+/// An `OpenAI` session made with skills on rebinds onto Claude keeping `Skill`,
 /// which the Claude successor now presents.
 #[test]
 fn an_openai_session_with_skills_rebinds_onto_claude() {
@@ -1108,7 +1108,7 @@ fn a_claude_model_switch_on_a_session_made_without_skills_never_gains_skill() {
     executor.block_on(opened.release()).unwrap().unwrap();
 }
 
-/// A fork is a successor of its source: on Claude and OpenAI alike it keeps
+/// A fork is a successor of its source: on Claude and `OpenAI` alike it keeps
 /// whether the source's skills are on after `skills.enabled` changed (made
 /// without them and forked with them on, or the reverse), so it is admitted
 /// with the source's tools, re-reads the roots under that (a skill written

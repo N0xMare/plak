@@ -230,11 +230,11 @@ fn compact_finished_note(
         || compaction_event_outcome_detail(outcome).to_owned(),
         compaction_summary_clause,
     );
-    if let Some(detail) = detail {
-        if !detail.trim().is_empty() {
-            note.push_str(": ");
-            note.push_str(&redact_text_preview(detail));
-        }
+    if let Some(detail) = detail
+        && !detail.trim().is_empty()
+    {
+        note.push_str(": ");
+        note.push_str(&redact_text_preview(detail));
     }
     note
 }

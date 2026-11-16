@@ -118,6 +118,10 @@ fn selection_refuses_duplicates_and_covered_tools() -> TestResult {
     Ok(())
 }
 
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "test fixtures retain the fallible helper signature used by their callers"
+)]
 #[test]
 fn selection_error_text_pins() -> TestResult {
     let text = |names: &[&str]| {

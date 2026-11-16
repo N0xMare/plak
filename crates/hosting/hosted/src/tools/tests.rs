@@ -5,6 +5,10 @@ fn cli<T>(result: CliResult<T>) -> TestResult<T> {
     result.map_err(|error| std::io::Error::other(error.message()).into())
 }
 
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "test fixtures retain the fallible helper signature used by their callers"
+)]
 #[test]
 fn catalog_preserves_core_then_extension_declaration_order() -> TestResult {
     // One membership: the compiled surface. Core in the presentation's own

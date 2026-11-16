@@ -1,4 +1,4 @@
-//! Hosted continuation of Codex and SuperGrok sessions past their admitted
+//! Hosted continuation of Codex and `SuperGrok` sessions past their admitted
 //! catalog window (spec 01 §7.4).
 //!
 //! The agent runtime asks for a fresh resolution between model operations once
@@ -6,7 +6,7 @@
 //! through the facade, recompiles the node's session configuration from it the
 //! way construction did, and hands the result back for the runtime's own
 //! binding checks. Roots and children install it alike; routes without a
-//! window (Claude OAuth, API keys, OpenRouter) install nothing.
+//! window (Claude OAuth, API keys, `OpenRouter`) install nothing.
 
 use std::future::Future;
 use std::sync::Arc;

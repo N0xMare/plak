@@ -25,8 +25,14 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Exact-open refusal with its original cause and bounded reconstruction facts.
+/// These facts describe why attachment failed; none grants a lease, recovery
+/// permission or authority to substitute another account or checkpoint.
+#[derive(Debug)]
 pub struct CodingSessionOpenFailure {
+    /// Categorized failure retaining typed causes and product repair facts.
     pub failure: Box<CliFailure>,
+    /// Canonical locator discovered during open, when one was established.
     pub current_locator: Option<SessionLocator>,
     /// The frozen binding input this build reconstructs differently, when the
     /// open (or its verification) refused for that reason.
@@ -127,6 +133,7 @@ pub struct AttachedReleaseError {
 
 impl AttachedReleaseError {
     /// The parent's released head, even when owned child shutdown failed.
+    #[must_use]
     pub fn released_locator(&self) -> Option<SessionLocator> {
         self.released_locator
     }
@@ -363,6 +370,10 @@ impl AttachedCodingSession {
 
     /// Forks onto `runtime`'s compilation of this binding (current
     /// instruction files, the source's history).
+    ///
+    /// # Errors
+    /// Returns the canonical fork refusal, including invalid source state, storage failures
+    /// and lost session authority.
     pub async fn fork(
         &self,
         operation_id: SessionOperationId,
@@ -379,6 +390,10 @@ impl AttachedCodingSession {
     /// An exact ordinary fork of `source`; product forks recompile
     /// ([`Self::fork`]).
     #[cfg(any(test, feature = "test-support"))]
+    ///
+    /// # Errors
+    /// Returns the canonical fork refusal for the exact source locator; another checkpoint is
+    /// never substituted.
     pub async fn fork_from(
         &self,
         operation_id: SessionOperationId,
@@ -389,6 +404,10 @@ impl AttachedCodingSession {
             .await
     }
 
+    ///
+    /// # Errors
+    /// Returns the canonical compaction refusal for the exact source and summary inputs. A
+    /// refusal is not permission to redispatch a paid operation.
     pub async fn compact_from(
         &self,
         operation_id: SessionOperationId,
@@ -408,6 +427,10 @@ impl AttachedCodingSession {
             .await
     }
 
+    ///
+    /// # Errors
+    /// Returns the canonical successor-binding refusal, including invalid source state,
+    /// changed binding evidence or storage failure.
     pub async fn rebind_from(
         &self,
         operation_id: SessionOperationId,
@@ -429,6 +452,10 @@ impl AttachedCodingSession {
         Box::pin(self.sessions.rebind(request)).await
     }
 
+    ///
+    /// # Errors
+    /// Returns the canonical context-inspection failure for this attachment; it does not
+    /// infer status from a product projection.
     pub async fn context_status(
         &self,
         operation_id: SessionOperationId,
@@ -449,6 +476,10 @@ impl AttachedCodingSession {
         clippy::result_large_err,
         reason = "the error carries the released locator and both lease failures; it is returned once at session teardown"
     )]
+    ///
+    /// # Errors
+    /// Returns canonical and topology release failures, retaining any successfully
+    /// released parent locator even when child shutdown failed.
     pub async fn release(self) -> Result<SessionLocator, AttachedReleaseError> {
         self.release_root(true).await
     }
@@ -460,6 +491,10 @@ impl AttachedCodingSession {
         clippy::result_large_err,
         reason = "the error carries the released locator and both lease failures; it is returned once at session teardown"
     )]
+    ///
+    /// # Errors
+    /// Returns a typed release failure if canonical ownership cannot be settled for handoff;
+    /// no successor may infer release from a timeout.
     pub async fn release_for_handoff(self) -> Result<SessionLocator, AttachedReleaseError> {
         self.release_root(false).await
     }
@@ -508,6 +543,10 @@ impl AttachedCodingSession {
         clippy::result_large_err,
         reason = "the error carries the released locator and both lease failures; it is returned once at process exit"
     )]
+    ///
+    /// # Errors
+    /// Returns a typed abandonment or release failure. An unsuccessful return must not be
+    /// treated as a terminal ownership receipt.
     pub async fn abandon_and_release(
         mut self,
         job_budget: Duration,
@@ -600,6 +639,10 @@ impl AttachedCodingSession {
 
     /// Quiesces the live driver and releases its source lease while retaining
     /// the session workflow service needed to publish a canonical branch.
+    ///
+    /// # Errors
+    /// Returns canonical detach failures; a product-side observation cannot stand in for
+    /// successful lease settlement.
     pub async fn detach(&mut self) -> Result<SessionLocator, AgentSessionsError> {
         let Some(opened) = self.opened.take() else {
             return Ok(self.locator);
@@ -611,6 +654,7 @@ impl AttachedCodingSession {
     }
 
     #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
     pub fn stub_for_host_tests(sessions: Arc<AgentSessions>, locator: SessionLocator) -> Self {
         Self {
             output_bound_rederived: None,
@@ -789,6 +833,10 @@ pub(super) async fn build_or_open(
 ///
 /// Product code that persists or later reopens a conversation must retain this
 /// handle while live and persist its current locator.
+///
+/// # Errors
+/// Refuses credential, binding, tool, storage or session-creation failures for the
+/// selected native route.
 pub async fn build_coding_session(
     spec: ProductAgentSpec,
     create_operation_id: &str,
@@ -827,6 +875,10 @@ pub(crate) async fn build_coding_session_seed(
 
 /// Reopens one exact product-bound Plakous session without substituting current
 /// defaults for its persisted runtime authority.
+///
+/// # Errors
+/// Refuses exact-locator or reconstruction failures, preserving the typed open failure
+/// rather than falling back to another account.
 pub async fn open_coding_session(
     spec: ProductAgentSpec,
     locator: SessionLocator,
@@ -848,6 +900,10 @@ pub async fn open_coding_session(
 
 /// Creates a durable product session from an already sealed public Plakous
 /// runtime binding. This is the provider-neutral lane used by API-key dialects.
+///
+/// # Errors
+/// Refuses canonical creation or seed-history validation failures. Failure does not
+/// authorize publishing a product locator.
 pub async fn build_runtime_session(
     state_roots: &ProductStateRoots,
     runtime: SessionRuntimeBinding,
@@ -1020,6 +1076,10 @@ async fn attach_native_source(
     result
 }
 
+///
+/// # Errors
+/// Refuses exact API construction, topology admission or canonical session creation;
+/// subscription credentials are not a fallback.
 pub async fn build_api_root_coding_session(
     parent: ApiTopologyParent,
     create_operation_id: &str,
@@ -1076,6 +1136,10 @@ pub(crate) async fn build_api_coding_session_seed(
     .map_err(|error| *error.failure)
 }
 
+///
+/// # Errors
+/// Refuses exact API binding revalidation or canonical open failures, retaining typed
+/// attachment refusal facts.
 pub async fn open_api_root_coding_session(
     parent: ApiTopologyParent,
     locator: SessionLocator,
@@ -1194,12 +1258,12 @@ async fn attach_api_source(
             prepared.runtime
         }
         Err(error) => {
-            if let Some(acquired) = topology_owner.take() {
-                if let Err(cleanup) = crate::topology_runtime::release_root_lease(&acquired).await {
-                    return Err(CodingSessionOpenFailure::from(
-                        error.with_cleanup_failure(cleanup),
-                    ));
-                }
+            if let Some(acquired) = topology_owner.take()
+                && let Err(cleanup) = crate::topology_runtime::release_root_lease(&acquired).await
+            {
+                return Err(CodingSessionOpenFailure::from(
+                    error.with_cleanup_failure(cleanup),
+                ));
             }
             return Err(CodingSessionOpenFailure::from(error));
         }
@@ -1217,16 +1281,16 @@ async fn attach_api_source(
     )
     .await;
     if result.is_err() || target.verifies() {
-        if let Some(acquired) = acquired_owner {
-            if let Err(cleanup) = crate::topology_runtime::release_root_lease(&acquired).await {
-                return result.map_err(|error| CodingSessionOpenFailure {
-                    failure: Box::new(error.failure.with_cleanup_failure(cleanup)),
-                    current_locator: error.current_locator,
-                    binding_change: error.binding_change,
-                    unsettled_work: error.unsettled_work,
-                    lease_held: error.lease_held,
-                });
-            }
+        if let Some(acquired) = acquired_owner
+            && let Err(cleanup) = crate::topology_runtime::release_root_lease(&acquired).await
+        {
+            return result.map_err(|error| CodingSessionOpenFailure {
+                failure: Box::new(error.failure.with_cleanup_failure(cleanup)),
+                current_locator: error.current_locator,
+                binding_change: error.binding_change,
+                unsettled_work: error.unsettled_work,
+                lease_held: error.lease_held,
+            });
         }
         return result;
     }

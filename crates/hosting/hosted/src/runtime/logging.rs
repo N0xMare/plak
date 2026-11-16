@@ -30,6 +30,7 @@ pub(super) fn session_header(session: &sessions::SessionRecord) -> TranscriptRow
 
 /// A session's restore snapshot: its header, then the restore window of its
 /// transcript.
+#[must_use]
 pub fn project_session_snapshot(session: &sessions::SessionRecord) -> PresentationSnapshot {
     let mut items = session.transcript.items();
     items.insert(

@@ -37,6 +37,10 @@ fn fenced_then_answering() -> Arc<ScriptPlan> {
     ]))
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+)]
 pub(super) fn script(steps: serde_json::Value) -> Arc<ScriptPlan> {
     Arc::new(
         serde_json::from_value(serde_json::json!({"version": SCRIPT_VERSION, "steps": steps}))
@@ -328,7 +332,7 @@ fn a_fence_recovers_in_place_at_once_and_the_next_prompt_runs() {
     assert!(claims[0].contains("model_request"), "{claims:?}");
 }
 
-/// The live OpenRouter Messages failure sequence is deterministic here: an
+/// The live `OpenRouter` Messages failure sequence is deterministic here: an
 /// uncertain transport outcome fences one root, then the explicit recovery
 /// prompt encounters a context limit. Neither failure is replayed, and only a
 /// further explicit prompt starts the successful root on the same session.

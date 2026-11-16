@@ -23,6 +23,10 @@ use serde::Deserialize;
 use crate::frozen_tools::McpPlacement;
 use crate::tool_plan::{SelectedTool, TemplateToolSelection};
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "error adapters consume the failing operation error, matching Result::map_err ownership"
+)]
 fn mcp_failure(error: McpError) -> crate::CliFailure {
     let advice = if let Some(login) = error.login_requirement() {
         Some(plakous_host_protocol::refusal::RefusalAdvice::McpLogin {
@@ -328,6 +332,10 @@ impl BoundMcpTools {
 /// rebuilt from the session's frozen records with no server behind them.
 /// Nothing is started, connected or leased, so no MCP login is renewed; the
 /// definitions and binding identities are the ones a leasing reopen builds.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "MCP construction takes ownership of node services and credential handles for the bound runtime"
+)]
 pub(crate) fn recorded_mcp_tools(
     selection: &TemplateToolSelection,
     tool_sections: &BTreeMap<String, String>,
@@ -406,6 +414,10 @@ pub struct McpProbe {
 ///
 /// Returns the one-line cause a session bind would report: an invalid table,
 /// a missing secret, or a start, handshake or listing failure.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "MCP construction takes ownership of node services and credential handles for the bound runtime"
+)]
 pub fn probe_mcp_server(
     server: &str,
     rendered: &str,
@@ -478,6 +490,10 @@ pub fn probe_mcp_server(
 ///
 /// Returns the one-line cause a session bind would report, or the server's
 /// refusal of `prompts/list`.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "MCP construction takes ownership of node services and credential handles for the bound runtime"
+)]
 pub fn list_mcp_prompts(
     server: &str,
     rendered: &str,
@@ -499,6 +515,10 @@ pub fn list_mcp_prompts(
 ///
 /// As [`list_mcp_prompts`], and an unknown prompt, a wrong argument, or a
 /// refused, failed or oversized expansion.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "MCP construction takes ownership of node services and credential handles for the bound runtime"
+)]
 pub fn get_mcp_prompt(
     server: &str,
     rendered: &str,
@@ -585,6 +605,10 @@ pub fn mcp_login_status(
 ///
 /// Returns a one-line reason for an invalid table, a table without OAuth,
 /// or a product without MCP logins.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "MCP construction takes ownership of node services and credential handles for the bound runtime"
+)]
 pub fn mcp_oauth_spec(
     server: &str,
     rendered: &str,

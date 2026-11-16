@@ -635,7 +635,7 @@ impl crate::node::TurnRole<()> for ChildTurns {
                 )
                 .await;
                 retire_live_child(&driver, live, &agent_id, completed_turn).await;
-                return AfterTerminal::Settled(());
+                AfterTerminal::Settled(())
             }
             Ok(_) => {
                 let ended =
@@ -657,7 +657,7 @@ impl crate::node::TurnRole<()> for ChildTurns {
                 )
                 .await;
                 retire_live_child(&driver, live, &agent_id, completed_turn).await;
-                return AfterTerminal::Settled(());
+                AfterTerminal::Settled(())
             }
             Err(error) => {
                 // No authoritative terminal was published. Submitted work
@@ -677,7 +677,7 @@ impl crate::node::TurnRole<()> for ChildTurns {
                 )
                 .await;
                 retire_live_child(&driver, live, &agent_id, completed_turn).await;
-                return AfterTerminal::Settled(());
+                AfterTerminal::Settled(())
             }
         }
     }

@@ -31,6 +31,7 @@ pub enum ProtocolSelection {
 impl ProtocolSelection {
     /// Stable lowercase operator and persisted token, without alias expansion.
     #[allow(dead_code, reason = "consumed by product target-selection wiring")]
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Auto => "auto",
@@ -132,6 +133,7 @@ impl WireBinding {
     /// Freeze the current resolution rule: `Auto` resolves to chat, and explicit
     /// choices retain their wire. No network discovery or credential lookup runs.
     #[allow(dead_code, reason = "consumed by product target-selection wiring")]
+    #[must_use]
     pub fn resolve(selection: ProtocolSelection) -> Self {
         let resolved = match selection {
             ProtocolSelection::Auto | ProtocolSelection::Chat => ResolvedProtocol::Chat,
@@ -160,7 +162,7 @@ impl WireBinding {
     }
 }
 
-/// Product-owned OpenRouter endpoint/fallback policy.
+/// Product-owned `OpenRouter` endpoint/fallback policy.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum OpenRouterRoutingSelection {
@@ -172,7 +174,7 @@ pub enum OpenRouterRoutingSelection {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlatformProvider {
-    /// OpenAI API-key account, independent of a ChatGPT subscription.
+    /// `OpenAI` API-key account, independent of a `ChatGPT` subscription.
     OpenAi,
     /// Anthropic API-key account, independent of a Claude subscription.
     Anthropic,
@@ -239,6 +241,7 @@ impl ApiTarget {
     }
 
     /// Parsed exact account identity, without credential resolution.
+    #[must_use]
     pub fn selection(&self) -> &crate::account::AccountRef {
         match self {
             Self::OpenRouter { account, .. } | Self::Platform { account, .. } => account,
@@ -280,6 +283,7 @@ pub enum TargetSelection {
 
 impl TargetSelection {
     /// Whether construction uses API-key rather than subscription authority.
+    #[must_use]
     pub const fn is_api(&self) -> bool {
         matches!(self, Self::Platform { .. } | Self::OpenRouter { .. })
     }
@@ -489,7 +493,7 @@ pub const fn native_ptc_refusal(provider: NativeProvider) -> &'static str {
     }
 }
 
-/// Refusal for an explicit `native-ptc` on OpenRouter, which enrolls no
+/// Refusal for an explicit `native-ptc` on `OpenRouter`, which enrolls no
 /// native programmatic tool calling.
 pub const OPENROUTER_NATIVE_PTC_REFUSAL: &str = crate::capabilities::OPENROUTER.native_ptc_refusal;
 
@@ -567,7 +571,7 @@ pub enum CompositionSelection {
     #[serde(rename = "plakous-default")]
     FollowCatalog,
     /// The vertical's own programmatic tool calling system. Only Codex Code
-    /// Mode (`exec`/`wait`) is enrolled: Codex `CodeModeOnly` rows and OpenAI
+    /// Mode (`exec`/`wait`) is enrolled: Codex `CodeModeOnly` rows and `OpenAI`
     /// API models enrolled as `CodeModeOnly`.
     NativePtc,
     /// Harness JavaScript PTC (`exec_js`/`wait_js`), on every vertical.

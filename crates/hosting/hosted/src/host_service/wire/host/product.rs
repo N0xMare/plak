@@ -23,6 +23,10 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
     }
     /// Deadline outcome selected before work starts. Mutations may already
     /// have taken effect when their response deadline expires.
+    ///
+    /// # Errors
+    /// The default returns a deadline refusal. Implementations preserve the request-specific
+    /// refusal even when its mutation may already have taken effect.
     fn host_request_timeout(
         &self,
         _request: &P::HostRequest,

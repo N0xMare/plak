@@ -515,6 +515,10 @@ impl SessionRecord {
     /// Write one tool activity row in place, or append it for a new call id.
     /// The projection bounds subject and detail, so every reader sees bounded
     /// rows.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "projection boundaries consume owned event facts rather than retaining borrowed inputs across settlement"
+    )]
     pub fn upsert_tool_activity(&mut self, activity: ToolItem) {
         // A call id seen for the first time is one more tool call; later state
         // changes update the row and never count again. Compact workflows and
@@ -774,8 +778,7 @@ pub fn digest_parts(parts: &[&str]) -> String {
 pub fn encode_workflow_kind(kind: &SessionWorkflowKind) -> (Option<&str>, Option<String>) {
     match kind {
         SessionWorkflowKind::Compact(reason) => (Some(reason.as_str()), None),
-        SessionWorkflowKind::New => (None, None),
-        SessionWorkflowKind::Fork => (None, None),
+        SessionWorkflowKind::New | SessionWorkflowKind::Fork => (None, None),
         SessionWorkflowKind::Rebind(v) => (None, serde_json::to_string(v).ok()),
         SessionWorkflowKind::Switch(v) => (None, v.encode().ok()),
     }

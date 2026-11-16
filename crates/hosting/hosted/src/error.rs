@@ -398,6 +398,10 @@ impl CliFailure {
         self.retry_open
     }
 
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "error adapters consume the failing operation error, matching Result::map_err ownership"
+    )]
     pub(crate) fn inspection_read(
         agent: &str,
         locator: &str,

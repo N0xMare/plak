@@ -431,7 +431,7 @@ fn processes_stop_exact_identity_and_stop_all_are_user_attributed() -> TestResul
 }
 
 /// A user stop returns at once with the row `Stopping`, and the process
-/// gets the TaskStop grace between SIGTERM and SIGKILL. The TERM handler
+/// gets the `TaskStop` grace between SIGTERM and SIGKILL. The TERM handler
 /// here finishes only after the test releases it, well past any short
 /// cleanup bound, so a SIGKILL inside the grace leaves no marker.
 #[test]
@@ -673,13 +673,11 @@ fn owner_maps_shrink_after_retired_children() -> TestResult {
     let services = registry
         .services
         .lock()
-        .map(|services| services.len())
-        .unwrap_or(0);
+        .map_or(0, |services| services.len());
     let (labels, trees) = registry
         .owners
         .lock()
-        .map(|owners| (owners.labels.len(), owners.trees.len()))
-        .unwrap_or((0, 0));
+        .map_or((0, 0), |owners| (owners.labels.len(), owners.trees.len()));
     assert_eq!((services, labels, trees), (1, 1, 1));
 
     let kept = registry

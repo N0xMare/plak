@@ -15,6 +15,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Inputs for building the product coding agent (run + TUI host).
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the frozen agent spec carries independent product policy switches"
+)]
 #[derive(Clone)]
 pub struct ProductAgentSpec {
     /// Saved creation selection; names freeze before card bodies and tools.
@@ -52,7 +56,7 @@ pub struct ProductAgentSpec {
     /// `None` is a real state — a session constructed with no product home
     /// behind it — and it is stated here rather than discovered: nothing under
     /// `agent/**` reads the environment for it. The topology, the product instruction tail and the
-    /// OpenRouter binding are the three things that ask.
+    /// `OpenRouter` binding are the three things that ask.
     pub product_home: Option<PathBuf>,
     /// The optional tools this node's template selects. Binding resolves them
     /// on this session's route or refuses session creation.
@@ -764,8 +768,7 @@ pub(in crate::agent) fn stamp_root_account(
     let root_id = tree.root_agent_id.clone();
     let empty = tree
         .node(&root_id)
-        .map(|node| node.account.is_empty())
-        .unwrap_or(false);
+        .is_ok_and(|node| node.account.is_empty());
     if empty {
         tree.set_node_account_if_empty(&root_id, root_account);
     }
@@ -784,6 +787,10 @@ pub(in crate::agent) fn rejoin_parent(
         .cloned()
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "projection entry points own a runtime lease handle through snapshot construction"
+)]
 pub(crate) fn topology_extensions_from_runtime(
     runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,
     parent: &SpawnParent,
@@ -815,7 +822,7 @@ pub(crate) fn topology_extensions_from_runtime(
 ///
 /// It is the presentation [`CodingPresentation::admit`] would compile for
 /// this parent — Grok's output and kill tools on the Grok pack, pi's `wait`
-/// and `stop` on the pi pack (OpenRouter), the Plak names on every other pack
+/// and `stop` on the pi pack (`OpenRouter`), the Plak names on every other pack
 /// (spec 03 §3) — not a second provider match.
 fn topology_vocabulary(
     parent: &SpawnParent,
@@ -915,7 +922,11 @@ struct OperatorRecoverRefusal<'a> {
     message: &'a str,
 }
 
-/// Idle JSONL `invoke_tool`: TopologyTool on the attached hub, not a model turn.
+/// Idle JSONL `invoke_tool`: `TopologyTool` on the attached hub, not a model turn.
+///
+/// # Errors
+/// Refuses invalid tool input, missing caller authority or a topology runtime failure. No
+/// tool effect is inferred from a refusal.
 pub async fn invoke_topology_tool_on_hub(
     tree_id: &str,
     caller_id: Option<&str>,
@@ -990,6 +1001,7 @@ pub(in crate::agent) fn claim_root_topology_owner(tree_id: &str, is_root: bool) 
     clippy::too_many_arguments,
     reason = "An API topology parent freezes route evidence, tool selection, instruction authority, limits, and its owning tree identity."
 )]
+#[must_use]
 pub fn api_topology_parent(
     product_home: PathBuf,
     topology_tree_id: String,

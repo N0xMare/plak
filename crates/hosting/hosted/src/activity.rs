@@ -508,12 +508,11 @@ fn expand_escaped_newlines(pretty: &str) -> String {
                 Some('t') => out.push_str("    "),
                 Some('r') => {}
                 Some('"') => out.push('"'),
-                Some('\\') => out.push('\\'),
+                Some('\\') | None => out.push('\\'),
                 Some(other) => {
                     out.push('\\');
                     out.push(other);
                 }
-                None => out.push('\\'),
             },
             other => out.push(other),
         }

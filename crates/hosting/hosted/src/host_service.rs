@@ -49,6 +49,7 @@ mod child;
 pub(crate) mod drafts;
 mod face;
 mod gap_repair;
+mod handle;
 #[cfg(feature = "test-support")]
 pub mod test_draft_gate;
 #[cfg(feature = "test-support")]
@@ -68,6 +69,10 @@ mod test_draft_gate {
         BTreeMap, HostService, IntentSender, ProtocolExtension, RequestRefusal, SessionIntent,
         drafts,
     };
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "the disabled draft gate keeps the enabled gate's fallible deferral signature"
+    )]
     pub(super) fn defer<P: ProtocolExtension>(
         _service: &HostService<P>,
         _sender: &IntentSender<P>,
@@ -252,29 +257,6 @@ pub struct HostService<P: ProtocolExtension> {
     /// The session tree's children, or `None` when only the root attaches.
     nodes: Option<Arc<dyn ChildNodes>>,
     state: Arc<Mutex<State<P>>>,
-}
-
-impl<P: ProtocolExtension> std::fmt::Debug for HostService<P> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Do not lock session state or render queued observations during diagnostics.
-        formatter
-            .debug_struct("HostService")
-            .field("root", &self.root)
-            .field("capacity", &self.capacity)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<P: ProtocolExtension> Clone for HostService<P> {
-    fn clone(&self) -> Self {
-        Self {
-            actions: self.actions.clone(),
-            root: self.root.clone(),
-            capacity: self.capacity,
-            nodes: self.nodes.clone(),
-            state: Arc::clone(&self.state),
-        }
-    }
 }
 
 /// How a service holds its session's mailbox.
@@ -658,6 +640,10 @@ impl<P: ProtocolExtension> HostService<P> {
     /// `request` names the session request that caused the switch, if one
     /// did: the attachment that asked and its client's id for it. Returns
     /// the attachments it ended.
+    #[allow(
+        clippy::must_use_candidate,
+        reason = "moving attachments is the effect; callers may ignore the ended-attachment summary"
+    )]
     pub fn move_attachments(
         &self,
         node: &NodeAddress,
@@ -1048,6 +1034,10 @@ impl<P: ProtocolExtension> HostService<P> {
 
     /// Takes everything queued for `attachment`. A dropped attachment
     /// yields its resync-required once and is then gone.
+    #[allow(
+        clippy::must_use_candidate,
+        reason = "draining is the effect even when a caller discards the queued observations"
+    )]
     pub fn take(&self, attachment: AttachmentId) -> Vec<Outbound<P>> {
         let mut taken = Vec::new();
         // The first drain makes room; the second includes any kept baseline

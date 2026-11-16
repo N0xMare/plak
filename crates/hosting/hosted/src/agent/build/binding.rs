@@ -50,6 +50,10 @@ use std::sync::Arc;
 
 /// Materializes Plak's complete explicit provider selection before any live
 /// model resolution occurs.
+///
+/// # Errors
+/// Refuses an unavailable route or an invalid provider/model configuration; no alternate
+/// account or model is selected.
 pub fn selected_coding_provider_configuration(
     provider: NativeProvider,
     model: ModelId,
@@ -71,9 +75,17 @@ pub fn selected_coding_provider_configuration(
 /// processing tier. This constructs a candidate, not admission evidence;
 /// provider resolution must validate named tiers against its authenticated row.
 #[allow(
+    clippy::needless_pass_by_value,
+    reason = "the public selection boundary owns its model identity; changing it to a borrow would change the API contract"
+)]
+#[allow(
     clippy::too_many_lines,
     reason = "Native configuration selection maps each provider capability, reasoning effort, tool mode, composition, and service tier without fallback."
 )]
+///
+/// # Errors
+/// Refuses an unavailable route, unsupported processing tier, or invalid provider/model
+/// configuration. The selected tier is never silently downgraded.
 pub fn selected_coding_provider_configuration_with_processing_tier(
     provider: NativeProvider,
     model: ModelId,
@@ -108,7 +120,6 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
                 provider,
             )));
         }
-        (NativeProvider::Codex, Some(NativeToolMode::Direct), _) => false,
         (
             NativeProvider::Codex,
             Some(NativeToolMode::CodeModeOnly),
@@ -125,14 +136,6 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
         // presentation (no `exec`/`wait`), and Plak js/py-ptc may replace that
         // Direct presentation exactly as on a catalog-Direct row. Plak PTC never
         // attaches *beside* Code Mode because this arm compiles no Code Mode.
-        (
-            NativeProvider::Codex,
-            Some(NativeToolMode::CodeModeOnly),
-            CompositionSelection::Direct
-            | CompositionSelection::JsPtc
-            | CompositionSelection::PyPtc
-            | CompositionSelection::PySdk,
-        ) => false,
         (NativeProvider::Codex, Some(NativeToolMode::CodeMode), _) => {
             return Err(CliFailure::new(
                 "Codex hybrid CodeMode is catalog-admitted but has no exact enrolled product presentation",
@@ -143,7 +146,16 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
                 "Codex model has no recognized authenticated tool-mode authority",
             ));
         }
-        (_, None, _) => false,
+        (NativeProvider::Codex, Some(NativeToolMode::Direct), _)
+        | (
+            NativeProvider::Codex,
+            Some(NativeToolMode::CodeModeOnly),
+            CompositionSelection::Direct
+            | CompositionSelection::JsPtc
+            | CompositionSelection::PyPtc
+            | CompositionSelection::PySdk,
+        )
+        | (_, None, _) => false,
         (_, Some(_), _) => {
             return Err(CliFailure::new(
                 "native tool-mode evidence belongs to a different provider family",
@@ -471,6 +483,10 @@ pub(crate) async fn api_session_runtime_binding_with_owner(
 
 /// Constructs the exact sealed runtime authority used by create, open, and
 /// driver-owned session workflows.
+///
+/// # Errors
+/// Refuses credential, model, composition, tool or topology admission failures while
+/// compiling the exact selected binding.
 pub async fn coding_session_runtime_binding(
     spec: ProductAgentSpec,
     stderr: &mut (dyn Write + Send),
@@ -504,6 +520,10 @@ pub(crate) async fn coding_move_runtime_binding(
 
 /// Fresh conversation create (`/new`) must attach a new root tree, not look
 /// up the previous hub lease.
+///
+/// # Errors
+/// Refuses exact-route construction or topology attachment failures. Failure does not
+/// authorize a different root or a second runtime owner.
 pub async fn coding_session_runtime_binding_attaching_root(
     mut spec: ProductAgentSpec,
     stderr: &mut (dyn Write + Send),
@@ -654,10 +674,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
         }
     } else if provider == NativeProvider::Codex {
         match resolved_tool_mode {
-            Some(NativeToolMode::Direct)
-                if resolved.configuration().effective().behavior().tool_mode
-                    == ToolPresentationMode::Direct => {}
-            Some(NativeToolMode::CodeModeOnly)
+            Some(NativeToolMode::Direct | NativeToolMode::CodeModeOnly)
                 if resolved.configuration().effective().behavior().tool_mode
                     == ToolPresentationMode::Direct => {}
             Some(NativeToolMode::CodeModeOnly) => {
@@ -1136,6 +1153,10 @@ pub(in crate::agent) fn ensure_workspace_excludes_product_state(
 }
 
 /// Exact compaction runtime: same coding binding as the live turn with compact max output only.
+///
+/// # Errors
+/// Refuses unavailable credentials, model facts or compaction construction inputs.
+/// Construction itself grants no permission to repeat a paid dispatch.
 pub async fn compaction_session_runtime_binding(
     spec: &ProductAgentSpec,
 ) -> CliResult<SessionRuntimeBinding> {

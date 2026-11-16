@@ -361,8 +361,7 @@ impl Presentations {
                     .live
                     .get(&scope)
                     .and_then(|live| live.pending_tool(call_id.as_deref().unwrap_or(name)))
-            {
-                if sink
+                && sink
                     .send(ContentEvent::TranscriptStream {
                         scope: scope.clone(),
                         delta:
@@ -371,9 +370,8 @@ impl Presentations {
                             ),
                     })
                     .is_err()
-                {
-                    return self.resync(&scope, sink);
-                }
+            {
+                return self.resync(&scope, sink);
             }
             return true;
         };

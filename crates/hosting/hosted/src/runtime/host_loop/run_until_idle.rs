@@ -125,17 +125,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     })
                     .collect::<Vec<_>>();
                 let mut failures = Vec::new();
-                if run.bounds.leave_jobs_running {
-                    if let Err(error) = self
+                if run.bounds.leave_jobs_running
+                    && let Err(error) = self
                         .role
                         .config
                         .state_roots
                         .job_registry()
                         .disown_leftovers()
                         .await
-                    {
-                        failures.push(error);
-                    }
+                {
+                    failures.push(error);
                 }
                 if let Err(error) = self
                     .role
@@ -226,14 +225,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                         format!("plak: run stopped at {bound}{suffix}"),
                     ));
                     state.result = Some(Ok(OneShotOutcome::Bounded { assistant, bound }));
-                } else if (interrupted || storage_unavailable) && completed {
-                    if let Some(Ok(
+                } else if (interrupted || storage_unavailable)
+                    && completed
+                    && let Some(Ok(
                         OneShotOutcome::Completed { assistant }
                         | OneShotOutcome::Truncated { assistant },
                     )) = state.result.take()
-                    {
-                        state.result = Some(Ok(OneShotOutcome::Interrupted { assistant }));
-                    }
+                {
+                    state.result = Some(Ok(OneShotOutcome::Interrupted { assistant }));
                 }
                 if let Err(error) = self.pause_run_queue() {
                     failures.push(error.message().to_owned());

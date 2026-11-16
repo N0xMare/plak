@@ -36,7 +36,7 @@ pub(super) fn profile(model: &str) -> Option<&'static str> {
 
 /// Product-owned credentials for this compiled API route.
 pub trait Credentials: Send + Sync + 'static {
-    /// Resolve a refreshable key source for this exact OpenAI API account, retaining its
+    /// Resolve a refreshable key source for this exact `OpenAI` API account, retaining its
     /// credential scope rather than borrowing subscription authentication.
     ///
     /// # Errors
@@ -99,7 +99,7 @@ pub(super) async fn construct(
     )))?;
     model.configured().await.map_err(api_error)
 }
-/// The credential reference the OpenAI API route resolves its key under, for
+/// The credential reference the `OpenAI` API route resolves its key under, for
 /// both session construction and the model listing.
 pub(super) fn openai_credential_reference(
     account: &crate::account::AccountRef,
@@ -108,7 +108,7 @@ pub(super) fn openai_credential_reference(
         .map_err(api_error)
 }
 
-/// The OpenAI catalog over one id list, classified by the provider crate's
+/// The `OpenAI` catalog over one id list, classified by the provider crate's
 /// bundled table and family rules. The live list publishes ids only.
 pub(in crate::platform) fn catalog(
     listed: &[plakous::openai::OpenAiListedModel],

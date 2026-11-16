@@ -31,6 +31,10 @@ use crate::sessions::{NoticeScope, TranscriptRow};
     clippy::too_many_lines,
     reason = "Clear rebuilds the candidate before detaching the source and preserves rollback at every publication boundary."
 )]
+///
+/// # Errors
+/// Refuses source settlement, explicit successor construction or product publication
+/// failures. The recorded operation identity governs reconciliation.
 pub async fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     opened: &mut AttachedCodingSession,

@@ -1,5 +1,9 @@
 use super::{ImageFileError, NormalizeError};
 
+/// Refuse image normalization without decoding any caller-supplied bytes.
+///
+/// # Errors
+/// Always returns the typed omitted-`images` capability refusal.
 pub fn normalize(
     _name: String,
     _bytes: Vec<u8>,
@@ -7,10 +11,18 @@ pub fn normalize(
     Err(unavailable())
 }
 
+/// Refuse tool-result image normalization in a build without image support.
+///
+/// # Errors
+/// Always returns the typed omitted-`images` capability refusal.
 pub fn normalize_tool(_bytes: &[u8]) -> Result<(String, Vec<u8>), NormalizeError> {
     Err(unavailable())
 }
 
+/// Refuse raw-pixel normalization without interpreting dimensions or pixel data.
+///
+/// # Errors
+/// Always returns the typed omitted-`images` capability refusal.
 pub fn normalize_rgba(
     _name: String,
     _width: u32,

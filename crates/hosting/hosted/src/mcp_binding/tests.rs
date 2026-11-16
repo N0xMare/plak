@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use plakous::model::ToolExecutionOwner;
@@ -72,7 +73,7 @@ fn rendered(
         quoted(args)
     );
     if let Some(tools) = tools {
-        out.push_str(&format!("tools = [{}]\n", quoted(tools)));
+        let _ = writeln!(out, "tools = [{}]", quoted(tools));
     }
     out.push_str("startup_seconds = 20\ncall_seconds = 120\n");
     out

@@ -282,9 +282,9 @@ async fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
     let operation_id = SessionOperationId::new(operation)
         .map_err(|_| CliFailure::new("compact operation identity is invalid"))?;
     let facade_reason = match reason {
-        sessions::ProductCompactReason::Manual => CompactReason::Manual,
         sessions::ProductCompactReason::Scheduled => CompactReason::Scheduled,
-        sessions::ProductCompactReason::CapacityRecovery => CompactReason::Manual,
+        sessions::ProductCompactReason::Manual
+        | sessions::ProductCompactReason::CapacityRecovery => CompactReason::Manual,
     };
     if watch.observe_now() {
         config

@@ -520,7 +520,6 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
                 return Err(ChildStartFailure::Refused(rejection));
             }
             let deleted = match (cleanup_owned, released) {
-                (false, _) => false,
                 (true, Some(locator)) => match sessions.archive(locator).await {
                     Ok(report) => sessions
                         .delete(report.session_id(), report.archived_revision())
@@ -528,7 +527,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
                         .is_ok(),
                     Err(_) => false,
                 },
-                (true, None) => false,
+                (false, _) | (true, None) => false,
             };
             if delete_on_definite_refusal && deleted {
                 return Err(ChildStartFailure::Refused(rejection));

@@ -90,6 +90,10 @@ fn retry_notice_names_the_network_phase() {
     assert_eq!(notice.cause_kind, "connect");
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+)]
 fn agent_event(kind: serde_json::Value) -> AgentEvent {
     let uuid = uuid::Uuid::from_u128(1);
     serde_json::from_value(serde_json::json!({

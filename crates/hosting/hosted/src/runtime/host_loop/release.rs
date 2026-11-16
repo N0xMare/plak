@@ -186,10 +186,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return CliFailure::shutdown(release_failure, None);
         };
         let cleanup_failure = if published {
-            let deadline = self
-                .quit_started_at
-                .map(|started| started + std::time::Duration::from_secs(1))
-                .unwrap_or_else(|| super::Instant::now() + super::FINAL_PROJECTION_BOUND);
+            let deadline = self.quit_started_at.map_or_else(
+                || super::Instant::now() + super::FINAL_PROJECTION_BOUND,
+                |started| started + std::time::Duration::from_secs(1),
+            );
             let projected = async {
                 let sessions = self.role.config.state_roots.runtime_sessions()?;
                 let pass = super::super::projection::project_to_tail(

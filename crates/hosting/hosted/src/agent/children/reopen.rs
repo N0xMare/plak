@@ -161,7 +161,7 @@ pub(in crate::agent) async fn recover_owed_children(
     .await;
 }
 
-/// recover_node for a child with a bound turn: the exact open, then the
+/// `recover_node` for a child with a bound turn: the exact open, then the
 /// owner-lost mark, after cancelling a turn the open restored.
 async fn recover_bound_child(
     parent: &SpawnParent,
@@ -466,7 +466,7 @@ pub(in crate::agent) struct ChildReopenMode {
     /// retirement failure when the result reconciliation refuses.
     pub(in crate::agent) recovery: bool,
     /// Whether the reopen projects the feed the open left before it
-    /// returns. A custody take's recover_node projects it itself, after its
+    /// returns. A custody take's `recover_node` projects it itself, after its
     /// owner-lost mark: a lost turn's terminal folded before the mark would
     /// interrupt the child with no cause, and so with no continuation.
     pub(in crate::agent) project: bool,
@@ -481,7 +481,7 @@ impl ChildReopenMode {
         project: true,
     };
 
-    /// A custody take's reopen of a child it owes recover_node, and a loss
+    /// A custody take's reopen of a child it owes `recover_node`, and a loss
     /// continuation's: as [`Self::OWNER`], with the feed left for the mark
     /// (or the caller) to project.
     pub(in crate::agent) const TAKE: Self = Self {
@@ -581,6 +581,10 @@ impl From<ChildReopenError> for crate::agent_tree_tools::MailDeliveryFailure {
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "error adapters consume the failing operation error, matching Result::map_err ownership"
+)]
 fn child_reopen_from_binding(failure: crate::CliFailure) -> ChildReopenError {
     ChildReopenError {
         kind: ChildReopenErrorKind::SessionUnavailable,
@@ -590,6 +594,10 @@ fn child_reopen_from_binding(failure: crate::CliFailure) -> ChildReopenError {
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "error adapters consume the failing operation error, matching Result::map_err ownership"
+)]
 fn child_reopen_from_open(error: crate::agent::CodingSessionOpenFailure) -> ChildReopenError {
     ChildReopenError {
         kind: ChildReopenErrorKind::Incompatible,

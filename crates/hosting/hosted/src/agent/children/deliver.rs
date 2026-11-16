@@ -1,6 +1,7 @@
 //! Live mail delivery and turn cancellation for bound children.
 
 use crate::driver::ledger::CommandLedger as _;
+use std::fmt::Write as _;
 
 use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
 
@@ -285,11 +286,10 @@ impl ProductMailDeliverer {
                 let node = tree
                     .node(&request.agent_id)
                     .map_err(|error| error.message)?;
-                let template = node
-                    .template
-                    .as_ref()
-                    .map(|template| template.as_str().to_owned())
-                    .unwrap_or_else(|| "unknown".to_owned());
+                let template = node.template.as_ref().map_or_else(
+                    || "unknown".to_owned(),
+                    |template| template.as_str().to_owned(),
+                );
                 let workspace_path = tree
                     .workspace(&node.workspace_id)
                     .filter(|row| row.mode != crate::agent_tree_protocol::WorkspaceMode::Inherit)
@@ -600,10 +600,11 @@ impl ProductMailDeliverer {
                             })
                     });
             if acknowledgement {
-                message.push_str(&format!(
+                let _ = write!(
+                    message,
                     "; its parent may send purpose=followup with acknowledge_recovery={attempt} \
                      for a fresh attempt without replaying uncertain work; a tool may have changed this workspace"
-                ));
+                );
             } else {
                 message.push_str("; a tool may have changed this workspace. Ask the operator to Resume/recover the child, or rebind this session to the current tool definitions before acknowledging recovery");
             }

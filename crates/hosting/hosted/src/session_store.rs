@@ -1413,17 +1413,16 @@ mod memory {
                 let target_id = request.successor_product_id();
                 if let (Some(target), Some(target_views)) =
                     (next.records.get(&target_id), next.views.get(&target_id))
-                {
-                    if let Some(completion) = crate::sessions::projector::new_session_completion(
+                    && let Some(completion) = crate::sessions::projector::new_session_completion(
                         &request,
                         target,
                         &target_views.state,
-                    ) {
-                        joined
-                            .state
-                            .workflows
-                            .insert(request.operation_id, completion);
-                    }
+                    )
+                {
+                    joined
+                        .state
+                        .workflows
+                        .insert(request.operation_id, completion);
                 }
             }
             joined.consume_before_retention(&next.intents.get(id).cloned().unwrap_or_default());

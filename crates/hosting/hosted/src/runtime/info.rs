@@ -46,10 +46,11 @@ pub(super) fn emit_terminal_status<P: plakous_host_protocol::ProtocolExtension>(
     });
 }
 
+#[must_use]
+/// Canonical persisted effort token shared by all routes, including explicit `none`.
 pub fn effort_label(effort: ReasoningEffort) -> String {
     match effort {
         ReasoningEffort::Low => "low".into(),
-        ReasoningEffort::Medium => "medium".into(),
         ReasoningEffort::High => "high".into(),
         ReasoningEffort::XHigh => "xhigh".into(),
         ReasoningEffort::Max => "max".into(),
@@ -251,9 +252,7 @@ fn session_info_view_with_storage<P: plakous_host_protocol::ProtocolExtension>(
                     .to_owned(),
             }
         }),
-        HostTargetAuthority::Platform { .. } => None,
-
-        HostTargetAuthority::Registered { .. } => None,
+        HostTargetAuthority::Platform { .. } | HostTargetAuthority::Registered { .. } => None,
     };
     plakous_host_protocol::views::presentation::SessionInfoView {
         runner: config.session.runner.as_ref().map_or_else(

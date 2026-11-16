@@ -6,6 +6,7 @@ use crate::session_log::redact_text_preview;
 use crate::sessions;
 use crate::sessions::SessionRecord;
 use crate::surface_protocol::ContentEvent;
+use std::fmt::Write as _;
 
 impl ComposeProjection {
     /// The row state to re-emit with a new tally.
@@ -102,7 +103,7 @@ pub(super) fn compose_counts_label(compose: &ComposeProjection, gap_observed: bo
 pub(crate) fn compose_counts_subject(count: usize, failed: usize, gap_observed: bool) -> String {
     let mut label = format!("{count} tools");
     if failed > 0 {
-        label.push_str(&format!(" · {failed} failed"));
+        let _ = write!(label, " · {failed} failed");
     }
     if gap_observed {
         label.push_str(" · counts partial after gap");

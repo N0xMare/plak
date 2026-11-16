@@ -11,6 +11,7 @@
 )]
 pub(crate) mod suite {
     use std::collections::BTreeMap;
+    use std::fmt::Write as _;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
 
@@ -113,7 +114,7 @@ pub(crate) mod suite {
         /// as Grok's output and kill tools.
         pub grok_root: ProductToolExtensions,
         pub grok_nested_parent: ProductToolExtensions,
-        /// The same hubs on a pi (OpenRouter) node: the await and interrupt
+        /// The same hubs on a pi (`OpenRouter`) node: the await and interrupt
         /// slots spelled as pi's `wait` and `stop`.
         pub pi_root: ProductToolExtensions,
         pub pi_nested_parent: ProductToolExtensions,
@@ -246,7 +247,7 @@ pub(crate) mod suite {
     fn render_headers_table(spec: &RouteSpec) -> String {
         let mut body = String::from("| name | value |\n| --- | --- |\n");
         for (name, value) in wire::review_headers(spec) {
-            body.push_str(&format!("| {name} | {value} |\n"));
+            let _ = writeln!(body, "| {name} | {value} |");
         }
         body
     }
@@ -595,14 +596,7 @@ pub(crate) mod suite {
     /// Lowercase hex sha256 of a rendered artifact, used by the in-code pin
     /// tables in place of a committed file comparison.
     pub(crate) fn render_digest(text: &str) -> String {
-        use sha2::{Digest as _, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(text.as_bytes());
-        hasher
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        plakous::model::sha256_hex(&[text.as_bytes()])
     }
 
     pub(crate) fn print_pins_requested() -> bool {
@@ -776,9 +770,9 @@ pub(crate) mod suite {
             writer_mode: WriterMode::SingleLease,
             bounds: EpochBounds {
                 max_depth: u16::from(MAX_TREE_DEPTH),
-                max_children: MAX_DIRECT_CHILDREN as u16,
-                max_nodes: MAX_TREE_NODES as u16,
-                max_attempts: MAX_TREE_ATTEMPTS as u16,
+                max_children: u16::try_from(MAX_DIRECT_CHILDREN).unwrap(),
+                max_nodes: u16::try_from(MAX_TREE_NODES).unwrap(),
+                max_attempts: u16::try_from(MAX_TREE_ATTEMPTS).unwrap(),
                 max_agents_per_cell: DEFAULT_MAX_AGENTS_PER_CELL,
             },
             require_review_evidence: false,
@@ -905,6 +899,10 @@ pub(crate) mod suite {
         }
     }
 
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+    )]
     fn enroll(
         profile: HarnessProfileSpec,
         presentation: SkillsPresentation,
@@ -1464,7 +1462,7 @@ pub(crate) mod suite {
         let artifacts = wire::render_wire(spec, home, root, cwd, tools);
         let mut markdown = String::new();
         markdown.push_str(&render_harness_footprint(&artifacts.footprint));
-        markdown.push_str(&format!("\n# `{}`\n\n", spec.file_stem));
+        let _ = write!(markdown, "\n# `{}`\n\n", spec.file_stem);
         markdown.push_str(&scenario_description(spec));
         markdown.push_str("\n\n## Headers\n\n");
         markdown.push_str(&render_headers_table(spec));
@@ -1947,8 +1945,8 @@ pub(crate) mod suite {
         ),
     ];
 
-    /// On a js-ptc, py-ptc, or OpenRouter hub, `spawn_agent` is
-    /// callable only inside a cell (or is a Direct extra on OpenRouter). The
+    /// On a js-ptc, py-ptc, or `OpenRouter` hub, `spawn_agent` is
+    /// callable only inside a cell (or is a Direct extra on `OpenRouter`). The
     /// one evaluator — `compile` over the callable surface — earns the
     /// topology paragraph for every one of them, and the route rendered from
     /// those contributions is byte-identical to the pinned render.

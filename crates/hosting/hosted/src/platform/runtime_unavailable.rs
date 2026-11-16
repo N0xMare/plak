@@ -1,5 +1,7 @@
 use super::{ApiCatalogSource, ApiModelCatalog, ApiModelLists, PlatformProvider};
 use crate::{CliFailure, CliResult};
+/// Inert credential-port vocabulary when no direct API route is compiled.
+/// Implementing this marker admits no route and cannot resolve an API key.
 pub trait PlatformCredentials: Send + Sync + 'static {}
 impl<T: Send + Sync + 'static> PlatformCredentials for T {}
 pub use PlatformCredentials as OpenAiCredentials;
@@ -21,6 +23,7 @@ pub(super) fn bundled(provider: PlatformProvider, source: ApiCatalogSource) -> A
         models: Vec::new(),
     }
 }
+/// Return the exact provider's omitted-capability refusal without catalog I/O.
 pub fn api_model_catalog(
     provider: PlatformProvider,
     _: &crate::account::AccountRef,

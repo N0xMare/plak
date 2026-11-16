@@ -84,6 +84,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         );
     }
 
+    #[allow(
+        clippy::unused_self,
+        reason = "the disabled crash hook keeps the receiver signature of its test-enabled counterpart"
+    )]
     #[cfg(not(test))]
     fn cut_stop(&self, _at: &str) {}
 
@@ -796,7 +800,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         ),
                     }
                 }
-                Ok(UserAction::RefreshTemplates) => {
+                Ok(UserAction::RefreshTemplates | UserAction::RefreshReadiness) => {
                     surface::publish_template_readiness(
                         self.host.surface.as_deref(),
                         self.host.ready_catalog,
@@ -934,21 +938,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 }
                 // Readiness is a read, so it stays truthful mid-turn; every
                 // credential mutation waits for the idle boundary.
-                Ok(UserAction::RefreshReadiness) => {
-                    surface::publish_template_readiness(
-                        self.host.surface.as_deref(),
-                        self.host.ready_catalog,
-                        self.host.events,
-                    );
-                }
                 // Unreachable: `IntentSender::send_correlated` sets the promptable
                 // flag and returns before queueing on every send path, so the
                 // intent never enters the queue; the arm keeps the match exhaustive.
-                Ok(UserAction::Promptable) => {}
+                Ok(UserAction::Promptable) | Err(TryRecvError::Empty) => {}
                 Ok(UserAction::ResyncTranscript { scope }) => {
                     self.host.events.resync_transcript(&scope);
                 }
-                Err(TryRecvError::Empty) => {}
             }
         }
 

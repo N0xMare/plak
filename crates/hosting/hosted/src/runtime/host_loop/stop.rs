@@ -118,8 +118,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .config
             .store
             .load(id)
-            .map(|record| record.store_revision)
-            .unwrap_or(0);
+            .map_or(0, |record| record.store_revision);
         (
             intents.wake_suppressions.len(),
             intents.pause_causes.len(),
@@ -131,6 +130,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// Settles `ticket`, then tells the session. The settle wakes whoever
     /// is waiting on the answer, so it does not depend on this notice. A
     /// stop that recorded nothing new is not announced again.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "stop settlement consumes its ticket and outcome exactly once"
+    )]
     fn finish_stop(&mut self, ticket: StopTicket, outcome: Result<(), String>, fresh: bool) {
         #[cfg(test)]
         if let Some(delay) = crate::runtime::test_seams::notice_delay(&self.role.config.session.id)
@@ -167,6 +170,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         );
     }
 
+    #[allow(
+        clippy::unused_self,
+        reason = "the disabled crash hook keeps the receiver signature of its test-enabled counterpart"
+    )]
     #[cfg(not(test))]
     fn cut(&self, _at: &str) {}
 }

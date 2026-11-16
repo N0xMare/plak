@@ -5,34 +5,20 @@
 //! `plakous-host-protocol`; nothing in it knows Plak's configuration schema,
 //! its XDG layout, or its database.
 //!
+//! Products supply [`runtime::HostConfig`] and the persistence/credential ports;
+//! [`runtime`] owns the single driver and its canonical terminal settlement.
+//! [`host_service`] routes attachments and bounded observations, not execution
+//! authority. Its wire handlers do not turn a reconnect or an observation into
+//! a second turn admission.
+//!
+//! [`sessions::SessionRecord`] holds product intents and discardable projections.
+//! The exact Plakous locator remains canonical history authority, while
+//! [`session_store::SessionRecordStore`] owns product-record commits and their
+//! compare-and-swap revisions. [`runtime::RootBindingDocument`] and
+//! [`runtime::SurfaceHandler`] keep settings parsing and publication in the
+//! product, outside the hosted driver's authority.
+//!
 #![forbid(unsafe_code)]
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::must_use_candidate,
-    clippy::doc_markdown,
-    clippy::map_unwrap_or,
-    clippy::needless_pass_by_value,
-    clippy::match_same_arms,
-    clippy::uninlined_format_args,
-    clippy::unnecessary_wraps,
-    clippy::struct_excessive_bools,
-    clippy::cast_possible_truncation,
-    clippy::format_push_string,
-    clippy::assigning_clones,
-    clippy::single_match,
-    clippy::manual_let_else,
-    clippy::unused_self,
-    clippy::return_self_not_must_use,
-    clippy::if_same_then_else,
-    clippy::collapsible_if,
-    clippy::unnested_or_patterns,
-    clippy::inefficient_to_string,
-    clippy::format_collect,
-    clippy::needless_return,
-    reason = "inherited by the hosted extraction, which allowed \
-              these crate-wide; tightening them is its own change"
-)]
 #![cfg_attr(
     test,
     allow(
@@ -112,10 +98,6 @@ pub mod prompt_inputs;
 pub mod request_slots;
 #[cfg(test)]
 pub(crate) mod role_table;
-#[allow(
-    missing_docs,
-    reason = "runtime ports, configuration and injected test host contracts await documentation"
-)]
 pub mod runtime;
 pub mod skills;
 pub(crate) mod storage_pressure;

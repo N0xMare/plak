@@ -122,7 +122,7 @@ fn a_shell_queue_edit_emits_exactly_one_success_receipt() {
     assert_eq!(config.session.pending_queue[0].text, "after");
 }
 
-/// An OpenRouter root binds the wire its template names on the
+/// An `OpenRouter` root binds the wire its template names on the
 /// gateway-managed route; a direct API root binds its account's route.
 /// Effort and composition follow what a new session from that template
 /// binds.

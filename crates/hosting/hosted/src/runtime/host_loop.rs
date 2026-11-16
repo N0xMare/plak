@@ -38,7 +38,7 @@ use super::info::{
 use super::logging::{
     elapsed_ms_since, log_ev, log_host_attached, log_host_ready, log_session_ready,
 };
-use super::models::native_compact_facet;
+use super::native_compact_facet;
 use super::rebind::{Rebound, durable_tree_id, handle_rebind};
 use super::reconcile::{
     commit_definite_failure_projection, commit_exceptional_terminal_projection, persist,
@@ -135,6 +135,10 @@ type RootActor<'a, P> = NodeActor<RootRole<'a, P>>;
 
 /// The root's port: the attachment's surface, its durable session record,
 /// queue, interrupt and deferred state, and publication.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "these independent host policy and settlement facts are not mutually exclusive states"
+)]
 struct RootRole<'a, P: plakous_host_protocol::ProtocolExtension> {
     _storage_notices: Option<super::storage::StorageNotices>,
     config: HostConfig<P>,
@@ -681,10 +685,11 @@ impl<'a, 'o, P: plakous_host_protocol::ProtocolExtension> crate::node::Role<Root
                 .schedule_passive_checkpoint(actor.role.executor.tasks());
             cx.passive_checkpoint_scheduled = true;
         }
-        if let Some(state) = cx.one_shot.as_deref_mut() {
-            if state.attempted && state.run.is_none() {
-                return crate::node::Next::End(Ok(()));
-            }
+        if let Some(state) = cx.one_shot.as_deref_mut()
+            && state.attempted
+            && state.run.is_none()
+        {
+            return crate::node::Next::End(Ok(()));
         }
         let next = if let Some(state) = cx.one_shot.as_deref_mut()
             && state.attempted

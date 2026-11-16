@@ -1,4 +1,4 @@
-//! OpenRouter vocabulary with a feature-selected runtime implementation.
+//! `OpenRouter` vocabulary with a feature-selected runtime implementation.
 use crate::binding::{CompositionSelection, ResolvedProtocol};
 use plakous::{
     agent::ReasoningEffort,
@@ -16,7 +16,7 @@ mod implementation;
 pub(crate) use implementation::binding_matrix_facts;
 pub use implementation::*;
 pub(crate) use implementation::{carry_input_window, construct_openrouter_runtime_with_fence};
-/// Inputs for a newly discovered Custom/experimental OpenRouter Chat runtime.
+/// Inputs for a newly discovered Custom/experimental `OpenRouter` Chat runtime.
 pub struct ProductOpenRouterSpec {
     /// Explicit workspace authority of this node.
     pub runner_services: Option<plakous::runner::RunnerServices>,
@@ -99,10 +99,10 @@ pub struct OutputBoundRederived {
     pub current: Option<NonZeroU32>,
 }
 
-/// Result of one on-demand OpenRouter inference-key allowance read.
+/// Result of one on-demand `OpenRouter` inference-key allowance read.
 #[derive(Clone, Debug)]
 pub enum OpenRouterKeyUsageProbe {
-    /// No OpenRouter key in the product secret store.
+    /// No `OpenRouter` key in the product secret store.
     NotConfigured,
     /// The authenticated read succeeded, with the product's safe key label.
     Ok(Box<OpenRouterKeyUsage>, String),

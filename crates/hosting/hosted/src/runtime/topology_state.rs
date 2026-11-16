@@ -367,6 +367,10 @@ pub(crate) async fn mark_root_live_for_prompt(tree_id: &str) -> Result<(), Strin
 }
 
 /// Freeze the next epoch for a tree whose root just rebound.
+///
+/// # Errors
+/// Refuses invalid successor topology, source/target row failures, lost custody or a
+/// compare-and-swap conflict. A failed install grants no new execution authority.
 pub async fn install_successor_epoch(
     rows: &dyn TreeRows,
     snapshot: OrchestrationSnapshot,
@@ -645,6 +649,10 @@ pub(crate) async fn record_root_bind_view(
 /// compare-and-swap, so when a hub in that other process publishes first this
 /// refuses instead of overwriting, and when this publishes first the hub's
 /// next save is refused — either way the operator hears about it.
+///
+/// # Errors
+/// Returns successor-epoch installation failures from the supplied row authorities; it
+/// does not create a second runtime owner.
 pub fn install_successor_epoch_headless(
     rows: &dyn TreeRows,
     snapshot: OrchestrationSnapshot,

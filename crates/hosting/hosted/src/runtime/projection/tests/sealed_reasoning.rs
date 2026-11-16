@@ -1,5 +1,5 @@
 //! E4 (spec 02 §2.6, spec 05 rebuild-equals-incremental): a sealed-reasoning
-//! final answer streamed through the real Anthropic Messages and OpenAI
+//! final answer streamed through the real Anthropic Messages and `OpenAI`
 //! Responses kernels persists one thinking row and one assistant row, and
 //! deleting the views and reopening rebuilds exactly those rows.
 //!
@@ -18,6 +18,10 @@ use crate::runtime::test_support::fresh_injected_attached_host;
 const THINKING: &str = "Synthetic plan: the fixture asks for one short answer.";
 const ANSWER: &str = "Synthetic answer from the sealed-reasoning fixture.";
 
+#[allow(
+    clippy::format_collect,
+    reason = "synthetic provider event framing mirrors the complete byte-exact fixture stream; allocation cost is irrelevant to this test"
+)]
 fn sse(provider: PlatformProvider, model: &str) -> String {
     let events = if provider == PlatformProvider::Anthropic {
         vec![
@@ -309,6 +313,10 @@ fn a_sealed_reasoning_final_answer_rebuilds_to_its_live_thinking_and_assistant_r
     }
 }
 
+#[allow(
+    clippy::format_collect,
+    reason = "synthetic provider event framing mirrors the complete byte-exact fixture stream; allocation cost is irrelevant to this test"
+)]
 fn read_tool_sse(model: &str) -> String {
     [
         serde_json::json!({"type":"message_start","message":{"id":"msg_tool","type":"message","role":"assistant","model":model,"content":[],"stop_reason":null,"usage":{"input_tokens":8,"output_tokens":0}}}),

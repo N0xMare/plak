@@ -79,10 +79,10 @@ pub const fn child_tier_line(tier: AgentTier, isolated: bool) -> &'static str {
 /// Prefix appended when a Start prompt includes a mail body after the assignment brief.
 pub const PLAK_CHILD_ASSIGNMENT_MESSAGE_PREFIX: &str = "\n\nMessage:\n";
 
-/// First submit harness nudge after completed_without_submission; `{turn_token}`, `{schema}`.
+/// First submit harness nudge after `completed_without_submission`; `{turn_token}`, `{schema}`.
 pub const PLAK_CHILD_SUBMIT_NUDGE_REMINDER_TEMPLATE: &str = "Your previous turn completed without calling submit_result. Assignment output is not the last assistant text. Call submit_result exactly once (directly if it is a top-level tool; otherwise as a nested call inside a cell, the only callable path for nested tools) with turn_token={turn_token} and output_json matching this schema, then stop.\n\nAssignment output schema:\n{schema}";
 
-/// Second submit harness nudge forcing submit_result; `{turn_token}`, `{schema}`.
+/// Second submit harness nudge forcing `submit_result`; `{turn_token}`, `{schema}`.
 pub const PLAK_CHILD_SUBMIT_NUDGE_FORCE_TEMPLATE: &str = "Required: call submit_result now (top-level tool, or nested inside a cell when that is the only callable path) with turn_token={turn_token} and schema-valid output_json. Do not write a final assistant answer. Ending the turn without submit_result while nothing you started is running is completed_without_submission.\n\nAssignment output schema:\n{schema}";
 
 /// The fixed instruction of a host wake turn on a parked child. Process

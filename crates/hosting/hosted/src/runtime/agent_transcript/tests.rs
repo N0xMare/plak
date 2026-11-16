@@ -601,6 +601,10 @@ fn rows_past_the_bound_keep_the_newest_behind_one_truncated_row() {
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+)]
 fn script(steps: serde_json::Value) -> Arc<ScriptPlan> {
     Arc::new(
         serde_json::from_value(serde_json::json!({"version": SCRIPT_VERSION, "steps": steps}))
@@ -805,6 +809,10 @@ fn a_settled_process_wait_reads_like_the_live_row() {
     );
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+)]
 fn call_observation(args: serde_json::Value) -> plakous::agent::ToolCallObservation {
     serde_json::from_value(serde_json::json!({
         "subject": null,

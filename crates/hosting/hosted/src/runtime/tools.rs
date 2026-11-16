@@ -1,6 +1,7 @@
 //! Tool subject, preview, and result-summary projection.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use plakous::model::ContentBlock;
 
@@ -132,9 +133,9 @@ pub(super) fn process_subject_for_ids(
                 .map(crate::jobs::display::redacted_job_command);
             let mut subject = id.clone();
             if label == "process_session_write" {
-                subject.push_str(&format!(" · {} bytes", input.unwrap_or_default().len()));
+                let _ = write!(subject, " · {} bytes", input.unwrap_or_default().len());
             } else if let Some(command) = command {
-                subject.push_str(&format!(" · {command}"));
+                let _ = write!(subject, " · {command}");
             }
             let outcome = if label == "process_session_wait" {
                 wait_result
@@ -184,7 +185,6 @@ pub(super) fn process_wait_outcome(result: &serde_json::Value, id: &str) -> Opti
 
 fn process_action_label(label: &str, completed: bool) -> &'static str {
     match label {
-        "Shell" => "",
         "process_session_wait" if completed => "Waited on process",
         "process_session_wait" => "Waiting on process",
         "process_session_read" => "Read output of process",
@@ -498,7 +498,7 @@ fn mcp_arguments_subject(args: &serde_json::Map<String, serde_json::Value>) -> O
         if !summary.is_empty() {
             summary.push(' ');
         }
-        summary.push_str(&format!("{key}={value}"));
+        let _ = write!(summary, "{key}={value}");
         if summary.len() > MCP_ARGUMENTS_SUBJECT_BYTES {
             let mut end = MCP_ARGUMENTS_SUBJECT_BYTES;
             while !summary.is_char_boundary(end) {
@@ -800,12 +800,10 @@ pub(super) fn stash_tool_subjects_from_response(
                 let subject = args_val
                     .as_ref()
                     .and_then(|v| tool_subject_from_args(&name, v))
-                    .map(|subject| redact_text_preview(&subject))
-                    .unwrap_or_else(|| name.clone());
+                    .map_or_else(|| name.clone(), |subject| redact_text_preview(&subject));
                 let detail = args_val
                     .as_ref()
-                    .map(args_detail_preview)
-                    .unwrap_or_else(|| subject.clone());
+                    .map_or_else(|| subject.clone(), args_detail_preview);
                 pending.push(name, call_id, PendingToolInfo { subject, detail });
             }
         }

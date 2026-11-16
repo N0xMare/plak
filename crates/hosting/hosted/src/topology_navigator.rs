@@ -12,6 +12,7 @@ use plakous_host_protocol::views::transcript::{
     RowKey, TranscriptItem as KeyedItem, TranscriptScope,
 };
 use plakous_host_protocol::views::{PresentationSnapshot, TreeView};
+use std::fmt::Write as _;
 
 use crate::agent_tree::ProductAgentTree;
 use crate::agent_tree_protocol::AttemptScopedRequest;
@@ -303,6 +304,10 @@ pub(crate) fn spawn_operator_mail<P: plakous_host_protocol::ProtocolExtension>(
 
 /// Starts the operator's Resume of a held continuation on the host
 /// executor and returns. The hub tracks the task, and shutdown aborts it.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "projection entry points own a runtime lease handle through snapshot construction"
+)]
 fn spawn_loss_resume<P: plakous_host_protocol::ProtocolExtension>(
     runtime: std::sync::Arc<ProductTopologyRuntime>,
     session: &SessionRecord,
@@ -389,6 +394,10 @@ fn loss_resume_note(
 /// Starts one child recover on the host executor and returns. The hub keeps
 /// the task, and shutdown aborts it. The tree mutex is not held while the
 /// lease wait runs.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "projection entry points own a runtime lease handle through snapshot construction"
+)]
 fn spawn_operator_child_recover<P: plakous_host_protocol::ProtocolExtension>(
     runtime: std::sync::Arc<ProductTopologyRuntime>,
     session: &SessionRecord,
@@ -472,11 +481,12 @@ pub(crate) fn apply_session_root_binding(snapshot: &mut TreeView, session: &Sess
     };
     account.clone_into(&mut root.model_account);
     model.clone_into(&mut root.model_tuple);
-    root.model_effort = session.effort.clone();
+    root.model_effort.clone_from(&session.effort);
 }
 
 /// The tree's own typed view. The JSONL wire and the TUI's canvas adapter are
 /// the two readers, and each chooses its own spelling from these enums.
+#[must_use]
 pub fn project_snapshot(tree: &ProductAgentTree) -> TreeView {
     crate::agent_tree::view::project_tree_view(tree)
 }
@@ -570,14 +580,14 @@ pub(crate) fn mail_row(text: &str) -> Option<String> {
         .and_then(serde_json::Value::as_str)
         .and_then(|attempt| attempt.rsplit_once("-a").map(|(_, seq)| seq.to_owned()))
     {
-        row.push_str(&format!(" · a{seq}"));
+        let _ = write!(row, " · a{seq}");
     }
     if let Some(candidate) = object
         .get("candidate")
         .and_then(serde_json::Value::as_str)
         .filter(|candidate| !candidate.is_empty())
     {
-        row.push_str(&format!(" · {}", short_agent(candidate)));
+        let _ = write!(row, " · {}", short_agent(candidate));
     }
     let body = object
         .get("output")
@@ -586,7 +596,7 @@ pub(crate) fn mail_row(text: &str) -> Option<String> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     if let Some(body) = crate::runtime::bounded_notice_text(body, 2048) {
-        row.push_str(&format!(" · {body}"));
+        let _ = write!(row, " · {body}");
     }
     Some(row)
 }
@@ -623,7 +633,7 @@ fn child_mail_rows(mut rest: &str) -> Option<Vec<String>> {
         let (body, after) = block.split_once("\n</child_message>")?;
         let mut row = format!("{purpose} · {}", short_agent(&unescape_mail(from)));
         if let Some(body) = crate::runtime::bounded_notice_text(&unescape_mail(body), 2048) {
-            row.push_str(&format!(" · {body}"));
+            let _ = write!(row, " · {body}");
         }
         rows.push(row);
         rest = after;

@@ -441,11 +441,12 @@ impl TerminalExchange {
     pub(crate) fn of(result: &plakous::agent::TurnResult) -> Self {
         use plakous::agent::{AgentErrorKind, TurnResultOutcome};
         match result.outcome() {
-            TurnResultOutcome::Completed(_) | TurnResultOutcome::Cancelled(_) => Self::Closed,
             TurnResultOutcome::Failed(error) if error.kind() == AgentErrorKind::Internal => {
                 Self::Unclosed
             }
-            TurnResultOutcome::Failed(_) => Self::Closed,
+            TurnResultOutcome::Completed(_)
+            | TurnResultOutcome::Cancelled(_)
+            | TurnResultOutcome::Failed(_) => Self::Closed,
             TurnResultOutcome::RecoveryRequired(_) => Self::Unresolved,
         }
     }

@@ -174,12 +174,11 @@ pub(crate) const fn design(row: Row, column: Column) -> Cell {
 /// deferral is its FIFO place, part of `U` for the root.
 pub(crate) const fn today(row: Row, column: Column) -> Cell {
     match (row, column) {
-        (Row::Prompt, Column::Root) => Cell::Classes(&[I, B, W]),
         (Row::Interrupt, _) | (Row::Quit, Column::Root) => Cell::Classes(&[U]),
         (Row::Quit, Column::Child) => Cell::Detach,
         (Row::Workflow | Row::Recover | Row::InvokeTool, Column::Root) => Cell::Classes(&[I, W]),
         // `RefreshReadiness` is ordinary, `RetryAttach` idle-only.
-        (Row::Readiness, Column::Root) => Cell::Classes(&[I, B, W]),
+        (Row::Prompt | Row::Readiness, Column::Root) => Cell::Classes(&[I, B, W]),
         (Row::ChildOnly, Column::Root) => Cell::Absent,
         (Row::ChildOnly, Column::Child) => Cell::ChildPolicy,
         (
@@ -197,13 +196,12 @@ pub(crate) const fn today(row: Row, column: Column) -> Cell {
             Cell::Classes(&[B])
         }
         // The node's own jobs, by node address: a stop and `Background`.
-        (Row::Processes, Column::Child) => Cell::Classes(&[B]),
+        (Row::Processes | Row::Approval, Column::Child) => Cell::Classes(&[B]),
         // The usage view by node address; the rest are the root's.
         (Row::Templates, Column::Child) => Cell::Classes(&[R, B]),
         // The intent names a child as its caller and runs idle.
         (Row::InvokeTool, Column::Child) => Cell::Classes(&[I]),
         // The child's actor is the single decider for its own decisions.
-        (Row::Approval, Column::Child) => Cell::Classes(&[B]),
         (
             Row::Queue | Row::Workflow | Row::Readiness | Row::Recover | Row::Navigator,
             Column::Child,
@@ -272,6 +270,9 @@ pub(crate) fn row_of(action: &UserAction) -> Row {
 /// for it.
 pub(crate) fn child_address(action: &UserAction) -> Option<&str> {
     match action {
+        UserAction::ResumeLossContinuation { agent_id }
+        | UserAction::InvokeTool { agent_id, .. }
+        | UserAction::RequestCallDetail { agent_id, .. } => agent_id.as_deref(),
         UserAction::OpenAgentTranscript { agent_id }
         | UserAction::InterruptTopologyNode { agent_id }
         | UserAction::CloseTopologyNode { agent_id }
@@ -279,11 +280,8 @@ pub(crate) fn child_address(action: &UserAction) -> Option<&str> {
         | UserAction::BackgroundTopologyNode { agent_id }
         | UserAction::StopTopologyNodeProcesses { agent_id, .. }
         | UserAction::ReadTopologyNodeUsage { agent_id }
-        | UserAction::RecoverTopologyNode { agent_id, .. } => Some(agent_id),
-        UserAction::ResumeLossContinuation { agent_id }
-        | UserAction::InvokeTool { agent_id, .. }
-        | UserAction::RequestCallDetail { agent_id, .. } => agent_id.as_deref(),
-        UserAction::ResyncTranscript {
+        | UserAction::RecoverTopologyNode { agent_id, .. }
+        | UserAction::ResyncTranscript {
             scope: TranscriptScope::Agent(agent_id),
         } => Some(agent_id),
         _ => None,

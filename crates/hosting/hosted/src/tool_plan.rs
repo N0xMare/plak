@@ -672,7 +672,7 @@ impl ToolPlan {
 /// parameter for, rather than dropping it. Every route filters allowed
 /// domains; excluded domains need the provider's own exclusion list; a
 /// search count other than the default needs the provider's own limit, or a
-/// side request that runs exactly one search (Codex, OpenRouter).
+/// side request that runs exactly one search (Codex, `OpenRouter`).
 pub(crate) fn check_retrieval_options(
     selection: &TemplateToolSelection,
     route: ToolRoute,
@@ -890,7 +890,9 @@ pub(crate) fn bind_tool_plan_with(
     let mut image_gen = None;
     for entry in selection.entries() {
         let served = match entry {
-            SelectedTool::Optional(OptionalTool::FetchUrl) => continue,
+            SelectedTool::Optional(OptionalTool::FetchUrl)
+            | SelectedTool::McpServer(_)
+            | SelectedTool::McpTool { .. } => continue,
             SelectedTool::Optional(OptionalTool::ImageGen) => {
                 let reason = match (image_row, &image_port) {
                     (ImageGenRow::Supported, Some(port)) => {
@@ -922,7 +924,6 @@ pub(crate) fn bind_tool_plan_with(
                 _ => false,
             },
             // MCP entries bind through `crate::mcp_binding`.
-            SelectedTool::McpServer(_) | SelectedTool::McpTool { .. } => continue,
         };
         if !served {
             return Err(refusal(entry, table, route_label));

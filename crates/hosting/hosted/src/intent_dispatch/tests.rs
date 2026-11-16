@@ -14,7 +14,9 @@ fn expected_class(action: &UserAction) -> IntentClass {
         UserAction::Interrupt => IntentClass::Urgent,
         UserAction::Quit => IntentClass::Quit,
         UserAction::StopSession { .. } => IntentClass::Stop,
-        UserAction::ReleaseForReopen { .. } => IntentClass::IdleOnly { noun: "binding" },
+        UserAction::ReleaseForReopen { .. } | UserAction::RetryAttach => {
+            IntentClass::IdleOnly { noun: "binding" }
+        }
         UserAction::NewSession => IntentClass::IdleOnly {
             noun: "new session",
         },
@@ -26,7 +28,6 @@ fn expected_class(action: &UserAction) -> IntentClass {
         UserAction::InvokeTool { .. } => IntentClass::IdleOnly {
             noun: "invoke_tool",
         },
-        UserAction::RetryAttach => IntentClass::IdleOnly { noun: "binding" },
         UserAction::Recover => IntentClass::IdleOnly { noun: "recover" },
         UserAction::Prompt(_)
         | UserAction::FollowUp(_)
@@ -176,8 +177,9 @@ fn every_intent_has_its_class_and_disposition() {
         let class = IntentClass::of(action);
         assert_eq!(class, expected_class(action), "{action:?}");
         let (busy, workflow) = match class {
-            IntentClass::Urgent => (Disposition::Handle, Disposition::ObserveInterrupt),
-            IntentClass::Stop => (Disposition::Handle, Disposition::ObserveInterrupt),
+            IntentClass::Urgent | IntentClass::Stop => {
+                (Disposition::Handle, Disposition::ObserveInterrupt)
+            }
             IntentClass::Quit | IntentClass::Ordinary => (Disposition::Handle, Disposition::Defer),
             IntentClass::IdleOnly { noun } => {
                 (Disposition::RefuseWhileBusy { noun }, Disposition::Defer)

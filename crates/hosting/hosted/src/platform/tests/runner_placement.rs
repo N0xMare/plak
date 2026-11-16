@@ -76,7 +76,7 @@ async fn foreign_runner(workspace: &Path) -> (RunnerServices, RunnerClient) {
     )
 }
 
-/// Creates a fresh OpenAI API session over `runner_services`, runs one turn,
+/// Creates a fresh `OpenAI` API session over `runner_services`, runs one turn,
 /// and returns the one request the provider received.
 async fn first_request(
     workspace: &Path,

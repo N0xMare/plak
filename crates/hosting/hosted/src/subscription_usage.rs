@@ -373,7 +373,7 @@ fn usage_credential_state(
 ///
 /// A prepaid remaining of `$0` and a pay-as-you-go cap of `$0` are the
 /// provider saying those features are unused / switched off. Grok Build's
-/// `/usage` omits them; printing `$0.00` here made SuperGrok look empty.
+/// `/usage` omits them; printing `$0.00` here made `SuperGrok` look empty.
 fn report_balance(balance: &SubscriptionUsageBalance) -> bool {
     match balance.id() {
         SUBSCRIPTION_BALANCE_PREPAID_CREDITS => balance.remaining_cents() != Some(0),
@@ -821,9 +821,8 @@ fn format_duration(value: Duration) -> String {
 /// Maps a native provider onto its Usage vertical.
 #[must_use]
 pub fn vertical_for_native(provider: NativeProvider) -> UsageVertical {
-    let route = match crate::capabilities::for_native(provider) {
-        Some(route) => route,
-        None => unreachable!(),
+    let Some(route) = crate::capabilities::for_native(provider) else {
+        unreachable!()
     };
     vertical_for_route(route)
 }
@@ -831,9 +830,8 @@ pub fn vertical_for_native(provider: NativeProvider) -> UsageVertical {
 /// Returns the operator-facing label for one native subscription vertical.
 #[must_use]
 pub const fn subscription_provider_label(provider: NativeProvider) -> &'static str {
-    let route = match crate::capabilities::for_native(provider) {
-        Some(route) => route,
-        None => unreachable!(),
+    let Some(route) = crate::capabilities::for_native(provider) else {
+        unreachable!()
     };
     match route.subscription_label {
         Some(label) => label,
@@ -862,10 +860,10 @@ pub fn format_unix_seconds(seconds: u64) -> String {
     let Ok(description) = time::format_description::parse_borrowed::<2>(WALL_CLOCK_FORMAT) else {
         return seconds.to_string();
     };
-    timestamp
-        .format(&description)
-        .map(|rendered| format!("{rendered}{suffix}"))
-        .unwrap_or_else(|_| seconds.to_string())
+    timestamp.format(&description).map_or_else(
+        |_| seconds.to_string(),
+        |rendered| format!("{rendered}{suffix}"),
+    )
 }
 
 const WALL_CLOCK_FORMAT: &str = "[year]-[month]-[day] [hour]:[minute]";
@@ -889,10 +887,10 @@ pub fn format_reset_wall_clock(seconds: u64) -> String {
     let Ok(description) = time::format_description::parse_borrowed::<2>(RESET_CLOCK_FORMAT) else {
         return seconds.to_string();
     };
-    timestamp
-        .format(&description)
-        .map(|rendered| format!("{rendered}{suffix}"))
-        .unwrap_or_else(|_| seconds.to_string())
+    timestamp.format(&description).map_or_else(
+        |_| seconds.to_string(),
+        |rendered| format!("{rendered}{suffix}"),
+    )
 }
 
 const RESET_CLOCK_FORMAT: &str =
@@ -903,7 +901,7 @@ const RESET_CLOCK_FORMAT: &str =
 /// `account` is the vertical's `plak login` account name, so a credential-state
 /// refusal can name its remedy. Only `Transport` says the HTTP exchange failed;
 /// a local lock, lease, or credential state is named as exactly that. Calling
-/// every local refusal "usage transport failed" is what hid the SuperGrok
+/// every local refusal "usage transport failed" is what hid the `SuperGrok`
 /// compatibility-lock race from the operator.
 #[must_use]
 pub fn unavailable_reason(reason: SubscriptionUsageUnavailable, account: &str) -> String {

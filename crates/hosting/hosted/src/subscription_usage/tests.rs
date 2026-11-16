@@ -428,7 +428,7 @@ fn supergrok_names_its_one_window_from_the_reported_period_and_keeps_balances()
     Ok(())
 }
 
-/// proto3 omits a true 0.0 `creditUsagePercent`. A named weekly SuperGrok
+/// proto3 omits a true 0.0 `creditUsagePercent`. A named weekly `SuperGrok`
 /// period with no percentage is 0% used (a full bar), and zero prepaid /
 /// disabled pay-as-you-go lines are omitted.
 #[test]

@@ -107,13 +107,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .str("cause", report.cause().as_str());
         }
         log_ev(self.role.log.as_ref(), &self.role.config, record);
-        if let Some(report) = &report {
-            if !terminal_published {
-                let _ = self.role.events.send(ContentEvent::Row(TranscriptRow::info(
-                    NoticeScope::Recovery,
-                    super::super::events::abandoned_turn_operator_line(report),
-                )));
-            }
+        if let Some(report) = &report
+            && !terminal_published
+        {
+            let _ = self.role.events.send(ContentEvent::Row(TranscriptRow::info(
+                NoticeScope::Recovery,
+                super::super::events::abandoned_turn_operator_line(report),
+            )));
         }
         if report.is_none() && !restored_working {
             let _ = self.role.events.send(ContentEvent::Row(TranscriptRow::info(NoticeScope::Recovery,

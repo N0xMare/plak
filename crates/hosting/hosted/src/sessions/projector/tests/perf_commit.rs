@@ -11,8 +11,7 @@ fn projection_800_rows_per_commit() {
     let cloned = std::env::var("PLAK_PROJECT_BENCH").is_ok_and(|mode| mode == "cloned");
     let iterations: u64 = std::env::var("PLAK_PROJECT_COMMITS")
         .ok()
-        .map(|value| value.parse().unwrap())
-        .unwrap_or(10_000);
+        .map_or(10_000, |value| value.parse().unwrap());
     let mut feed = Feed::new();
     let mut views = super::super::project(
         SessionViews::empty(),

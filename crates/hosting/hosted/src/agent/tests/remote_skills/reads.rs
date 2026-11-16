@@ -135,7 +135,7 @@ fn replacing_a_runner_skill_file_between_slices_refuses_the_whole_page() {
     let fixture = ReadFixture::new();
     let path = fixture.user_root.join("review/large.txt");
     let replacement = fixture.user_root.join("review/replacement.txt");
-    let length = plakous_tools::MAX_STANDARD_TEXT_BYTES as usize + 64;
+    let length = usize::try_from(plakous_tools::MAX_STANDARD_TEXT_BYTES).unwrap() + 64;
     std::fs::write(&path, vec![b'a'; length]).unwrap();
     std::fs::write(&replacement, vec![b'b'; length]).unwrap();
     let registry = fixture.registry(Arc::new(ReplaceBetweenSlices {

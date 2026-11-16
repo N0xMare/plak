@@ -213,6 +213,10 @@ pub(crate) fn after_fetch<T>(
 }
 
 /// The route's catalog: live list, cache or bundled table, classified.
+///
+/// # Errors
+/// Refuses an unavailable route capability. Provider-list failures are represented by the
+/// catalog provenance and reviewed bundled facts, not a different route.
 pub async fn api_model_catalog(
     provider: PlatformProvider,
     account: &crate::account::AccountRef,

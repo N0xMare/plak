@@ -399,6 +399,9 @@ tracked Rust file of the package, tests included:
   integration-test targets. Growth fails and a reduction requires lowering
   the package's ceiling in the same change. The tooling self-test preserves
   enrollment as well as exact counts; removing the key is not an opt-out.
+  Hosted production code has no crate-wide exception for the inherited
+  pedantic lint set either: remaining exceptions attach to individual items
+  and state the ownership, feature-shape or fixture invariant they preserve.
 - `crate-wide-allows` lists, as `path:lint`, the inner allows of these lints
   that remain at the top of a target root, before its first item. An unlisted
   one fails, so no new crate gains one; a listed one that is gone must be

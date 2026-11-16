@@ -210,6 +210,10 @@ use plakous::tools::CompiledSurface;
 /// instructions, the child binding -- not the files behind the ports, so the
 /// doubles are the honest fixture. The twelve that *do* read Plak's own
 /// authorities back live in the binary.
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "test fixtures retain the fallible helper signature used by their callers"
+)]
 fn test_state_roots(product: PathBuf, state_home: PathBuf) -> CliResult<ProductStateRoots> {
     Ok(ProductStateRoots::with_doubles(product, state_home))
 }
@@ -2067,7 +2071,7 @@ async fn child_processing_tier_is_its_own_cards() {
     crate::topology_runtime::force_release(&tree_id).await;
 }
 
-/// A child of an OpenRouter parent binds only what its own row names: a row
+/// A child of an `OpenRouter` parent binds only what its own row names: a row
 /// without an account or a model is refused, never filled from the parent.
 #[tokio::test]
 async fn openrouter_child_never_takes_its_parents_account_or_model() {
@@ -2323,7 +2327,6 @@ fn coding_selections_are_exact_durable_and_canonically_ordered() {
                 NativeProvider::Claude => CachePolicy::Enabled {
                     requirement: CapabilityRequirement::Required,
                 },
-                NativeProvider::Codex | NativeProvider::Xai => CachePolicy::Disabled,
                 _ => CachePolicy::Disabled,
             }
         );
@@ -3691,7 +3694,7 @@ fn a_tool_name_clash_fails_construction_naming_both_providers() {
 }
 
 /// An API child's pin follows the API table for the model its node runs: an
-/// OpenAI API child on `plakous-default` pins `native-ptc`, and an explicit
+/// `OpenAI` API child on `plakous-default` pins `native-ptc`, and an explicit
 /// `native-ptc` card on the xAI or Anthropic API is refused at the pin even
 /// when the epoch's account hints would let it spawn.
 #[tokio::test]
@@ -3749,9 +3752,9 @@ async fn api_child_pin_follows_the_api_table_for_its_node_model() {
         writer_mode: WriterMode::SingleLease,
         bounds: EpochBounds {
             max_depth: u16::from(MAX_TREE_DEPTH),
-            max_children: MAX_DIRECT_CHILDREN as u16,
-            max_nodes: MAX_TREE_NODES as u16,
-            max_attempts: MAX_TREE_ATTEMPTS as u16,
+            max_children: u16::try_from(MAX_DIRECT_CHILDREN).unwrap(),
+            max_nodes: u16::try_from(MAX_TREE_NODES).unwrap(),
+            max_attempts: u16::try_from(MAX_TREE_ATTEMPTS).unwrap(),
             max_agents_per_cell: crate::cell_budget::DEFAULT_MAX_AGENTS_PER_CELL,
         },
         require_review_evidence: false,
@@ -4174,8 +4177,8 @@ fn xai_api_hub_surface_presents_task_tools_for_direct_and_js_ptc() {
 }
 
 /// The vocabulary a node granted agent tools gets follows the pack its route
-/// wears: pi (OpenRouter) spells the await and interrupt `wait` and `stop`,
-/// Grok (SuperGrok and the xAI API) the task tools, every other pack the Plak
+/// wears: pi (`OpenRouter`) spells the await and interrupt `wait` and `stop`,
+/// Grok (`SuperGrok` and the xAI API) the task tools, every other pack the Plak
 /// names.
 #[test]
 fn topology_vocabulary_follows_the_pack_the_route_wears() {
@@ -4306,7 +4309,7 @@ fn standard_model(
     )?)
 }
 
-/// A SuperGrok (native xAI OAuth) hub whose topology output and kill claim the
+/// A `SuperGrok` (native xAI OAuth) hub whose topology output and kill claim the
 /// Grok process slots creates and reopens through `ProductProjectionAdmission`
 /// and `AgentSessions`, on every occupancy fence.
 #[tokio::test]

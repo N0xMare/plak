@@ -17,6 +17,7 @@ pub struct BoundedText64 {
 
 impl BoundedText64 {
     /// Stores up to 64 UTF-8 bytes; longer inputs are rejected.
+    #[must_use]
     pub fn new(text: &str) -> Option<Self> {
         if text.is_empty() || text.len() > 64 {
             return None;
@@ -369,6 +370,7 @@ impl ProductObservation {
 }
 
 /// Parses a product session UUID from durable tree/session text.
+#[must_use]
 pub fn session_id_from_text(text: &str) -> Option<SessionId> {
     uuid::Uuid::parse_str(text)
         .ok()
@@ -376,10 +378,15 @@ pub fn session_id_from_text(text: &str) -> Option<SessionId> {
 }
 
 /// Wall-clock timestamp for product-side observations.
+///
+/// # Panics
+/// Only if the timestamp implementation rejects the fixed valid fallback
+/// `(0, 1)` after both the current clock and `(1, 0)` were refused.
 #[allow(
     clippy::unwrap_used,
     reason = "Timestamp::new only fails on invalid nanos"
 )]
+#[must_use]
 pub fn wall_timestamp() -> Timestamp {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

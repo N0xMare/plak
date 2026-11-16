@@ -111,6 +111,10 @@ pub(crate) fn sample_children_rusage_cumulative() -> ProcessResourceSnapshot {
     snapshot
 }
 
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "platform probes share an optional result with the unavailable platform implementation"
+)]
 pub(super) fn process_resources() -> Option<ProcessResources> {
     #[cfg(target_os = "linux")]
     {

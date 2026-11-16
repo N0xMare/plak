@@ -60,6 +60,10 @@ fn apply(events: &crate::surface_protocol::HostEventReceiver, state: &mut Transc
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "fixture helpers own their input so test setup does not retain borrowed JSON or runtime state"
+)]
 fn assert_call(state: &TranscriptState, expected: ActivityState) -> RowKey {
     let rows: Vec<_> = state
         .items()
