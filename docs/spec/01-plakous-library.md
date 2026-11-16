@@ -9623,9 +9623,11 @@ presentation, and semantic revisions are all frozen before dispatch.
 
 The agent-owned local-composition parser, validation, descriptor and ordinary
 future seams return `LocalCompositionError`, also used by the facade
-implementation. Existing refusal text and classification are unchanged; parser,
-compiler and worker-start failures retain their original error as a source,
-while policy refusals have none. Evaluator session loss remains the separate
+implementation. Policy and input-refusal sentences keep their existing text.
+Sourced failures display a boundary-owned sentence and retain the original
+parser, compiler or worker failure only through `source()`, so an error-chain
+renderer does not repeat the cause. Policy refusals have no source.
+Evaluator session loss remains the separate
 closed `LocalCompositionSessionLoss` outcome. These process-local error types
 change no model-visible grammar, binding input or persisted encoding.
 

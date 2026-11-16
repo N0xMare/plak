@@ -59,8 +59,9 @@ impl Tasks {
             if let Err(error) = result
                 && !error.is_cancelled()
             {
-                let message = format!("SDK host task failed: {error}");
-                failure.get_or_insert_with(|| LocalCompositionError::with_source(message, error));
+                failure.get_or_insert_with(|| {
+                    LocalCompositionError::with_source("SDK host task failed", error)
+                });
             }
         }
         failure.map_or(Ok(()), Err)
@@ -588,4 +589,37 @@ async fn observe_process(scope: &Scope, name: &str, input: &Value) -> Result<V, 
         )
     };
     Ok(process_value(scope, process(scope, tool, args).await?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Tasks;
+    use std::error::Error as _;
+
+    #[tokio::test(flavor = "current_thread")]
+    #[allow(
+        clippy::panic,
+        reason = "a panicking child exercises the JoinError cause chain"
+    )]
+    async fn failed_task_chain_prints_the_cause_once() -> Result<(), Box<dyn std::error::Error>> {
+        let tasks = Tasks::default();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        tasks.spawn(Box::pin(async move {
+            let _ = started.send(());
+            panic!("fixture worker panic");
+        }));
+        ready.await?;
+        let Err(error) = tasks.stop().await else {
+            return Err("the failed task was not reported".into());
+        };
+        assert_eq!(error.to_string(), "SDK host task failed");
+        let Some(source) = error.source() else {
+            return Err("the task failure lost its source".into());
+        };
+        assert!(source.is::<tokio::task::JoinError>());
+        let chain = format!("{error}: {source}");
+        assert_eq!(chain.matches("SDK host task failed").count(), 1);
+        assert_eq!(chain.matches("fixture worker panic").count(), 1);
+        Ok(())
+    }
 }

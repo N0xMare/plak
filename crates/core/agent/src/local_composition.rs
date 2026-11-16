@@ -40,9 +40,9 @@ impl LocalCompositionError {
         }
     }
 
-    /// Retains a failure while preserving its existing display text.
+    /// Retains a failure under the local-composition boundary sentence.
     pub fn from_source(source: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self::with_source(source.to_string(), source)
+        Self::with_source("local composition failed", source)
     }
 
     /// Retains a failure under an existing safe, boundary-owned message.
@@ -579,4 +579,25 @@ pub struct LocalCompositionAttachmentIdentity {
     pub binding: Digest,
     pub engine_contract: Digest,
     pub evidence_receipt: Option<Digest>,
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::LocalCompositionError;
+    use std::error::Error as _;
+
+    #[test]
+    fn sourced_failure_chain_prints_the_cause_once() {
+        let error = LocalCompositionError::from_source(std::io::Error::other("worker failed"));
+        let mut messages = vec![error.to_string()];
+        let mut next = error.source();
+        while let Some(source) = next {
+            messages.push(source.to_string());
+            next = source.source();
+        }
+        assert_eq!(
+            messages.join(": "),
+            "local composition failed: worker failed"
+        );
+    }
 }
