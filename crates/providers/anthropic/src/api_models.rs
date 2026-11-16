@@ -691,10 +691,12 @@ fn classify(
         .map_or_default(efforts_from);
     let max_input_tokens = listed
         .max_input_tokens
-        .or(reviewed.map_or_default(|row| row.max_input_tokens));
+        .or(reviewed.map(|row| row.max_input_tokens))
+        .unwrap_or_default();
     let max_tokens = listed
         .max_tokens
-        .or(reviewed.map_or_default(|row| row.max_tokens));
+        .or(reviewed.map(|row| row.max_tokens))
+        .unwrap_or_default();
     let adaptive = listed
         .adaptive_thinking
         .or(reviewed.map(|row| row.adaptive_thinking))

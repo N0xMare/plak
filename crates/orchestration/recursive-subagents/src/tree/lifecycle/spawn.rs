@@ -130,7 +130,8 @@ impl ProductAgentTree {
                         node.agent_id,
                         serde_json::to_value(node.status)
                             .ok()
-                            .and_then(|value| value.as_str().map_or_default(str::to_owned))
+                            .and_then(|value| value.as_str().map(str::to_owned))
+                            .unwrap_or_default()
                     )
                 })
                 .collect();

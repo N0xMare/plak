@@ -210,7 +210,8 @@ pub(super) fn adopt_milestone(
         TopologyCallFacts::Wait(_) => return None,
     };
     let (agent_id, template) = producer(candidate)
-        .or_else(|| sealer_named_by(candidate).map_or_default(|agent| (agent, None)));
+        .or_else(|| sealer_named_by(candidate).map(|agent| (agent, None)))
+        .unwrap_or_default();
     Some(AgentMilestone {
         agent_id,
         event,
