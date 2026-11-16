@@ -681,10 +681,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             .map_err(CliFailure::new)?;
     }
     match command {
-        Command::Help => {
-            cli::render::global_help(&mut stdout).map_err(|_| CliFailure::new("stdout failed"))?;
-            Ok(ProcessOutcome::Success)
-        }
         Command::CommandHelp { command } => {
             cli::render::command_help(&command, &mut stdout)
                 .map_err(|_| CliFailure::new("stdout failed"))?;
@@ -1244,7 +1240,9 @@ fn execute_command(
         Command::Mcp(command) => {
             commands::mcp::run(services.paths()?, command, stdin, stdout, stderr, login_ui)
         }
-        Command::Runner(_) => unreachable!("runner commands dispatch before the stdio locks"),
+        Command::Help | Command::Runner(_) => {
+            unreachable!("early commands dispatch before product state and stdio locks")
+        }
         Command::StatusAll => dispatch::execute_status_all(services, backend, stdout),
         Command::AccountsList => {
             for account in backend.accounts()? {
