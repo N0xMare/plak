@@ -360,14 +360,12 @@ pub(super) fn read(fixture: &Fixture) -> Summary {
             locator,
         )
         .expect("decoded head root lifecycles");
-    let obligations = report
-        .as_ref()
-        .map_or_default(|r| {
-            r.obligations()
-                .iter()
-                .map(|o| (o.operation_id(), format!("{:?}", o.action())))
-                .collect()
-        });
+    let obligations = report.as_ref().map_or_default(|r| {
+        r.obligations()
+            .iter()
+            .map(|o| (o.operation_id(), format!("{:?}", o.action())))
+            .collect()
+    });
     let facts = runtime_facts(&paths.runtime_database(), locator);
     let provider_owners = serde_json::to_value(
         plakous_offline_crash_harness::ledger_signature::inspect_provider_owners(

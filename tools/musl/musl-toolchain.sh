@@ -1,5 +1,5 @@
 # Sourced by tools/musl/musl-native.sh and tools/release/package-release.sh:
-# checks the native Linux x86_64 musl prerequisites and exports the compiler,
+# checks the pinned Rust 1.100.0 native Linux x86_64 musl prerequisites and exports the compiler,
 # linker and CARGO_BUILD_TARGET for x86_64-unknown-linux-musl.
 if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
   echo "native musl build requires a Linux x86_64 host" >&2

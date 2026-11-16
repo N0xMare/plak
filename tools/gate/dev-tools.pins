@@ -1,4 +1,5 @@
 # Pinned developer tools: one line per release archive, oldest version first.
+# Rust is pinned separately in rust-toolchain.toml: stable 1.100.0 (2026-11-12).
 #
 #   tool version target sha256 url
 #

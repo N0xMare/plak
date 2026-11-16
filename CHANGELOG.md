@@ -11,6 +11,8 @@ for one version bump, without native protocol compatibility.
 
 - Raise the pinned stable Rust toolchain and MSRV to 1.100.0 (2026-11-12)
   for RC2; source builds and embedders now require Rust 1.100.0 or later.
+  Adopt equivalent `map_or_default` combinators for clippy and remove redundant
+  package homepage metadata (the repository URL is unchanged).
 
 - Classify Anthropic API HTTP 400 insufficient-credit responses as permanent
   `QuotaExceeded` failures with an API-credit repair remedy.
