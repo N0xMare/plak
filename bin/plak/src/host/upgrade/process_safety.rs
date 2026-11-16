@@ -1,4 +1,4 @@
-//! Remove this one admission gate once cross-build job retention is available.
+//! Remove this admission gate once host upgrade carries jobs across runner triples.
 
 use super::{CliFailure, CliResult, Duration, Services};
 use plakous::runner::protocol::{LineStatus, VersionTriple};
@@ -82,7 +82,7 @@ fn live(line: &LineStatus) -> CliResult<bool> {
 
 fn refused() -> CliFailure {
     CliFailure::new(
-        "host_upgrade_process_retention_unavailable: runner triple changes while foreground/background processes are live or their state is unknown; settle and drain them using the old build, then retry; cross-build job retention is not available yet",
+        "host_upgrade_process_retention_unavailable: runner triple changes while foreground/background processes are live or their state is unknown; settle and drain them using the old build, then retry; runner retention v1 exists, but host upgrade does not carry jobs across changed runner triples",
     )
 }
 
@@ -160,6 +160,18 @@ mod tests {
 
     #[test]
     fn host_upgrade_changed_triple_process_gate_is_fail_closed() {
+        let failure = refused();
+        assert!(
+            failure
+                .message()
+                .starts_with("host_upgrade_process_retention_unavailable:")
+        );
+        assert!(failure.message().contains("retention v1 exists"));
+        assert!(
+            failure
+                .message()
+                .contains("host upgrade does not carry jobs across changed runner triples")
+        );
         let mut line = LineStatus {
             host_id: "host".into(),
             line: "line".into(),

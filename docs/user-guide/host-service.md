@@ -158,9 +158,10 @@ precedence and is never converted into a continuation. The admission-verdict
 barrier joins a delivery attempt, not receipt by a disconnected client.
 
 Promoted jobs continue only with an unchanged exact runner revision/flavor/protocol
-triple. Until cross-build job retention lands, changed-triple requests with live
-foreground/background processes or unknown runner state refuse before drain;
-settle and drain them using the old build, then retry. Source process
+triple. Runner retention v1 exists, but `host upgrade` does not carry jobs across
+changed runner triples. It still refuses changed-triple requests with live
+foreground/background processes or unknown runner state before drain; settle
+and drain them using the old build, then retry. Source process
 inspection needs a live source-compatible native connection, not just a cached
 picker **Ready** row. For a cold source or a paired runner with no native backend user,
 reconnect a settled root on that runner read-only using the old client and keep
@@ -175,8 +176,8 @@ response alone does not call for a link change or root attachment. No source res
 is needed. Same-key upgrade checks source-owned runner clients again before
 surrender, without another bind or custody transfer, including child placements.
 Cross-key settled carry checks once, before pausing admissions. On the same-key
-path a process started during preparation can
-already have been promoted by Notice when the final check refuses; it keeps
+path a process started during preparation can already have been promoted by
+Notice when the final check refuses; it keeps
 running on the source and can be stopped or drained there. Cross-key carry still
 requires settled jobs and trees.
 `--drain` cannot be combined with `--wait` or `--abandon`.

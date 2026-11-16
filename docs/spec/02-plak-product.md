@@ -5613,8 +5613,9 @@ A replacement acknowledgement requires a fresh source-instance identity even
 when a test forces the same image to restart. An already running exact target
 remains an ordinary no-op.
 
-A changed local-runner protocol refuses before handoff. Step draining adds no
-job-retention channel across different native runner triples. One read-only gate
+A changed local-runner protocol refuses before handoff. Runner retention v1
+exists, but host upgrade does not carry jobs across changed runner triples.
+Step draining adds no such job-retention channel. One read-only gate
 checks the source's existing bound runner clients before drain. Same-key upgrade
 checks again before surrender; cross-key settled carry checks once, before the
 admission pause. A changed-triple request with live foreground/background processes or
@@ -5635,8 +5636,8 @@ flushes, each under its original cleanup bound; it does not retry ambiguous fail
 an operator restart to avoid checkpoint contention. A persistent cleanup refusal
 still aborts before surrender.
 Promoted-job continuation is qualified only for an unchanged exact triple.
-On the same-key path, if a process begins after the first check, Notice may already have promoted its
-wait by the final check. Refusal leaves that process running under the source;
+On the same-key path, if a process begins after the first check, Notice may
+already have promoted its wait by the final check. Refusal leaves that process running under the source;
 it does not stop the process or surrender its custody. The gate checks child
 runner placements too, not just each root's runner. This temporary gate does not
 weaken the home-local protocol-only admission rule
