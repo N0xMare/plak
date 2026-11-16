@@ -9,1347 +9,271 @@ for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
-- Raise the pinned stable Rust toolchain and MSRV to 1.100.0 (2026-11-12)
-  for RC2; source builds and embedders now require Rust 1.100.0 or later.
-  Adopt equivalent `map_or_default` combinators for clippy and remove redundant
-  package homepage metadata (the repository URL is unchanged).
-  The standard library now uses Unicode 18 and `str::escape_debug` always
-  escapes grapheme extenders, including after printable characters.
-  Resolve offline MCP and product crash-fixture paths from Cargo artifact
-  records rather than the intermediate test-binary layout, which Cargo 1.100 changes.
-
-- Accept symlinked absolute workspace cwd paths without weakening containment,
-  fixing home-local runner startup with homes under macOS `/tmp` or `/var`.
-
-- Classify Anthropic API HTTP 400 insufficient-credit responses as permanent
-  `QuotaExceeded` failures with an API-credit repair remedy.
-
-- Before upgrading to `0.0.4`, delete the removed `[tui]` section (and its
-  subtables) from `config.toml`; the new daemon refuses it with a deletion
-  remedy. Leave `[host] reload_requests` unset until the old build is retired:
-  the previous `0.0.3`/U27 build rejects that new key. No automatic config
-  conversion or acceptance of removed terminal settings is provided.
-
-- Advance the Rust workspace release cohort to `0.0.4`, including `plakd`.
-  The vendored Code Mode protocol keeps its upstream version.
-
-- Breaking (0.0.4): host wire 11 requires `Welcome.state_key`, adds advisory
-  `host_lifecycle` notices for admitted planned shutdowns and upgrades (including
-  `running` on aborted drains), and types stdio bridge discovery refusals on
-  stdout. Exact-version handshakes remain mandatory; wire 10 is refused.
-
-- Breaking: `plakous-tools::ImageNormalizer::normalize` now returns the typed
-  `ImageNormalizationError` instead of `String`. Its display text is unchanged;
-  decoder failures remain available through `source()`. The internal-tier local
-  composition seam uses `LocalCompositionError`. Correct the host-side
-  profile-default remedy to select materialized root and working-set templates
-  instead of the nonexistent `root.profile` setting.
-
-- Rename the public host daemon, operator package and executable to `plakd`.
-  Keep `.plak`, `PLAK_`, credential/state locations and `~/.local/lib/plak`;
-  new images and generated user services use the daemon name. The old public
-  `plak` package is retired without a command shim or registry upload.
-
-- Fresh provider review dated 2026-11-15 on all seven surfaces. Subscription
-  expiries (Codex, Grok, Claude) and API review-due dates (OpenAI Platform,
-  Anthropic API, xAI Platform, OpenRouter Chat) are all 2027-02-13T00:00:00Z.
-  Native references are Codex 0.169.0, Grok Build 1.0.77
-  (`x-grok-client-version` 1.0.77) and Claude Code 2.1.325. OAuth consent
-  identities stay unchanged. Enroll Fable 5.2 on Claude OAuth and Anthropic
-  API with explicit selection; Mythos 5.2, GPT-6.1 Terra, GPT-6 Cyber and
-  Rosalind stay `needs review`.
-
-- Remove the public terminal application, terminal resume/hidden launch flags,
-  clipboard features, screen goldens and story/live-TUI tooling. Bare invocation
-  prints help without starting a host. Server catalogs, settings metadata,
-  reload/upgrade, credential resolution and explicit session resume remain;
-  move the operational reload-request switch to `host.reload_requests`.
-  Clients are independently maintained against the wire protocol; the Python
-  socket example is test-only support.
-
-- Remove terminal-only orchestration-on-reload. Existing sessions retain their
-  frozen epoch; new sessions and explicit profile switches use current settings.
-  Startup still settles already-persisted orchestration carry intents.
-
-- Separate host catalog and attachment vocabulary from terminal adapters, and
-  run catalog admission, settings defaults and compaction-view rebuild checks
-  independently of terminal rendering.
-
-- Fix child-result wakes remaining suppressed after a host restart continued
-  the root's interrupted work. An admitted handoff or owner-loss continuation
-  rearms waking durably; later operator stops and interrupts still suppress it.
-
-- Shorten integration and worker gates without weakening release qualification:
-  share platform-independent checks, narrow worker lint roots, keep macOS batch
-  checks to fmt/clippy, builds and parallel tests, and require exact-tree Mac
-  serial/durability plus package verification before production installation.
-  Package verification runs every batch, reusing only matching cohort verification
-  receipts; standalone supported-package rustdoc stays in every batch. Keep
-  full checks on both release platforms. Explicit static scopes are restricted
-  to step-group invocations.
-
-- Keep restart-matrix pilots local to their actual test run: only nextest
-  workers share its run ID; Cargo test and crash-sweep use a fresh process
-  identity even when a parent supplied an old nextest run ID.
-
-- Run durability in a host-scaled pool of `min(16, available_parallelism)`
-  slots, with whole-pool and `ceil(N/4)` reservations. Split the four restart
-  matrices into 64 grouped tests with run-local shared pilots; each family's
-  sixteen groups must run within one invocation to check their union.
-
-- Keep an operator pause entered after a loss-continuation decision in force
-  when the continuation is admitted. Pin in-turn notices after continuation
-  and user-prompt admission, without a duplicate idle wake.
-
-- Keep ownership-move witnesses independent across live instances of one home,
-  finish disposed-group cleanup independently, and qualify dormant prepare-time
-  terminal proofs against crashes, drift and foreign allocations.
-
-- Carry retained, unconsumed terminal jobs using exact original-worker proofs,
-  without acknowledging their output. Recheck those proofs under source holds
-  before native preparation and surrender.
-
-- Recover ownership-move batches from their immutable captured terminal set,
-  even when lease-only reconciliation records more job terminals before Ready.
-
-- Qualify live ownership-move process cuts around drain, original-job
-  reconciliation and group readiness, without enabling public live cutover.
-
-- Report uncertain host-upgrade decisions to the requester with a startup
-  reconciliation remedy, including attempts later withdrawn without surrender.
-
-- Reconcile retained promoted-job allocations before publishing whole-group
-  ownership readiness. Fresh original-worker witnesses fence cross-build
-  transfers; disconnected originals keep dependent groups withheld and their
-  jobs charged. Live ownership moves remain privately qualified, not enabled.
-
-- Clarify that session usage is process-local since runtime open, not a lifetime
-  total. Reopening after a host restart starts empty; reconnecting a client to
-  the same runtime does not reset it. Durable per-turn usage is unchanged.
-
-- Recover partially prepared ownership moves after an aborted foreign startup,
-  without relying on source archival. Uncertain surrender writes stop the paused
-  owner for receipt recovery; committed retirement failures retry forward.
-  Group abandonment reports guard failures and backs off automatic retries.
-
-- Preserve dormant ownership-move interpreter generation floors, acknowledged
-  agent attention, reserved tree decisions and recorded compaction display
-  facts. Pin semantic fidelity through the version-13 carrier and reconstruction,
-  including retained child input and immutable fork/checkpoint provenance.
-  These complete the unshipped context-4/runtime-38/product-38/tree-11 cut.
-
-- Prepare guarded live ownership moves through read-only destination binding
-  inspection, joined step drains and durable planned handoffs. Failed handoff
-  recording now reports failure after cleanup rather than silently surrendering.
-
-- Qualify joined ownership-move cuts for retained promoted-job metadata while
-  keeping dormant cuts terminal-only and live cross-key execution disabled.
-
-- Reload durable runner owner floors and retention-only roles after acquiring
-  the native daemon lock, so replacement startup cannot revive stale authority.
-
-- Client protocol 10 adds required Unix-second `created_at` timestamps to
-  session directory rows and safe `detail` text to structured validation
-  issues. Profile writes identify empty working sets and missing templates
-  by field path and code; config writes identify decoded values of the wrong
-  kind. Refusals never echo supplied values. Clients must adopt protocol 10
-  together; runtime, export and persisted formats are unchanged.
-
-- Clarify running-child transcript coverage with the addressed notice
-  `Live view starts here · earlier streaming output not shown`. Attach and
-  later gaps disclose unavailable streaming output without replaying it;
-  resync preserves the notice and terminal refresh restores committed history.
-  No persisted or wire format change; client protocol remains 9.
-
-- Pin prompt queue durability across a host crash inside paid scheduled
-  compaction: durably admitted input survives with its identity and resumes
-  once, while a deferred mailbox draft is not reported as saved. Distinguish
-  summary dispatch from ordinary turns and consumed input from missing input.
-  Add coverage for the unavailable-compaction queue remedy. No runtime, wire
-  or persisted-format change.
-
-- Classify missing merge-plan and process executors as release binding changes,
-  using the reviewed executor inventory rather than a separate prefix list.
-
-- Fix continuation command collisions between distinct sessions at equal feed
-  positions, and namespace child loss continuations by their tree. Reopen keeps
-  recorded decision identities, including older pending and consumed decisions.
-  A proven foreign-submission collision gets one durable replacement decision;
-  the other session's submission and accepted work remain untouched.
-
-- Extend the test-hooks-only pending-draft producer to capture the first native
-  sender's original UUID without choosing it at host startup. A content-free
-  barrier reports that UUID; real pending checks, release, durable duplicate
-  proof and cancellation retain their existing authority. Default and
-  maintainer builds are unchanged; no persisted or wire format changes.
-
-- Fixed a busy root's graceful host handoff being lost after an accepted
-  send-now steer; restarting the host continues the handed-off turn once.
-
-- Keep process executor contracts stable across shell-file replacement, while
-  refusing replacement or retarget during a runtime enrollment. Fresh runtime
-  enrollment accepts the new shell without changing recorded IDs.
-- Preserve frozen tool presentations during manual compaction and inherited
-  skills and pending epochs during fresh binding workflows. Recovery remedies
-  respect the session's presented schema.
-- Refuse host upgrades only on live binding regressions, showing actionable
-  rows; report inactive branches and externally owned MCP contracts separately.
-
-- Preserve each session's frozen tool presentation on exact reopen across
-  release changes, while checking current executor compatibility separately.
-- Check retained bindings read-only before a same-key host upgrade surrenders
-  ownership, including branches belonging to children.
-- Pin release binding facts across the offline route matrix and require exact
-  reopen of predecessor-authored native root and child sessions.
-
-- Add an integration map and a stdlib Python socket client checked against
-  a real offline host in the tooling gate.
-
-- Publish `plakd wire schema` as a supported command and attach target-specific
-  JSON Schemas to releases.
-
-- Drain same-key host upgrades at runtime step boundaries with `--drain`
-  (60 seconds by default, bounded durations or unbounded `idle`).
-  Yield observation waits and promote foreground processes with Notice;
-  join results before surrender, never cancel paid compaction. Show waiting
-  categories and elapsed time; Ctrl-C or session stop withdraws preparation.
-  Resolve earlier draft verdicts with a ten-second minimum barrier before
-  freezing roots and children; requester loss or rollback reopens source gates.
-  Existing planned handoff preserves identities and once-only continuation.
-  Cross-key carry remains settled-only, and this adds no background-job
-  retention across different native runner builds.
-
-- Add an internal, generation-scoped runtime step hold for host coordination.
-  It parks at joined operation boundaries, preserves ordinary timeout budgets,
-  and revokes on coordinator drop without occupying command ingress. It does
-  not yet enable live upgrade or change session and runner custody.
-
-- Add `plakd runner connect --stdio --binary <id>` to select and verify an
-  already installed immutable runner image without moving command links.
-  Unsafe, missing or mismatched snapshots refuse with an install remedy;
-  ordinary exact-triple and pairing admission remain unchanged.
-
-- Add macOS LaunchAgent installation for `plakd host install`, with private
-  log directories and explicit load, start and removal instructions. Installation
-  never loads or starts the service.
-
-- Report issued job output containing NUL as binary during literal or regex
-  search instead of returning unmarked binary text. Context beyond an early
-  match stop marks binary lines explicitly and keeps later context. Invalid
-  UTF-8 still searches lossily with its existing warning and later matches.
-
-- Add a paused-host draft-verdict barrier for planned upgrade preparation,
-  rejecting only unclaimed mailbox inputs and joining durable admission and
-  verdict delivery without carrying a draft registry across generations.
-
-- Retain promoted runner jobs across planned build replacement through the
-  same-user frozen job-retention endpoint v1. Direct original-worker delegation
-  preserves controls, output and number floors without duplicate capacity or
-  effect replay; retention-only lines cannot regain native control on reinstall.
-
-- Runner protocol 8 adds typed `jobs.ack` for committed terminal consumption.
-  Running or cleanup-unresolved jobs cannot be acknowledged away; retries of
-  already consumed numbers are harmless. The job-retention endpoint has its
-  own independent version, not native protocol compatibility.
-
-- Write session export v13 with closed document kinds; import v13 and v12,
-  refuse v11 and older, and keep ownership-move capsules out of ordinary session
-  import. The 0.0.3 release wrote v11: those exports cannot be carried into this
-  build directly.
-- Add hidden host-only runtime retirement and invisible semantic-install seams,
-  with operation-bound abort/commit, permanent abandonment and imported lease
-  floors. Runtime SQLite advances to schema 28; dormant product moves remain off.
-- Compile dormant destination heads from semantic history and named state with
-  unchanged session, branch and line identities, new checkpoint provenance and
-  imported feed floors. Imported compaction selections contain no historical
-  admission or cache grants. Context codec 4 and runtime epoch 38 share the
-  unshipped schema-28 state-key cut; product/tree move publication remains off.
-- Retain immutable product and tree semantic move bases, original pending-input
-  identities and source custody floors. Product schema 38 and tree schema 11 share
-  the same state-key cut. Lease-only reconciliation stays distinct from a durable
-  execution open; a guarded withdrawal cannot revoke a destination that opened,
-  even if its idle checkpoint never advanced. Product move publication remains off.
-- Add a bounded, normally bound owner-floor read for identity-preserving host
-  moves, and an exact-CAS client path that returns foreign witnesses without
-  retrying from them. Native runner protocol 9 pins the new request and reply;
-  ordinary owner transfers and both inspection modes keep their authority.
-- Add capability-gated connected-group orchestration: reversible source freezes,
-  irreversible native retirement, passive semantic installation, exact-owner
-  reconciliation and atomic group readiness. Guarded never-Ready abandonment
-  cannot revoke an opened driver; pending targets refuse metadata mutation and
-  normal readoption. The public dormant move remains disabled pending qualification.
-
-- Fixed runner calls being queued on an already cancelled link; calls refused
-  before dispatch remain provably not sent, without a replay journal claim.
-
-- Ride out multi-minute provider outages when transport evidence proves a
-  request write never completed, without spending ordinary retries or replaying
-  an ambiguously dispatched session workflow.
-- Clarify and test that Responses host-behavior revisions guard prepared
-  attempts, not frozen session bindings: existing sessions reopen exactly
-  across that revision change without a carry or rebind.
-
-- Let a parent re-task a child held for recovery through
-  `send_agent_message` with `purpose=followup` and `acknowledge_recovery` set
-  to the child's current attempt ID. The host settles the old session without
-  replaying uncertain work before admitting a fresh attempt. The receipt's
-  `recovery_warning` preserves that a tool may have changed the workspace;
-  ownership, effect-evidence and workspace refusals still block admission.
-  The host-layer `ChildController` gains `recover_followup`, and the typed send
-  request gains `acknowledge_recovery`, and the stored send receipt gains an
-  optional `recovery_warning` field; no table, export-document or frame change.
-
-- Speed up host startup continuation discovery by reading handoff candidates
-  without reopening every persisted tree; full eligibility checks are unchanged.
-
-- Continue recorded child handoffs at host startup even when their parent
-  root was idle, without waiting for a client to attach. Unhanded-off children
-  do not cause an eager open.
-
-- Fixed unavailable process-group scans classifying promoted jobs as leftovers
-  and allowing a run to exit before their completion notice.
-
-- Fixed workspace reads returning stale cached bytes after a same-size rewrite.
-- Fixed pending child decisions not being offered when the child's read model
-  first attaches.
-- Fixed due idle retention being skipped when an idle driver stops.
-
-- Fixed duplicate topology refreshes from split binding/attach observations and
-  made topology precede the terminal's initial promptable notification.
-
-- Fixed a redundant topology snapshot request while resuming a session; the
-  terminal now waits for the successful target transition before refreshing.
-
-- Add explicit test-hooks-only abandoned-open recovery seeding and a real
-  draft-reservation hold for deterministic host-client recovery and same-ID
-  pending-admission tests. Default and maintainer behavior is unchanged.
-
-- Restore live terminal pins and residency from same-instance inventory. Permit
-  explicit lost-runner acknowledgment after a continuously observed namespace
-  deadline or proven configuration removal, resetting loss witnesses on rebind.
-  Open-rate backpressure now carries the remaining retry delay; other terminal
-  backpressure explicitly reports no timed estimate. Browser rendering remains
-  private client work. Product storage and state key are unchanged.
-
-- Add client protocol 9 operator-terminal requests, fresh action-bound consent,
-  independent credited stream frames, confirmed controller takeover and explicit
-  residency/loss outcomes. Credit batches validate atomically; bounded per-stream
-  and aggregate output budgets preserve control/transcript progress. The default-off
-  terminal switch enables the strict-CSP WASM seam without permitting script eval.
-  Product DTOs own terminal events; generic host streams remain attachment-free.
-  Runner protocol 6 becomes 7 for OperatorControl and paired binding-free
-  qualification in one batch, preserving the preceding Changes contract.
-  Terminal state remains process-local; product schema and state key are unchanged.
-
-- Preserve terminal controller authority across same-instance renewals. Bound slow-reader
-  queues by decoded bytes, coalesce adjacent data, retain terminal end notices and
-  close command admission before draining. Enforce host-wide quotas and six opens
-  per principal per minute; collect completed host receipts behind principal-local
-  fences without blocking runner inventory. Isolate operation locks and shutdown
-  work across runners, and retain pins during same-instance disconnects.
-
-- Collect refused terminal opens behind compact exact-outcome fences. Reserve
-  bulk-channel capacity for terminal control responses and gate reads without
-  losing the read deadline. Clean independent validated process groups even when
-  another group is uncertain, report live session survivors, and back off periodic
-  proof scans while retaining the explicit-close proof window.
-
-- Anchor successful Darwin PTY spawns through the owned, unreaped child handle,
-  including children that exit before their first observation. No Darwin waitid
-  result is required; Linux retains full-scan identity checks. Retire the shared
-  anchor before reaping and verify live members before every group signal.
-
-- Keep operator-terminal authority process-local on the runner and home-local
-  daemon. The private host registry discovers surviving pin inventory on first
-  bind, retains resident holds and authenticated controllers, and joins shutdown.
-  Scope reconciliation is independent of terminal namespace expiry and quota.
-  Runner-owned leases guard workspace removal/trim; precise lost-instance pins
-  remain while host memory survives. Simultaneous host/runner loss is unlocalized
-  unknown loss, not cleanup proof. Product schema stays 37 and the state key is
-  unchanged. Client protocol 9 exposes the private registry without adding persisted state.
-
-- Keep settled remote upgrade retries on the serving registry connection, so
-  importing another root cannot cancel live services. Retry with status-change
-  wakeups and capped exponential backoff. Add `plakd host upgrade --abandon` for
-  permanently lost pending remote successors; reservations remain unusable,
-  while retained exports can be copied and normally imported elsewhere.
-  Missing rollback records count as restored; archived heads are excluded from
-  settlement and the carried-root cap. The unshipped ownership receipt remains
-  version 1 with explicit placement and abandonment; export v12 is unchanged.
-
-- Fixed native-client exits losing `bye`: last-handle drop now waits up to two
-  seconds for the sole writer to drain and finish, even after explicit goodbye.
-
-- Wait up to two seconds when a root reopen races this process's runner
-  readoption or lease-only stop, without weakening another process's lease
-  fence. A local timeout now says that this host is still reconciling the
-  session's runner and asks for a short retry, rather than claiming another
-  process holds it. Skipped readoption is retried after a failed local open;
-  a successful open suppresses the retry to preserve runner readiness. Local
-  contention makes dormant stops explicitly retryable.
-  The host-layer `readopt_lines` and `finish_recorded_stop` functions now take
-  `ProductStateRoots` instead of a standalone session service, so their
-  coordination identity comes from the actual runtime database.
-  `try_lease_only` and `ReconciliationPermit` expose the same scheduling gate
-  to product-owned stop retries. No persisted, wire or binding format changes.
-
-- Harden workspace inspection audit coverage, deadline-bounded placement probes,
-  UTF-8 result filtering and retryable continuation authority; retain full bounded
-  Changes snapshots independently of client-response truncation.
-
-- Harden Changes execution against repository-local executable search and Git
-  index refresh writes. Require Git 2.44 with a no-lazy-fetch capability probe,
-  enforce repository ownership, and tighten metadata redirect checks.
-  Keep the 2,000-entry internal status budget separate from the bounded client
-  projection, so full execution identities survive client-side truncation.
-
-- Add consented host-console writes for named accounts, masked write-only keys,
-  cancellable subscription login, logout and explicit refresh, plus etag-checked
-  home configuration, template and profile publication. Client protocol 6 becomes
-  7 (runner protocol unchanged); welcome advertises `max_request_bytes: 278528`,
-  with the enlarged request allowance restricted to template/profile puts.
-  Remote `SaveSettings`, `ApplyProfile {apply:default}` and
-  `RefreshUsageCredential` are refused. Public API additions:
-  `plakous-hosted` exposes `HostSessions::{host_request_timeout,
-  host_request_refused, host_disconnect}` and `HostRequestContext.request_id`;
-  `plakous-host-protocol` adds `ProtocolExtension::host_request_size_allowed`,
-  `ConsoleCapability::{CredentialsWrite, ConfigWrite}` and a redacted
-  `LineReader` Debug implementation. No persisted format changes.
-
-- Fixed reattaching the original session after Fork now: the source and fork
-  remain independently attachable at their directory addresses with their own
-  transcripts.
-
-- Add an explicit detach-only goodbye to the native wire client: send `bye`
-  once and half-close writes while retaining the receiver to drain replies and
-  exact delivery dispositions, without stopping session work.
-
-- Add fixed, bounded read-only Changes execution: contained Git status and
-  worktree-versus-HEAD diff, revision preconditions, disabled repository helpers
-  and network/lazy fetch, and explicit refusals on unsafe repositories or limits.
-  Paired runner protocol 6 adds the ownerless BuildRead `workspace.changes`
-  status/diff verb; home-local daemons remain process-only.
-  Placed environments route the same executor through their frozen backend
-  identity, with matching local and paired-runner results and no local fallback.
-
-- Add protocol-8 saved-workspace Files and Changes inspection with exact byte pages, contained execution and bounded operator admission.
-- Include exact-account last settled credential-refresh outcome and time in protocol-8 account status reads.
-
-- Add a separate operator-terminal runner protocol with validated namespace,
-  terminal identity, dimensions and raw-byte stream vocabulary. Runner protocol
-  7 is an exact-version cut, independent of client protocol 9.
-  Runner and home-local daemon PTYs use principal-private, bounded in-memory
-  tables and output rings, independent quotas and awake deadlines, single
-  controllers and session-wide identity-checked cleanup. Unproven cleanup keeps
-  workspace pins and blocks idle exit; agent lines, jobs and accounting are
-  unchanged. Browser rendering remains private client work.
-  Session-id isolation is probed before enabling PTYs, and transient observation
-  failures never close live shells. Unknown termination supports fresh absence
-  proof or explicit acknowledged loss with surviving identities. Completed
-  receipts and retired namespaces are collected behind bounded replay fences.
-  Darwin retains an owned zombie's unreaped-child anchor without treating it as
-  live session membership; fast-exiting children retain cleanup authority.
-
-- Add settled-root `plakd host upgrade --expect-binary <id>`.
-  It preflights the destination, optionally waits with a bounded admission
-  pause, and carries settled roots across state keys through unchanged export
-  v12, with durable successor mappings and source-surrender/retry receipts.
-  Named state and paused text queues survive; carried roots start new lines.
-  Children remain inert references and cannot be revived. Running/held work,
-  live or sealing children and nonterminal daemon jobs refuse before cross-key
-  drain. Paired remote roots require advancing the runner's dedicated link to
-  the exact matching snapshot first; read-only qualification checks identity,
-  revision/flavor/protocol, configuration and capacity before drain. After
-  surrender the source exits; the destination host imports under its own
-  custody before Ready and recovers partial imports from receipts. Surrendered
-  roots cannot reopen on the old build. Same-key upgrade remains planned
-  handoff. This is not live tree or job migration. Adds ownership receipt
-  format 1 with source archival rollback and per-successor Ready acknowledgements,
-  and private coordinator protocol 1, not a new session export or state-key
-  format; runner protocol 7 adds paired read-only qualification.
-
-- Recover Prepared host upgrades through plain host startup as well as explicit
-  retry; withdraw non-crash preparation failures, make Aborted attempts inert,
-  and archive surrendered source records for older builds' ordinary-reopen
-  protection. A post-surrender runner outage withholds only its own successors
-  while ready roots serve; host-owned retries finish them without duplicate
-  import or renewed strict capacity/credential probes for completed imports.
-
-- Reopen compaction and profile successors on runner-placed and home-daemon
-  sessions through a fresh process port scoped to the current line owner.
-  Profile switches keep their recorded attachable root address, and a late
-  `ProfileApplied` confirmation reaches only the requesting client's
-  replacement attachment on the same live connection.
-
-- Keep saved history readable when a session cannot open: root attach answers
-  `Attached` with a read-only, `not_ready` view instead of refusing it. Plain
-  attach retries a failed open once its cause is fixed, except while the startup
-  scan owns the retry; existing read-only links are told to reattach when it
-  succeeds. Startup continuation retries transient pre-admission failures with
-  backoff: 1 s doubling to 30 s, unbounded attempts while eligible. Interrupted
-  runner line inspection is retryable, but explicit refusals are not. The public
-  `plakous::agent::SessionStore` gains a required `branch_line` method, breaking
-  embedder implementations. `plakous-hosted` renames `ArchivedSessionView` to
-  `StoredSessionView` and `archived_view` to `stored_view`; the latter takes an
-  `include_unarchived` flag to avoid projecting live sessions on normal attach.
-  No frame-schema or persisted-format change; export document unchanged.
-
-- Allow repeated reads within one model tool call on a remote runner. Claude
-  `Read`, sliced text and image reads, multi-file patches, and search context
-  reads no longer collide under the tool call's effect key. Reads retain their
-  owner fence and placement hold but are neither recorded nor acknowledged;
-  keyed effects retain their at-most-once behavior. Runner protocol 5 separates
-  these semantics from older home-local runners, which can bind across source
-  revisions; frame schemas and persisted formats are unchanged.
-  Settle home-local background jobs before upgrading: a protocol-5 host does
-  not see a live protocol-4 home-local daemon or its jobs, including in the
-  embedded startup check. Finish or stop them with the old build before
-  installing and using `/reload`.
-
-- Open sessions placed on a remote runner with skills on: such a node
-  discovers `<workspace>/.agents/skills` and then the runner process's
-  `~/.agents/skills`, both on the runner, never the host's home. User-skill file
-  reads use the runner's read-only exception, allow links only within that root,
-  and never fall back to a same-spelled host file. Stop cancels a stalled read;
-  a file identity change between slices refuses the whole page. A runner reader's
-  failure now names the runner's reason (`SourceReadError::UnavailableBecause`), so
-  `SourceReadError` is no longer `Copy`; discovery still fails closed when the
-  runner cannot answer.
-
-- Hold a live session's runner work while its placement is unreachable instead
-  of failing it: unsent tool effects and model reads wait for the reconnect
-  barrier and are sent once afterwards under their own key, a foreground
-  command's observation reads again at its cursor, an effect already sent is
-  observed past its window under its original key, and no new paid model
-  request is sent until release. Stop and refusal end the wait; the directory
-  shows the waiting root turn as needing the operator. No wire or format
-  change.
-
-- Bind a paired runner whose OS differs from the host's: a runner descriptor's
-  containment is checked against its own `linux` or `macos` tag, not the
-  decoding process's OS, and a runner naming any other OS is refused.
-
-- Name the runner's OS in the prompt's environment sentence for a session whose
-  tools run on a remote runner. `plakous::prompts` takes a `PromptWorkspace`
-  (root, cwd, backend OS) in place of the root and cwd pair.
-
-- Compile a session's explicit plan against the backend its tools run on, so a
-  fresh session on a remote runner opens instead of being refused as an
-  execution-environment change. `compile_explicit_runtime_profile` takes the
-  backend's `ExecutionBackendDescriptor`, now on the facade.
-
-- Move image sniffing and attachment/tool-result normalization into the internal
-  `plakous-image` crate, so a client without the facade shares the one
-  implementation. Outputs are byte-identical; no wire or format change.
-
-- Share serialized product wire types through the internal `plakd-wire-types`
-  crate without changing the wire schema or resetting terminal-local preferences.
-
-- Include host/web serving in default builds and qualify a transparent
-  `host connect --stdio` bridge. Explicit local auto-start uses a curated
-  environment, detached bounded logging and five-minute empty-service exit;
-  cross-key home guards prevent sibling hosts. Bare invocation prints help without starting a host.
-
-- Let the serving host announce and refuse requested reloads without a
-  connected terminal; a client never consumes the host's request channel.
-
-
-
-
-
-- Serialize configuration publication so independent operator and host settings edits are merged.
-
-- Preserve an unresolved new-session request identity across reconnects until the operator retries or selects another session.
-
-- Add the portable internal runner dial core: Noise IK, pairing proofs, offers,
-  fingerprint confirmation and bounded encrypted transport framing, without a product caller.
-
-- Keep host startup tolerant of brief discovery lock probes and retire a
-  recovered creation request identity on explicit session selection. Pin
-  terminal restart pilots after stopped-tree settlement, and verify live
-  streaming after reattachment.
-
-- Keep held child jobs alive across successor attachment. Start managed local
-  runners once per dial without ambiguous detached fallback, probe socket locks
-  before spawning, and reap detached children. Hosts reconnect lost daemon links
-  and isolate recovery failures per item. Foreground diagnostics drain on implicit
-  transfers and retire with their owner; embedded opens refuse live daemon work
-  anywhere in their tree without altering job outcomes. Session formats and frozen bindings are unchanged.
-
-- Runner protocol 3 ends foreground authority at a newer owner transfer or
-  instance-lease expiry, not at a transient disconnect. Transfers report stopped
-  foreground processes for structured logging only; existing call recovery
-  settles their unanswered tool calls once. Promoted jobs survive and are
-  re-adopted. Queued starts and promotions recheck line and instance authority
-  when execution begins. Home-local daemons use `host/runner/v3/`; obsolete protocols are
-  inspected and reported unknown, never re-adopted. Session formats are unchanged.
-
-### Format cut
-
-This release changes every persisted store at once (the 0.0.4 format cut), so
-a 0.0.4 build opens no 0.0.3 state; 0.0.3 sessions cross through `/reload` or
-an export.
-
-- State key `r27.e37.p37.t10` (runtime SQLite schema 27, runtime format epoch
-  37, product schema 37, agent tree schema 10; 0.0.3 used `r26.e34.p35.t9`).
-- Product schema 37 adds operator titles and archival state. Client protocol
-  5 adds explicit runner placement and directory lifecycle; runner protocol
-  4 adds workspace catalogs and per-session execution services.
-- Epoch 36: a prepared-call record no longer embeds its request's wire-input
-  item list (about 166 bytes per item, every round); it stores the list's
-  identity digest, so a long turn's records stop growing as rounds times
-  history (56% of a measured 3.4 GB store). The request anchor in context
-  state stays the one persisted copy. Measurement, the token-projection,
-  scope, status and admission identities, and the 4 MiB record bound (which
-  still counts the list as if embedded) are unchanged; a decoded record
-  refuses to be measured again.
-- Runtime schema 27 records agent lines: each line's head, every branch's line
-  membership and `line_job_terminals`. Epoch 35 adds line membership and
-  generation to the checkpoint topology, line-head job owners and the line
-  feed facts; the execution-environment digest moves to format 5 and the
-  run-stable workspace facts to `workspace-environment-v2`, so every
-  environment descriptor and plan digest changes.
-- Product schema 36 adds the write-ahead `carry_intent` of a same-store carry,
-  the session's node, the virtual root's profile, the runner display copy,
-  frozen MCP placement (`host` or `runner`), the `switch` workflow kind and the root
-  interrupt cause and continuation decision intents. The clear workflow kind is
-  now `new` with `plak:new:` operation ids, and the legacy `workflows` table is
-  gone.
-- Agent tree schema 10 adds the node's line, epoch and runner placement,
-  successor epochs, fork provenance, runner ancestors and the tree custody
-  record (one live `plak` process holds a tree; see Plak below).
-- Holder claims are `plak-holder-v3`: one lock per process and one record per
-  grant, with no 128-claim cap. Tree custody proves a holder gone by its own
-  host-lifetime lock in `custody-hosts/`, beside `subagents.sqlite3`.
-- Session export version 12 adds the session's runner (today always the local
-  runner) and its profile (root template and working set). It imports versions
-  12 and 11 and refuses 10; `plakd session --help` names those versions from the
-  build's own constants.
-- Telemetry store schema 21 (`telemetry-v21.sqlite3`, disposable).
-- Upgrading from 0.0.3: a 0.0.3 session carries forward through `/reload` from
-  a running 0.0.3 TUI, or through `plakd session export` and `plakd session
-  import`. Version 11 documents import onto the local runner under the home
-  default profile with one notice and an identical conversation. Agent trees
-  never cross a state-key change. A 0.0.3 build refuses a `config.toml` that
-  sets any of the new keys below.
-- `/new` is stored under its own name: the session workflow it records is
-  `new` (it was `clear`) with `plak:new:` operation ids. The JSONL `clear`
-  command and the `clear` host phase keep their names.
-- Configuration compatibility: `config.toml` accepts `[host]
-  resume_after_loss` (`hold` or `continue`, default `hold`), `[mcp_servers.<id>]
-  placement` (`host` or `runner`, default `host`), `[runners.<name>]` and
-  `[web] allow` / `[web] origin` (read by `plakd host --web`, below);
-  `resume_after_loss` applies to the root and sub-agents a lost host
-  interrupted. `plak` writes them only when you set them, and `plakd doctor` warns `config uses
-  0.0.4-only keys` while one is set.
-- Plakous embedder break (agent lines): a head-advancing rebind's source
-  becomes read-only, a non-head branch; opening it for work, committing on
-  it, rebinding or pruning it is refused `NotLineHead`. An embedder that
-  compares two bindings on one history forks, or uses
-  `RebindSessionRequest::starting_line`.
-- Plakous embedder break (agent lines): `JobOwner` is `{ line, generation,
-  session_id, branch_id, fence }`, and `JobHost::service` takes a `LineId`
-  (`service_at` takes a session and branch). A `JobHost` transfers a line's
-  service only to an owner that `JobOwner::succeeds` its holder.
-- Plakous embedder break (agent lines): the per-construction `AgentId` is
-  renamed `DriverInstanceId`.
-- Plakous embedder break (agent lines): a head-advancing rebind or carry whose
-  source head has running jobs is refused (`RebindRefused::RunningJobsWithoutJobHost`,
-  or `UnsettledProcesses` for a carry) unless the target binding installs a
-  `JobHost`; `plakous::tools::LocalJobHost` is the in-process one. Without a
-  `JobHost`, `OpenedSession::release_for_transfer` is a terminal release that
-  stops the jobs.
-- Plakous embedder break (agent lines): a same-store carry
-  (`CreateSessionRequest::continuing_line`) takes the source head's lease, so
-  it is refused as `Ownership` while the source is attached or held lease-only
-  and as `NotQuiescent` while its head has an unfinished turn.
-- Plakous embedder break (agent lines): history pruning (`gc`) keeps a line's
-  predecessor branches whole (`PruneHistoryOutcome::Superseded`, or `LineEnded`
-  once the session holding the head was deleted); deleting the session is the
-  reclaim.
-- Plakous embedder break (agent lines): a fork or new-line rebind copies no
-  running job rows; it keeps the job numbers and the rows of jobs with
-  terminal evidence, under its own owner.
-- Plakous embedder break (agent lines): `JobView::owner` names the owning line
-  (`LineId`) for a durable job row and the driver instance
-  (`DriverInstanceId`) for a live process snapshot. It is display attribution,
-  never authority.
-- Plakous embedder break (runners): `ExecutionOperationControl` is renamed
-  `OperationContext` (adding `owner`, `class` and `budget`) and
-  `plakous_tools::operation_control` is `operation_context`;
-  `RetrievalPort::retrieve` and `ImageGenPort::generate` take an
-  `OperationContext`.
-- Plakous embedder break (runners): `ExecutionBackendKind::Host` is gone. The
-  in-process backend reports `ExecutionBackendKind::Runner` on
-  `RunnerId::local()`, and `ExecutionBackendDescriptor::current_host` is
-  renamed `local_runner`.
-- Plakous embedder break (runners): the descriptor wire encoding gains
-  `runner_id` (also in its `Debug` output), so every environment descriptor,
-  plan digest and runtime environment component changes.
-- Plakous embedder break (runners): a rebind or fork whose target names
-  another runner is refused (`InvalidInput`, `BindingChange::Runner`).
-
-### Plak
-
-
-
-- Host-mode attachment refusals preserve the previous attachment and name the holder's remedy. Discovery enforces same-user socket checks and waits through host start/stop windows. Requested reloads remain host-owned without a connected client.
-
-- `plakd host` runs root and child process sessions on the home-local runner:
-  jobs survive a host crash or signal handoff, the next host sweeps and
-  re-adopts their lines before recovering its journal, and recorded stops
-  finish before it serves. Starts carry that host's captured login-shell
-  PATH and HOME; files, bindings and embedded-mode exit behavior are unchanged.
-  Daemon teardown races do not strand startup, including an obsolete daemon
-  closing before its inspection Hello. An idle handoff does not revive a
-  cancelled turn from a previous host.
-
-
-
-
-
-- A tree's genesis roster reads the session's own workspace: a trusted
-  project's templates in its `[roster] working_set` are on the root's spawn
-  menu. Before, the roster read the home alone, so a trusted project's
-  templates never reached a tree.
-- `plakd host` (hidden, maintainer builds): the per-user host process,
-  serving every session of the home. One per home and state key
-  (`state/<key>/host.lock`, a second one refuses naming the first); a control
-  socket `host/run/<key>.sock` for this user only, whose clients use the wire
-  v2 session directory: they list and watch the home's sessions, create one
-  in any directory with `new_session` (a retry of the same request id
-  answers the same session), and attach any, which opens a dormant one in its
-  own workspace. An idle session releases after 300 s. A row names a tree's
-  other custody holder only when it is not proven gone, so a crashed host's
-  or departed client's stale custody reads free. Its custody identity and the login
-  shell's `PATH` are captured once at start (not yet given to its sessions'
-  tools); a `SIGTERM` hands every resident session off as a planned handoff
-  and stops it within 60 s, and the next host's start scan opens each
-  session whose continuation runs by itself (a handoff, a pending decision,
-  a held loss under `resume_after_loss = "continue"`), so it continues with
-  no client attached. `release_session` detaches every attachment of a
-  session and releases it now unless something else keeps it resident, so a
-  another attached client can take it; a session already opening or releasing settles
-  first, so `released` means another face can open it. `stop_session` stops
-  the session the connection is attached to, as on a connection that serves
-  one session, and is answered even when that attachment ends first. A
-  session another live process holds (its tree's
-  custody, or its runtime lease's holder record for any session) is named in
-  its row, and its attach is refused `tree_hosted_elsewhere` naming that
-  process; a working face whose open is refused for a lease another live
-  process holds (the host included) is refused the same way, typed, naming
-  it, and told how to release a host's, while a holder whose lease lapsed
-  is still taken over. A stopping host opens and creates nothing more.
-  A session no face has opened yet (the host's `new_session`) opens in any
-  working face first. Spec 02 §4.6 carries the systemd unit.
-- `plakd host --web`: the host's sessions' wire v2 over
-  a WebSocket at `/wire`, and a web UI's static build, on a private unix
-  socket that `tailscale serve --bg unix:<path>` publishes on the tailnet,
-  from a tagged node. Access is the tailnet login Serve stamps, checked
-  against the new home-scoped `[web] allow`; Serve's forwarded shape for the
-  exact `[web] origin` from a source that is not the serving machine; and on
-  the upgrade the exact `Origin` and an HttpOnly `__Host-` session cookie,
-  bound to the login and origin and signed with a key in `secrets/web/`. A
-  loopback listener is dev mode and needs `--dev-login`. Each connection is a
-  client of the host's session directory, as one on the control socket is;
-  one `/wire` serves every session, chosen by id. There is no `plak web`.
-  Spec 04 §2.10 states
-  which check stops which attacker and the residual risks. A 0.0.3 build refuses a
-  `config.toml` that sets `[web]`, so `plak` writes it only when you set it,
-  and `plakd doctor` lists it with the other 0.0.4-only keys.
-- `plakd wire schema` (hidden) prints this build's wire v2 JSON Schema with its
-  protocol version.
-- Wire v2 is protocol 4: a welcome names its session as `session`, and a host
-  of many sessions names none. The session directory's requests
-  (`list_sessions`, `watch_sessions`, `unwatch_sessions`, `new_session`,
-  `release_session`), their answers, the `directory` and `detached` host
-  frames and the `unknown_session` and `tree_hosted_elsewhere` refusals are
-  new; a connection that serves one session refuses the requests
-  `unsupported`. A protocol 3 client is refused `version_mismatch`. The typed
-  client's `connect` refuses a welcome that names no session
-  (`ConnectError::NoSession`), and `connect_to` attaches a root the caller
-  names from the directory.
-- The wire v2 connection moved into `plakous-hosted`
-  (`host_service::wire::WireConnection`), shared by `plakd agent --wire v2` and
-  `plakd host`; `WireSession` serves one session to many connections. A switch
-  ends every attachment of a shared service (`HostService::move_attachments`,
-  which queues the new `Outbound::Moved`). Embedder break: the new
-  `Outbound` variant.
-- Supply chain: `tokio-tungstenite` and `tungstenite` 0.29.0 (web endpoint,
-  maintainer builds only); `plakous-host-protocol` now depends on `schemars`,
-  which was already locked, so it reaches the minimal and headless closures.
-
-- `/fork` makes a new node in an agent tree of its own. The fork's tree starts
-  from the source tree's current epoch and carries none of its children, mail,
-  workspaces or candidates. A fork is refused while the source's tree has a
-  live sub-agent or a spawn in progress (`cannot fork while this session's
-  sub-agents run`).
-- Agent tree custody: one live `plak` process holds a tree, and every tree
-  write proves that claim. An attach, or a later tree write, while another live
-  process holds the tree is refused with `tree_hosted_elsewhere (<build>)`
-  naming that process's host, machine and instance: exit code 7, and in `plak
-  agent` a JSONL `error` with `code: "tree_hosted_elsewhere"`. A holder whose
-  exit cannot be proven (another machine sharing the home) is released only by
-  `plakd tree release --force <tree-id>`, which refuses a holder still running
-  on this machine.
-- `plakd runner`: a persistent runner daemon per machine user (`serve`,
-  `connect --stdio`, which a host runs over ssh with fixed strict options and
-  which starts the daemon when none answers), host pairing through an
-  allowlist in `<home>/runner/runner.toml` (`allow`, `pair <name>`), and
-  `ps` for the lines and jobs a runner holds, orphaned ones marked. Runners
-  keep each line's newest owner across restarts, journal a host's keyed calls
-  so a returning host replays them, and let the same host re-adopt its lines
-  after a lost link. The ssh link requires a known host key
-  (`StrictHostKeyChecking=yes`), a runner refuses roots in or around its
-  product home, and a host's `ps <name>` sees only its own lines. No session
-  is placed on a runner yet. `connect --stdio` delivers every frame the daemon
-  sent, so a refused bind reaches the host as a refusal, and then ends at once.
-  `serve`, `connect` and `ps` refuse a socket path past the platform's
-  `sockaddr_un` limit by name before doing anything else.
-- MCP servers can run on the node's runner: `[mcp_servers.<id>] placement =
-  "runner"` (stdio only) starts the server there, one per runner, workspace
-  and definition, with its `secret_env` names resolved from the runner's own
-  secrets (`plakd runner secret set|rm|list`); host secret values never cross
-  to a runner. Without a remote runner the server runs here and reads this
-  home's runner secrets. Sessions freeze the placement each server ran under.
-  `plakd doctor` adds a `runner_ssh` row per `[runners.<name>]` from `ssh -G`.
-- Claude `Read` returns PNG, JPEG, GIF and WebP as an image when the model
-  accepts image input. Codex Direct adds `view_image` for one workspace image.
-  Other packs stay text. A model that cannot accept the image is refused with
-  the route and model named. New sessions record a registry descriptor that
-  includes `view_image`; no schema revision or state-key change. Codex native
-  Code Mode does not offer `view_image`.
-- Add explicit profile switching: the session root continues on its own line while sub-agents and background processes keep running. Future root spawns use the selected profile's cards; running sub-agents keep their frozen roster. Switching requires an idle root and empty queue.
-
-- Claude `Read` and pi `read` results cut to fit the context keep whole leading
-  lines and say where to continue, like Grok's read.
-- Agent Skills: `SKILL.md` folders under `<workspace>/.agents/skills` and
-  `~/.agents/skills` are listed in each family's native wording (the project
-  wins a shared name) and frozen with the session like `AGENTS.md`. Claude
-  sessions get Claude Code's `Skill` tool. `skills.enabled` (default on)
-  applies to new sessions and spawns; a fork, rebind or switch keeps its
-  source's setting, and sessions created before this build never gain `Skill`.
-  Skills that are skipped are reported once as a session notice. A project
-  skills folder that resolves outside the workspace is refused; only the user
-  folder is readable outside the workspace, and only regular files.
-- Grok `read_file` returns the file text verbatim plus one metadata line
-  instead of JSON inside JSON; program cells keep the JSON form. A read cut to
-  fit the context keeps whole leading lines and continues after them. Grok
-  `grep` and `search_repository` accept the agent's own issued `full output:`
-  paths and search job logs up to 64 MiB. Context rows are bounded like match
-  rows, and an empty search says so. Tool path wording matches what the tools
-  accept, the process lifetime sentence appears only on the starting tool, and
-  `list_dir` names a missing path.
-- Existing sessions on routes whose tools changed (Grok, Codex, Claude, pi,
-  Python cells and the typed SDK) carry on their next reopen.
-- Text and thinking streamed by a model request that is retried, refused, cut
-  by the output limit or folded for context are dimmed or dropped from the live
-  transcript back to the start of that request. Earlier requests of the same
-  turn keep their text.
-- Copying a thinking lead copies its rail, glyph, summary and meta, and a
-  selection edge on part of a wide grapheme takes the whole grapheme.
-- A full observation mailbox keeps a credential wait's park and clear notices;
-  it drops streaming text or transcript content that the next resnapshot
-  repairs instead.
-- A root turn that loses its owner mid-tool now recovers in place as soon as
-  the session is idle: the pill reads `needs recovery · reopening`, the
-  interrupted tool is named once in the transcript (also after a crash during
-  the reopen), and no `/recover` or prompt is needed first. A quit sent during
-  the reopen is answered after it.
-- A sub-agent a lost host interrupted is held for your Resume: `r` on it in
-  the Agents tab, or JSONL `resume` (optionally with `agent_id`), records your
-  consent and continues it once with a new instruction turn that never
-  replays the lost one. `[host] resume_after_loss = "continue"` now takes
-  effect for sub-agents: each held one continues once by itself. Tree rows
-  carry the interrupt `cause` and the `continuation` state (`held`, `pending`,
-  `running`), and a live tree notice names the held agents after recovery.
-- A root turn a lost host interrupted is held the same way: the root stays
-  promptable (a new prompt ends the hold), and the one Resume (`Ctrl+R` on the
-  paused queue, `/recover`, or JSONL `resume`/`recover`) continues it once with
-  a new instruction turn, resumes every held agent and lets the restored queue
-  drain. `resume_after_loss = "continue"` does that by itself at open.
-- A planned handoff (`/reload`) records each node with work in flight as
-  handed off before its host releases it, and the next host continues each
-  once by itself, whatever `resume_after_loss` says; a handoff it could not
-  record holds like a loss. A handoff waits up to 5 s for the running turn to
-  settle (a quit waits 300 ms); a turn still running then is released as a
-  held loss, with a warning rather than an error. `/reload` no longer refuses while a turn or a
-  sub-agent runs: it hands them off, and the new build continues each once. It
-  still refuses while a background process runs, and a reload that carries
-  into a new session still refuses a running turn or sub-agent. The installed
-  build cannot check a session whose turn is still running, so it is asked
-  again once the handoff settled it; if it then would not reopen the session
-  exactly, or cannot say, the session stays open in this build, which continues the
-  handed-off work once. Interrupts now
-  record why (`operator`, `parent`, `cascade`, `stopped`), and tree rows carry
-  it. A stop is final: stopping a running root turn is recorded before its
-  cancel, so a host lost before the turn ended never continues it, and
-  `/stop-all` ends a root continuation held after a lost host; an idle
-  interrupt (`Esc`) keeps it.
-- Reopening a session no longer pauses the agent tree. A sub-agent whose turn
-  lost its owner is interrupted (owner lost) on reopen, keeps its attempt and
-  waits for mail or a followup; a lost turn the reopen finds still waiting
-  (at an approval, admitted but not yet sent, or after a provider's server
-  pause it already recorded) is closed as abandoned,
-  never rejoined, and a pending wake's mail returns unread for the
-  continuation. Mail sent to a sub-agent still being reopened
-  waits as for a busy slot and stays durable until its recovery settles. The
-  background recovery pass does not hold a tree-wide lock.
-- Recovery is Plak's job, not the model's: `recover_agent` leaves every
-  agent's tools. `list_agents` now says the host is recovering a child whose
-  session recovery is pending, with no remedy to call. You retry one child
-  with `u` in the Agents tab or, from a JSONL client, `invoke_tool` with
-  `recover_agent`, which stays an operator-only name.
-- `/reload` with a sub-agent whose request ignores its cancel no longer drops
-  that sub-agent into a new session: it is handed off and the new build
-  continues it once. The release names it instead of failing.
-- After a lost host, a parent's `wait_agent` rows say why a child stopped
-  (`cause`: `owner_lost`, `handoff`, `operator`, `parent`, `cascade` or
-  `stopped`) and where its continuation stands (`continuation`: `held`,
-  `pending` or `running`). The open sends one warning listing everything the
-  lost host left held, the root's turn and each held agent with what it was
-  doing, instead of one for the root and another counting the agents.
-- After a lost host, a parent's next turn is told which of its sub-agents the
-  loss interrupted, once per host run, in a `[harness]` note after its
-  prompt and mail: each agent, and whether it waits for your resume or
-  continues by itself. A handed-off agent is not named.
-- `/reload` onto a build without an install manifest (a development or
-  cargo-installed build) no longer falls back to an unverified resume on a
-  busy machine; the reload probe answers without hashing the build.
-- An explicit `recover` with nothing pending answers before the next command
-  is handled, so a quit sent right after it no longer drops the answer. Urgent
-  actions sent during an in-place root recovery are answered in the order they
-  arrived.
-- An orchestration workspace path that cannot be inspected (permission or I/O
-  error) now refuses the spawn, adopt, reclaim or restore instead of being
-  treated as absent.
-- Telemetry records content-free measurement facts: each child's template,
-  salted per-session digests of read, search and list targets with the page
-  returned, a program label for shell calls (credential-shaped words become
-  `other`), wait targets and outcomes, the context window beside prepared
-  input, compaction trigger facts, the first request's footprint, the turn's
-  prepared-input high water and idle gaps. `plak telemetry status --views`
-  lists queries for them.
-- A carried session no longer flashes `invalid transcript presentation` above
-  the chat after a send, a steer or a turn end. An imported row and a later
-  tree result that name the same `child-result:` call stay two rows in key
-  order; the result used to overwrite the imported row and break the view's
-  key order. A repaired presentation now keeps one error notice per cause in
-  that transcript and logs the cause to `plak.log`.
-- A reload request (`plakd session reload`) belongs to its session. An in-place
-  switch to another session (`/new`, `/resume`, a fork or a rebind) settles
-  the requests the host holds for the session it leaves as `not taken: the
-  session switched` before it completes.
-- Rows that share a call id are kept apart everywhere: importing a document
-  keeps every row, and a new tree result that reuses an imported result's call
-  id shows as its own row while the turn runs, in the host views,
-  instead of briefly replacing the imported one. A carried session's first save
-  keeps the notices recorded before it (such as the carried-forward note) as
-  notices with their own identities, after the imported rows. A repair or
-  refusal note stays where it happened in the transcript instead of trailing
-  the newest turn.
-- `Esc` right after `Enter`, before the turn shows as running, no longer
-  stops the prompt silently. A sent prompt counts as busy for `Esc` and `Ctrl+C`
-  until the host reports it busy, so either opens `Stop this turn?`; a host refusal before
-  then closes the pop-up. A prompt stopped before its turn was admitted now
-  ends with `⊘ interrupted` instead of a bare prompt row, and stays queued.
+### plakd
+
+- Rename the public operator package and executable from `plak` to `plakd`.
+  Keep batch `run` and JSONL `agent` interfaces and the existing project,
+  environment, credential and installation identities. The old command has
+  no compatibility shim.
+- Remove the public TUI, terminal resume and hidden launch flags, clipboard
+  integration and TUI-only tooling. Bare `plakd` prints help without opening
+  state, a session or a host. No default client or UI is shipped: clients are
+  independently maintained against the public protocol.
+- Include host and web serving in default builds. `plakd host` serves the
+  home's session directory; `plakd host connect --stdio` discovers and relays
+  it, with local startup allowed only by explicit `--auto-start`. Discovery
+  enforces same-user socket and home-custody checks across start/stop windows.
+- Add `plakd host install` for Linux user services and macOS LaunchAgents.
+  Installation generates the service definition without loading or starting it.
+  Existing unmanaged or legacy services must be resolved before automatic startup.
+- Breaking: host wire 11 requires `Welcome.state_key`, adds advisory
+  `host_lifecycle` notices for planned shutdowns and upgrades, and types stdio
+  bridge discovery refusals on stdout. Aborted drains return to `running`;
+  lifecycle generation is an identity, not an ordered counter. Handshakes require
+  the exact version; older clients are refused.
+- Publish `plakd wire schema` as a supported, stateless command and attach
+  target-specific JSON Schemas to releases. Share serialized product DTOs through
+  the internal `plakd-wire-types` crate, without moving runtime or store authority
+  into clients.
+- Add multi-session directory watch/create/attach/release controls, explicit
+  runner placement, titles and archival lifecycle. Preserve saved history in a
+  read-only view when a session cannot open; plain attach retries after repair.
+  Child attachments expose their own transcript, mail, interrupt, processes and
+  usage. A host client's quit detaches without stopping session work.
+- Bound attachment queues and repair gaps with `resync_required` rather than
+  blocking sessions. Address delayed replies to their original requester,
+  preserve source and fork addresses independently, and disclose missing earlier
+  child streaming output instead of inventing replay.
+- Add attachment-free account, usage, catalog and settings reads; consented
+  credential writes and cancellable login; and etag-checked configuration,
+  template and profile publication. Saved-workspace Files and Changes inspection
+  is bounded, read-only and routed through the recorded execution backend.
+  Session rows include creation timestamps; structured validation identifies
+  fields and codes without echoing supplied values.
+- Add opt-in operator terminals with fresh action-bound consent, explicit
+  controller takeover, credited raw-byte streams and bounded quotas. Terminal
+  authority, inventory and workspace pins are process-local and separate from
+  agent jobs; unproven cleanup retains pins. Browser rendering remains client-owned.
+- Add named subscription and API-key accounts on all seven routes, selected as
+  `<vertical>/<name>`. Credentials, catalogs, usage and frozen session/child
+  bindings use the exact account, never a default or sibling fallback.
+  `plakd accounts list` and `accounts rm` inspect or remove local selections;
+  native removal requires logout first and never silently revokes remotely.
+- Report Claude subscription usage limits as quota exhaustion and hold automatic
+  child wakes until a new prompt or admitted continuation. Decline excessive
+  provider retry advice rather than waiting indefinitely. Anthropic API HTTP 400
+  insufficient-credit responses are permanent `QuotaExceeded` failures with an
+  API-credit repair remedy.
+- Add Agent Skills discovery with per-family listings and Claude's `Skill`
+  tool, frozen with the session. Project skills override matching user skills;
+  containment and regular-file checks fail closed. Placed sessions discover and
+  read skills on their runner, not the host.
+- Add Claude image reads and Codex Direct `view_image`; normalize and
+  capability-check every model-visible tool image through the shared internal
+  `plakous-image` crate. Codex native Code Mode does not expose `view_image`.
+- Return Grok file reads as text, keep whole leading lines when reads must fit
+  context, and allow search of issued job output. NUL-containing output is
+  explicitly binary; same-size file rewrites no longer return stale cached bytes.
+- Allow explicit profile switches on an idle root with an empty queue while
+  children and background processes continue. Future spawns use the selected
+  profile; running children retain their frozen roster. Trusted project templates
+  participate in a tree's genesis roster.
+- Remove terminal-only orchestration-on-reload: existing sessions retain their
+  frozen epoch, while new sessions and explicit switches use current settings.
+  Startup still settles persisted carry intents. Before upgrading, delete
+  `[tui]` and its subtables from `config.toml`; removed settings are refused,
+  not converted. The operational switch is now `host.reload_requests`, which
+  older builds reject. Reload requests remain host-owned without a client.
+- Record content-free tool, child, context, compaction and idle-gap measurement
+  facts in telemetry. Session usage is process-local since runtime open, not a
+  lifetime total; client reconnect does not reset it. Durable per-turn usage
+  is unchanged.
+
+### Recovery, runners and upgrades
+
+- Run hosted root and child processes on a home-local runner so promoted jobs
+  survive host crashes and planned handoffs. Reconcile lines before recovery,
+  finish recorded stops before readiness and retain job-number floors.
+  Transient link loss does not revoke foreground ownership; a newer owner or
+  expired instance lease does.
+- Add paired SSH runners with strict known-host checks, explicit per-session
+  placement, workspace catalogs and runner-local MCP placement and secrets.
+  Cross-platform bindings validate the runner's OS and containment. A lost link
+  holds affected work without sending another paid model request; reconnect
+  resumes observations and keyed effects without a local fallback.
+- Native runner protocol is 9, with exact-version admission, committed terminal
+  job acknowledgement and bounded owner-floor inspection. Select an installed
+  immutable runner image with `runner connect --stdio --binary <id>`.
+  Coordinate host and runner upgrades; incompatible old workers remain the
+  matching old build's responsibility.
+- Retain promoted jobs across planned build replacement through the separate
+  same-user job-retention endpoint v1. Original workers retain controls, output
+  and number floors without replaying effects or double-charging capacity.
+  Retention-only lines cannot regain native execution authority. This endpoint
+  is not native runner compatibility or permission for live cross-key upgrade.
+- Hold interrupted roots and children for explicit resume by default;
+  `host.resume_after_loss = "continue"` admits a fresh continuation instead of
+  replaying the lost turn. Recorded planned handoffs continue once on startup,
+  including children whose parent was idle. Operator stops remain final.
+- Fix continuation identity collisions, lost handoffs after accepted steering,
+  child-result wakes suppressed after resumed work, and operator pauses being
+  overwritten by continuation admission. Queued input durably admitted during
+  paid compaction survives a crash exactly once; deferred drafts are not
+  reported as saved.
+- Let a parent re-task a recovery-held child with `send_agent_message`,
+  `purpose=followup` and `acknowledge_recovery` naming the current attempt.
+  Settle the old attempt without replaying uncertain work and retain the
+  workspace-change warning. Ownership, effect-evidence and workspace refusals
+  still block admission; `recover_agent` is operator-only.
+- Preserve frozen tool presentations on exact reopen and manual compaction,
+  inherited skills and pending epochs on binding workflows, and child input
+  and fork provenance. Inspect retained bindings read-only before an upgrade;
+  live executor regressions refuse with actionable remedies, while inactive
+  branches and externally owned MCP contracts are reported separately.
+- Add `plakd host upgrade --expect-binary <id>`. Same-key upgrades support
+  `--drain` at joined runtime step boundaries, with a 60-second default or
+  explicit durations/`idle`; paid compaction is joined, never cancelled.
+  Resolve pending draft verdicts before surrender and restore admissions when
+  preparation is withdrawn.
+- Cross-key upgrade carries settled roots through the portable export/import
+  contract, with new agent lines, named state and paused queued text. Live or
+  held turns/children, workspace effects and nonterminal jobs block it. Finished
+  children remain inert references; trees, candidates, replay, queued images
+  and execution authority are not transferred. The destination must import the
+  source export version, so this does not directly bridge 0.0.3 to 0.0.4.
+- Recover prepared and partially imported upgrades through durable ownership
+  receipts, source archival and per-successor Ready acknowledgements. Runner
+  outages withhold only their pending successors; `host upgrade --abandon`
+  permanently abandons a lost pending successor. After surrender, recovery
+  follows the destination, not the old owner.
+- Add guarded semantic ownership-move preparation and crash qualification,
+  including retained terminal-job proofs and connected-group readiness.
+  Public identity-preserving dormant and live cross-key moves remain disabled;
+  the supported cross-key operation is settled portable carry.
+- Fix symlinked absolute workspace cwd admission without weakening containment,
+  stale runner owner-floor reloads, cancelled-link dispatch and unknown
+  process-group scans being mistaken for completion proof.
 
 ### Plakous
 
-- Tree-store caches are scoped to each tree's revision and custody grant,
-  with one shared writer per database file. Alternating resident trees no
-  longer invalidate each other and continuously rewrite unchanged rows;
-  stale baselines are rebuilt before writing row deltas.
+- Add durable agent lines: only the head branch commits, head-advancing rebinds
+  and same-store carries continue that line, and forks start new lines.
+  Superseded branches are read-only; predecessor history is reclaimed by
+  deletion, not ordinary pruning. `AgentId` becomes `DriverInstanceId`;
+  `JobOwner` includes line and generation, and live-job succession requires
+  a `JobHost`.
+- Breaking: `plakous::sessions` requires the new `store` facade feature;
+  `sessions-sqlite` implies it. Memory-only users must select `store`.
+  Without it the facade links no session store.
+- Add executor-neutral runtime interfaces and `AgentBuilder::runtime`;
+  `AgentBuilder::clock` replaces only wall time. Drivers, heartbeats, timeouts,
+  sleeps and blocking cleanup use the supplied runtime. Root and child actors
+  share one drive loop; release joins owned tasks and tree shutdown is leaf-first.
+- Breaking: runner-aware ports carry instruction reads, workspace probes, jobs
+  and operation controls. `ExecutionOperationControl` becomes `OperationContext`,
+  `ExecutionBackendKind::Host` is removed, and backend descriptors include
+  `runner_id`. `JoinedSessionsPort::refresh_jobs` returns `Result`;
+  `SessionStore` implementations must provide `branch_line`.
+- Breaking: `ImageNormalizer::normalize` returns `ImageNormalizationError`
+  instead of `String`, retaining decoder causes through `source()`.
+  The internal local-composition seam likewise uses `LocalCompositionError`.
+- Add shared typed host services and a transport-independent wire client with
+  correlated replies, root/child attachments, bounded delivery and explicit
+  detach-only goodbye. Keep product settings, credentials and persistence
+  authority at the product boundary.
+- Add async per-tree writers, handle-scoped storage interrupts and
+  revision/custody-scoped caches. Tree writes prove one live custody holder;
+  `plakd tree release --force` refuses a holder still alive on this machine.
+- Bound long-turn storage by pruning superseded Working-head checkpoints
+  between rounds while retaining the 64-checkpoint floor. Keep four recent
+  root terminal results instead of sixteen; older duplicates return
+  `ControlErrorKind::Reclaimed`. Prepared calls retain the wire-input identity
+  digest rather than another full copy of growing history.
+- Add `TurnControl::abandon(cause)` to distinguish owner loss from operator
+  cancellation. Recover completed nested effects without replay, retire settled
+  turn evidence below the live provider frontier, and preserve distinct
+  transcript rows that share a call ID.
+- Route Messages context-window overflow through compaction when no hosted
+  effect ran. A programmatic call cut by `max_tokens` requires reconciliation.
+  Subscription side-request contract drift names the newer-build remedy while
+  authentication failures retain credential remedies. Retry extended outages
+  only when transport evidence proves the request write never completed.
+- Add portable runner dial primitives and recorded remote VCS/bundle stages.
+  Cross-runner child copies remain library-only; the product spawn interface
+  does not select another runner. Plakous L0 remains single-agent.
 
-- `plakous::sessions::holder::{sqlite_branch_holder, BranchHolder}` (feature
-  `sessions-sqlite`): the process a runtime branch's holder record names,
-  unless it is this process or its free lock proves it gone. Probes of
-  another process's lock, there and in the gone-holder proof and tree
-  custody's liveness, are serialized within the process and retried
-  briefly, so a dead holder no longer reads alive under concurrent probes.
-- A long turn no longer keeps every checkpoint it commits: between two model
-  rounds the owner prunes superseded history at its Working head under the
-  same 64-checkpoint minimum as the idle sweep, and that prune also keeps the
-  head and the 64 checkpoints before it. A request whose horizon is at or
-  below the one the branch already records removes nothing. A 200-round turn retains about 130 checkpoints
-  instead of about 1,400. A reader that lags more than 64 commits inside the
-  turn reads the head and shows `earlier output not retained`. Nothing is
-  pruned while a compaction workflow is between its identity commit and its
-  receipt. `PruneBranch::at_working_head` is the owner's request for it; an
-  ordinary `PruneBranch::new` under a Working head is still
-  `Invalid(PruneHeadNotQuiescent)`, and a released Working head is never
-  pruned.
-- Retention keeps the 4 most recent root terminal results (was 16): a
-  duplicate of an older root command is `ControlErrorKind::Reclaimed`, and a
-  bridge must settle a handed-off item within 4 further root turns.
-- `TurnControl::abandon(cause)` cancels a turn because its owner was lost
-  or let it go. The terminal is still `Cancelled`, the record carries an
-  abandonment report (the same claim and note a reopen would write for that
-  turn), and history gets the abandonment note instead of "the user
-  cancelled the request above". A plain `cancel` is unchanged. If the report
-  cannot be built, the turn still stops and `abandon` says so.
-  A restored hosted tool-batch, or a server pause the lost owner never
-  promoted, is closed that way: one terminal, and the baton is finalized
-  in that same commit. The next host uses it when it does not continue a
-  restored child turn (`ProcessLost`, or `Interrupted` after a handoff).
-- An agent whose jobs run on a runner reads the line's jobs from the runner
-  before it restores them and reports nothing until the restore is done, so
-  a terminal an earlier host already reported is not reported again and a job
-  the runner still lists is that live job. A runner that does not answer that
-  read fails the agent's construction (`runner <id> did not answer the job
-  read`). Embedder break: `JoinedSessionsPort::refresh_jobs` returns a
-  `Result`.
-- `plakous_hosted::host_service::HostService`: one session's wire v2 host
-  side: attachments on the session's root, observations fanned out by class
-  with addressed answers routed by the intent's origin attachment, an
-  attach snapshot of every state, the root baseline, pending approvals and
-  the holding credential wait, and bounded per-attachment queues that drop
-  a slow attachment with `resync_required` instead of blocking the session.
-  Typed host attachments and `plakd agent` JSONL v1 share its loop
-  (`host_service::face`, `FaceReceiver`): their intents go out on the
-  session's own mailbox sender tagged with their attachment, and their
-  observations pass through the service, so they receive exactly what they
-  did before. A publisher answering after the host moved on
-  (`Sender::answering`) reopens its requester's `IntentStarted` window
-  around the answer. Embedder break: `IntentSender::tagged` and
-  `IntentDelivery::correlated`; an intent's origin is part of the
-  `IntentStarted` correlation, and only a client's own correlation makes an
-  intent a command reply. In `plakd agent` JSONL v1, a late answer (a
-  profile apply's finish, a usage refresh) now carries the command id of
-  the command it answers rather than the one running when it arrived.
-- Wire v2 node attach: a host service attachment may target a child node of
-  the session's tree (`HostService::with_nodes`, `ChildNodes`, `TreeNodes`).
-  It holds that node's transcript only, and its intents are the node's
-  controls: tree mail from the operator for prompts, follow-ups and steers
-  (the new `SessionIntent::MailTopologyNode`), the tree's interrupt with
-  the operator as its cause, its close and call detail as the node; a quit
-  detaches it. It gets back only the answers its
-  control's publisher marks (`Sender::answering` marks its windows
-  `answer:`); the session serves one agent view, so a second agent's is
-  refused while one is held. Approvals and tool calls are refused there for
-  now. Operator mail is the root's send, reaching the root's message peers;
-  its request is answered once the mail is written (`draft_accepted`, or
-  `mail_refused`). A closed, retiring, out-of-reach or unknown node is
-  refused with `node_closed`, `node_retiring`, `out_of_reach` or
-  `unknown_node` (`RequestRefusal` gains all but the last, and
-  `mail_refused`). The navigator's interrupt now records the operator as
-  its cause (`interrupt_agent_for`). Embedder break: the new intent and
-  refusals, an answering sender's marked windows, the required
-  `ChildNodes::interrupt` with its `ControlDone` answer, and
-  `ProductTopologyRuntime::executor`.
-- Child processes and usage by node address: a child attachment's
-  `background`, process stop and usage read become
-  `SessionIntent::BackgroundTopologyNode`, `StopTopologyNodeProcesses` and
-  `ReadTopologyNodeUsage`. Background reaches the node's running turn
-  through its own control; a stop reaches only the processes the node's
-  lines attached as that node; the usage view carries the node's own
-  session ledger, kept from the child turn usage the tree projects. The
-  intent x role table's B1 cells close. Embedder break: the new intents
-  and `ProtocolExtension::reads_usage` (defaults to false).
-- Embedder break: `plakous::sessions` (session workflows, the feed, portable
-  histories and `SessionBackend::memory`) now needs the new facade feature
-  `store`, and without it the facade links no session store.
-  `sessions-sqlite` implies `store`, so an embedder that already selects it
-  changes nothing; one that uses sessions with only the memory backend adds
-  `store`. `plakous-store`'s `nix` and `rustix` are now `cfg(unix)` target
-  dependencies, so its memory backend also builds for `wasm32-unknown-unknown`.
-- An agent runs on a host `Runtime`: `AgentBuilder::runtime` supplies it, and
-  without one the agent runs, as before, on the Tokio runtime current at
-  build. The driver, the lease heartbeat, job-stop and cleanup blocking calls,
-  every sleep and store or model timeout, and every monotonic reading go
-  through it. `AgentBuilder::clock` replaces the wall clock alone.
-  `Runtime::spawn_blocking` is new, with a default that runs the work as a
-  task; `TokioRuntime` now lives in `plakous-agent`, still at
-  `plakous::runtime::TokioRuntime`, and runs it on Tokio's blocking pool. The
-  tool runtime keeps its Tokio-backed `ToolTimer` and `ToolTaskOwner`
-  defaults.
-- One drive per child turn: the child's turn waiter, run by its actor,
-  reduces the turn's events into the read model every face reads beside the
-  turn's result, so a follow-up admitted mid-turn no longer runs a reducer
-  of its own. A wire v2 child attachment's interrupt now runs on the tree
-  (`ProductTopologyRuntime::executor`), not behind the root session's
-  mailbox, and is taken whatever the root runs.
-- An attached client uses its session's host service: a face's
-  intents pass through the service (`host_service::FaceSender`,
-  `HostService::attach_face`), so its agent view is opened, held and
-  released there as any attachment's and its queue holds the root and the
-  agent transcript it opened. The faces' service holds the session's
-  mailbox without being one of its senders (`HostService::for_faces`,
-  `IntentSender::downgrade`, `WeakIntentSender`), so the session still ends when its last face sender
-  goes, and it keeps the attach snapshot for later attachments. Embedder
-  break: `face` returns a `FaceSender`, `IntentSendError::Refused` (an
-  intent the service refused for the attachment's role; `plakd agent` JSONL
-  v1 answers it as that command's `error` record), `HostService` is
-  `Clone` (its clones are the same service), and the new types.
-- A wire v2 connection is a local or a remote face
-  (`host_service::wire::Face`, `WireConnection::face`,
-  `WireSession::connect` takes it); a remote face, the web endpoint's, is
-  refused the local-face-only intents (`ProtocolExtension::local_only`:
-  Plak's installed-build check and probe and the reload-request
-  handover) as `refused_for_role` `local_face`. Embedder break: the
-  `connect` signature and the new trait method (defaults to false).
-- A remote face's attachment is never delivered, nor replayed on attach,
-  an observation only a local face may receive
-  (`ObservationExtension::local_only`: Plak's build status, reload
-  probe answers, handed-over reload requests and lookup progress).
-  Embedder break: `HostService::attach` takes the connection's `Face`.
-- A wire v2 attach of the root a connection last knew, of a session that
-  has since switched, is refused `moved` with the served session's root
-  (`RequestRefusal::Moved`), not `unknown_node`: a connection welcomed
-  before a switch learns where the session went.
-- Wire v2 quit and stop: a `quit` intent on a root attachment of `plakd host`
-  (a host whose connections detach) detaches that attachment, answered
-  `detached`, and the session runs on; on `plakd agent --wire v2` it still
-  quits the session. A child attachment's quit-as-detach now answers
-  `detached` too, not `accepted`. The new `stop_session {session}` op
-  (`Op::StopSession`, answered `stopped`, `Answer::Stopped`) stops the
-  served session's work from any face: child wakes are suppressed until
-  the next prompt's admission, running and held sub-agents are interrupted
-  `stopped` (signalled, not joined, while a root turn is running), background
-  processes stop, and the running root turn is then cancelled with
-  `interrupt{stopped}` recorded before the cancel unless that turn already
-  finished. A held or pending root continuation is recorded stopped last,
-  so nothing continues by itself. A later handoff skips a stopped child
-  only while that attempt has no later turn. It is answered only once that is durable; a session the host does
-  not serve is refused `unknown_session` (`RequestRefusal::UnknownSession`),
-  and each stop is logged with the connection's face and login. A dormant
-  session is woken for it. In process the stop is
-  `IntentSender::request_stop`, a host-only `SessionIntent::StopSession`
-  that never crosses the wire, settled through `IntentReceiver::settle_stop`.
-  The wire version is unchanged. Embedder break: the new `Op`, `Answer`,
-  `RequestRefusal` and `SessionIntent` variants.
-- Wire v2 session requests: `retry_attach`, `resume_session` and `rebind`
-  ops (`Op::RetryAttach`, `Op::ResumeSession`, `Op::Rebind`), each naming
-  its requester attachment and a client `request_id`, answered `moved`
-  with the new root (`Answer::Moved`) or refused `session_unavailable`
-  (`RequestRefusal::SessionUnavailable`). Every `moved` frame a session
-  request causes names its `request_id`. The session host serves
-  `resume_session`; `retry_attach` and `rebind` are refused there until a
-  launcher serves them. A transcript the session's observation mailbox
-  lost ends its wire holders with `resync_required` once per loss.
-  Embedder break: `HostService::move_attachments` takes the request id and
-  `Outbound::Moved` carries it.
-- `plakous_host_protocol::client` is a typed wire v2 client over any byte
-  transport: hello and welcome, the root attach, `moved` and
-  `resync_required` followed on its own, intents refused as the in-process
-  mailbox refuses them, session requests and their answers, and the
-  session's observations in the in-process receiver's shape. Plak's
-  `wire_transport::host_socket` connects it to the host's socket only in a
-  directory private to the user. Wire fix: `ContextUsage::display_percent`
-  is a `u64` (was `u128`, which no wire v2 reader could decode inside a
-  tagged frame); embedder break for its readers.
-- The session's background processes and the face's promptable mark are
-  wire v2 traffic: the state observation `processes {views, running}`
-  (`SessionObservation::Processes`), published when the rows change (a
-  clear follows its `clear_view` with an empty list), each command and
-  output tail redacted as a tool row's are, and
-  the intent `promptable` (`SessionIntent::Promptable`), which sets the
-  passive-maintenance flag without entering the queue. Embedder break:
-  the mailbox mirror is gone (`IntentSender::processes`,
-  `background_processes`, `mark_promptable`; `IntentReceiver::set_processes`,
-  `set_background_processes`; the `FaceSender` forwards).
-- Keep product settings, account/catalog facts and telemetry behind host-owned typed views. Clients neither read product stores as authority nor resolve credentials themselves.
+### Persisted formats
 
-- A wire v2 connection whose session switches to another sends `moved
-  {attachment, node}` and keeps the connection for a fresh attach of the
-  new root (`HostFrame::Moved`, `HostService::reroot`,
-  `host_service::wire::session_root_of`; `WireConnection::serving` takes a
-  root resolver). Embedder break: the new frame and the `serving`
-  signature.
-- Wire v2 for an embedded face: `HostService::publisher` and
-  `WireConnection::publisher` publish to a service from outside its
-  session (`FaceReceiver::publisher` is now that of its service), waking
-  its connection; a connection whose session ends on its own sends `bye`
-  while its client still reads; and the client's first attach reads no
-  transcript as lost (it no longer starts with the root marked as needing
-  a baseline). `WireConnection::serve`, `handshake` and the stdio and web
-  acceptors take `wire::Lines` (`wire::lines`), one channel of the client's
-  lines and the session mailbox's wakes, so a connection forwards what the
-  session says at once instead of on a 20 ms poll.
-  `WireConnection::session_baseline_follows` and
-  `HostService::attach_asking` let an embedded face's first attach skip
-  asking for a root baseline the session publishes anyway.
-- `plakous_host_protocol::client`: `WireSender::send` no longer blocks;
-  refusals and unknown outcomes come back through
-  `WireReceiver::try_unsent`, and `WireSender::settle` waits for every
-  verdict. `SendError::RefusedForRole` names the role-table row. What a
-  face has not taken waits in an observation mailbox with the session
-  mailbox's rules instead of a 4096-entry queue that dropped everything;
-  a re-attach reads every held transcript as lost and opens the face's
-  agent transcript again. Wire break: `hello` has no `locality`
-  (`ClientLocality` is gone), and `WIRE_VERSION` is 3, so a peer of the
-  previous version is refused `version_mismatch`.
-- The session host owns installed-build observations and requested-reload announcements, offers and refusals. Only a session UUID names a reload-channel file, and a request no face takes is refused as `not taken`.
-
-- Wire v2 handshake: `welcome` names the session id, tree id and root node,
-  and the session opens before it is sent, so a failure before dispatch
-  (`plakd agent --wire v2` included) is a `refused` frame with the new
-  `unavailable` refusal, never a JSONL record. A host service never reuses
-  an attachment id, each attachment's sequence starts at 1, and no event
-  precedes its `attached` answer. A client that sends no hello within 10
-  seconds is refused, a terminating signal quits and joins the session, and
-  a connection ends when its session switches to another. The shared
-  connection code gains `host_service::wire::{session_root,
-  session_welcome, refuse}`, `HELLO_DEADLINE`, `UNAVAILABLE_UNAUTHENTICATED`
-  and `WireConnection::{with_stop, serving}`; `handshake` takes a stop
-  probe. Embedder
-  break: `Welcome` gains `session_id`, `tree_id` and `root`, and
-  `HandshakeRefusal` gains `Unavailable`.
-- Version control on a runner (unsupported; only the test route selects a
-  runner): an orchestration tree on a selected runner drives its copies
-  through `RemoteVcs` over the runner link instead of refusing every effect.
-  Questions are `vcs.read` calls; every effect is a `vcs.effect` step of a
-  tree operation (protocol class `TreeOperation`, keyed by tree and
-  operation), recorded first as a `vcs_stage` tree intent and run at most
-  once per key. The root and its children record the runner they run on; an
-  `inherit` child on another runner is `runner_mismatch` and a copy on another
-  runner `cross_runner_copy_unavailable`. Embedder break: `RunnerClass` is no
-  longer `Copy` (`RunnerCall::class` returns a reference), and the VCS port's
-  value types serialize. A stage left unfinished by a lost process reruns
-  under its first keys, so a rerun never runs beside the step it repeats;
-  the extension refuses a relative path or one with `..` before admission;
-  a root stage of unknown outcome records a `vcs_fault`.
-- Copies that cross runners (library only; no spawn argument names a runner
-  yet): `spawn_reserve_on` places a `fork` or `snapshot` child on another
-  runner the tree's port reaches (`routed_vcs::RoutedVcs`). Its parent's live
-  state is pinned as a base snapshot, bundled leaving out what the target
-  holds (`tree_runner_ancestors`, persisted per runner), relayed by the host
-  in 1 MiB chunks it does not keep, and applied into the tree's mirror on the
-  target, where the copy is minted; its candidate comes back by the same
-  stages into the parent's checkout, the apply recorded as verifiable with
-  the candidate reference and commit it leaves. `VcsOps` gains the transfer
-  calls; `vcs_runner_extension` takes a copies root. Embedder break:
-  `vcs_runner_extension` takes a second argument and `StageLedger` adds the
-  stage record a carry runs through. `plakd runner serve` registers the
-  extension, admitting paths under `roots` and the new `runner.toml` `copies`
-  root and never the product home; `copies` may not lie inside or around a
-  root. Mirrors are keyed by runner (`<copies>/<runner id>/<tree id>`). A
-  seal-back never moves a candidate reference that names another commit: it
-  records a `vcs_fault` instead. A failed apply leaves no upload, and the
-  reclamation pass sweeps transfer files older than a day.
-- Wire v2 types in `plakous-host-protocol` (no frontend speaks it yet;
-  JSONL v1 is unchanged): every observation has a class
-  (`SessionObservation::class`: broadcast state, required or droppable
-  event, or addressed to one attachment); intents and observations
-  serialize as tagged objects that refuse unknown fields, decoding a
-  snapshot or patch only when it validates and image bytes as base64; and
-  the `wire` module holds the NDJSON frames (16 MiB lines), the
-  exact-version handshake, requests with one typed response each, blob
-  chunks for images and paged snapshots, with bounded blob and snapshot
-  assembly and the event class derived at the receiver. The hidden
-  `plakd agent --wire v2` speaks it on stdio over the session's mailbox (root
-  only, unsupported). Embedder break:
-  `ObservationExtension` gains `wire_class` (with a default) and the
-  protocol's view types serialize.
-- A Messages `model_context_window_exceeded` stop fails the stream and takes
-  the context-limit overflow fold when nothing hosted ran, on Anthropic and
-  OpenRouter.
-- A programmatic tool call cut by `max_tokens` ends the request as an effect
-  that needs reconciliation; deferred programmatic calls flush only once the
-  stop reason is known.
-- Subscription side requests (SuperGrok web and X search and images, Claude
-  OAuth web search and page fetch) report a reviewed version gate or sent-beta
-  rejection as contract drift with the newer-build remedy. A 401 or 403 keeps
-  the credential path.
-- Portable runtime interfaces (`plakous::model::runtime`: spawn, sleep, a
-  monotonic clock and an HTTP transport) with native implementations in
-  `plakous::runtime`; host task sets are built on them.
-- Tree mutations run through an async per-tree writer that keeps commit order;
-  a storage-full wait no longer blocks a worker thread, owed releases and effect
-  completions never give up, and host shutdown is a latched signal.
-- Storage-wait interrupts are bound per handle for the runtime and tree stores.
-- Runner ports: instruction and skill discovery read through
-  `InstructionSourceReader`, workspace probes through `WorkspaceProbe`, and job
-  services through `JoinedSessionsPort`; answers distinguish unavailable from
-  absent and discovery fails closed. `JobHost`, `discover_instruction_sources`,
-  `discover_skills`, `discover_skill_roots` and `Skill::load` signatures change.
-- Hosted and orchestration tasks have explicit owners: a session's tasks are
-  aborted and joined at release, a tree's at its last root lease, and tasks
-  that own a child's session or runtime authority run until they return.
-  Operator intents are classified in one table, and each session's product
-  writes have their own storage interrupt.
-- `AgentSessions::created_tool_registration_and_sources` reads a checkpoint's
-  frozen tool registration and instruction sources without opening it.
-  `AgentBuilder::image_normalizer` installs the image decoder tool reads use.
-- Tool measurement uses typed execution values and the new `WaitFact` only,
-  and does no work when telemetry is disabled.
-
-- The attached root runs as one async node actor (biased urgent-first idle
-  wait, workflows awaited inline with urgent-only observation, the session's
-  task set closed on release); root tree passes run only at the four points
-  spec 03 §4.4 names.
-- The orchestration VCS port (`occupancy_vcs::VcsOps`) is async, and the tree
-  asks it every workspace question before a writer turn; settle and spawn
-  mints run as their own release-owned tasks.
-
-- Live sub-agents run on the same node actor as the root: one main loop and
-  one turn loop serve both roles, the hub's follow-up, restart, release and
-  cancel are messages to the child's actor, and a child's approval is decided
-  once by its own actor (`LiveChildHandle::decide`). Behavior is unchanged.
-- Runner protocol v1 (`plakous-runner-protocol`) and the runner library
-  (`plakous-runner`): framed, versioned host-runner messages with line-keyed
-  owner fences, at-most-once effect calls, process sessions, streams and
-  liveness, behind an unsupported, hidden runner seam. Sessions select the
-  local runner; a non-local runner is reachable only from tests.
+- State key `r28.e38.p38.t11`: runtime SQLite schema 28, runtime format epoch
+  38, product schema 38 and agent tree schema 11. Native 0.0.3 state
+  (`r26.e34.p35.t9`) is neither opened nor migrated; keep it with its matching
+  build.
+- Write session export v13 and import v13/v12 only; v11 and older refuse.
+  The 0.0.3 release wrote v11, so neither its exports nor its reload path
+  carry sessions directly into this build. Finish them on their matching build.
+  Ordinary import accepts portable sessions, not reserved ownership-move capsules.
+- Context codec 4 records semantic imported-compaction selections without
+  carrying historical admission or cache grants. Operation-bound retirement,
+  invisible semantic-install batches, immutable product/tree move seeds and
+  custody floors support guarded reconstruction, not public live migration.
+- Host-upgrade ownership receipts are version 1, outside the state key.
+  Telemetry schema 22 is disposable and never recovery authority.
 
 ### Security
 
-- A background job's command is redacted for display with the runtime's
-  escaped newlines undone, so a token a heredoc writes on its own line is
-  redacted (process views, live and stored process transcript rows, process
-  tool rows and the run's waiting notice, which showed the command
-  unredacted), and so are wire v2's `job_started` command and
-  `job_terminal` output for every face (JSONL v1 keeps them as the runtime
-  displays them). A job's output tail now starts at a line's start, or with
-  `…` (`plakous::tools::JOB_TAIL_FRAGMENT`) when it was cut inside its only
-  line, which a face shows as the mark alone; a private key whose BEGIN the
-  tail lost is redacted up to its END. The display redactor also redacts a
-  private key without its END, to the end of the text. Every read of a
-  stored transcript bounds its projector rows again, so rows an older build
-  stored come out redacted too; the state key stays `r27.e35.p36.t10`.
-- pulldown-cmark is 0.13.6 (RUSTSEC-2026-0433, quadratic parsing of nested
-  image wikilinks). Plak never enables wikilinks, so it was not exposed.
-- The build audit also waives RUSTSEC-2026-0429 for zip 8.6.0. Like
-  RUSTSEC-2026-0367, -0368 and -0369 it concerns only `ZipArchive::extract`,
-  which the Monty type checker's in-memory typeshed reader never calls.
+- Harden workspace inspection against executable search, Git index writes,
+  repository helpers and lazy network fetches. Require Git 2.44 with a
+  no-lazy-fetch capability probe, repository ownership and metadata containment;
+  special or uninspectable workspace files fail closed.
+- Redact job commands, lifecycle output and stored transcript rows, including
+  heredoc secrets and incomplete private-key tails; mark output cut mid-line.
+- Update MCP to rmcp 3.9.0 and bundle SQLite 3.54.0 through rusqlite 0.41.0,
+  fixing the SQLite WAL memory disclosure. Keep custom MCP HTTP limits and the
+  SDK's 16 MiB stdio line bound.
+- Update pulldown-cmark to 0.13.6 (RUSTSEC-2026-0433); wikilinks were not
+  enabled. Waive extraction-only RUSTSEC-2026-0429 for zip 8.6.0 alongside
+  the existing extraction advisories: the affected typeshed reader never
+  extracts archives.
+- Process tools still run with host authority, without an OS sandbox or
+  tool-approval prompts. Credentials remain private plaintext files.
 
-### Development
+### Pins and development
 
-- A traced gate build's SQLite actor runs deferred reclamation right after the
-  job that queued it, so a sweep with `PLAK_TEST_WORKING_PRUNE_MINIMUM=1`
-  and `PLAK_TEST_WORKING_PRUNE_MARGIN=1` (test-hooks knobs that prune between
-  every pair of rounds, the margin one lowering the recency floor) keeps one
-  commit order per twin pilot.
-- A test's wall-clock wait that only guards against a hang is thirty seconds;
-  a bound that tells prompt from late runs in the serial lane, on a paused
-  clock or event-driven (spec 05 §2.3).
-- The strict crash sweep covers a job on a child runner surviving host loss
-  and a runner restart that loses its jobs; each fixture reaps every daemon of
-  its runner home.
-- The strict crash sweep runs its shapes on one shared worker pool and
-  refreshes its progress tables every 30 seconds instead of after every cut,
-  which makes it about a third faster; `timings.jsonl` records each task.
-- Development tooling lives under `tools/<area>/` beside the recipe modules
-  that run it. Reference configs moved to `docs/reference-config/` and config
-  scenarios to `tests/fixtures/config-scenarios/`; CONTRIBUTING and SECURITY
-  moved to `.github/`; formatter, lint and audit configs use `.rustfmt.toml`,
-  `.clippy.toml` and `.config/deny.toml`.
-- The static group compiles seven library feature profiles instead of every
-  singleton, still validating every feature closure, and checks maintainer
-  Python with ruff 0.17.3.
-- The crash sweep's twin-pilot determinism check covers every strict shape in
-  the durability lane.
-- A portability fence keeps `plakous-model`'s dependency closure free of
-  native-only crates for `wasm32-unknown-unknown`, and the builds group
-  compiles it for that target. `just dev-tools install` adds the target.
-- `plakous-tools` joins the portable set. Its process, PTY and descriptor
-  dependencies are `cfg(unix)` target dependencies; on `wasm32-unknown-unknown`
-  (not a supported target) the library compiles without a host, so host
-  environments, workspace files and job output files refuse there.
-- `plakous-agent` joins the portable set; on `wasm32-unknown-unknown` only it
-  enables `getrandom`'s `wasm_js` (WebCrypto) backend.
-- One test-environment helper and one build entry point serve every recipe;
-  `just nextest` runs cargo-nextest under the gate's environment.
+- Raise the pinned Rust toolchain and MSRV to 1.100.0. Resolve offline product,
+  MCP and crash fixtures from Cargo artifact records rather than Cargo's
+  intermediate test layout.
+- Refresh all seven provider/profile reviews on 2026-11-15. Subscription
+  expiries (Codex, Grok, Claude) and API review-due dates (OpenAI Platform,
+  Anthropic API, xAI Platform, OpenRouter Chat) are 2027-02-13T00:00:00Z.
+  API review dates do not calendar-refuse; subscription expiries do.
+- Pin native references to Codex 0.169.0, Grok Build 1.0.77 and Claude Code
+  2.1.325. Enroll Fable 5.2 on Claude OAuth and Anthropic API through explicit
+  selection; Mythos 5.2, GPT-6.1 Terra, GPT-6 Cyber and Rosalind remain
+  `needs review`. Consent identities remain unchanged.
+- Share test isolation and build entry points, clear provider keys from offline
+  tests and require the pinned development tools and a working jj. Validate all
+  feature closures while compiling seven isolated library profiles.
+- Extend the wasm compilation fence to the portable model, runner-protocol,
+  tools and agent crates and the store's memory backend. This is library
+  compile evidence, not a supported product platform.
+- Narrow worker gates to affected packages and reverse dependencies; share
+  platform-independent integration checks. macOS batches run fmt/clippy,
+  builds and parallel tests; production installation additionally requires
+  exact-tree serial, durability and package checks. Package verification and
+  standalone supported-package rustdoc remain in every integration batch;
+  releases still require full checks on both supported platforms.
+- Scale durability reservations to available parallelism, group restart
+  matrices without omitting cuts, and require each family's union in one run.
+  Strict crash sweeps share a worker pool and check twin-pilot determinism.
+- Preserve full-gate evidence across clean linked Git worktrees and inert
+  documentation-only deltas, now including root `AGENTS.md` edits, after
+  tracked-file hygiene checks. Gate-read documentation remains excluded;
+  `README.md` additionally needs exact-tree package evidence. Offline package
+  gates report review-window age; publication dry runs and uploads still
+  require more than a third of each review window.
+- Replace TUI qualification with maintainer review through an independently
+  maintained client, separate from public automated gates. Live-provider
+  qualification remains opt-in and paid, not implied by offline evidence.
 
 ## 0.0.3
 
