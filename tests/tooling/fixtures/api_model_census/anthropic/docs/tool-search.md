@@ -6,6 +6,7 @@ Synthetic fixture for tools/dev/api_model_census.py; not provider documentation.
 
 | Model | Supported |
 | --- | --- |
+| Model (claude-fable-5-2) | yes |
 | Model (claude-fable-5-1) | yes |
 | Model (claude-mythos-5-1) | yes |
 | Model (claude-fable-5) | yes |
@@ -13,6 +14,7 @@ Synthetic fixture for tools/dev/api_model_census.py; not provider documentation.
 | Model (claude-opus-5-5) | yes |
 | Model (claude-opus-5) | yes |
 | Model (claude-sonnet-5-5) | yes |
+| Model (claude-sonnet-5) | yes |
 | Model (claude-haiku-5-5) | yes |
 | Model (claude-opus-4-8) | yes |
 | Model (claude-opus-4-7) | yes |

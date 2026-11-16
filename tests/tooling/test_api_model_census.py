@@ -86,8 +86,14 @@ class ParseTests(unittest.TestCase):
         self.assertTrue(haiku["adaptive_thinking"])
         self.assertIn("compaction", haiku["hosted_features"])
         sonnet = bundle["anthropic"]["observed"]["claude-sonnet-5"]
-        self.assertNotIn("tool_search", sonnet["hosted_features"])
+        self.assertIn("tool_search", sonnet["hosted_features"])
         self.assertIsNone(sonnet["price_threshold_input_tokens"])
+        fable = bundle["anthropic"]["observed"]["claude-fable-5-2"]
+        self.assertEqual(fable["max_input_tokens"], 1_000_000)
+        self.assertEqual(fable["max_tokens"], 128_000)
+        self.assertEqual(fable["efforts"], ["low", "medium", "high", "xhigh", "max"])
+        self.assertTrue(fable["adaptive_thinking"])
+        self.assertIn("web_fetch", fable["hosted_features"])
         older = bundle["anthropic"]["observed"]["claude-haiku-4-5-20251001"]
         self.assertEqual(older["efforts"], [])
         self.assertFalse(older["adaptive_thinking"])
@@ -453,7 +459,13 @@ class CommandTests(unittest.TestCase):
             self.assertIn("anthropic revision=", result.stdout)
             self.assertIn("  unchanged", result.stdout)
             self.assertNotIn("changed ", result.stdout)
-            self.assertIn("removed gpt-daybreak-blue-latest", result.stdout)
+            self.assertEqual(
+                [line for line in result.stdout.splitlines() if line.startswith("  removed ")],
+                [
+                    "  removed gpt-daybreak-blue-latest still in the table; pass --drop-removed",
+                    "  removed gpt-daybreak-red-latest still in the table; pass --drop-removed",
+                ],
+            )
             for provider, path in census.table_paths(ROOT).items():
                 self.assertEqual((tables / f"{provider}.json").read_text(), originals[provider])
                 self.assertEqual(path.read_text(), originals[provider])

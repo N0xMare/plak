@@ -1,6 +1,10 @@
 {
   "models": [
     {
+      "slug": "gpt-6.1-terra",
+      "context_window": 500000
+    },
+    {
       "slug": "gpt-6-astra",
       "context_window": 272000
     },

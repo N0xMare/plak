@@ -2,6 +2,12 @@
   "object": "list",
   "data": [
     {
+      "id": "gpt-6.1-terra"
+    },
+    {
+      "id": "gpt-6-cyber"
+    },
+    {
       "id": "tts-1"
     },
     {
