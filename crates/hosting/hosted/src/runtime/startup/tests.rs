@@ -129,7 +129,8 @@ fn root_template(tools: &[&str]) -> crate::binding::RootTemplateFact {
 /// into the record for every later bind.
 #[test]
 fn creation_freezes_listed_mcp_tools_and_records_the_omission_notice() {
-    let server = PathBuf::from(std::env::var_os("PLAK_MCP_SERVER").expect("PLAK_MCP_SERVER fixture"));
+    let server =
+        PathBuf::from(std::env::var_os("PLAK_MCP_SERVER").expect("PLAK_MCP_SERVER fixture"));
     assert!(
         server.is_file(),
         "run the workspace tests so the fixture is built"
