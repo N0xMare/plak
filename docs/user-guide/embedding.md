@@ -2,7 +2,7 @@
 
 Plakous is an embeddable single-agent library. plakd is the host and operator CLI built
 on it. Depend on `plakous` from crates.io, or on a source checkout by path.
-Use Rust **1.99.0** or later and edition **2024**. Supported platforms are Linux
+Use Rust **1.100.0** or later and edition **2024**. Supported platforms are Linux
 x86_64 musl and Apple Silicon macOS.
 
 ## Four explicit choices
@@ -55,7 +55,7 @@ replace the version with `path = "../plak/crates/plakous"`:
 name = "my-agent"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.99.0"
+rust-version = "1.100.0"
 
 [dependencies]
 plakous = { version = "0.0.4", features = ["composition", "sessions-sqlite"] }

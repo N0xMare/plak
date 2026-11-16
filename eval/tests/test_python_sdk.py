@@ -342,7 +342,7 @@ class PythonSdkTests(unittest.TestCase):
             manifest = {
                 "source": {"repo": "plak", "commit": "a" * 40, "dirty": False},
                 "features": ["maintainer"],
-                "toolchain": "rustc 1.99.0",
+                "toolchain": "rustc 1.100.0",
                 "binaries": artifact["binaries"],
             }
             (root / "plak-build.json").write_text(json.dumps(manifest))
@@ -383,7 +383,7 @@ class PythonWorkerUploadTests(unittest.IsolatedAsyncioTestCase):
             manifest = {
                 "source": {"repo": "plak", "commit": "a" * 40, "dirty": False},
                 "features": ["maintainer"],
-                "toolchain": "rustc 1.99.0",
+                "toolchain": "rustc 1.100.0",
                 "binaries": artifact["binaries"],
             }
             (root / "plak-build.json").write_text(json.dumps(manifest))

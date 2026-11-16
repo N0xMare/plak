@@ -18,7 +18,7 @@ the build attestation when `gh` is installed and signed in. It installs `plakd`,
 below, with links in `~/.local/bin`, and never needs `sudo`. Any other platform
 is refused; a source build does not make it a supported target.
 
-With a Rust 1.99.0 toolchain, Cargo installs the same three executables from
+With a Rust 1.100.0 toolchain, Cargo installs the same three executables from
 crates.io into `~/.cargo/bin`, where plakd finds its workers beside itself:
 
 ```sh
@@ -29,7 +29,7 @@ cargo install --locked plakd plakous-js-runtime plakous-py-worker
 
 ### Before you start
 
-- **Rust 1.99.0**, pinned by `rust-toolchain.toml`, so rustup installs it on the
+- **Rust 1.100.0**, pinned by `rust-toolchain.toml`, so rustup installs it on the
   first build. That is also the MSRV.
 - **[`just`](https://github.com/casey/just)**, to run `just install release` and the
   other recipes in the `Justfile`. Without it, use the Cargo commands below.

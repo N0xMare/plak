@@ -33,7 +33,7 @@ history, never prerequisite reading, and never cited as authority.
 
 ## Dev
 
-MSRV and pinned toolchain are Rust 1.99.0; supported platforms are Linux x86_64
+MSRV and pinned toolchain are Rust 1.100.0; supported platforms are Linux x86_64
 musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
 cargo-nextest, cargo-deny and ruff and the `wasm32-unknown-unknown` rustc
 target the `builds` group checks the portable crates for; an existing setup

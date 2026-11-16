@@ -137,7 +137,7 @@ def require_plak_provenance(binary: Path, js_host: Path, py_host: Path) -> dict[
             or source.get("dirty") is not False
             or not re.fullmatch(r"[0-9a-f]{40}", source.get("commit", ""))
             or manifest.get("features") != ["maintainer"]
-            or not manifest.get("toolchain", "").startswith("rustc 1.99.0")
+            or not manifest.get("toolchain", "").startswith("rustc 1.100.0")
         ):
             raise ValueError
         for path in (binary, js_host, py_host):

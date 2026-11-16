@@ -9,6 +9,9 @@ for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
+- Raise the pinned stable Rust toolchain and MSRV to 1.100.0 (2026-11-12)
+  for RC2; source builds and embedders now require Rust 1.100.0 or later.
+
 - Classify Anthropic API HTTP 400 insufficient-credit responses as permanent
   `QuotaExceeded` failures with an API-credit repair remedy.
 

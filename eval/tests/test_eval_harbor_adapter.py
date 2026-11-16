@@ -1559,7 +1559,7 @@ class ConfigurationContractTests(unittest.TestCase):
         self.assertIn("harbor==0.23.0", pyproject)
         self.assertTrue((ROOT / "eval" / "uv.lock").is_file())
         dockerfile = (ROOT / "eval" / "harbor_adapter" / "Dockerfile").read_text()
-        self.assertIn("FROM rust:1.99.0-bookworm", dockerfile)
+        self.assertIn("FROM rust:1.100.0-bookworm", dockerfile)
         self.assertNotIn("FROM --platform=", dockerfile)
         self.assertIn("clang mold", dockerfile)
         self.assertIn("-p plakous-js-runtime --bin plakous-js-host", dockerfile)

@@ -43,10 +43,12 @@ API execution surface.
 
 ## 2. Platforms
 
-The workspace is Rust edition 2024. MSRV is 1.99.0 and `rust-toolchain.toml`
-pins channel `1.99.0` with the `minimal` profile plus `clippy` and `rustfmt`, so
+The workspace is Rust edition 2024. MSRV is 1.100.0 and `rust-toolchain.toml`
+pins channel `1.100.0` with the `minimal` profile plus `clippy` and `rustfmt`, so
 the ordinary development build is the MSRV build and there is no separate MSRV
 job. `.clippy.toml` repeats the MSRV so lint suggestions stay inside it.
+The pinned stable release is dated 2026-11-12, with rustc
+`1.100.0 (0ef1bc386 2026-11-09)`.
 `.cargo/config.toml` sets `resolver.incompatible-rust-versions = "fallback"`.
 `rust-toolchain.toml` lists no extra targets. `wasm32-unknown-unknown` is
 installed by `just dev-tools install` (section 7.5), not by that file: listing
@@ -962,7 +964,7 @@ just musl container --fast plakd  # optional targeted iteration
 preloaded image `plak-qual-base:6fc79538` (image ID `6fc795383e2c`), which is
 not published; without that image on a Linux x86_64 Docker host the gate cannot
 run, and the platform tiers above remain the public evidence. The image holds Alpine 3.24.2,
-Rust 1.99.0 with a musl host toolchain, clippy, rustfmt, the
+Rust 1.100.0 with a musl host toolchain, clippy, rustfmt, the
 `wasm32-unknown-unknown` target and C/C++ tools, Python 3.14,
 curl, git, jj, just, and the registry sources for cargo-deny (not its executable),
 the workspace and compile-contract fixture lockfiles. It never pulls an image or installs tools.

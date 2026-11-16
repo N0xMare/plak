@@ -89,7 +89,7 @@ or `plakous-tools` (Custom tool integration).
 
 ## Platforms
 
-The workspace is Rust edition 2024 with MSRV 1.99.0 and forbids unsafe Rust in
+The workspace is Rust edition 2024 with MSRV 1.100.0 and forbids unsafe Rust in
 production code.
 
 | Target | Status |

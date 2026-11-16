@@ -353,7 +353,7 @@ class PublicCompileGateTests(unittest.TestCase):
             mock.patch.object(
                 compile_gate.subprocess,
                 'check_output',
-                return_value='rustc 1.99.0\nhost: aarch64-apple-darwin\n',
+                return_value='rustc 1.100.0\nhost: aarch64-apple-darwin\n',
             ),
         ):
             environment = compile_gate.contract_environment()

@@ -230,7 +230,7 @@ def supported_compile_fixtures(workspace: Workspace) -> dict[str, dict[str, Any]
                 "name": f"plakous-{fixture_name}",
                 "version": "0.0.0",
                 "edition": "2024",
-                "rust-version": "1.99.0",
+                "rust-version": "1.100.0",
                 "description": contract["description"],
                 "license": WORKSPACE_LICENSE,
                 "repository": WORKSPACE_REPOSITORY,
@@ -6095,8 +6095,8 @@ def _check_workspace() -> int:
             continue
         if metadata.get("edition") != "2024":
             errors.append(f"{name}: edition must be 2024")
-        if metadata.get("rust_version") != "1.99.0":
-            errors.append(f"{name}: rust-version must be 1.99.0")
+        if metadata.get("rust_version") != "1.100.0":
+            errors.append(f"{name}: rust-version must be 1.100.0")
         if metadata.get("license") != WORKSPACE_LICENSE:
             errors.append(f"{name}: license expression is inconsistent")
         errors.extend(

@@ -16,7 +16,7 @@ There is no CLA and no DCO sign-off.
 
 ## Build and test
 
-You need Rust 1.99.0 (pinned by `rust-toolchain.toml`), a C/C++ toolchain,
+You need Rust 1.100.0 (pinned by `rust-toolchain.toml`), a C/C++ toolchain,
 [`just`](https://github.com/casey/just), Python 3.11+ and `nm`. Supported
 platforms are Apple Silicon macOS and Linux x86_64 musl.
 

@@ -31,7 +31,7 @@ installer installs the product and matching JavaScript/Python workers under
 curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
 ```
 
-For a source checkout with Rust 1.99.0 and the documented build prerequisites,
+For a source checkout with Rust 1.100.0 and the documented build prerequisites,
 use `just install release`. Detailed installation, Cargo alternatives and
 updates belong in [getting started](docs/user-guide/getting-started.md).
 
