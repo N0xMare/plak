@@ -46,7 +46,9 @@ class UpgradeRehearsalTests(unittest.TestCase):
                     script.touch()
 
                 def git(command, **_kwargs):
-                    return SimpleNamespace(stdout="" if command[-1] == "--porcelain" else "revision\n")
+                    return SimpleNamespace(
+                        stdout="" if command[-1] == "--porcelain" else "revision\n"
+                    )
 
                 def compile_image(command, *, env, **_kwargs):
                     self.assertEqual(command[1], f"tools/build/build-{product}.sh")
@@ -58,19 +60,24 @@ class UpgradeRehearsalTests(unittest.TestCase):
                     return SimpleNamespace(returncode=0)
 
                 args = SimpleNamespace(source="revision", destination="revision", jobs=4)
-                with patch.object(DRIVER, "run", side_effect=git), patch.object(
-                    DRIVER.subprocess, "run", side_effect=compile_image
+                with (
+                    patch.object(DRIVER, "run", side_effect=git),
+                    patch.object(DRIVER.subprocess, "run", side_effect=compile_image),
                 ):
                     manifest = DRIVER.build(args, root)
                 for name in ("A", "B"):
                     self.assertEqual(Path(manifest[name]["binary"]).name, product)
-                    self.assertEqual(Path(manifest[name]["binary"]).read_bytes(), b"synthetic build image")
+                    self.assertEqual(
+                        Path(manifest[name]["binary"]).read_bytes(), b"synthetic build image"
+                    )
                     for image in DRIVER.SIDECAR_IMAGES:
                         self.assertTrue((owned / "images" / name / image).is_file())
 
     def test_host_readiness_accepts_both_revision_banners_not_other_output(self):
         for product in ("plak", "plakd"):
-            self.assertTrue(DRIVER.host_is_serving(f"{product} host: serving on /scratch/host.sock\n"))
+            self.assertTrue(
+                DRIVER.host_is_serving(f"{product} host: serving on /scratch/host.sock\n")
+            )
         self.assertFalse(DRIVER.host_is_serving("host process started"))
 
     def test_terminal_inventory_uses_only_readonly_lines_and_refuses_lost_or_consumed_jobs(self):

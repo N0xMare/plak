@@ -132,10 +132,15 @@ def prepare_root(path):
 
 def product_image(checkout):
     """Historical rehearsal revisions own their package and build-script layout."""
-    products = [name for name in ("plak", "plakd") if (checkout / "bin" / name / "Cargo.toml").is_file()]
+    products = [
+        name for name in ("plak", "plakd") if (checkout / "bin" / name / "Cargo.toml").is_file()
+    ]
     require(len(products) == 1, f"{checkout}: expected exactly one product package")
     product = products[0]
-    require((checkout / f"tools/build/build-{product}.sh").is_file(), f"{checkout}: missing product build script")
+    require(
+        (checkout / f"tools/build/build-{product}.sh").is_file(),
+        f"{checkout}: missing product build script",
+    )
     return product
 
 
@@ -321,8 +326,16 @@ def main():
     parser.add_argument("command", choices=["build", "run", "all", "cleanup"])
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--repository", type=Path, default=Path(__file__).resolve().parents[2])
-    parser.add_argument("--source", default="9e9785efe0c6549ee8d1c143b81db00472031dab", help="literal pre-S4 r27 source revision")
-    parser.add_argument("--destination", default="887f754e1c1e5126b586531a573ebd6fb8bc0189", help="S4 r28 destination revision")
+    parser.add_argument(
+        "--source",
+        default="9e9785efe0c6549ee8d1c143b81db00472031dab",
+        help="literal pre-S4 r27 source revision",
+    )
+    parser.add_argument(
+        "--destination",
+        default="887f754e1c1e5126b586531a573ebd6fb8bc0189",
+        help="S4 r28 destination revision",
+    )
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument(
         "--keep-builds",
