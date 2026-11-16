@@ -9,6 +9,13 @@ for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
+- Breaking: `plakous-tools::ImageNormalizer::normalize` now returns the typed
+  `ImageNormalizationError` instead of `String`. Its display text is unchanged;
+  decoder failures remain available through `source()`. The internal-tier local
+  composition seam uses `LocalCompositionError`. Correct the host-side
+  profile-default remedy to select materialized root and working-set templates
+  instead of the nonexistent `root.profile` setting.
+
 - Fresh provider review dated 2026-11-15 on all seven surfaces. Subscription
   expiries (Codex, Grok, Claude) and API review-due dates (OpenAI Platform,
   Anthropic API, xAI Platform, OpenRouter Chat) are all 2027-02-13T00:00:00Z.
