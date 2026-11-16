@@ -99,6 +99,25 @@ fn host_lifecycle_wire_ten_gets_only_version_mismatch_even_at_planned_stop() {
 }
 
 #[test]
+fn host_lifecycle_stalled_peer_uses_the_same_total_stop_budget_as_handoff() {
+    let Some(fixture) = fixture() else { return };
+    let budget = fixture.root.join("handoff-budget.json");
+    let mut host = start_env(&fixture, &[], &[("PLAK_TEST_HOST_HANDOFF_BUDGET", budget.display().to_string())]);
+    let mut stalled = UnixStream::connect(&host.socket).unwrap();
+    stalled.write_all(b"{\"frame\":\"hello\"").unwrap();
+    let (_observer, _) = observe(&host);
+    let began = Instant::now();
+    stop(&mut host);
+    assert!(began.elapsed() < Duration::from_secs(60));
+    let budget: serde_json::Value = serde_json::from_slice(&std::fs::read(budget).unwrap()).unwrap();
+    let elapsed = budget["elapsed_ms"].as_u64().unwrap();
+    let remaining = budget["remaining_ms"].as_u64().unwrap();
+    assert!(elapsed >= 1900, "the stalled handshake did not exercise the join allowance: {budget}");
+    assert!(remaining < 54_000, "advisory waits were added outside the handoff budget: {budget}");
+    assert!(elapsed + remaining <= 55_000, "the stop margin was spent twice: {budget}");
+}
+
+#[test]
 fn host_lifecycle_sigterm_notice_precedes_transport_eof() {
     let Some(fixture) = fixture() else { return };
     let mut host = start(&fixture);

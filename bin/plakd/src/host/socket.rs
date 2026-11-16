@@ -120,7 +120,7 @@ impl Bound {
         stopped: impl Fn() -> bool + Send + Sync + 'static,
         idle: Option<super::idle::IdleExit>,
         scanning: Arc<AtomicUsize>,
-    ) {
+    ) -> Instant {
         let stopped: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(stopped);
         let mut tick = tokio::time::interval(STOP_POLL);
         let pending = Arc::new(AtomicUsize::new(0));
@@ -128,7 +128,7 @@ impl Bound {
         let mut next_idle_check = Instant::now();
         let mut idle = idle.map(super::idle::IdleGuard::new);
         let mut connections = tokio::task::JoinSet::new();
-        'accepting: loop {
+        let stopping = 'accepting: loop {
             tokio::select! {
                 _ = connections.join_next(), if !connections.is_empty() => {}
                 accepted = self.listener.accept() => {
@@ -152,7 +152,7 @@ impl Bound {
                 }
                 _ = tick.tick() => {
                     if stopped() {
-                        break;
+                        break Instant::now();
                     }
                     let now = Instant::now();
                     if now >= next_idle_check && let Some(idle) = &mut idle {
@@ -165,7 +165,7 @@ impl Bound {
                             match self.retire_idle_listener() {
                                 Ok(backlog) if backlog.is_empty() => {
                                     eprintln!("plakd host: auto-started service idle window elapsed; stopping");
-                                    break 'accepting;
+                                    break 'accepting Instant::now();
                                 }
                                 Ok(backlog) => {
                                     idle.activity();
@@ -184,20 +184,21 @@ impl Bound {
                                 }
                                 Err(error) => {
                                     eprintln!("plakd host: idle socket retirement failed: {error}");
-                                    break 'accepting;
+                                    break 'accepting Instant::now();
                                 }
                             }
                         }
                     }
                 }
             }
-        }
+        };
         // Healthy peers get their final advisory before runtime shutdown;
         // an unresponsive peer cannot hold the host's handoff deadline.
         let _ = tokio::time::timeout(Duration::from_secs(2), async {
             while connections.join_next().await.is_some() {}
         })
         .await;
+        stopping
     }
 
     /// Hide discovery first, then drain the kernel backlog without waiting.

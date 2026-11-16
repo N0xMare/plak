@@ -206,7 +206,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         Arc::clone(&scanning),
     );
     let pending = upgrades.pending();
-    runtime.block_on(bound.serve(
+    let stopping = runtime.block_on(bound.serve(
         &host,
         move || stop.stopped() || upgrade::has_ready(&pending),
         idle,
@@ -219,7 +219,6 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     lifecycle::stopping(&host);
     runtime.block_on(host.wait_lifecycle_delivery(Duration::from_secs(1)));
     stop_listeners(&runtime, reload_requests, web, idle_reload, ready.is_some());
-    let stopping = Instant::now();
     // The socket goes first, so no client reaches a host that is handing
     // its sessions off, and before the lock: a host that takes the lock
     // next finds no socket of this one.
@@ -227,7 +226,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     runtime.block_on(terminals.stop());
     // The handoff first closes the host: no session opens or is created
     // from then on.
-    hand_off(&host);
+    hand_off(&host, stopping.elapsed());
     receipt_recovery.join();
     eprintln!(
         "plakd host: stopped in {} ms",
@@ -341,8 +340,10 @@ fn bind_web(
     }
 }
 
-fn hand_off(host: &SessionHost<crate::surface_protocol::PlakExtension>) {
-    let deadline = HANDOFF_DEADLINE.saturating_sub(STOP_MARGIN);
+fn hand_off(host: &SessionHost<crate::surface_protocol::PlakExtension>, elapsed: Duration) {
+    let deadline = HANDOFF_DEADLINE.saturating_sub(elapsed).saturating_sub(STOP_MARGIN);
+    #[cfg(feature = "test-hooks")]
+    crate::test_hooks::record_host_handoff_budget(elapsed, deadline);
     for (session, failure) in host.hand_off_all(deadline) {
         eprintln!(
             "plakd host: session {session} was not handed off: {}",

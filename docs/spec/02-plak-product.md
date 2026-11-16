@@ -4016,7 +4016,9 @@ notice omits both target and retry hint. A forced
 same-image restart uses `operator_restart`, a same-key binary upgrade uses
 `paired_upgrade`, and a changed key uses `cross_key_upgrade`. A planned stop
 (including SIGTERM handoff) announces `stopping` / `shutdown`. Socket and web
-writers make a bounded final send attempt before closing; slow or lost peers
+writers make a bounded final send attempt before closing. Connection joins and
+advisory delivery spend the same host-wide stop budget: handoff receives only
+the time remaining since stop was observed, less the existing stop margin; slow or lost peers
 can miss notices, and duplicate final notices are allowed. Notices never
 acknowledge a prompt, authorize replay, or alter admission. Failure without a
 notice remains possible. A destination serves ordinary Welcome; committed,
