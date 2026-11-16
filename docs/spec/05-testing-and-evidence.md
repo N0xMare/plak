@@ -6642,7 +6642,7 @@ sockets from inode replacement and native-lock-free absence. Ack targets are
 restricted per origin/control ID; a closed watch consumer terminates its pump.
 
 Frozen v1 JSON fixtures pin every verb, status and refusal independently of
-native protocol 8. Tests reject arbitrary native verbs, unsupported versions,
+native protocol 9. Tests reject arbitrary native verbs, unsupported versions,
 changed original instances, oversized declared frames, public/symlink parents
 and replacement-inode unlinking. Source CAS tests prove persisted native-control
 refusal and own-tuple-only recovery. Real-child tests exercise direct three-build
