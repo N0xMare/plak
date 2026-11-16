@@ -141,6 +141,7 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.env.pop('PLAK_PY_HOST', None)
         self.env.pop('PLAK_JS_HOST', None)
         self.env.pop('PLAK_MCP_SERVER', None)
+        self.env.pop('PLAK_TEST_BINARY', None)
         # The offline musl container exports this; the package group must decide it itself.
         self.env.pop('CARGO_NET_OFFLINE', None)
         # Keep gate scratch inside the fixture instead of the shared per-checkout root.
@@ -168,6 +169,7 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(args=args, worker=os.environ.get('PLAK_PY_HOST'),
                              js_worker=os.environ.get('PLAK_JS_HOST'),
                              mcp_server=os.environ.get('PLAK_MCP_SERVER'),
+                             test_binary=os.environ.get('PLAK_TEST_BINARY'),
                              target=os.environ.get('CARGO_BUILD_TARGET'),
                              target_dir=os.environ.get('CARGO_TARGET_DIR'),
                              plak_home=os.environ.get('PLAK_HOME'),
@@ -440,6 +442,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         lanes = [c for c in calls if c['args'][:2] == ['nextest', 'run']]
         self.assertEqual(len(lanes), 2)
         self.assertTrue(all(c['worker'] == str(self.worker.resolve()) for c in lanes))
+        self.assertTrue(all(c['test_binary'] == str(self.worker.resolve()) for c in lanes))
         self.assertTrue(
             all(
                 c['mcp_server'] == str(self.worker.with_name('mcp-fake-server').resolve())
@@ -461,6 +464,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.env['PLAK_PY_HOST'] = str(self.worker.relative_to(self.root))
         self.env['PLAK_JS_HOST'] = str(self.worker.relative_to(self.root))
         self.env['PLAK_MCP_SERVER'] = str(self.worker.relative_to(self.root))
+        self.env['PLAK_TEST_BINARY'] = str(self.worker.relative_to(self.root))
         result, calls, _ = self.run_gate('--steps', 'tests-parallel,tests-serial')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(c['args'][0] == 'test' for c in calls))
@@ -468,6 +472,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual([c['worker'] for c in lanes], [str(self.worker.resolve())] * 2)
         self.assertEqual([c['js_worker'] for c in lanes], [str(self.worker.resolve())] * 2)
         self.assertEqual([c['mcp_server'] for c in lanes], [str(self.worker.resolve())] * 2)
+        self.assertEqual([c['test_binary'] for c in lanes], [str(self.worker.resolve())] * 2)
 
     def test_invalid_mcp_fixture_override_fails_before_any_test_lane(self):
         self.worker.parent.mkdir(parents=True)
@@ -475,6 +480,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.worker.chmod(0o700)
         self.env['PLAK_PY_HOST'] = str(self.worker)
         self.env['PLAK_JS_HOST'] = str(self.worker)
+        self.env['PLAK_TEST_BINARY'] = str(self.worker)
         for value in ('', 'missing', str(self.root)):
             with self.subTest(value=value):
                 self.env['PLAK_MCP_SERVER'] = value
@@ -482,6 +488,22 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 result, calls, _ = self.run_gate('--steps', 'tests-parallel')
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn('PLAK_MCP_SERVER', result.stderr)
+                self.assertFalse(any(c['args'][:2] == ['nextest', 'run'] for c in calls))
+
+    def test_invalid_product_fixture_override_fails_before_any_test_lane(self):
+        self.worker.parent.mkdir(parents=True)
+        self.worker.write_text('#!/bin/sh\nexit 0\n')
+        self.worker.chmod(0o700)
+        self.env['PLAK_PY_HOST'] = str(self.worker)
+        self.env['PLAK_JS_HOST'] = str(self.worker)
+        self.env['PLAK_MCP_SERVER'] = str(self.worker)
+        for value in ('', 'missing', str(self.root)):
+            with self.subTest(value=value):
+                self.env['PLAK_TEST_BINARY'] = value
+                self.log.unlink(missing_ok=True)
+                result, calls, _ = self.run_gate('--steps', 'tests-parallel')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('PLAK_TEST_BINARY', result.stderr)
                 self.assertFalse(any(c['args'][:2] == ['nextest', 'run'] for c in calls))
 
     def test_invalid_override_fails_before_any_test_lane(self):
@@ -494,6 +516,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.worker.chmod(0o700)
         self.env['PLAK_JS_HOST'] = str(self.worker)
         self.env['PLAK_MCP_SERVER'] = str(self.worker)
+        self.env['PLAK_TEST_BINARY'] = str(self.worker)
         for value in ('', 'missing', str(directory), str(ordinary)):
             with self.subTest(value=value):
                 self.env['PLAK_PY_HOST'] = value
@@ -513,6 +536,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.worker.chmod(0o700)
         self.env['PLAK_PY_HOST'] = str(self.worker)
         self.env['PLAK_MCP_SERVER'] = str(self.worker)
+        self.env['PLAK_TEST_BINARY'] = str(self.worker)
         for value in ('', 'missing', str(self.root)):
             with self.subTest(value=value):
                 self.env['PLAK_JS_HOST'] = value

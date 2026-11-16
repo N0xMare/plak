@@ -138,7 +138,7 @@ prepare_tests() {
   if [[ -n "$py_host" && ( "${1:-}" != tooling || -n "$plak_host" ) ]]; then return; fi
   worker_manifest="$(mktemp "$TMPDIR/plakd-worker-build.XXXXXX")"
   trap 'rm -f "$worker_manifest"' EXIT
-  if [[ "${PLAK_PY_HOST+x}" == x && "${PLAK_JS_HOST+x}" == x && "${PLAK_MCP_SERVER+x}" == x && "${1:-}" != tooling ]]; then
+  if [[ "${PLAK_PY_HOST+x}" == x && "${PLAK_JS_HOST+x}" == x && "${PLAK_MCP_SERVER+x}" == x && "${PLAK_TEST_BINARY+x}" == x && "${1:-}" != tooling ]]; then
     worker_mode=explicit
     worker_input=''
   else
@@ -162,6 +162,8 @@ executables = [("PLAK_PY_HOST", "plakous-py-host"), ("PLAK_JS_HOST", "plakous-js
                ("PLAK_MCP_SERVER", "mcp-fake-server")]
 if mode == "built":
     executables.append(("PLAK_TOOLING_BINARY", "plakd"))
+else:
+    executables.append(("PLAK_TEST_BINARY", "plakd"))
 for variable, binary in executables:
     if variable in os.environ and variable != "PLAK_TOOLING_BINARY":
         value = os.environ[variable]
@@ -475,7 +477,7 @@ run_lane() {
   local profile=$1
   shift
   prepare_tests
-  PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" PLAK_MCP_SERVER="$mcp_server" python3 tools/gate/test-processes.py -- cargo nextest run --locked --workspace --all-features \
+  PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" PLAK_MCP_SERVER="$mcp_server" PLAK_TEST_BINARY="$plak_host" python3 tools/gate/test-processes.py -- cargo nextest run --locked --workspace --all-features \
     --profile "$profile" ${target_args[@]+"${target_args[@]}"} "$@"
 }
 

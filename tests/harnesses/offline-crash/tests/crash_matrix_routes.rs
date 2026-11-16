@@ -939,15 +939,9 @@ impl Fixture {
     }
 }
 
-/// The JavaScript sidecar, when it has been built into the same target dir.
+/// The JavaScript sidecar selected by the test invocation.
 fn sidecar_path() -> Option<PathBuf> {
-    if let Some(explicit) = std::env::var_os("PLAK_JS_HOST") {
-        return Some(PathBuf::from(explicit));
-    }
-    let deps = std::env::current_exe().ok()?;
-    let target = deps.parent()?.parent()?;
-    let candidate = target.join("plakous-js-host");
-    candidate.is_file().then_some(candidate)
+    std::env::var_os("PLAK_JS_HOST").map(PathBuf::from)
 }
 
 struct CrashChild {
@@ -2217,8 +2211,8 @@ fn pi_edit_and_write_in_one_turn_commit_canonical_apply_patch_and_lower_by_expos
 //
 // These cells drive `plakd agent` through the scripted offline model (the
 // `test-hooks` feature). The durability gate's workspace/all-features test
-// build prepares that binary and both sidecars. Standalone invocations must
-// build the same artifacts or point `PLAK_TEST_BINARY` at a matching build
+// build prepares that binary and both sidecars and passes their artifact paths.
+// Standalone invocations must set `PLAK_TEST_BINARY` to a matching build
 // with both sidecars beside it. Cut points on this face are reached
 // through fsynced evidence rows, stream records and script stalls; the fold
 // and the effect-outcome interval have no deterministic hook on this face and
@@ -2239,20 +2233,15 @@ struct FaceFixture {
 
 /// The `plakd` binary carrying the test hooks, when one is available.
 fn plak_binary() -> Option<PathBuf> {
-    if let Some(explicit) = std::env::var_os("PLAK_TEST_BINARY") {
-        return Some(PathBuf::from(explicit));
-    }
-    let deps = std::env::current_exe().ok()?;
-    let candidate = deps.parent()?.parent()?.join("plakd");
-    candidate.is_file().then_some(candidate)
+    std::env::var_os("PLAK_TEST_BINARY").map(PathBuf::from)
 }
 
 impl FaceFixture {
     fn new(script: &Value) -> TestResult<Self> {
         use std::os::unix::fs::PermissionsExt;
         let binary = plak_binary().ok_or(
-            "no plakd binary with test hooks; build one with `cargo build --locked -p plakd \
-             --features test-hooks -p plakous-js-runtime -p plakous-py-worker` or set PLAK_TEST_BINARY",
+            "no plakd binary with test hooks; run the gate or set PLAK_TEST_BINARY \
+             to a matching workspace test build with both sidecars",
         )?;
         let root = tempfile::tempdir()?;
         let home = root.path().join("home");

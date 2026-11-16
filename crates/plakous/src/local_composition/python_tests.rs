@@ -130,7 +130,7 @@ fn fixture_bootstrap(
     Ok(Some(super::python::worker_bootstrap(bootstrap)))
 }
 
-/// The built `plakous-py-host`: `PLAK_PY_HOST`, else the test build's own.
+/// The `plakous-py-host` selected by the test invocation.
 fn py_host() -> Option<PathBuf> {
     if let Ok(explicit) = std::env::var("PLAK_PY_HOST") {
         let path = PathBuf::from(&explicit);
@@ -141,14 +141,7 @@ fn py_host() -> Option<PathBuf> {
         );
         return Some(path);
     }
-    std::env::current_exe()
-        .ok()
-        .and_then(|path| {
-            path.parent()
-                .and_then(Path::parent)
-                .map(|directory| directory.join("plakous-py-host"))
-        })
-        .filter(|path| path.is_file())
+    None
 }
 
 async fn python_session_within(
