@@ -128,8 +128,13 @@ inference is `api.openai.com/v1/responses` and xAI API inference is
 `api.x.ai/v1/responses`.
 
 Subscription accounts need their current compatibility notice accepted before
-a live run: run `plak models <account>` once from a terminal (for example
-after a profile review renewal). The drivers start `plak run` with stdin
+a live run: run `plak models <account>` from a terminal on first use or when
+the notice revision or consent identity changes. Consent binds the provider,
+profile id, primary and secondary source revisions, provenance and kill-switch
+revision. An existing valid acceptance survives a later review when those pins
+and the notice revision are unchanged: the stored `reviewed_at` and `expires_at`
+are not compared. The current compiled profile must still be active.
+The drivers start `plak run` with stdin
 closed, so an unaccepted notice fails at once with exit 3 instead of waiting
 on a hidden prompt, and the scenario scores `harness` with that remedy.
 
@@ -541,7 +546,7 @@ default sweep (`just live estimate` adds them only with `--confirm`).
 | `claude-opus-low` | `claude` | `claude-opus-5-5` | low | light | 3, sparing |
 | `claude-opus-medium` | `claude` | `claude-opus-5-5` | medium | light | 3, sparing |
 | `codex-astra` | `codex` | `gpt-6-astra` | low | light | 3, sparing |
-| `claude-fable` | `claude` | `claude-fable-5-1` | low | light | 3, sparing |
+| `claude-fable` | `claude` | `claude-fable-5-2` | low | light | 3, sparing |
 
 The pre-release bar runs once per release candidate, not per install. It
 binds the same clean source revision, binary/sidecar hashes and platform

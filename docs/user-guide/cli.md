@@ -443,9 +443,9 @@ runner; these waits do not add a cross-runner spawn argument.
 ### Subscription compatibility review deadlines
 
 The first time you use a subscription account — `plak login`, `plak refresh`,
-`plak logout <account>`, `plak models` or `plak run` — and again whenever the build's profile or notice
-revision changes, Plak prints a notice on stderr and asks once. A build that
-only re-reviews the profile does not ask again:
+`plak logout <account>`, `plak models` or `plak run` — and again when the notice
+revision or consent identity changes, Plak prints a notice on stderr and asks
+once. Renewing only a profile's review and expiry dates does not ask again:
 
 ```
 codex uses an experimental revision-pinned compatibility integration.
@@ -463,10 +463,14 @@ refuses with exit 3 and names both ways (`plak login` itself asks for the
 answer on a terminal or a pipe); any other answer declines, exits 3 and sends
 nothing.
 
-When a newer build renews a profile's review, `plak status` shows the
-acceptance as required while the credential stays ready. Accepting the renewed
-notice (for example through `plak models <account>`) keeps the existing login;
-no new `plak login` is needed.
+Consent binds the provider, profile id, primary and secondary source revisions,
+provenance and kill-switch revision, together with the notice revision. An
+existing valid acceptance survives a later review when those pins are unchanged:
+the stored `reviewed_at` and `expires_at` are not compared. The current compiled
+profile's active window and kill switch are still checked. If the notice
+revision or consent identity changes, reaccept it through, for example,
+`plak models <account>`; reacceptance does not itself replace or refresh the
+existing login credentials.
 
 `plak status` lists the UTC expiry of each compiled subscription compatibility
 profile. These dates govern this build's integration review, independently of
