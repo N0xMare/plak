@@ -7,6 +7,8 @@ import sys
 import tempfile
 import unittest
 
+from tests.tooling.path_fixtures import path_without_jj
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -109,7 +111,9 @@ if sys.argv[1:] != ["target", "add", "wasm32-unknown-unknown"]:
     def test_missing_and_broken_python_are_rejected(self):
         isolated = self.root / "isolated-bin"
         isolated.mkdir()
-        os.symlink("/usr/bin/dirname", isolated / "dirname")
+        dirname = shutil.which("dirname")
+        self.assertIsNotNone(dirname)
+        os.symlink(dirname, isolated / "dirname")
         missing_env = dict(self.env, PATH=str(isolated))
         result = self.run_script("check", env=missing_env)
         self.assertEqual(result.returncode, 2)
@@ -178,14 +182,11 @@ if sys.argv[1:] != ["target", "add", "wasm32-unknown-unknown"]:
 
     def test_check_falls_back_to_an_installed_pinned_jj_but_not_past_an_empty_override(self):
         (self.bin / "jj").unlink()
-        path = os.pathsep.join(
-            entry
-            for entry in self.env["PATH"].split(os.pathsep)
-            if not os.access(Path(entry) / "jj", os.X_OK)
-        )
+        path = path_without_jj(self.env["PATH"], self.root / "without-jj")
+        self.assertIsNone(shutil.which("jj", path=path))
         env = dict(self.env, PATH=path)
         missing = self.run_script("check", env=env)
-        self.assertEqual(missing.returncode, 2)
+        self.assertEqual(missing.returncode, 2, missing.stderr)
         self.assertIn("jj is unavailable", missing.stderr)
         self.executable("jj", 'print("jj 0.46.0")\n', self.root / ".dev-tools/jj/0.46.0")
         installed = self.run_script("check", env=env)

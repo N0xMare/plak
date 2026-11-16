@@ -14,6 +14,8 @@ import tomllib
 import unittest
 import unittest.mock
 
+from tests.tooling.path_fixtures import path_without_jj
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -200,11 +202,8 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             binary.write_text("#!/bin/sh\n")
             binary.chmod(0o700)
         newest = str(self.checkout / ".dev-tools/jj/0.10.0/jj")
-        path = os.pathsep.join(
-            entry
-            for entry in os.environ["PATH"].split(os.pathsep)
-            if not os.access(Path(entry) / "jj", os.X_OK)
-        )
+        path = path_without_jj(os.environ["PATH"], self.base / "without-jj")
+        self.assertIsNone(shutil.which("jj", path=path))
         env = dict(self.env, PATH=path, PLAK_TEST_TMPDIR=str(self.base / "jj-tmp"))
         env.pop("PLAK_TEST_JJ", None)
         script = str(gate / "test-env.sh")

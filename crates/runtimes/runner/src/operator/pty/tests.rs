@@ -18,10 +18,9 @@ fn operator_pty_exited_before_first_observation_retains_only_unreaped_anchor() {
     let pair = native_pty_system()
         .openpty(size(TerminalDimensions::new(24, 80).unwrap()))
         .unwrap();
-    let mut child = pair
-        .slave
-        .spawn_command(CommandBuilder::new("/usr/bin/true"))
-        .unwrap();
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args(["-c", "exit 0"]);
+    let mut child = pair.slave.spawn_command(command).unwrap();
     let pid = child.process_id().unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     // Completion witness only: no reap or start/session table observation.
