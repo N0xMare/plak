@@ -1194,12 +1194,17 @@ Every tier that runs Rust tests takes the `plakous-py-host` and
 `plakous-js-host` binaries from the workspace test build (`cargo test --no-run
 --workspace --all-features`) and obtains their executable paths from Cargo's
 artifact records, respecting Cargo target-directory and build-target
-configuration. Explicit `PLAK_PY_HOST` and `PLAK_JS_HOST` overrides instead select
-existing workers; missing, empty, directory, or non-executable paths fail the
+configuration. The MCP fixture server is selected from the same records and
+passed as `PLAK_MCP_SERVER`; tests never infer its location from Cargo's
+intermediate test-executable layout. Explicit `PLAK_PY_HOST`, `PLAK_JS_HOST` and
+`PLAK_MCP_SERVER` overrides instead select existing executables (all three are
+required to skip the test build); missing, empty, directory, or non-executable paths fail the
 gate. All nextest lanes receive their absolute paths, so real Monty tests
 cannot silently take their missing-worker early return. A worker that cannot
 run or speak the protocol fails those tests. Manually invoked Rust tests
 without a worker retain their existing limited, potentially skipped coverage.
+Manually invoked MCP fixture tests require `PLAK_MCP_SERVER` to name the built
+workspace fixture binary.
 
 Python regressions distinguish queue handoff from correlated worker
 acceptance, lost receipts from successful delivery, and bounded value conversion

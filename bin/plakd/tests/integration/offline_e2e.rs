@@ -4843,15 +4843,10 @@ fn a_code_mode_cell_runs_two_nested_calls_on_the_cli_face() {
     );
 }
 
-/// The repository-only MCP fixture server. Workspace test runs build every
-/// workspace binary into the directory above the test binary's `deps`.
+/// The repository-only MCP fixture server, selected from Cargo's artifact records.
 fn fake_mcp_server() -> PathBuf {
-    let executable = std::env::current_exe().expect("test binary");
-    let server = executable
-        .parent()
-        .and_then(Path::parent)
-        .expect("target directory")
-        .join("mcp-fake-server");
+    let server =
+        PathBuf::from(std::env::var_os("PLAK_MCP_SERVER").expect("PLAK_MCP_SERVER fixture"));
     assert!(
         server.is_file(),
         "{} is missing; run the workspace tests so the fixture binary is built",

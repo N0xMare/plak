@@ -15,6 +15,8 @@ for one version bump, without native protocol compatibility.
   package homepage metadata (the repository URL is unchanged).
   The standard library now uses Unicode 18 and `str::escape_debug` always
   escapes grapheme extenders, including after printable characters.
+  Resolve offline MCP fixture paths from Cargo artifact records rather than
+  the intermediate test-binary layout, which Cargo 1.100 changes.
 
 - Classify Anthropic API HTTP 400 insufficient-credit responses as permanent
   `QuotaExceeded` failures with an API-credit repair remedy.

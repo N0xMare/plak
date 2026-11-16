@@ -128,6 +128,7 @@ case "$target_dir" in
 esac
 py_host=''
 js_host=''
+mcp_server=''
 plak_host=''
 prepare_tests() {
   # Validate explicit workers before a tooling-only build as well.
@@ -137,7 +138,7 @@ prepare_tests() {
   if [[ -n "$py_host" && ( "${1:-}" != tooling || -n "$plak_host" ) ]]; then return; fi
   worker_manifest="$(mktemp "$TMPDIR/plakd-worker-build.XXXXXX")"
   trap 'rm -f "$worker_manifest"' EXIT
-  if [[ "${PLAK_PY_HOST+x}" == x && "${PLAK_JS_HOST+x}" == x && "${1:-}" != tooling ]]; then
+  if [[ "${PLAK_PY_HOST+x}" == x && "${PLAK_JS_HOST+x}" == x && "${PLAK_MCP_SERVER+x}" == x && "${1:-}" != tooling ]]; then
     worker_mode=explicit
     worker_input=''
   else
@@ -157,7 +158,8 @@ import sys
 mode, manifest = sys.argv[1:]
 records = ([json.loads(line) for line in Path(manifest).read_text().splitlines() if line.strip()]
            if mode == "built" else [])
-executables = [("PLAK_PY_HOST", "plakous-py-host"), ("PLAK_JS_HOST", "plakous-js-host")]
+executables = [("PLAK_PY_HOST", "plakous-py-host"), ("PLAK_JS_HOST", "plakous-js-host"),
+               ("PLAK_MCP_SERVER", "mcp-fake-server")]
 if mode == "built":
     executables.append(("PLAK_TOOLING_BINARY", "plakd"))
 for variable, binary in executables:
@@ -185,7 +187,8 @@ PY_WORKER
   )"
   py_host="$(printf '%s\n' "$worker_paths" | sed -n '1p')"
   js_host="$(printf '%s\n' "$worker_paths" | sed -n '2p')"
-  plak_host="$(printf '%s\n' "$worker_paths" | sed -n '3p')"
+  mcp_server="$(printf '%s\n' "$worker_paths" | sed -n '3p')"
+  plak_host="$(printf '%s\n' "$worker_paths" | sed -n '4p')"
   rm -f "$worker_manifest"
   trap - EXIT
 }
@@ -472,7 +475,7 @@ run_lane() {
   local profile=$1
   shift
   prepare_tests
-  PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" python3 tools/gate/test-processes.py -- cargo nextest run --locked --workspace --all-features \
+  PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" PLAK_MCP_SERVER="$mcp_server" python3 tools/gate/test-processes.py -- cargo nextest run --locked --workspace --all-features \
     --profile "$profile" ${target_args[@]+"${target_args[@]}"} "$@"
 }
 
@@ -688,22 +691,24 @@ run_timed() {
   # status and goes on to the next group. Prepared worker paths survive a
   # failed lane so later lanes reuse the same build.
   worker_state="$(mktemp)"
-  printf '%s\n' "$py_host" "$js_host" "$plak_host" >"$worker_state"
+  printf '%s\n' "$py_host" "$js_host" "$mcp_server" "$plak_host" >"$worker_state"
   set +e
   (
     set -Ee
     py_host="$(sed -n '1p' "$worker_state")"
     js_host="$(sed -n '2p' "$worker_state")"
-    plak_host="$(sed -n '3p' "$worker_state")"
-    trap 'printf "%s\n" "$py_host" "$js_host" "$plak_host" >"$worker_state"' ERR
+    mcp_server="$(sed -n '3p' "$worker_state")"
+    plak_host="$(sed -n '4p' "$worker_state")"
+    trap 'printf "%s\n" "$py_host" "$js_host" "$mcp_server" "$plak_host" >"$worker_state"' ERR
     run_group "$group"
-    printf '%s\n' "$py_host" "$js_host" "$plak_host" >"$worker_state"
+    printf '%s\n' "$py_host" "$js_host" "$mcp_server" "$plak_host" >"$worker_state"
   )
   status=$?
   set -e
   py_host="$(sed -n '1p' "$worker_state")"
   js_host="$(sed -n '2p' "$worker_state")"
-  plak_host="$(sed -n '3p' "$worker_state")"
+  mcp_server="$(sed -n '3p' "$worker_state")"
+  plak_host="$(sed -n '4p' "$worker_state")"
   rm -f "$worker_state"
   if [[ -s "$skip_record" ]]; then skipped_checks+="$(cat "$skip_record")"$'\n'; fi
   rm -f "$skip_record"

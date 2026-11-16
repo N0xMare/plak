@@ -55,12 +55,8 @@ impl NamedSecrets for HostSecrets {
 /// The fixture server, started through a shell that records its pid and
 /// exits unless `TOKEN` is the runner's value.
 fn table(directory: &Path) -> String {
-    let executable = std::env::current_exe().unwrap();
-    let server = executable
-        .parent()
-        .and_then(Path::parent)
-        .unwrap()
-        .join("mcp-fake-server");
+    let server =
+        PathBuf::from(std::env::var_os("PLAK_MCP_SERVER").expect("PLAK_MCP_SERVER fixture"));
     assert!(server.is_file(), "{} is missing", server.display());
     let script = format!(
         "echo $$ > '{}'; exec '{}' --expect-env TOKEN=runner-value",

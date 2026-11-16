@@ -140,6 +140,7 @@ class DevCheckWorkerTests(unittest.TestCase):
         )
         self.env.pop('PLAK_PY_HOST', None)
         self.env.pop('PLAK_JS_HOST', None)
+        self.env.pop('PLAK_MCP_SERVER', None)
         # The offline musl container exports this; the package group must decide it itself.
         self.env.pop('CARGO_NET_OFFLINE', None)
         # Keep gate scratch inside the fixture instead of the shared per-checkout root.
@@ -166,6 +167,7 @@ if args == ['nextest', '--version']:
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(args=args, worker=os.environ.get('PLAK_PY_HOST'),
                              js_worker=os.environ.get('PLAK_JS_HOST'),
+                             mcp_server=os.environ.get('PLAK_MCP_SERVER'),
                              target=os.environ.get('CARGO_BUILD_TARGET'),
                              target_dir=os.environ.get('CARGO_TARGET_DIR'),
                              plak_home=os.environ.get('PLAK_HOME'),
@@ -225,6 +227,11 @@ if args[0] == 'test':
     js_worker.chmod(0o700)
     print(json.dumps(dict(reason='compiler-artifact', executable=str(js_worker),
                          target=dict(name='plakous-js-host', kind=['bin']), profile=dict(test=False))))
+    mcp_server = worker.with_name('mcp-fake-server')
+    mcp_server.write_text('#!/bin/sh\nexit 0\n')
+    mcp_server.chmod(0o700)
+    print(json.dumps(dict(reason='compiler-artifact', executable=str(mcp_server),
+                         target=dict(name='mcp-fake-server', kind=['bin']), profile=dict(test=False))))
     print(json.dumps(dict(reason='compiler-artifact', executable=str(worker),
                          target=dict(name='plakd', kind=['bin']), profile=dict(test=False))))
 ''',
@@ -435,6 +442,12 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertTrue(all(c['worker'] == str(self.worker.resolve()) for c in lanes))
         self.assertTrue(
             all(
+                c['mcp_server'] == str(self.worker.with_name('mcp-fake-server').resolve())
+                for c in lanes
+            )
+        )
+        self.assertTrue(
+            all(
                 c['js_worker'] == str(self.worker.with_name('plakous-js-host').resolve())
                 for c in lanes
             )
@@ -447,12 +460,29 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.worker.chmod(0o700)
         self.env['PLAK_PY_HOST'] = str(self.worker.relative_to(self.root))
         self.env['PLAK_JS_HOST'] = str(self.worker.relative_to(self.root))
+        self.env['PLAK_MCP_SERVER'] = str(self.worker.relative_to(self.root))
         result, calls, _ = self.run_gate('--steps', 'tests-parallel,tests-serial')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(c['args'][0] == 'test' for c in calls))
         lanes = [c for c in calls if c['args'][:2] == ['nextest', 'run']]
         self.assertEqual([c['worker'] for c in lanes], [str(self.worker.resolve())] * 2)
         self.assertEqual([c['js_worker'] for c in lanes], [str(self.worker.resolve())] * 2)
+        self.assertEqual([c['mcp_server'] for c in lanes], [str(self.worker.resolve())] * 2)
+
+    def test_invalid_mcp_fixture_override_fails_before_any_test_lane(self):
+        self.worker.parent.mkdir(parents=True)
+        self.worker.write_text('#!/bin/sh\nexit 0\n')
+        self.worker.chmod(0o700)
+        self.env['PLAK_PY_HOST'] = str(self.worker)
+        self.env['PLAK_JS_HOST'] = str(self.worker)
+        for value in ('', 'missing', str(self.root)):
+            with self.subTest(value=value):
+                self.env['PLAK_MCP_SERVER'] = value
+                self.log.unlink(missing_ok=True)
+                result, calls, _ = self.run_gate('--steps', 'tests-parallel')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('PLAK_MCP_SERVER', result.stderr)
+                self.assertFalse(any(c['args'][:2] == ['nextest', 'run'] for c in calls))
 
     def test_invalid_override_fails_before_any_test_lane(self):
         directory = self.root / 'directory'

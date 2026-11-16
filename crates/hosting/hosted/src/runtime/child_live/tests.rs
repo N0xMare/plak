@@ -82,13 +82,9 @@ async fn real_finished_cells_restore_nested_rows_and_failure_tally_from_the_ledg
             directory.path().join("evidence.jsonl"),
         )
         .unwrap();
-        let sidecar = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("plakous-js-host");
+        let sidecar = std::path::PathBuf::from(
+            std::env::var_os("PLAK_JS_HOST").expect("PLAK_JS_HOST fixture"),
+        );
         let binding = plakous_offline_crash_harness::scripted_code_mode_runtime_binding(
             directory.path(),
             controller,

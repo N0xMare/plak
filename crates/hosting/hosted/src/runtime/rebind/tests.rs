@@ -1548,12 +1548,9 @@ fn fork_now_onto_an_api_root_branches_onto_its_own_tree() {
 /// is unchanged, nothing is listed again, and the successor binds them.
 #[test]
 fn a_rebind_keeps_the_sessions_frozen_mcp_tools_without_listing_again() {
-    let server = std::env::current_exe()
-        .unwrap()
-        .parent()
-        .and_then(std::path::Path::parent)
-        .unwrap()
-        .join("mcp-fake-server");
+    let server = std::path::PathBuf::from(
+        std::env::var_os("PLAK_MCP_SERVER").expect("PLAK_MCP_SERVER fixture"),
+    );
     assert!(
         server.is_file(),
         "run the workspace tests so the fixture is built"

@@ -1,5 +1,5 @@
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use plakous::model::ToolExecutionOwner;
 use plakous::tools::{CodingPresentation, CompositionRuntime, ToolOwnerClass};
@@ -28,15 +28,10 @@ fn secrets(entries: &[(&'static str, &'static str)]) -> Arc<dyn NamedSecrets> {
     Arc::new(Secrets(entries.iter().copied().collect()))
 }
 
-/// The repository-only fixture server. Workspace test runs build every
-/// workspace binary into the directory above the test binary's `deps`.
+/// The repository-only fixture server, selected from Cargo's artifact records.
 fn fixture() -> TestResult<PathBuf> {
-    let executable = std::env::current_exe()?;
-    let directory = executable
-        .parent()
-        .and_then(Path::parent)
-        .ok_or("test binary has no target directory")?;
-    let server = directory.join("mcp-fake-server");
+    let server =
+        PathBuf::from(std::env::var_os("PLAK_MCP_SERVER").ok_or("PLAK_MCP_SERVER fixture")?);
     if !server.is_file() {
         return Err(format!(
             "{} is missing; run the workspace tests so the fixture binary is built",
