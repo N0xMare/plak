@@ -183,8 +183,13 @@ pub(super) fn process_wait_outcome(result: &serde_json::Value, id: &str) -> Opti
     }
 }
 
+#[allow(
+    clippy::match_same_arms,
+    reason = "Shell deliberately has no process-action prefix; unknown labels separately fall back to no prefix"
+)]
 fn process_action_label(label: &str, completed: bool) -> &'static str {
     match label {
+        "Shell" => "",
         "process_session_wait" if completed => "Waited on process",
         "process_session_wait" => "Waiting on process",
         "process_session_read" => "Read output of process",

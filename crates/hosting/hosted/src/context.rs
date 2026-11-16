@@ -657,11 +657,16 @@ impl ContextProjection {
 ///
 /// Unknown or internally contradictory future variants fail closed to an
 /// unavailable product projection.
+#[allow(
+    clippy::match_same_arms,
+    reason = "known unavailable status is distinct from the fail-closed fallback for future variants"
+)]
 pub fn project_context_status(status: &ContextStatus) -> ContextProjection {
     let disposition = match status.kind() {
         ContextStatusKind::Fits { .. } => ContextDisposition::Fits,
         ContextStatusKind::WouldOverflow(_) => ContextDisposition::WouldOverflow,
         ContextStatusKind::ProtectedOverflow(_) => ContextDisposition::ProtectedOverflow,
+        ContextStatusKind::Unavailable(_) => return ContextProjection::unavailable(),
         _ => return ContextProjection::unavailable(),
     };
     let Some((evidence, non_guarantee)) =

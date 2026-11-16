@@ -172,13 +172,18 @@ pub(crate) const fn design(row: Row, column: Column) -> Cell {
 
 /// Today's cell. A workflow defers every intent but `Interrupt`; `Quit`'s
 /// deferral is its FIFO place, part of `U` for the root.
+#[allow(
+    clippy::match_same_arms,
+    reason = "role cells name distinct dispatch policies even when their admitted classes currently agree"
+)]
 pub(crate) const fn today(row: Row, column: Column) -> Cell {
     match (row, column) {
+        (Row::Prompt, Column::Root) => Cell::Classes(&[I, B, W]),
         (Row::Interrupt, _) | (Row::Quit, Column::Root) => Cell::Classes(&[U]),
         (Row::Quit, Column::Child) => Cell::Detach,
         (Row::Workflow | Row::Recover | Row::InvokeTool, Column::Root) => Cell::Classes(&[I, W]),
         // `RefreshReadiness` is ordinary, `RetryAttach` idle-only.
-        (Row::Prompt | Row::Readiness, Column::Root) => Cell::Classes(&[I, B, W]),
+        (Row::Readiness, Column::Root) => Cell::Classes(&[I, B, W]),
         (Row::ChildOnly, Column::Root) => Cell::Absent,
         (Row::ChildOnly, Column::Child) => Cell::ChildPolicy,
         (
@@ -196,12 +201,13 @@ pub(crate) const fn today(row: Row, column: Column) -> Cell {
             Cell::Classes(&[B])
         }
         // The node's own jobs, by node address: a stop and `Background`.
-        (Row::Processes | Row::Approval, Column::Child) => Cell::Classes(&[B]),
+        (Row::Processes, Column::Child) => Cell::Classes(&[B]),
         // The usage view by node address; the rest are the root's.
         (Row::Templates, Column::Child) => Cell::Classes(&[R, B]),
         // The intent names a child as its caller and runs idle.
         (Row::InvokeTool, Column::Child) => Cell::Classes(&[I]),
         // The child's actor is the single decider for its own decisions.
+        (Row::Approval, Column::Child) => Cell::Classes(&[B]),
         (
             Row::Queue | Row::Workflow | Row::Readiness | Row::Recover | Row::Navigator,
             Column::Child,

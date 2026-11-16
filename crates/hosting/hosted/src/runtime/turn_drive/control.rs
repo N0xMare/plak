@@ -143,6 +143,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         clippy::too_many_lines,
         reason = "The running-turn owner serializes queue edits, steering, cancellation, navigation, usage, and shutdown intents against one admission."
     )]
+    #[allow(
+        clippy::match_same_arms,
+        reason = "readiness reads, template refreshes, unreachable mailbox flags and empty polls retain distinct control meanings"
+    )]
     pub(super) async fn poll_actions(&mut self) -> bool {
         if self.host.events.step_control.requested() {
             crate::interrupt::InterruptWatch::deferring(self.host.actions, self.host.deferred)
@@ -800,7 +804,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         ),
                     }
                 }
-                Ok(UserAction::RefreshTemplates | UserAction::RefreshReadiness) => {
+                Ok(UserAction::RefreshTemplates) => {
                     surface::publish_template_readiness(
                         self.host.surface.as_deref(),
                         self.host.ready_catalog,
@@ -938,13 +942,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 }
                 // Readiness is a read, so it stays truthful mid-turn; every
                 // credential mutation waits for the idle boundary.
+                Ok(UserAction::RefreshReadiness) => {
+                    surface::publish_template_readiness(
+                        self.host.surface.as_deref(),
+                        self.host.ready_catalog,
+                        self.host.events,
+                    );
+                }
                 // Unreachable: `IntentSender::send_correlated` sets the promptable
                 // flag and returns before queueing on every send path, so the
                 // intent never enters the queue; the arm keeps the match exhaustive.
-                Ok(UserAction::Promptable) | Err(TryRecvError::Empty) => {}
+                Ok(UserAction::Promptable) => {}
                 Ok(UserAction::ResyncTranscript { scope }) => {
                     self.host.events.resync_transcript(&scope);
                 }
+                Err(TryRecvError::Empty) => {}
             }
         }
 

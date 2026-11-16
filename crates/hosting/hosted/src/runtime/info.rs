@@ -48,9 +48,14 @@ pub(super) fn emit_terminal_status<P: plakous_host_protocol::ProtocolExtension>(
 
 #[must_use]
 /// Canonical persisted effort token shared by all routes, including explicit `none`.
+#[allow(
+    clippy::match_same_arms,
+    reason = "the known medium effort is explicit rather than hidden inside the future-variant fallback"
+)]
 pub fn effort_label(effort: ReasoningEffort) -> String {
     match effort {
         ReasoningEffort::Low => "low".into(),
+        ReasoningEffort::Medium => "medium".into(),
         ReasoningEffort::High => "high".into(),
         ReasoningEffort::XHigh => "xhigh".into(),
         ReasoningEffort::Max => "max".into(),

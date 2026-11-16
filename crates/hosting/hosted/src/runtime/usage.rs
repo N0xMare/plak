@@ -116,6 +116,10 @@ pub(super) fn report_unavailable_context<P: plakous_host_protocol::ProtocolExten
 
 pub(super) const CONTEXT_QUERY_FAILED: &str = "canonical context query failed";
 
+#[allow(
+    clippy::match_same_arms,
+    reason = "known unavailable reports stay explicit beside the conservative future-report fallback"
+)]
 pub(super) async fn query_context(
     opened: &AttachedCodingSession,
     query: ContextQuery,
@@ -138,6 +142,7 @@ pub(super) async fn query_context(
     Ok(match report.kind() {
         SessionContextStatusKind::Available(status) => project_context_status(status),
         SessionContextStatusKind::RecoveryRequired(_) => ContextProjection::recovery_required(),
+        SessionContextStatusKind::Unavailable(_) => ContextProjection::unavailable(),
         _ => ContextProjection::unavailable(),
     })
 }

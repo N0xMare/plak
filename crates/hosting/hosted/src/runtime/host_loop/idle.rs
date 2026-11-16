@@ -84,6 +84,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         clippy::too_many_lines,
         reason = "The idle owner arbitrates operator intents, queued work, child wakes, transient retries, and shutdown without a second dispatcher."
     )]
+    #[allow(
+        clippy::match_same_arms,
+        reason = "the unreachable promptable mailbox flag is distinct from an accepted idle background control"
+    )]
     pub(super) async fn next_prompt(
         &mut self,
         mut one_shot: Option<&mut super::super::oneshot::OneShotState>,
@@ -458,7 +462,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     }
                     None
                 }
-                Ok(UserAction::Background | UserAction::Promptable) => None,
+                Ok(UserAction::Background) => None,
                 Ok(UserAction::DropQueued) => {
                     match commit_session_update(
                         &*self.role.config.store,
@@ -1035,6 +1039,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 // Unreachable: `IntentSender::send_correlated` sets the promptable
                 // flag and returns before queueing on every send path, so the
                 // intent never enters the queue; the arm keeps the match exhaustive.
+                Ok(UserAction::Promptable) => None,
                 Ok(UserAction::ResyncTranscript { scope }) => {
                     self.role.events.resync_transcript(&scope);
                     None

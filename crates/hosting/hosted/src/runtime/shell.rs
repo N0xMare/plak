@@ -162,6 +162,10 @@ fn publish_shell_startup<P: plakous_host_protocol::ProtocolExtension>(
     clippy::too_many_lines,
     reason = "Shell action dispatch preserves the individual model, profile, queue, compaction, and navigation refusal paths."
 )]
+#[allow(
+    clippy::match_same_arms,
+    reason = "the unreachable promptable mailbox flag is distinct from accepted no-op shell controls"
+)]
 fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut ShellHostConfig<P>,
     events: &Sender<P>,
@@ -182,8 +186,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         UserAction::Quit => return ShellStep::Quit,
         UserAction::Background
         | UserAction::StopSession { .. }
-        | UserAction::ReleaseForReopen { .. }
-        | UserAction::Promptable => {}
+        | UserAction::ReleaseForReopen { .. } => {}
         action @ (UserAction::Prompt(_) | UserAction::FollowUp(_) | UserAction::Steer(_)) => {
             refuse_not_ready(events, config, log);
             reject_draft(events, action);
@@ -316,6 +319,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         // Unreachable: `IntentSender::send_correlated` sets the promptable
         // flag and returns before queueing on every send path, so the
         // intent never enters the queue; the arm keeps the match exhaustive.
+        UserAction::Promptable => {}
         UserAction::OpenAgentTranscript { agent_id } => {
             super::child_live::send_agent_transcript(
                 events,

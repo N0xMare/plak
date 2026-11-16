@@ -878,6 +878,10 @@ pub(crate) const NO_IMAGE_GEN: (ImageGenRow, Option<Arc<dyn ImageGenPort>>) =
     (ImageGenRow::NotOffered, None);
 
 /// [`bind_tool_plan`] over an explicit support table and retrieval port.
+#[allow(
+    clippy::match_same_arms,
+    reason = "local fetch tools and MCP entries bypass hosted retrieval for different binding authorities"
+)]
 pub(crate) fn bind_tool_plan_with(
     selection: &TemplateToolSelection,
     table: HostedRetrievalTable,
@@ -890,9 +894,7 @@ pub(crate) fn bind_tool_plan_with(
     let mut image_gen = None;
     for entry in selection.entries() {
         let served = match entry {
-            SelectedTool::Optional(OptionalTool::FetchUrl)
-            | SelectedTool::McpServer(_)
-            | SelectedTool::McpTool { .. } => continue,
+            SelectedTool::Optional(OptionalTool::FetchUrl) => continue,
             SelectedTool::Optional(OptionalTool::ImageGen) => {
                 let reason = match (image_row, &image_port) {
                     (ImageGenRow::Supported, Some(port)) => {
@@ -924,6 +926,7 @@ pub(crate) fn bind_tool_plan_with(
                 _ => false,
             },
             // MCP entries bind through `crate::mcp_binding`.
+            SelectedTool::McpServer(_) | SelectedTool::McpTool { .. } => continue,
         };
         if !served {
             return Err(refusal(entry, table, route_label));

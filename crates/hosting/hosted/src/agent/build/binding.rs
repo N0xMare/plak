@@ -86,6 +86,10 @@ pub fn selected_coding_provider_configuration(
 /// # Errors
 /// Refuses an unavailable route, unsupported processing tier, or invalid provider/model
 /// configuration. The selected tier is never silently downgraded.
+#[allow(
+    clippy::match_same_arms,
+    reason = "the alternate Direct presentation of a CodeModeOnly row is distinct from ordinary Direct and non-Codex routes"
+)]
 pub fn selected_coding_provider_configuration_with_processing_tier(
     provider: NativeProvider,
     model: ModelId,
@@ -132,10 +136,6 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
             }
             true
         }
-        // explicit Direct on a CodeModeOnly row is a second enrolled
-        // presentation (no `exec`/`wait`), and Plak js/py-ptc may replace that
-        // Direct presentation exactly as on a catalog-Direct row. Plak PTC never
-        // attaches *beside* Code Mode because this arm compiles no Code Mode.
         (NativeProvider::Codex, Some(NativeToolMode::CodeMode), _) => {
             return Err(CliFailure::new(
                 "Codex hybrid CodeMode is catalog-admitted but has no exact enrolled product presentation",
@@ -146,16 +146,19 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
                 "Codex model has no recognized authenticated tool-mode authority",
             ));
         }
-        (NativeProvider::Codex, Some(NativeToolMode::Direct), _)
-        | (
+        // Explicit Direct on a CodeModeOnly row is a second enrolled
+        // presentation (no `exec`/`wait`), and Plak js/py-ptc may replace that
+        // Direct presentation exactly as on a catalog-Direct row. Plak PTC never
+        // attaches *beside* Code Mode because this arm compiles no Code Mode.
+        (
             NativeProvider::Codex,
             Some(NativeToolMode::CodeModeOnly),
             CompositionSelection::Direct
             | CompositionSelection::JsPtc
             | CompositionSelection::PyPtc
             | CompositionSelection::PySdk,
-        )
-        | (_, None, _) => false,
+        ) => false,
+        (NativeProvider::Codex, Some(NativeToolMode::Direct), _) | (_, None, _) => false,
         (_, Some(_), _) => {
             return Err(CliFailure::new(
                 "native tool-mode evidence belongs to a different provider family",
