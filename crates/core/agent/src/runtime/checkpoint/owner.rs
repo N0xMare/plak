@@ -8,7 +8,7 @@ use crate::runtime::checkpoint::candidate::{
 };
 use crate::runtime::checkpoint::identity::deterministic_checkpoint_id;
 use crate::runtime::checkpoint::io::{
-    DurabilityCommitTelemetry, StoreCallError, StorePhase, capacity_store_call,
+    DurabilityCommitTelemetry, StoreCallError, StorePhase, capacity_store_call, cleanup_flush,
     commit_with_acknowledgement_recovery, store_call,
 };
 #[cfg(test)]
@@ -705,24 +705,19 @@ impl CheckpointOwner {
             }
             let flush_started = crate::executor::now();
             let flush = contain_cleanup_panic(async {
-                capacity_store_call(
-                    StorePhase::Flush,
-                    branch.store_timeouts.cleanup,
-                    || branch.store.flush(),
-                    || branch.store.storage_wait_cancelled(),
-                )
-                .await
-                .map_err(StoreCallError::into_agent)
-                .and_then(|report| {
-                    if report.is_complete() {
-                        Ok(())
-                    } else {
-                        Err(AgentError::new(
-                            AgentErrorKind::Session,
-                            "durable session flush retained unresolved checkpoint debt",
-                        ))
-                    }
-                })
+                cleanup_flush(&branch.store, branch.store_timeouts.cleanup)
+                    .await
+                    .map_err(StoreCallError::into_agent)
+                    .and_then(|report| {
+                        if report.is_complete() {
+                            Ok(())
+                        } else {
+                            Err(AgentError::new(
+                                AgentErrorKind::Session,
+                                "durable session flush retained unresolved checkpoint debt",
+                            ))
+                        }
+                    })
             })
             .await;
             if let Some(telemetry) = telemetry {

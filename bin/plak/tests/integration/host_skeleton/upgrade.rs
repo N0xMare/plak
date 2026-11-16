@@ -13,6 +13,7 @@ mod drain;
 mod live;
 mod recovery;
 mod remote;
+mod residents;
 mod selection;
 mod topology;
 mod verdicts;

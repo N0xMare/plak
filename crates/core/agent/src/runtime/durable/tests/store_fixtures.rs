@@ -61,6 +61,7 @@ pub(super) struct TestCreateStore {
     pub(super) recover_calls: AtomicUsize,
     pub(super) releases: AtomicUsize,
     pub(super) flushes: AtomicUsize,
+    pub(super) flush_refusals: Mutex<std::collections::VecDeque<SessionStoreError>>,
     pub(super) renew_calls: AtomicUsize,
     pub(super) hang_release_on: AtomicUsize,
     pub(super) hang_shutdown: AtomicBool,
@@ -1544,7 +1545,15 @@ impl SessionStore for TestCreateStore {
     fn flush(&self) -> crate::StoreFuture<'_, crate::DurabilityReport> {
         self.record_admission_job("flush");
         self.flushes.fetch_add(1, Ordering::AcqRel);
-        Box::pin(async {
+        let refusal = self
+            .flush_refusals
+            .lock()
+            .expect("flush refusals")
+            .pop_front();
+        Box::pin(async move {
+            if let Some(error) = refusal {
+                return Err(error);
+            }
             Ok(crate::DurabilityReport::from_store(
                 RuntimeDurability::Required,
                 0,

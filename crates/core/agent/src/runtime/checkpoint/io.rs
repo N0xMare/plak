@@ -123,6 +123,37 @@ pub(in crate::runtime) async fn store_call<T>(
         .map_err(StoreCallError::Store)
 }
 
+/// Independent store owners can contend on a passive SQLite checkpoint while
+/// releasing together. Flush is idempotent; retry only its definite busy
+/// refusal, under the original cleanup bound, never an ambiguous failure.
+pub(in crate::runtime) async fn cleanup_flush(
+    store: &Arc<dyn SessionStore>,
+    timeout: Duration,
+) -> Result<crate::DurabilityReport, StoreCallError> {
+    let start = crate::executor::now();
+    loop {
+        let remaining = timeout.saturating_sub(start.elapsed());
+        let result = capacity_store_call(
+            StorePhase::Flush,
+            remaining,
+            || store.flush(),
+            || store.storage_wait_cancelled(),
+        )
+        .await;
+        if !matches!(
+            result,
+            Err(StoreCallError::Store(SessionStoreError::BackendBusy))
+        ) {
+            return result;
+        }
+        let remaining = timeout.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            return result;
+        }
+        crate::executor::sleep(remaining.min(Duration::from_millis(10))).await;
+    }
+}
+
 /// Retries only a proven capacity refusal, retaining the caller's exact
 /// mutation. An ambiguous acknowledgement is returned for reconciliation,
 /// never repeated. Each physical call is bounded; the retained mutation waits

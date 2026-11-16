@@ -1093,6 +1093,62 @@ async fn shutdown_releases_the_lease_a_heartbeat_renewed_while_cleanup_joined_it
 }
 
 #[tokio::test]
+async fn settled_release_retries_only_busy_flushes_within_one_cleanup_bound() -> TestResult {
+    for (refusals, succeeds) in [
+        (vec![SessionStoreError::BackendBusy; 2], true),
+        (vec![SessionStoreError::BackendUnavailable], false),
+        (vec![SessionStoreError::BackendBusy; 128], false),
+    ] {
+        let directory = tempfile::tempdir()?;
+        let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+        let store = Arc::new(TestCreateStore::default());
+        *store.flush_refusals.lock().expect("flush refusals") = refusals.clone().into();
+        let cleanup = if succeeds {
+            Duration::from_secs(5)
+        } else {
+            Duration::from_millis(50)
+        };
+        let runtime = DurableSessionRuntime::current(
+            store.clone(),
+            RuntimeDurability::Required,
+            NonZeroU64::new(30).ok_or("nonzero lease")?,
+        )?
+        .with_store_timeouts(Duration::from_secs(1), cleanup)?;
+        let agent = runtime
+            .create(
+                "create:contended-flush",
+                durable_test_builder(
+                    workspace,
+                    ToolRegistryBuilder::default().freeze(),
+                    "test.route",
+                    b"alpha",
+                    false,
+                )?,
+            )
+            .await?;
+        let result =
+            tokio::time::timeout(cleanup + Duration::from_secs(1), agent.shutdown()).await?;
+        assert_eq!(result.is_ok(), succeeds);
+        assert!(crate::runtime::lease_released(&agent));
+        let flushes = store.flushes.load(Ordering::Acquire);
+        if succeeds {
+            assert_eq!(flushes, 3);
+        } else {
+            assert_eq!(result.unwrap_err().store_error(), refusals.first().copied());
+            if refusals.len() == 1 {
+                assert_eq!(flushes, 1, "ambiguous failure must not retry");
+            } else {
+                assert!(
+                    (1..128).contains(&flushes),
+                    "persistent busy was not bounded"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn hanging_store_cleanup_and_shutdown_are_bounded_and_redacted() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
