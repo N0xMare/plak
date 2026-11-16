@@ -5633,10 +5633,23 @@ def load_hygiene_private_names(root: Path = ROOT) -> frozenset[bytes]:
 # spans, so `name`, `name.local`, `x.name` and `name.sh` all surface `name` or
 # `name.sh`, while `my-name` and `names` do not.
 HYGIENE_NAME_RUN = re.compile(rb"[A-Za-z0-9_.-]+")
-# Generic placeholder users in examples and tests, and the container user the
-# eval pmux cell creates. Never a real account name.
+# Generic placeholder users and the synthetic qualification/eval container
+# accounts. Never an operator's account name.
 HYGIENE_HOME_PLACEHOLDERS = frozenset(
-    {"fixture", "me", "op", "pmux", "secret", "test", "tester", "u", "user", "x", "you"}
+    {
+        "fixture",
+        "me",
+        "op",
+        "plak-qual",
+        "pmux",
+        "secret",
+        "test",
+        "tester",
+        "u",
+        "user",
+        "x",
+        "you",
+    }
 )
 
 

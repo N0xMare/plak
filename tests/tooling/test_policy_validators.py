@@ -338,6 +338,7 @@ class TrackedHygieneTests(unittest.TestCase):
             "/home/user/project",
             "/home/you/.plak",
             'PMUX_CELL_HOME = "/home/pmux"',
+            'QUALIFICATION_HOME = "/home/plak-qual"',
             '"$root/home/agents/lead.toml"',
             "/tmp/home/secrets/token",
             "for home in /root /home/*; do",
