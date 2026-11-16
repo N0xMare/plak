@@ -4252,7 +4252,7 @@ refresh request and truthful Plak identity are unchanged, so the consent profile
 and its original source provenance remain unchanged. The source comparison is
 not a native 0.169.0 capture or live qualification. The earlier native 0.166.0
 capture remains historical evidence only. Plak sends the new reference version
-while retaining `originator=plakd` and its truthful user agent. The reference
+while retaining `originator=plak` and its truthful user agent. The reference
 client also sends
 `x-codex-beta-features: remote_compaction_v2` on ordinary turns; Plak sends that
 header only on a remote-compaction request, because it claims a capability
@@ -4260,7 +4260,7 @@ only that request uses. Ordinary and remote-compaction requests send
 `session-id` equal to the body's `prompt_cache_key`, bound exactly to physical
 dispatch. The backend keys prompt caching on this header, not the body field.
 A missing, non-string, or header-invalid key is refused. This Plak-owned affinity
-does not borrow client identity: `originator=plakd` and the truthful Plak user
+does not borrow client identity: `originator=plak` and the truthful Plak user
 agent remain unchanged. Its compiled compatibility
 profile was reviewed on 2026-11-15 and expires at 2027-02-13T00:00:00Z, 90 days
 after the review (§7.1); a re-review that changes no contract keeps every
@@ -5315,7 +5315,7 @@ supply only pins, key shapes and error mapping.
 | SuperGrok (xAI) | Authorization code + PKCE S256 + OIDC nonce against `https://auth.x.ai`, client id `b1a00492-073a-47ea-816f-4c329264a828`, scopes `openid profile email offline_access grok-cli:access api:access` | Paste-completed in both local and remote modes; no loopback socket is ever bound. Remote revoke exists. Authenticated catalog evidence lasts 6 h. Every revalidation (each model operation's preparation and dispatch check, compaction, the next turn) refreshes the access token when it is inside the 5-minute lead, and a running model renews its receipt after any refresh of the shared store (§7.4). A still-current catalog receipt is not a session-ending event |
 | Claude (Max) | Authorization code + PKCE S256 at `https://claude.com/cai/oauth/authorize`, client id `9d1c250a-e61b-44d9-88ed-5944d1962f5e`, redirect `https://platform.claude.com/oauth/code/callback` | Always paste-completed; no loopback listener at all. **No remote revoke exists**; logout retires the local credential only |
 
-Every subscription request identifies truthfully as Plak (`originator=plakd`,
+Every subscription request identifies truthfully as Plak (`originator=plak`,
 never a borrowed CLI identity) and is pinned to HTTP/1.1.
 
 Claude's login token exchange distinguishes a provider's non-2xx rejection
@@ -5344,7 +5344,7 @@ The isolated native OAuth initiation retains the public client, PKCE S256 and
 nonce, but also requests `conversations:read`, `conversations:write`,
 `workspaces:read` and `workspaces:write` for cloud features. Plakous does not
 implement those features and retains its narrower six requested scopes, fixed
-redirect and truthful `referrer=plakd`; the current official OIDC discovery
+redirect and truthful `referrer=plak`; the current official OIDC discovery
 still advertises all six and the pinned endpoints. An isolated expired-token
 refresh sends the same `client_id`, `grant_type=refresh_token` and
 `refresh_token` form to the token endpoint; no extra scopes are requested.
@@ -8595,7 +8595,7 @@ Each self-contained `<process_notice>` names `p<N>`, displayed command, UTC
 start time (Unix seconds with nanoseconds), elapsed runtime and terminal status.
 Integer-handle tool routes additionally carry `session_id="N"`; string-handle
 routes omit it. Natural exits carry `exit_code` when known. Explicit stops
-carry `by="model|user|plakd exit|attempt ended|hard cap"`. Unknown outcomes carry
+carry `by="model|user|plak exit|attempt ended|hard cap"`. Unknown outcomes carry
 the exact warning:
 
 > Plak stopped unexpectedly while this command was running. It may still be running outside Plak and may hold locks or ports; the runtime cap no longer applies. Check before relying on its effects.

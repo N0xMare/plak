@@ -235,7 +235,7 @@ effects retains the existing reconciliation requirement.
 
 Operator Changes reads are a separate fixed-query authority, not shell or
 file-tool requests. They exclude both the product home and the resolved
-`$XDG_STATE_HOME/plakd` (or `$HOME/.local/state/plakd`) in either direction on the
+`$XDG_STATE_HOME/plak` (or `$HOME/.local/state/plak`) in either direction on the
 execution machine, including repository toplevel, Git and common directories.
 Their worktree content identities use the same descriptor-relative no-follow,
 nonblocking regular-file opens as contained file reads (§2.6).
@@ -252,8 +252,8 @@ cannot hold a viewer waiting for a writer. Execution deadlines and cancellation
 are checked during traversal and content reads; ignored entries still consume
 the traversal budget.
 
-Both the product home and resolved `$XDG_STATE_HOME/plakd` (fallback
-`$HOME/.local/state/plakd`) are protected against overlap in either direction.
+Both the product home and resolved `$XDG_STATE_HOME/plak` (fallback
+`$HOME/.local/state/plak`) are protected against overlap in either direction.
 Local unrestricted roots are no exemption. Local inspection checks on the
 serving machine; paired inspection enforces protection on the execution
 machine. Equal path spellings on other machines confer no authority.
@@ -713,7 +713,7 @@ Every such step is built by one constructor that:
   `GIT_SSH_COMMAND`, ...; a fixed list, because the CLI boundary forbids
   ambient environment iteration) and sets only the ones the step needs
   (`GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS`, a fallback
-  `EMAIL=plakd@local` when the environment has none, and per step a private
+  `EMAIL=plak@local` when the environment has none, and per step a private
   `GIT_INDEX_FILE`, `GIT_OPTIONAL_LOCKS=0`, or fixed snapshot dates);
 - passes `-c core.fsmonitor=false -c core.hooksPath=/dev/null`, so no
   repository hook or fsmonitor daemon command runs, whatever the repository

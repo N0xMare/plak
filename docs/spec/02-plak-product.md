@@ -3112,7 +3112,7 @@ share that deadline with hosted admission, turns, and idle waiting. Expiry
 during preparation cancels the pending request, writes `plakd: run stopped at
 timeout`, and exits 6 without admitting a turn. Hosted drive never resets the clock;
 each job retains its own hard cap. A bound interrupts the current turn, stops
-owned background processes with `plakd exit` (leftovers are first relinquished
+owned background processes with `plak exit` (leftovers are first relinquished
 when `--leave-jobs-running` is set), interrupts running children resumably,
 and exits 6. Timeout is a bound only when work would continue or wait, or the
 current turn did not complete; a completed final answer with no pending work
@@ -6913,7 +6913,7 @@ Concretely, per vertical:
 
 | Vertical | What the model and the edge see |
 | --- | --- |
-| Codex OAuth | No model-visible costume. The pinned native-client registration is used for authorization, and requests send `originator=plakd` with a truthful plakd user agent and a plakd-owned `session-id` equal to the body `prompt_cache_key` on ordinary and remote-compaction requests |
+| Codex OAuth | No model-visible costume. The pinned native-client registration is used for authorization, and requests send `originator=plak` with a truthful Plak user agent and a Plak-owned `session-id` equal to the body `prompt_cache_key` on ordinary and remote-compaction requests |
 | SuperGrok OAuth | No model-visible costume. Harness text lowers as the first `input` element with `role: system`; client identity headers name `plakous` |
 | Claude OAuth | Two leading Messages `system` blocks before any product text: a billing header block carrying `cc_version`, `cc_entrypoint=cli`, `cc_turn_origin=human` for direct customer prompts (neither it nor `cc_prompt_id` is sent when the newest root intent has harness `Instruction` provenance, even after user steering), and a computed `cch` attestation over the serialized body, then `You are Claude Code, Anthropic's official CLI for Claude.` The transport pins the Claude Code 2.1.325 `claude-cli/2.1.325 (external, cli)` user agent, Stainless package `0.128.0`, and the reviewed client attribution. The `anthropic-beta` header and Messages `max_tokens` are that model's enrollment row (captured order for every row under 2.1.325, including `per-turn-control` where the row sets it; Haiku puts `claude-code-20250219` fifth). An OAuth request sends `context_management` `{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}` when thinking is enabled or adaptive, and omits it when reasoning is disabled. A direct customer prompt also carries `cc_prompt_index` and `cc_turn_index`, the root turn's session position derived from canonical history (fixed per turn across tool rounds and retries, continued across reopen, fork and compaction; spec 01 §10.6), and every request sends `diagnostics` `{"previous_message_id": …}` naming the runtime-proven previous response (`null` on a session's first request) |
 | OpenRouter | No costume; the pi pack and its base instruction; no user agent. Chat and Responses send `authorization`, `accept`, `content-type` and `x-openrouter-metadata`; Messages sends those three without the metadata header. Discovery and key usage send `authorization` and `accept`. Optional attribution adds `http-referer`, `x-openrouter-title` and `x-openrouter-categories`. The HTTP client adds no user agent |

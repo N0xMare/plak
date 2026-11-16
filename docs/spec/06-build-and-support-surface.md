@@ -1695,7 +1695,7 @@ pointer to the source build. It resolves the latest release from the
 `releases/latest` redirect, downloads the tarball and `SHA256SUMS` over HTTPS
 only, and refuses a missing entry or checksum mismatch before writing
 anything under `~/.local`. When `gh` is installed and signed in it also runs
-`gh attestation verify --repo N0xMare/plakd` and refuses on failure;
+`gh attestation verify --repo N0xMare/plak` and refuses on failure;
 otherwise it reports that only the checksum was verified
 (`PLAK_SKIP_ATTESTATION=1` skips the step). `PLAK_RELEASE_BASE` replaces
 `https://github.com/N0xMare/plak` for mirrors and tests and lifts the HTTPS-only

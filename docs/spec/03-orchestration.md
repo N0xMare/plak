@@ -1785,11 +1785,11 @@ TMP=$(mktemp -d)/index; cp "$(git rev-parse --git-path index)" "$TMP"  # 0700 di
 GIT_INDEX_FILE=$TMP git add -A
 GIT_INDEX_FILE=$TMP <secret unstage>
 T=$(GIT_INDEX_FILE=$TMP git write-tree)
-C=$(git commit-tree "$T" -p HEAD -m "plakd snapshot <label>")
+C=$(git commit-tree "$T" -p HEAD -m "plak snapshot <label>")
 ```
 
 `content` is the written tree id `T`; `commit` is the wrapper commit `C`. The
-`commit-tree` call pins `user.name=plakd`, `user.email=plakd@local`,
+`commit-tree` call pins `user.name=plak`, `user.email=plak@local`,
 `commit.gpgsign=false`, and both author and committer dates to `@0 +0000`, so
 the wrapper is a pure function of tree, parent, and label. The `-p` is omitted
 when HEAD does not resolve (an unborn branch). The working copy, the real
@@ -1807,7 +1807,7 @@ therefore cannot pin a secret the tool policy already excludes.
 **Mint.** The copy is `<launch>/.plak/worktrees/<copy_id>`, where `copy_id` is
 `<tree8>-<agent_id>` and `tree8 = sha256(tree_id)[..8]`. One shared naming
 function maps this identity to the `plak/<tree8>/<agent_id>` branch and
-`plakd-<tree8>-<agent_id>` JJ workspace. Consequently two trees sharing a checkout may both
+`plak-<tree8>-<agent_id>` JJ workspace. Consequently two trees sharing a checkout may both
 use the logical child id `c1`, and delayed cleanup from a crashed or partially
 pruned tree cannot address the other tree's path or branch. The base is the
 supplied candidate, or `snapshot(<parent cwd>)` — never the launch HEAD. The
@@ -1909,7 +1909,7 @@ inherited `GIT_*` steering variables, runs with `-c core.fsmonitor=false -c
 core.hooksPath=/dev/null` so no repository hook or fsmonitor command runs, and
 writes its scratch files privately (chapter 04 §2.6). It runs with
 `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS` and, when the environment has
-no `EMAIL`, the fallback `EMAIL=plakd@local` (a configured `user.email` still
+no `EMAIL`, the fallback `EMAIL=plak@local` (a configured `user.email` still
 wins): an unconfigured identity never makes a reflog write resolve the host
 name, which under musl without a network waits out the resolver timeout. It
 runs in its own process group, under a ceiling: 30 s for a read (status, rev-parse, counts, which also set
@@ -1929,7 +1929,7 @@ takes precedence over colocated Git.
 
 The optional `jj-lib` backend runs in process, with no JJ CLI fallback. It
 supports Git-backed JJ repositories and loads a fixed library configuration
-(`plakd`, `plakd@local`, signing disabled), without user configuration or aliases.
+(`plak`, `plak@local`, signing disabled), without user configuration or aliases.
 An installed JJ executable is needed only for a human/model that chooses to
 run JJ commands, not for host workspace operations.
 
@@ -1964,14 +1964,14 @@ native snapshots and the repository's Git `info/exclude` keeps it out of
 external JJ snapshots as well.
 
 **Mint.** The library creates `<launch>/.plak/workspaces/<copy_id>` with name
-`plakd-<copy_id>`, using the same tree-scoped identity as Git, and a new empty
+`plak-<copy_id>`, using the same tree-scoped identity as Git, and a new empty
 working-copy commit over an immutable mint base. With no candidate input, the
 parent is snapshotted and a frozen base F is written with the parent's tree
-and parent IDs, described `plakd base <copy_id>`: F is a sibling of the parent's
+and parent IDs, described `plak base <copy_id>`: F is a sibling of the parent's
 working-copy commit, not its descendant. With candidate input, that exact
 candidate is F. The child's empty working-copy commit has F as its parent,
 and the recorded base is F. F and the child are published together by
-`plakd mint workspace`; F is pinned at `refs/plak/<namespace>/bases/<agent_id>`.
+`plak mint workspace`; F is pinned at `refs/plak/<namespace>/bases/<agent_id>`.
 For JJ occupancy, ahead counts non-empty commits in `base..@`; behind counts
 `base-..parent@` excluding empty commits and commits whose tree equals F
 (the copied mint state is not new parent work). The frozen base and empty working-copy commit add no noise to

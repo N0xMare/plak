@@ -48,7 +48,7 @@ secrets; those are plakd product adapters.
 
 This complete manifest supports copying a scripted example and
 `examples/common/scripted.rs` into a consumer crate. For a source checkout,
-replace the version with `path = "../plakd/crates/plakous"`:
+replace the version with `path = "../plak/crates/plakous"`:
 
 ```toml
 [package]
