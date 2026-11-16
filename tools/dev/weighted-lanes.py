@@ -37,6 +37,7 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/gate"))
 from nextest_layout import available_parallelism, scaled_profile  # noqa: E402
+from test_artifacts import fixture_paths as worker_paths  # noqa: E402
 
 LANES = ("serial", "durability")
 
@@ -81,31 +82,6 @@ def weighted_config(serial_threads: int, durability_threads: int) -> str:
             profile_text("weighted-durability", durability, durability["test-threads"], []),
         ]
     )
-
-
-def worker_paths(manifest: str) -> dict[str, str]:
-    """The non-test workers and fixtures from the same workspace test build."""
-    records = [json.loads(line) for line in manifest.splitlines() if line.strip()]
-    found = {}
-    for variable, binary in [
-        ("PLAK_PY_HOST", "plakous-py-host"),
-        ("PLAK_JS_HOST", "plakous-js-host"),
-        ("PLAK_MCP_SERVER", "mcp-fake-server"),
-        ("PLAK_TEST_BINARY", "plakd"),
-    ]:
-        paths = {
-            row["executable"]
-            for row in records
-            if row.get("reason") == "compiler-artifact"
-            and row.get("target", {}).get("name") == binary
-            and "bin" in row.get("target", {}).get("kind", [])
-            and row.get("executable")
-            and not row.get("profile", {}).get("test")
-        }
-        if len(paths) != 1:
-            raise SystemExit(f"weighted-lanes: expected exactly one built {binary} executable")
-        found[variable] = str(Path(paths.pop()).resolve(strict=True))
-    return found
 
 
 def output(command: list[str], env: dict[str, str]) -> str:

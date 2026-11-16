@@ -314,6 +314,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         ):
             executable = self.base / binary
             executable.touch()
+            executable.chmod(0o700)
             expected[variable] = str(executable)
             for is_test in (True, False):
                 records.append(

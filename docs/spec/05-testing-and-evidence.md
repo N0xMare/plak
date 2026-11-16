@@ -1213,6 +1213,10 @@ all four executable paths themselves. Manually invoked MCP fixture tests
 require `PLAK_MCP_SERVER` to name the built workspace fixture binary.
 Standalone product crash-harness tests likewise require `PLAK_TEST_BINARY`;
 neither fixture lookup walks the intermediate test-binary directory tree.
+Standalone crash sweeps and weighted-lane trials likewise build the workspace,
+select all four non-test executable artifacts from that one Cargo JSON capture,
+and replace any inherited fixture paths before running or listing tests. A
+missing or unusable artifact refuses the run instead of using stale siblings.
 
 Python regressions distinguish queue handoff from correlated worker
 acceptance, lost receipts from successful delivery, and bounded value conversion
@@ -2029,6 +2033,24 @@ alone, and ends with `test-timing` over its profiles. Its load is not isolated:
 beside a gate on one machine, timing-sensitive tests fail in both, so it runs
 when no gate does or with lower thread counts. No gate tier runs it; a failing
 lane exits non-zero.
+
+Standalone runner fixture requirements are:
+
+| Entry point | Fixture-path contract |
+| --- | --- |
+| `dev crash-sweep`, `dev weighted-lanes` | All four paths from the runner's workspace Cargo artifact capture |
+| `dev coverage` | All four caller-supplied executable paths, validated before coverage starts |
+| `just nextest` | Caller supplies the four paths for full fixture coverage |
+| `dev jj-compat` (`jj-tools.py`) | The `test(jj)` selection exercises repository/JJ and doctor probes, not cell, MCP or product-crash fixtures |
+| `generate_binding_fixture.py`, `fixtures/current_bindings.py`, `fixtures/bootstrap_bindings.py` | Binding/export generators use explicit synthetic, never-invoked worker artifacts, not test-build executables |
+| `dev test-timing`, `dev crash-compare` (`compare_crash_sweeps.py`) | Read existing reports only; no executable fixtures |
+| Reload and upgrade rehearsals | Execute staged product/sidecar snapshots, not Rust test harnesses; no MCP-server or crash-harness fixture variables |
+| Performance smoke and cell timings | Execute the product and matching copied workers, or workers by explicit paths; no MCP-server or crash-harness fixtures |
+| Performance checks, allocations and build probes | Run pure core/project/store benchmarks or compile-only measurements; no worker/MCP/product-crash fixtures |
+| Live drivers | Execute built product/sidecar images; MCP OAuth uses its own HTTP server, not `mcp-fake-server` |
+| Harbor | Executes uploaded product and matching workers with explicit remote `PLAK_JS_HOST`/`PLAK_PY_HOST`; no Rust fixture suite |
+| Musl native/container gates | Delegate to `dev-check.sh`, which resolves fixtures inside the native/container build rather than passing host paths into a container |
+| Prompt render/diff/pin recipes | Run render-only unit tests with synthetic bindings, not worker/MCP/product-crash fixtures |
 
 The `default` profile sets `leak-timeout = { period = "5s", result = "fail" }`;
 the lane profiles inherit it.

@@ -33,11 +33,35 @@ SPEC.loader.exec_module(SWEEP)
 
 
 class CrashSweepTests(unittest.TestCase):
-    def run_sweep(self, scratch, results, args=None, listed_groups=16):
+    def run_sweep(self, scratch, results, args=None, listed_groups=16, missing_binary=None):
         if args is None:
             args = ["--strict", "--jobs", "8", "--shapes", "code_mode_cell_final"]
 
+        build_calls = []
+
         def run(command, **kwargs):
+            if command[:3] == ["cargo", "test", "--no-run"]:
+                build_calls.append(unittest.mock.call(command, **kwargs))
+                rows = []
+                for binary in ("plakous-py-host", "plakous-js-host", "mcp-fake-server", "plakd"):
+                    if binary == missing_binary:
+                        continue
+                    executable = scratch / "custom target" / binary
+                    executable.parent.mkdir(exist_ok=True)
+                    executable.touch()
+                    executable.chmod(0o700)
+                    for is_test in (True, False):
+                        rows.append(
+                            json.dumps(
+                                {
+                                    "reason": "compiler-artifact",
+                                    "target": {"name": binary, "kind": ["bin"]},
+                                    "profile": {"test": is_test},
+                                    "executable": str(executable) + ("-harness" if is_test else ""),
+                                }
+                            )
+                        )
+                return subprocess.CompletedProcess(command, results[0], stdout="\n".join(rows))
             if command[-1] != "--list":
                 return subprocess.CompletedProcess(command, 0, stdout=str(scratch) + "\n")
             selector = command[command.index("--") - 1]
@@ -56,7 +80,7 @@ class CrashSweepTests(unittest.TestCase):
                 side_effect=run,
             ),
             patch.object(SWEEP.subprocess, "check_output", side_effect=test_env_output),
-            patch.object(SWEEP.subprocess, "call", side_effect=results) as calls,
+            patch.object(SWEEP.subprocess, "call", side_effect=results[1:]) as calls,
             patch.dict(
                 "os.environ",
                 {
@@ -67,10 +91,14 @@ class CrashSweepTests(unittest.TestCase):
                     "PLAK_TEST_CELL_HELLO_MS": "1",
                     "PLAK_TEST_HOST_IDLE_EXIT_SECONDS": "1",
                     "OPENAI_API_KEY": "leaked",
+                    "PLAK_PY_HOST": "stale-worker",
+                    "PLAK_JS_HOST": "stale-worker",
+                    "PLAK_MCP_SERVER": "stale-server",
+                    "PLAK_TEST_BINARY": "stale-product",
                 },
             ),
         ):
-            return SWEEP.main(), calls.call_args_list
+            return SWEEP.main(), build_calls + calls.call_args_list
 
     def test_builds_workers_and_product_before_running_sweep_with_the_same_environment(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -78,7 +106,15 @@ class CrashSweepTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(
                 calls[0].args[0],
-                ["cargo", "test", "--no-run", "--locked", "--workspace", "--all-features"],
+                [
+                    "cargo",
+                    "test",
+                    "--no-run",
+                    "--locked",
+                    "--workspace",
+                    "--all-features",
+                    "--message-format=json",
+                ],
             )
             self.assertEqual(
                 calls[1].args[0],
@@ -99,6 +135,15 @@ class CrashSweepTests(unittest.TestCase):
             )
             env = calls[0].kwargs["env"]
             self.assertEqual(env, calls[1].kwargs["env"])
+            for variable, binary in (
+                ("PLAK_PY_HOST", "plakous-py-host"),
+                ("PLAK_JS_HOST", "plakous-js-host"),
+                ("PLAK_MCP_SERVER", "mcp-fake-server"),
+                ("PLAK_TEST_BINARY", "plakd"),
+            ):
+                self.assertEqual(
+                    env[variable], str(Path(directory).resolve() / "custom target" / binary)
+                )
             self.assertEqual(env["CARGO_TARGET_DIR"], "custom-target")
             self.assertEqual(env["CARGO_BUILD_TARGET"], "host-triple")
             self.assertEqual(env["PLAK_CRASH_SWEEP_STRICT"], "1")
@@ -200,6 +245,12 @@ class CrashSweepTests(unittest.TestCase):
             code, calls = self.run_sweep(Path(directory), [37])
             self.assertEqual(code, 37)
             self.assertEqual(len(calls), 1)
+
+    def test_missing_fixture_record_never_starts_a_sweep(self):
+        for binary in ('plakous-py-host', 'plakous-js-host', 'mcp-fake-server', 'plakd'):
+            with self.subTest(binary=binary), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(SystemExit, f'built {binary} executable'):
+                    self.run_sweep(Path(directory), [0], missing_binary=binary)
 
 
 if __name__ == "__main__":

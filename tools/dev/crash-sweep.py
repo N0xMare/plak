@@ -8,6 +8,9 @@ from pathlib import Path
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gate"))
+from test_artifacts import fixture_paths  # noqa: E402
+
 
 TERMINAL_SHAPES = {
     "runner_hold_poll": "host_skeleton::runner::hold::runner_hold_poll",
@@ -63,7 +66,7 @@ def main() -> int:
         env["PLAK_CRASH_SWEEP_SHAPES"] = "final_only,direct_tool_then_final"
     # Use the gate's test build, including both cell workers. Building only
     # plakd can silently run stale sibling executables from another tree.
-    built = subprocess.call(
+    built = subprocess.run(
         [
             "cargo",
             "test",
@@ -71,11 +74,15 @@ def main() -> int:
             "--locked",
             "--workspace",
             "--all-features",
+            "--message-format=json",
         ],
         env=env,
+        stdout=subprocess.PIPE,
+        text=True,
     )
-    if built:
-        return built
+    if built.returncode:
+        return built.returncode
+    env.update(fixture_paths(built.stdout))
     # `--workspace` keeps the feature resolution of the build above: `-p plakd`
     # resolves plakd's features alone and recompiled about twenty crates (and
     # the product binary the sweep launches) into a second artifact set.
