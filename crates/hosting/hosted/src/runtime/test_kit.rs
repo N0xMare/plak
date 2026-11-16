@@ -791,6 +791,7 @@ impl ScriptedRuntimeFactory {
     }
 }
 
+/// Drive the host over a scripted factory and return its ordered observations.
 ///
 /// # Errors
 /// Returns the same host admission, publication and release failures as the production
@@ -855,6 +856,7 @@ use std::{any::Any, thread, time::Duration};
     clippy::expect_used,
     reason = "fixture access requires a registered scripted route"
 )]
+/// Borrow the scripted factory currently installed in this fixture's configuration.
 ///
 /// # Panics
 /// Panics unless this configuration holds a scripted runtime factory.
@@ -869,6 +871,7 @@ pub fn scripted<P: plakous_host_protocol::ProtocolExtension>(
     clippy::expect_used,
     reason = "fixture mutation requires an exclusive scripted route"
 )]
+/// Exclusively borrow the installed scripted factory for fixture mutation.
 ///
 /// # Panics
 /// Panics unless the factory is scripted and its Arc has no other owners.
@@ -879,6 +882,7 @@ pub fn scripted_mut<P: plakous_host_protocol::ProtocolExtension>(
         .downcast_mut()
         .expect("scripted route")
 }
+/// Take the scripted factory, replacing it with the production construction port.
 ///
 /// # Panics
 /// Panics unless the removed factory is scripted. The configuration already contains the

@@ -993,6 +993,7 @@ pub(in crate::agent) fn openrouter_frozen_pin(
     clippy::too_many_lines,
     reason = "Child specification resolution reconstructs native provider evidence, reasoning admission, frozen tools, and the exact spawned identity."
 )]
+/// Reconstruct a child's exact session specification from its frozen parent and roster facts.
 ///
 /// # Errors
 /// Refuses missing frozen roster/parent facts, unavailable exact credentials or

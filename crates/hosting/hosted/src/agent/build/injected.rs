@@ -56,6 +56,7 @@ pub fn injected_root_tool_registrations(
     Ok(extensions.registrations().to_vec())
 }
 
+/// Create or reopen a canonical session using the supplied runtime and optional exact head.
 ///
 /// # Errors
 /// Refuses invalid creation/open inputs, binding mismatches, unavailable storage or lost

@@ -404,6 +404,7 @@ impl AttachedCodingSession {
             .await
     }
 
+    /// Compact the exact source under its operation identity and admitted runtime binding.
     ///
     /// # Errors
     /// Returns the canonical compaction refusal for the exact source and summary inputs. A
@@ -427,6 +428,7 @@ impl AttachedCodingSession {
             .await
     }
 
+    /// Recompile an explicit successor, either continuing the line or starting a new one.
     ///
     /// # Errors
     /// Returns the canonical successor-binding refusal, including invalid source state,
@@ -452,6 +454,7 @@ impl AttachedCodingSession {
         Box::pin(self.sessions.rebind(request)).await
     }
 
+    /// Inspect canonical context for this attachment without deriving admission from a view.
     ///
     /// # Errors
     /// Returns the canonical context-inspection failure for this attachment; it does not
@@ -1076,6 +1079,7 @@ async fn attach_native_source(
     result
 }
 
+/// Create an API-backed canonical root with its own topology attachment.
 ///
 /// # Errors
 /// Refuses exact API construction, topology admission or canonical session creation;
@@ -1136,6 +1140,7 @@ pub(crate) async fn build_api_coding_session_seed(
     .map_err(|error| *error.failure)
 }
 
+/// Revalidate and attach the exact API-backed root locator and frozen model evidence.
 ///
 /// # Errors
 /// Refuses exact API binding revalidation or canonical open failures, retaining typed
