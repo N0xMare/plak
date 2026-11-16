@@ -12859,6 +12859,15 @@ provider error and rendered in UTC with advice to wait or review plan/credits.
 Missing, past or invalid reset values keep the quota classification and omit the
 timestamp. Dates beyond year 9999 are invalid. The shared dialect's message
 is provider-neutral; the Codex route alone adds its ChatGPT plan/credits URL.
+Anthropic's HTTP 400 `invalid_request_error` is also typed `QuotaExceeded`
+when its bounded message starts with the reviewed API insufficient-credit
+sentence. That exact status/type/prefix combination is billing evidence, not
+an invalid request field or transient rate limit. It produces a fixed safe
+notice to add API credits or use another API account; provider prose is never
+retained. It is permanent even with `Retry-After`, with no inference retry,
+credential refresh, compaction or model/route fallback. The shared Anthropic
+classifier applies the same shape on either credential route; Claude OAuth's
+HTTP 429 subscription usage-limit classification remains separate and unchanged.
 Ordinary
 `rate_limit_exceeded`, `rate_limit_error`, and overloaded 529 remain retryable.
 An OpenRouter numeric `402` is typed quota evidence; its native value is

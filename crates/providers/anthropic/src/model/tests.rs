@@ -1326,6 +1326,46 @@ async fn api_turn_does_not_retry_a_status_the_policy_does_not_name() -> TestResu
 }
 
 #[tokio::test]
+async fn production_api_credit_balance_is_permanent_quota_without_retrying() -> TestResult {
+    let body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. synthetic-private-detail"}}"#;
+    let wire = format!(
+        "HTTP/1.1 400 Rejected\r\ncontent-type: application/json\r\nretry-after: 0\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes();
+    let (client, origin, peer) = tls_exchange(vec![Some(wire)], false).await?;
+    let binding = configured(
+        client,
+        origin,
+        static_key_source("offline-only")?,
+        "claude-haiku-5-5",
+        ReasoningEffort::Low,
+    )?;
+    let root = tempfile::tempdir()?;
+    let agent = agent(binding, root.path(), ReasoningEffort::Low)?;
+    let result = timeout(Duration::from_secs(30), async {
+        agent.prompt("hello").await?.result().await
+    })
+    .await??;
+    let error = result
+        .error()
+        .and_then(|error| error.model_error())
+        .ok_or("model error")?;
+    assert_eq!(error.kind(), ModelErrorKind::QuotaExceeded);
+    let context = error.context().ok_or("model error context")?;
+    assert_eq!(context.http_status().map(ModelHttpStatus::get), Some(400));
+    assert_eq!(context.retryability(), ModelRetryability::Permanent);
+    assert!(error.to_string().contains("add API credits"));
+    assert!(!error.to_string().contains("synthetic-private-detail"));
+    assert!(!format!("{error:?}").contains("synthetic-private-detail"));
+    assert!(result.response().is_none());
+    assert_eq!(result.model_rounds(), 1);
+    agent.shutdown().await?;
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn production_api_http_rejection_and_accepted_error_never_retry() -> TestResult {
     let rejected = |status, kind| {
         let body =

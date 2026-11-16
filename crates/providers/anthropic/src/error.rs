@@ -35,6 +35,8 @@ pub enum AnthropicErrorKind {
     Authorization,
     /// The provider rate limited the operation.
     RateLimited,
+    /// The provider rejected the operation because API credits are insufficient.
+    QuotaExceeded,
     /// The provider was overloaded or temporarily unavailable.
     Overloaded,
     /// The provider rejected the request for a context or output limit.
@@ -381,6 +383,17 @@ pub fn classify_provider_error_with_safety(
         Some("rate_limit_error") => AnthropicErrorKind::RateLimited,
         Some("overloaded_error") => AnthropicErrorKind::Overloaded,
         Some("request_too_large") => AnthropicErrorKind::Limit,
+        Some("invalid_request_error")
+            if status == Some(400)
+                && parsed.as_ref().is_some_and(|value| {
+                    value
+                        .error
+                        .message
+                        .starts_with("Your credit balance is too low to access the Anthropic API.")
+                }) =>
+        {
+            AnthropicErrorKind::QuotaExceeded
+        }
         // "prompt is too long: N tokens > M maximum" is the only name the
         // provider gives a context overflow; it arrives as a plain 400.
         Some("invalid_request_error")
@@ -409,7 +422,11 @@ pub fn classify_provider_error_with_safety(
     };
     // Provider prose is intentionally classification-only input. It is never
     // retained or exposed through Display, Debug, or the diagnostic accessor.
-    let message = "Anthropic provider error";
+    let message = if kind == AnthropicErrorKind::QuotaExceeded {
+        "Anthropic API credit balance is too low; add API credits or use another API account."
+    } else {
+        "Anthropic provider error"
+    };
     let request_id = header_request_id
         .filter(|value| valid_provider_metadata(value, MAX_PROVIDER_REQUEST_ID_BYTES))
         .map(str::to_owned)

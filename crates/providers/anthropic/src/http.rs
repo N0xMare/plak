@@ -1227,6 +1227,7 @@ fn protocol_source(error: &AnthropicError) -> MessagesAttemptProtocolError {
     // Carry the provider's own name for the refusal forward. The formatted
     // message above is diagnostic text no classifier should have to parse.
     let source = match error.kind() {
+        AnthropicErrorKind::QuotaExceeded => source.with_usage_limit(),
         AnthropicErrorKind::RateLimited => {
             source.with_refusal(plakous_messages::MessagesProviderRefusal::RateLimit)
         }

@@ -18,6 +18,79 @@ fn classify_accepted(
 const SECRET_SENTINEL: &str = "ANTHROPIC_SECRET_SENTINEL_DO_NOT_RETAIN";
 
 #[test]
+fn api_credit_balance_rejection_is_permanent_quota_with_a_fixed_safe_notice() {
+    let body = serde_json::json!({
+        "type": "error",
+        "error": {
+            "type": "invalid_request_error",
+            "message": format!(
+                "Your credit balance is too low to access the Anthropic API. {SECRET_SENTINEL}"
+            ),
+        },
+    })
+    .to_string();
+    for safety in [
+        RetrySafety::new(false, false, false),
+        RetrySafety::new(true, false, false),
+        RetrySafety::new(true, true, true),
+    ] {
+        let error = classify_provider_error_with_safety(
+            Some(400),
+            body.as_bytes(),
+            Some("req_synthetic_credit"),
+            AnthropicErrorPhase::Connect,
+            safety,
+        );
+        assert_eq!(error.kind(), AnthropicErrorKind::QuotaExceeded);
+        assert_eq!(error.retry_advice(), RetryAdvice::Never);
+        assert_eq!(error.status(), Some(400));
+        assert_eq!(error.request_id(), Some("req_synthetic_credit"));
+        assert!(error.message().contains("add API credits"));
+        assert!(!error.to_string().contains(SECRET_SENTINEL));
+        assert!(!format!("{error:?}").contains(SECRET_SENTINEL));
+    }
+}
+
+#[test]
+fn credit_balance_classification_requires_the_exact_bounded_400_shape() {
+    for (status, kind, message) in [
+        (
+            429,
+            "invalid_request_error",
+            "Your credit balance is too low to access the Anthropic API.".to_owned(),
+        ),
+        (
+            400,
+            "authentication_error",
+            "Your credit balance is too low to access the Anthropic API.".to_owned(),
+        ),
+        (
+            400,
+            "invalid_request_error",
+            "input mentions credit balance is too low".to_owned(),
+        ),
+        (
+            400,
+            "invalid_request_error",
+            format!(
+                "Your credit balance is too low to access the Anthropic API. {}",
+                "x".repeat(MAX_PROVIDER_ERROR_MESSAGE_BYTES)
+            ),
+        ),
+    ] {
+        let body = serde_json::json!({"error":{"type":kind,"message":message}}).to_string();
+        let error = classify_accepted(
+            Some(status),
+            body.as_bytes(),
+            None,
+            AnthropicErrorPhase::Connect,
+        );
+        assert_ne!(error.kind(), AnthropicErrorKind::QuotaExceeded);
+        assert!(!error.message().contains("add API credits"));
+    }
+}
+
+#[test]
 fn a_prompt_too_long_rejection_is_a_limit_and_other_invalid_requests_are_not() {
     let overflow = br#"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 270013 tokens > 200000 maximum"}}"#;
     let error = classify_accepted(Some(400), overflow, None, AnthropicErrorPhase::Connect);
