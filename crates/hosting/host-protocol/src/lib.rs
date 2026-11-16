@@ -55,7 +55,7 @@
 //!
 //! | `kind` | Fields |
 //! | --- | --- |
-//! | `prompt` | `text`, optional `steer` (only literal `true` counts) |
+//! | `prompt` | `text` (optional with images), optional `images` (array of file paths), optional `steer` (only literal `true` counts) |
 //! | `interrupt`, `compact`, `clear`, `quit` | — |
 //! | `background`, `resume_queue`, `recover` | — |
 //! | `resume` | optional `agent_id` (otherwise all held work) |
@@ -71,7 +71,10 @@
 //!
 //! `hello`, `ready`, `bye`, `error`, `status`, `busy`, `assistant`,
 //! `assistant_done`, `tool`, `queue`, `turn`, `tree`, `reasoning`,
-//! `approval`, `approval_resolved`, and `steer_ack`. The handshake and refusal
+//! `approval`, `approval_resolved`, `steer_ack`, `job_started`, `job_promoted`,
+//! `job_terminal`, `model_refusal`, `recovered`, `retry`, `turn_lifecycle`,
+//! `model_request_queued`, and `credential_wait`.
+//! The handshake and refusal
 //! lines are built here — [`envelope::hello_line`], [`envelope::ready_line`],
 //! [`envelope::bye_line`], [`envelope::diagnostic_line`] — and the rest are
 //! projected by the host from its own observations. The subset in

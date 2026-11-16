@@ -37,7 +37,9 @@ COMMANDS (stdin):
 
 EVENTS (stdout):
   hello, ready, status, busy, assistant, assistant_done, tool, error,
-  turn, tree, queue, reasoning, approval, approval_resolved, steer_ack, bye
+  turn, tree, queue, reasoning, approval, approval_resolved, steer_ack,
+  job_started, job_promoted, job_terminal, model_refusal, recovered, retry,
+  turn_lifecycle, model_request_queued, credential_wait, bye
 
 NOTES:
   Stdout is machine-only. Diagnostics go to stderr.
