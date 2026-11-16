@@ -196,7 +196,7 @@ ROUTES = {
         "claude-opus-medium", "claude", "claude-opus-5-5", "medium", None, _CLAUDE, LIGHT, CONFIRM
     ),
     "claude-fable": _route(
-        "claude-fable", "claude", "claude-fable-5-1", "low", None, _CLAUDE, LIGHT, CONFIRM
+        "claude-fable", "claude", "claude-fable-5-2", "low", None, _CLAUDE, LIGHT, CONFIRM
     ),
     # Free OpenRouter rows are best effort and flaky: informational depth.
     "or-nemotron-free": _route(

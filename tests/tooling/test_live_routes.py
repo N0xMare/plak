@@ -67,7 +67,7 @@ class CatalogTests(unittest.TestCase):
                 "claude-sonnet55-medium": ("claude", "claude-sonnet-5-5", "medium", None),
                 "claude-opus-low": ("claude", "claude-opus-5-5", "low", None),
                 "claude-opus-medium": ("claude", "claude-opus-5-5", "medium", None),
-                "claude-fable": ("claude", "claude-fable-5-1", "low", None),
+                "claude-fable": ("claude", "claude-fable-5-2", "low", None),
                 "or-nemotron-free": (
                     "openrouter",
                     "nvidia/nemotron-3-ultra-550b-a55b:free",

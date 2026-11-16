@@ -5398,7 +5398,8 @@ catalog and nothing else:
 - Claude: `claude-haiku-5-5`, `claude-sonnet-5-5` and `claude-opus-5-5` at low
   and medium (`claude-haiku55-low`, `claude-haiku55-medium`,
   `claude-sonnet55-low`, `claude-sonnet55-medium`, `claude-opus-low`,
-  `claude-opus-medium`), `claude-fable-5-1` at low (`claude-fable`).
+  `claude-opus-medium`), `claude-fable-5-2` at low (`claude-fable`, adaptive
+  thinking at the selected effort).
 - OpenRouter free, best effort: `nvidia/nemotron-3-ultra-550b-a55b:free`
   (`or-nemotron-free`), `nvidia/nemotron-3.5-super-vl:free`
   (`or-nemotron-vl-free`), `thinkingmachines/inkling:free` (`or-inkling-free`),

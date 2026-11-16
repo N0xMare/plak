@@ -55,7 +55,7 @@ Rung 3 rows are sparing and run only for a targeted confirmation.
 | `claude-opus-low` | light, sparing | 3 | smoke pass at `f07e205e` (Apple Silicon) |
 | `claude-opus-medium` | light, sparing | 3 | smoke pass at `f07e205e` (Apple Silicon) |
 | `codex-astra` | light, sparing | 3 | smoke pass at `f07e205e` (Apple Silicon) |
-| `claude-fable` | light, sparing | 3 | smoke pass at `f07e205e` (Apple Silicon) |
+| `claude-fable` | light, sparing | 3 | model changed to `claude-fable-5-2` at low; no result yet |
 
 ## History
 
