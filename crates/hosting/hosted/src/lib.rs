@@ -1,12 +1,13 @@
 //! One hosted coding session.
 //!
-//! The turn loop, its bounded cancel, the session record, and the ports a
+//! The host loop, its bounded cancel, the session record, and the ports a
 //! product supplies it with. Everything here is written against `plakous` and
 //! `plakous-host-protocol`; nothing in it knows Plak's configuration schema,
 //! its XDG layout, or its database.
 //!
 //! Products supply [`runtime::HostConfig`] and the persistence/credential ports;
-//! [`runtime`] owns the single driver and its canonical terminal settlement.
+//! [`runtime`] owns the host loop around Plakous' single-agent driver and
+//! observes that driver's canonical terminal settlement.
 //! [`host_service`] routes attachments and bounded observations, not execution
 //! authority. Its wire handlers do not turn a reconnect or an observation into
 //! a second turn admission.
@@ -16,7 +17,7 @@
 //! [`session_store::SessionRecordStore`] owns product-record commits and their
 //! compare-and-swap revisions. [`runtime::RootBindingDocument`] and
 //! [`runtime::SurfaceHandler`] keep settings parsing and publication in the
-//! product, outside the hosted driver's authority.
+//! product, outside the host loop's authority.
 //!
 #![forbid(unsafe_code)]
 #![cfg_attr(

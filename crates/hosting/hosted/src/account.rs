@@ -85,7 +85,7 @@ impl AccountName {
         &self.0
     }
 
-    /// Accept 1–32 ASCII bytes beginning with a lowercase letter, followed by
+    /// Accept 1-32 ASCII bytes beginning with a lowercase letter, followed by
     /// lowercase letters, digits or hyphens. `default` is reserved and refused.
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {

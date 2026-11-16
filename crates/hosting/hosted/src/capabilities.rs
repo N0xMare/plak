@@ -233,9 +233,9 @@ pub enum AccountAdmissionError {
         /// Exact account that failed target validation.
         account: String,
     },
-    /// The account has no available credential source.
+    /// The selected account is not in the ready credential state.
     AccountUnavailable {
-        /// Exact account whose credentials are unavailable.
+        /// Exact account whose credential state prevents admission.
         account: String,
     },
     /// An account operation holds its exclusive lifecycle slot.

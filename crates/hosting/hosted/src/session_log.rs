@@ -47,7 +47,8 @@ pub enum SessionEventPresentation {
     CompactCommittedOverflow,
 }
 
-/// Scalar log vocabulary: no nested payloads, provider fixtures or credentials.
+/// Scalar log vocabulary without nested payloads. Callers must redact sensitive
+/// values before constructing events; this type cannot identify credentials.
 #[derive(Clone, Debug)]
 pub enum JsonVal {
     /// Explicit absence, distinct from an omitted event field.

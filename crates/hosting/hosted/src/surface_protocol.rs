@@ -2,25 +2,34 @@
 
 use plakous_host_protocol::{Core, ProtocolExtension, intent_channel, observation_channel};
 
-/// Hosted `UserAction` with an optional driver-owned extension.
+/// An intent submitted for host admission, not evidence that execution began.
+/// The extension parameter adds driver-owned intents without bypassing admission.
 pub type UserAction<P = Core> = plakous_host_protocol::SessionIntent<P>;
-/// Hosted `HostEvent` with an optional driver-owned extension.
+/// A discardable observation of host state, not canonical history or turn authority.
 pub type HostEvent<P = Core> = plakous_host_protocol::SessionObservation<P>;
-/// Hosted producer content, excluding keyed transcript publications.
+/// Producer content that cannot forge keyed transcript publications; the host
+/// projection owns transcript keys and publication order.
 pub type ContentEvent<P = Core> = plakous_host_protocol::ContentObservation<P>;
-/// Hosted `UserActionSender` with an optional driver-owned extension.
+/// A clonable, nonblocking intent producer. Bounded ordinary controls can be
+/// refused; urgent controls use the mailbox's separate control path.
 pub type UserActionSender<P = Core> = plakous_host_protocol::IntentSender<P>;
-/// Hosted `UserActionReceiver` with an optional driver-owned extension.
+/// The single host consumer that delivers queued controls for admission.
 pub type UserActionReceiver<P = Core> = plakous_host_protocol::IntentReceiver<P>;
-/// Hosted `UserActionDelivery` with an optional driver-owned extension.
+/// One exact intent and its generation-bound acknowledgement. Dropping this
+/// delivery, or its extracted acknowledgement guard, releases duplicate protection
+/// for a non-repeatable intent.
 pub type UserActionDelivery<P = Core> = plakous_host_protocol::IntentDelivery<P>;
-/// Hosted `UserActionAcknowledgement` with an optional driver-owned extension.
+/// A generation-bound guard that keeps a non-repeatable intent pending until
+/// dropped, without acknowledging a later generation of the same control.
 pub type UserActionAcknowledgement<P = Core> = plakous_host_protocol::IntentAcknowledgement<P>;
-/// Hosted `UserActionSendError` with an optional driver-owned extension.
+/// A rejected submission retaining the unaccepted intent for the caller.
+/// Saturation, disconnection, duplication and attachment-role refusal are distinct.
 pub type UserActionSendError<P = Core> = plakous_host_protocol::IntentSendError<P>;
-/// Hosted `HostEventSender` with an optional driver-owned extension.
+/// A bounded, nonblocking observation producer. Saturation can drop replaceable
+/// deltas or evict older observations in favor of latest state.
 pub type HostEventSender<P = Core> = plakous_host_protocol::ObservationSender<P>;
-/// Hosted `HostEventReceiver` with an optional driver-owned extension.
+/// A bounded observation consumer; received views do not substitute for canonical
+/// history or proof that an admitted turn settled.
 pub type HostEventReceiver<P = Core> = plakous_host_protocol::ObservationReceiver<P>;
 
 /// Construct a bounded intent mailbox.
