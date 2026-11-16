@@ -16,7 +16,7 @@ mod sessions;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    assert_eq!(plakous::VERSION, "0.0.3");
+    assert_eq!(plakous::VERSION, "0.0.4");
     configuration::surface_is_nameable();
     control_observation::surface_is_nameable();
     custom_model::surface_is_nameable();

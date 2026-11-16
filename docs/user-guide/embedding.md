@@ -58,7 +58,7 @@ edition = "2024"
 rust-version = "1.99.0"
 
 [dependencies]
-plakous = { version = "0.0.3", features = ["composition", "sessions-sqlite"] }
+plakous = { version = "0.0.4", features = ["composition", "sessions-sqlite"] }
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "sync", "time"] }
 serde_json = "1.0"
 uuid = { version = "1.18", features = ["v4"] }

@@ -14,7 +14,7 @@ plakd <command> --help             one command's help
 
 A bare command that needs an argument prints that command's help instead of
 failing -- `plakd run`, `plakd login`, `plakd key set`, `plakd session show` -- and
-that is a successful exit, not an error. `plakd version` prints, for example, `plakd 0.0.3 (release; binary 0123456789ab)`.
+that is a successful exit, not an error. `plakd version` prints, for example, `plakd 0.0.4 (release; binary 0123456789ab)`.
 The binary ID identifies the executable in build checks and host upgrades.
 
 `plakd wire schema` prints this build's wire v2 JSON Schema, including the exact
@@ -625,7 +625,7 @@ $ plakd doctor
 plakd doctor
 
 CHECK              RESULT   DETAIL                                        FIX
-Version            OK       available · 0.0.3                             —
+Version            OK       available · 0.0.4                             —
 Home               OK       available · /home/you/.plak                   —
 Home free space    OK       available · product home volume has at least 5120 MiB available   —
 Config             OK       valid · /home/you/.plak/config.toml           —

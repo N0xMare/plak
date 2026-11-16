@@ -198,7 +198,7 @@ Monty worker package needs.
 
 ## Persisted versions
 
-The workspace release is **0.0.3**. The current versions below are this
+The workspace release is **0.0.4**. The current versions below are this
 build's state tuple (the 0.0.4 format cut), not the 0.0.3 release's tuple
 (`r26.e34.p35.t9`); older state is not opened. This build writes export v13,
 imports v13 and v12, and refuses v11 and older (§2.5.1 of chapter 02). The

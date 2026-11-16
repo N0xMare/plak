@@ -131,7 +131,7 @@ binary is large and has a visible cold-start cost.
 
 ```sh
 $ plakd version
-plakd 0.0.3 (release; binary 0123456789ab)
+plakd 0.0.4 (release; binary 0123456789ab)
 ```
 
 The binary ID is the executable identity used by build checks and host upgrades.
@@ -227,7 +227,7 @@ $ plakd doctor
 plakd doctor
 
 CHECK              RESULT   DETAIL                                       FIX
-Version            OK       available · 0.0.3                            —
+Version            OK       available · 0.0.4                            —
 Home               OK       available · /home/you/.plak                  —
 Config             OK       valid · /home/you/.plak/config.toml          —
 Product db         OK       available · /home/you/.plak/state/r28.e38.p38.t11/product.sqlite3 —

@@ -9,6 +9,9 @@ for one version bump, without native protocol compatibility.
 
 ## Unreleased
 
+- Advance the Rust workspace release cohort to `0.0.4`, including `plakd`.
+  The vendored Code Mode protocol keeps its upstream version.
+
 - Breaking: `plakous-tools::ImageNormalizer::normalize` now returns the typed
   `ImageNormalizationError` instead of `String`. Its display text is unchanged;
   decoder failures remain available through `source()`. The internal-tier local

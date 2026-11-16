@@ -50,7 +50,7 @@ Build identity distinguishes `maintainer release`, `maintainer debug`,
 `release`, and `debug`, and shows a binary ID: the first twelve hexadecimal
 digits of SHA-256 over the executable. A `test-hooks` build is labeled separately.
 `plakd version` and global help carry the same build identity alongside the
-package version. `0.0.3` alone is package metadata, not proof of build recency.
+package version. `0.0.4` alone is package metadata, not proof of build recency.
 The default build's version label is unchanged. A build omitting product
 features appends `; features -images,-python` (the omitted names, sorted) inside
 the build-identity parentheses. `plakd doctor` reports a `build_features` row:

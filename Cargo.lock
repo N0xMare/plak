@@ -3492,7 +3492,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "plakd"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3541,7 +3541,7 @@ dependencies = [
 
 [[package]]
 name = "plakd-wire-types"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "plakous-host-protocol",
  "schemars",
@@ -3552,7 +3552,7 @@ dependencies = [
 
 [[package]]
 name = "plakous"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -3596,7 +3596,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-agent"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "futures",
  "futures-util",
@@ -3622,7 +3622,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-anthropic"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "futures-util",
  "httpdate",
@@ -3654,7 +3654,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-attempt"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "getrandom 0.4.3",
  "httpdate",
@@ -3665,7 +3665,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-auth"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.4.3",
@@ -3691,7 +3691,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-cell"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "nix 0.28.0",
  "serde",
@@ -3702,7 +3702,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-chat-completions"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -3731,7 +3731,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-compose"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "futures",
  "plakous-codex-code-mode-protocol",
@@ -3750,7 +3750,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-exchange"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "futures",
  "futures-channel",
@@ -3767,7 +3767,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-host-protocol"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "schemars",
@@ -3780,7 +3780,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-hosted"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "image",
  "nix 0.28.0",
@@ -3820,7 +3820,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-http"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "bytes",
  "futures-util",
@@ -3842,7 +3842,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-image"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "image",
  "serde_json",
@@ -3852,7 +3852,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-js-runtime"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "nix 0.28.0",
  "plakous-cell",
@@ -3865,7 +3865,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-mcp"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -3888,7 +3888,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-mcp-fake-server"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3911,7 +3911,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-messages"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -3929,7 +3929,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-model"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -3948,7 +3948,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-offline-crash-harness"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "futures-util",
  "plakous",
@@ -3972,7 +3972,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-openai"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "futures-core",
@@ -4003,7 +4003,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-openrouter"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "futures-util",
  "plakous-agent",
@@ -4030,7 +4030,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-prompts"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "plakous-agent",
  "plakous-compose",
@@ -4043,7 +4043,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-py-worker"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "monty-alloc",
  "monty-proto",
@@ -4057,7 +4057,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-recursive-subagents"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "futures-util",
  "plakous",
@@ -4077,7 +4077,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-recursive-subagents-store"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "plakous",
  "plakous-recursive-subagents",
@@ -4095,7 +4095,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-responses"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "futures-core",
@@ -4118,7 +4118,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-runner"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "filedescriptor",
@@ -4139,7 +4139,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-runner-dial"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "blake2",
@@ -4163,7 +4163,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-runner-protocol"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -4171,7 +4171,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-store"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "futures-channel",
  "libsqlite3-sys",
@@ -4191,7 +4191,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-test-support"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "futures",
  "futures-core",
@@ -4213,7 +4213,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tool-files"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "diffy",
  "plakous-model",
@@ -4227,7 +4227,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tool-plan"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "plakous-model",
  "plakous-tools",
@@ -4239,7 +4239,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tool-process"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "filedescriptor",
  "plakous-model",
@@ -4254,7 +4254,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tool-search"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "plakous-model",
  "plakous-tools",
@@ -4266,7 +4266,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tool-web"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "htmd",
  "plakous-agent",
@@ -4287,7 +4287,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tools"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "filedescriptor",
@@ -4310,7 +4310,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-workspace"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "futures",
  "gix",
@@ -4326,7 +4326,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-xai"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "futures-core",
