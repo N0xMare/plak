@@ -174,7 +174,10 @@ fn lifecycle_notice(phase: u8) -> plakous_host_protocol::wire::HostLifecycle<Rea
 fn a_mid_drain_directory_connection_gets_the_current_phase_before_later_notices() {
     let (host, _) = fixture(limits());
     host.publish_lifecycle(lifecycle_notice(1));
-    for principal in [HostPrincipal::Socket(501), HostPrincipal::Web("fixture-login".into())] {
+    for principal in [
+        HostPrincipal::Socket(501),
+        HostPrincipal::Web("fixture-login".into()),
+    ] {
         let out = Output::default();
         let mut connection = host.connect(out.clone(), Face::Remote, principal, || false);
         connection.flush().unwrap();

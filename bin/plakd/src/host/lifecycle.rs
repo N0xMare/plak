@@ -8,10 +8,10 @@ use plakous_hosted::host_service::wire::SessionHost;
 use crate::surface_protocol::PlakExtension;
 
 pub(super) fn draining(host: &SessionHost<PlakExtension>, binary: &str, key: &str) {
-    let reason = if key != crate::home::state::state_key() {
-        HostLifecycleReason::CrossKeyUpgrade
-    } else {
+    let reason = if key == crate::home::state::state_key() {
         HostLifecycleReason::PairedUpgrade
+    } else {
+        HostLifecycleReason::CrossKeyUpgrade
     };
     host.publish_lifecycle(HostLifecycle {
         host_generation: host.generation(),

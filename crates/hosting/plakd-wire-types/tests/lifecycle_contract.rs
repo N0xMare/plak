@@ -13,11 +13,7 @@ use serde_json::json;
 fn lifecycle_is_a_closed_advisory_frame_with_a_bounded_retry_hint() {
     assert_eq!(WIRE_VERSION, 11);
     for phase in ["draining", "restarting", "stopping", "running"] {
-        for reason in [
-            "paired_upgrade",
-            "cross_key_upgrade",
-            "shutdown",
-        ] {
+        for reason in ["paired_upgrade", "cross_key_upgrade", "shutdown"] {
             let value = json!({"frame":"host_lifecycle","host_generation":7,
                 "phase":phase,"reason":reason,"target":{"binary_id":"next","state_key":"next-key"},
                 "retry_after_ms":30000});
@@ -52,10 +48,20 @@ fn bridge_refusals_have_exact_product_bytes_and_no_untrusted_detail() {
             "verification_failed",
         ),
     ] {
-        let value = json!({"frame":"refused","kind":"bridge_unavailable","reason":name,"retry_after_ms":500});
+        let retry_after_ms = matches!(
+            reason,
+            BridgeUnavailableReason::Absent
+                | BridgeUnavailableReason::Starting
+                | BridgeUnavailableReason::Stopping
+        )
+        .then_some(500);
+        let mut value = json!({"frame":"refused","kind":"bridge_unavailable","reason":name});
+        if let Some(hint) = retry_after_ms {
+            value["retry_after_ms"] = json!(hint);
+        }
         let frame = HostFrame::<PlakExtension>::Refused(HandshakeRefusal::BridgeUnavailable {
             reason,
-            retry_after_ms: Some(500),
+            retry_after_ms,
         });
         assert_eq!(serde_json::to_value(&frame).unwrap(), value);
         assert_eq!(

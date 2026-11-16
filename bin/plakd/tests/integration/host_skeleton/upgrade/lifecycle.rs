@@ -102,30 +102,63 @@ fn host_lifecycle_wire_ten_gets_only_version_mismatch_even_at_planned_stop() {
 fn host_lifecycle_stalled_peer_uses_the_same_total_stop_budget_as_handoff() {
     let Some(fixture) = fixture() else { return };
     let budget = fixture.root.join("handoff-budget.json");
-    let mut host = start_env(&fixture, &[], &[("PLAK_TEST_HOST_HANDOFF_BUDGET", budget.display().to_string())]);
+    let mut host = start_env(
+        &fixture,
+        &[],
+        &[(
+            "PLAK_TEST_HOST_HANDOFF_BUDGET",
+            budget.display().to_string(),
+        )],
+    );
     let mut stalled = UnixStream::connect(&host.socket).unwrap();
     stalled.write_all(b"{\"frame\":\"hello\"").unwrap();
     let (_observer, _) = observe(&host);
     let began = Instant::now();
     let (stopped, finished) = mpsc::channel();
-    std::thread::spawn(move || { stop(&mut host); stopped.send(()).unwrap(); });
+    std::thread::spawn(move || {
+        stop(&mut host);
+        stopped.send(()).unwrap();
+    });
     let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
     let marker_deadline = Instant::now() + Duration::from_secs(1);
-    while !std::fs::read_to_string(paths.host_lock()).unwrap().contains(" stopping") {
-        assert!(Instant::now() < marker_deadline, "stop marker was deferred until after the connection join");
+    while !std::fs::read_to_string(paths.host_lock())
+        .unwrap()
+        .contains(" stopping")
+    {
+        assert!(
+            Instant::now() < marker_deadline,
+            "stop marker was deferred until after the connection join"
+        );
         std::thread::sleep(Duration::from_millis(5));
     }
-    let result = super::super::bridge::output_after_hello(fixture.command().args(["host", "connect", "--stdio", "--auto-start"]), WIRE_VERSION);
-    assert_eq!(serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap(),
-        json!({"frame":"refused","kind":"bridge_unavailable","reason":"stopping","retry_after_ms":500}));
+    let result = bridge::output_after_hello(
+        fixture
+            .command()
+            .args(["host", "connect", "--stdio", "--auto-start"]),
+        WIRE_VERSION,
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap(),
+        json!({"frame":"refused","kind":"bridge_unavailable","reason":"stopping","retry_after_ms":500})
+    );
     finished.recv_timeout(WAIT).unwrap();
     assert!(began.elapsed() < Duration::from_secs(60));
-    let budget: serde_json::Value = serde_json::from_slice(&std::fs::read(budget).unwrap()).unwrap();
+    let budget: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(budget).unwrap()).unwrap();
     let elapsed = budget["elapsed_ms"].as_u64().unwrap();
     let remaining = budget["remaining_ms"].as_u64().unwrap();
-    assert!(elapsed >= 1900, "the stalled handshake did not exercise the join allowance: {budget}");
-    assert!(remaining < 54_000, "advisory waits were added outside the handoff budget: {budget}");
-    assert!(elapsed + remaining <= 55_000, "the stop margin was spent twice: {budget}");
+    assert!(
+        elapsed >= 1900,
+        "the stalled handshake did not exercise the join allowance: {budget}"
+    );
+    assert!(
+        remaining < 54_000,
+        "advisory waits were added outside the handoff budget: {budget}"
+    );
+    assert!(
+        elapsed + remaining <= 55_000,
+        "the stop margin was spent twice: {budget}"
+    );
 }
 
 #[test]
@@ -149,31 +182,75 @@ fn host_lifecycle_same_key_restart_precedes_eof_and_changes_generation() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     let order = fixture.root.join("ready-order");
-    let mut host = start_env(&fixture, &[], &[("PLAK_TEST_HOST_UPGRADE_READY_ORDER", order.display().to_string())]);
+    let mut host = start_env(
+        &fixture,
+        &[],
+        &[(
+            "PLAK_TEST_HOST_UPGRADE_READY_ORDER",
+            order.display().to_string(),
+        )],
+    );
+    let mut stalled = UnixStream::connect(&host.socket).unwrap();
+    stalled.write_all(b"{\"frame\":\"hello\"").unwrap();
     let (reader, generation) = observe(&host);
     let id = binary(&fixture);
-    let result = output_env(
-        &fixture,
-        &["host", "upgrade", "--expect-binary", &id, "--drain", "0"],
-        false,
-        &[("PLAK_TEST_FORCE_HOST_UPGRADE", "1")],
+    let mut request = fixture.command();
+    request
+        .args(["host", "upgrade", "--expect-binary", &id, "--drain", "0"])
+        .env("PLAK_TEST_FORCE_HOST_UPGRADE", "1");
+    let upgrading = std::thread::spawn(move || request.output().unwrap());
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let deadline = Instant::now() + WAIT;
+    while !std::fs::read_to_string(paths.host_lock())
+        .unwrap_or_default()
+        .contains(" restarting")
+    {
+        assert!(
+            Instant::now() < deadline,
+            "committed restart was not marked during the stalled-peer join"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let reconnected = bridge::output_after_hello(
+        fixture
+            .command()
+            .args(["host", "connect", "--stdio", "--auto-start"]),
+        WIRE_VERSION,
     );
+    assert!(
+        reconnected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reconnected.stderr)
+    );
+    let welcome: serde_json::Value = serde_json::from_slice(&reconnected.stdout).unwrap();
+    assert_eq!(
+        welcome["frame"], "welcome",
+        "a committed restart must be awaited, not refused"
+    );
+    assert_ne!(welcome["host_generation"], generation);
+    let result = upgrading.join().unwrap();
     assert!(
         result.status.success(),
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    assert_eq!(std::fs::read_to_string(order).unwrap(), "restarting", "ready became observable before restarting was published");
+    assert_eq!(
+        std::fs::read_to_string(order).unwrap(),
+        "restarting",
+        "ready became observable before restarting was published"
+    );
     let notices = notices_to_eof(reader, generation);
     assert_eq!(notices.first().unwrap().phase, HostLifecyclePhase::Draining);
     assert_eq!(
         notices.last().unwrap().phase,
         HostLifecyclePhase::Restarting
     );
-    assert!(notices.iter().all(
-        |notice| notice.reason == HostLifecycleReason::PairedUpgrade
-            && notice.target.as_ref().unwrap().binary_id == id
-    ));
+    assert!(
+        notices
+            .iter()
+            .all(|notice| notice.reason == HostLifecycleReason::PairedUpgrade
+                && notice.target.as_ref().unwrap().binary_id == id)
+    );
     let (_, next_generation) = observe(&host);
     assert_ne!(next_generation, generation);
     stop(&mut host);

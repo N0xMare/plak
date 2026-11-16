@@ -22,12 +22,18 @@ pub(super) struct StartFailure {
 
 impl From<CliFailure> for StartFailure {
     fn from(failure: CliFailure) -> Self {
-        Self { reason: BridgeUnavailableReason::VerificationFailed, failure: Box::new(failure) }
+        Self {
+            reason: BridgeUnavailableReason::VerificationFailed,
+            failure: Box::new(failure),
+        }
     }
 }
 
 fn policy_refused(detail: &str) -> StartFailure {
-    StartFailure { reason: BridgeUnavailableReason::StartRefused, failure: Box::new(CliFailure::new(detail)) }
+    StartFailure {
+        reason: BridgeUnavailableReason::StartRefused,
+        failure: Box::new(CliFailure::new(detail)),
+    }
 }
 
 pub(super) fn start(paths: &PlakPaths, deadline: Instant) -> Result<bool, StartFailure> {
@@ -70,8 +76,10 @@ pub(super) fn start(paths: &PlakPaths, deadline: Instant) -> Result<bool, StartF
         if Instant::now() >= deadline {
             let _ = helper.kill();
             let _ = helper.wait();
-            return Err(StartFailure { reason: BridgeUnavailableReason::Starting,
-                failure: Box::new(CliFailure::new("the detached host starter timed out")) });
+            return Err(StartFailure {
+                reason: BridgeUnavailableReason::Starting,
+                failure: Box::new(CliFailure::new("the detached host starter timed out")),
+            });
         }
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -303,7 +311,8 @@ fn refuse_installed_unit(
         if !directory.is_absolute() {
             return Err(CliFailure::new(
                 "host unit lookup needs absolute OS configuration paths; absence is unproven",
-            ).into());
+            )
+            .into());
         }
         let path = directory.join("plakd-host.service");
         match std::fs::symlink_metadata(&path) {

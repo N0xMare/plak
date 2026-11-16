@@ -436,6 +436,8 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     # repository gate's offline model selector. Naming the model rather than a
     # bare flag keeps the selection an explicit binding fact.
     ("plakd", "src/test_hooks.rs"): [
+        ("var_os", (("string", "PLAK_TEST_HOST_HANDOFF_BUDGET"),)),
+        ("var_os", (("string", "PLAK_TEST_HOST_UPGRADE_READY_ORDER"),)),
         ("var", (("string", "PLAK_TEST_STATE_KEY"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION"),)),

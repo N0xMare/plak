@@ -309,7 +309,10 @@ where
         let connection_id = self.next_connection.fetch_add(1, Ordering::Relaxed);
         // Register under the same lock order as publication, so a concurrent
         // drain is either seeded here or queued by the publisher, never missed.
-        let latest = self.lifecycle_latest.lock().unwrap_or_else(PoisonError::into_inner);
+        let latest = self
+            .lifecycle_latest
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         self.lifecycle
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

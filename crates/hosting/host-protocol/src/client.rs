@@ -62,9 +62,9 @@ use serde::de::DeserializeOwned;
 use crate::channel::transcript_observation;
 use crate::views::transcript::{NoticeScope, TranscriptRow, TranscriptScope};
 use crate::wire::{
-    Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, Hello, HostFrame, HostLifecycle,
-    LineReader, NodeAddress, Op, Outcome, RequestId, RequestRefusal, SnapshotAssembler, Welcome,
-    WireError, decode_host_line, encode_line, take_images,
+    Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, Hello, HostFrame,
+    HostLifecycle, LineReader, NodeAddress, Op, Outcome, RequestId, RequestRefusal,
+    SnapshotAssembler, Welcome, WireError, decode_host_line, encode_line, take_images,
 };
 use crate::{
     IntentSendError, ObservationReceiver, ObservationSender, ProtocolExtension, SessionIntent,
@@ -360,6 +360,27 @@ struct State<P: ProtocolExtension> {
 }
 
 impl<P: ProtocolExtension> State<P> {
+    fn lifecycle(&mut self, frame: HostFrame<P>) -> bool {
+        if let HostFrame::HostLifecycle {
+            host_generation,
+            phase,
+            reason,
+            target,
+            retry_after_ms,
+        } = frame
+        {
+            self.host_lifecycle = Some(HostLifecycle {
+                host_generation,
+                phase,
+                reason,
+                target,
+                retry_after_ms,
+            });
+            return true;
+        }
+        false
+    }
+
     fn host_stream(&mut self, frame: HostFrame<P>) -> std::io::Result<bool> {
         if self.host_streams.len() >= 64 {
             return Err(std::io::Error::other(
@@ -1410,13 +1431,8 @@ impl<P: ProtocolExtension> Inner<P> {
         P::Intent: Serialize,
     {
         match frame {
-            frame @ HostFrame::TerminalStream { .. } => {
-                state.host_stream(frame)
-            }
-            HostFrame::HostLifecycle { host_generation, phase, reason, target, retry_after_ms } => {
-                state.host_lifecycle = Some(HostLifecycle { host_generation, phase, reason, target, retry_after_ms });
-                Ok(true)
-            }
+            frame @ HostFrame::TerminalStream { .. } => state.host_stream(frame),
+            frame @ HostFrame::HostLifecycle { .. } => Ok(state.lifecycle(frame)),
             HostFrame::Response { id, outcome } => {
                 if let Some(root) = state.selections.remove(&id) {
                     self.selected(state, root, &outcome);

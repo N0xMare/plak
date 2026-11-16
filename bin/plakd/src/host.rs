@@ -345,9 +345,10 @@ fn bind_web(
 }
 
 fn hand_off(host: &SessionHost<crate::surface_protocol::PlakExtension>, elapsed: Duration) {
-    let deadline = HANDOFF_DEADLINE.saturating_sub(elapsed).saturating_sub(STOP_MARGIN);
-    #[cfg(feature = "test-hooks")]
-    crate::test_hooks::record_host_handoff_budget(elapsed, deadline);
+    let deadline = HANDOFF_DEADLINE
+        .saturating_sub(elapsed)
+        .saturating_sub(STOP_MARGIN);
+    crate::test_hooks::host_lifecycle::record_handoff_budget(elapsed, deadline);
     for (session, failure) in host.hand_off_all(deadline) {
         eprintln!(
             "plakd host: session {session} was not handed off: {}",

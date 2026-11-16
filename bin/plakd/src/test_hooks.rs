@@ -43,16 +43,22 @@ use crate::{product_agent, product_config, product_host, product_paths};
 /// The exact model id this hook answers to.
 pub(crate) const SELECTOR: &str = "offline-loopback-v1";
 
-pub(crate) fn record_host_handoff_budget(elapsed: std::time::Duration, remaining: std::time::Duration) {
-    if let Some(path) = std::env::var_os("PLAK_TEST_HOST_HANDOFF_BUDGET") {
-        let value = serde_json::json!({"elapsed_ms":elapsed.as_millis(), "remaining_ms":remaining.as_millis()});
-        let _ = std::fs::write(path, value.to_string());
+#[cfg(feature = "web")]
+pub(crate) mod host_lifecycle {
+    pub(crate) fn record_handoff_budget(
+        elapsed: std::time::Duration,
+        remaining: std::time::Duration,
+    ) {
+        if let Some(path) = std::env::var_os("PLAK_TEST_HOST_HANDOFF_BUDGET") {
+            let value = serde_json::json!({"elapsed_ms":elapsed.as_millis(), "remaining_ms":remaining.as_millis()});
+            let _ = std::fs::write(path, value.to_string());
+        }
     }
-}
 
-pub(crate) fn record_upgrade_ready_order(restarting: bool) {
-    if let Some(path) = std::env::var_os("PLAK_TEST_HOST_UPGRADE_READY_ORDER") {
-        let _ = std::fs::write(path, if restarting { "restarting" } else { "missing" });
+    pub(crate) fn record_ready_order(restarting: bool) {
+        if let Some(path) = std::env::var_os("PLAK_TEST_HOST_UPGRADE_READY_ORDER") {
+            let _ = std::fs::write(path, if restarting { "restarting" } else { "missing" });
+        }
     }
 }
 

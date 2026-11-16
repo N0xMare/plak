@@ -63,13 +63,23 @@ fn bridge_refusal_requires_one_bounded_hello_before_discovery() {
 #[test]
 fn bridge_refusal_auto_start_permission_failure_requires_repair() {
     let Some(fixture) = fixture() else { return };
+    let _cleanup = StartedHome(fixture.home());
     let host = fixture.home().join("host");
     std::fs::create_dir_all(&host).unwrap();
-    std::fs::set_permissions(host, std::fs::Permissions::from_mode(0o777)).unwrap();
-    let result = output_after_hello(fixture.command().args(["host", "connect", "--stdio", "--auto-start"]), WIRE_VERSION);
+    let log = host.join("auto-start.log");
+    std::fs::write(&log, "not a private log").unwrap();
+    std::fs::set_permissions(log, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let result = output_after_hello(
+        fixture
+            .command()
+            .args(["host", "connect", "--stdio", "--auto-start"]),
+        WIRE_VERSION,
+    );
     assert_eq!(result.status.code(), Some(1));
-    assert_eq!(serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap(),
-        json!({"frame":"refused","kind":"bridge_unavailable","reason":"verification_failed"}));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap(),
+        json!({"frame":"refused","kind":"bridge_unavailable","reason":"verification_failed"})
+    );
 }
 
 #[test]
@@ -121,15 +131,28 @@ fn bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed() {
     drop(held);
     let held = held_lock(&fixture, &key, "stopping");
     refusal(&fixture, "stopping");
-    let result = output_after_hello(fixture.command().args(["host", "connect", "--stdio", "--auto-start"]), WIRE_VERSION);
-    assert_eq!(serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap(),
-        json!({"frame":"refused","kind":"bridge_unavailable","reason":"stopping","retry_after_ms":500}));
+    let result = output_after_hello(
+        fixture
+            .command()
+            .args(["host", "connect", "--stdio", "--auto-start"]),
+        WIRE_VERSION,
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap(),
+        json!({"frame":"refused","kind":"bridge_unavailable","reason":"stopping","retry_after_ms":500})
+    );
     assert!(!fixture.home().join("host/auto-start.log").exists());
     drop(held);
     let held = held_lock(&fixture, &key, "restarting");
     let mut bridge = Bridge::start(&fixture);
     bridge.hello(WIRE_VERSION);
-    assert!(bridge.lines.recv_timeout(Duration::from_millis(100)).is_err(), "restart was refused instead of awaited");
+    assert!(
+        bridge
+            .lines
+            .recv_timeout(Duration::from_millis(100))
+            .is_err(),
+        "restart was refused instead of awaited"
+    );
     drop(held);
     let mut host = start(&fixture);
     assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
