@@ -3933,6 +3933,35 @@ and no omitted reasoning becomes text. The API replay account includes the
 API-key generation, so a newly configured key cannot reuse the old signature even
 without aggregate replay metadata. Compaction preparation and successor
 measurement use the same closed-history authority.
+
+Thinking signatures bind the content before each block, not just its target
+configuration. Semantic cuts and offline prefix rewrites (tool placeholders and
+image retirement) therefore omit replay-bearing reasoning after the first
+changed content, including signed, omitted and redacted thinking. The omission
+is canonical, never a text fallback, so later artifacts cannot resurrect it.
+All Messages routes, including OpenRouter, use that same neutral history
+transformation. An unchanged prefix retains native reasoning byte-exact;
+appending tool results or a new prompt does not invalidate it, and reasoning
+produced on a compacted history remains replayable. Never omit an intermediate
+thinking block while keeping later invalidated thinking. Within an unchanged
+tool-use turn, thinking accompanies its tool calls complete and unmodified.
+After an intentional prefix rewrite the invalid thinking suffix is removed
+with all other content and tool correlations preserved; this follows the
+provider's prefix-mismatch remediation, not a retry or server-side drop policy.
+Manual thinking's final-assistant constraint still applies: a tool-result-only
+continuation whose assistant turn lost its initial thinking refuses preparation
+with typed `ProtectedHistory`, rather than sending an invalid manual request.
+A new non-tool user turn closes that loop. Adaptive thinking has no requirement
+that each assistant message begin with thinking.
+
+Known limitation: an explicit recompile-for-target that changes system content,
+instructions or tools while retaining signed reasoning can still invalidate
+thinking on API-key Anthropic and OpenRouter Messages. This history-rewrite
+fix does not refuse profile switches or rebinds; Claude OAuth already drops
+mismatched thinking server-side. A later release must add a transient
+prefix-binding proof at lowering, rather than a persisted-format change or
+a blanket rebind refusal.
+
 No predecessor replay decoder is retained. Responses-family continuation and encrypted reasoning
 are used only under exact binding. An unchanged binding and canonical item prefix
 retain the manifest family artifact across completed tool exchanges, follow-up
@@ -10339,8 +10368,10 @@ Protected-only overflow is typed before dispatch.
 
 The successor keeps the latest intent and every steering segment verbatim, so
 a rolling cut inside the active turn replaces its sealed middle with the
-summary while the instruction and the current round's batch survive byte for
-byte. The summarizer's input is the folded set in source order — plus the
+summary while the instruction and the current round's tool calls and results
+survive byte for byte, except that replay-bearing reasoning invalidated by the
+new prefix is omitted (§6.1). The summarizer's input is the folded set in
+source order — plus the
 latest intent when the cut reaches inside the turn, since the summary must
 preserve the user intent it is folding work for. A Codex native successor keeps
 the same protected current-round tail verbatim after its compaction item
@@ -10351,10 +10382,12 @@ the protected tail, a completed tool-call-and-result group may have its
 **result body** replaced by a bounded placeholder without the group being
 split, reordered or dropped. User intent, assistant text, reasoning, encrypted
 replay, native compaction items and committed compaction outputs are never
-rewritten by a tool-result-body placeholder pass. Image residency is a separate
+rewritten by a tool-result-body placeholder pass, except that native reasoning
+whose preceding content changes is omitted (§6.1). Image residency is a separate
 revisioned exception: it can replace an image block in an older user intent or
 an image part in a consumed tool result, keeping the group, item identity,
-block/part position, call/result correlation and all other content unchanged.
+block/part position, call/result correlation and all other content unchanged,
+with the same invalidated-native-reasoning omission.
 The latest committed intent and incoming prompt, every steering segment, the
 unanswered tool batch, reasoning, opaque/native items and compaction outputs
 remain protected. The two newest otherwise unprotected images also remain.

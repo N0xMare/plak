@@ -68,6 +68,7 @@ pub(in crate::runtime) fn residency_successor(
     segments.push(note(source, plan, workflow)?);
     Ok(ResidencySuccessor {
         history: CanonicalHistory::new(segments)
+            .and_then(|successor| successor.without_invalidated_reasoning(source))
             .map_err(|_| invalid("image residency successor invalid"))?,
         notice,
     })

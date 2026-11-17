@@ -15,6 +15,7 @@ use crate::semantic_json::{canonicalize_normalized_prevalidated, canonicalize_pr
 use crate::{Actor, ContentBlock, ConversationItem, Digest, DigestDomain, DigestError, EntryId};
 
 mod planning;
+mod rewrite;
 mod view;
 
 pub use planning::{

@@ -98,6 +98,54 @@ fn byte_target_stops_exactly_at_seventy_five_percent() {
 }
 
 #[test]
+fn image_retirement_drops_native_reasoning_invalidated_by_the_new_prefix() {
+    use plakous_model::{
+        DataClassification, ProtocolId, ReasoningBlock, ReasoningVisibility, ReplayEnvelope,
+        ReplayKindId, ReplayScope,
+    };
+    let replay = ReplayEnvelope::new(
+        ProtocolId::new("fixture.protocol").expect("protocol"),
+        None,
+        ReplayScope::Protocol,
+        ReplayKindId::new("fixture.reasoning").expect("kind"),
+        1,
+        DataClassification::Sensitive,
+        serde_json::value::RawValue::from_string("\"synthetic\"".into()).expect("payload"),
+    )
+    .expect("replay");
+    let source = fixture(21, 1)
+        .append(segment(
+            4,
+            HistorySegmentKind::ReasoningReplay,
+            Actor::Assistant,
+            vec![
+                ContentBlock::Reasoning(
+                    ReasoningBlock::new(ReasoningVisibility::Omitted, None, Some(replay))
+                        .expect("reasoning"),
+                ),
+                text(),
+            ],
+        ))
+        .expect("append");
+    let plan = evaluate(&source, ImageTotals::ZERO, ResidentImageBudget::default())
+        .expect("policy")
+        .expect("plan");
+    let successor = residency_successor(&source, &plan, workflow()).expect("successor");
+    assert_eq!(
+        image_totals(&successor.history, ImageTotals::ZERO),
+        plan.after
+    );
+    let assistant = successor
+        .history
+        .segments()
+        .iter()
+        .flat_map(HistorySegment::items)
+        .find(|item| item.id() == EntryId::try_from(Uuid::from_u128(4)).expect("entry"))
+        .expect("retained assistant");
+    assert_eq!(assistant.blocks(), &[text()]);
+}
+
+#[test]
 fn retiring_uri_images_decrements_unknown_bytes_and_recomputes_totals() {
     let uri = ImageBlock::new(
         "image/png",

@@ -375,6 +375,65 @@ mod placeholders {
         );
     }
 
+    #[test]
+    fn placeholders_drop_native_reasoning_invalidated_by_the_new_prefix() {
+        use plakous_model::{
+            DataClassification, ProtocolId, ReasoningBlock, ReasoningVisibility, ReplayEnvelope,
+            ReplayKindId, ReplayScope,
+        };
+        let source = fixture();
+        let replay = ReplayEnvelope::new(
+            ProtocolId::new("fixture.protocol").expect("protocol"),
+            None,
+            ReplayScope::Protocol,
+            ReplayKindId::new("fixture.reasoning").expect("kind"),
+            1,
+            DataClassification::Sensitive,
+            serde_json::value::RawValue::from_string("\"synthetic\"".into()).expect("payload"),
+        )
+        .expect("replay");
+        let assistant = ConversationItem::new(
+            EntryId::try_from(Uuid::from_u128(980_002)).expect("entry"),
+            Actor::Assistant,
+            vec![
+                ContentBlock::Reasoning(
+                    ReasoningBlock::new(ReasoningVisibility::Omitted, None, Some(replay))
+                        .expect("reasoning"),
+                ),
+                ContentBlock::Text(TextBlock::new("synthetic answer", None).expect("text")),
+            ],
+            Provenance::ModelOutput,
+        )
+        .expect("assistant");
+        let source = source
+            .append(
+                HistorySegment::new(HistorySegmentKind::ReasoningReplay, vec![assistant])
+                    .expect("segment"),
+            )
+            .expect("append");
+        let successor = placeholder_successor(
+            &source,
+            &collect_placeholder_candidates(&source),
+            1,
+            workflow(),
+        )
+        .expect("successor");
+        assert!(
+            !successor
+                .history
+                .segments()
+                .iter()
+                .flat_map(HistorySegment::items)
+                .flat_map(ConversationItem::blocks)
+                .any(|block| matches!(block, ContentBlock::Reasoning(_)))
+        );
+        assert_eq!(placeholder_bodies(&successor.history).len(), 1);
+        assert_eq!(
+            source.segments().len() + 2,
+            successor.history.segments().len()
+        );
+    }
+
     /// Pins the projection that `plakous-responses`'s
     /// `fresh_codex_body_matches_portable_reasoning_projection` reproduces:
     /// reasoning is dropped and an item left without blocks is elided.

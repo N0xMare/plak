@@ -363,6 +363,9 @@ pub fn lower_request_with_active_artifact(
             "manual Messages thinking is incompatible with forced or specific tool choice",
         ));
     }
+    if matches!(&thinking, Some(ThinkingParam::Enabled { .. })) {
+        validate_manual_thinking_loop(&messages)?;
+    }
     let active_artifact_container = active_artifact_lineage
         .as_ref()
         .and_then(|_| container.clone());
@@ -443,6 +446,44 @@ pub fn lower_request_with_active_artifact(
         active_artifact_container,
         replay_diagnostics,
         historical_projection_diagnostics,
+    })
+}
+
+fn validate_manual_thinking_loop(
+    messages: &[super::MessageParam],
+) -> Result<(), MessagesRequestError> {
+    let tool_results_only = |message: &super::MessageParam| {
+        message.role == MessageRole::User
+            && !message.content.is_empty()
+            && message
+                .content
+                .iter()
+                .all(|block| matches!(block, super::MessageBlock::ToolResult { .. }))
+    };
+    if !messages.last().is_some_and(tool_results_only) {
+        return Ok(());
+    }
+    let start = messages
+        .iter()
+        .rposition(|message| message.role == MessageRole::User && !tool_results_only(message))
+        .map_or(0, |index| index + 1);
+    let first_assistant = messages[start..]
+        .iter()
+        .find(|message| message.role == MessageRole::Assistant);
+    if first_assistant
+        .and_then(|message| message.content.first())
+        .is_some_and(|block| {
+            matches!(
+                block,
+                super::MessageBlock::Thinking { .. } | super::MessageBlock::RedactedThinking { .. }
+            )
+        })
+    {
+        return Ok(());
+    }
+    Err(MessagesRequestError {
+        kind: super::MessagesRequestErrorKind::ProtectedHistory,
+        message: "manual Messages tool-loop continuation requires its original thinking prefix; start a new user turn".into(),
     })
 }
 

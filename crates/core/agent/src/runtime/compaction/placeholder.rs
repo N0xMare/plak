@@ -12,7 +12,8 @@
 //! call-and-result group stays whole and paired, and only the result body is
 //! replaced by a bounded placeholder naming the tool, the call id and the
 //! original size in bytes. A placeholder-only pass never changes user intent,
-//! assistant text, reasoning, encrypted replay or committed compaction outputs.
+//! assistant text or committed compaction outputs. Native reasoning invalidated
+//! by the rewritten prefix is omitted, never flattened into text.
 //! An explicitly authorized portable pass also records replay loss with a
 //! steering note and the full source range. The history's sole compaction
 //! segment records the pass, rather than leaving a silent deletion.
@@ -676,6 +677,7 @@ pub(in crate::runtime) fn placeholder_successor(
         selected_ordered,
     )?);
     let history = CanonicalHistory::new(segments)
+        .and_then(|successor| successor.without_invalidated_reasoning(history))
         .map_err(|_| invalid("tool-result placeholders successor is invalid"))?;
     Ok(PlaceholderSuccessor {
         history,

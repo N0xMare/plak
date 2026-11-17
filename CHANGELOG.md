@@ -156,6 +156,11 @@ for one version bump, without native protocol compatibility.
 
 ### Plakous
 
+- Omit native reasoning invalidated by compaction or earlier-content rewrites,
+  preventing Messages thinking-signature failures while preserving unchanged replay.
+- Known limitation: API-key Anthropic and OpenRouter Messages may reject retained
+  thinking after an explicit system/tool recompile; transient lowering proofs are planned.
+
 - Add durable agent lines: only the head branch commits, head-advancing rebinds
   and same-store carries continue that line, and forks start new lines.
   Superseded branches are read-only; predecessor history is reclaimed by

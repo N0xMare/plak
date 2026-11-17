@@ -920,6 +920,14 @@ The real child-result cases distinguish detached move compilation from ordinary
 frozen-presentation reopen: submitted results must commit through the live tree
 writer, while passive finished-child compilation leaves custody and grants alone.
 
+Offline compaction regressions use synthetic native-reasoning envelopes only.
+They check that a retained tool exchange loses invalidated reasoning but keeps
+calls/results, that Messages translation after a cut omits signed, omitted and
+redacted thinking under both exact and portable policies, and that unchanged
+prefixes and post-cut append-only reasoning retain exact replay. Prefix-change
+cases also cover tool-result placeholders and image retirement. These tests
+prove request/history projection, not provider acceptance or live qualification.
+
 ## 1. Gate layers
 
 The authoritative gate is `tools/gate/dev-check.sh`, in four tiers plus an

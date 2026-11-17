@@ -901,6 +901,75 @@ fn semantic_compaction_cut_seals_whole_groups_and_builds_shared_successor() {
 }
 
 #[test]
+fn semantic_compaction_invalidates_native_reasoning_in_the_retained_tail() {
+    let replay = crate::ReplayEnvelope::new(
+        crate::ProtocolId::new("fixture.protocol").expect("protocol"),
+        None,
+        crate::ReplayScope::Protocol,
+        crate::ReplayKindId::new("fixture.reasoning").expect("kind"),
+        1,
+        crate::DataClassification::Sensitive,
+        serde_json::value::RawValue::from_string("\"synthetic\"".into()).expect("payload"),
+    )
+    .expect("replay");
+    let mut exchange = complete_exchange(100).items().to_vec();
+    let call = &exchange[0];
+    exchange[0] = ConversationItem::new(
+        call.id(),
+        call.actor(),
+        vec![
+            ContentBlock::Reasoning(
+                ReasoningBlock::new(ReasoningVisibility::Omitted, None, Some(replay))
+                    .expect("reasoning"),
+            ),
+            call.blocks()[0].clone(),
+        ],
+        call.provenance(),
+    )
+    .expect("assistant");
+    let source = ConversationView::from_shared(
+        CanonicalHistory::new(vec![
+            HistorySegment::new(
+                HistorySegmentKind::RecentIntent,
+                vec![text(1, Actor::User, "old intent")],
+            )
+            .expect("old intent"),
+            HistorySegment::new(
+                HistorySegmentKind::Conversation,
+                vec![text(2, Actor::Assistant, "old answer")],
+            )
+            .expect("old answer"),
+            HistorySegment::new(
+                HistorySegmentKind::RecentIntent,
+                vec![text(3, Actor::User, "latest intent")],
+            )
+            .expect("latest intent"),
+            HistorySegment::new(HistorySegmentKind::ToolExchange, exchange).expect("exchange"),
+        ])
+        .expect("history"),
+        WorkingProjection::default(),
+    );
+    let cut =
+        SemanticCompactionCut::seal(&source, &ContextHistoryPlan::new(&source).expect("plan"))
+            .expect("cut");
+    let successor = cut
+        .build_successor(&compaction_summary(200, "synthetic summary"))
+        .expect("successor");
+    assert!(source.items().iter().any(|item| {
+        item.blocks()
+            .iter()
+            .any(|block| matches!(block, ContentBlock::Reasoning(_)))
+    }));
+    let retained = successor.segments().get(2).expect("retained exchange");
+    assert_eq!(retained.kind(), HistorySegmentKind::ToolExchange);
+    assert!(matches!(
+        retained.items()[0].blocks(),
+        [ContentBlock::ToolCall(_)]
+    ));
+    assert_eq!(retained.items()[1], source.items()[4]);
+}
+
+#[test]
 fn semantic_compaction_cut_folds_prior_compaction_exactly_once() {
     let old_summary = compaction_summary(1, "prior summary");
     let old_intent = HistorySegment::new(

@@ -1019,6 +1019,48 @@ fn compact_context(
     Ok((compacted, successor, summary))
 }
 
+#[test]
+fn semantic_compaction_publication_accepts_the_prefix_safe_retained_tail() -> TestResult {
+    use plakous_model::{
+        DataClassification, ProtocolId, ReasoningBlock, ReasoningVisibility, ReplayEnvelope,
+        ReplayKindId, ReplayScope,
+    };
+    let source = context_history(2)?;
+    let replay = ReplayEnvelope::new(
+        ProtocolId::new("fixture.protocol")?,
+        None,
+        ReplayScope::Protocol,
+        ReplayKindId::new("fixture.reasoning")?,
+        1,
+        DataClassification::Sensitive,
+        serde_json::value::RawValue::from_string("\"synthetic\"".into())?,
+    )?;
+    let source = source.append(HistorySegment::new(
+        HistorySegmentKind::ReasoningReplay,
+        vec![ConversationItem::new(
+            id::<EntryId>(90_002)?,
+            Actor::Assistant,
+            vec![ContentBlock::Reasoning(ReasoningBlock::new(
+                ReasoningVisibility::Omitted,
+                None,
+                Some(replay),
+            )?)],
+            Provenance::ModelOutput,
+        )?],
+    )?)?;
+    let context =
+        RuntimeContextState::genesis(id::<SessionId>(90_003)?, id::<BranchId>(90_004)?, [1; 32])?;
+    let (compacted, successor, _) =
+        compact_context(&context, &source, id::<CheckpointId>(90_005)?, [2; 32])?;
+    assert_eq!(successor.segments().len(), 2);
+    compacted.validate_history(&successor)?;
+    assert_eq!(
+        RuntimeContextState::decode(&compacted.encode()?)?,
+        compacted
+    );
+    Ok(())
+}
+
 fn native_compact_context(
     source: &RuntimeContextState,
     source_history: &CanonicalHistory,

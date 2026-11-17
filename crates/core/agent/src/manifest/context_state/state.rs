@@ -406,8 +406,9 @@ impl RuntimeContextState {
     /// Atomically describes a successful semantic-summary publication.
     ///
     /// The target history must contain exactly one leading compaction segment
-    /// followed by the closed planner's retained source segments. Summary
-    /// content stays only in that canonical segment.
+    /// followed by the closed planner's retained source content, with native
+    /// reasoning invalidated by the cut omitted. Summary content stays only
+    /// in that canonical segment.
     #[allow(
         clippy::too_many_lines,
         reason = "Semantic compaction checks the published summary against its source and target context identities before rotation"
@@ -455,17 +456,9 @@ impl RuntimeContextState {
             .position()
             .checked_add(1)
             .ok_or(RuntimeManifestError::InvalidCompactionProvenance)?;
-        let retained_segment_count = cut.retained_segment_count();
-        if successor_history.segments().len() != retained_segment_count.saturating_add(1)
-            || successor_history
-                .segments()
-                .iter()
-                .skip(1)
-                .map(HistorySegment::identity)
-                .ne(cut.retained_segments().iter().map(HistorySegment::identity))
-        {
-            return Err(RuntimeManifestError::InvalidCompactionProvenance);
-        }
+        // The sealed successor above is the authority: a replay-only retained
+        // segment can disappear when its prefix changes.
+        let retained_segment_count = sealed_successor.segments().len().saturating_sub(1);
         let next_epoch = self
             .affinity
             .epoch()

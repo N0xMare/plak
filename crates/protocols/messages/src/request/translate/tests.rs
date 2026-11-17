@@ -19,6 +19,7 @@ use super::*;
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 mod citations;
+mod compaction;
 
 fn selected_id(label: &[u8]) -> TestResult<SelectedProviderConfigurationId> {
     Ok(serde_json::from_value(serde_json::to_value(

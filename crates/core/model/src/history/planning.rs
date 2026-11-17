@@ -684,7 +684,8 @@ impl SemanticCompactionCut {
         } else {
             input_handles.extend_from_slice(&selected);
         }
-        let summary_history = CanonicalHistory::new(input_handles)?;
+        let summary_history = CanonicalHistory::new(input_handles)?
+            .without_invalidated_reasoning(source.history())?;
         let summary_input =
             ConversationView::from_shared(summary_history, WorkingProjection::default());
         let retained_tail_identity = retained_tail.identity();
@@ -834,7 +835,8 @@ impl SemanticCompactionCut {
     /// The result contains the supplied summary at position zero followed by
     /// the sealed retained handles in source order. The old compaction, if
     /// any, cannot survive as a second compaction segment. Retained segment
-    /// payloads are shared exactly; no item is flattened or copied.
+    /// payloads are shared except for native reasoning whose prefix the new
+    /// summary invalidates. That reasoning is omitted, never flattened.
     ///
     /// # Errors
     ///
@@ -875,7 +877,7 @@ impl SemanticCompactionCut {
         {
             return Err(SemanticCompactionCutError::InvalidRetainedSemantics);
         }
-        Ok(successor)
+        Ok(successor.without_invalidated_reasoning(self.source.history())?)
     }
 }
 

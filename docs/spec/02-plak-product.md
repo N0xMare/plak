@@ -3500,6 +3500,11 @@ prompt-sent notice, so no resume pays for the same refused fold; one that does
 not fit stays queued as above. A
 retry is a new paid operation.
 
+A committed semantic compact retains ordinary recent-tail content and tool
+correlations but omits native reasoning whose earlier content the cut changed
+(chapter 01 §6.1, §10.1). The next turn must not replay stale thinking signatures;
+append-only turns keep valid reasoning, including reasoning produced after a cut.
+
 A compact request is an intent keyed by its workflow operation id. Its
 completion is the `WorkflowSettled` fact the runtime commits, so the product
 never classifies a compaction itself. A definite synchronous `NotNeeded` or
