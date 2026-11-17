@@ -621,9 +621,9 @@ class UnfiredFaultTests(unittest.TestCase):
             return raised.exception
 
     def test_after_events_parses_the_fault_plan(self):
-        plan = live.fault_plan(live.ROUTES["or-lfm-free"], "reset", after_events=3)
+        plan = live.fault_plan(live.ROUTES["or-flint-free"], "reset", after_events=3)
         self.assertEqual(smoke.after_events(plan), 3)
-        self.assertIsNone(smoke.after_events(live.fault_plan(live.ROUTES["or-lfm-free"], "429")))
+        self.assertIsNone(smoke.after_events(live.fault_plan(live.ROUTES["or-flint-free"], "429")))
 
     def test_keep_alives_then_an_in_band_504_before_the_cut_is_provider(self):
         failure = self.judge(KEEP_ALIVE * 33 + IN_BAND_504)
@@ -770,7 +770,7 @@ class UnfiredFaultTests(unittest.TestCase):
 
 class CancelWithoutInterruptTests(unittest.TestCase):
     def cancel(self, turn):
-        driver = smoke.Smoke(live.ROUTES["or-lfm-free"], Mock(capture_segments=[]))
+        driver = smoke.Smoke(live.ROUTES["or-flint-free"], Mock(capture_segments=[]))
         driver.repo = Mock(return_value=Path("repo"))
         agent = Mock(capture_dir=Path("segment"), lookup_faults=None)
         agent.prompt.return_value = turn

@@ -80,9 +80,7 @@ class CatalogTests(unittest.TestCase):
                     None,
                     None,
                 ),
-                "or-inkling-free": ("openrouter", "thinkingmachines/inkling:free", None, None),
                 "or-flint-free": ("openrouter", "recursive/flint-v1.0:free", None, None),
-                "or-lfm-free": ("openrouter", "liquid/lfm-2.5-2.6b:free", None, None),
                 "deepseek": ("openrouter", "deepseek/deepseek-v4-flash-0731", None, None),
                 "deepseek-messages": (
                     "openrouter",
@@ -119,8 +117,6 @@ class CatalogTests(unittest.TestCase):
                 "codex",
                 "grok-46",
                 "or-flint-free",
-                "or-inkling-free",
-                "or-lfm-free",
                 "or-nemotron-free",
                 "or-nemotron-vl-free",
             ],

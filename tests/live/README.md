@@ -503,9 +503,7 @@ default sweep (`just live estimate` adds them only with `--confirm`).
 | --- | --- | --- | --- | --- | --- |
 | `or-nemotron-free` | `openrouter` | `nvidia/nemotron-3-ultra-550b-a55b:free` | | informational | 1 |
 | `or-nemotron-vl-free` | `openrouter` | `nvidia/nemotron-3.5-super-vl:free` | | informational | 1 |
-| `or-inkling-free` | `openrouter` | `thinkingmachines/inkling:free` | | informational | 1 |
 | `or-flint-free` | `openrouter` | `recursive/flint-v1.0:free` | | informational | 1 |
-| `or-lfm-free` | `openrouter` | `liquid/lfm-2.5-2.6b:free` | | informational | 1 |
 | `codex` | `codex` | `gpt-6-luna` | low | light | 1 |
 | `claude-haiku55-low` | `claude` | `claude-haiku-5-5` | low | light | 1 |
 | `grok-46` | `grok` | `grok-4.6` | low | light | 1 |

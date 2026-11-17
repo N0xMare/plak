@@ -5206,9 +5206,7 @@ catalog and nothing else:
   thinking at the selected effort).
 - OpenRouter free, best effort: `nvidia/nemotron-3-ultra-550b-a55b:free`
   (`or-nemotron-free`), `nvidia/nemotron-3.5-super-vl:free`
-  (`or-nemotron-vl-free`), `thinkingmachines/inkling:free` (`or-inkling-free`),
-  `recursive/flint-v1.0:free` (`or-flint-free`), `liquid/lfm-2.5-2.6b:free`
-  (`or-lfm-free`).
+  (`or-nemotron-vl-free`) and `recursive/flint-v1.0:free` (`or-flint-free`).
 - OpenRouter paid, not best-effort: `deepseek/deepseek-v4-flash-0731` on Chat
   (`deepseek`, no protocol) and on Messages (`deepseek-messages`, protocol
   `messages`), `z-ai/glm-5.3-flash` (`or-glm`).
@@ -5228,7 +5226,7 @@ else.
   `claude-sonnet55-medium`, `claude-haiku55-low`, `claude-haiku55-medium`,
   `claude-opus-low`, `claude-opus-medium`, `claude-fable`, `or-glm`,
   `api-openai`, `api-anthropic`, `api-xai`.
-- `informational`: the five free OpenRouter rows; also the `deepseek` and
+- `informational`: the three free OpenRouter rows; also the `deepseek` and
   `deepseek-messages` long-session lanes.
 
 Each route has a `rung` on the testing ladder. A qualification cycle runs the

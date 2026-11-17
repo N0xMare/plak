@@ -481,7 +481,7 @@ class LiveOracleTests(unittest.TestCase):
                 os.utime(path, (clock, clock))
         return number
 
-    def judge_timeline(self, steps, faults=None, route="or-lfm-free"):
+    def judge_timeline(self, steps, faults=None, route="or-flint-free"):
         base = self.capture_workspace
         env = live.Env(base / "plakd", self.home(base), base)
         env.route = live.ROUTES[route] if route else None

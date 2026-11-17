@@ -34,9 +34,7 @@ Rung 3 rows are sparing and run only for a targeted confirmation.
 | --- | --- | --- | --- |
 | `or-nemotron-free` | informational | 1 | smoke pass at `bce238af` (Apple Silicon) |
 | `or-nemotron-vl-free` | informational | 1 | smoke pass at `bce238af` (Apple Silicon) |
-| `or-inkling-free` | informational | 1 | provider, recorded at `0df98a47` (Apple Silicon): OpenRouter refuses the model outside agentic harnesses |
 | `or-flint-free` | informational | 1 | provider, recorded at `0df98a47` (Apple Silicon): no upstreams available on both runs |
-| `or-lfm-free` | informational | 1 | unqualified: not planned in 0.0.2 (upstream at about 7 tokens per second with in-band 504s on every 0.0.2 run) |
 | `codex` | light | 1 | smoke pass at `bce238af` (Apple Silicon) |
 | `claude-haiku55-low` | light | 1 | smoke pass at `bce238af` (Apple Silicon) |
 | `grok-46` | light | 1 | smoke pass at `bce238af` (Apple Silicon) |
