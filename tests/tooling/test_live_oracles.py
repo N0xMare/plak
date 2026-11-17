@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import queue
 import sys
 import tempfile
@@ -36,6 +37,7 @@ class CompactionFoldTests(unittest.TestCase):
 
 class LiveOracleTests(unittest.TestCase):
     def setUp(self):
+        self.homes = set()
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.capture_workspace = Path(directory.name).resolve()
@@ -43,6 +45,13 @@ class LiveOracleTests(unittest.TestCase):
         root = patch.object(live, "ROOT", self.capture_workspace)
         root.start()
         self.addCleanup(root.stop)
+
+    def home(self, artifacts, name="main"):
+        home = live.scratch_home(artifacts, name)
+        if home not in self.homes:
+            self.homes.add(home)
+            self.addCleanup(shutil.rmtree, home)
+        return home
 
     def test_pre_admission_refusal_consumes_unidentified_idle_edge(self):
         agent = live.Agent.__new__(live.Agent)
@@ -225,11 +234,11 @@ class LiveOracleTests(unittest.TestCase):
             self.assertEqual(os.environ["TMPDIR"], "/gate/tmp")
             self.assertEqual(os.environ["GIT_CONFIG_NOSYSTEM"], "1")
             base = self.capture_workspace
-            child = live.Env(base / "plakd", base / "home", base).environ()
+            child = live.Env(base / "plakd", self.home(base), base).environ()
             self.assertEqual(child["TMPDIR"], "/operator/tmp")
             self.assertEqual(child["GIT_CONFIG_GLOBAL"], "/operator/gitconfig")
             self.assertNotIn("GIT_CONFIG_NOSYSTEM", child)
-            self.assertEqual(child["PLAK_HOME"], str(base / "home"))
+            self.assertEqual(child["PLAK_HOME"], str(self.home(base)))
             self.assertNotEqual(child["PLAK_HOME"], gate["PLAK_HOME"])
         finally:
             os.environ.clear()
@@ -239,7 +248,7 @@ class LiveOracleTests(unittest.TestCase):
     def test_environment_removes_override(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory).resolve()
-            env = live.Env(base / "plakd", base / "home", base)
+            env = live.Env(base / "plakd", self.home(base), base)
             source = {
                 "PATH": "/bin",
                 "OPENROUTER_API_KEY": "fixture-override",
@@ -253,7 +262,7 @@ class LiveOracleTests(unittest.TestCase):
                 child,
                 {
                     "PATH": "/bin",
-                    "PLAK_HOME": str(base / "home"),
+                    "PLAK_HOME": str(self.home(base)),
                     "PLAK_TEST_EXCHANGE_CAPTURE_DIR": str(env.capture_segments[0]),
                     "PLAK_LOG": live.AUTHORITY_DIAGNOSTICS_FILTER,
                 },
@@ -275,7 +284,7 @@ class LiveOracleTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         base = Path(directory.name).resolve()
-        env = live.Env(Path("plakd"), base / "home", base)
+        env = live.Env(Path("plakd"), self.home(base), base)
         segment = env.capture_root / "explicit"
         child = env.environ(capture_dir=segment, source={})
         self.assertEqual(child["PLAK_TEST_EXCHANGE_CAPTURE_DIR"], str(segment))
@@ -304,7 +313,7 @@ class LiveOracleTests(unittest.TestCase):
     def test_capture_root_rejects_public_or_symlinked_authority_directory(self):
         root = self.capture_workspace / "tests/provider-authority"
         root.mkdir(mode=0o755)
-        env = live.Env(Path("plakd"), Path("home"), Path("artifacts"))
+        env = live.Env(Path("plakd"), self.home(self.capture_workspace), self.capture_workspace)
         with self.assertRaises(live.ScenarioFailure):
             env.environ(source={})
         root.rmdir()
@@ -474,7 +483,7 @@ class LiveOracleTests(unittest.TestCase):
 
     def judge_timeline(self, steps, faults=None, route="or-lfm-free"):
         base = self.capture_workspace
-        env = live.Env(base / "plakd", base / "home", base)
+        env = live.Env(base / "plakd", self.home(base), base)
         env.route = live.ROUTES[route] if route else None
         env.environ(source={})
         segment = env.capture_segments[-1]
@@ -861,7 +870,7 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_run_cli_timeout_on_a_pending_exchange_is_provider(self):
         base = self.capture_workspace
-        env = live.Env(base / "plakd", base / "home", base)
+        env = live.Env(base / "plakd", self.home(base), base)
         env.route = live.ROUTES["grok"]
         failure = self.timed_out_run(env, pending=True)
         self.assertEqual(failure.outcome, live.PROVIDER)
@@ -880,7 +889,7 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_run_cli_timeout_without_a_pending_exchange_is_harness(self):
         base = self.capture_workspace
-        env = live.Env(base / "plakd", base / "home", base)
+        env = live.Env(base / "plakd", self.home(base), base)
         failure = self.timed_out_run(env, pending=False)
         self.assertEqual(failure.outcome, live.HARNESS)
         self.assertRegex(
@@ -901,7 +910,7 @@ class LiveOracleTests(unittest.TestCase):
             (True, "fault=stall", live.HARNESS),
         ):
             with self.subTest(pending=pending, faults=faults):
-                env = live.Env(base / "plakd", base / "home", base)
+                env = live.Env(base / "plakd", self.home(base), base)
                 env.route = live.ROUTES["grok"]
                 env.environ(source={})
                 segment = env.capture_segments[-1]
@@ -1058,8 +1067,8 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_run_cli_can_use_a_private_home(self):
         base = self.capture_workspace
-        env = live.Env(base / "plakd", base / "home", base)
-        private = base / "private-home"
+        env = live.Env(base / "plakd", self.home(base), base)
+        private = self.home(base, "private")
         with patch.object(
             live.subprocess, "run", return_value=Mock(returncode=0, stdout="ok", stderr="")
         ) as run:
@@ -1069,7 +1078,7 @@ class LiveOracleTests(unittest.TestCase):
 
     def test_run_cli_closes_stdin_and_scores_a_truncated_answer_as_completed(self):
         base = self.capture_workspace
-        env = live.Env(base / "plakd", base / "home", base)
+        env = live.Env(base / "plakd", self.home(base), base)
         truncated = "plakd: answer truncated at its 64-token output limit\nplakd: turn_failed:output-limit\n"
         with patch.object(
             live.subprocess,
@@ -1267,7 +1276,7 @@ class LiveOracleTests(unittest.TestCase):
     def test_headless_soak_records_reopen_failure_instead_of_losing_report(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            env = live.Env(base / "plakd", base / "home", base)
+            env = live.Env(base / "plakd", self.home(base), base)
             runner = soak.Soak(live.ROUTES["grok"], env, base)
 
             def refused(_faults):
@@ -1281,7 +1290,7 @@ class LiveOracleTests(unittest.TestCase):
     def test_headless_soak_output_limit_turn_is_a_model_miss_not_a_dead_end(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            env = live.Env(base / "plakd", base / "home", base)
+            env = live.Env(base / "plakd", self.home(base), base)
             runner = soak.Soak(live.ROUTES["grok"], env, base)
             agent = Mock(proc=Mock(pid=1, poll=Mock(return_value=0)), capture_dir=base)
             agent.prompt.return_value = live.Turn(phase="failed", model_error_kind="OutputLimit")
@@ -1540,8 +1549,9 @@ class AgentStartupFailureTests(unittest.TestCase):
                 "exit 5\n"
             )
             binary.chmod(0o755)
-            (base / "home").mkdir()
-            env = live.Env(binary, base / "home", base)
+            home = live.scratch_home(base)
+            self.addCleanup(shutil.rmtree, home)
+            env = live.Env(binary, home, base)
             with self.assertRaises(live.ScenarioFailure) as raised:
                 live.Agent(env, base, "startup", args=[])
             self.assertEqual(raised.exception.outcome, live.PROVIDER)

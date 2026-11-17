@@ -1571,7 +1571,8 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
 
     def test_agent_home_override_is_the_child_plak_home(self):
         env = live.Env(self.binary, self.capture_workspace / "shared", self.capture_workspace)
-        private = self.capture_workspace / "private"
+        private = live.scratch_home(self.capture_workspace, "private")
+        self.addCleanup(shutil.rmtree, private)
 
         def ready(agent, *_args):
             agent.session_id = "synthetic"
