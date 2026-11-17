@@ -10,6 +10,7 @@ use plakous_tools::internal::runner::{
 };
 use std::time::Duration;
 
+mod jobs;
 #[cfg(feature = "test-hooks")]
 mod nested;
 

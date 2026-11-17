@@ -315,7 +315,7 @@ impl JoinedProcessSessions {
     /// Rejects a foreign session or an exhausted bounded notice ledger.
     pub(crate) fn promote(&self, id: JoinedProcessSessionId) -> Result<(), ExecutionBackendError> {
         if let Some(arm) = self.runner_arm() {
-            return arm.promote(id);
+            return arm.promote(self, id);
         }
         let fits = self.reserve_job_output(id);
         self.promote_reserved(id, fits)
@@ -380,7 +380,7 @@ impl JoinedProcessSessions {
         fits: bool,
     ) -> Result<(), ExecutionBackendError> {
         if let Some(arm) = self.runner_arm() {
-            return arm.promote(id);
+            return arm.promote(self, id);
         }
         let session = self.session(id)?;
         // The monitor waits for `published`; dropping it unsent ends the

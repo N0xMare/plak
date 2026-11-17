@@ -535,12 +535,19 @@ impl RunnerArm {
         Ok(polled.status())
     }
 
-    pub(super) fn promote(&self, id: JoinedProcessSessionId) -> Result<(), ExecutionBackendError> {
+    pub(super) fn promote(
+        &self,
+        service: &JoinedProcessSessions,
+        id: JoinedProcessSessionId,
+    ) -> Result<(), ExecutionBackendError> {
         self.wait(self.sessions.promote(id))?;
         if let Some(session) = lock(&self.state).sessions.get_mut(&id) {
             session.promoted = true;
         }
-        self.wait(self.sessions.jobs()).map(drop)
+        let jobs = self.wait(self.sessions.jobs())?;
+        // A turn may finish and release before the watch delivers this job.
+        self.on_jobs(service, &jobs);
+        Ok(())
     }
 
     pub(super) fn stop_jobs(

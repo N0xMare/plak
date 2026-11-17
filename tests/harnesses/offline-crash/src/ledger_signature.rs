@@ -113,8 +113,12 @@ pub fn inspect_process_notices(
 pub struct JobFact {
     /// Session-local job number.
     pub number: u32,
+    /// Allocation-local generation of the process service that promoted it.
+    pub owner_generation: u64,
     /// Exact terminal evidence is present, rather than an unknown live process.
     pub terminal: bool,
+    /// Exact terminal evidence attributes the stop to the user.
+    pub user_stop: bool,
 }
 
 /// Reads durable unconsumed job notices without opening a writable store.
@@ -138,7 +142,11 @@ pub fn inspect_jobs(
         .iter()
         .map(|job| JobFact {
             number: job.number,
+            owner_generation: job.owner_generation.get(),
             terminal: job.terminal.is_some(),
+            user_stop: job.terminal.as_ref().is_some_and(|terminal| {
+                terminal.stopper == Some(plakous::tools::JobStopReason::User)
+            }),
         })
         .collect())
 }

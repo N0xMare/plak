@@ -7984,7 +7984,11 @@ of a job the runner still lists is that live job, never a second snapshot of
 it; a row of a job the runner no longer lists, such as one a restarted runner
 lost, is restored as a terminal snapshot under the runner's session identity
 (a running row as of unknown outcome), and that session's reads stay on the
-host. A stop through the runner arm reads the line's jobs again before it
+host. A promotion through the runner arm reports the jobs from its synchronous
+read to the host observer before returning, without waiting for `jobs.watch`.
+The stream and the synchronous report share transition deduplication, so an
+immediate answer and release cannot lose or duplicate promotion observations.
+A stop through the runner arm reads the line's jobs again before it
 returns and reports what ended, so a host that exits right after stopping its
 jobs has reported their ends. Backend errors cross with their kind, message, no-effect
 proof and conflict path. A link failure becomes `Io`, proven to have had no
@@ -8546,7 +8550,9 @@ and released after host loss. The host registry and the agent's own cleanup use
 the same daemon-owned lifetime: neither stops promoted work on a planned
 handoff. Only explicit stops, terminal shutdown commands and attempt-end cleanup
 select terminal cleanup; an embedded agent stays direct and its release remains
-terminal. The daemon, not an in-process registry, keeps promoted work through
+terminal. Selecting a runner backend alone does not select Transfer: the
+agent must also have a `JobHost`, including for an in-process loopback runner.
+The daemon, not an in-process registry, keeps promoted work through
 host loss. Remote continuation requires the unchanged exact runner triple;
 the host-upgrade changed-triple process gate remains chapter 02 §4.6.
 

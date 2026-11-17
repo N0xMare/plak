@@ -13,6 +13,9 @@ for one version bump, without native protocol compatibility.
 
 - Preserve paired-runner promoted jobs through graceful host restart and
   unchanged-triple same-key upgrade, while keeping explicit stops terminal.
+- Report runner job promotions before returning from the tool, even when its
+  watch stream lags; runner-backed agents without a job host still stop their
+  jobs on release.
 - Fix same-key host upgrade reopen probes for paired-runner sessions with
   terminal job history, without taking custody or weakening live-job refusals.
 - Rename the public operator package and executable from `plak` to `plakd`.

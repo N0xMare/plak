@@ -2975,8 +2975,15 @@ started it, its process remains alive and its durable row is not terminal.
 Every cut kills the host at one of its commits. In
 `runner_job_survives_host_loss` the daemon survives, and so does a job it
 started, even past answer publication and ordinary release. The successor must
-keep that process alive without inventing a terminal notice. In
-`runner_restart_unknown` the harness kills the daemon at the cut as well and
+keep that process alive without inventing a terminal notice. The converged
+summary must retain its non-terminal row with the original number and owner
+generation. A runner-arm regression uses ordinary calls without a job-watch
+stream: promotion must reach the host observer before the turn completes.
+Companion release cases require Terminal without a `JobHost` and Transfer
+with one. Planned host-release tests also read durable rows and terminal
+evidence: no terminal at SIGTERM or unchanged-triple upgrade, then exactly one
+user-attributed terminal after the explicit stop.
+In `runner_restart_unknown` the harness kills the daemon at the cut as well and
 starts a replacement, so the successor's bridge meets a new runner instance,
 and a job the cut left running is reported only as of unknown outcome. The
 job appends one line per start to its marker, and no cut or successor may

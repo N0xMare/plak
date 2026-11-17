@@ -147,9 +147,47 @@ pub(in super::super) fn after_recovery(shape: &str, fixture: &Fixture, before: &
     }
     if shape == "runner_job_survives_host_loss"
         && before.jobs.iter().any(|job| job["terminal"] == false)
-        && let Some((pid, _)) = job(fixture)
     {
+        let (pid, _) = job(fixture).expect("retained job lost its start marker");
         assert!(alive(pid), "the successor stopped the retained runner job");
+        retained_jobs(before, &summary::read_converged(fixture));
+    }
+}
+
+fn retained_jobs(before: &summary::Summary, after: &summary::Summary) {
+    for job in before.jobs.iter().filter(|job| job["terminal"] == false) {
+        let retained = after
+            .jobs
+            .iter()
+            .find(|row| row["number"] == job["number"])
+            .expect("the successor lost the retained job row");
+        assert_eq!(retained["terminal"], false, "retained job became terminal");
+        assert_eq!(
+            retained["owner_generation"], job["owner_generation"],
+            "retained job changed owner generation"
+        );
+    }
+}
+
+#[test]
+fn retained_job_oracle_rejects_lost_terminal_and_replaced_rows() {
+    let row = json!({"number": 1, "owner_generation": 7, "terminal": false});
+    let before = summary::Summary {
+        jobs: vec![row.clone()],
+        ..summary::Summary::default()
+    };
+    retained_jobs(&before, &before);
+    for jobs in [
+        vec![],
+        vec![json!({"number": 2, "owner_generation": 7, "terminal": false})],
+        vec![json!({"number": 1, "owner_generation": 8, "terminal": false})],
+        vec![json!({"number": 1, "owner_generation": 7, "terminal": true})],
+    ] {
+        let after = summary::Summary {
+            jobs,
+            ..summary::Summary::default()
+        };
+        assert!(std::panic::catch_unwind(|| retained_jobs(&before, &after)).is_err());
     }
 }
 
