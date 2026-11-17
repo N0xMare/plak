@@ -11,6 +11,8 @@ for one version bump, without native protocol compatibility.
 
 ### plakd
 
+- Fix same-key host upgrade reopen probes for paired-runner sessions with
+  terminal job history, without taking custody or weakening live-job refusals.
 - Rename the public operator package and executable from `plak` to `plakd`.
   Keep batch `run` and JSONL `agent` interfaces and the existing project,
   environment, credential and installation identities. The old command has

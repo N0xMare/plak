@@ -5327,6 +5327,14 @@ when to call it, after closing ingress and before freezing runtime steps.
 A same-key upgrade uses planned handoff of the same sessions, not export/import.
 Its exact-reopen probe refuses known binding/configuration/credential changes;
 an unfinished-turn verdict retains the existing planned-handoff recovery law.
+Verification restores process metadata only into detached, start-refusing
+bookkeeping from the durable job mirror. It never refreshes or watches runner
+jobs, adopts a line or takes process custody. Paired placements retain the
+binding-free qualification connection for workspace/configuration reads only,
+for both changed and unchanged triples. Terminal job history does not block
+reopen; process liveness and unknown-state refusals remain the source's native
+process gate below, with its typed `host_upgrade_process_retention_unavailable`
+old-build settle/drain remedy.
 The source closes ingress and resolves earlier draft verdicts before requesting
 runtime holds. `--drain` defaults to 60 seconds; integer `ms`, `s`, `m`, `h`
 suffixes and bare seconds accept 0 through one hour. It is exclusive with

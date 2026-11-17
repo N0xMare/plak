@@ -79,6 +79,14 @@ pub fn restore_job_terminals(sessions: &crate::JoinedProcessSessions, views: &[c
     sessions.restore_job_terminals(views);
 }
 
+/// Detached bookkeeping for exact-open verification: no runner reads or
+/// streams, and no authority to start processes on either machine.
+pub fn inspection_process_sessions(
+    environment: &ExecutionEnvironment,
+) -> Result<crate::JoinedProcessSessions, crate::ExecutionBackendError> {
+    crate::JoinedProcessSessions::refusing(environment)
+}
+
 pub fn sanitize_job_command(command: &str) -> String {
     let mut text = String::new();
     for ch in command.chars() {

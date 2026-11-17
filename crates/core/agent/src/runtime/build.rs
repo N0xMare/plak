@@ -1333,9 +1333,15 @@ fn attach_job_environment(
         environment,
         builder.tool_result_images,
     );
-    let fresh_sessions = environment
-        .joined_process_sessions()
-        .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
+    let inspection = bootstrap.is_some_and(|bootstrap| bootstrap.inspection);
+    // Verification has no process custody. In particular, a paired runner's
+    // qualification link permits neither job reads nor job-watch streams.
+    let fresh_sessions = if inspection {
+        plakous_tools::internal::inspection_process_sessions(&environment)
+    } else {
+        environment.joined_process_sessions()
+    }
+    .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
     // A session on another runner holds the runner port: its processes and
     // job events are that runner's.
     let fresh = if builder.runner_backend.is_some() || builder.local_daemon.is_some() {
@@ -1344,7 +1350,6 @@ fn attach_job_environment(
         plakous_tools::JoinedSessionsPort::local(fresh_sessions)
     };
     fresh.seed_job_counter(builder.job_counter_seed);
-    let inspection = bootstrap.is_some_and(|bootstrap| bootstrap.inspection);
     let port = if let Some(host) = builder.job_host.as_ref().filter(|_| !inspection) {
         host.attach(job_owner, fresh)
             .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?

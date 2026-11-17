@@ -135,6 +135,11 @@ Keep the old and new snapshots, including sidecars, until the command confirms
 success. Installation does not itself replace the running host.
 
 Same-key upgrade uses planned handoff and the existing session identities.
+Its exact-reopen check accepts terminal job history on paired runners without
+reading or watching jobs over the qualification connection or taking custody.
+Live jobs across a changed runner triple still refuse with
+`host_upgrade_process_retention_unavailable`: settle and drain them using the
+old build, then retry.
 It closes new admissions, resolves earlier draft verdicts, then drains roots
 and children at runtime step boundaries. The default natural-drain budget is
 60 seconds. Use `--drain 0` to skip that wait or `--drain 5m` for five minutes.

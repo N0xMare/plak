@@ -14,6 +14,7 @@ mod lifecycle;
 mod live;
 mod recovery;
 mod remote;
+mod reopen;
 mod residents;
 mod selection;
 mod topology;
