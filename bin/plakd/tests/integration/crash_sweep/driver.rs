@@ -412,10 +412,10 @@ pub(super) fn cut(
     let (fixture, commits) = kill_fixture(seed, session, shape, pilot, target);
     let _orphans = Orphans(&fixture);
     let before = summary::read(&fixture);
-    shapes::runner::after_kill(shape, &fixture, &before);
+    shapes::runner::after_kill(shape, &fixture);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let row = cut_after_kill(&fixture, session, shape, &commits, &before, baseline);
-        shapes::runner::after_recovery(shape, &fixture);
+        shapes::runner::after_recovery(shape, &fixture, &before);
         row
     }));
     match result {

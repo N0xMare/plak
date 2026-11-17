@@ -5966,6 +5966,12 @@ keeps its separate readiness path.
   Every daemon-backed agent release other than an explicit stop transfers its
   jobs, including held children materialized after host loss. Embedded agents
   remain direct and stop their jobs on exit.
+  This lifetime includes paired native runner placements, not only the
+  home-local daemon: a quiescent root's promoted jobs survive graceful host
+  restart and same-key handoff with an unchanged exact runner triple. Neither
+  host-registry cleanup nor agent cleanup may turn that handoff into a
+  `SessionExit` job stop. Explicit session stops remain terminal, and the
+  changed-triple live/unknown-process refusal in §4.6 is unchanged.
   An embedded open checks the live holder first, preserving
   `tree_hosted_elsewhere`, then inspects the current-protocol home-local daemon
   before opening the canonical session. It resolves the root and every node's

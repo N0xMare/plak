@@ -16,6 +16,7 @@ mod recovery;
 mod remote;
 mod reopen;
 mod residents;
+mod retained_jobs;
 mod selection;
 mod topology;
 mod verdicts;

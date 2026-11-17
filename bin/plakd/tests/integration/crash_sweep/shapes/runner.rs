@@ -60,8 +60,7 @@ fn alive(pid: i32) -> bool {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
 }
 
-/// The pilot promoted one job, the daemon started it, and the pilot's quit
-/// stopped it there and recorded its terminal.
+/// The pilot promoted one job and quit without stopping its daemon-owned work.
 pub(super) fn assert_job(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {
     assert_live(fixture, outcome, state, 1, 2);
     assert_eq!(
@@ -86,7 +85,7 @@ pub(super) fn assert_job(fixture: &Fixture, outcome: &AgentOutcome, state: &summ
         jobs.iter()
             .filter(|record| record["kind"] == "job_terminal")
             .count(),
-        1,
+        0,
         "pilot job records: {jobs:?}"
     );
     let (pid, parent) = job(fixture).expect("the runner job never ran");
@@ -100,18 +99,19 @@ pub(super) fn assert_job(fixture: &Fixture, outcome: &AgentOutcome, state: &summ
         ChildRunner::at(fixture).pid(),
         "the job's parent is not the runner daemon"
     );
-    assert!(!alive(pid), "pilot quit left its runner job alive");
+    assert!(alive(pid), "pilot quit stopped its daemon-owned job");
+    assert_eq!(state.jobs.len(), 1, "pilot lost its durable job");
     assert!(
-        state.jobs.iter().all(|job| job["terminal"] == true),
-        "pilot quit left an unsettled durable job"
+        state.jobs.iter().all(|job| job["terminal"] == false),
+        "pilot quit invented a job terminal"
     );
 }
 
 /// What the cut leaves the successor host. The daemon outlives the host;
-/// so does a job it started, unless the host was already quitting, which it
-/// does only after it published the answer. The restart shape then kills
+/// so does a job it started, even after the answer and ordinary release.
+/// The restart shape then kills
 /// the daemon too, and the successor's bridge meets a new runner instance.
-pub(in super::super) fn after_kill(shape: &str, fixture: &Fixture, before: &summary::Summary) {
+pub(in super::super) fn after_kill(shape: &str, fixture: &Fixture) {
     let runner = ChildRunner::at(fixture);
     if shape.starts_with("runner_") {
         assert!(
@@ -125,9 +125,7 @@ pub(in super::super) fn after_kill(shape: &str, fixture: &Fixture, before: &summ
                 runner.pid().is_some(),
                 "the runner daemon died with the host"
             );
-            if let Some((pid, _)) = job(fixture)
-                && before.original_answers == 0
-            {
+            if let Some((pid, _)) = job(fixture) {
                 assert!(alive(pid), "the runner job died with the host");
             }
         }
@@ -143,14 +141,20 @@ pub(in super::super) fn after_kill(shape: &str, fixture: &Fixture, before: &summ
 
 /// What the successor left: the job started at most once over the cut and
 /// both reopens, never again for a tool call the cut had already run.
-pub(in super::super) fn after_recovery(shape: &str, fixture: &Fixture) {
+pub(in super::super) fn after_recovery(shape: &str, fixture: &Fixture, before: &summary::Summary) {
     if shape.starts_with("runner_") {
         assert!(starts(fixture) <= 1, "the successor started the job again");
+    }
+    if shape == "runner_job_survives_host_loss"
+        && before.jobs.iter().any(|job| job["terminal"] == false)
+        && let Some((pid, _)) = job(fixture)
+    {
+        assert!(alive(pid), "the successor stopped the retained runner job");
     }
 }
 
 #[test]
-fn runner_job_pilot_promotes_and_stops_a_job_in_the_daemon() {
+fn runner_job_pilot_promotes_and_retains_a_job_in_the_daemon() {
     let (fixture, session) = super::super::driver::setup("runner_job_survives_host_loss");
     super::super::driver::pilot(&fixture, &session, "runner_job_survives_host_loss");
 }

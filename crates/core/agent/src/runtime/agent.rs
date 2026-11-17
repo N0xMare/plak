@@ -690,7 +690,7 @@ impl Agent {
 
     /// Stops admission, cancels active work, terminalizes queued turns, and
     /// waits for the private actor to exit. Calling this from clones is idempotent.
-    /// Home-local daemon jobs transfer on ordinary release; explicit stops
+    /// Daemon-backed jobs transfer on ordinary release; explicit stops
     /// and terminal shutdown commands still stop them.
     ///
     /// # Errors

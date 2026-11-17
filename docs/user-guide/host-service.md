@@ -170,7 +170,9 @@ precedence and is never converted into a continuation. The admission-verdict
 barrier joins a delivery attempt, not receipt by a disconnected client.
 
 Promoted jobs continue only with an unchanged exact runner revision/flavor/protocol
-triple. Runner retention v1 exists, but `host upgrade` does not carry jobs across
+triple. On paired runners, this includes jobs of quiescent sessions through
+graceful host restart and same-key upgrade; an explicit session stop still ends
+them. Runner retention v1 exists, but `host upgrade` does not carry jobs across
 changed runner triples. It still refuses changed-triple requests with live
 foreground/background processes or unknown runner state before drain; settle
 and drain them using the old build, then retry. Source process

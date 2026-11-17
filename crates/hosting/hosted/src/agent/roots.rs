@@ -623,7 +623,7 @@ impl ProductStateRoots {
     }
 
     pub(crate) fn daemon_processes(&self) -> bool {
-        self.local_daemon.is_some()
+        self.local_daemon.is_some() || self.runner_services.is_some()
     }
 
     /// Whether these roots' registry is under `jobs`, the process's bound.

@@ -180,7 +180,7 @@ fn paired_live_job_unchanged_triple_probe_keeps_source_custody() {
     stop(&mut host);
 }
 
-fn placed_job(
+pub(super) fn placed_job(
     fixture: &Fixture,
     path: &str,
     id: &str,
@@ -225,7 +225,7 @@ fn placed_job(
     (host, client, session, node)
 }
 
-fn same_key_upgrade(fixture: &Fixture, path: &str) -> std::process::Output {
+pub(super) fn same_key_upgrade(fixture: &Fixture, path: &str) -> std::process::Output {
     output_env(
         fixture,
         &[

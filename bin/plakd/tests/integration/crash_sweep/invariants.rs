@@ -141,13 +141,19 @@ pub(super) fn job_notices_once(
             .iter()
             .filter(|row| row["job_id"] == id)
             .collect::<Vec<_>>();
-        assert_eq!(matches.len(), 1, "durable job notice lost: {id}");
         if job["terminal"] == false && survives {
-            assert_ne!(
-                matches[0]["status"], "outcome_unknown",
-                "a job that outlived the host lost its outcome"
+            assert!(
+                matches.is_empty(),
+                "retained running job reported terminal: {id}"
             );
-        } else if job["terminal"] == false {
+            assert!(
+                !second_ids.contains(id.as_str()),
+                "retained running job ended on second reopen: {id}"
+            );
+            continue;
+        }
+        assert_eq!(matches.len(), 1, "durable job notice lost: {id}");
+        if job["terminal"] == false {
             assert_eq!(
                 matches[0]["status"], "outcome_unknown",
                 "invented lost-process outcome"

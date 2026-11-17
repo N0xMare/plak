@@ -18,7 +18,8 @@ impl ProductStateRoots {
         locator: plakous::sessions::SessionLocator,
         tree_id: &str,
     ) -> CliResult<()> {
-        if self.daemon_processes() {
+        // This exemption is home-local custody, not the job-release lifetime.
+        if self.local_daemon.is_some() {
             return Ok(());
         }
         let socket = self

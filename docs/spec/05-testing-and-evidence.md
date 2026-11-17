@@ -2970,10 +2970,12 @@ own) that the product reaches through `plakd runner connect
 --stdio`, the offline script's `child_runner` route (spec 01 §8.5). A fork
 keeps the seed's runner identity and owner floors, so its session reopens on
 the same runner, under a daemon of its own. The session promotes one job,
-which the pilot's quit stops on the runner; the pilot checks the daemon
-started it. Every cut kills the host at one of its commits. In
+which the daemon retains after the pilot quits. The pilot checks the daemon
+started it, its process remains alive and its durable row is not terminal.
+Every cut kills the host at one of its commits. In
 `runner_job_survives_host_loss` the daemon survives, and so does a job it
-started while the host had not yet published the answer; in
+started, even past answer publication and ordinary release. The successor must
+keep that process alive without inventing a terminal notice. In
 `runner_restart_unknown` the harness kills the daemon at the cut as well and
 starts a replacement, so the successor's bridge meets a new runner instance,
 and a job the cut left running is reported only as of unknown outcome. The
@@ -3198,7 +3200,8 @@ fixture uses a standalone tool driver, not a hub-visible tree: its three faces
 compare tool observations and the landed receipt, without inventing adoption
 notices from presentation call facts. The hosted laws above require adoption
 notices from the root's durable tree operations instead.
-The process pilots prove a real shell job was promoted and quit settled it;
+The process pilots prove a real shell job was promoted and either terminal
+direct release settled it or its daemon retained it;
 the sealed pilot additionally proves promotion of managed native family bytes.
 PID evidence is scoped to each fixture root, never a workspace shared by cuts.
 Each shape starts from a clean

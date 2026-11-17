@@ -8540,11 +8540,15 @@ stop a child's jobs. Recovery-required child failure stops jobs with attempt-end
 attribution before parking or releasing its owner. Terminal snapshots remain
 available for durable reconciliation even if the failed runtime cannot publish.
 
-For the home-local daemon transport in host mode, ordinary releases instead
-transfer jobs, including a held child rebuilt and released after host loss.
-Only explicit stops select terminal cleanup; an embedded agent stays direct
-and its release remains terminal. The daemon, not an in-process registry,
-keeps promoted work through host loss.
+For daemon-backed transports in host mode, both home-local and paired native
+remote, ordinary releases instead transfer jobs, including a held child rebuilt
+and released after host loss. The host registry and the agent's own cleanup use
+the same daemon-owned lifetime: neither stops promoted work on a planned
+handoff. Only explicit stops, terminal shutdown commands and attempt-end cleanup
+select terminal cleanup; an embedded agent stays direct and its release remains
+terminal. The daemon, not an in-process registry, keeps promoted work through
+host loss. Remote continuation requires the unchanged exact runner triple;
+the host-upgrade changed-triple process gate remains chapter 02 §4.6.
 
 The host decides release disposition. Before that decision a driver that exits
 itself (including RecoveryRequired, fatal error or panic) closes admission for
