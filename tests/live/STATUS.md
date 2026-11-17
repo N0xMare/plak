@@ -7,55 +7,114 @@ Raw reports stay private under the ignored `target/live/`.
 
 ## Qualification
 
-`efe23aba` (0.0.3) passed the spec 05 §3.4 pre-release bar:
+`080c15df` (0.0.4) passed the spec 05 §3.4 pre-release bar:
 
 - the integrated gate on both supported platforms: `just full` on Apple
   Silicon and on Linux x86_64, the native musl tier and the pinned musl
-  container gate, and the strict crash-point sweep over all twenty-seven
-  shapes with no unclassified, divergent or refused cut, plus the publish dry
+  container gate, and the strict crash-point sweep over all fifty
+  shapes (2,111 indexed and 187 wire-restart cuts) with no unclassified,
+  divergent or refused cut, plus the publish dry
   run;
-- the 0.0.3 live matrix (History, below);
-- a maintainer's review of the `efe23aba` maintainer build in the TUI.
+- the 0.0.4 live matrix at `86ddea1c`, re-confirmed at `080c15df`, and the new GPT-6.2 rows at
+  `080c15df` (History, below);
+- a maintainer's review of the `080c15df` maintainer build through an independently
+  maintained client.
 
-`25ea8365` (tag `v0.0.2`) passed the same bar for 0.0.2.
+`efe23aba` (0.0.3) and `25ea8365` (tag `v0.0.2`) passed the same bar for
+their releases.
 
 No later revision is qualified.
 
 ## Live matrix
 
 The rows are the owner's catalog, the `ROUTES` keys in `live.py`, in ladder
-order (spec 05 §3.4). A row shows its latest result, from the 0.0.3 candidate
-matrix where it ran there and from the 0.0.2 matrix otherwise; whether it
+order (spec 05 §3.4). A row shows its latest result, from the 0.0.4 candidate
+matrix where it ran there and from an earlier matrix otherwise; whether it
 carries to a later revision is the §3.4 re-confirmation rule. A new row, or a
 row whose model or effort changed, has no result yet.
 Rung 3 rows are sparing and run only for a targeted confirmation.
 
 | Route | Class | Rung | Last result |
 | --- | --- | --- | --- |
-| `or-nemotron-free` | informational | 1 | smoke pass at `bce238af` (Apple Silicon) |
-| `or-nemotron-vl-free` | informational | 1 | smoke pass at `bce238af` (Apple Silicon) |
-| `or-flint-free` | informational | 1 | provider, recorded at `0df98a47` (Apple Silicon): no upstreams available on both runs |
-| `codex` | light | 1 | smoke pass at `bce238af` (Apple Silicon) |
-| `claude-haiku55-low` | light | 1 | smoke pass at `bce238af` (Apple Silicon) |
-| `grok-46` | light | 1 | smoke pass at `bce238af` (Apple Silicon) |
-| `api-openai` | light | 1 | smoke pass at `bce238af` (Apple Silicon, Linux x86_64 musl) |
-| `api-anthropic` | light | 1 | smoke pass at `bce238af` (Apple Silicon, Linux x86_64 musl) |
-| `api-xai` | light | 1 | smoke pass at `bce238af` (Apple Silicon, Linux x86_64 musl) |
-| `codex-sol` | full | 2 | full cell pass at `bce238af` (Apple Silicon); Linux x86_64 musl smoke pass |
-| `claude-sonnet55-low` | full | 2 | full cell pass at `bce238af` (Apple Silicon); Linux x86_64 musl smoke pass |
-| `grok` | full | 2 | full cell and one-hour headless soak pass at `bce238af` (Apple Silicon); Linux x86_64 musl smoke pass |
-| `deepseek` | full; long-session informational | 2 | full cell pass at `e180b55b` (Apple Silicon; the informational long-session lane passed after its MODEL rerun); Linux x86_64 musl smoke pass |
-| `deepseek-messages` | full; long-session informational | 2 | smoke and `crash_jobs` x3 pass at `e180b55b` (Apple Silicon); jobs model, recorded (`wake_while_idle`: the model kept the root busy while the job ran); informational long-session pass at `b2755c04` after its MODEL rerun; Linux x86_64 musl smoke pass |
-| `or-glm` | light | 2 | smoke pass at `bce238af` (Apple Silicon) |
-| `codex-luna-medium` | light | 2 | smoke pass at `bce238af` (Apple Silicon) |
-| `claude-haiku55-medium` | light | 2 | smoke pass at `bce238af` (Apple Silicon) |
-| `claude-sonnet55-medium` | light | 2 | smoke pass at `bce238af` (Apple Silicon) |
+| `or-nemotron-free` | informational | 1 | smoke pass at `86ddea1c` (Apple Silicon) |
+| `or-nemotron-vl-free` | informational | 1 | smoke pass at `86ddea1c` (Apple Silicon) |
+| `or-flint-free` | informational | 1 | smoke pass at `86ddea1c` (Apple Silicon) |
+| `codex` | light | 1 | smoke pass at `86ddea1c` (Apple Silicon) |
+| `claude-haiku55-low` | light | 1 | smoke pass at `86ddea1c` (Apple Silicon) |
+| `grok-46` | light | 1 | smoke pass at `86ddea1c` (Apple Silicon) |
+| `api-openai` | light | 1 | smoke pass at `86ddea1c` (Apple Silicon, Linux x86_64 musl) |
+| `api-anthropic` | light | 1 | smoke pass at `86ddea1c` (Apple Silicon, Linux x86_64 musl) |
+| `api-xai` | light | 1 | smoke pass at `86ddea1c` (Apple Silicon, Linux x86_64 musl) |
+| `codex-sol` | full | 2 | full cell pass at `86ddea1c` (Apple Silicon); Linux x86_64 musl smoke pass; re-confirmation smoke pass at `080c15df` on both platforms |
+| `claude-sonnet55-low` | full | 2 | full cell pass at `86ddea1c` (Apple Silicon); Linux x86_64 musl smoke pass; re-confirmation smoke pass at `080c15df` on both platforms |
+| `grok` | full | 2 | full cell and one-hour headless soak pass at `86ddea1c` (Apple Silicon); Linux x86_64 musl smoke pass; re-confirmation smoke pass at `080c15df` on both platforms |
+| `deepseek` | full; long-session informational | 2 | full cell pass at `86ddea1c` (Apple Silicon, the informational long-session lane included); Linux x86_64 musl smoke pass; re-confirmation smoke pass at `080c15df` on both platforms |
+| `deepseek-messages` | full; long-session informational | 2 | full cell pass at `86ddea1c` (Apple Silicon, the informational long-session lane included); Linux x86_64 musl smoke pass; re-confirmation smoke pass at `080c15df` on both platforms |
+| `or-glm` | light | 2 | smoke pass at `86ddea1c` (Apple Silicon) |
+| `codex-luna-medium` | light | 2 | smoke pass at `86ddea1c` (Apple Silicon) |
+| `claude-haiku55-medium` | light | 2 | smoke pass at `86ddea1c` (Apple Silicon) |
+| `claude-sonnet55-medium` | light | 2 | smoke pass at `86ddea1c` (Apple Silicon) |
+| `codex-sol62-low` | light | 2 | smoke pass at `080c15df` (Apple Silicon) |
+| `codex-sol62-medium` | light | 2 | smoke pass at `080c15df` (Apple Silicon) |
+| `api-openai-sol62-low` | light | 2 | smoke pass at `080c15df` (Apple Silicon, Linux x86_64 musl) |
 | `claude-opus-low` | light, sparing | 3 | smoke pass at `f07e205e` (Apple Silicon) |
 | `claude-opus-medium` | light, sparing | 3 | smoke pass at `f07e205e` (Apple Silicon) |
 | `codex-astra` | light, sparing | 3 | smoke pass at `f07e205e` (Apple Silicon) |
-| `claude-fable` | light, sparing | 3 | model changed to `claude-fable-5-2` at low; no result yet |
+| `claude-fable` | light, sparing | 3 | smoke pass at `86ddea1c` (Apple Silicon), confirming the `claude-fable-5-2` tuple |
+| `codex-astra62-low` | light, sparing | 3 | smoke pass at `080c15df` (Apple Silicon), confirming the `gpt-6.2-astra` tuple |
+| `codex-astra62-medium` | light, sparing | 3 | smoke pass at `080c15df` (Apple Silicon), confirming the `gpt-6.2-astra` tuple |
+| `api-openai-astra62-low` | light, sparing | 3 | smoke pass at `080c15df` (Apple Silicon, Linux x86_64 musl), confirming the `gpt-6.2-astra` tuple |
 
 ## History
+
+### 0.0.4 candidate matrix (`86ddea1c`, re-confirmed at `080c15df`)
+
+`plakd/test-hooks` release builds, composition `plakous-default`: `86ddea1c` for
+`aarch64-apple-darwin` (`plakd` SHA-256 `8b0214d7…`, workers `874decb0…` and
+`0a3cf5e9…`) and `x86_64-unknown-linux-musl` (`plakd` SHA-256 `8b8038f6…`,
+workers `990e829b…` and `830c36c8…`); `080c15df` for the final re-confirmation
+smokes and the GPT-6.2 rows (`plakd` `ebecd5e1…` on Apple Silicon, `3a82d5ef…`
+on Linux x86_64 musl). The revisions after `86ddea1c` change package-verification
+tooling (`10dcfe0c`), same-key upgrade inspection of paired-runner sessions
+(`054c2d1e`), paired-runner job retention across planned handoff (`a80ceae4`,
+`7d2e9f36`) and enroll `gpt-6.2-sol` and `gpt-6.2-astra` on the Codex and
+OpenAI API routes with GPT-6.2 shipped Codex defaults (`080c15df`). No existing
+row's rendered-prompt pins move, so the `86ddea1c` cells carry with the
+re-confirmation smoke on each `full` row, which also passed at `10dcfe0c`,
+`054c2d1e` and `a80ceae4` on both platforms. The six GPT-6.2 rows are new tuples
+and ran their class depth, the eleven-scenario smoke, at `080c15df`.
+
+Commits after `382aa2ba` were re-recorded to correct three commits' author
+metadata; every commit's tree is unchanged, so the gates and cells recorded
+here ran on byte-identical sources under the commits' earlier identifiers.
+
+Every cell below ran through the qualification cell driver. Before `86ddea1c`:
+
+- The first Linux musl pass, at `c2e16bf9`, scored `api-anthropic` HARNESS:
+  after compaction the request replayed a signed thinking block whose earlier
+  history had been rewritten, and the Anthropic API refused it. `86ddea1c`
+  invalidates native reasoning after history prefix rewrites. `api-openai`
+  was provider on both attempts (the stored key was refused) and passed after
+  the key was replaced.
+- At `c2e16bf9` the rung-one `or-inkling-free` and `or-lfm-free` cells refused
+  before a turn: OpenRouter withdrew both models. `ce2817fd` retired the rows.
+- `c2e16bf9` moved the driver's scratch homes to a short private temporary
+  root: under `target/live/` the host socket path exceeded the platform
+  socket-path limit, so every resume scenario failed.
+
+| Cells | Platform | Outcome |
+| --- | --- | --- |
+| Smoke on `codex`, `claude-haiku55-low`, `grok-46`, `api-openai`, `api-anthropic`, `api-xai`, `or-nemotron-free`, `or-nemotron-vl-free`, `or-flint-free` | Apple Silicon | pass |
+| Smoke on `codex-luna-medium`, `claude-haiku55-medium`, `claude-sonnet55-medium`, `or-glm`, `claude-fable` | Apple Silicon | pass |
+| Smoke, long-session `--all`, jobs and `crash_jobs` x3 on `claude-sonnet55-low` | Apple Silicon | pass |
+| Smoke, jobs and `crash_jobs` x3 on `codex-sol` and `grok` | Apple Silicon | pass; jobs after its PROVIDER rerun (model lookup timeouts) |
+| Smoke and long-session `--all` (informational) on `deepseek`; long-session `--all` (informational), jobs and `crash_jobs` x3 on `deepseek-messages` | Apple Silicon | pass |
+| Long-session `--all` on `codex-sol` and `grok`; jobs and two further `crash_jobs` on `deepseek`; smoke on `deepseek-messages` | Apple Silicon | the first cells ran during a local network outage (DNS and connect failures on every provider, nothing sent) and scored harness or provider; fresh cells after the outage passed |
+| Headless soak, one hour, `grok` | Apple Silicon | pass |
+| Smoke on `codex-sol`, `claude-sonnet55-low`, `grok`, `deepseek`, `deepseek-messages`, `api-openai`, `api-anthropic`, `api-xai` | Linux x86_64 musl | pass, all on the first attempt |
+| Re-confirmation smoke on `codex-sol`, `claude-sonnet55-low`, `grok`, `deepseek`, `deepseek-messages` at `080c15df` | Apple Silicon, Linux x86_64 musl | pass, all on the first attempt |
+| Smoke on `codex-sol62-low`, `codex-sol62-medium`, `codex-astra62-low`, `codex-astra62-medium`, `api-openai-sol62-low`, `api-openai-astra62-low` at `080c15df` | Apple Silicon | pass, all on the first attempt |
+| Smoke on `api-openai-sol62-low`, `api-openai-astra62-low` at `080c15df` | Linux x86_64 musl | pass, both on the first attempt |
 
 ### 0.0.3 candidate matrix (`bce238af` to `b2755c04`)
 

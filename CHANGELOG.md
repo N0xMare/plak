@@ -7,7 +7,7 @@ cross-build session carrier (a build imports its own and the previous version).
 The separate runner job-retention endpoint also retains its previous speaker
 for one version bump, without native protocol compatibility.
 
-## Unreleased
+## 0.0.4
 
 ### plakd
 
