@@ -355,7 +355,7 @@ pub(crate) mod compaction;
 mod runner_placement;
 
 #[test]
-fn openai_api_code_mode_table_matches_the_codex_reference_catalog() {
+fn openai_api_code_mode_table_matches_the_codex_catalog_evidence() {
     // OpenAI API rows the Codex catalog does not list, enrolled Direct on
     // review. Empty today: every enrolled API row is a Codex catalog row.
     const API_ONLY_DIRECT: &[&str] = &[];
@@ -363,6 +363,11 @@ fn openai_api_code_mode_table_matches_the_codex_reference_catalog() {
         "../agent/fixtures/codex-reference-catalog.json"
     ))
     .unwrap();
+    let authenticated: serde_json::Value = serde_json::from_str(include_str!(
+        "../agent/fixtures/codex-authenticated-catalog.json"
+    ))
+    .unwrap();
+    assert_eq!(authenticated["client_version"], reference["client_version"]);
     assert_eq!(
         reference["client_version"].as_str(),
         Some(plakous_openai::OPENAI_CODEX_REFERENCE_CLIENT_VERSION),
@@ -379,11 +384,15 @@ fn openai_api_code_mode_table_matches_the_codex_reference_catalog() {
     for row in rows {
         assert!(
             reference["models"].get(&row.model).is_some()
+                || authenticated["models"].get(&row.model).is_some()
                 || API_ONLY_DIRECT.contains(&row.model.as_str()),
             "{} is neither a reference catalog row nor reviewed as API-only Direct",
             row.model
         );
-        let catalog = reference["models"][&row.model]["tool_mode"].as_str();
+        let catalog = reference["models"]
+            .get(&row.model)
+            .unwrap_or(&authenticated["models"][&row.model])["tool_mode"]
+            .as_str();
         let expected = match catalog {
             Some("code_mode_only") => ApiToolMode::CodeModeOnly,
             _ => ApiToolMode::Direct,
@@ -517,6 +526,18 @@ async fn openai_api_native_ptc_creates_and_reopens_from_the_enrolled_table() {
         OpenSessionRequest, SessionBackend, SessionOperationId,
     };
     for (provider, model, composition, admitted) in [
+        (
+            PlatformProvider::OpenAi,
+            "gpt-6.2-sol",
+            CompositionSelection::FollowCatalog,
+            true,
+        ),
+        (
+            PlatformProvider::OpenAi,
+            "gpt-6.2-astra",
+            CompositionSelection::NativePtc,
+            true,
+        ),
         (
             PlatformProvider::OpenAi,
             "gpt-5.6-luna",

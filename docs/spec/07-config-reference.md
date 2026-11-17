@@ -1106,6 +1106,13 @@ Two keys take a value spelling the file grammar cannot:
 
 Every built-in profile has the same four roles:
 
+The Codex profile uses `gpt-6.2-astra` at `medium` for root and reviewer,
+`gpt-6.2-sol` at `medium` for worker, and `gpt-6-luna` at `xhigh` with fast
+mode for researcher (there is no enrolled 6.2 Luna successor). The mixed
+profile's Codex worker uses `gpt-6.2-sol` at `medium` with fast mode. Other
+providers' defaults are unchanged. The annotated reference home uses the
+same Codex assignments.
+
 | role | `access` | `spawns` | `tools` |
 | --- | --- | --- | --- |
 | root (`root-agent`) | `full` | `[]` | none: core tools only; its menu is the working set |

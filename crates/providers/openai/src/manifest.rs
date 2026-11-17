@@ -14,8 +14,10 @@ use crate::{ConfigError, OpenAiRoute, ResponsesFeature, StorageMode};
 pub(crate) const OPENAI_GPT_56_PLATFORM_PROFILE_ID: &str = "openai.platform.gpt-5.6.2026-07-31.r2";
 /// Reviewed GPT-6 Sol/Luna Responses profile.
 pub(crate) const OPENAI_GPT_6_PLATFORM_PROFILE_ID: &str = "openai.platform.gpt-6.2026-09-22.r1";
+/// Reviewed GPT-6.2 Sol/Astra Responses profile.
+pub(crate) const OPENAI_GPT_62_PLATFORM_PROFILE_ID: &str = "openai.platform.gpt-6.2.2026-11-17.r1";
 /// UTC second at which the official model documentation was reviewed.
-pub(crate) const OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS: u64 = 1_794_700_800;
+pub(crate) const OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS: u64 = 1_794_873_600;
 /// When this review is due for renewal, 90 days after it. It drives only
 /// doctor and status notes and the publish floor; the route never refuses on
 /// the calendar.
@@ -24,20 +26,34 @@ pub const OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS: u64 =
 
 const GPT_56_FAMILY_ID: &str = "gpt-5.6";
 const GPT_6_FAMILY_ID: &str = "gpt-6";
+const GPT_62_FAMILY_ID: &str = "gpt-6.2";
 /// Reviewed maximum output tokens for every Platform row.
 pub(crate) const OPENAI_PLATFORM_MAX_OUTPUT_TOKENS: u32 = 128_000;
 
-// Sources reviewed 2026-11-15:
+// Sources reviewed 2026-11-17:
 // - https://developers.openai.com/api/docs/models
 // - https://developers.openai.com/api/docs/guides/latest-model
 // - the exact /api/docs/models/gpt-5.6-{sol,terra,luna} and
 //   /api/docs/models/gpt-6-{sol,luna} pages
+// - https://developers.openai.com/api/docs/models/gpt-6.2-sol
+// - https://developers.openai.com/api/docs/models/gpt-6.2-astra
+// - https://developers.openai.com/api/docs/guides/reasoning
 // - https://developers.openai.com/api/docs/guides/conversation-state
 // - https://platform.openai.com/docs/models/default-usage-policies-by-endpoint
 //
 // Portable ReasoningEffort includes Ultra for subscription/Codex routes. The
 // Platform rows admit only the current documented named GPT-5.6 efforts.
-const REVIEWED_ROWS: [ReviewedPlatformRow; 5] = [
+const REVIEWED_ROWS: [ReviewedPlatformRow; 7] = [
+    ReviewedPlatformRow::new(
+        "gpt-6.2-sol",
+        GPT_62_FAMILY_ID,
+        OPENAI_GPT_62_PLATFORM_PROFILE_ID,
+    ),
+    ReviewedPlatformRow::new(
+        "gpt-6.2-astra",
+        GPT_62_FAMILY_ID,
+        OPENAI_GPT_62_PLATFORM_PROFILE_ID,
+    ),
     ReviewedPlatformRow::new(
         "gpt-5.6-sol",
         GPT_56_FAMILY_ID,
@@ -82,6 +98,14 @@ impl ReviewedPlatformRow {
             family,
             profile,
             max_output_tokens: OPENAI_PLATFORM_MAX_OUTPUT_TOKENS,
+        }
+    }
+
+    fn facts_reviewed_at(self) -> u64 {
+        // A new row's review does not change the provenance of unchanged rows.
+        match self.family {
+            GPT_62_FAMILY_ID => OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS,
+            _ => 1_794_700_800,
         }
     }
 }
@@ -180,6 +204,18 @@ pub(crate) fn validate_reviewed_platform_request(
     {
         return Err(ConfigError::UnsupportedToolForm);
     }
+    if row.family == GPT_62_FAMILY_ID
+        && matches!(
+            request.reasoning(),
+            ReasoningPolicy::Disabled
+                | ReasoningPolicy::Enabled {
+                    effort: Some(ReasoningEffort::None),
+                    ..
+                }
+        )
+    {
+        return Err(ConfigError::UnsupportedReasoningEffort);
+    }
     validate_platform_adapter_request(request)
 }
 
@@ -262,7 +298,7 @@ fn descriptor_for_row(
     route: &OpenAiRoute,
     row: ReviewedPlatformRow,
 ) -> Result<ResolvedModelDescriptor, ConfigError> {
-    let observed_at = fixed_timestamp(OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS)?;
+    let observed_at = fixed_timestamp(row.facts_reviewed_at())?;
     let provenance = FactProvenance::new(FactSource::BuiltIn, observed_at, None);
     let mut features = BTreeMap::from([
         (
@@ -390,7 +426,7 @@ pub(crate) fn with_context_envelope(
             ],
         )?;
         let freshness = EvidenceFreshness::new(
-            fixed_timestamp(OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS)?,
+            fixed_timestamp(REVIEWED_ROWS[admission.witness.row_index].facts_reviewed_at())?,
             None,
         )?;
         let capacity = CapacityCertificate::custom_envelope(

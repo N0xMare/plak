@@ -2900,15 +2900,18 @@ fn newly_enrolled_oauth_models_compile_every_valid_product_presentation() {
 }
 
 #[test]
-fn codex_enrollment_matches_the_pinned_reference_catalog() -> Result<(), Box<dyn std::error::Error>>
-{
+fn codex_enrollment_matches_reference_or_authenticated_catalog()
+-> Result<(), Box<dyn std::error::Error>> {
     let reference: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/codex-reference-catalog.json"))?;
     let enrolled = NativeProvider::Codex.enrolled_models();
+    let authenticated: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/codex-authenticated-catalog.json"))?;
+    assert_eq!(authenticated["client_version"], reference["client_version"]);
     let rows = reference["models"].as_object().ok_or("reference models")?;
-    assert_eq!(rows.len(), enrolled.len());
+    assert!(rows.keys().all(|model| enrolled.contains(&model.as_str())));
     for model in enrolled {
-        let row = &rows[model];
+        let row = rows.get(model).unwrap_or(&authenticated["models"][model]);
         assert_eq!(row["tool_mode"], "code_mode_only", "{model}");
         assert_eq!(
             NativeProvider::Codex.enrolled_tool_mode(model),
@@ -2939,6 +2942,16 @@ fn new_oauth_product_selections_pass_effective_capability_compile()
         serde_json::from_str(include_str!("fixtures/codex-authenticated-catalog.json"))?;
 
     for (provider, model, mode) in [
+        (
+            NativeProvider::Codex,
+            "gpt-6.2-sol",
+            Some(NativeToolMode::CodeModeOnly),
+        ),
+        (
+            NativeProvider::Codex,
+            "gpt-6.2-astra",
+            Some(NativeToolMode::CodeModeOnly),
+        ),
         (
             NativeProvider::Codex,
             "gpt-6.1-sol",
@@ -2975,7 +2988,9 @@ fn new_oauth_product_selections_pass_effective_capability_compile()
         for &composition in compositions {
             if provider == NativeProvider::Codex {
                 assert_eq!(
-                    codex_reference["models"][model]["use_responses_lite"],
+                    codex_reference["models"]
+                        .get(model)
+                        .unwrap_or(&codex_observed["models"][model])["use_responses_lite"],
                     serde_json::json!(true),
                     "effective capability fixture must match the 0.169.0 reference catalog"
                 );

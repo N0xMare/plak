@@ -11,6 +11,8 @@ for one version bump, without native protocol compatibility.
 
 ### plakd
 
+- Enroll GPT-6.2 Sol and Astra on Codex subscription and OpenAI API routes,
+  update the Codex and mixed-profile defaults, and add light smoke routes.
 - Preserve paired-runner promoted jobs through graceful host restart and
   unchanged-triple same-key upgrade, while keeping explicit stops terminal.
 - Report runner job promotions before returning from the tool, even when its

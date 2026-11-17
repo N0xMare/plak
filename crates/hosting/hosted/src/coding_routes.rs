@@ -246,6 +246,14 @@ fn build_routes() -> Result<PresentationRoutes, ()> {
         PresentationRoute::standard(
             OPENAI_PLATFORM.0,
             OPENAI_PLATFORM.1,
+            "openai.platform.gpt-6.2.2026-11-17.r1",
+            None,
+            |model| openai_platform_profile(model) == Some("openai.platform.gpt-6.2.2026-11-17.r1"),
+            platform_presentation(PlatformProvider::OpenAi),
+        ),
+        PresentationRoute::standard(
+            OPENAI_PLATFORM.0,
+            OPENAI_PLATFORM.1,
             "openai.platform.gpt-6.2026-09-22.r1",
             None,
             |model| openai_platform_profile(model) == Some("openai.platform.gpt-6.2026-09-22.r1"),

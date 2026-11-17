@@ -2051,6 +2051,8 @@ async fn exact_catalog_resolution_rejects_selected_defects_and_duplicate_slug() 
 #[test]
 fn executable_catalog_predicate_matches_exact_source_enrollment() {
     let expected = [
+        ("gpt-6.2-sol", CodexCatalogToolMode::CodeModeOnly),
+        ("gpt-6.2-astra", CodexCatalogToolMode::CodeModeOnly),
         ("gpt-6-astra", CodexCatalogToolMode::CodeModeOnly),
         ("gpt-6.1-sol", CodexCatalogToolMode::CodeModeOnly),
         ("gpt-6-sol", CodexCatalogToolMode::CodeModeOnly),
@@ -2065,6 +2067,8 @@ fn executable_catalog_predicate_matches_exact_source_enrollment() {
         assert_eq!(release_enrolled_codex_tool_mode(model), Some(tool_mode));
     }
     for model in [
+        "gpt-6.2-sol-latest",
+        "gpt-6.2-astra-latest",
         "gpt-6",
         "gpt-6-astra-latest",
         "gpt-5.6",

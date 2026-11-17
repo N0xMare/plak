@@ -1038,6 +1038,18 @@ fn every_template_validation_rule_has_a_positive_and_a_negative_case() {
 /// never defaulted at Fork now or Use now.
 #[test]
 fn a_direct_api_template_needs_an_effort_on_its_models_ladder_at_load() {
+    for model in ["gpt-6.2-sol", "gpt-6.2-astra"] {
+        for effort in ["", "none", "minimal", "ultra"] {
+            let text =
+                format!("account = \"openai\"\nmodel = \"{model}\"\neffort = \"{effort}\"\n");
+            assert!(parse_template(&text, "t").is_err(), "{model}/{effort}");
+        }
+        for effort in ["low", "medium", "high", "xhigh", "max"] {
+            let text =
+                format!("account = \"openai\"\nmodel = \"{model}\"\neffort = \"{effort}\"\n");
+            assert!(parse_template(&text, "t").is_ok(), "{model}/{effort}");
+        }
+    }
     let needs =
         "template t: openai model `gpt-5.6-sol` requires --effort none|low|medium|high|xhigh|max";
     for effort in ["", "effort = \"ultra\"\n"] {
@@ -1334,9 +1346,9 @@ fn the_shipped_presets_load_as_a_home() {
     type Row = [(&'static str, &'static str, &'static str, bool); 4];
     // The reference tree is the annotated render of `presets/codex`.
     let provider_codex: Row = [
-        ("codex", "gpt-6-astra", "medium", false),
-        ("codex", "gpt-6-sol", "medium", false),
-        ("codex", "gpt-6-astra", "medium", false),
+        ("codex", "gpt-6.2-astra", "medium", false),
+        ("codex", "gpt-6.2-sol", "medium", false),
+        ("codex", "gpt-6.2-astra", "medium", false),
         ("codex", "gpt-6-luna", "xhigh", true),
     ];
     let codex_tools: &[&str] = &["web_search", "fetch_url"];
@@ -1371,7 +1383,7 @@ fn the_shipped_presets_load_as_a_home() {
             None,
             [
                 ("claude", "claude-opus-5-5", "high", false),
-                ("codex", "gpt-6.1-sol", "medium", true),
+                ("codex", "gpt-6.2-sol", "medium", true),
                 ("claude", "claude-opus-5-5", "high", false),
                 ("grok", "grok-4.7-build-fast", "medium", false),
             ],

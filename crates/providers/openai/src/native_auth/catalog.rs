@@ -933,6 +933,8 @@ pub(super) struct ResolvedCatalog {
 /// catalog admission all read it. Window and effort facts come from the
 /// authenticated catalog, never from here.
 pub const RELEASE_ENROLLED_CODEX_MODELS: &[(&str, CodexCatalogToolMode)] = &[
+    ("gpt-6.2-sol", CodexCatalogToolMode::CodeModeOnly),
+    ("gpt-6.2-astra", CodexCatalogToolMode::CodeModeOnly),
     ("gpt-6-astra", CodexCatalogToolMode::CodeModeOnly),
     ("gpt-6.1-sol", CodexCatalogToolMode::CodeModeOnly),
     ("gpt-6-sol", CodexCatalogToolMode::CodeModeOnly),

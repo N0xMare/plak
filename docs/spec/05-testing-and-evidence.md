@@ -5216,6 +5216,10 @@ catalog and nothing else:
 
 - Codex: `gpt-6-luna` at low (`codex`) and medium (`codex-luna-medium`),
   `gpt-6.1-sol` at low (`codex-sol`), `gpt-6-astra` at low (`codex-astra`).
+  GPT-6.2 Sol at low and medium (`codex-sol62-low`, `codex-sol62-medium`)
+  and GPT-6.2 Astra at low and medium (`codex-astra62-low`,
+  `codex-astra62-medium`) are light smoke rows only, not long-session or soak
+  qualification. Sol is rung 2; Astra is rung 3 (sparing).
 - SuperGrok: `grok-4.6` at low (`grok-46`), `grok-4.7` at low (`grok`).
 - Claude: `claude-haiku-5-5`, `claude-sonnet-5-5` and `claude-opus-5-5` at low
   and medium (`claude-haiku55-low`, `claude-haiku55-medium`,
@@ -5230,12 +5234,14 @@ catalog and nothing else:
   `messages`), `z-ai/glm-5.3-flash` (`or-glm`).
 - API keys: OpenAI `gpt-6-luna` at low (`api-openai`), Anthropic
   `claude-haiku-5-5` at low (`api-anthropic`), xAI API `grok-4.6` at low
-  (`api-xai`).
+  (`api-xai`). OpenAI also has `gpt-6.2-sol` at low (`api-openai-sol62-low`,
+  rung 2) and `gpt-6.2-astra` at low (`api-openai-astra62-low`, rung 3, sparing):
+  light smokes only, with no long-session or soak requirement.
 
 Depth follows the account. The Codex, SuperGrok and Claude subscriptions and
 OpenRouter are tested deep: they carry every `full` row. API keys are very
-light: each has one `light` row on its cheapest first-rung tuple, and nothing
-else.
+light: each has a `light` row on its cheapest first-rung tuple; OpenAI also
+has the two explicit GPT-6.2 light smoke rows.
 
 - `full`: `codex-sol`, `grok`, `claude-sonnet55-low`, `deepseek`,
   `deepseek-messages` (both DeepSeek rows' long-session lanes are
@@ -5243,7 +5249,9 @@ else.
 - `light`: `codex`, `codex-luna-medium`, `codex-astra`, `grok-46`,
   `claude-sonnet55-medium`, `claude-haiku55-low`, `claude-haiku55-medium`,
   `claude-opus-low`, `claude-opus-medium`, `claude-fable`, `or-glm`,
-  `api-openai`, `api-anthropic`, `api-xai`.
+  `api-openai`, `api-anthropic`, `api-xai`, `codex-sol62-low`,
+  `codex-sol62-medium`, `codex-astra62-low`, `codex-astra62-medium`,
+  `api-openai-sol62-low`, `api-openai-astra62-low`.
 - `informational`: the three free OpenRouter rows; also the `deepseek` and
   `deepseek-messages` long-session lanes.
 

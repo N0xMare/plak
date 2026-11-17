@@ -815,7 +815,7 @@ authenticated discovery, which refuses an id the gateway catalog does not list
 in the same shape; an account with no table is refused. The refusal names the model,
 the account and its catalog, and the `plakd models` listing that shows the rows.
 
-Codex OAuth enrolls exactly `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
+Codex OAuth enrolls exactly `gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
 `gpt-5.6-sol`, `gpt-5.6-terra`,
 and `gpt-5.6-luna`. Each is `code_mode_only`. A live catalog row that is not
 on that list, including retired `gpt-5.3-codex-spark`, is observational only
@@ -844,8 +844,9 @@ key header sensitive. Each listed id gets a status: `usable`, `needs
 review` (no reviewed family rule or table row, with the reason), `not a coding
 model`, or `retired` (lifecycle fields; deprecated models are usable with a
 note). Spec 01 §6.3 owns the family rules and tables. OpenAI admits
-`gpt-6-luna`, `gpt-6-sol`, `gpt-5.6-luna`, `gpt-5.6-sol` and `gpt-5.6-terra`
-(efforts `none` through `max` on those profiles; `none` is explicit and an
+`gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6-luna`, `gpt-6-sol`, `gpt-5.6-luna`,
+`gpt-5.6-sol` and `gpt-5.6-terra`
+(efforts `low` through `max` on 6.2, `none` through `max` on older profiles; `none` is explicit and an
 omitted effort stays refused). Other text Responses ids are `needs review`;
 audio, image, embedding, realtime, moderation and video ids are `not a coding
 model`. xAI admits `grok-4.3`, `grok-4.5`, `grok-4.6` and `grok-4.7` under
@@ -859,7 +860,8 @@ and rebind validation check the bundled table offline, and session
 construction re-admits against the live list. An unlisted id is an error
 naming up to three closest listed ids by edit distance; a listed id that is not
 usable is refused with its status and reason; an effort outside the model's
-published ladder (OpenAI reviewed profiles: `none|low|medium|high|xhigh|max`;
+published ladder (OpenAI 6.2: `low|medium|high|xhigh|max`, older reviewed
+profiles: `none|low|medium|high|xhigh|max`;
 Anthropic 5.x and Opus 4.7/4.8: `low|medium|high|xhigh|max`;
 4.6: `low|medium|high|max`; xAI `grok-4.7`/`grok-4.6`/`grok-4.5`:
 `low|medium|high|xhigh`; `grok-4.3`: `none|low|medium|high|xhigh`) is refused naming the

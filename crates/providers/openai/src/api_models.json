@@ -1,7 +1,11 @@
 {
-  "revision": "openai.api-models.2026-11-15.v1",
-  "reviewed_at": "2026-11-15",
+  "revision": "openai.api-models.2026-11-17.v1",
+  "reviewed_at": "2026-11-17",
   "sources": [
+    "https://developers.openai.com/api/docs/models/gpt-6.2-sol (reviewed 2026-11-17; rejects none)",
+    "https://developers.openai.com/api/docs/models/gpt-6.2-astra (reviewed 2026-11-17; rejects none)",
+    "https://developers.openai.com/api/docs/guides/reasoning (reviewed 2026-11-17)",
+    "Sanitized Codex authenticated catalog, client_version=0.169.0 (2026-11-17; named effort ladder only)",
     "https://developers.openai.com/api/docs/changelog (reviewed 2026-11-15; no authenticated catalog capture)",
     "https://developers.openai.com/api/reference/resources/models/methods/list (ids and ownership/availability metadata, not capability evidence)",
     "https://developers.openai.com/api/docs/models/<exact model id> (maximum input/output, effort, Responses and tools)",
@@ -9,6 +13,46 @@
     "https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/models-manager/models.json (context_window only, not API capabilities)"
   ],
   "models": [
+    {
+      "id": "gpt-6.2-sol",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": 500000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-6.2-astra",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": 272000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
     {
       "id": "gpt-6-luna",
       "max_input_tokens": 922000,

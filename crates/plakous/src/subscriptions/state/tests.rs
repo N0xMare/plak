@@ -32,6 +32,7 @@ async fn capture_codex_authenticated_catalog() -> Result<(), Box<dyn Error>> {
         for entry in catalog.entries() {
             let capacity = entry.capacity_facts();
             models.insert(entry.model_id().to_owned(), serde_json::json!({
+                "visibility": entry.visibility(),
                 "tool_mode": entry.tool_mode(),
                 "reasoning": entry.reasoning_effort_options().iter().map(|effort| {
                     format!("{effort:?}").to_ascii_lowercase()
@@ -58,7 +59,7 @@ async fn capture_codex_authenticated_catalog() -> Result<(), Box<dyn Error>> {
         "vertical": "codex-oauth",
         "client_version": plakous_openai::OPENAI_CODEX_REFERENCE_CLIENT_VERSION,
         "account_material_removed": true,
-        "capture_procedure": "PLAK_CAPTURE_STATE_HOME=<Plak XDG state home> PLAK_CAPTURE_OUTPUT=<fixture path> cargo test --locked -p plakous --features codex capture_codex_authenticated_catalog -- --ignored",
+        "capture_procedure": "PLAK_CAPTURE_STATE_HOME=<Plak XDG state home> PLAK_CAPTURE_OUTPUT=<fixture path> cargo test --locked -p plakous --features codex,grok,claude capture_codex_authenticated_catalog -- --ignored",
         "models": captured.ok_or("catalog capture did not complete")?,
     });
     let mut bytes = serde_json::to_vec_pretty(&document)?;

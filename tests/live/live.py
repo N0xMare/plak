@@ -169,8 +169,8 @@ FIRST, THEN, CONFIRM = 1, 2, 3
 RUNGS = (FIRST, THEN, CONFIRM)
 
 # Depth by account. Subscriptions and OpenRouter are tested deep: they carry
-# the `full` rows. API-key accounts are very light: one `light` row each, on
-# their cheapest first-rung tuple.
+# the `full` rows. API-key accounts are very light: their cheapest first-rung
+# tuple plus the explicit GPT-6.2 smoke rows.
 DEEP_ACCOUNTS = frozenset({"codex", "grok", "claude", "openrouter"})
 VERY_LIGHT_ACCOUNTS = frozenset({"openai", "anthropic", "xai-api"})
 
@@ -251,6 +251,18 @@ ROUTES = {
     "codex-sol": _route("codex-sol", "codex", "gpt-6.1-sol", "low", None, _CODEX, FULL, THEN),
     "codex-astra": _route(
         "codex-astra", "codex", "gpt-6-astra", "low", None, _CODEX, LIGHT, CONFIRM
+    ),
+    "codex-sol62-low": _route(
+        "codex-sol62-low", "codex", "gpt-6.2-sol", "low", None, _CODEX, LIGHT, THEN
+    ),
+    "codex-sol62-medium": _route(
+        "codex-sol62-medium", "codex", "gpt-6.2-sol", "medium", None, _CODEX, LIGHT, THEN
+    ),
+    "codex-astra62-low": _route(
+        "codex-astra62-low", "codex", "gpt-6.2-astra", "low", None, _CODEX, LIGHT, CONFIRM
+    ),
+    "codex-astra62-medium": _route(
+        "codex-astra62-medium", "codex", "gpt-6.2-astra", "medium", None, _CODEX, LIGHT, CONFIRM
     ),
     "grok-46": _route("grok-46", "grok", "grok-4.6", "low", None, _GROK, LIGHT, FIRST),
     "grok": _route("grok", "grok", "grok-4.7", "low", None, _GROK, FULL, THEN),
@@ -346,6 +358,19 @@ ROUTES = {
     # smokes these three plus the full rows.
     "api-openai": _route(
         "api-openai", "openai", "gpt-6-luna", "low", None, _OPENAI_API, LIGHT, FIRST
+    ),
+    "api-openai-sol62-low": _route(
+        "api-openai-sol62-low", "openai", "gpt-6.2-sol", "low", None, _OPENAI_API, LIGHT, THEN
+    ),
+    "api-openai-astra62-low": _route(
+        "api-openai-astra62-low",
+        "openai",
+        "gpt-6.2-astra",
+        "low",
+        None,
+        _OPENAI_API,
+        LIGHT,
+        CONFIRM,
     ),
     "api-anthropic": _route(
         "api-anthropic", "anthropic", "claude-haiku-5-5", "low", None, _ANTHROPIC_API, LIGHT, FIRST

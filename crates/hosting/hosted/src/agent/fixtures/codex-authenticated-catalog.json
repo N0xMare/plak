@@ -1,7 +1,7 @@
 {
   "account_material_removed": true,
-  "capture_procedure": "PLAK_CAPTURE_STATE_HOME=<Plak XDG state home> PLAK_CAPTURE_OUTPUT=<fixture path> cargo test --locked -p plakous --features native-subscriptions capture_codex_authenticated_catalog -- --ignored",
-  "client_version": "0.162.1",
+  "capture_procedure": "PLAK_CAPTURE_STATE_HOME=<Plak XDG state home> PLAK_CAPTURE_OUTPUT=<fixture path> cargo test --locked -p plakous --features codex,grok,claude capture_codex_authenticated_catalog -- --ignored",
+  "client_version": "0.169.0",
   "models": {
     "gpt-5.6-luna": {
       "auto_compact_token_limit": null,
@@ -24,7 +24,8 @@
         }
       ],
       "tool_mode": "code_mode_only",
-      "use_responses_lite": true
+      "use_responses_lite": true,
+      "visibility": "list"
     },
     "gpt-5.6-sol": {
       "auto_compact_token_limit": null,
@@ -47,7 +48,8 @@
         }
       ],
       "tool_mode": "code_mode_only",
-      "use_responses_lite": true
+      "use_responses_lite": true,
+      "visibility": "list"
     },
     "gpt-5.6-terra": {
       "auto_compact_token_limit": null,
@@ -70,7 +72,8 @@
         }
       ],
       "tool_mode": "code_mode_only",
-      "use_responses_lite": true
+      "use_responses_lite": true,
+      "visibility": "list"
     },
     "gpt-6-astra": {
       "auto_compact_token_limit": null,
@@ -93,7 +96,8 @@
         }
       ],
       "tool_mode": "code_mode_only",
-      "use_responses_lite": true
+      "use_responses_lite": true,
+      "visibility": "list"
     },
     "gpt-6-luna": {
       "auto_compact_token_limit": null,
@@ -116,7 +120,8 @@
         }
       ],
       "tool_mode": "code_mode_only",
-      "use_responses_lite": true
+      "use_responses_lite": true,
+      "visibility": "list"
     },
     "gpt-6-sol": {
       "auto_compact_token_limit": null,
@@ -139,7 +144,8 @@
         }
       ],
       "tool_mode": "code_mode_only",
-      "use_responses_lite": true
+      "use_responses_lite": true,
+      "visibility": "list"
     },
     "gpt-6.1-sol": {
       "auto_compact_token_limit": null,
@@ -162,7 +168,56 @@
         }
       ],
       "tool_mode": "code_mode_only",
-      "use_responses_lite": true
+      "use_responses_lite": true,
+      "visibility": "list"
+    },
+    "gpt-6.2-astra": {
+      "auto_compact_token_limit": null,
+      "context_window": 272000,
+      "default_reasoning": "low",
+      "effective_context_window_percent": 95,
+      "max_context_window": 872000,
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "service_tiers": [
+        {
+          "description": "2x speed, increased usage",
+          "id": "priority",
+          "name": "Fast"
+        }
+      ],
+      "tool_mode": "code_mode_only",
+      "use_responses_lite": true,
+      "visibility": "list"
+    },
+    "gpt-6.2-sol": {
+      "auto_compact_token_limit": null,
+      "context_window": 500000,
+      "default_reasoning": "low",
+      "effective_context_window_percent": 95,
+      "max_context_window": 872000,
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "service_tiers": [
+        {
+          "description": "2x speed, increased usage",
+          "id": "priority",
+          "name": "Fast"
+        }
+      ],
+      "tool_mode": "code_mode_only",
+      "use_responses_lite": true,
+      "visibility": "list"
     }
   },
   "provider": "openai",

@@ -10,7 +10,7 @@ account = "codex"
 
 # Exact model id.
 # type: string · default: (required) · non-empty; a direct API account must name an enrolled model, checked at load; every other account is checked at bind
-model = "gpt-6-astra"
+model = "gpt-6.2-astra"
 
 # Reasoning effort; on a subscription account a typo surfaces as a bind failure, not a load error.
 # type: string · default: (unset) · none|low|medium|high|xhigh|max|ultra; Codex offers low through max (never ultra); none is an explicit API effort, not an omitted one; a direct API account requires a level on the model's published ladder, checked at load; every other account is checked at bind

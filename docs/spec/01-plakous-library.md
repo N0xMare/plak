@@ -4294,6 +4294,20 @@ agent remain unchanged. Its compiled compatibility
 profile was reviewed on 2026-11-15 and expires at 2027-02-13T00:00:00Z, 90 days
 after the review (§7.1); a re-review that changes no contract keeps every
 earlier acceptance current (§7.2).
+
+The 2026-11-17 sanitized authenticated capture with `client_version=0.169.0`
+also enrolls exact server-delivered `gpt-6.2-sol` and `gpt-6.2-astra` rows.
+Both advertise visibility `list`, `code_mode_only`, Responses Lite,
+`low, medium, high, xhigh, max` (default `low`), 95% effective context and
+`priority` service tier. Sol's working context is 500,000 tokens; Astra's is
+272,000; both advertise a maximum context of 872,000. These subscription
+windows are not Platform API limits. The stable 0.169.0 and latest reviewed
+prerelease `rust-v0.171.0-alpha.12` public catalogs contain no 6.2 rows or
+6.2-specific prompt source. No first bundled release is established by that
+source review: delivery is authenticated and server-side. The existing parser,
+Code Mode contract and GPT-6 prompt base apply unchanged; there is no reference
+bump, consent revision, prompt-source change or additional format cut. The
+capture proves catalog admission, not inference qualification.
 The hidden, non-default `test-clock` feature alone exposes the Codex manager
 and `NativeSubscriptions` clock seams for offline fixtures; it is not a
 supported facade API. Consent, catalog, side requests and token time checks
@@ -4342,10 +4356,11 @@ Tool calls and results retain their call identities on subsequent turns.
 Remote compaction uses the same selected mode. Platform API requests retain
 their separate policy; OAuth catalog facts do not establish API model facts.
 The tool mode an OpenAI API session runs under comes from the product's
-reviewed API model table, which a test holds to this reference catalog
-fixture: the fixture's client version is the pinned constant, every row the
+reviewed API model table, which a test holds to reference and authenticated
+catalog fixtures: their client version is the pinned constant, every row the
 table marks `CodeModeOnly` is an enrolled API row, and every enrolled API row
-is either in the fixture or on an explicit reviewed API-only Direct list.
+is either in the reference fixture, in sanitized authenticated evidence from
+that client version, or on an explicit reviewed API-only Direct list.
 Moving the reference-client pin rotates the Codex OAuth binding identity and
 requires a runtime format epoch cut. This pin move belongs to the same unshipped
 epoch 38 / `r28.e38.p38.t11` cut as the pending runtime changes; it adds no
@@ -4451,7 +4466,7 @@ API key, `Authorization: Bearer`, at most 2048 rows and 4 MiB). The listing
 parser admits ids only, ignoring ownership, creation and shutdown
 metadata. Windows, output bounds, efforts and hosted-feature
 flags come from the bundled reviewed table (`api_models.json`, revision
-`openai.api-models.2026-11-15.v1`), checked against the model pages and, where
+`openai.api-models.2026-11-17.v1`), checked against the model pages and, where
 a page states no price threshold, the Codex catalog's per-model
 `context_window`. The working window is the documented input price threshold
 (272,000 where the page states the 2x price step), else that Codex window when
@@ -4459,10 +4474,26 @@ it is below the documented maximum input (so `gpt-daybreak-red-latest` stays
 at its documented 272,000 maximum input rather than the Codex 372,000 window),
 else the full maximum input. The output bound is the documented maximum output
 (128,000 on the reviewed GPT-5.x and GPT-6 profiles). Classification
-(`openai_api_models`) admits only the existing platform profiles
-`gpt-6-luna`, `gpt-6-sol`, `gpt-5.6-luna`, `gpt-5.6-sol` and `gpt-5.6-terra`,
-under the efforts the model page lists (`none` through `max` on those five;
-`gpt-6-astra` and `gpt-6.1-sol` start at `low`). Other text Responses ids are
+(`openai_api_models`) admits `gpt-6-luna`, `gpt-6-sol`, `gpt-5.6-luna`,
+`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6.2-sol` and `gpt-6.2-astra`. The first
+five admit `none` through `max`; the 6.2 rows admit only `low, medium, high,
+xhigh, max`, never `none` or `ultra`. Their exact manifest tuples use family
+`gpt-6.2` and profile `openai.platform.gpt-6.2.2026-11-17.r1`. Existing rows retain
+their 2026-11-15 fact provenance; the new review does not rotate their
+unchanged binding contracts.
+The 2026-11-17 official Sol and Astra model pages and compare page establish
+1,050,000 total context, 922,000 maximum input, 128,000 maximum output,
+text/image input, text output, streaming, structured output and Responses
+function tools. Both pages reject `none`; the named ladder is corroborated by
+the sanitized authenticated catalog. The documented input price step gives a
+272,000 working input window for both API rows. Chat Completions is available
+upstream, but tool calling requires Responses (official latest-model guide);
+this route remains Responses only. Sources:
+`https://developers.openai.com/api/docs/models/gpt-6.2-sol`,
+`https://developers.openai.com/api/docs/models/gpt-6.2-astra`,
+`https://developers.openai.com/api/docs/models/compare?model=gpt-6.2-sol&model=gpt-6.2-astra`,
+`https://developers.openai.com/api/docs/guides/latest-model`.
+Other text Responses ids are
 `NeedsReview`. The 2026-11-15 review records `gpt-6.1-terra` with 922,000
 maximum input, 128,000 output, a 272,000 price threshold and `none` through
 `max`, but does not enroll a coding/tool-mode profile for this visual reasoning,
@@ -4472,7 +4503,7 @@ price threshold but no effort ladder: its model page states none. It remains
 `access_programs.cyber` request contract are not implemented. The newly documented
 `gpt-6-rosalind` also remains `NeedsReview`: it is a specialized life-sciences
 model requiring Rosalind Research approval, not an enrolled coding profile.
-`gpt-6-astra` and `gpt-6.1-sol` remain outside the five reviewed coding profiles.
+`gpt-6-astra` and `gpt-6.1-sol` remain outside the seven reviewed coding profiles.
 The Models endpoint publishes identity and ownership/availability metadata, not
 capability evidence; no authenticated listing was captured for this review.
 Ids containing the reviewed non-coding markers (`tts`,
@@ -4572,16 +4603,16 @@ not newly enabled hosted tools in the local client-tools execution profile.
 Fable 5.2 requires 30-day provider retention unless Anthropic expressly
 authorizes otherwise; this route makes no zero-retention claim.
 
-The OpenAI Platform manifest and the xAI Platform binding and model table were
-re-reviewed on 2026-11-15 against official release notes, model pages, Responses,
-function-calling, reasoning and storage documentation. The OpenAI review keeps
-its five admitted coding profiles; `gpt-6.1-sol` remains unenrolled. The xAI
+The OpenAI Platform manifest was reviewed on 2026-11-17 and the xAI Platform
+binding and model table on 2026-11-15 against official model pages, Responses,
+function-calling, reasoning and storage documentation. The OpenAI review adds
+the two 6.2 coding profiles; `gpt-6.1-sol` remains unenrolled. The xAI
 review retains its four coding enrollments and conservative capabilities;
 Grok 4.7 Fast remains subscription-only, not an API enrollment. Grok 4.7's
 default encrypted reasoning output is already preserved and replayed unchanged
 by the Responses host. Optional `safety_identifier` and moderation `guidelines`
-are not sent. Both documented public API reviews are due at
-2027-02-13T00:00:00Z, but the routes
+are not sent. The OpenAI review is due at 2027-02-15T00:00:00Z and xAI
+at 2027-02-13T00:00:00Z (90 days after each review), but the routes
 never refuse on the calendar: construction, preparation and runtime
 revalidation ignore the review date, built-in facts carry no expiry, and a
 skewed clock before the review date refuses nothing. The review-due date drives
@@ -9532,7 +9563,7 @@ identity. The host's wait schema and
 description additionally declare the 600-second observation clamp. The new
 content-filter guidance is a separate host-authored instruction fragment, not a
 change to those renders. The release-enrolled Codex
-OAuth slugs are `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
+OAuth slugs are `gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
 `gpt-5.6-sol`, `gpt-5.6-terra`, and
 `gpt-5.6-luna`, each `CodeModeOnly`. Fresh authenticated catalog evidence
 selects `Direct`, `CodeMode`, or `CodeModeOnly`, and all three are

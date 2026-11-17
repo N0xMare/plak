@@ -17,6 +17,36 @@ fn find<'a>(models: &'a [OpenAiApiModel], id: &str) -> &'a OpenAiApiModel {
 }
 
 #[test]
+fn gpt62_profiles_admit_only_the_reviewed_reasoning_ladder() -> TestResult {
+    let listed = parse_openai_models_page(
+        br#"{"data":[{"id":"gpt-6.2-sol"},{"id":"gpt-6.2-astra"},{"id":"gpt-6.2-sol-latest"}]}"#,
+    )?;
+    let models = openai_api_models(&listed)?;
+    for id in ["gpt-6.2-sol", "gpt-6.2-astra"] {
+        let row = find(&models, id);
+        assert_eq!(row.status(), &OpenAiApiModelStatus::Usable);
+        assert_eq!(row.max_input_tokens(), 922_000);
+        assert_eq!(row.max_tokens(), 128_000);
+        assert_eq!(row.price_threshold_input_tokens(), Some(272_000));
+        assert_eq!(
+            row.efforts(),
+            &[
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+                ReasoningEffort::XHigh,
+                ReasoningEffort::Max,
+            ]
+        );
+    }
+    assert!(matches!(
+        find(&models, "gpt-6.2-sol-latest").status(),
+        OpenAiApiModelStatus::NeedsReview(_)
+    ));
+    Ok(())
+}
+
+#[test]
 fn live_fixture_classifies_profiles_text_and_non_coding_models() -> TestResult {
     let models = live()?;
     let usable: Vec<_> = models

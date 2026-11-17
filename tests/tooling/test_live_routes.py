@@ -59,6 +59,10 @@ class CatalogTests(unittest.TestCase):
                 "codex-luna-medium": ("codex", "gpt-6-luna", "medium", None),
                 "codex-sol": ("codex", "gpt-6.1-sol", "low", None),
                 "codex-astra": ("codex", "gpt-6-astra", "low", None),
+                "codex-sol62-low": ("codex", "gpt-6.2-sol", "low", None),
+                "codex-sol62-medium": ("codex", "gpt-6.2-sol", "medium", None),
+                "codex-astra62-low": ("codex", "gpt-6.2-astra", "low", None),
+                "codex-astra62-medium": ("codex", "gpt-6.2-astra", "medium", None),
                 "grok-46": ("grok", "grok-4.6", "low", None),
                 "grok": ("grok", "grok-4.7", "low", None),
                 "claude-haiku55-low": ("claude", "claude-haiku-5-5", "low", None),
@@ -90,6 +94,8 @@ class CatalogTests(unittest.TestCase):
                 ),
                 "or-glm": ("openrouter", "z-ai/glm-5.3-flash", None, None),
                 "api-openai": ("openai", "gpt-6-luna", "low", None),
+                "api-openai-sol62-low": ("openai", "gpt-6.2-sol", "low", None),
+                "api-openai-astra62-low": ("openai", "gpt-6.2-astra", "low", None),
                 "api-anthropic": ("anthropic", "claude-haiku-5-5", "low", None),
                 "api-xai": ("xai-api", "grok-4.6", "low", None),
             },
@@ -124,11 +130,14 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(
             rungs[live.THEN],
             [
+                "api-openai-sol62-low",
                 "claude-haiku55-medium",
                 "claude-sonnet55-low",
                 "claude-sonnet55-medium",
                 "codex-luna-medium",
                 "codex-sol",
+                "codex-sol62-low",
+                "codex-sol62-medium",
                 "deepseek",
                 "deepseek-messages",
                 "grok",
@@ -137,12 +146,27 @@ class CatalogTests(unittest.TestCase):
         )
         self.assertEqual(
             rungs[live.CONFIRM],
-            ["claude-fable", "claude-opus-low", "claude-opus-medium", "codex-astra"],
+            [
+                "api-openai-astra62-low",
+                "claude-fable",
+                "claude-opus-low",
+                "claude-opus-medium",
+                "codex-astra",
+                "codex-astra62-low",
+                "codex-astra62-medium",
+            ],
         )
         self.assertEqual(
             sorted(name for name, route in live.ROUTES.items() if route.sparing),
             rungs[live.CONFIRM],
         )
+
+    def test_gpt62_routes_are_light_smokes_only(self):
+        routes = [route for route in live.ROUTES.values() if route.model.startswith("gpt-6.2-")]
+        self.assertEqual(len(routes), 6)
+        for route in routes:
+            self.assertEqual(route.route_class, live.LIGHT)
+            self.assertEqual(route.lane_class("smoke"), live.LIGHT)
         self.assertTrue(
             all(route.route_class != live.FULL for route in live.ROUTES.values() if route.sparing)
         )
@@ -157,8 +181,9 @@ class CatalogTests(unittest.TestCase):
         )
         for account in live.VERY_LIGHT_ACCOUNTS:
             rows = [route for route in live.ROUTES.values() if route.account == account]
-            self.assertEqual(len(rows), 1, account)
+            self.assertEqual(len(rows), 3 if account == "openai" else 1, account)
             self.assertEqual((rows[0].route_class, rows[0].rung), (live.LIGHT, live.FIRST))
+            self.assertTrue(all(route.route_class == live.LIGHT for route in rows))
         self.assertEqual(estimate.LINUX_SMOKE_ACCOUNTS, live.VERY_LIGHT_ACCOUNTS)
 
     def test_xai_api_home_copies_the_shared_key_file(self):
@@ -372,6 +397,7 @@ class EstimateTests(unittest.TestCase):
             {c.route_name for c in cells if c.platform == "linux"},
             {
                 "api-openai",
+                "api-openai-sol62-low",
                 "api-anthropic",
                 "api-xai",
                 "claude-sonnet55-low",

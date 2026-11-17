@@ -163,6 +163,8 @@ class RegenerateTests(unittest.TestCase):
         self.assertEqual(
             removed,
             [
+                "openai gpt-6.2-sol",
+                "openai gpt-6.2-astra",
                 "openai gpt-daybreak-blue-latest",
                 "openai gpt-daybreak-red-latest",
             ],
@@ -462,6 +464,8 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(
                 [line for line in result.stdout.splitlines() if line.startswith("  removed ")],
                 [
+                    "  removed gpt-6.2-sol still in the table; pass --drop-removed",
+                    "  removed gpt-6.2-astra still in the table; pass --drop-removed",
                     "  removed gpt-daybreak-blue-latest still in the table; pass --drop-removed",
                     "  removed gpt-daybreak-red-latest still in the table; pass --drop-removed",
                 ],

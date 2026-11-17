@@ -82,6 +82,8 @@ fn literal_platform_models_are_closed_without_hosted_tool_claims() {
         .expect("fixture time"),
     ));
     for facts in [
+        OpenAiPlatformModelFacts::Gpt62Sol,
+        OpenAiPlatformModelFacts::Gpt62Astra,
         OpenAiPlatformModelFacts::Gpt6Sol,
         OpenAiPlatformModelFacts::Gpt6Luna,
         OpenAiPlatformModelFacts::Gpt56Sol,

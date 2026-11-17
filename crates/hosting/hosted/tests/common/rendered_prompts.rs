@@ -2146,7 +2146,14 @@ pub(crate) mod suite {
                     ProductCompositionSelection::Direct | ProductCompositionSelection::NativePtc
                 )
         }) {
-            for model in ["gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"] {
+            for model in [
+                "gpt-6.2-sol",
+                "gpt-6.2-astra",
+                "gpt-6.1-sol",
+                "gpt-6-astra",
+                "gpt-5.6-sol",
+                "gpt-5.6-luna",
+            ] {
                 spec.model = model;
                 let artifacts = wire::render_wire(&spec, &home, &root, &cwd, &tools);
                 let text = &artifacts.footprint.instruction_text;

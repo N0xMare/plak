@@ -66,6 +66,7 @@ use crate::{
     ConfigError, CredentialReference, EndpointOrigin, OPENAI_PLATFORM_ORIGIN, OpenAiKeySource,
     OpenAiPlatformRouteConfig, OpenAiTarget, PlatformStoragePolicy,
     manifest::OPENAI_GPT_6_PLATFORM_PROFILE_ID, manifest::OPENAI_GPT_56_PLATFORM_PROFILE_ID,
+    manifest::OPENAI_GPT_62_PLATFORM_PROFILE_ID,
 };
 
 const DEFAULT_OPENAI_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
@@ -209,6 +210,10 @@ pub enum StandardOpenAiHttpBuildError {
 /// Closed literal model selection admitted by the reviewed Platform table.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OpenAiPlatformModelFacts {
+    /// `gpt-6.2-sol`.
+    Gpt62Sol,
+    /// `gpt-6.2-astra`.
+    Gpt62Astra,
     /// `gpt-6-sol`.
     Gpt6Sol,
     /// `gpt-6-luna`.
@@ -223,7 +228,9 @@ pub enum OpenAiPlatformModelFacts {
 
 impl OpenAiPlatformModelFacts {
     /// Every model the reviewed Platform table admits, in listing order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
+        Self::Gpt62Sol,
+        Self::Gpt62Astra,
         Self::Gpt6Luna,
         Self::Gpt6Sol,
         Self::Gpt56Luna,
@@ -239,9 +246,8 @@ impl OpenAiPlatformModelFacts {
             .find(|facts| facts.model_id() == model)
     }
 
-    /// Input window in tokens. `GET /v1/models` reports none; this is the
-    /// `context_window` the authenticated Codex catalog reports for the same
-    /// model literals (observed 2026-09-23), the vendor's own value for them.
+    /// Working input window in tokens: the documented price threshold, or
+    /// the reviewed Codex window where the model page states no threshold.
     #[must_use]
     pub const fn context_window(self) -> u64 {
         272_000
@@ -257,6 +263,7 @@ impl OpenAiPlatformModelFacts {
     #[must_use]
     pub const fn profile_id(self) -> &'static str {
         match self {
+            Self::Gpt62Sol | Self::Gpt62Astra => OPENAI_GPT_62_PLATFORM_PROFILE_ID,
             Self::Gpt6Sol | Self::Gpt6Luna => OPENAI_GPT_6_PLATFORM_PROFILE_ID,
             Self::Gpt56Sol | Self::Gpt56Terra | Self::Gpt56Luna => {
                 OPENAI_GPT_56_PLATFORM_PROFILE_ID
@@ -268,6 +275,8 @@ impl OpenAiPlatformModelFacts {
     #[must_use]
     pub const fn model_id(self) -> &'static str {
         match self {
+            Self::Gpt62Sol => "gpt-6.2-sol",
+            Self::Gpt62Astra => "gpt-6.2-astra",
             Self::Gpt6Sol => "gpt-6-sol",
             Self::Gpt6Luna => "gpt-6-luna",
             Self::Gpt56Sol => "gpt-5.6-sol",
@@ -280,6 +289,7 @@ impl OpenAiPlatformModelFacts {
         let model = ModelId::new(self.model_id())
             .unwrap_or_else(|error| unreachable!("static model ID is valid: {error}"));
         let family_id = match self {
+            Self::Gpt62Sol | Self::Gpt62Astra => "gpt-6.2",
             Self::Gpt6Sol | Self::Gpt6Luna => "gpt-6",
             Self::Gpt56Sol | Self::Gpt56Terra | Self::Gpt56Luna => "gpt-5.6",
         };

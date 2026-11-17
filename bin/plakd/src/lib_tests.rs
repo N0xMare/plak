@@ -1222,6 +1222,8 @@ fn native_sections_with_checked_api_rows<'a>(
         (
             "openai",
             &[
+                "gpt-6.2-sol",
+                "gpt-6.2-astra",
                 "gpt-6-luna",
                 "gpt-6-sol",
                 "gpt-5.6-luna",
@@ -1262,7 +1264,11 @@ fn native_sections_with_checked_api_rows<'a>(
                 if account == "openai" {
                     assert_eq!(
                         entry.effort_options,
-                        ["none", "low", "medium", "high", "xhigh", "max"]
+                        if entry.id.starts_with("gpt-6.2-") {
+                            vec!["low", "medium", "high", "xhigh", "max"]
+                        } else {
+                            vec!["none", "low", "medium", "high", "xhigh", "max"]
+                        }
                     );
                 } else if account == "xai-api" && entry.id == "grok-4.3" {
                     assert_eq!(

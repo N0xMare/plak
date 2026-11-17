@@ -10,13 +10,19 @@ accepting the current profile with `plakd models codex`:
 ```sh
 PLAK_CAPTURE_STATE_HOME="$HOME/.local/state" \
 PLAK_CAPTURE_OUTPUT="$PWD/crates/hosting/hosted/src/agent/fixtures/codex-authenticated-catalog.json" \
-cargo test --locked -p plakous --features codex capture_codex_authenticated_catalog -- --ignored
+cargo test --locked -p plakous --features codex,grok,claude capture_codex_authenticated_catalog -- --ignored
 ```
 
 Use the configured state home if it differs. The writer allowlists typed model
 facts only; account ids, emails, credential generations, catalog receipts,
 ETags, access-window expiry and all other account-scoped values are omitted.
 It never prints or exports credentials or the raw authenticated response.
+
+The 2026-11-17 sanitized observation
+uses client version 0.169.0 and includes server-delivered `gpt-6.2-sol` and
+`gpt-6.2-astra`; both retain Code Mode Only, Responses Lite and the named
+`low` through `max` effort ladder. This is catalog evidence, not inference
+qualification.
 
 
 Three opt-in drivers that drive the real `plakd` against real provider accounts.
@@ -511,6 +517,9 @@ default sweep (`just live estimate` adds them only with `--confirm`).
 | `api-anthropic` | `anthropic` | `claude-haiku-5-5` | low | light | 1 |
 | `api-xai` | `xai-api` | `grok-4.6` | low | light | 1 |
 | `codex-sol` | `codex` | `gpt-6.1-sol` | low | full; the full Codex row | 2 |
+| `codex-sol62-low` | `codex` | `gpt-6.2-sol` | low | light; smoke only | 2 |
+| `codex-sol62-medium` | `codex` | `gpt-6.2-sol` | medium | light; smoke only | 2 |
+| `api-openai-sol62-low` | `openai` | `gpt-6.2-sol` | low | light; smoke only | 2 |
 | `claude-sonnet55-low` | `claude` | `claude-sonnet-5-5` | low | full | 2 |
 | `grok` | `grok` | `grok-4.7` | low | full | 2 |
 | `deepseek` | `openrouter` | `deepseek/deepseek-v4-flash-0731` | | full, Chat; long-session informational | 2 |
@@ -522,7 +531,13 @@ default sweep (`just live estimate` adds them only with `--confirm`).
 | `claude-opus-low` | `claude` | `claude-opus-5-5` | low | light | 3, sparing |
 | `claude-opus-medium` | `claude` | `claude-opus-5-5` | medium | light | 3, sparing |
 | `codex-astra` | `codex` | `gpt-6-astra` | low | light | 3, sparing |
+| `codex-astra62-low` | `codex` | `gpt-6.2-astra` | low | light; smoke only | 3, sparing |
+| `codex-astra62-medium` | `codex` | `gpt-6.2-astra` | medium | light; smoke only | 3, sparing |
+| `api-openai-astra62-low` | `openai` | `gpt-6.2-astra` | low | light; smoke only | 3, sparing |
 | `claude-fable` | `claude` | `claude-fable-5-2` | low | light | 3, sparing |
+
+The six GPT-6.2 rows are for light and medium-effort smokes only. They do not
+add long-session or soak requirements; retain the existing rows for those.
 
 The pre-release bar runs once per release candidate, not per install. It
 binds the same clean source revision, binary/sidecar hashes and platform

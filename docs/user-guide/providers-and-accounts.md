@@ -152,7 +152,7 @@ OPENROUTER_API_KEY is set in the process environment and still wins over the
 file store; unset OPENROUTER_API_KEY (plakd never loads .env); no file change
 ```
 
-Codex OAuth enrolls `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
+Codex OAuth enrolls `gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
 `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
 Other ChatGPT/Codex catalog rows, including retired
 `gpt-5.3-codex-spark`, are not executable on this path.
@@ -167,7 +167,8 @@ else the table built into plakd. Anthropic reads `GET /v1/models` and admits
 the Claude 5.x models and Opus/Sonnet 4.6 and later, including
 `claude-haiku-5-5` and `claude-fable-5-2`; `claude-mythos-5-2` and Claude 4.5
 models are listed as `needs review`. OpenAI
-reads `GET /v1/models` (ids only) and admits `gpt-6-luna`, `gpt-6-sol`,
+reads `GET /v1/models` (ids only) and admits `gpt-6.2-sol`, `gpt-6.2-astra`,
+`gpt-6-luna`, `gpt-6-sol`,
 `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra`. Other text models are
 `needs review`; speech, image, embedding, realtime, moderation and video
 models are `not a coding model`. xAI reads `GET /v1/models` and admits
@@ -176,7 +177,8 @@ multi-agent variants, and `grok-build-0.1`, are `needs review`; image and
 video models are `not a coding model`.
 
 Effort is always explicit and must be on the model's published ladder
-(OpenAI profiles: `none`, `low`, `medium`, `high`, `xhigh`, `max`; `none`
+(OpenAI 6.2: `low`, `medium`, `high`, `xhigh`, `max`; older OpenAI profiles
+also admit `none`; `none`
 means "no reasoning", it is not what you get by leaving effort off;
 Anthropic 5.x: `low` through `max`; Sonnet/Opus 4.6: `low`, `medium`, `high`,
 `max`; `grok-4.7`, `grok-4.6` and `grok-4.5`: `low`, `medium`, `high`,

@@ -1,7 +1,10 @@
-/// `openai` API models enrolled as `CodeModeOnly`. Reviewed 2026-11-15 against
+/// `openai` API models enrolled as `CodeModeOnly`. Reviewed 2026-11-17 against
 /// the `tool_mode` of the same model ids in the Codex 0.169.0 reference
-/// catalog; a test holds this table to that fixture.
+/// catalog and sanitized authenticated server-delivered rows; a test holds
+/// this table to those fixtures.
 pub(super) const OPENAI_API_CODE_MODE_ONLY: &[&str] = &[
+    "gpt-6.2-sol",
+    "gpt-6.2-astra",
     "gpt-6-sol",
     "gpt-6-luna",
     "gpt-5.6-sol",
