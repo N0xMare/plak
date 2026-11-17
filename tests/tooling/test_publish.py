@@ -132,6 +132,7 @@ class PublishScriptTests(unittest.TestCase):
             "tools/release/gate_evidence.py",
             "tools/release/offline_first.py",
             "tools/release/package_verification_cache.py",
+            "tools/release/invalidate_package_builds.py",
             "tools/gate/cargo_key.py",
             "tools/gate/vcs_listing.py",
             "tools/gate/check_workspace.py",
@@ -499,14 +500,34 @@ class PublishScriptTests(unittest.TestCase):
         fingerprints = self.target / "package" / "debug" / ".fingerprint"
         stale_builds = [fingerprints / f"{name}-0123abcd" for name in ORDER]
         kept_builds = [fingerprints / "serde-0123abcd"]
+        builds = self.target / "package" / "debug" / "build"
+        stale_builds.extend(builds / name / "0123abcd" / "fingerprint" for name in ORDER)
+        kept_builds.append(builds / "serde" / "0123abcd" / "fingerprint")
         for directory in (*stale_builds, *kept_builds):
             directory.mkdir(parents=True)
+            (directory / "lib-stale").write_text("stale fingerprint")
         self.env["CARGO_HOME"] = str(cargo_home)
         result, calls = self.publish("--gate")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(calls), 1)
         self.assertEqual([path for path in (*stale, *stale_builds) if path.exists()], [])
         self.assertEqual([path for path in (*kept, *kept_builds) if not path.exists()], [])
+
+    def test_unrecognized_cohort_fingerprints_refuse_verification(self) -> None:
+        for layout in (
+            "debug/future/plakous-mid/0123abcd/fingerprint",
+            "debug/future/0123abcd/.fingerprint",
+        ):
+            with self.subTest(layout=layout):
+                directory = self.target / "package" / layout
+                directory.mkdir(parents=True)
+                (directory / "lib-plakous_mid.json").write_text("stale fingerprint")
+                result, calls = self.publish("--gate")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("unrecognized cohort fingerprint layout", result.stderr)
+                self.assertEqual(calls, [])
+                self.assertEqual(self.prefetch_calls, [])
+                shutil.rmtree(directory)
 
     def test_execute_needs_a_registry_token(self) -> None:
         self.record_evidence()

@@ -1514,7 +1514,12 @@ treats a registry package's build in the verification target as fresh by
 package identity alone, so before packaging the script removes every unpacked
 `<name>-<version>` of the cohort and the cohort's verification fingerprints;
 otherwise sources or artifacts left by an earlier run of the same version
-would be verified in place of the tree being packaged.
+would be verified in place of the tree being packaged. Invalidation removes
+cohort-owned `build/<name>` directories (including Rust 1.100's nested
+fingerprints) and legacy `.fingerprint/<name>-*` directories throughout the
+verification artifacts, preserving third-party dependency builds. A remaining
+fingerprint path or marker naming a cohort crate in an unrecognized layout
+refuses verification with a diagnostic rather than reusing stale artifacts.
 
 A packaged crate resolves its registry dependencies without the root
 `[patch]` table, so verifying `plakous-py-worker` needs the upstream

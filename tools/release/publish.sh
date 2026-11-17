@@ -99,11 +99,11 @@ fi
 cargo_home="${CARGO_HOME:-$HOME/.cargo}"
 for entry in "${order[@]}"; do
   name="${entry%% *}"
-  for unpacked in "$cargo_home"/registry/src/*/"$name-${entry#* }" \
-    "$CARGO_TARGET_DIR"/debug/.fingerprint/"$name"-*; do
+  for unpacked in "$cargo_home"/registry/src/*/"$name-${entry#* }"; do
     if [[ -d "$unpacked" ]]; then rm -rf -- "$unpacked"; fi
   done
 done
+python3 "$root/tools/release/invalidate_package_builds.py" "$CARGO_TARGET_DIR" "$scratch/order"
 # Resolve the actual archive graphs, which do not inherit workspace patches.
 # Preparation never compiles or uploads; verification below stays offline.
 echo "== package verification inputs (offline first) =="
