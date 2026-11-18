@@ -48,7 +48,7 @@ async fn a_partial_body_never_dials() -> TestResult {
     let gateway = gateway()?;
     let (client, server) = tokio::io::duplex(8 * 1024);
     let running = gateway.clone();
-    let served = tokio::spawn(async move { serve_one(server, &running).await });
+    let task = tokio::spawn(async move { serve_one(server, &running).await });
     let (read, mut write) = tokio::io::split(client);
     let header = b"POST /v1/relay HTTP/1.1\r\nhost: g\r\ncontent-length: 40\r\n\r\n";
     write.write_all(header).await?;
@@ -57,10 +57,10 @@ async fn a_partial_body_never_dials() -> TestResult {
     assert_eq!(gateway.dials(), 0);
     drop(write);
     drop(read);
-    let report = served.await?;
+    let report = task.await?;
     assert!(matches!(report, Err(FixtureError::Incomplete)));
     assert_eq!(gateway.dials(), 0);
-    assert!(gateway.captured().is_empty());
+    assert_eq!(gateway.captured().len(), 0);
     Ok(())
 }
 
@@ -145,7 +145,7 @@ async fn refusals_and_drops_do_not_dial() -> TestResult {
     )
     .await?;
     assert!(!report.dialed);
-    assert!(bytes.is_empty());
+    assert_eq!(bytes.len(), 0);
     assert_eq!(gateway.dials(), 0);
     Ok(())
 }
@@ -231,13 +231,13 @@ async fn exchange(
 ) -> TestResult<(Vec<u8>, super::ServeReport)> {
     let (client, server) = tokio::io::duplex(64 * 1024);
     let running = gateway.clone();
-    let served = tokio::spawn(async move { serve_one(server, &running).await });
+    let task = tokio::spawn(async move { serve_one(server, &running).await });
     let (mut read, mut write) = tokio::io::split(client);
     write.write_all(request).await?;
     write.shutdown().await?;
     let mut response = Vec::new();
     read.read_to_end(&mut response).await?;
-    let report = served.await??;
+    let report = task.await??;
     Ok((response, report))
 }
 

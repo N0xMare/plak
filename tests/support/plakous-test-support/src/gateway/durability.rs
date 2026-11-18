@@ -13,7 +13,7 @@ use plakous_gateway_protocol::facts::{RefreshMode, RefreshRequest};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use super::tests::{self};
-use super::{FixtureError, FixtureGateway, GatewayScript, serve_one};
+use super::{FixtureError, GatewayScript, serve_one};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -120,7 +120,7 @@ fn switch_crash_rows_name_one_rebind_and_at_most_one_prompt() {
     for row in SWITCH_CRASH_ROWS {
         assert_eq!(row.rebinds, 1, "{}", row.durable);
         assert!(row.prompts <= 1, "{}", row.reopen);
-        assert!(!row.reopen.is_empty());
+        assert_ne!(row.reopen, "");
     }
 }
 
@@ -172,14 +172,14 @@ async fn gateway_killed_mid_refresh_dials_nothing() -> TestResult {
     gateway.push(GatewayScript::Stall(Duration::from_secs(30)));
     let (client, server) = tokio::io::duplex(8 * 1024);
     let running = gateway.clone();
-    let served = tokio::spawn(async move { serve_one(server, &running).await });
+    let task = tokio::spawn(async move { serve_one(server, &running).await });
     let (mut read, mut write) = tokio::io::split(client);
     let body = refresh_body()?;
     write.write_all(&http_post("/v1/refresh", &body)).await?;
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(gateway.dials(), 0);
-    served.abort();
-    let _ = served.await;
+    task.abort();
+    let _ = task.await;
     let mut response = Vec::new();
     let _ = read.read_to_end(&mut response).await;
     assert!(!response.starts_with(b"HTTP/1.1 200"));
@@ -193,7 +193,7 @@ async fn gateway_killed_mid_stream_ends_the_body_after_head() -> TestResult {
     gateway.push(GatewayScript::Relay(large_reply()));
     let (client, server) = tokio::io::duplex(256);
     let running = gateway.clone();
-    let served = tokio::spawn(async move { serve_one(server, &running).await });
+    let task = tokio::spawn(async move { serve_one(server, &running).await });
     let (mut read, mut write) = tokio::io::split(client);
     write
         .write_all(&http_post("/v1/relay", &tests::relay_body()?))
@@ -215,8 +215,8 @@ async fn gateway_killed_mid_stream_ends_the_body_after_head() -> TestResult {
         response.len() < 4_096,
         "the body finished before the gateway was killed"
     );
-    served.abort();
-    let _ = served.await;
+    task.abort();
+    let _ = task.await;
     assert_eq!(gateway.dials(), 1);
     Ok(())
 }
@@ -227,7 +227,7 @@ async fn host_killed_mid_stream_cancels_after_one_dial() -> TestResult {
     gateway.push(GatewayScript::Relay(large_reply()));
     let (client, server) = tokio::io::duplex(256);
     let running = gateway.clone();
-    let served = tokio::spawn(async move { serve_one(server, &running).await });
+    let task = tokio::spawn(async move { serve_one(server, &running).await });
     let (mut read, mut write) = tokio::io::split(client);
     write
         .write_all(&http_post("/v1/relay", &tests::relay_body()?))
@@ -237,7 +237,7 @@ async fn host_killed_mid_stream_cancels_after_one_dial() -> TestResult {
     let _ = tokio::time::timeout(Duration::from_secs(2), read.read(&mut tmp)).await;
     drop(read);
     drop(write);
-    let report = tokio::time::timeout(Duration::from_secs(2), served).await??;
+    let report = tokio::time::timeout(Duration::from_secs(2), task).await??;
     match report {
         Ok(report) => {
             assert!(report.dialed || gateway.dials() == 1);
