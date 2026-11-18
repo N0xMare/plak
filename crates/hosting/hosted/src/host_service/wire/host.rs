@@ -722,7 +722,8 @@ where
             Op::DeleteSession {
                 session,
                 abandon_children,
-            } => answered(self.delete_session(session, abandon_children)),
+                abandon_jobs,
+            } => answered(self.delete_session(session, abandon_children, abandon_jobs)),
             Op::StopSession { session } => self.stop(&session, text),
             Op::Attach { node } => self.attach(&node, text),
             Op::RetryAttach {
@@ -981,14 +982,19 @@ where
         }
     }
 
-    fn delete_session(&self, session: String, abandon_children: bool) -> Outcome<P> {
+    fn delete_session(
+        &self,
+        session: String,
+        abandon_children: bool,
+        abandon_jobs: bool,
+    ) -> Outcome<P> {
         if let Err(refusal) = self.require_lifecycle_session(&session) {
             return Outcome::Refused(refusal);
         }
         let slot = self.host.slot(&session);
         let sessions = Arc::clone(&self.host.sessions);
         match slot.mutate_lifecycle(&session, true, || {
-            sessions.delete(&session, abandon_children)
+            sessions.delete(&session, abandon_children, abandon_jobs)
         }) {
             Ok(()) => {
                 self.host.lock().retain(|held| {

@@ -762,6 +762,9 @@ impl DurableSessionStoreError {
             SessionStoreError::UnsupportedCodec => Self::UnsupportedCodec,
             SessionStoreError::Shutdown => Self::Shutdown,
             SessionStoreError::Pruned => Self::Pruned,
+            // Archive refuses this before any checkpoint write. It is not a
+            // durable terminal tag, so the canonical error codec is unchanged.
+            SessionStoreError::RunningJobs => Self::Conflict,
         }
     }
 

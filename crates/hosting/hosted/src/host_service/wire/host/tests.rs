@@ -253,7 +253,12 @@ impl HostSessions<Core> for Fake {
         Ok(())
     }
 
-    fn delete(&self, session: &str, _abandon_children: bool) -> Result<(), RequestRefusal> {
+    fn delete(
+        &self,
+        session: &str,
+        _abandon_children: bool,
+        _abandon_jobs: bool,
+    ) -> Result<(), RequestRefusal> {
         self.0.lifecycle_mutations.fetch_add(1, Ordering::SeqCst);
         if !self.0.successors.lock().unwrap().contains_key(session) {
             assert_eq!(
@@ -2909,6 +2914,7 @@ fn lifecycle_releases_a_successor_served_through_its_predecessor_slot() {
             Op::DeleteSession {
                 session: "s9".into(),
                 abandon_children: false,
+                abandon_jobs: false,
             }
         } else {
             Op::ArchiveSession {
@@ -2944,6 +2950,7 @@ fn lifecycle_on_a_dormant_predecessor_does_not_release_its_resident_successor() 
             Op::DeleteSession {
                 session: "s1".into(),
                 abandon_children: false,
+                abandon_jobs: false,
             }
         } else {
             Op::ArchiveSession {

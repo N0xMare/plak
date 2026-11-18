@@ -945,7 +945,7 @@ fn product_command_argv_matrix() {
         }),
         (
             &["session", "delete", "aaaa"],
-            |c| matches!(c, Command::SessionDelete { id, yes: false, abandon_children: false } if id == "aaaa"),
+            |c| matches!(c, Command::SessionDelete { id, yes: false, abandon_children: false, abandon_jobs: false } if id == "aaaa"),
         ),
         (&["session", "delete", "aaaa", "--yes"], |c| {
             matches!(c, Command::SessionDelete { yes: true, .. })
@@ -1120,7 +1120,7 @@ fn product_command_argv_matrix() {
         (&["runner", "unpair", "build"], |c| {
             matches!(
                 c,
-                Command::Runner(crate::commands::runner::RunnerCommand::Unpair { name })
+                Command::Runner(crate::commands::runner::RunnerCommand::Unpair { name, abandon_jobs: false })
                     if name == "build"
             )
         }),

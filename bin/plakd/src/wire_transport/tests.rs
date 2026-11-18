@@ -132,6 +132,7 @@ fn lifecycle_forwarding_never_turns_a_host_refusal_or_unknown_outcome_into_offli
         Op::DeleteSession {
             session: "s".into(),
             abandon_children: false,
+            abandon_jobs: false,
         },
     ];
     for (index, op) in operations.into_iter().enumerate() {

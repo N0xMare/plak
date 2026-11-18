@@ -27,7 +27,7 @@ pub(crate) use binding::{
 pub use delete::confirm_session_mutation;
 #[cfg(test)]
 pub(crate) use delete::refuse_stranding_a_carry;
-pub(crate) use delete::{delete_session, gc_sessions};
+pub(crate) use delete::{SessionDeleteOptions, delete_session, gc_sessions, running_job_labels};
 
 pub(crate) use import_export::{
     PreparedImport, export_session, import_prepared, import_session, request_reload,

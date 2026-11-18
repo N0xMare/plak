@@ -127,6 +127,8 @@ pub enum SessionStoreOrigin {
     UnsupportedPersistence,
     /// Stored semantics failed an integrity check.
     Integrity,
+    /// A head still has a job row without terminal evidence.
+    RunningJobs,
 }
 
 /// Returns an agent's full checkpoint only to the facade implementation.
@@ -281,6 +283,7 @@ pub const fn session_store_origin(error: SessionStoreError) -> SessionStoreOrigi
             SessionStoreOrigin::UnsupportedPersistence
         }
         SessionStoreError::Corrupt(_) => SessionStoreOrigin::Integrity,
+        SessionStoreError::RunningJobs => SessionStoreOrigin::RunningJobs,
     }
 }
 

@@ -90,11 +90,18 @@ for one version bump, without native protocol compatibility.
 ### plakd
 
 - Refuse session delete and `plakd runner unpair` while a durable job has no
-  terminal evidence. The refusal names the process ids and says to stop the
-  jobs first. Unpair removes only the local pairing pin.
+  terminal evidence, including a finished child of a session on that runner.
+  The `running_jobs` lifecycle reason names the process ids and both remedies:
+  open the session to reconcile and stop the jobs, or pass `--abandon-jobs`.
+  `--abandon-jobs` archives anyway and names the processes left running.
+  Unpair removes only the local pairing pin. Delete stays available when the
+  store is full.
 - An escalated quit keeps daemon-owned background jobs and records that keep,
   instead of racing a stop against the keep.
 - JSONL `stop_processes` stops one background job as a user stop.
+- Host wire protocol 11 schema pin covers `DeleteSession.abandon_jobs` and
+  the `running_jobs` lifecycle reason. Clients carry the projection from the
+  previous protocol pin.
 
 - Restore subscription model picking and Codex root prompts under gateway
   custody. Host startup and `plakd models` populate a host-owned catalog

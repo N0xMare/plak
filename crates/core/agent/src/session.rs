@@ -550,20 +550,50 @@ impl<T> Page<T> {
 }
 
 /// Expected-revision archive request.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+/// Receipt identity is the session and the expected revision. `abandon_jobs`
+/// is an operator instruction for this attempt, not part of that identity, so
+/// a retry matches the stored receipt either way.
+#[derive(Clone, Copy, Debug)]
 pub struct ArchiveSession {
     session_id: SessionId,
     expected_revision: SessionRevision,
+    abandon_jobs: bool,
 }
 
+impl PartialEq for ArchiveSession {
+    fn eq(&self, other: &Self) -> bool {
+        self.session_id == other.session_id && self.expected_revision == other.expected_revision
+    }
+}
+
+impl Eq for ArchiveSession {}
+
 impl ArchiveSession {
-    /// Creates a request that rejects active leases and revision drift.
+    /// Creates a request that rejects active leases, revision drift, and a
+    /// head that still has a job row without terminal evidence.
     #[must_use]
     pub const fn new(session_id: SessionId, expected_revision: SessionRevision) -> Self {
         Self {
             session_id,
             expected_revision,
+            abandon_jobs: false,
         }
+    }
+
+    /// Archives even when a head job row has no terminal evidence.
+    ///
+    /// The processes are left running. The caller names them.
+    #[must_use]
+    pub const fn abandoning_jobs(mut self) -> Self {
+        self.abandon_jobs = true;
+        self
+    }
+
+    /// Whether this attempt archives over non-terminal job rows.
+    #[must_use]
+    pub const fn abandons_jobs(self) -> bool {
+        self.abandon_jobs
     }
 
     /// Returns the target session.

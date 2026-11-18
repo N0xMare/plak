@@ -974,6 +974,37 @@ impl MemorySessionStore {
         let state = &mut *guard;
         require_open(state)?;
         let now = self.lease_now()?;
+        if !request.abandons_jobs()
+            && let Some(ids) = state
+                .sessions
+                .get(&request.session_id())
+                .and_then(|session| {
+                    session.archive_receipt.is_none().then(|| {
+                        session
+                            .branches
+                            .values()
+                            .map(|branch| branch.head.checkpoint().checkpoint_id())
+                            .collect::<Vec<_>>()
+                    })
+                })
+        {
+            for id in ids {
+                let record = state
+                    .checkpoints
+                    .get(&id)
+                    .ok_or(SessionStoreError::corrupt())?;
+                if record
+                    .checkpoint
+                    .manifest()
+                    .jobs()
+                    .rows()
+                    .iter()
+                    .any(|job| job.terminal.is_none())
+                {
+                    return Err(SessionStoreError::RunningJobs);
+                }
+            }
+        }
         let session = state
             .sessions
             .get_mut(&request.session_id())

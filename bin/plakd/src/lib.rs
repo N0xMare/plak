@@ -1342,12 +1342,16 @@ fn execute_command(
             id,
             yes,
             abandon_children,
+            abandon_jobs,
         } => {
             commands::session::delete_session(
                 services,
                 &id,
-                yes,
-                abandon_children,
+                commands::session::SessionDeleteOptions {
+                    confirmed: yes,
+                    abandon_children,
+                    abandon_jobs,
+                },
                 stdin,
                 stderr,
                 stdout,

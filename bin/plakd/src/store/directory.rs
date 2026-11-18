@@ -208,7 +208,6 @@ impl ProductStore {
             .map_err(|_| "a recent workspace row is invalid".to_owned())
     }
 
-    /// Every record's identity for startup recovery, without the face's row limit.
     /// Sessions whose display runner is `runner_id`, including archived rows.
     ///
     /// # Errors
@@ -230,6 +229,7 @@ impl ProductStore {
         dead_code,
         reason = "the optional hosting product reads the full directory"
     )]
+    /// Every record's identity for startup recovery, without the face's row limit.
     pub(crate) fn session_ids(&self) -> Result<Vec<String>, String> {
         self.connection
             .prepare("SELECT id FROM sessions ORDER BY id")

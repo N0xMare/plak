@@ -131,18 +131,31 @@ impl AgentSessions {
         path: impl AsRef<Path>,
         locator: SessionLocator,
     ) -> Result<Vec<String>, AgentSessionsError> {
-        let loaded =
-            SqliteSessionStore::inspect_branch(path, locator.session_ref()).map_err(store_error)?;
-        let exact = ExactSource::validate(locator, &loaded)?;
-        Ok(exact
-            .checkpoint
-            .manifest()
-            .jobs()
-            .rows()
-            .iter()
-            .filter(|row| row.terminal.is_none())
-            .map(|row| format!("p{}", row.number))
-            .collect())
+        let path = path.as_ref();
+        let mut locator = locator;
+        let mut followed = false;
+        loop {
+            let loaded = SqliteSessionStore::inspect_branch(path, locator.session_ref())
+                .map_err(store_error)?;
+            match ExactSource::validate(locator, &loaded) {
+                Ok(exact) => {
+                    return Ok(exact
+                        .checkpoint
+                        .manifest()
+                        .jobs()
+                        .rows()
+                        .iter()
+                        .filter(|row| row.terminal.is_none())
+                        .map(|row| format!("p{}", row.number))
+                        .collect());
+                }
+                Err(error) if !followed && error.kind() == AgentSessionsErrorKind::StaleLocator => {
+                    followed = true;
+                    locator = error.current_locator().ok_or(error)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     /// Whether the head at this locator is an unfinished turn awaiting recovery.

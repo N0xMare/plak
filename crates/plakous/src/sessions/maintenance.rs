@@ -42,16 +42,38 @@ impl AgentSessions {
         &self,
         locator: SessionLocator,
     ) -> Result<ArchiveSessionReport, AgentSessionsError> {
+        self.archive_at(locator, false).await
+    }
+
+    /// Archives one exact released session even when a head job row has no
+    /// terminal evidence.
+    ///
+    /// The processes are left running. The caller names them. This is the
+    /// operator override for a runner that can never record a terminal.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed ownership, stale-locator, integrity, or backend failure.
+    /// A running-jobs refusal is not one of them.
+    pub async fn archive_abandoning_jobs(
+        &self,
+        locator: SessionLocator,
+    ) -> Result<ArchiveSessionReport, AgentSessionsError> {
+        self.archive_at(locator, true).await
+    }
+
+    async fn archive_at(
+        &self,
+        locator: SessionLocator,
+        abandon_jobs: bool,
+    ) -> Result<ArchiveSessionReport, AgentSessionsError> {
         let _reservation = self.drivers.reserve_session(locator.session_id)?;
         let source = self.load_exact(locator).await?;
-        let receipt = self
-            .store
-            .archive(ArchiveSession::new(
-                locator.session_id,
-                source.session_revision,
-            ))
-            .await
-            .map_err(store_error)?;
+        let mut request = ArchiveSession::new(locator.session_id, source.session_revision);
+        if abandon_jobs {
+            request = request.abandoning_jobs();
+        }
+        let receipt = self.store.archive(request).await.map_err(store_error)?;
         Ok(ArchiveSessionReport::from_receipt(receipt))
     }
 

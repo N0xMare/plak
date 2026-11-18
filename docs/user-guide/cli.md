@@ -393,7 +393,7 @@ command = "/opt/plakd/bin/plakd"  # absolute stable executable on the runner
 ```sh
 plakd runner pair build     # adds this host to the runner's allowlist over ssh
 plakd runner ps build       # the lines and jobs it holds for this host
-plakd runner unpair build   # drops this host's pin; refused while a job still runs
+plakd runner unpair build   # drops this host's pin; --abandon-jobs leaves running jobs
 ```
 
 Pairing needs a build that knows its source revision (a release or
@@ -535,8 +535,9 @@ unless `--leave-jobs-running` gives up ownership; redirect service output to
 a file or `/dev/null` if it must survive output capture closing. Hosted and JSONL
 jobs remain owned until stop or session release. A local daemon or paired
 runner keeps background jobs across quit, including an escalated quit, and
-across upgrade. Deleting the session or unpairing the runner is refused while
-a job is still running; stop the jobs first.
+across upgrade. `plakd session delete` and `plakd runner unpair` refuse while
+a job is still running. Open the session and stop the jobs, or pass
+`--abandon-jobs` to delete or unpair anyway and leave those processes running.
 
 Waiting and continuation summaries go to stderr. A bound stops owned jobs,
 interrupts children resumably, and exits 6. Ctrl-C does the same and exits 4.
@@ -786,7 +787,7 @@ plakd session recover <uuid>
 plakd session export <uuid> [--out <path>]
 plakd session import <path>
 plakd session reload <uuid> --expect-binary <binary-id>
-plakd session delete <uuid> [--yes] [--abandon-children]
+plakd session delete <uuid> [--yes] [--abandon-children] [--abandon-jobs]
 plakd session gc <uuid> | --all
 ```
 
@@ -878,6 +879,9 @@ refusal names them. These checks run before the question and again after it,
 and nothing is removed until the session itself has been closed for deletion.
 `--abandon-children` exempts only recovery-required children in this session's
 own tree. It does not bypass live child leases, a live root, or fork dependencies.
+Delete also refuses while this session or a finished child still has a background
+job. Open the session and stop the job, or pass `--abandon-jobs` to delete anyway
+and leave that process running. The store-full remedy is the same command.
 A child closed before a late session-cleanup fault still needs recovery and is
 listed as `recovery_required`. Recover it or use `--abandon-children`; recovery
 keeps it closed and does not send another result to its parent.

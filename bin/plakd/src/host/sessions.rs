@@ -585,11 +585,17 @@ impl HostSessions<PlakExtension> for ProductSessions {
             .map_err(|error| lifecycle::refusal(session, error))
     }
 
-    fn delete(&self, session: &str, abandon_children: bool) -> Result<(), RequestRefusal> {
+    fn delete(
+        &self,
+        session: &str,
+        abandon_children: bool,
+        abandon_jobs: bool,
+    ) -> Result<(), RequestRefusal> {
         crate::commands::session::lifecycle::delete_confirmed(
             &self.services,
             session,
             abandon_children,
+            abandon_jobs,
         )
         .map_err(|error| lifecycle::refusal(session, error))
     }

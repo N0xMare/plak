@@ -9,7 +9,10 @@ use plakous_hosted::error::{CliFailure, CliResult};
 pub(super) enum Change {
     Rename(Option<String>),
     Archive(bool),
-    Delete(bool),
+    Delete {
+        abandon_children: bool,
+        abandon_jobs: bool,
+    },
 }
 
 pub(super) fn request(services: &Services, id: &str, change: Change) -> CliResult<bool> {
@@ -22,9 +25,13 @@ pub(super) fn request(services: &Services, id: &str, change: Change) -> CliResul
             session: id.to_owned(),
             archived: *archived,
         },
-        Change::Delete(abandon_children) => Op::DeleteSession {
+        Change::Delete {
+            abandon_children,
+            abandon_jobs,
+        } => Op::DeleteSession {
             session: id.to_owned(),
             abandon_children: *abandon_children,
+            abandon_jobs: *abandon_jobs,
         },
     };
     let Some(outcome) = crate::wire_transport::forward_lifecycle(services.paths()?, operation)?
@@ -39,7 +46,7 @@ pub(super) fn request(services: &Services, id: &str, change: Change) -> CliResul
     };
     let matched = match (&change, &answer) {
         (Change::Rename(_), Answer::Renamed { session, .. })
-        | (Change::Delete(_), Answer::Deleted { session }) => session == id,
+        | (Change::Delete { .. }, Answer::Deleted { session }) => session == id,
         (Change::Archive(expected), Answer::ArchiveUpdated { session, archived }) => {
             session == id && expected == archived
         }

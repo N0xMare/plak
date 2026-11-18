@@ -265,6 +265,7 @@ pub(crate) enum Command {
         id: String,
         yes: bool,
         abandon_children: bool,
+        abandon_jobs: bool,
     },
     /// `plakd session reload <id> --expect-binary <binary>`.
     SessionReloadRequest {

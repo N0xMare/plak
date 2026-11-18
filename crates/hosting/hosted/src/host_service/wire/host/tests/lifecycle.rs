@@ -122,6 +122,7 @@ fn same_node_switch_stop_and_archive_use_the_addressed_record_not_a_cached_label
                 Op::DeleteSession {
                     session: session.into(),
                     abandon_children: false,
+                    abandon_jobs: false,
                 },
             );
             assert_eq!(
@@ -241,6 +242,7 @@ fn lifecycle_on_a_fork_source_keeps_the_forks_slot_serving() {
         Op::DeleteSession {
             session: "s1".into(),
             abandon_children: false,
+            abandon_jobs: false,
         },
     );
     assert_eq!(
@@ -326,6 +328,7 @@ fn lifecycle_unknown_ids_do_not_allocate_slots_and_delete_drops_its_slot() {
         Op::DeleteSession {
             session: "s1".into(),
             abandon_children: false,
+            abandon_jobs: false,
         },
     );
     assert!(matches!(
@@ -422,6 +425,7 @@ fn lifecycle_releases_the_resident_actor_before_archive_or_delete_without_reopen
             Op::DeleteSession {
                 session: "s1".into(),
                 abandon_children: false,
+                abandon_jobs: false,
             }
         } else {
             Op::ArchiveSession {
@@ -462,6 +466,7 @@ fn lifecycle_busy_refusal_keeps_the_same_actor_and_never_calls_the_product() {
             Op::DeleteSession {
                 session: "s1".into(),
                 abandon_children: false,
+                abandon_jobs: false,
             }
         } else {
             Op::ArchiveSession {

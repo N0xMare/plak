@@ -217,7 +217,12 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
     ///
     /// # Errors
     /// Typed deletion fences or infrastructure refusal.
-    fn delete(&self, _session: &str, _abandon_children: bool) -> Result<(), RequestRefusal> {
+    fn delete(
+        &self,
+        _session: &str,
+        _abandon_children: bool,
+        _abandon_jobs: bool,
+    ) -> Result<(), RequestRefusal> {
         Err(product_service_missing("delete_session"))
     }
 }

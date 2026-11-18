@@ -735,6 +735,9 @@ enum RunnerAction {
     /// Remove this host's pairing pin. Refuses while a job on that runner is still running.
     Unpair {
         name: Option<String>,
+        /// Drop the pin even when a job has no terminal evidence, and name the processes left running.
+        #[arg(long, action = ArgAction::SetTrue)]
+        abandon_jobs: bool,
     },
     /// This machine's runner secrets, which an MCP server placed on this
     /// runner reads.
@@ -768,7 +771,7 @@ impl RunnerAction {
             Self::Connect { stdio: false, .. }
             | Self::Allow { host_id: None }
             | Self::Pair { name: None }
-            | Self::Unpair { name: None } => {
+            | Self::Unpair { name: None, .. } => {
                 return help();
             }
             Self::Allow {
@@ -784,9 +787,12 @@ impl RunnerAction {
                 crate::product_config::validate_runner_name(&name)?;
                 RunnerCommand::Pair { name }
             }
-            Self::Unpair { name: Some(name) } => {
+            Self::Unpair {
+                name: Some(name),
+                abandon_jobs,
+            } => {
                 crate::product_config::validate_runner_name(&name)?;
-                RunnerCommand::Unpair { name }
+                RunnerCommand::Unpair { name, abandon_jobs }
             }
         }))
     }
@@ -1025,6 +1031,9 @@ enum SessionAction {
         /// Abandon unresolved child obligations instead of running recovery.
         #[arg(long, action = ArgAction::SetTrue)]
         abandon_children: bool,
+        /// Delete even when a job has no terminal evidence, and name the processes left running.
+        #[arg(long, action = ArgAction::SetTrue)]
+        abandon_jobs: bool,
     },
     /// Reclaim superseded checkpoint history of a session, or with --all of
     /// every session in this home not open in a running plakd, and finish
@@ -1101,10 +1110,12 @@ impl SessionAction {
                 id: Some(id),
                 yes,
                 abandon_children,
+                abandon_jobs,
             } => Ok(Command::SessionDelete {
                 id,
                 yes,
                 abandon_children,
+                abandon_jobs,
             }),
             Self::Gc { all: true, .. } => Ok(Command::SessionGc { id: None }),
             Self::Gc { id, all: false } => Ok(Command::SessionGc { id }),

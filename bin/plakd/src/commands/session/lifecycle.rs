@@ -43,8 +43,16 @@ pub(super) fn forward_delete(
     services: &Services,
     id: &str,
     abandon_children: bool,
+    abandon_jobs: bool,
 ) -> Result<bool, CliFailure> {
-    forward::request(services, id, forward::Change::Delete(abandon_children))
+    forward::request(
+        services,
+        id,
+        forward::Change::Delete {
+            abandon_children,
+            abandon_jobs,
+        },
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -208,7 +216,7 @@ impl std::fmt::Display for LifecycleRefusal {
             ),
             Self::RunningJobs { processes, .. } => write!(
                 f,
-                "background jobs are still running ({}); stop the jobs first",
+                "background jobs are still running ({}); open the session to reconcile and stop the jobs, or delete with --abandon-jobs",
                 processes.join(", ")
             ),
         }
@@ -315,8 +323,9 @@ pub(crate) fn delete_confirmed(
     services: &Services,
     id: &str,
     abandon_children: bool,
+    abandon_jobs: bool,
 ) -> Result<(), LifecycleError> {
-    super::delete::delete_confirmed(services, id, abandon_children)
+    super::delete::delete_confirmed(services, id, abandon_children, abandon_jobs)
 }
 
 #[cfg(test)]
@@ -333,7 +342,7 @@ mod tests {
             rename_session(&services, &id, None).map(|_| ()),
             set_archived(&services, &id, true),
             set_archived(&services, &id, false),
-            delete_confirmed(&services, &id, false),
+            delete_confirmed(&services, &id, false, false),
         ] {
             assert!(matches!(
                 result,
@@ -466,9 +475,9 @@ mod tests {
             Some("generated")
         );
         assert!(store.load(&record.id).unwrap().plakous_locator.is_none());
-        delete_confirmed(&services, &record.id, false).unwrap();
+        delete_confirmed(&services, &record.id, false, false).unwrap();
         assert!(matches!(
-            delete_confirmed(&services, &record.id, false),
+            delete_confirmed(&services, &record.id, false, false),
             Err(LifecycleError::Refused(LifecycleRefusal::NotFound))
         ));
     }

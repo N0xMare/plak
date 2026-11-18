@@ -80,6 +80,7 @@ pub(super) fn delete_confirmed(
     services: &crate::shell::services::Services,
     id: &str,
     abandon_children: bool,
+    abandon_jobs: bool,
 ) -> Result<(), LifecycleError> {
     let paths = services.paths()?;
     crate::carry::upgrade::receipt::ensure_metadata_available(paths, id)?;
@@ -96,7 +97,7 @@ pub(super) fn delete_confirmed(
         .map_or("local", |runner| runner.runner_id.as_str());
     // Durable job rows are readable without a live runner. A paired session
     // whose runner is down still must not be deleted out from under them.
-    if let Some(locator) = record.plakous_locator {
+    if !abandon_jobs && let Some(locator) = record.plakous_locator {
         refuse_running_jobs(paths, &[locator])?;
     }
     if crate::terminal_registry::session_pinned(services, id, runner_id).map_err(CliFailure::new)? {
@@ -145,6 +146,7 @@ pub(super) fn delete_confirmed(
         &record,
         locator,
         abandon_children,
+        abandon_jobs,
     )?;
     Ok(())
 }
@@ -155,6 +157,14 @@ struct DeletionPlan {
     children: Vec<(String, SessionLocator)>,
     tree: Option<(String, u64)>,
     abandon: Vec<String>,
+}
+
+/// Operator choices for one `session delete`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SessionDeleteOptions {
+    pub confirmed: bool,
+    pub abandon_children: bool,
+    pub abandon_jobs: bool,
 }
 
 /// `plakd session delete <id> [--yes]`: deletes the session's runtime history,
@@ -170,12 +180,16 @@ struct DeletionPlan {
 pub(crate) fn delete_session(
     services: &crate::shell::services::Services,
     id: &str,
-    confirmed: bool,
-    abandon_children: bool,
+    options: SessionDeleteOptions,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
     stdout: &mut dyn io::Write,
 ) -> CliResult<()> {
+    let SessionDeleteOptions {
+        confirmed,
+        abandon_children,
+        abandon_jobs,
+    } = options;
     let paths = services.paths()?;
     let record = load_metadata_product_session(paths, services.session_records()?.as_ref(), id)?;
     crate::carry::upgrade::receipt::ensure_metadata_available(paths, &record.id)?;
@@ -183,11 +197,23 @@ pub(crate) fn delete_session(
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     if let Some(locator) = record.plakous_locator {
-        deletion_plan(paths, &mut product, &record, locator, abandon_children)
-            .map_err(|error| cli_delete_error(&record.id, error))?;
+        deletion_plan(
+            paths,
+            &mut product,
+            &record,
+            locator,
+            abandon_children,
+            abandon_jobs,
+        )
+        .map_err(|error| cli_delete_error(&record.id, error))?;
     }
+    let abandoned = if abandon_jobs {
+        running_job_labels(paths, &record).map_err(|error| cli_delete_error(&record.id, error))?
+    } else {
+        Vec::new()
+    };
     confirm_deletion(&record.id, confirmed, stdin, stderr)?;
-    if !super::lifecycle::forward_delete(services, &record.id, abandon_children)? {
+    if !super::lifecycle::forward_delete(services, &record.id, abandon_children, abandon_jobs)? {
         if record.plakous_locator.is_none() {
             return Err(cli_delete_error(
                 &record.id,
@@ -201,10 +227,19 @@ pub(crate) fn delete_session(
                 }),
             ));
         }
-        super::lifecycle::delete_confirmed(services, &record.id, abandon_children)
+        super::lifecycle::delete_confirmed(services, &record.id, abandon_children, abandon_jobs)
             .map_err(|error| cli_delete_error(&record.id, error))?;
     }
-    writeln!(stdout, "deleted session {}", record.id).map_err(|_| CliFailure::new("stdout failed"))
+    let abandoned = if abandoned.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; abandoned running jobs {} (left to the runner)",
+            abandoned.join(", ")
+        )
+    };
+    writeln!(stdout, "deleted session {}{abandoned}", record.id)
+        .map_err(|_| CliFailure::new("stdout failed"))
 }
 
 /// Deleting a carry's source before the carry settles would strand it.
@@ -247,8 +282,16 @@ fn delete_confirmed_session(
     record: &product_sessions::SessionRecord,
     locator: SessionLocator,
     abandon_children: bool,
+    abandon_jobs: bool,
 ) -> Result<Reclaimed, LifecycleError> {
-    let mut plan = deletion_plan(paths, product, record, locator, abandon_children)?;
+    let mut plan = deletion_plan(
+        paths,
+        product,
+        record,
+        locator,
+        abandon_children,
+        abandon_jobs,
+    )?;
     let settled_children = plan
         .children
         .iter()
@@ -256,7 +299,7 @@ fn delete_confirmed_session(
         .cloned()
         .collect::<Vec<_>>();
     runtime.refuse_unsettled_children(&record.id, &settled_children)?;
-    let root = runtime.archive(&record.id, locator)?;
+    let root = runtime.archive(&record.id, locator, abandon_jobs, paths)?;
     #[cfg(test)]
     crate::store::lifecycle_crash_cut("delete_root_archived");
     // Fence every unresolved child before closing its durable obligation. A
@@ -264,7 +307,10 @@ fn delete_confirmed_session(
     let mut archived_children = std::collections::BTreeMap::new();
     for (agent_id, child) in &plan.children {
         if plan.abandon.contains(agent_id) {
-            archived_children.insert(agent_id.clone(), runtime.archive(&record.id, *child)?);
+            archived_children.insert(
+                agent_id.clone(),
+                runtime.archive(&record.id, *child, abandon_jobs, paths)?,
+            );
         }
     }
     publish_abandoned_children(paths, &mut plan)?;
@@ -274,7 +320,7 @@ fn delete_confirmed_session(
     for (agent_id, child) in &plan.children {
         let archived = match archived_children.remove(agent_id) {
             Some(archived) => Ok(archived),
-            None => runtime.archive(&record.id, *child),
+            None => runtime.archive(&record.id, *child, abandon_jobs, paths),
         };
         let archived = archived?;
         remove_job_outputs(paths, &archived)?;
@@ -383,6 +429,7 @@ fn deletion_plan(
     record: &product_sessions::SessionRecord,
     locator: SessionLocator,
     abandon_children: bool,
+    abandon_jobs: bool,
 ) -> Result<DeletionPlan, LifecycleError> {
     let dependents = product
         .session_dependents(&record.id, locator.session_id())
@@ -393,7 +440,9 @@ fn deletion_plan(
             &SessionDeleteRefusal::fork_dependency(dependents),
         ));
     }
-    refuse_running_jobs(paths, &[locator])?;
+    if !abandon_jobs {
+        refuse_running_jobs(paths, &[locator])?;
+    }
     let (tree_id, observed) = crate::topology_product::inspect_session_tree(paths, record)?;
     let TreeInspection::Tree(tree) = observed else {
         return Ok(DeletionPlan {
@@ -443,7 +492,7 @@ fn deletion_plan(
             }
         }
     }
-    if !running_jobs.is_empty() {
+    if !abandon_jobs && !running_jobs.is_empty() {
         return Err(running_jobs_refused(running_jobs));
     }
     if !recovering.is_empty() && !may_abandon {
@@ -492,6 +541,44 @@ fn refuse_running_jobs(
         return Ok(());
     }
     Err(running_jobs_refused(processes))
+}
+
+pub(crate) fn running_job_labels(
+    paths: &crate::home::paths::PlakPaths,
+    record: &product_sessions::SessionRecord,
+) -> Result<Vec<String>, LifecycleError> {
+    let Some(locator) = record.plakous_locator else {
+        return Ok(Vec::new());
+    };
+    let mut locators = vec![locator];
+    if let Ok((tree_id, observed)) = crate::topology_product::inspect_session_tree(paths, record)
+        && let TreeInspection::Tree(tree) = observed
+        && tree_id == record.id
+    {
+        for node in tree.rows().nodes().values() {
+            if node.parent_agent_id.is_none() {
+                continue;
+            }
+            if let Some(child) = &node.session_locator
+                && let Ok(child) = child.parse::<SessionLocator>()
+            {
+                locators.push(child);
+            }
+        }
+    }
+    let mut processes = Vec::new();
+    for locator in locators {
+        match AgentSessions::unsettled_job_labels(paths.runtime_database(), locator) {
+            Ok(labels) => processes.extend(labels),
+            Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(
+                    CliFailure::new(format!("running jobs could not be read: {error}")).into(),
+                );
+            }
+        }
+    }
+    Ok(processes)
 }
 
 fn running_jobs_refused(processes: Vec<String>) -> LifecycleError {
@@ -643,17 +730,30 @@ impl RuntimeDeletion {
         &self,
         session_id: &str,
         recorded: SessionLocator,
+        abandon_jobs: bool,
+        paths: &crate::home::paths::PlakPaths,
     ) -> Result<RuntimeArchive, LifecycleError> {
         let mut head = recorded;
         let mut stale_retried = false;
         loop {
-            match self.run(self.sessions.archive(head))? {
+            let archived = if abandon_jobs {
+                self.run(self.sessions.archive_abandoning_jobs(head))?
+            } else {
+                self.run(self.sessions.archive(head))?
+            };
+            match archived {
                 Ok(report) => return Ok(RuntimeArchive::Archived(report)),
                 Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => {
                     return Ok(RuntimeArchive::Earlier(recorded.session_id()));
                 }
                 Err(error) if error.kind() == AgentSessionsErrorKind::Ownership => {
                     return Err(delete_refused(session_id, &SessionDeleteRefusal::Open));
+                }
+                Err(error) if error.kind() == AgentSessionsErrorKind::UnsettledProcesses => {
+                    let labels =
+                        AgentSessions::unsettled_job_labels(paths.runtime_database(), head)
+                            .unwrap_or_default();
+                    return Err(running_jobs_refused(labels));
                 }
                 Err(error)
                     if error.kind() == AgentSessionsErrorKind::StaleLocator && !stale_retried =>
@@ -999,8 +1099,10 @@ fn finish_interrupted_deletes(
                 .into_iter()
                 .try_for_each(|(id, locator)| {
                     let record = records.load(id).map_err(CliFailure::from)?;
-                    delete_confirmed_session(paths, product, runtime, &record, locator, false)
-                        .map(|deleted| reclaimed.merge(&deleted))
+                    delete_confirmed_session(
+                        paths, product, runtime, &record, locator, false, false,
+                    )
+                    .map(|deleted| reclaimed.merge(&deleted))
                 })
                 .map(|()| true)
         };

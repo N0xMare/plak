@@ -416,6 +416,12 @@ pub enum Op<P: ProtocolExtension> {
         /// Explicitly abandon only this session's recovery-required children.
         #[serde(default)]
         abandon_children: bool,
+        /// Archive even when a head job row has no terminal evidence.
+        ///
+        /// The processes are left running. Absent on an older caller, which
+        /// still refuses those jobs.
+        #[serde(default)]
+        abandon_jobs: bool,
     },
     /// Detaches every attachment of `session` and releases it now, unless
     /// something other than an attachment keeps it resident.

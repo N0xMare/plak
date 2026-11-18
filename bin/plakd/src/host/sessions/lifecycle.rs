@@ -76,3 +76,31 @@ pub(super) fn refusal(session: &str, error: LifecycleError) -> RequestRefusal {
         reason,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::refusal;
+    use crate::commands::session::lifecycle::{LifecycleError, LifecycleRefusal};
+    use plakous_host_protocol::wire::{LifecycleReason, RequestRefusal};
+
+    #[test]
+    fn running_jobs_maps_to_the_host_wire_reason() {
+        let mapped = refusal(
+            "session-1",
+            LifecycleError::Refused(LifecycleRefusal::RunningJobs {
+                processes: vec!["p1".into(), "p2".into()],
+                processes_truncated: false,
+            }),
+        );
+        assert_eq!(
+            mapped,
+            RequestRefusal::SessionLifecycleRefused {
+                session: "session-1".into(),
+                reason: LifecycleReason::RunningJobs {
+                    processes: vec!["p1".into(), "p2".into()],
+                    processes_truncated: false,
+                },
+            }
+        );
+    }
+}

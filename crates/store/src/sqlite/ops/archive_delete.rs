@@ -49,6 +49,19 @@ pub(in super::super) fn archive(
         if row.active.as_ref().map(|l| expired(l, now)).transpose()? == Some(false) {
             return Err(SessionStoreError::LeaseHeld);
         }
+        if !r.abandons_jobs() {
+            let stored = load_checkpoint(&tx, row.head.checkpoint().checkpoint_id())?;
+            if stored
+                .checkpoint()
+                .manifest()
+                .jobs()
+                .rows()
+                .iter()
+                .any(|job| job.terminal.is_none())
+            {
+                return Err(SessionStoreError::RunningJobs);
+            }
+        }
     }
     let revision = r.expected_revision().checked_next().ok_or_else(|| {
         SessionStoreError::capacity(

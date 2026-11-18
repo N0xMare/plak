@@ -83,6 +83,7 @@ pub(crate) enum RunnerCommand {
     /// still has a non-terminal job.
     Unpair {
         name: String,
+        abandon_jobs: bool,
     },
 }
 
@@ -115,7 +116,7 @@ pub(crate) fn run(
         RunnerCommand::Ps { name: None } => runtime.block_on(ps_local(paths, stdout)),
         RunnerCommand::Ps { name: Some(name) } => runtime.block_on(ps_remote(paths, &name, stdout)),
         RunnerCommand::Pair { name } => runtime.block_on(pair(paths, &name, stdout)),
-        RunnerCommand::Unpair { name } => unpair(paths, &name, stdout),
+        RunnerCommand::Unpair { name, abandon_jobs } => unpair(paths, &name, abandon_jobs, stdout),
     }?;
     Ok(ProcessOutcome::Success)
 }
@@ -685,9 +686,16 @@ async fn pair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) ->
 }
 
 /// `plakd runner unpair <name>`: drops this host's pairing pin after refusing
-/// while any session on that runner still has a non-terminal job. It does not
-/// ssh, and it does not edit the runner's `runner.toml`.
-fn unpair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) -> CliResult<()> {
+/// while any session on that runner, or a finished child in its tree, still
+/// has a non-terminal job. `--abandon-jobs` drops the pin anyway and names
+/// the processes left running. It does not ssh, and it does not edit the
+/// runner's `runner.toml`.
+fn unpair(
+    paths: &PlakPaths,
+    name: &str,
+    abandon_jobs: bool,
+    stdout: &mut dyn std::io::Write,
+) -> CliResult<()> {
     let pin = registry::read_pin(paths, name).ok_or_else(|| {
         CliFailure::new(format!("runner {name} is not paired; nothing to unpair"))
     })?;
@@ -699,26 +707,15 @@ fn unpair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) -> Cli
     let mut blocked = Vec::new();
     for id in sessions {
         let record = product.load(&id).map_err(CliFailure::new)?;
-        let Some(locator) = record.plakous_locator else {
-            continue;
-        };
-        match plakous::sessions::AgentSessions::unsettled_job_labels(
-            paths.runtime_database(),
-            locator,
-        ) {
-            Ok(labels) if labels.is_empty() => {}
-            Ok(labels) => blocked.push(format!("{id} ({})", labels.join(", "))),
-            Err(error) if error.kind() == plakous::sessions::AgentSessionsErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(CliFailure::new(format!(
-                    "session {id} running jobs could not be read: {error}"
-                )));
-            }
+        let labels = crate::commands::session::running_job_labels(paths, &record)
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        if !labels.is_empty() {
+            blocked.push(format!("{id} ({})", labels.join(", ")));
         }
     }
-    if !blocked.is_empty() {
+    if !blocked.is_empty() && !abandon_jobs {
         return Err(CliFailure::new(format!(
-            "runner {name} still has running jobs: {}; stop the jobs first",
+            "runner {name} still has running jobs: {}; open the session to reconcile and stop the jobs, or unpair with --abandon-jobs",
             blocked.join("; ")
         )));
     }
@@ -732,7 +729,16 @@ fn unpair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) -> Cli
             )));
         }
     }
-    writeln!(stdout, "unpaired runner {name}").map_err(|_| CliFailure::new("stdout failed"))
+    let abandoned = if abandon_jobs && !blocked.is_empty() {
+        format!(
+            "; abandoned running jobs {} (left to the runner)",
+            blocked.join("; ")
+        )
+    } else {
+        String::new()
+    };
+    writeln!(stdout, "unpaired runner {name}{abandoned}")
+        .map_err(|_| CliFailure::new("stdout failed"))
 }
 
 /// What a host records of a runner it paired with.

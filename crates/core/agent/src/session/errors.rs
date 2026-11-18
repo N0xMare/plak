@@ -444,6 +444,12 @@ pub enum SessionStoreError {
     /// The session is archived and closed to ordinary mutation/load.
     #[error("session is archived")]
     Archived,
+    /// A head manifest still has a job row without terminal evidence.
+    ///
+    /// Archive refuses this inside the same transaction as the lease fence.
+    /// An [`ArchiveSession::abandoning_jobs`] request is the operator override.
+    #[error("session has running jobs without terminal evidence")]
+    RunningJobs,
     /// A configured hard bound was reached.
     #[error("session store capacity was reached: {0}")]
     Capacity(SessionStoreCapacity),

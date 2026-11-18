@@ -485,7 +485,8 @@ fn lifecycle_real_product_archive_delete_releases_idle_actor_without_reopen() {
             6,
             Op::DeleteSession {
                 session: session.clone(),
-                abandon_children: false
+                abandon_children: false,
+                abandon_jobs: false,
             }
         ),
         Outcome::Ok(Answer::Deleted {

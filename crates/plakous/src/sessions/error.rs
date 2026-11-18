@@ -428,6 +428,12 @@ pub(super) fn store_origin_error(origin: SessionStoreOrigin) -> AgentSessionsErr
         }
         SessionStoreOrigin::UnsupportedPersistence => return incompatible(),
         SessionStoreOrigin::Integrity => (AgentSessionsErrorKind::Integrity, "integrity"),
+        SessionStoreOrigin::RunningJobs => {
+            return AgentSessionsError::new(
+                AgentSessionsErrorKind::UnsettledProcesses,
+                "background jobs are still running; open the session to reconcile and stop them, or pass the abandon override",
+            );
+        }
     };
     AgentSessionsError::new(
         kind,
