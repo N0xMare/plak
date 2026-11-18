@@ -2251,7 +2251,7 @@ fn child_wake_config_set_is_immediate_even_with_a_non_quiescent_tree() {
             .unwrap()
             .contains("next session genesis")
     );
-    let surface = shell::settings::ProductSurface::new(paths.clone());
+    let surface = shell::settings::ProductSurface::new(paths.clone(), gateway::HostCustody::Local);
     assert_eq!(surface.child_wake_enabled(), Some(false));
     let mut config = product_config::ProductConfig::load_user(&paths).unwrap();
     config.set_key("turn.auto_continue", "true").unwrap();
@@ -2313,6 +2313,7 @@ fn command_and_attach_workers_share_one_lazy_product_store() {
         &plakous_host_protocol::views::ReadyCatalog::default(),
         None,
         &[],
+        &gateway::HostCustody::Local,
     )
     .unwrap();
     assert!(Arc::ptr_eq(&first_roots.session_records(), &config.store));
@@ -2400,6 +2401,7 @@ fn two_workspaces_in_one_process_keep_their_own_contexts() {
             &plakous_host_protocol::views::ReadyCatalog::default(),
             None,
             &[],
+            &gateway::HostCustody::Local,
         )
         .unwrap();
         store::tree::open_tree_store(&context).unwrap();

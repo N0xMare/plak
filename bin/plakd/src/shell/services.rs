@@ -43,6 +43,9 @@ pub(crate) struct Services {
     extra_telemetry_sink: OnceLock<Option<Arc<dyn ExtraTelemetrySink>>>,
     /// The process's one job bound, shared by every state root it opens.
     jobs: plakous_hosted::agent::ProcessJobs,
+    /// Credential custody, latched by the first resolution and shared by
+    /// every clone: a host resolves it at startup and never re-reads it.
+    custody: Arc<OnceLock<crate::gateway::HostCustody>>,
 }
 
 #[derive(Clone)]
@@ -132,6 +135,7 @@ impl Services {
             telemetry_sink_factory: None,
             extra_telemetry_sink: OnceLock::new(),
             jobs: plakous_hosted::agent::ProcessJobs::default(),
+            custody: Arc::default(),
         }
     }
 
@@ -172,6 +176,7 @@ impl Services {
             telemetry_sink_factory,
             extra_telemetry_sink: OnceLock::new(),
             jobs: plakous_hosted::agent::ProcessJobs::default(),
+            custody: Arc::default(),
         }
     }
 
@@ -206,6 +211,7 @@ impl Clone for Services {
             telemetry_sink_factory: self.telemetry_sink_factory,
             extra_telemetry_sink,
             jobs: self.jobs.clone(),
+            custody: Arc::clone(&self.custody),
         }
     }
 }
@@ -364,6 +370,7 @@ impl Services {
             self.extra_telemetry_sink(),
             self.session_records()?,
             &self.jobs,
+            &self.custody()?,
         )?;
         let roots = match &*self
             .local_daemon
@@ -388,6 +395,18 @@ impl Services {
             return Ok(roots.with_reclamation_fence(registry.clone()));
         }
         Ok(roots.with_reclamation_fence(fallback))
+    }
+
+    /// This process's credential custody. The first call reads the home's
+    /// `config.toml`; every later call, on this value or any clone, returns
+    /// that same custody. A failed read is an error and latches nothing.
+    pub(crate) fn custody(&self) -> CliResult<crate::gateway::HostCustody> {
+        if let Some(custody) = self.custody.get() {
+            return Ok(custody.clone());
+        }
+        let resolved =
+            crate::gateway::HostCustody::resolve(self.paths()?).map_err(crate::CliFailure::new)?;
+        Ok(self.custody.get_or_init(|| resolved).clone())
     }
 
     /// The process's one job bound.

@@ -25,7 +25,8 @@ async fn account_status_refresh_history_is_exact_settled_and_content_free()
         database.execute("INSERT INTO credential_refreshes (at,provider,account,phase,failure_class,generation,oauth_error_description) VALUES (?1,'codex',?2,?3,?4,1,'withheld-provider-body')", rusqlite::params![at * 1_000_000_000, account, phase, class])?;
     }
     let state = paths.home().join("state");
-    let reader = accounts::reader(&state).map_err(|_| "reader")?;
+    let reader =
+        accounts::reader_at(&state, &crate::gateway::HostCustody::Local).map_err(|_| "reader")?;
     for (id, outcome, at) in [
         ("codex", "completed", "1970-01-01T00:00:02Z"),
         ("codex/work", "quarantined", "1970-01-01T00:00:01Z"),
@@ -77,6 +78,7 @@ async fn welcome_and_dispatch_share_independent_startup_switches_without_session
             let console = Console::new(
                 paths.clone(),
                 state.clone(),
+                crate::gateway::HostCustody::Local,
                 Some(tokio::runtime::Handle::current()),
                 switches,
             );
@@ -114,12 +116,7 @@ async fn socket_reads_are_attachment_free_and_web_is_gated_before_work()
     let root = tempfile::tempdir()?;
     let paths = PlakPaths::explicit(root.path().join("home"));
     let state = root.path().join("state");
-    let console = Console::new(
-        paths.clone(),
-        state.clone(),
-        Some(tokio::runtime::Handle::current()),
-        DISABLED_SWITCHES,
-    );
+    let console = local_console(paths.clone(), state.clone(), DISABLED_SWITCHES);
     let socket = context(HostPrincipal::Socket(7));
     let web = context(HostPrincipal::Web("operator".into()));
     assert!(matches!(
@@ -157,6 +154,7 @@ async fn account_selectors_and_page_limits_are_exact_and_refused_before_network(
     let console = Console::new(
         paths,
         root.path().join("state"),
+        crate::gateway::HostCustody::Local,
         Some(tokio::runtime::Handle::current()),
         DISABLED_SWITCHES,
     );
@@ -226,12 +224,7 @@ async fn definitions_and_metadata_need_no_attachment_and_cursors_do_not_cross_re
     let root = tempfile::tempdir()?;
     let paths = PlakPaths::explicit(root.path().join("absent"));
     let state = root.path().join("state");
-    let console = Console::new(
-        paths.clone(),
-        state.clone(),
-        Some(tokio::runtime::Handle::current()),
-        DISABLED_SWITCHES,
-    );
+    let console = local_console(paths.clone(), state.clone(), DISABLED_SWITCHES);
     let socket = context(HostPrincipal::Socket(7));
     assert!(matches!(
         console
@@ -354,4 +347,18 @@ async fn assert_metadata(
     assert_eq!(catalog.account_id, None);
     assert!(needs_setup);
     Ok(())
+}
+
+fn local_console(
+    paths: PlakPaths,
+    state: std::path::PathBuf,
+    switches: ConfiguredSwitches,
+) -> Arc<Console> {
+    Console::new(
+        paths,
+        state,
+        crate::gateway::HostCustody::Local,
+        Some(tokio::runtime::Handle::current()),
+        switches,
+    )
 }

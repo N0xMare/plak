@@ -57,11 +57,15 @@ mod tests {
         let source_revision = source.store_revision;
 
         let (actions, _events, worker) = crate::shell::host::spawn_shell_host(ShellHostConfig {
-            surface: Some(ProductSurface::boxed(&paths)),
+            surface: Some(ProductSurface::boxed(
+                &paths,
+                crate::gateway::HostCustody::Local,
+            )),
             binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
             subscriptions: crate::shell::host::open_product_subscriptions(),
             openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
                 &paths,
+                crate::gateway::HostCustody::Local,
             ),
             product_home: paths.home().to_path_buf(),
             home: paths.session_home(),

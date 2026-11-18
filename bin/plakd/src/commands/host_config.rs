@@ -6,10 +6,8 @@ use std::sync::Arc;
 
 use plakous::agent::ReasoningEffort;
 
-use super::application::PlakousApplication;
 use super::support::{
-    application_state_home, native_processing_tier, persist_miss_native_tool_mode,
-    product_subscription_request_limits,
+    native_processing_tier, persist_miss_native_tool_mode, product_subscription_request_limits,
 };
 use crate::home::paths as product_paths;
 use crate::presentation::HostLaunchNativeModelFact;
@@ -21,10 +19,12 @@ use plakous_hosted::runtime as product_host;
 
 pub(super) fn binding_presentation(
     paths: &product_paths::PlakPaths,
+    custody: &crate::gateway::HostCustody,
     account: &plakous_hosted::account::AccountRef,
 ) -> crate::CliResult<crate::presentation::HostCatalogBundle> {
     if account.is_named() {
-        if account.vertical().is_api() {
+        // A gateway holds the key; it refuses a missing one at dispatch.
+        if account.vertical().is_api() && custody.admin().is_none() {
             crate::home::secrets::require_api_key(paths, account.as_str())?;
         }
         return Ok(crate::presentation::HostCatalogBundle {
@@ -33,7 +33,7 @@ pub(super) fn binding_presentation(
             native_models: Vec::new(),
         });
     }
-    catalog_bundle(paths)
+    catalog_bundle(paths, custody)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -101,7 +101,7 @@ pub fn attach_eligibility(
     clippy::too_many_lines,
     reason = "Host construction binds the recorded session, catalog facts, explicit effort, workspace, and publication fence in admission order."
 )]
-pub fn build_host_config(
+pub(crate) fn build_host_config(
     paths: &product_paths::PlakPaths,
     state_roots: &product_agent::ProductStateRoots,
     session: product_sessions::SessionRecord,
@@ -113,6 +113,7 @@ pub fn build_host_config(
     ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
     resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
     native_models: &[HostLaunchNativeModelFact],
+    custody: &crate::gateway::HostCustody,
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, crate::CliFailure> {
     if session.plakous_locator.is_some() {
         crate::carry::upgrade::receipt::ensure_open(paths, &session)?;
@@ -157,6 +158,7 @@ pub fn build_host_config(
             cwd,
             ready_catalog,
             resume_publication,
+            custody,
         );
     }
     let account = account
@@ -165,9 +167,8 @@ pub fn build_host_config(
     let model_id = model_id
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| "no model bound — choose a profile with /agents".to_owned())?;
-    let state_home = application_state_home().map_err(|e| format!("state home: {e}"))?;
-    let app = PlakousApplication::for_accounts(state_home)
-        .map_err(|e| format!("plakous app: {}", e.message()))?;
+    let executor = plakous::application::ApplicationExecutor::new()
+        .map_err(|_| "application executor construction failed".to_owned())?;
     let selected_account: plakous_hosted::account::AccountRef = account.parse()?;
     let subscriptions = if selected_account.vertical().is_api() {
         state_roots.native_subscriptions()
@@ -240,7 +241,10 @@ pub fn build_host_config(
                 auto_continue: policy.auto_continue,
                 resume_after_loss: policy.resume_after_loss,
                 topology_admission: Some(product_config::topology_admission_probe(paths)),
-                surface: Some(crate::shell::settings::ProductSurface::boxed(paths)),
+                surface: Some(crate::shell::settings::ProductSurface::boxed(
+                    paths,
+                    custody.clone(),
+                )),
                 root_template: policy.root_template,
                 attached_one_shot: false,
                 interactive: true,
@@ -272,10 +276,7 @@ pub fn build_host_config(
             fact.service_tiers.iter().any(|tier| tier.0 == "priority"),
         )
     } else {
-        match app
-            .executor
-            .block_on(subscriptions.model_catalog_persisted(provider))
-        {
+        match executor.block_on(subscriptions.model_catalog_persisted(provider)) {
             Ok(Ok(snapshot)) => {
                 let entry = snapshot
                     .models()
@@ -316,8 +317,7 @@ pub fn build_host_config(
     .map_err(|e| format!("provider configuration `{model_id}`: {}", e.message()))?;
     let limits = product_subscription_request_limits()
         .map_err(|()| "product gate limits invalid".to_owned())?;
-    let resolved = app
-        .executor
+    let resolved = executor
         .block_on(
             subscriptions
                 .resolve_turn_scoped_provider_for_attach(selected, limits),
@@ -362,7 +362,10 @@ pub fn build_host_config(
         auto_continue: policy.auto_continue,
         resume_after_loss: policy.resume_after_loss,
         topology_admission: Some(product_config::topology_admission_probe(paths)),
-        surface: Some(crate::shell::settings::ProductSurface::boxed(paths)),
+        surface: Some(crate::shell::settings::ProductSurface::boxed(
+            paths,
+            custody.clone(),
+        )),
         root_template: policy.root_template,
         attached_one_shot: false,
         interactive: true,

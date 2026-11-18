@@ -333,6 +333,12 @@ impl ProductConfig {
         Ok(config)
     }
 
+    /// The home's `config.toml` alone: no templates, no project overlay. A
+    /// read or parse failure is an error, never the default product.
+    pub(crate) fn load_home_file(paths: &PlakPaths) -> Result<Self, String> {
+        Self::load_config_file(&paths.config_file())
+    }
+
     pub(super) fn load_config_file(path: &Path) -> Result<Self, String> {
         let text = match fs::read_to_string(path) {
             Ok(text) => text,

@@ -23,4 +23,6 @@ pub enum OpenRouterCatalogProbe {
     Ok,
     /// Named catalog/schema failure or transport/auth error (no secret material).
     Failed(String),
+    /// A configured gateway holds the key; this process does not probe it.
+    Gateway,
 }

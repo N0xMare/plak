@@ -29,6 +29,7 @@ pub(super) fn console(root: &std::path::Path) -> Arc<Console> {
     Console::new(
         crate::home::paths::PlakPaths::explicit(root.join("home")),
         root.join("state"),
+        crate::gateway::HostCustody::Local,
         Some(tokio::runtime::Handle::current()),
         ConfiguredSwitches {
             web_accounts_read: false,

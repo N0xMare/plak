@@ -894,6 +894,8 @@ fn send_agent_acknowledgements(paths: &PlakPaths, tree_id: &str, events: &Sender
 /// product has a configuration file at all.
 pub struct ProductSurface {
     paths: PlakPaths,
+    /// The process's latched credential custody.
+    custody: crate::gateway::HostCustody,
     chrome_refresh: crate::shell::chrome_refresh::ChromeRefresh,
     chrome_generation: std::sync::Arc<std::sync::Mutex<u64>>,
     usage_accounts_generation: std::sync::Arc<std::sync::Mutex<u64>>,
@@ -929,8 +931,9 @@ fn publish_usage_refresh_accounts(
 impl ProductSurface {
     /// The surfaces of one product home.
     #[must_use]
-    pub fn new(paths: PlakPaths) -> Self {
+    pub(crate) fn new(paths: PlakPaths, custody: crate::gateway::HostCustody) -> Self {
         Self {
+            custody,
             state_home: crate::home::paths::application_state_home(),
             usage_refreshing: std::sync::Arc::new(std::sync::Mutex::new(false)),
             chrome_refresh: crate::shell::chrome_refresh::ChromeRefresh::default(),
@@ -962,13 +965,18 @@ impl ProductSurface {
             *generation
         };
         let state_home = self.state_home.clone();
+        let custody = self.custody.clone();
         let generation = std::sync::Arc::clone(&self.usage_accounts_generation);
         let events = events.answering();
         std::thread::spawn(move || {
             let _ = reads.wait_settled(USAGE_READ_SETTLE_LIMIT);
             let accounts = state_home
                 .map_err(plakous_hosted::error::CliFailure::new)
-                .and_then(crate::commands::application::PlakousApplication::for_accounts)
+                .and_then(|state_home| {
+                    crate::commands::application::PlakousApplication::for_accounts(
+                        state_home, custody,
+                    )
+                })
                 .map_or_default(|mut backend| {
                     crate::commands::usage::usage_refresh_accounts(&mut backend)
                 });
@@ -996,13 +1004,18 @@ impl ProductSurface {
         drop(running);
         let paths = self.paths.clone();
         let state_home = self.state_home.clone();
+        let custody = self.custody.clone();
         let running = std::sync::Arc::clone(&self.usage_refreshing);
         let events = events.answering();
         std::thread::spawn(move || {
             let _telemetry = crate::telemetry_sink::install_product_credential_telemetry(&paths);
             let result = state_home
                 .map_err(plakous_hosted::error::CliFailure::new)
-                .and_then(crate::commands::application::PlakousApplication::for_accounts)
+                .and_then(|state_home| {
+                    crate::commands::application::PlakousApplication::for_accounts(
+                        state_home, custody,
+                    )
+                })
                 .and_then(|mut backend| {
                     let selection: plakous_hosted::account::AccountRef = account.parse()?;
                     crate::commands::usage::refresh_usage_credential(&mut backend, &selection)
@@ -1027,8 +1040,11 @@ impl ProductSurface {
 
     /// A boxed handler for a [`HostConfig`](plakous_hosted::runtime::HostConfig)'s `surface` field.
     #[must_use]
-    pub fn boxed(paths: &PlakPaths) -> Box<dyn SurfaceHandler<PlakExtension>> {
-        Box::new(Self::new(paths.clone()))
+    pub(crate) fn boxed(
+        paths: &PlakPaths,
+        custody: crate::gateway::HostCustody,
+    ) -> Box<dyn SurfaceHandler<PlakExtension>> {
+        Box::new(Self::new(paths.clone(), custody))
     }
 }
 
@@ -1224,8 +1240,9 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
 
     fn readiness_read(&self) -> plakous_hosted::runtime::ReadinessRead {
         let paths = self.paths.clone();
+        let custody = self.custody.clone();
         Box::new(move || {
-            crate::presentation::catalog_values(&paths)
+            crate::presentation::catalog_values(&paths, &custody)
                 .map(|(providers, sections)| {
                     (
                         providers,

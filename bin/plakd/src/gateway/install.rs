@@ -1,6 +1,8 @@
 //! `plakd gateway install` writes a user service definition and does not start it.
-//! The unit runs whatever executable is installing it; the cutover runbook pins
-//! that path to an immutable snapshot before the service is enabled.
+//! The unit runs whatever executable is installing it, with the installing
+//! process's `PLAK_HOME` and `XDG_STATE_HOME`, so the service resolves the
+//! homes the operator's host does; the cutover runbook pins the executable to
+//! an immutable snapshot before the service is enabled.
 
 use std::fs;
 use std::io::Write as _;
@@ -41,7 +43,7 @@ fn remove_definition(path: &Path, absent: &str) -> Result<String, String> {
 
 fn install_systemd(executable: &str, dry_run: bool) -> Result<PathBuf, String> {
     let path = systemd_path()?;
-    let unit = systemd_unit(executable);
+    let unit = systemd_unit(executable, &crate::environment::inherited_homes());
     if dry_run {
         print_dry(&path, &unit)?;
         return Ok(path);
@@ -81,20 +83,40 @@ fn launchd_path() -> Result<PathBuf, String> {
     Ok(PathBuf::from(home).join("Library/LaunchAgents/com.plakd.gateway.plist"))
 }
 
-pub(crate) fn systemd_unit(executable: &str) -> String {
+/// The user unit. Files it creates are owner-only; API-key variables come
+/// from the optional `gateway.env` beside the home config; a stop allows the
+/// 30 s drain plus the runtime's own shutdown before systemd kills it.
+pub(crate) fn systemd_unit(executable: &str, homes: &[(&str, String)]) -> String {
+    let environment: String = homes
+        .iter()
+        .map(|(name, value)| format!("Environment=\"{name}={}\"\n", systemd_quoted(value)))
+        .collect();
     format!(
         "\
 [Unit]
 Description=plakd credential gateway
 [Service]
 Type=simple
-ExecStart={executable} gateway serve
-# EnvironmentFile=-%h/.config/plak/gateway.env
+ExecStart={} gateway serve
+UMask=0077
+{environment}EnvironmentFile=-%h/.config/plak/gateway.env
 Restart=on-failure
+RestartSec=2
+TimeoutStopSec=45
 [Install]
 WantedBy=default.target
-"
+",
+        executable.replace('%', "%%")
     )
+}
+
+/// A value inside a double-quoted systemd assignment: specifiers and quoting
+/// characters are escaped.
+fn systemd_quoted(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('%', "%%")
 }
 
 fn launchd_plist(executable: &str) -> String {
@@ -143,4 +165,32 @@ fn print_dry(path: &Path, body: &str) -> Result<(), String> {
     writeln!(out, "# {}", path.display()).map_err(|error| error.to_string())?;
     writeln!(out, "{body}").map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_unit_carries_the_installing_homes_and_the_service_bounds() {
+        let unit = super::systemd_unit(
+            "/home/user/.local/lib/plak/maintainer/abc/plakd",
+            &[
+                ("PLAK_HOME", "/home/user/.plak".to_owned()),
+                ("XDG_STATE_HOME", "/home/user/state 100%".to_owned()),
+            ],
+        );
+        for line in [
+            "ExecStart=/home/user/.local/lib/plak/maintainer/abc/plakd gateway serve",
+            "UMask=0077",
+            "Environment=\"PLAK_HOME=/home/user/.plak\"",
+            "Environment=\"XDG_STATE_HOME=/home/user/state 100%%\"",
+            "EnvironmentFile=-%h/.config/plak/gateway.env",
+            "Restart=on-failure",
+            "RestartSec=2",
+            "TimeoutStopSec=45",
+        ] {
+            assert!(unit.lines().any(|row| row == line), "{line}\n{unit}");
+        }
+        let bare = super::systemd_unit("/usr/bin/plakd", &[]);
+        assert!(!bare.contains("Environment=\""));
+    }
 }

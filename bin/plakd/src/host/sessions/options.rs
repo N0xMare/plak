@@ -21,9 +21,9 @@ struct Choices {
     templates: Vec<TemplateRow>,
 }
 
-fn choices(paths: &PlakPaths) -> Choices {
-    let models =
-        crate::presentation::catalog_bundle(paths).map_or_default(|bundle| bundle.sections);
+fn choices(paths: &PlakPaths, custody: &crate::gateway::HostCustody) -> Choices {
+    let models = crate::presentation::catalog_bundle(paths, custody)
+        .map_or_default(|bundle| bundle.sections);
     let profiles = match crate::product_config::ProductConfig::load(paths) {
         Ok(config) => crate::profiles::list(&config, paths.home()),
         Err(error) => ProfilesView {
@@ -157,7 +157,11 @@ impl ProductSessions {
                 .home()
                 .to_owned(),
         );
-        let shared = choices(&home);
+        let custody = self
+            .services
+            .custody()
+            .map_err(|error| unavailable(error.message()))?;
+        let shared = choices(&home, &custody);
         let workspace = workspace
             .map(|probe| {
                 match runtime.block_on(registry.validate_workspace(
@@ -171,7 +175,7 @@ impl ProductSessions {
                         } else {
                             home.for_remote_workspace(std::path::Path::new(&canonical_path))
                         };
-                        let selected = choices(&context);
+                        let selected = choices(&context, &custody);
                         Ok(wire::WorkspaceOptions::Valid {
                             canonical_path,
                             profiles: selected.profiles,

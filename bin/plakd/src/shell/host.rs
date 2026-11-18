@@ -8,16 +8,12 @@
 //! `ProductConfig` helpers the Settings save shares with it, and the
 //! thread-spawning entry points the binary calls.
 
-use std::sync::Arc;
-
 use plakous::subscriptions::{NativeSubscriptions, SubscriptionPaths};
 
-use crate::home::paths::PlakPaths;
 use crate::product_config::ProductConfig;
 use plakous_hosted::runtime::shell::run_shell_host_loop;
-use plakous_hosted::runtime::{Sender, ShellFallbackFacts, ShellHostConfig, ShellHostRunner};
+use plakous_hosted::runtime::{Sender, ShellHostConfig};
 
-use crate::shell::settings::ProductSurface;
 use crate::surface_protocol::PlakExtension;
 
 /// The product's native-subscription service, found through its own state home.
@@ -25,17 +21,9 @@ use crate::surface_protocol::PlakExtension;
 /// Product construction resolves the state home and supplies the resulting
 /// service to the hosted session.
 pub fn open_product_subscriptions() -> Option<NativeSubscriptions> {
-    open_subscriptions(None)
-}
-
-pub(crate) fn open_subscriptions(home: Option<&PlakPaths>) -> Option<NativeSubscriptions> {
     let state_home = crate::home::paths::application_state_home().ok()?;
     let paths = SubscriptionPaths::from_xdg_state_home(state_home).ok()?;
-    let subscriptions = NativeSubscriptions::new(paths);
-    let Some(home) = home else {
-        return Some(subscriptions);
-    };
-    crate::gateway::with_subscription_custody(subscriptions, home).ok()
+    Some(NativeSubscriptions::new(paths))
 }
 
 /// Whether a Settings save carries an identity change for the root template.
@@ -87,51 +75,6 @@ pub fn commit_root_template(
     Ok(())
 }
 
-/// Plak's shell host, as the hosted startup path sees it.
-pub struct ProductShellHost {
-    paths: PlakPaths,
-}
-
-impl ProductShellHost {
-    /// The shell host of one product home.
-    #[must_use]
-    pub const fn new(paths: PlakPaths) -> Self {
-        Self { paths }
-    }
-
-    /// A boxed handle for a [`plakous_hosted::runtime::HostLaunchPreparation`].
-    #[must_use]
-    pub fn boxed(paths: &PlakPaths) -> Box<dyn ShellHostRunner<PlakExtension>> {
-        Box::new(Self::new(paths.clone()))
-    }
-}
-
-impl ShellHostRunner<PlakExtension> for ProductShellHost {
-    fn fallback_facts(&self) -> ShellFallbackFacts<PlakExtension> {
-        ShellFallbackFacts {
-            surface: Some(ProductSurface::boxed(&self.paths)),
-            binding: crate::shell::binding_document::ProductRootBindingDocument::shared(
-                &self.paths,
-            ),
-            subscriptions: open_subscriptions(Some(&self.paths)),
-            openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
-                &self.paths,
-            ),
-        }
-    }
-
-    fn run(
-        self: Box<Self>,
-        config: ShellHostConfig<PlakExtension>,
-        actions: crate::surface_protocol::UserActionReceiver,
-        events: Sender<PlakExtension>,
-        clear_publication: Option<Arc<std::sync::Mutex<Option<String>>>>,
-    ) -> crate::CliResult<()> {
-        run_shell_host_loop(config, actions, events, clear_publication);
-        Ok(())
-    }
-}
-
 /// Spawn the non-agent shell host used for unconfigured host empty state.
 #[must_use]
 pub fn spawn_shell_host(
@@ -163,7 +106,9 @@ pub fn spawn_shell_host(
     reason = "a temporary product home is absolute by construction"
 )]
 #[must_use]
-pub fn product_state_roots(paths: &PlakPaths) -> plakous_hosted::agent::ProductStateRoots {
+pub fn product_state_roots(
+    paths: &crate::home::paths::PlakPaths,
+) -> plakous_hosted::agent::ProductStateRoots {
     // The runtime store cannot create its parent: the temporary home's state
     // root exists before the roots bind it.
     std::fs::create_dir_all(paths.state_dir()).expect("test state root");
@@ -171,19 +116,25 @@ pub fn product_state_roots(paths: &PlakPaths) -> plakous_hosted::agent::ProductS
         paths.home().to_path_buf(),
         paths.runtime_database(),
         paths.home().join("test-state"),
-        Arc::new(crate::telemetry_sink::ProductTelemetryFactory::new(
+        std::sync::Arc::new(crate::telemetry_sink::ProductTelemetryFactory::new(
             paths.clone(),
         )),
-        Arc::new(crate::store::tree::ProductTreeStoreFactory::new(
+        std::sync::Arc::new(crate::store::tree::ProductTreeStoreFactory::new(
             paths.clone(),
         )),
-        Arc::new(crate::roster_input::ProductRosterSource::new(Some(
+        std::sync::Arc::new(crate::roster_input::ProductRosterSource::new(Some(
             paths.clone(),
         ))),
-        Arc::new(crate::sidecars::ProductSidecarLocator),
-        crate::openrouter_product::ProductOpenRouterCredentials::shared(paths),
-        crate::platform_product::ProductPlatformCredentials::shared(paths),
-        Arc::new(crate::store::session_records::SqliteSessionStore::new(
+        std::sync::Arc::new(crate::sidecars::ProductSidecarLocator),
+        crate::openrouter_product::ProductOpenRouterCredentials::shared(
+            paths,
+            crate::gateway::HostCustody::Local,
+        ),
+        crate::platform_product::ProductPlatformCredentials::shared(
+            paths,
+            crate::gateway::HostCustody::Local,
+        ),
+        std::sync::Arc::new(crate::store::session_records::SqliteSessionStore::new(
             paths.clone(),
         )),
     )

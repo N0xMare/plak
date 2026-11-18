@@ -47,7 +47,10 @@ pub(crate) async fn read<Permit>(
             let _ = changed.changed().await;
             continue;
         };
-        let credentials = super::super::ProductOpenRouterCredentials::shared(paths);
+        let credentials = super::super::ProductOpenRouterCredentials::shared(
+            paths,
+            crate::gateway::HostCustody::Local,
+        );
         let _permit = before_get.await;
         // The console owns the shared provider deadline; legacy callers keep
         // their existing timeout policy and never consume this cache.

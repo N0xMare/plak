@@ -54,7 +54,7 @@ fn serve_and_dry_status_refuse_a_foreign_state_root_before_creating_it() {
     assert!(!foreign.exists(), "serve must not create a foreign store");
     let mut stdout = Vec::new();
     let dry = super::execute(
-        &paths,
+        &crate::shell::services::Services::for_home(paths.clone()),
         GatewayCommand::Status { dry_run: true },
         &mut stdout,
     )
@@ -70,7 +70,12 @@ fn init_writes_no_key_directory_and_a_named_one_is_refused() {
     let error = ServerConfig::parse(&paths, "key_dir = \"/tmp/plak-gateway-keys\"\n").unwrap_err();
     assert!(error.contains("key_dir"), "{error}");
     let mut stdout = Vec::new();
-    super::execute(&paths, GatewayCommand::Init { tcp: None }, &mut stdout).unwrap();
+    super::execute(
+        &crate::shell::services::Services::for_home(paths.clone()),
+        GatewayCommand::Init { tcp: None },
+        &mut stdout,
+    )
+    .unwrap();
     let text = String::from_utf8(stdout).unwrap();
     assert!(!text.contains("key_dir"), "{text}");
     assert!(text.contains("state_root "));

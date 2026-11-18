@@ -21,10 +21,11 @@ use plakous_hosted::session_log::{SessionEvent, SessionLog};
 /// excludes its selected provider. Logs under the record only once published.
 pub(crate) fn hook(
     paths: PlakPaths,
+    custody: crate::gateway::HostCustody,
     mode: Option<&HostLaunchMode<PlakExtension>>,
 ) -> impl FnOnce(Option<Sender<PlakExtension>>) + Send + use<> {
     let (session_id, account) = mode.map_or_default(refresh_context);
-    move |events| spawn(paths, session_id, account, events)
+    move |events| spawn(paths, custody, session_id, account, events)
 }
 
 fn refresh_context(mode: &HostLaunchMode<PlakExtension>) -> (Option<String>, Option<String>) {
@@ -46,6 +47,7 @@ fn refresh_providers(attached_account: Option<&str>) -> impl Iterator<Item = Nat
 
 fn spawn(
     paths: PlakPaths,
+    custody: crate::gateway::HostCustody,
     session_id: Option<String>,
     attached_account: Option<String>,
     events: Option<Sender<PlakExtension>>,
@@ -58,12 +60,9 @@ fn spawn(
         let Ok(sub_paths) = SubscriptionPaths::from_xdg_state_home(state_home) else {
             return;
         };
-        let Ok(subscriptions) =
-            crate::gateway::with_subscription_custody(NativeSubscriptions::new(sub_paths), &paths)
-        else {
-            return;
-        };
-        let subscriptions = subscriptions.without_model_lookup_retries();
+        let subscriptions = custody
+            .subscriptions(NativeSubscriptions::new(sub_paths))
+            .without_model_lookup_retries();
         let Ok(executor) = ApplicationExecutor::new() else {
             return;
         };
@@ -93,7 +92,7 @@ fn spawn(
             let _ = log.append_for(session_id, event);
         }
         if let Some(events) = events
-            && let Ok((providers, _)) = crate::presentation::catalog_values(&paths)
+            && let Ok((providers, _)) = crate::presentation::catalog_values(&paths, &custody)
         {
             let _ = events.send(ContentEvent::ProviderSnapshot { providers });
         }
@@ -140,7 +139,10 @@ mod tests {
                 binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
                 subscriptions: None,
                 openrouter_credentials:
-                    crate::openrouter_product::ProductOpenRouterCredentials::shared(&paths),
+                    crate::openrouter_product::ProductOpenRouterCredentials::shared(
+                        &paths,
+                        crate::gateway::HostCustody::Local,
+                    ),
                 home: config.home,
                 store: config.store,
                 session: config.session,

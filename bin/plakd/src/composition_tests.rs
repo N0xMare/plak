@@ -87,7 +87,8 @@ pub(crate) fn product_injected_attached_host(
     session.composition = plakous_hosted::binding::CompositionSelection::JsPtc;
     let config = HostConfig {
         surface: Some(Box::new(
-            ProductSurface::new(paths.clone()).with_test_state_home(root.join("account-state")),
+            ProductSurface::new(paths.clone(), crate::gateway::HostCustody::Local)
+                .with_test_state_home(root.join("account-state")),
         )),
         auto_continue: true,
         resume_after_loss: plakous_hosted::runtime::ResumeAfterLoss::Hold,
@@ -742,11 +743,15 @@ fn refresh_readiness_republishes_both_projections_without_touching_credentials()
     sessions::save_session(&paths, &mut session).unwrap();
     let (tx, rx, join) =
         crate::shell::host::spawn_shell_host(plakous_hosted::runtime::ShellHostConfig {
-            surface: Some(ProductSurface::boxed(&paths)),
+            surface: Some(ProductSurface::boxed(
+                &paths,
+                crate::gateway::HostCustody::Local,
+            )),
             binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
             subscriptions: crate::shell::host::open_product_subscriptions(),
             openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
                 &paths,
+                crate::gateway::HostCustody::Local,
             ),
             product_home: paths.home().to_path_buf(),
             home: paths.session_home(),
@@ -884,7 +889,10 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
         rebind_builds: std::sync::Mutex::new(Vec::new()),
     });
     let mut config = HostConfig {
-        surface: Some(ProductSurface::boxed(&paths)),
+        surface: Some(ProductSurface::boxed(
+            &paths,
+            crate::gateway::HostCustody::Local,
+        )),
         auto_continue: true,
         resume_after_loss: plakous_hosted::runtime::ResumeAfterLoss::Hold,
         topology_admission: None,

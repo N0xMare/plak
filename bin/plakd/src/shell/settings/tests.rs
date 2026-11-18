@@ -180,7 +180,7 @@ fn composer_refresh_uses_the_launch_workspace() {
         live_children: false,
         mcp: None,
     };
-    ProductSurface::new(paths).dispatch(
+    ProductSurface::new(paths, crate::gateway::HostCustody::Local).dispatch(
         SurfaceIntent::RefreshComposerChrome,
         SurfaceFacts {
             phase: SurfacePhase::Detached,
@@ -403,7 +403,7 @@ fn child_wake_reads_only_config_and_observes_immediate_changes() {
     let paths =
         PlakPaths::resolve(Some(OsStr::new(dir.path())), Some(OsStr::new("/home/u"))).unwrap();
     paths.ensure_layout().unwrap();
-    let surface = ProductSurface::new(paths.clone());
+    let surface = ProductSurface::new(paths.clone(), crate::gateway::HostCustody::Local);
     assert_eq!(surface.child_wake_enabled(), Some(true));
     std::fs::write(
         paths.user_agents_dir().join("broken.toml"),
@@ -466,7 +466,7 @@ fn an_agent_acknowledgement_is_persisted_and_answered_with_the_complete_set() {
         session: None,
     };
     let (events, rx) = host_event_sink();
-    let surface = ProductSurface::new(paths.clone());
+    let surface = ProductSurface::new(paths.clone(), crate::gateway::HostCustody::Local);
     let occurrence = AgentAcknowledgement {
         agent_id: "c3".into(),
         attempt_id: "c3-a1".into(),
@@ -490,7 +490,7 @@ fn an_agent_acknowledgement_is_persisted_and_answered_with_the_complete_set() {
     });
     assert_eq!(rx.try_recv().unwrap(), expected);
     // A fresh surface over the same home is a restart: the set is still there.
-    ProductSurface::new(paths).dispatch(
+    ProductSurface::new(paths, crate::gateway::HostCustody::Local).dispatch(
         SurfaceIntent::ListAgentAcknowledgements {
             tree_id: "tree-1".into(),
         },
@@ -528,7 +528,7 @@ fn every_product_intent_uses_immutable_phase_facts_and_bounded_observations() {
             let (_root, paths) = PlakPaths::isolated_test_home();
             let config = ProductConfig::default_product();
             config.save(&paths).unwrap();
-            let handler = ProductSurface::new(paths.clone())
+            let handler = ProductSurface::new(paths.clone(), crate::gateway::HostCustody::Local)
                 .with_test_state_home(paths.home().join("account-state"));
             let intent = match intent_index {
                 0 => SurfaceIntent::OpenConfigFile,
@@ -674,13 +674,15 @@ fn usage_never_waits_on_a_held_compatibility_lock_on_the_action_loop() {
     let state_home = root.path().join("account-state");
     let holder = std::fs::File::open(compatibility_lock_dir(&state_home)).unwrap();
     holder.lock().unwrap();
-    let surface = ProductSurface::new(paths.clone()).with_test_state_home(state_home);
+    let surface = ProductSurface::new(paths.clone(), crate::gateway::HostCustody::Local)
+        .with_test_state_home(state_home);
     let (tx, rx, join) = crate::shell::host::spawn_shell_host(ShellHostConfig {
         surface: Some(Box::new(surface)),
         binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
         subscriptions: None,
         openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
             &paths,
+            crate::gateway::HostCustody::Local,
         ),
         product_home: paths.home().to_path_buf(),
         home: paths.session_home(),
@@ -746,7 +748,8 @@ fn usage_posture_waits_for_the_host_usage_read_to_settle() {
     let (root, paths) = PlakPaths::isolated_test_home();
     let state_home = root.path().join("account-state");
     let lock_dir = compatibility_lock_dir(&state_home);
-    let surface = ProductSurface::new(paths).with_test_state_home(state_home);
+    let surface = ProductSurface::new(paths, crate::gateway::HostCustody::Local)
+        .with_test_state_home(state_home);
     let reads = UsageReads::default();
     let running_read = reads.begin();
     let (events, received) = host_event_sink();
@@ -790,7 +793,7 @@ fn refused_product_save_returns_no_binding_effect_and_preserves_the_file() {
     update.product.default_account = Some("unadmitted".into());
     update.product.default_model = Some("unadmitted-model".into());
     let (events, received) = host_event_sink();
-    let effect = ProductSurface::new(paths.clone()).dispatch(
+    let effect = ProductSurface::new(paths.clone(), crate::gateway::HostCustody::Local).dispatch(
         SurfaceIntent::SaveSettings(update),
         SurfaceFacts {
             session: None,
@@ -1067,7 +1070,7 @@ fn apply_with_queue(
 ) -> (SurfaceEffect, Vec<HostEvent>) {
     let (events, rx) = host_event_sink();
     let catalog = codex_catalog();
-    let effect = ProductSurface::new(paths.clone()).dispatch(
+    let effect = ProductSurface::new(paths.clone(), crate::gateway::HostCustody::Local).dispatch(
         SurfaceIntent::ApplyProfile {
             name: name.to_owned(),
             apply: how,
@@ -1135,7 +1138,7 @@ fn applying_claude_profile_discards_saved_sdk_selection() {
         "an unchanged SDK selection does not mint a template"
     );
     catalog[0].account = "claude".into();
-    let effect = ProductSurface::new(paths.clone()).dispatch(
+    let effect = ProductSurface::new(paths.clone(), crate::gateway::HostCustody::Local).dispatch(
         SurfaceIntent::ApplyProfile {
             name: "claude-default".into(),
             apply: crate::surface_protocol::ProfileApply::Fork,
@@ -1171,7 +1174,7 @@ fn applying_claude_profile_discards_saved_sdk_selection() {
     // selection stay exactly as they were.
     assert_eq!(std::fs::read(paths.config_file()).unwrap(), before);
     // Setting the profile as the default discards the saved SDK selection.
-    let effect = ProductSurface::new(paths.clone()).dispatch(
+    let effect = ProductSurface::new(paths.clone(), crate::gateway::HostCustody::Local).dispatch(
         SurfaceIntent::ApplyProfile {
             name: "claude-default".into(),
             apply: crate::surface_protocol::ProfileApply::Default,
@@ -1308,11 +1311,15 @@ fn an_unattached_empty_session_binds_the_profile_and_reattaches() {
     let paths = profile_paths(dir.path());
     let session = SessionRecord::new(dir.path().to_path_buf());
     let (tx, rx, join) = crate::shell::host::spawn_shell_host(ShellHostConfig {
-        surface: Some(ProductSurface::boxed(&paths)),
+        surface: Some(ProductSurface::boxed(
+            &paths,
+            crate::gateway::HostCustody::Local,
+        )),
         binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
         subscriptions: crate::shell::host::open_product_subscriptions(),
         openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
             &paths,
+            crate::gateway::HostCustody::Local,
         ),
         product_home: paths.home().to_path_buf(),
         home: paths.session_home(),
@@ -1395,18 +1402,19 @@ fn only_local_use_now_can_bootstrap_a_fresh_home_default() {
             panic!("profile intent");
         };
         let catalog = codex_catalog();
-        let effect = ProductSurface::new(paths.clone()).dispatch(
-            intent,
-            SurfaceFacts {
-                session: None,
-                phase: SurfacePhase::Idle,
-                attached_one_shot: false,
-                catalog: &catalog,
-                queue_len: 0,
-                usage_reads: UsageReads::default(),
-            },
-            &answering,
-        );
+        let effect = ProductSurface::new(paths.clone(), crate::gateway::HostCustody::Local)
+            .dispatch(
+                intent,
+                SurfaceFacts {
+                    session: None,
+                    phase: SurfacePhase::Idle,
+                    attached_one_shot: false,
+                    catalog: &catalog,
+                    queue_len: 0,
+                    usage_reads: UsageReads::default(),
+                },
+                &answering,
+            );
         let fork = effect
             .profile_fork
             .expect("session binding remains available");
@@ -1534,18 +1542,19 @@ fn moved_remote_requester_use_now_never_bootstraps_a_fresh_home_default() {
             panic!("profile intent")
         };
         let catalog = codex_catalog();
-        let effect = ProductSurface::new(paths.clone()).dispatch(
-            intent,
-            SurfaceFacts {
-                session: None,
-                phase: SurfacePhase::Idle,
-                attached_one_shot: false,
-                catalog: &catalog,
-                queue_len: 0,
-                usage_reads: UsageReads::default(),
-            },
-            &events,
-        );
+        let effect = ProductSurface::new(paths.clone(), crate::gateway::HostCustody::Local)
+            .dispatch(
+                intent,
+                SurfaceFacts {
+                    session: None,
+                    phase: SurfacePhase::Idle,
+                    attached_one_shot: false,
+                    catalog: &catalog,
+                    queue_len: 0,
+                    usage_reads: UsageReads::default(),
+                },
+                &events,
+            );
         (effect
             .profile_fork
             .expect("remote Use now still binds")
@@ -1577,11 +1586,15 @@ fn use_now_keeps_a_loadable_home_default() {
     std::fs::write(paths.config_file(), "[root]\nagent = \"kept-root\"\n").unwrap();
     let session = SessionRecord::new(dir.path().to_path_buf());
     let (tx, rx, join) = crate::shell::host::spawn_shell_host(ShellHostConfig {
-        surface: Some(ProductSurface::boxed(&paths)),
+        surface: Some(ProductSurface::boxed(
+            &paths,
+            crate::gateway::HostCustody::Local,
+        )),
         binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
         subscriptions: crate::shell::host::open_product_subscriptions(),
         openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
             &paths,
+            crate::gateway::HostCustody::Local,
         ),
         product_home: paths.home().to_path_buf(),
         home: paths.session_home(),
@@ -1676,11 +1689,15 @@ fn use_now_binds_an_openrouter_or_api_root_from_its_template() {
             paths.clone(),
         ));
         let (tx, rx, join) = crate::shell::host::spawn_shell_host(ShellHostConfig {
-            surface: Some(ProductSurface::boxed(&paths)),
+            surface: Some(ProductSurface::boxed(
+                &paths,
+                crate::gateway::HostCustody::Local,
+            )),
             binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
             subscriptions: crate::shell::host::open_product_subscriptions(),
             openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
                 &paths,
+                crate::gateway::HostCustody::Local,
             ),
             product_home: paths.home().to_path_buf(),
             home: paths.session_home(),
@@ -1774,11 +1791,15 @@ fn settings_save_uses_exact_ready_catalog_not_effort_name_heuristics() {
     }];
     let session = SessionRecord::new(dir.path().to_path_buf());
     let (tx, rx, join) = crate::shell::host::spawn_shell_host(ShellHostConfig {
-        surface: Some(ProductSurface::boxed(&paths)),
+        surface: Some(ProductSurface::boxed(
+            &paths,
+            crate::gateway::HostCustody::Local,
+        )),
         binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
         subscriptions: crate::shell::host::open_product_subscriptions(),
         openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
             &paths,
+            crate::gateway::HostCustody::Local,
         ),
         product_home: paths.home().to_path_buf(),
         home: paths.session_home(),
@@ -1945,7 +1966,7 @@ fn an_identity_settings_save_still_rewrites_the_root_template() {
 fn usage_watch_follows_the_open_tab_and_does_not_read() {
     use plakous_hosted::runtime::{SurfaceFacts, SurfaceHandler, SurfacePhase, UsageReads};
     let (_root, paths) = PlakPaths::isolated_test_home();
-    let handler = ProductSurface::new(paths);
+    let handler = ProductSurface::new(paths, crate::gateway::HostCustody::Local);
     assert!(!handler.usage_watch_armed());
     assert!(!handler.needs_usage(&SurfaceIntent::WatchUsage(true)));
     let facts = || SurfaceFacts {
@@ -2011,7 +2032,7 @@ fn a_failed_config_loads_no_profile_templates_and_does_not_say_custom() {
     assert!(row.differences.is_empty(), "{row:?}");
 
     let (events, rx) = host_event_sink();
-    ProductSurface::new(paths).dispatch(
+    ProductSurface::new(paths, crate::gateway::HostCustody::Local).dispatch(
         SurfaceIntent::RefreshComposerChrome,
         SurfaceFacts {
             phase: SurfacePhase::Detached,

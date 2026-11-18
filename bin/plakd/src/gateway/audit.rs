@@ -31,6 +31,9 @@ pub(crate) struct AuditEvent {
 pub(crate) struct Audit {
     dir: PathBuf,
     retention_days: u16,
+    failures: std::sync::atomic::AtomicU64,
+    /// Where the failure count is published: `<instance> <count>`.
+    failures_file: Option<(PathBuf, String)>,
 }
 
 impl Audit {
@@ -39,14 +42,37 @@ impl Audit {
         let audit = Self {
             dir,
             retention_days,
+            failures: std::sync::atomic::AtomicU64::new(0),
+            failures_file: None,
         };
         audit.prune();
         Ok(audit)
     }
 
+    /// Publishes this instance's failure count at `path`, starting at zero.
+    pub(crate) fn publishing_failures(mut self, path: PathBuf, instance: &str) -> Self {
+        self.failures_file = Some((path, instance.to_owned()));
+        self.publish(0);
+        self
+    }
+
     pub(crate) fn record(&self, event: &AuditEvent) {
-        // A failed audit line must not fail the call it records.
-        let _ = self.append(event);
+        // A failed audit line must not fail the call it records; it is
+        // counted, logged and shown by `plakd gateway status`.
+        if let Err(error) = self.append(event) {
+            let count = self
+                .failures
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                + 1;
+            eprintln!("plakd gateway: audit append failed ({count} so far): {error}");
+            self.publish(count);
+        }
+    }
+
+    fn publish(&self, count: u64) {
+        if let Some((path, instance)) = &self.failures_file {
+            let _ = super::io_file::write_private(path, format!("{instance} {count}\n").as_bytes());
+        }
     }
 
     fn append(&self, event: &AuditEvent) -> std::io::Result<()> {
@@ -144,10 +170,25 @@ pub(crate) fn stamp() -> String {
     jiff::Timestamp::now().to_string()
 }
 
-/// Reads audit lines for `plakd gateway audit`. A line that is not JSON is skipped.
+/// The published failure count of gateway `instance`, if it published one.
+pub(crate) fn published_failures(path: &Path, instance: &str) -> Option<u64> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let (owner, count) = text.trim().split_once(' ')?;
+    (owner == instance).then(|| count.parse().ok()).flatten()
+}
+
+/// Parses `audit --since`: an RFC 3339 timestamp.
+pub(crate) fn parse_since(text: &str) -> Result<jiff::Timestamp, String> {
+    text.parse::<jiff::Timestamp>().map_err(|_| {
+        format!("--since must be an RFC 3339 timestamp, such as 2026-11-18T00:00:00Z; got {text}")
+    })
+}
+
+/// Reads audit lines for `plakd gateway audit`. A line that is not JSON is
+/// skipped; `since` compares instants, not text.
 pub(crate) fn read_lines(
     dir: &Path,
-    since: Option<&str>,
+    since: Option<jiff::Timestamp>,
     caller: Option<&str>,
 ) -> std::io::Result<Vec<String>> {
     let mut names = Vec::new();
@@ -175,8 +216,11 @@ pub(crate) fn read_lines(
                 continue;
             };
             if let Some(since) = since {
-                let ts = value.get("ts").and_then(|item| item.as_str()).unwrap_or("");
-                if ts < since {
+                let at = value
+                    .get("ts")
+                    .and_then(|item| item.as_str())
+                    .and_then(|ts| ts.parse::<jiff::Timestamp>().ok());
+                if at.is_none_or(|at| at < since) {
                     continue;
                 }
             }

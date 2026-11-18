@@ -36,6 +36,28 @@ pub(crate) struct GatewayState {
     pub draining: AtomicBool,
     pub listeners: Mutex<Vec<String>>,
     pub shutdown: tokio::sync::Notify,
+    /// Each streaming relay's cut, by its operation and attempt, for
+    /// `disable --cut`.
+    pub relays: Mutex<std::collections::HashMap<String, RelayCut>>,
+}
+
+/// Who one in-flight relay runs for and how to end it.
+pub(crate) struct RelayCut {
+    pub principal: Principal,
+    pub account: GatewayAccount,
+    pub token: plakous::gateway::server::CancellationToken,
+}
+
+impl RelayCut {
+    fn matches(&self, target: &DisableTarget) -> bool {
+        match target {
+            DisableTarget::All {} => true,
+            DisableTarget::Account { account } => self.account == *account,
+            DisableTarget::Caller { caller } => {
+                matches!(&self.principal, Principal::Caller(id) if id == caller)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -141,7 +163,11 @@ fn dispatch(
     request: &Request,
     started: std::time::Instant,
 ) -> Response {
-    if let Some(blocked) = killed(state, principal) {
+    // The local administrator's admin calls decide the kill switch per verb
+    // (`admin_exempt`), so a global disable cannot lock out `enable`.
+    let local_admin_call = principal.is_local_admin()
+        && matches!(Endpoint::parse(&request.path), Some((_, Endpoint::Admin)));
+    if let Some(blocked) = killed(state, principal).filter(|_| !local_admin_call) {
         let verb = if request.path == plakous::gateway::protocol::VERSIONS_PATH {
             "versions"
         } else {
@@ -183,7 +209,7 @@ fn dispatch(
     if request.method != "POST" {
         return refusal(&GatewayRefusal::EnvelopeInvalid {});
     }
-    if flag_block(state, principal, None) {
+    if !local_admin_call && flag_block(state, principal, None) {
         return refusal(&blocked_refusal(state, principal, None));
     }
     match endpoint {
@@ -220,6 +246,18 @@ fn admin(
             refusal: AdminRefusal::LocalAdminRequired {},
         });
     }
+    let exempt = admin_exempt(principal, &call);
+    if let Some(blocked) = killed(state, principal).filter(|_| !exempt) {
+        audit(
+            state,
+            &principal.audit_name(),
+            verb,
+            account.as_ref(),
+            Some(blocked.code()),
+            started,
+        );
+        return refusal_response(&blocked);
+    }
     if let Some(refusal) = admin_scope(principal, scopes, &call) {
         audit(
             state,
@@ -231,7 +269,12 @@ fn admin(
         );
         return refusal_response(&refusal);
     }
-    if let Some(account) = account.as_ref() {
+    // A flag verb names its target; that account's flag does not block it.
+    let flag_verb = matches!(
+        call,
+        AdminRequest::Disable { .. } | AdminRequest::Enable { .. }
+    );
+    if let Some(account) = account.as_ref().filter(|_| !exempt && !flag_verb) {
         if flag_block(state, principal, Some(account)) {
             let refusal = blocked_refusal(state, principal, Some(account));
             audit(
@@ -521,7 +564,24 @@ fn accounts_scope(
     }
 }
 
-/// A global or per-caller kill switch applies to every call, including versions.
+/// The local administrator's verbs that a kill switch never blocks: without
+/// them a global disable could not be cleared, tightened with `--cut`, or the
+/// service drained.
+/// Relays, facts and refresh stay blocked for everyone.
+fn admin_exempt(principal: &Principal, request: &AdminRequest) -> bool {
+    principal.is_local_admin()
+        && matches!(
+            request,
+            AdminRequest::Enable { .. }
+                | AdminRequest::Disable { .. }
+                | AdminRequest::Drain {}
+                | AdminRequest::CallerList {}
+                | AdminRequest::Status { .. }
+        )
+}
+
+/// A global or per-caller kill switch applies to every call, including
+/// versions, except the local administrator's exempt admin verbs.
 pub(crate) fn killed(state: &GatewayState, principal: &Principal) -> Option<GatewayRefusal> {
     let flags = match state.flags.lock() {
         Ok(guard) => guard,
@@ -623,17 +683,31 @@ fn caller_remove(state: &GatewayState, caller: &CallerId) -> AdminResponse {
     }
 }
 
-fn disable(state: &GatewayState, target: &DisableTarget, _cut: bool) -> AdminResponse {
-    let mut flags = lock_flags(state);
-    let saved = match target {
-        DisableTarget::All {} => flags.disable_all(),
-        DisableTarget::Account { account } => flags.disable_account(account.clone()),
-        DisableTarget::Caller { caller } => flags.disable_caller(caller.clone()),
+/// Sets the flag; with `cut`, also ends every matching relay in flight.
+/// The flag is saved first, so a relay that starts after the cut is
+/// refused rather than missed.
+fn disable(state: &GatewayState, target: &DisableTarget, cut: bool) -> AdminResponse {
+    let saved = {
+        let mut flags = lock_flags(state);
+        match target {
+            DisableTarget::All {} => flags.disable_all(),
+            DisableTarget::Account { account } => flags.disable_account(account.clone()),
+            DisableTarget::Caller { caller } => flags.disable_caller(caller.clone()),
+        }
     };
-    match saved {
-        Ok(()) => AdminResponse::Disabled {},
-        Err(_) => refused_admin(AdminRefusal::Unavailable {}),
+    if saved.is_err() {
+        return refused_admin(AdminRefusal::Unavailable {});
     }
+    if cut {
+        let relays = match state.relays.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        for relay in relays.values().filter(|relay| relay.matches(target)) {
+            relay.token.cancel();
+        }
+    }
+    AdminResponse::Disabled {}
 }
 
 fn enable(state: &GatewayState, target: &DisableTarget) -> AdminResponse {

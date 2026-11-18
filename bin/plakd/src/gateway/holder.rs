@@ -5,7 +5,7 @@
 //! service socket path a local CLI discovers.
 
 use std::fs::File;
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, Read as _, Seek as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use rustix::fs::{FlockOperation, flock};
@@ -68,6 +68,7 @@ impl HolderLock {
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "socket path"))?;
         let mut file = file.try_clone()?;
         file.set_len(0)?;
+        file.seek(io::SeekFrom::Start(0))?;
         file.write_all(text.as_bytes())?;
         file.write_all(b"\n")?;
         file.sync_all()?;

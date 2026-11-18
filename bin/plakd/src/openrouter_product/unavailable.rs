@@ -4,10 +4,13 @@ use plakous_hosted::{CliFailure, CliResult, openrouter::OpenRouterCredentials};
 use std::sync::Arc;
 pub struct ProductOpenRouterCredentials;
 impl ProductOpenRouterCredentials {
-    pub fn new(_: PlakPaths) -> Self {
+    pub(crate) const fn new(_: PlakPaths, _: crate::gateway::HostCustody) -> Self {
         Self
     }
-    pub fn shared(_: &PlakPaths) -> Arc<dyn OpenRouterCredentials> {
+    pub(crate) fn shared(
+        _: &PlakPaths,
+        _: crate::gateway::HostCustody,
+    ) -> Arc<dyn OpenRouterCredentials> {
         Arc::new(Self)
     }
 }

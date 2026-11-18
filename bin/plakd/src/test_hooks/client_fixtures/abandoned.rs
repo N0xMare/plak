@@ -53,6 +53,7 @@ pub(super) fn seed(workspace: &Path, with_submission: bool) -> crate::CliResult<
         None,
         records,
         &plakous_hosted::agent::ProcessJobs::default(),
+        &crate::gateway::HostCustody::Local,
     )?;
     let store = roots.session_records();
     if !store.list_for_workspace(&workspace)?.is_empty() {
@@ -74,6 +75,7 @@ pub(super) fn seed(workspace: &Path, with_submission: bool) -> crate::CliResult<
         &workspace,
         &plakous_host_protocol::views::ReadyCatalog::default(),
         None,
+        &crate::gateway::HostCustody::Local,
     )?;
     settle(config)?;
     let mut record = store.load(&id)?;

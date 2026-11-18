@@ -973,7 +973,10 @@ impl Fixture {
         session.effort = Some("medium".into());
         session.composition = crate::product_config::ProductCompositionSelection::JsPtc;
         HostConfig {
-            surface: Some(crate::shell::settings::ProductSurface::boxed(&paths)),
+            surface: Some(crate::shell::settings::ProductSurface::boxed(
+                &paths,
+                crate::gateway::HostCustody::Local,
+            )),
             auto_continue: true,
             resume_after_loss: plakous_hosted::runtime::ResumeAfterLoss::Hold,
             topology_admission: None,

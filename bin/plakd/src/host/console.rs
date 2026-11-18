@@ -40,6 +40,8 @@ mod wire_size;
 pub(super) struct Console {
     paths: PlakPaths,
     state: std::path::PathBuf,
+    /// The host's latched credential custody.
+    custody: crate::gateway::HostCustody,
     runtime: Option<tokio::runtime::Handle>,
     pages: Mutex<pages::Pages>,
     provider: Arc<tokio::sync::Semaphore>,
@@ -68,12 +70,14 @@ impl Console {
     pub fn new(
         paths: PlakPaths,
         state: std::path::PathBuf,
+        custody: crate::gateway::HostCustody,
         runtime: Option<tokio::runtime::Handle>,
         switches: ConfiguredSwitches,
     ) -> Arc<Self> {
         Arc::new(Self {
             paths,
             state,
+            custody,
             runtime,
             pages: Mutex::default(),
             provider: Arc::new(tokio::sync::Semaphore::new(limits::PROVIDER_READS)),
@@ -311,6 +315,7 @@ impl Console {
         let revision = match pages::source_revision(
             &self.paths,
             &self.state,
+            &self.custody,
             selection.account_id.as_deref(),
             deadline,
             &cancelled,
@@ -353,6 +358,7 @@ impl Console {
         let after = pages::source_revision(
             &self.paths,
             &self.state,
+            &self.custody,
             selection.account_id.as_deref(),
             deadline,
             &cancelled,

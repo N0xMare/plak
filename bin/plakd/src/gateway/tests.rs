@@ -51,6 +51,7 @@ fn state_for(paths: &PlakPaths) -> Arc<GatewayState> {
         draining: std::sync::atomic::AtomicBool::new(false),
         listeners: Mutex::new(Vec::new()),
         shutdown: tokio::sync::Notify::new(),
+        relays: Mutex::new(std::collections::HashMap::new()),
     })
 }
 
@@ -627,24 +628,39 @@ fn cli_routing_prefers_the_configured_address_then_the_service_then_the_process(
     let dir = tempfile::tempdir().unwrap();
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let lock = dir.path().join("holder.lock");
-    let configured = select(Some("tcp:127.0.0.1:9"), false, &lock).unwrap();
+    let configured_home = PlakPaths::explicit(dir.path().join("configured"));
+    std::fs::create_dir_all(configured_home.home()).unwrap();
+    std::fs::write(
+        configured_home.config_file(),
+        "[gateway]\naddress = \"tcp:127.0.0.1:9\"\n",
+    )
+    .unwrap();
+    super::io_file::write_private(
+        &configured_home.secrets_dir().join("gateway.key"),
+        b"plakgw1.host.unused",
+    )
+    .unwrap();
+    let configured_custody = super::HostCustody::resolve(&configured_home).unwrap();
+    let configured = select(&configured_custody, &lock).unwrap();
     assert!(matches!(configured, AccountRoute::Configured(_)));
     assert!(configured.via_line().unwrap().contains("tcp:127.0.0.1:9"));
-    let alone = select(None, false, &lock).unwrap();
+    let local = super::HostCustody::Local;
+    let alone = select(&local, &lock).unwrap();
     assert!(matches!(alone, AccountRoute::InProcess));
     assert!(alone.via_line().is_none());
+    assert!(!lock.exists(), "routing must not create the holder file");
     let exclusive =
         super::holder::HolderLock::try_acquire(&lock, super::holder::HolderMode::Exclusive)
             .unwrap();
     let socket = dir.path().join("gateway.sock");
     exclusive.advertise(&socket).unwrap();
-    let service = select(None, false, &lock).unwrap();
+    let service = select(&local, &lock).unwrap();
     assert_eq!(
         service,
         AccountRoute::Service(super::address::GatewayAddress::Unix(socket))
     );
     assert!(service.via_line().unwrap().starts_with("via gateway unix:"));
-    let still = select(Some("unix:/tmp/configured.sock"), false, &lock).unwrap();
+    let still = select(&configured_custody, &lock).unwrap();
     assert!(matches!(still, AccountRoute::Configured(_)));
 }
 
@@ -680,29 +696,28 @@ fn gateway_grammar_parses_the_service_verbs() {
 }
 
 #[test]
-fn remote_route_uses_configuration_and_does_not_create_the_holder() {
+fn routing_uses_configuration_and_does_not_create_the_holder() {
     let (_dir, paths) = home();
-    assert!(
-        super::remote_account::remote_route(&paths)
-            .unwrap()
-            .is_none()
-    );
+    let local = super::HostCustody::resolve(&paths).unwrap();
     let lock = paths
         .home()
         .join("state/plak/subscriptions/.custody-holder.lock");
+    assert!(matches!(
+        select(&local, &lock).unwrap(),
+        AccountRoute::InProcess
+    ));
     assert!(
         !lock.exists(),
         "looking for a gateway must not create the holder"
     );
     std::fs::write(
         paths.config_file(),
-        "[gateway]\naddress = \"tcp:127.0.0.1:9\"\n",
+        "[gateway]\naddress = \"unix:/tmp/plak-routing-test.sock\"\n",
     )
     .unwrap();
-    let configured = super::remote_account::remote_route(&paths)
-        .unwrap()
-        .unwrap();
-    assert!(configured.via_line().unwrap().contains("tcp:127.0.0.1:9"));
+    let configured = super::HostCustody::resolve(&paths).unwrap();
+    let route = select(&configured, &lock).unwrap();
+    assert!(route.via_line().unwrap().contains("plak-routing-test.sock"));
     assert!(!lock.exists());
 }
 
@@ -723,4 +738,408 @@ fn mint(state: &Arc<GatewayState>, id: &str, scopes: &str, source: &str) -> Stri
     let text = key.expose().to_string();
     assert!(CallerKey::parse(&text).is_ok());
     text
+}
+
+/// A gateway with one signed-in fixture account, an admin caller, and a
+/// facts call for that account from `peer`.
+struct KillFixture {
+    _dir: tempfile::TempDir,
+    state: Arc<GatewayState>,
+    key: String,
+    account: GatewayAccount,
+}
+
+impl KillFixture {
+    fn new() -> Self {
+        let (dir, paths) = home();
+        let state = state_for(&paths);
+        let key = mint(&state, "operator", "relay:*,admin:*", "127.0.0.1");
+        let account = GatewayAccount::new("fixture").unwrap();
+        admin(
+            &state,
+            &local(),
+            None,
+            &AdminRequest::KeySet {
+                account: account.clone(),
+                secret: plakous::gateway::protocol::SecretText::new(zeroize::Zeroizing::new(
+                    "not-a-real-key".to_owned(),
+                ))
+                .unwrap(),
+            },
+        );
+        Self {
+            _dir: dir,
+            state,
+            key,
+            account,
+        }
+    }
+
+    fn facts(&self, peer: &Peer, key: Option<&str>) -> super::http::Response {
+        dispatch::handle(
+            &self.state,
+            peer,
+            &request(
+                "POST",
+                &Endpoint::Facts.path(1),
+                key,
+                call::encode(&FactsRequest {
+                    accounts: vec![self.account.clone()],
+                })
+                .unwrap(),
+            ),
+        )
+    }
+
+    fn remote_facts(&self) -> u16 {
+        self.facts(&tcp("127.0.0.1"), Some(&self.key)).status
+    }
+
+    fn local(&self, call: &AdminRequest) -> AdminResponse {
+        admin(&self.state, &local(), None, call)
+    }
+
+    fn raw(&self, peer: &Peer, key: Option<&str>, call: &AdminRequest) -> u16 {
+        dispatch::handle(
+            &self.state,
+            peer,
+            &request(
+                "POST",
+                &Endpoint::Admin.path(1),
+                key,
+                call::encode(call).unwrap(),
+            ),
+        )
+        .status
+    }
+}
+
+#[test]
+fn a_global_disable_keeps_the_local_administrators_enable_and_status() {
+    let fixture = KillFixture::new();
+    fixture.local(&AdminRequest::Disable {
+        target: DisableTarget::All {},
+        cut: false,
+    });
+    for (peer, key) in [
+        (tcp("127.0.0.1"), Some(fixture.key.as_str())),
+        (local(), None),
+    ] {
+        let blocked = fixture.facts(&peer, key);
+        assert_eq!(blocked.status, 503);
+        assert!(matches!(
+            refusal(&blocked),
+            GatewayRefusal::GatewayDisabled {}
+        ));
+    }
+    assert!(matches!(
+        fixture.local(&AdminRequest::CallerList {}),
+        AdminResponse::Callers { .. }
+    ));
+    let status = AdminRequest::Status {
+        accounts: Vec::new(),
+    };
+    assert!(matches!(
+        fixture.local(&status),
+        AdminResponse::Status { .. }
+    ));
+    // The local administrator's other verbs stay blocked, as does any caller.
+    let key_clear = AdminRequest::KeyClear {
+        account: fixture.account.clone(),
+    };
+    assert_eq!(fixture.raw(&local(), None, &key_clear), 503);
+    assert_eq!(
+        fixture.raw(&tcp("127.0.0.1"), Some(&fixture.key), &status),
+        503
+    );
+    assert!(matches!(
+        fixture.local(&AdminRequest::Enable {
+            target: DisableTarget::All {}
+        }),
+        AdminResponse::Enabled {}
+    ));
+    assert_eq!(fixture.remote_facts(), 200, "relays resume after enable");
+}
+
+#[test]
+fn the_local_administrator_clears_an_account_disable_and_drains_a_disabled_gateway() {
+    let fixture = KillFixture::new();
+    let account = || DisableTarget::Account {
+        account: fixture.account.clone(),
+    };
+    fixture.local(&AdminRequest::Disable {
+        target: account(),
+        cut: false,
+    });
+    assert_eq!(fixture.remote_facts(), 503);
+    assert!(matches!(
+        fixture.local(&AdminRequest::Enable { target: account() }),
+        AdminResponse::Enabled {}
+    ));
+    assert_eq!(fixture.remote_facts(), 200);
+    fixture.local(&AdminRequest::Disable {
+        target: DisableTarget::All {},
+        cut: false,
+    });
+    assert!(matches!(
+        fixture.local(&AdminRequest::Drain {}),
+        AdminResponse::Draining {}
+    ));
+    assert!(
+        fixture
+            .state
+            .draining
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+}
+
+#[test]
+fn disable_cut_ends_only_the_matching_relays_in_flight() {
+    let (_dir, paths) = home();
+    let state = state_for(&paths);
+    let first = GatewayAccount::new("openai").unwrap();
+    let second = GatewayAccount::new("anthropic").unwrap();
+    let relay = |principal: super::auth::Principal, account: &GatewayAccount| {
+        let token = plakous::gateway::server::CancellationToken::new();
+        state.relays.lock().unwrap().insert(
+            format!("{}-{}", principal.audit_name(), account),
+            dispatch::RelayCut {
+                principal,
+                account: account.clone(),
+                token: token.clone(),
+            },
+        );
+        token
+    };
+    let reader = super::auth::Principal::Caller(CallerId::new("reader").unwrap());
+    let streaming = relay(reader.clone(), &first);
+    let other_account = relay(super::auth::Principal::LocalAdmin, &second);
+    let disable = |target: DisableTarget, cut: bool| {
+        admin(
+            &state,
+            &local(),
+            None,
+            &AdminRequest::Disable { target, cut },
+        )
+    };
+    disable(
+        DisableTarget::Account {
+            account: first.clone(),
+        },
+        false,
+    );
+    assert!(
+        !streaming.is_cancelled(),
+        "without --cut a streaming relay continues"
+    );
+    disable(
+        DisableTarget::Account {
+            account: first.clone(),
+        },
+        true,
+    );
+    assert!(streaming.is_cancelled());
+    assert!(!other_account.is_cancelled());
+    let by_caller = relay(reader, &second);
+    disable(
+        DisableTarget::Caller {
+            caller: CallerId::new("reader").unwrap(),
+        },
+        true,
+    );
+    assert!(by_caller.is_cancelled());
+    assert!(!other_account.is_cancelled());
+    disable(DisableTarget::All {}, true);
+    assert!(other_account.is_cancelled());
+}
+
+/// `plakd gateway drain` ends the service under a global disable: the
+/// service exits and releases the holder lock.
+#[test]
+fn a_globally_disabled_service_still_drains_and_exits() {
+    let (_dir, paths) = home();
+    std::fs::set_permissions(paths.home(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let socket = paths.home().join("gw.sock");
+    let state_root = paths.home().join("state");
+    std::fs::create_dir_all(&state_root).unwrap();
+    let config = ServerConfig::parse(
+        &paths,
+        &format!(
+            "socket = \"{}\"\nstate_root = \"{}\"\n",
+            socket.display(),
+            state_root.display()
+        ),
+    )
+    .unwrap();
+    let instance = UuidText::new(uuid::Uuid::new_v4().to_string()).unwrap();
+    let gateway =
+        super::service::Gateway::open_with(&paths, config, Box::new(MemoryBridge::new(instance)))
+            .unwrap();
+    let served = std::thread::spawn(move || gateway.serve_foreground());
+    while !socket.exists() {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let address = super::GatewayAddress::Unix(socket);
+    let disabled: AdminResponse = super::client::admin(
+        &address,
+        None,
+        &AdminRequest::Disable {
+            target: DisableTarget::All {},
+            cut: true,
+        },
+    )
+    .unwrap();
+    assert!(matches!(disabled, AdminResponse::Disabled {}));
+    let drained: AdminResponse =
+        super::client::admin(&address, None, &AdminRequest::Drain {}).unwrap();
+    assert!(matches!(drained, AdminResponse::Draining {}));
+    served.join().unwrap().unwrap();
+    let lock = super::holder::lock_path(&state_root);
+    super::holder::HolderLock::try_acquire(&lock, super::holder::HolderMode::Exclusive)
+        .expect("a drained service releases the holder lock");
+}
+
+#[test]
+fn the_service_replaces_only_its_own_stale_socket() {
+    let (_dir, paths) = home();
+    std::fs::set_permissions(paths.home(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let socket = paths.home().join("gw.sock");
+    std::fs::write(&socket, "not a socket").unwrap();
+    let state_root = paths.home().join("state");
+    std::fs::create_dir_all(&state_root).unwrap();
+    let config = ServerConfig::parse(
+        &paths,
+        &format!(
+            "socket = \"{}\"\nstate_root = \"{}\"\n",
+            socket.display(),
+            state_root.display()
+        ),
+    )
+    .unwrap();
+    let instance = UuidText::new(uuid::Uuid::new_v4().to_string()).unwrap();
+    let gateway =
+        super::service::Gateway::open_with(&paths, config, Box::new(MemoryBridge::new(instance)))
+            .unwrap();
+    let refused = gateway.serve_foreground().unwrap_err();
+    assert!(refused.contains("not this user's socket"), "{refused}");
+    assert_eq!(std::fs::read_to_string(&socket).unwrap(), "not a socket");
+}
+
+#[test]
+fn audit_append_failures_are_counted_and_published_for_status() {
+    let (_dir, paths) = home();
+    let dir = super::server_config::audit_dir(&paths);
+    let published = super::server_config::audit_failures_path(&paths);
+    let audit = super::audit::Audit::open(dir.clone(), 30)
+        .unwrap()
+        .publishing_failures(published.clone(), "instance-a");
+    assert_eq!(
+        super::audit::published_failures(&published, "instance-a"),
+        Some(0)
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+    std::fs::write(&dir, "not a directory").unwrap();
+    audit.record(&super::audit::AuditEvent::default());
+    audit.record(&super::audit::AuditEvent::default());
+    assert_eq!(
+        super::audit::published_failures(&published, "instance-a"),
+        Some(2)
+    );
+    assert_eq!(
+        super::audit::published_failures(&published, "instance-b"),
+        None,
+        "another instance's count is not this one's"
+    );
+}
+
+#[test]
+fn audit_since_is_an_instant_not_text() {
+    let (_dir, paths) = home();
+    let dir = super::server_config::audit_dir(&paths);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("2026-11-18.jsonl"),
+        concat!(
+            "{\"ts\":\"2026-11-18T09:00:00Z\",\"caller\":\"a\"}\n",
+            "{\"ts\":\"2026-11-18T11:00:00.5Z\",\"caller\":\"b\"}\n",
+        ),
+    )
+    .unwrap();
+    let since = super::audit::parse_since("2026-11-18T10:00:00+00:00").unwrap();
+    let lines = super::audit::read_lines(&dir, Some(since), None).unwrap();
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].contains("\"b\""));
+    assert!(super::audit::parse_since("yesterday").is_err());
+}
+
+/// `run`, `continue` and `models` are not admin verbs: under a configured
+/// gateway they run in this process, whose routes relay through the
+/// gateway, and they neither hold nor create the subscription store.
+#[test]
+fn model_commands_run_in_process_under_a_configured_gateway_without_the_store() {
+    let (dir, paths) = home();
+    std::fs::write(
+        paths.config_file(),
+        "[gateway]\naddress = \"unix:/tmp/plak-model-commands.sock\"\n",
+    )
+    .unwrap();
+    let state = dir.path().join("host-state");
+    std::fs::create_dir_all(&state).unwrap();
+    let services =
+        crate::shell::services::Services::for_home_with_state(paths.clone(), state.clone());
+    for args in [
+        &["models", "codex"][..],
+        &["run", "--model", "m", "--provider", "claude", "--", "hello"][..],
+    ] {
+        let command = crate::cli::parse(args.iter().map(std::ffi::OsString::from)).unwrap();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let forwarded = super::try_remote_account(
+            &services,
+            &command,
+            &mut std::io::empty(),
+            &mut stdout,
+            &mut stderr,
+        )
+        .unwrap();
+        assert!(forwarded.is_none(), "{args:?} must run in this process");
+        assert!(stdout.is_empty(), "{args:?} is not an admin verb");
+        assert!(
+            super::hold_in_process(&services, &command)
+                .unwrap()
+                .is_none()
+        );
+        let app = crate::commands::application::PlakousApplication::new(
+            state.clone(),
+            None,
+            None,
+            services.custody().unwrap(),
+        )
+        .unwrap();
+        assert!(app.custody().gateway().is_some());
+    }
+    assert!(
+        !state.join("plak/subscriptions").exists(),
+        "a gateway process must not create its subscription store"
+    );
+}
+
+/// Without an address, a model command under a service-held store refuses
+/// with the remedy instead of opening the store beside the service.
+#[test]
+fn a_model_command_without_an_address_refuses_a_service_held_store() {
+    let (dir, paths) = home();
+    let state = dir.path().join("host-state");
+    let lock = super::holder::lock_path(&state);
+    let held = super::holder::HolderLock::try_acquire(&lock, super::holder::HolderMode::Exclusive)
+        .unwrap();
+    held.advertise(&dir.path().join("gw.sock")).unwrap();
+    let services = crate::shell::services::Services::for_home_with_state(paths, state);
+    let command = crate::cli::parse(["models", "codex"].map(std::ffi::OsString::from)).unwrap();
+    let refused = super::hold_in_process(&services, &command).err().unwrap();
+    assert!(
+        refused.message().contains("[gateway] address"),
+        "{}",
+        refused.message()
+    );
 }

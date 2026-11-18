@@ -65,7 +65,7 @@ impl plakous_hosted::platform::AnthropicCredentials for ProductPlatformCredentia
         account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
         self.require_account(account, plakous_hosted::account::Vertical::Anthropic)?;
-        if let Some(gateway) = self.gateway()? {
+        if let Some(gateway) = self.gateway() {
             return Ok(Arc::new(
                 gateway
                     .key_source(

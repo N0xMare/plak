@@ -390,8 +390,8 @@ impl Console {
     }
 
     fn run_login(&self, work: LoginWork<'_>) -> Result<(), AccountError> {
-        if let Some(link) = crate::gateway::admin_link(&self.paths).map_err(|_| failed(false))? {
-            return gateway::run(&link, work);
+        if let Some(link) = self.custody.admin() {
+            return gateway::run(link, work);
         }
         self.run_local_login(work)
     }

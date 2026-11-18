@@ -157,7 +157,10 @@ pub fn run_actual_host(
         .collect();
     product_host::run_scripted_host(
         HostConfig {
-            surface: Some(crate::shell::settings::ProductSurface::boxed(&paths)),
+            surface: Some(crate::shell::settings::ProductSurface::boxed(
+                &paths,
+                crate::gateway::HostCustody::Local,
+            )),
             auto_continue: true,
             resume_after_loss: plakous_hosted::runtime::ResumeAfterLoss::Hold,
             topology_admission: None,

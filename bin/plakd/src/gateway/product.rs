@@ -3,6 +3,7 @@
 //! core dials; this type decides who may ask and records the result.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
@@ -27,7 +28,7 @@ use crate::home::paths::PlakPaths;
 pub(crate) struct ProductGateway {
     state: Arc<GatewayState>,
     home: PlakPaths,
-    custody: plakous::gateway::server::LocalCustody,
+    custody: Arc<plakous::gateway::server::LocalCustody>,
     notes: Mutex<HashMap<String, RelayNote>>,
 }
 
@@ -49,7 +50,11 @@ struct CallHold {
 
 impl ProductGateway {
     pub(crate) fn new(home: &PlakPaths, state: Arc<GatewayState>) -> Self {
-        let custody = local_custody(home, state.instance.clone(), &state.config.state_root);
+        let custody = Arc::new(local_custody(
+            home,
+            state.instance.clone(),
+            &state.config.state_root,
+        ));
         Self {
             state,
             home: home.clone(),
@@ -108,7 +113,11 @@ impl GatewayService for ProductGateway {
             let (principal, record) = auth::authenticate(&callers, &map_peer(peer), &request)?;
             (principal, record.map(|record| record.scopes.clone()))
         };
-        if let Some(refusal) = dispatch::killed(&self.state, &principal) {
+        // Every relay, facts and refresh path checks the switch again; the
+        // local administrator's admin calls are decided per verb.
+        if !principal.is_local_admin()
+            && let Some(refusal) = dispatch::killed(&self.state, &principal)
+        {
             return Err(refusal);
         }
         Ok(Authed { principal, scopes })
@@ -134,7 +143,29 @@ impl GatewayService for ProductGateway {
                 principal.scopes.as_ref(),
                 &envelope.account,
             )?;
-            self.custody.inject(envelope).await
+            let injection = self.custody.inject(envelope).await?;
+            let key = note_key(&envelope.operation, envelope.attempt);
+            let token = plakous::gateway::server::CancellationToken::new();
+            lock_relays(&self.state).insert(
+                key.clone(),
+                dispatch::RelayCut {
+                    principal: principal.principal.clone(),
+                    account: envelope.account.clone(),
+                    token: token.clone(),
+                },
+            );
+            // A disable saves its flag before it cuts: one that landed while
+            // this relay registered is seen here, so no relay escapes a cut.
+            if let Err(refusal) = dispatch::gate_relay(
+                &self.state,
+                &principal.principal,
+                principal.scopes.as_ref(),
+                &envelope.account,
+            ) {
+                lock_relays(&self.state).remove(&key);
+                return Err(refusal);
+            }
+            Ok(injection.cut_by(token))
         })
     }
 
@@ -227,15 +258,17 @@ impl ProductGateway {
         if !custody::custodied(&request.account) {
             return self.forward(principal, Endpoint::Refresh, body).await;
         }
-        let _hold = CallHold::acquire(&self.state, &principal.principal)?;
+        let hold = CallHold::acquire(&self.state, &principal.principal)?;
         dispatch::gate_relay(
             &self.state,
             &principal.principal,
             principal.scopes.as_ref(),
             &request.account,
         )?;
-        let reply = self.custody.refresh(&request).await?;
-        self.record(principal, "refresh", Some(&request.account), None);
+        let account = request.account.clone();
+        let custody = Arc::clone(&self.custody);
+        let reply = claim(hold, async move { custody.refresh(&request).await }).await?;
+        self.record(principal, "refresh", Some(&account), None);
         encode(&reply)
     }
 
@@ -255,14 +288,20 @@ impl ProductGateway {
         if !custody::custodied(account) {
             return self.forward(principal, Endpoint::Admin, body).await;
         }
-        let _hold = CallHold::acquire(&self.state, &principal.principal)?;
+        let hold = CallHold::acquire(&self.state, &principal.principal)?;
         dispatch::gate_admin_refresh(
             &self.state,
             &principal.principal,
             principal.scopes.as_ref(),
             account,
         )?;
-        let facts = self.custody.operator_refresh(account).await?;
+        let custody = Arc::clone(&self.custody);
+        let claimed = account.clone();
+        let facts = claim(
+            hold,
+            async move { custody.operator_refresh(&claimed).await },
+        )
+        .await?;
         self.record(principal, "refresh", Some(account), None);
         encode(&AdminResponse::Refreshed {
             facts: Box::new(facts),
@@ -336,7 +375,9 @@ impl ProductGateway {
 
     fn take_note(&self, record: &RelayRecord) -> Option<RelayNote> {
         let (operation, attempt) = record.operation.clone()?;
-        lock_notes(&self.notes).remove(&note_key(&operation, attempt))
+        let key = note_key(&operation, attempt);
+        lock_relays(&self.state).remove(&key);
+        lock_notes(&self.notes).remove(&key)
     }
 
     fn record(
@@ -355,6 +396,21 @@ impl ProductGateway {
             std::time::Instant::now(),
         );
     }
+}
+
+/// Runs one refresh claim on its own task, counted in flight until it
+/// settles: a caller that leaves must not drop a claim mid-exchange, and
+/// drain waits for it before the holder lock is released.
+async fn claim<T: Send + 'static>(
+    hold: CallHold,
+    refresh: impl Future<Output = Result<T, GatewayRefusal>> + Send + 'static,
+) -> Result<T, GatewayRefusal> {
+    tokio::spawn(async move {
+        let _hold = hold;
+        refresh.await
+    })
+    .await
+    .map_err(|_| GatewayRefusal::Internal {})?
 }
 
 fn relay_event(state: &GatewayState, caller: &str, record: &RelayRecord) -> AuditEvent {
@@ -402,6 +458,15 @@ fn lock_notes(
     notes: &Mutex<HashMap<String, RelayNote>>,
 ) -> std::sync::MutexGuard<'_, HashMap<String, RelayNote>> {
     match notes.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn lock_relays(
+    state: &GatewayState,
+) -> std::sync::MutexGuard<'_, HashMap<String, dispatch::RelayCut>> {
+    match state.relays.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     }

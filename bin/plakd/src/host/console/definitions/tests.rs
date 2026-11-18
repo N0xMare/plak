@@ -113,6 +113,7 @@ async fn response_fence_refuses_config_and_template_changes() -> TestResult {
     let console = super::super::Console::new(
         paths.clone(),
         root.path().join("state"),
+        crate::gateway::HostCustody::Local,
         Some(tokio::runtime::Handle::current()),
         plakd_wire_types::console::ConfiguredSwitches {
             web_accounts_read: false,
@@ -303,6 +304,7 @@ async fn encoded_definition_refuses_response_overflow_without_opening_a_session(
     let console = super::super::Console::new(
         paths,
         root.path().join("state"),
+        crate::gateway::HostCustody::Local,
         Some(tokio::runtime::Handle::current()),
         plakd_wire_types::console::ConfiguredSwitches {
             web_accounts_read: false,

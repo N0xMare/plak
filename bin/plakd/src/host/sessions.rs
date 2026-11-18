@@ -99,6 +99,7 @@ impl ProductSessions {
             console: super::console::Console::new(
                 services.paths()?.clone(),
                 services.home().state()?.to_path_buf(),
+                services.custody()?,
                 runtime.clone(),
                 switches,
             ),
@@ -1271,6 +1272,8 @@ mod tests {
             .unwrap(),
         );
         records.save(&mut broken).unwrap();
+        // A host latches custody at startup, before the config breaks.
+        services.custody().unwrap();
         std::fs::write(paths.config_file(), "[invalid").unwrap();
         let product = ProductSessions::new(&services, None, None).unwrap();
         assert_eq!(

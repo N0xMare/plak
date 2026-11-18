@@ -89,11 +89,24 @@ pub(crate) fn run_doctor(
             identity: "not required by the selected composition".to_owned(),
         },
     };
-    let openrouter_catalog = match openrouter_product::probe_openrouter_catalog_allowlist(
-        paths,
-        selected.default_account(),
-        selected.default_model(),
-    ) {
+    // Under a gateway this process reads no store and no key file: credential
+    // rows come from the gateway's admin status, and a custody that does not
+    // resolve fails those rows instead of reading local state.
+    let custody = services.custody();
+    let local_keys = matches!(custody, Ok(crate::gateway::HostCustody::Local));
+    let openrouter_probe = if local_keys {
+        openrouter_product::probe_openrouter_catalog_allowlist(
+            paths,
+            selected.default_account(),
+            selected.default_model(),
+        )
+    } else {
+        openrouter_product::OpenRouterCatalogProbe::Gateway
+    };
+    let openrouter_catalog = match openrouter_probe {
+        openrouter_product::OpenRouterCatalogProbe::Gateway => {
+            product_doctor::OpenRouterCatalogStatus::Gateway
+        }
         openrouter_product::OpenRouterCatalogProbe::NotConfigured => {
             product_doctor::OpenRouterCatalogStatus::NotConfigured
         }
@@ -122,7 +135,11 @@ pub(crate) fn run_doctor(
                     Some(effort) => format!("{}/{} · {effort}", template.account, template.model),
                     None => format!("{}/{}", template.account, template.model),
                 };
-                match presentation::catalog_values(paths) {
+                match custody
+                    .as_ref()
+                    .map_err(Clone::clone)
+                    .and_then(|custody| presentation::catalog_values(paths, custody))
+                {
                     Err(error) => product_doctor::RootTemplateStatus::Unknown {
                         detail: error.message().to_owned(),
                     },
@@ -151,16 +168,33 @@ pub(crate) fn run_doctor(
             }
         },
     };
-    let spawn_templates = doctor_spawn_templates(paths, &selected);
+    let spawn_templates = doctor_spawn_templates(paths, custody.as_ref(), &selected);
     let state_home = services.home().state()?.to_path_buf();
-    // The same offline classification `plakd status` and model runs read.
-    let mut accounts = PlakousApplication::for_accounts(state_home.clone());
-    let mut credential = |provider| match accounts.as_mut() {
-        Ok(accounts) => crate::commands::support::cli_provider_name(provider)
-            .parse()
-            .map_err(|error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string())
-            .and_then(|account| accounts.offline_status_row(&account)),
-        Err(failure) => Err(failure.message().to_owned()),
+    // The same offline classification `plakd status` and model runs read,
+    // or the gateway's status of the same account.
+    let mut accounts = match &custody {
+        Ok(crate::gateway::HostCustody::Local) => Some(PlakousApplication::for_accounts(
+            state_home.clone(),
+            crate::gateway::HostCustody::Local,
+        )),
+        _ => None,
+    };
+    let mut credential = |provider| {
+        let name = crate::commands::support::cli_provider_name(provider);
+        match (&custody, accounts.as_mut()) {
+            (Err(failure), _) => Err(failure.message().to_owned()),
+            (Ok(custody), None) => custody
+                .admin()
+                .ok_or_else(|| "credential custody is unavailable".to_owned())
+                .and_then(|link| gateway_status_row(link, name)),
+            (Ok(_), Some(Ok(accounts))) => name
+                .parse()
+                .map_err(
+                    |error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string(),
+                )
+                .and_then(|account| accounts.offline_status_row(&account)),
+            (Ok(_), Some(Err(failure))) => Err(failure.message().to_owned()),
+        }
     };
     let path = env::var_os("PATH");
     let report = product_doctor::diagnose(product_doctor::DoctorInputs {
@@ -205,28 +239,45 @@ pub(crate) fn run_doctor(
             &crate::commands::runner::STRICT_SSH_OPTIONS,
             path.as_deref(),
         ),
-        oauth: product_doctor::OauthCredentialProbes {
-            codex: product_doctor::probe_oauth_credential(
-                "codex",
-                credential(NativeProvider::Codex),
-                &state_home.join("plak/subscriptions/codex/credential.json"),
-                telemetry_store::TelemetryStore::latest_credential_refresh(paths, "codex")
-                    .map_err(|error| error.to_string()),
-            ),
-            xai: product_doctor::probe_oauth_credential(
-                "xai",
-                credential(NativeProvider::Xai),
-                &state_home.join("plak/subscriptions/xai/credential.json"),
-                telemetry_store::TelemetryStore::latest_credential_refresh(paths, "xai")
-                    .map_err(|error| error.to_string()),
-            ),
-            claude: product_doctor::probe_oauth_credential(
-                "claude",
-                credential(NativeProvider::Claude),
-                &state_home.join("plak/subscriptions/claude/credential.json"),
-                telemetry_store::TelemetryStore::latest_credential_refresh(paths, "claude")
-                    .map_err(|error| error.to_string()),
-            ),
+        oauth: if local_keys {
+            product_doctor::OauthCredentialProbes {
+                codex: product_doctor::probe_oauth_credential(
+                    "codex",
+                    credential(NativeProvider::Codex),
+                    &state_home.join("plak/subscriptions/codex/credential.json"),
+                    telemetry_store::TelemetryStore::latest_credential_refresh(paths, "codex")
+                        .map_err(|error| error.to_string()),
+                ),
+                xai: product_doctor::probe_oauth_credential(
+                    "xai",
+                    credential(NativeProvider::Xai),
+                    &state_home.join("plak/subscriptions/xai/credential.json"),
+                    telemetry_store::TelemetryStore::latest_credential_refresh(paths, "xai")
+                        .map_err(|error| error.to_string()),
+                ),
+                claude: product_doctor::probe_oauth_credential(
+                    "claude",
+                    credential(NativeProvider::Claude),
+                    &state_home.join("plak/subscriptions/claude/credential.json"),
+                    telemetry_store::TelemetryStore::latest_credential_refresh(paths, "claude")
+                        .map_err(|error| error.to_string()),
+                ),
+            }
+        } else {
+            product_doctor::OauthCredentialProbes {
+                codex: product_doctor::probe_gateway_credential(
+                    "codex",
+                    credential(NativeProvider::Codex),
+                ),
+                xai: product_doctor::probe_gateway_credential(
+                    "xai",
+                    credential(NativeProvider::Xai),
+                ),
+                claude: product_doctor::probe_gateway_credential(
+                    "claude",
+                    credential(NativeProvider::Claude),
+                ),
+            }
         },
     });
 
@@ -269,22 +320,31 @@ pub(crate) fn run_doctor(
         .map_err(|_| CliFailure::new("stdout failed"))?;
     let expiry_warnings = crate::review_expiry::write_warnings(stdout, services.now_unix_seconds())
         .map_err(|_| CliFailure::new("stdout failed"))?;
-    match crate::gateway::doctor_line(paths) {
-        Ok(line) => writeln!(stdout, "{line}").map_err(|_| CliFailure::new("stdout failed"))?,
-        Err(error) => writeln!(stdout, "{error}").map_err(|_| CliFailure::new("stdout failed"))?,
-    }
+    // A gateway that does not answer, or that holds some other store, is a
+    // failure: this host's credentials go nowhere else.
+    let gateway_failures = match crate::gateway::doctor_line(services) {
+        Ok(line) => {
+            writeln!(stdout, "{line}").map_err(|_| CliFailure::new("stdout failed"))?;
+            0
+        }
+        Err(error) => {
+            writeln!(stdout, "{error}").map_err(|_| CliFailure::new("stdout failed"))?;
+            1
+        }
+    };
+    let errors = report.summary.errors + gateway_failures;
     writeln!(
         stdout,
         "\nResult: {} passed · {} warnings · {} failures\nProvider credentials: run `plakd status`",
         report.summary.ok,
         report.summary.warnings + legacy_warnings + expiry_warnings,
-        report.summary.errors
+        errors
     )
     .map_err(|_| CliFailure::new("stdout failed"))?;
-    if report.summary.errors > 0 {
+    if errors > 0 {
         Err(CliFailure::classified(
             CliFailureKind::Agent,
-            format!("doctor found {} blocking failures", report.summary.errors),
+            format!("doctor found {errors} blocking failures"),
         ))
     } else {
         Ok(ProcessOutcome::Success)
@@ -297,6 +357,7 @@ pub(crate) fn run_doctor(
 /// inputs as the root template check.
 fn doctor_spawn_templates(
     paths: &home::paths::PlakPaths,
+    custody: Result<&crate::gateway::HostCustody, &CliFailure>,
     config: &product_config::ProductConfig,
 ) -> product_doctor::SpawnTemplatesStatus {
     let names = roster_input::nested_spawns(config.working_set.names(), |name| {
@@ -311,7 +372,10 @@ fn doctor_spawn_templates(
     if spawnable.is_empty() {
         return product_doctor::SpawnTemplatesStatus::None;
     }
-    let sections = match presentation::catalog_values(paths) {
+    let sections = match custody
+        .map_err(Clone::clone)
+        .and_then(|custody| presentation::catalog_values(paths, custody))
+    {
         Ok((_, sections)) => sections,
         Err(error) => {
             return product_doctor::SpawnTemplatesStatus::Unknown {
@@ -341,4 +405,38 @@ fn doctor_spawn_templates(
     } else {
         product_doctor::SpawnTemplatesStatus::NotReady { templates }
     }
+}
+
+/// One subscription account's credential posture from the gateway's admin
+/// status, in the shape the offline read has.
+fn gateway_status_row(
+    link: &crate::gateway::AdminLink,
+    account: &str,
+) -> Result<presentation::CliStatus, String> {
+    use plakous::gateway::protocol::facts::{Consent, CredentialStatus};
+    use presentation::{CompatibilityState, CredentialState};
+    let facts = link
+        .status(account)
+        .map_err(|error| format!("gateway: {error}"))?
+        .ok_or_else(|| format!("gateway: {account} is not a gateway account"))?;
+    let credential = match facts.credential.status {
+        CredentialStatus::SignedOut => CredentialState::SignedOut,
+        CredentialStatus::Ready => CredentialState::Ready,
+        CredentialStatus::RefreshRequired => CredentialState::RefreshRequired,
+        CredentialStatus::Refreshing => CredentialState::Refreshing,
+        CredentialStatus::Quarantined => CredentialState::Quarantined,
+        CredentialStatus::LoginRequired => CredentialState::LoginRequired,
+        CredentialStatus::ProfileChanged => CredentialState::ProfileChanged,
+        CredentialStatus::WrittenByNewerBuild => CredentialState::WrittenByNewerBuild,
+        CredentialStatus::Revoked => CredentialState::Revoked,
+    };
+    let compatibility = match facts.profile.map(|profile| profile.consent) {
+        None | Some(Consent::Current) => CompatibilityState::Current,
+        Some(Consent::Required) => CompatibilityState::Required,
+        Some(Consent::Inactive) => CompatibilityState::Inactive,
+    };
+    Ok(presentation::CliStatus {
+        compatibility,
+        credential,
+    })
 }

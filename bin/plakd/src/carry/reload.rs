@@ -158,18 +158,15 @@ pub(super) fn binding_change_words(
 /// within the margin answers `unknown`; an unusable one is refused with its
 /// login remedy. Routes without a native login pass.
 pub(crate) fn reopen_credential_gate(
-    home: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
     account: Option<&str>,
 ) -> Option<ReopenProbe> {
     let account = account?;
     let provider = plakous_hosted::capabilities::for_account(account)?.native_provider()?;
     let state_home = crate::home::paths::application_state_home().ok()?;
     let paths = plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(state_home).ok()?;
-    let subscriptions = crate::gateway::with_subscription_custody(
-        plakous::subscriptions::NativeSubscriptions::new(paths),
-        home,
-    )
-    .ok()?;
+    let subscriptions =
+        custody.subscriptions(plakous::subscriptions::NativeSubscriptions::new(paths));
     let executor = plakous::application::ApplicationExecutor::new().ok()?;
     let status = match executor.block_on(subscriptions.status(provider)) {
         Ok(Ok(status)) => Some(status.credential()),

@@ -41,6 +41,20 @@ pub(crate) fn inherited_home() -> Option<String> {
     std::env::var_os("HOME").and_then(|value| value.into_string().ok())
 }
 
+/// The product-home and state-home variables of this process, when set and
+/// valid text, for a service definition that must resolve the same homes.
+pub(crate) fn inherited_homes() -> Vec<(&'static str, String)> {
+    ["PLAK_HOME", "XDG_STATE_HOME"]
+        .into_iter()
+        .filter_map(|name| {
+            std::env::var_os(name)
+                .and_then(|value| value.into_string().ok())
+                .filter(|value| !value.is_empty())
+                .map(|value| (name, value))
+        })
+        .collect()
+}
+
 /// Runner-local account name, used only if passwd lookup is unavailable.
 pub(crate) fn inherited_user() -> Option<String> {
     std::env::var_os("USER").and_then(|value| value.into_string().ok())

@@ -4,6 +4,7 @@ fn new_console() -> std::sync::Arc<Console> {
     Console::new(
         crate::home::paths::PlakPaths::explicit(std::path::PathBuf::from("unused")),
         "unused".into(),
+        crate::gateway::HostCustody::Local,
         None,
         plakd_wire_types::console::ConfiguredSwitches {
             web_accounts_read: false,

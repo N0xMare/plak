@@ -14,11 +14,13 @@ mod xai;
 #[derive(Clone)]
 pub(crate) struct ProductPlatformCredentials {
     paths: PlakPaths,
+    custody: crate::gateway::HostCustody,
 }
 impl ProductPlatformCredentials {
-    pub(crate) fn shared(paths: &PlakPaths) -> Arc<Self> {
+    pub(crate) fn shared(paths: &PlakPaths, custody: crate::gateway::HostCustody) -> Arc<Self> {
         Arc::new(Self {
             paths: paths.clone(),
+            custody,
         })
     }
     fn key(&self, account: &plakous_hosted::account::AccountRef) -> Result<String, String> {
@@ -39,21 +41,17 @@ impl ProductPlatformCredentials {
                 .into(),
             );
         }
-        if self.gateway()?.is_some() {
+        if self.gateway().is_some() {
             return Ok(());
         }
         crate::home::secrets::require_api_key(&self.paths, account.as_str())
     }
 
-    fn gateway(&self) -> plakous_hosted::CliResult<Option<plakous::gateway::GatewayCustody>> {
-        crate::gateway::host_gateway(&self.paths).map_err(plakous_hosted::CliFailure::new)
+    fn gateway(&self) -> Option<&plakous::gateway::GatewayCustody> {
+        self.custody.gateway()
     }
 
     fn route_custody(&self) -> plakous::custody::Custody {
-        self.gateway()
-            .ok()
-            .flatten()
-            .map(|gateway| gateway.custody())
-            .unwrap_or_else(plakous::custody::Custody::local)
+        self.custody.route_custody()
     }
 }

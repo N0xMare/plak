@@ -6180,15 +6180,38 @@ taken and before the store is opened. When `state_root` is absent, serve uses
 the resolution. API keys are read from the home `secrets/` directory, as the
 host reads them; the server file does not name a key directory.
 
+`<home>/gateway.toml` keys (absent file: every default):
+
+| key | default | meaning |
+| --- | --- | --- |
+| `socket` | `$XDG_RUNTIME_DIR/plak/gateway.sock`, else `<home>/gateway/gateway.sock` | Unix listener; absolute path; directory 0700, socket 0600 |
+| `listen_tcp` | none | One `ip:port`; refuses wildcards, and non-loopback, non-tailnet addresses unless `allow_non_tailnet` |
+| `state_root` | the host state home (§2.3) | The store to adopt; must be those exact bytes |
+| `audit_retention_days` | 30 | 1..=365 days of audit files kept |
+| `max_inflight` / `max_inflight_per_caller` | 256 / 128 | At least 1; more is refused `busy` |
+| `max_request_body_bytes` | 33554432 | Upper bound on one relayed upstream body |
+| `allow_non_tailnet` | false | Admit a `listen_tcp` outside loopback and the tailnet |
+
+Any other key is refused. `gateway.toml` is read only by `gateway serve`,
+`gateway init` and `gateway status --dry-run`.
+
 Caller keys have the form `plakgw1.<id>.<secret>`. The registry stores the
 hash, scopes and source networks. The gateway is the only writer of
 `gateway/callers.json` and `gateway/flags.json`. Audit lines are appended to
 `gateway/audit/YYYY-MM-DD.jsonl` and carry metadata only: no headers, bodies,
 query strings, keys, tokens or pastes.
 
-`disable` engages the kill switch and may be called remotely with admin scope.
-`enable`, caller management and `drain` are local-admin only. `drain` waits up
-to 30 seconds for in-flight relays and refresh claims. Admin account verbs map
+`disable` engages the kill switch and may be called remotely with admin scope;
+`--cut` also ends matching relays in flight (chapter 04 §2.11). `enable`,
+caller management and `drain` are local-admin only. A global disable still
+admits the local administrator's `enable`, `disable`, `drain`, `caller
+list` and `status`; relays, facts and refresh stay blocked for everyone. `drain` stops
+accepting and waits up to 30 seconds for in-flight relays and refresh claims;
+a refresh claim runs to completion on its own task even when its caller
+leaves. The runtime then shuts down with a bounded timeout, and only after
+that is the holder lock released. A failed audit append is counted; `plakd
+gateway status` prints the running instance's count. `audit --since` takes an
+RFC 3339 timestamp and compares instants. Admin account verbs map
 to today's account operations on a blocking bridge. The listener serves each
 accepted connection with the shared relay server. API-key accounts and the
 subscription logins are custodied in the gateway process and relayed only to
@@ -6199,15 +6222,33 @@ buffered dispatcher cannot stream a relay, so a relay it decodes is refused
 with `not-observed`.
 
 `gateway install` writes a Linux user unit or macOS LaunchAgent and does not
-start it. The unit runs the executable that wrote it.
+start it. The unit runs the executable that wrote it, with `UMask=0077`, the
+installing process's `PLAK_HOME` and `XDG_STATE_HOME` when set, the optional
+`EnvironmentFile=-%h/.config/plak/gateway.env`, `Restart=on-failure`,
+`RestartSec=2` and `TimeoutStopSec=45`, longer than the drain.
+
+A process resolves its credential custody once, from the home's own
+`config.toml` (never a project overlay), when it first needs it; `plakd host`
+resolves it at startup, before it takes the holder lock, and every route,
+subscription, console read and write, carry probe, catalog refresh and admin
+link of that host uses that one value. `[gateway]` changes take effect at the
+next host start. A `config.toml` that does not read or parse, an address that
+does not parse, or an unsafe key file is an error: a host refuses to start and
+a command fails; nothing falls back to in-process custody.
 
 A host with `[gateway] address` set does not take the credential holder lock,
-does not resolve API keys, and does not open the subscription store. Its
-API-key routes and its subscription routes use the gateway's custody, and an
-existing session reopens with its recorded binding, because the binding names
-the provider account and key generation, never where the credential is held.
-Login, logout, consent and account listing use the gateway's admin verbs. Unset, the host keeps direct
-in-process credential access and takes the holder lock shared.
+does not resolve API keys or read `secrets/`, and does not open or create the
+subscription store. With a unix address it refuses to start unless the
+exclusive holder of its own state home's store advertises exactly that socket.
+Its API-key routes and its subscription routes use the gateway's custody, and
+an existing session reopens with its recorded binding, because the binding
+names the provider account and key generation, never where the credential is
+held. Login, logout, consent, key status and account listing use the gateway's
+admin verbs; `plakd key status` through a gateway prints each key's
+fingerprint as the in-process command does. `plakd run`, `continue` and
+`models` run in the CLI process, whose routes relay through the gateway the
+same way. Unset, the host keeps direct in-process credential access and takes
+the holder lock shared.
 
 ## 5. External client boundary
 
@@ -7742,7 +7783,8 @@ resume_after_loss`, `[mcp_servers.<id>] placement`, `[runners.<name>]`,
 `[web] allow`, `[web] origin`, or a `[host]`, `[runners]` or `[web]` table
 present even empty, chapter 07 §3): a warning
 `config uses 0.0.4-only keys` naming each (a project file's with its path),
-with the remedy to remove them before running a 0.0.3 build on the home. `plakd` itself writes those keys only
+with the remedy to remove them before running a 0.0.3 build on the home; a
+`[gateway]` key also names builds without the gateway, which refuse it too. `plakd` itself writes those keys only
 when the operator sets them. The `runner_ssh` rows follow the spawnable
 templates, one per configured runner, in name order.
 

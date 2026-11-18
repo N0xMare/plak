@@ -3,7 +3,8 @@
 //! A configured address, or a service that already advertised its socket, is
 //! the target. The command prints `via gateway <label>` and sends the admin
 //! verb. With neither, the command stays in this process and this module does
-//! not create the holder file.
+//! not create the holder file. Model commands always run in this process:
+//! under a configured gateway their routes relay through it.
 
 use std::io::{self, Write};
 use std::thread;
@@ -22,18 +23,18 @@ use super::address::GatewayAddress;
 use super::client;
 use super::route::AccountRoute;
 use crate::command::Command;
-use crate::home::paths::PlakPaths;
 use crate::presentation::MAX_REMOTE_AUTHORIZATION_INPUT_BYTES;
 use crate::shell::services::Services;
 use crate::terminal_application::read_terminal_secret_line;
 
 /// Shared holder for an account command that stays in this process.
-/// `Ok(None)` means the command does not open the store.
+/// `Ok(None)` means the command does not open the store: it is not a
+/// credential command, or a configured gateway holds the store.
 pub(crate) fn hold_in_process(
     services: &Services,
     command: &Command,
 ) -> CliResult<Option<super::holder::HolderLock>> {
-    if !credential_command(command) {
+    if !credential_command(command) || services.custody()?.address().is_some() {
         return Ok(None);
     }
     let root = services.home().state()?;
@@ -45,8 +46,10 @@ pub(crate) fn hold_in_process(
     held.map(Some).map_err(CliFailure::new)
 }
 
-/// Forwards a credential command to a configured or discovered gateway.
-/// `Ok(None)` means this process still owns the store.
+/// Forwards an account command to a configured or discovered gateway.
+/// `Ok(None)` means the command runs in this process: it is not an account
+/// command, or it dispatches model traffic (`run`, `continue`, `models`),
+/// whose routes take this process's gateway custody themselves.
 pub(crate) fn try_remote_account(
     services: &Services,
     command: &Command,
@@ -54,66 +57,23 @@ pub(crate) fn try_remote_account(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> CliResult<Option<ProcessOutcome>> {
-    if !credential_command(command) {
+    if !admin_command(command) {
         return Ok(None);
     }
-    let Ok(home) = services.paths() else {
-        return Ok(None);
-    };
-    let Some(route) = remote_route(home).map_err(CliFailure::new)? else {
-        return Ok(None);
-    };
+    let custody = services.custody()?;
+    let home = services.paths()?;
+    let route = super::route_for(home, &custody).map_err(CliFailure::new)?;
     let Some(address) = route.remote().cloned() else {
         return Ok(None);
     };
     if let Some(line) = route.via_line() {
         writeln!(stdout, "{line}").map_err(|_| CliFailure::new("stdout failed"))?;
     }
-    if relay_command(command) {
-        return Err(CliFailure::new(
-            "this command needs the gateway relay, which this build does not run yet",
-        ));
-    }
-    let key = super::cli_cmd::caller_key(home, &route).map_err(CliFailure::new)?;
-    dispatch(&address, key.as_deref(), command, stdin, stdout, stderr).map(Some)
-}
-
-/// The route when a gateway is already the holder. Does not create the lock.
-pub(crate) fn remote_route(home: &PlakPaths) -> Result<Option<AccountRoute>, String> {
-    let config = crate::product_config::ProductConfig::load(home)
-        .unwrap_or_else(|_| crate::product_config::ProductConfig::default_product());
-    let (configured, allow) = super::gateway_client_settings(&config);
-    if configured
-        .as_deref()
-        .is_some_and(|text| !text.trim().is_empty())
-    {
-        let state = super::ServerConfig::load(home)
-            .map(|config| config.state_root)
-            .unwrap_or_else(|_| home.home().to_path_buf());
-        return route_for_parts(configured.as_deref(), allow, &state).map(Some);
-    }
-    let state = super::ServerConfig::load(home)
-        .map(|config| config.state_root)
-        .or_else(|_| crate::home::paths::application_state_home());
-    let Ok(state) = state else {
-        return Ok(None);
+    let key = match route {
+        AccountRoute::Configured(_) => custody.admin().and_then(super::AdminLink::key),
+        AccountRoute::Service(_) | AccountRoute::InProcess => None,
     };
-    let lock = super::holder::lock_path(&state);
-    if !lock.is_file() {
-        return Ok(None);
-    }
-    match super::select(None, false, &lock)? {
-        AccountRoute::InProcess => Ok(None),
-        route => Ok(Some(route)),
-    }
-}
-
-fn route_for_parts(
-    configured: Option<&str>,
-    allow: bool,
-    state: &std::path::Path,
-) -> Result<AccountRoute, String> {
-    super::select(configured, allow, &super::holder::lock_path(state))
+    dispatch(&address, key, command, stdin, stdout, stderr).map(Some)
 }
 
 fn credential_command(command: &Command) -> bool {
@@ -143,7 +103,12 @@ fn credential_command(command: &Command) -> bool {
     )
 }
 
-fn relay_command(command: &Command) -> bool {
+/// The credential commands that are admin verbs at a gateway.
+fn admin_command(command: &Command) -> bool {
+    credential_command(command) && !model_command(command)
+}
+
+fn model_command(command: &Command) -> bool {
     matches!(
         command,
         Command::Models(_)
@@ -204,15 +169,6 @@ fn dispatch(
             login(address, key, provider.as_str(), *mode, stdin, stderr)
         }
         Command::Usage { account, .. } => usage(address, key, account.as_ref(), stdout),
-        Command::Models(_)
-        | Command::ModelsOpenRouter(_)
-        | Command::ModelsPlatform(_)
-        | Command::Run { .. }
-        | Command::RunOpenRouter { .. }
-        | Command::RunPlatform { .. }
-        | Command::ContinueSession { .. } => Err(CliFailure::new(
-            "this command needs the gateway relay, which this build does not run yet",
-        )),
         _ => Ok(ProcessOutcome::Success),
     }
 }
@@ -321,9 +277,19 @@ fn status(
                         (KeySource::Missing, _) => " source=missing".to_owned(),
                     }
                 });
+                // The fingerprint `plakd key status` prints in-process, so the
+                // two can be compared across a custody flip.
+                let fingerprint = row
+                    .facts
+                    .key
+                    .as_ref()
+                    .and_then(|key| key.fingerprint.as_ref())
+                    .map_or_else(String::new, |fingerprint| {
+                        format!(" fingerprint={}", fingerprint.as_str())
+                    });
                 writeln!(
                     stdout,
-                    "{}: credential={}{source}",
+                    "{}: credential={}{source}{fingerprint}",
                     row.facts.account,
                     credential_word(row.facts.credential.status)
                 )

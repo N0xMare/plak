@@ -196,3 +196,8 @@ pub(crate) fn flags_path(home: &PlakPaths) -> PathBuf {
 pub(crate) fn audit_dir(home: &PlakPaths) -> PathBuf {
     ServerConfig::gateway_dir(home).join("audit")
 }
+
+/// The running service's audit-failure count, for `plakd gateway status`.
+pub(crate) fn audit_failures_path(home: &PlakPaths) -> PathBuf {
+    ServerConfig::gateway_dir(home).join("audit-failures")
+}

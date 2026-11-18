@@ -23,7 +23,7 @@ impl Console {
             .ok_or_else(|| unavailable(ReadScope::Usage, UnavailableCode::Storage))?;
         let from = to - i64::try_from(window.seconds()).unwrap_or(0) * 1_000;
         let paths = self.paths.clone();
-        let reader = accounts::reader_at(&self.state, Some(&self.paths))?;
+        let reader = accounts::reader_at(&self.state, &self.custody)?;
         let roster = accounts::roster(&reader, &paths, selected.as_deref()).await?;
         let selection = selected.clone();
         let cancel = Arc::clone(&cancelled);
@@ -121,6 +121,14 @@ impl Console {
             );
         }
         if account.vertical() == plakous_hosted::account::Vertical::OpenRouter {
+            // The gateway holds the key; this host never reads it.
+            if self.custody.admin().is_some() {
+                return missing(
+                    account,
+                    "gateway",
+                    "the gateway holds this key; run plakd usage for its allowance",
+                );
+            }
             return match tokio::time::timeout(
                 timeout,
                 crate::openrouter_product::usage::console::read(
@@ -146,7 +154,7 @@ impl Console {
                 "this API account has no provider allowance endpoint",
             );
         };
-        let subscriptions = accounts::reader_at(&self.state, Some(&self.paths))
+        let subscriptions = accounts::reader_at(&self.state, &self.custody)
             .and_then(|reader| reader.subscriptions_for(account));
         let Ok(subscriptions) = subscriptions else {
             return missing(account, "local_state", "allowance state could not be read");

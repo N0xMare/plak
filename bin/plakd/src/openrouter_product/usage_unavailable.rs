@@ -1,8 +1,12 @@
 use crate::home::paths::PlakPaths;
 use plakous_hosted::{account::AccountRef, openrouter, subscription_usage::VerticalObservation};
 
-pub(crate) fn legacy(paths: &PlakPaths, account: &AccountRef) -> VerticalObservation {
-    let credentials = super::ProductOpenRouterCredentials::shared(paths);
+pub(crate) fn legacy(
+    paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
+    account: &AccountRef,
+) -> VerticalObservation {
+    let credentials = super::ProductOpenRouterCredentials::shared(paths, custody.clone());
     match openrouter::probe_openrouter_key_usage(credentials.as_ref(), account) {
         openrouter::OpenRouterKeyUsageProbe::Failed(reason) => {
             VerticalObservation::Unavailable(reason)
@@ -17,6 +21,6 @@ pub(crate) mod console {
         paths: &PlakPaths,
         account: &AccountRef,
     ) -> std::future::Ready<VerticalObservation> {
-        std::future::ready(legacy(paths, account))
+        std::future::ready(legacy(paths, &crate::gateway::HostCustody::Local, account))
     }
 }

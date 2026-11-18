@@ -61,8 +61,11 @@ struct Grants {
 }
 
 async fn grants(paths: &PlakPaths) -> Grants {
-    let platform = crate::platform_product::ProductPlatformCredentials::shared(paths);
-    let openrouter = crate::openrouter_product::ProductOpenRouterCredentials::shared(paths);
+    let custody = super::HostCustody::resolve(paths).unwrap();
+    let platform =
+        crate::platform_product::ProductPlatformCredentials::shared(paths, custody.clone());
+    let openrouter =
+        crate::openrouter_product::ProductOpenRouterCredentials::shared(paths, custody);
     let openai = platform.openai(&account("openai")).unwrap();
     openai.prepare().await.unwrap();
     let reference =
@@ -128,6 +131,7 @@ fn serve(
         gateway_state.to_path_buf(),
         None,
         None,
+        super::HostCustody::Local,
     )
     .unwrap()
     .with_account_home(Some(paths.clone()));
@@ -191,6 +195,7 @@ fn assert_gateway_roots(
         None,
         records,
         &plakous_hosted::agent::ProcessJobs::default(),
+        &super::HostCustody::resolve(paths).unwrap(),
     )
     .unwrap();
     for (name, provider) in [

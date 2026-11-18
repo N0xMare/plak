@@ -141,8 +141,11 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     // Arm reload before any startup I/O, even for a control-only host.
     let (runtime, reload, stop) = startup_runtime()?;
     let paths = services.paths()?;
-    refuse_external_gateway(paths)?;
-    let holder = hold_host_store(services, paths)?;
+    // Custody is resolved once, here, and every consumer takes this value
+    // through `services`; `[gateway]` changes need a host restart.
+    let custody = services.custody()?;
+    refuse_external_gateway(services, &custody)?;
+    let holder = hold_host_store(services, &custody)?;
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
     let (home_lock, lock) = lock::HostLock::take_home(paths, &binary)?;
@@ -175,7 +178,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         restart_services,
     } = opened;
     let scanning = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    announce_host(&bound, &environment, paths);
+    announce_host(&bound, &environment, paths, &custody);
     let receipt_recovery = startup_scan(&services, &host, &runtime, stop, owed, &scanning);
     let reload_requests = runtime.spawn(requested_reload::serve(
         Arc::clone(&host),
@@ -314,19 +317,23 @@ fn open_host(
     })
 }
 
-fn refuse_external_gateway(paths: &crate::home::paths::PlakPaths) -> CliResult<()> {
-    let config = crate::product_config::ProductConfig::load(paths)
-        .unwrap_or_else(|_| crate::product_config::ProductConfig::default_product());
-    crate::gateway::host_may_open_store(&config).map_err(CliFailure::new)
+/// A gateway host carries no provider key variables, and a unix gateway
+/// must hold this host's own state store at the configured socket.
+fn refuse_external_gateway(
+    services: &Services,
+    custody: &crate::gateway::HostCustody,
+) -> CliResult<()> {
+    crate::gateway::host_may_open_store(custody).map_err(CliFailure::new)?;
+    custody
+        .verify_holder(services.home().state()?)
+        .map_err(CliFailure::new)
 }
 
 fn hold_host_store(
     services: &Services,
-    paths: &crate::home::paths::PlakPaths,
+    custody: &crate::gateway::HostCustody,
 ) -> CliResult<Option<crate::gateway::HolderLock>> {
-    let config = crate::product_config::ProductConfig::load(paths)
-        .unwrap_or_else(|_| crate::product_config::ProductConfig::default_product());
-    if config.gateway_address.is_some() {
+    if custody.address().is_some() {
         return Ok(None);
     }
     let root = services.home().state()?;
@@ -365,14 +372,11 @@ fn announce_host(
     bound: &socket::Bound,
     environment: &environment::HostEnvironment,
     paths: &crate::home::paths::PlakPaths,
+    custody: &crate::gateway::HostCustody,
 ) {
-    crate::shell::catalog_refresh::hook(paths.clone(), None)(None);
+    crate::shell::catalog_refresh::hook(paths.clone(), custody.clone(), None)(None);
     let identity = plakous_recursive_subagents::tree::custody_host();
-    let gateway = crate::product_config::ProductConfig::load(paths)
-        .ok()
-        .and_then(|config| config.gateway_address)
-        .filter(|text| !text.trim().is_empty())
-        .unwrap_or_else(|| "in-process".to_owned());
+    let gateway = custody.label();
     eprintln!(
         "plakd host: serving on {} (host {}, instance {}); gateway: {gateway}; tools get {}",
         bound.path().display(),

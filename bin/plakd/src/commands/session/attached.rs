@@ -254,6 +254,7 @@ fn build_attached_host_config(
     let context = session_paths(services, &record)?;
     let paths = &context;
     product_config::SessionPolicy::load(paths).map_err(CliFailure::new)?;
+    let custody = services.custody()?;
     let cwd = record.workspace_root.clone();
     // The repository gate's offline model; see `crate::test_hooks`.
     #[cfg(feature = "test-hooks")]
@@ -283,13 +284,15 @@ fn build_attached_host_config(
                     &cwd,
                     &plakous_host_protocol::views::ReadyCatalog::default(),
                     None,
+                    &custody,
                 )
             })
             .map_err(AttachedConfigError::Other);
     }
     // After the offline model's early return: the probe never renews a login.
     if purpose == AttachedPurpose::Verify
-        && let Some(probe) = crate::carry::reopen_credential_gate(paths, record.account.as_deref())
+        && let Some(probe) =
+            crate::carry::reopen_credential_gate(&custody, record.account.as_deref())
     {
         return Err(AttachedConfigError::Answered(Box::new(probe)));
     }
@@ -301,7 +304,7 @@ fn build_attached_host_config(
         .model
         .clone()
         .ok_or_else(|| CliFailure::new("session has no exact model binding"))?;
-    let presentation = attached_presentation(paths, &account)?;
+    let presentation = attached_presentation(paths, &custody, &account)?;
     let ready_catalog = &presentation.sections;
     let (effort, explicit) = product_host::effort_from_config(record.effort.as_deref());
     validate_catalog_for_attach(
@@ -332,16 +335,18 @@ fn build_attached_host_config(
         ready_catalog,
         None,
         &presentation.native_models,
+        &custody,
     )
     .map_err(AttachedConfigError::Other)
 }
 
 fn attached_presentation(
     paths: &crate::home::paths::PlakPaths,
+    custody: &crate::gateway::HostCustody,
     account: &str,
 ) -> CliResult<crate::presentation::HostCatalogBundle> {
     let selection: plakous_hosted::account::AccountRef = account.parse()?;
-    crate::commands::host_config::binding_presentation(paths, &selection)
+    crate::commands::host_config::binding_presentation(paths, custody, &selection)
 }
 
 fn validate_catalog_for_attach(

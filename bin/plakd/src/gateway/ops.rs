@@ -194,6 +194,17 @@ impl AccountBridge for OpsBridge {
 }
 
 impl OpsBridge {
+    /// Whether the slot holds a login: anything but signed out or revoked.
+    /// A record this build cannot read counts as signed in.
+    fn signed_in(&mut self, account: &AccountRef) -> bool {
+        self.app.offline_status(account).map_or(true, |status| {
+            !matches!(
+                status.credential,
+                CredentialState::SignedOut | CredentialState::Revoked
+            )
+        })
+    }
+
     fn key_set(&mut self, account: &GatewayAccount, secret: &str) -> AdminResponse {
         if let Some(variable) = crate::home::secrets::overriding_env_var(account.as_str()) {
             return match BoundedText::new(variable.to_owned()) {
@@ -296,6 +307,9 @@ impl OpsBridge {
         let Ok(parsed) = Self::account(&account) else {
             return refused(AdminRefusal::WrongAccountClass {});
         };
+        // Captured before the login can retire an unusable record: a remote
+        // admin may only re-login the account this slot held (spec 04 §2.11).
+        let keep_account = !local_admin && self.signed_in(&parsed);
         if let Err(error) = crate::commands::application::host::prepare_host_login(
             &mut self.app,
             &parsed,
@@ -304,10 +318,12 @@ impl OpsBridge {
         ) {
             return refused(login_prep(error.message()));
         }
-        let _ = local_admin;
-        let Ok(challenge) = self.app.begin_login(&parsed, NativeLoginMode::Remote) else {
+        let Ok(mut challenge) = self.app.begin_login(&parsed, NativeLoginMode::Remote) else {
             return refused(AdminRefusal::ProviderRejected {});
         };
+        if keep_account {
+            challenge.pending.1.keep_signed_in_account();
+        }
         let method = match challenge.completion {
             NativeLoginCompletion::DeviceCode => LoginMethod::DeviceCode,
             NativeLoginCompletion::AuthorizationCodeOrRedirectUrl => LoginMethod::Paste,
@@ -391,6 +407,10 @@ impl OpsBridge {
             Ok(LoginOutcome::Cancelled) | Ok(LoginOutcome::TimedOut) => {
                 refused(AdminRefusal::PasteInvalid {})
             }
+            Err(error) if replacement_refused(error.message()) => {
+                let _ = self.attempts.take(attempt);
+                refused(AdminRefusal::LocalAdminRequired {})
+            }
             Err(_) => refused(AdminRefusal::ProviderRejected {}),
         }
     }
@@ -408,6 +428,12 @@ impl OpsBridge {
                     let id = found.id.clone();
                     let _ = self.attempts.take(attempt);
                     return progress(id, LoginPhase::Succeeded);
+                }
+                Ok(Err(
+                    plakous::subscriptions::NativeSubscriptionError::AccountReplacementRefused,
+                )) => {
+                    let _ = self.attempts.take(attempt);
+                    return refused(AdminRefusal::LocalAdminRequired {});
                 }
                 Ok(Err(_)) => return refused(AdminRefusal::ProviderRejected {}),
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
@@ -468,6 +494,11 @@ fn key_facts(account: &str, home: &PlakPaths) -> Option<KeyFacts> {
     })
 }
 
+/// The store refused a login that would replace the slot's account.
+fn replacement_refused(message: &str) -> bool {
+    message.contains("account_replacement_refused")
+}
+
 fn login_prep(message: &str) -> AdminRefusal {
     if message.contains("notice") {
         AdminRefusal::NoticeMismatch {}
@@ -501,4 +532,50 @@ fn progress(attempt: UuidText, phase: LoginPhase) -> AdminResponse {
 
 fn bounded64(text: &str) -> Option<BoundedText<64>> {
     BoundedText::new(text.to_owned()).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bridge(directory: &tempfile::TempDir) -> OpsBridge {
+        let home = PlakPaths::explicit(directory.path().join("home"));
+        let app = PlakousApplication::for_test_accounts(directory.path().join("state")).unwrap();
+        let instance = UuidText::new(uuid::Uuid::new_v4().to_string()).unwrap();
+        OpsBridge::new(app, home, instance)
+    }
+
+    /// The store's refusal reaches the admin caller as `local_admin_required`
+    /// for the default and for a named slot.
+    #[test]
+    fn a_refused_replacement_is_recognised_for_default_and_named_slots() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = bridge(&directory);
+        for account in ["claude", "claude/work", "codex", "grok/work"] {
+            let failure = bridge.app.account_failure(
+                plakous::subscriptions::NativeSubscriptionError::AccountReplacementRefused,
+                &account.parse().unwrap(),
+            );
+            assert!(
+                replacement_refused(failure.message()),
+                "{account}: {}",
+                failure.message()
+            );
+        }
+        let other = bridge.app.account_failure(
+            plakous::subscriptions::NativeSubscriptionError::Authentication,
+            &"claude".parse().unwrap(),
+        );
+        assert!(!replacement_refused(other.message()));
+    }
+
+    /// An empty slot has no account to keep: a remote login into it is not
+    /// held to one.
+    #[cfg(feature = "claude")]
+    #[test]
+    fn an_empty_slot_is_not_signed_in() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut bridge = bridge(&directory);
+        assert!(!bridge.signed_in(&"claude".parse().unwrap()));
+    }
 }

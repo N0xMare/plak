@@ -34,33 +34,40 @@ impl UsageReceipt {
 /// Plak's credentials: the product secret store under one product home.
 pub struct ProductOpenRouterCredentials {
     paths: PlakPaths,
+    custody: crate::gateway::HostCustody,
     usage_receipt: Option<UsageReceipt>,
 }
 
 impl ProductOpenRouterCredentials {
-    /// The OpenRouter credentials of one product home.
+    /// The OpenRouter credentials of one product home under `custody`.
     #[must_use]
-    pub const fn new(paths: PlakPaths) -> Self {
+    pub(crate) const fn new(paths: PlakPaths, custody: crate::gateway::HostCustody) -> Self {
         Self {
             paths,
+            custody,
             usage_receipt: None,
         }
     }
 
     /// A handle for a [`plakous_hosted::openrouter::ProductOpenRouterSpec`].
     #[must_use]
-    pub fn shared(paths: &PlakPaths) -> Arc<dyn OpenRouterCredentials> {
-        Arc::new(Self::new(paths.clone()))
+    pub(crate) fn shared(
+        paths: &PlakPaths,
+        custody: crate::gateway::HostCustody,
+    ) -> Arc<dyn OpenRouterCredentials> {
+        Arc::new(Self::new(paths.clone(), custody))
     }
 }
 
 pub(crate) fn usage_credentials(
     paths: &PlakPaths,
+    custody: crate::gateway::HostCustody,
 ) -> (Arc<dyn OpenRouterCredentials>, UsageReceipt) {
     let receipt = UsageReceipt::default();
     (
         Arc::new(ProductOpenRouterCredentials {
             paths: paths.clone(),
+            custody,
             usage_receipt: Some(receipt.clone()),
         }),
         receipt,
@@ -85,18 +92,14 @@ pub(crate) fn key_usage_fence(
 
 impl OpenRouterCredentials for ProductOpenRouterCredentials {
     fn custody(&self) -> plakous::custody::Custody {
-        crate::gateway::host_gateway(&self.paths)
-            .ok()
-            .flatten()
-            .map(|gateway| gateway.custody())
-            .unwrap_or_else(plakous::custody::Custody::local)
+        self.custody.route_custody()
     }
 
     fn usage_read(
         &self,
         account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<plakous_hosted::openrouter::OpenRouterUsageRead> {
-        let (credentials, observer) = super::usage::capture(&self.paths, account);
+        let (credentials, observer) = super::usage::capture(&self.paths, &self.custody, account);
         Ok(plakous_hosted::openrouter::OpenRouterUsageRead {
             source: credentials.source(account)?,
             label: credentials.key_label(account)?,
@@ -105,7 +108,7 @@ impl OpenRouterCredentials for ProductOpenRouterCredentials {
     }
     fn key_label(&self, account: &plakous_hosted::account::AccountRef) -> CliResult<String> {
         require_openrouter(account)?;
-        if self.gateway()?.is_some() {
+        if self.custody.gateway().is_some() {
             return Ok(account.as_str().to_owned());
         }
         let status = crate::home::secrets::key_status(&self.paths, account.as_str())
@@ -115,7 +118,7 @@ impl OpenRouterCredentials for ProductOpenRouterCredentials {
 
     fn preflight(&self, account: &plakous_hosted::account::AccountRef) -> CliResult<()> {
         require_openrouter(account)?;
-        if self.gateway()?.is_some() {
+        if self.custody.gateway().is_some() {
             return Ok(());
         }
         crate::home::secrets::require_api_key(&self.paths, account.as_str())
@@ -126,7 +129,7 @@ impl OpenRouterCredentials for ProductOpenRouterCredentials {
         account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<Arc<OpenRouterKeySource>> {
         require_openrouter(account)?;
-        if let Some(gateway) = self.gateway()? {
+        if let Some(gateway) = self.custody.gateway() {
             let authority = OpenRouterCredentialBinding::platform(
                 "plak.openrouter",
                 account.source_authority("plak.product-secrets.openrouter.v1"),
@@ -147,12 +150,6 @@ impl OpenRouterCredentials for ProductOpenRouterCredentials {
         let mut source = ProductOpenRouterApiKeySource::new(self.paths.clone(), account.clone())?;
         source.usage_receipt = self.usage_receipt.clone();
         Ok(Arc::new(source))
-    }
-}
-
-impl ProductOpenRouterCredentials {
-    fn gateway(&self) -> CliResult<Option<plakous::gateway::GatewayCustody>> {
-        crate::gateway::host_gateway(&self.paths).map_err(CliFailure::new)
     }
 }
 
@@ -269,11 +266,12 @@ impl plakous::api_key::ApiKeySource<OpenRouterCredentialRequest<'_>, OpenRouterC
 }
 
 /// Reads model identifiers through the existing authenticated facade catalog route.
-pub async fn list_models(
+pub(crate) async fn list_models(
     paths: &PlakPaths,
+    custody: crate::gateway::HostCustody,
     account: &plakous_hosted::account::AccountRef,
 ) -> CliResult<Vec<String>> {
-    let credentials = ProductOpenRouterCredentials::new(paths.clone());
+    let credentials = ProductOpenRouterCredentials::new(paths.clone(), custody);
     credentials.preflight(account)?;
     let client = OpenRouterChatClient::connect_with_retention(
         credentials.source(account)?,
@@ -398,7 +396,8 @@ mod tests {
         crate::home::secrets::clear_api_key(&paths, "openrouter/work").unwrap();
         assert!(work.generation().is_err());
         assert!(other.generation().is_ok());
-        let credentials = ProductOpenRouterCredentials::new(paths);
+        let credentials =
+            ProductOpenRouterCredentials::new(paths, crate::gateway::HostCustody::Local);
         assert!(credentials.source(&"openai/work".parse().unwrap()).is_err());
     }
 
@@ -420,9 +419,10 @@ mod tests {
             zeroize::Zeroizing::new(("key-alpha").to_string()),
         )
         .unwrap();
-        let label = ProductOpenRouterCredentials::new(paths.clone())
-            .key_label(&"openrouter".parse().unwrap())
-            .unwrap();
+        let label =
+            ProductOpenRouterCredentials::new(paths.clone(), crate::gateway::HostCustody::Local)
+                .key_label(&"openrouter".parse().unwrap())
+                .unwrap();
         assert!(label.starts_with("sha256:"));
         assert_eq!(label.len(), 15);
         assert!(!label.contains("key-alpha"));

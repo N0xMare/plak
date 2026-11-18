@@ -44,6 +44,7 @@ impl OfflineSelection {
         cwd: &Path,
         ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
         resume_publication: Option<Arc<AtomicBool>>,
+        custody: &crate::gateway::HostCustody,
     ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, crate::CliFailure>
     {
         if face != OfflineFace::Verify && session.plakous_locator.is_some() {
@@ -265,7 +266,10 @@ impl OfflineSelection {
             resume_after_loss: policy.resume_after_loss,
             topology_admission: Some(product_config::topology_admission_probe(paths)),
             surface: match face {
-                OfflineFace::Attached => Some(crate::shell::settings::ProductSurface::boxed(paths)),
+                OfflineFace::Attached => Some(crate::shell::settings::ProductSurface::boxed(
+                    paths,
+                    custody.clone(),
+                )),
                 OfflineFace::OneShot | OfflineFace::Verify => None,
             },
             root_template: policy.root_template,

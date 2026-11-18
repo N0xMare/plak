@@ -26,6 +26,7 @@ fn fixture() -> Result<(tempfile::TempDir, Arc<Console>), Box<dyn std::error::Er
     let console = Console::new(
         paths,
         root.path().join("state"),
+        crate::gateway::HostCustody::Local,
         Some(tokio::runtime::Handle::current()),
         ConfiguredSwitches {
             web_accounts_read: false,
@@ -195,15 +196,29 @@ async fn telemetry_writes_do_not_change_usage_cursor_revision() -> TestResult {
     let (_root, console) = fixture()?;
     let cancelled = AtomicBool::new(false);
     let deadline = Instant::now() + Duration::from_secs(10);
-    let first = pages::source_revision(&console.paths, &console.state, None, deadline, &cancelled)
-        .await
-        .map_err(|_| "first revision")?;
+    let first = pages::source_revision(
+        &console.paths,
+        &console.state,
+        &console.custody,
+        None,
+        deadline,
+        &cancelled,
+    )
+    .await
+    .map_err(|_| "first revision")?;
     let connection = rusqlite::Connection::open(console.paths.telemetry_database())?;
     connection.execute("UPDATE recording_evidence SET dropped=dropped+1", [])?;
     connection.execute("INSERT INTO recorded_terminals VALUES('concurrent','session','branch',?1,'codex','5','0','0','0','0','1','1',NULL)", [clock::now_ms()])?;
-    let after = pages::source_revision(&console.paths, &console.state, None, deadline, &cancelled)
-        .await
-        .map_err(|_| "after revision")?;
+    let after = pages::source_revision(
+        &console.paths,
+        &console.state,
+        &console.custody,
+        None,
+        deadline,
+        &cancelled,
+    )
+    .await
+    .map_err(|_| "after revision")?;
     assert_eq!(first, after);
     Ok(())
 }

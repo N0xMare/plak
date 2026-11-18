@@ -12,6 +12,7 @@ fn fixture() -> (tempfile::TempDir, Arc<Console>) {
     let console = Console::new(
         paths,
         root.path().join("state"),
+        crate::gateway::HostCustody::Local,
         Some(tokio::runtime::Handle::current()),
         ConfiguredSwitches {
             web_accounts_read: false,
@@ -93,6 +94,7 @@ async fn settings_metadata_follows_effective_write_capability() -> TestResult {
         let console = Console::new(
             console.paths.clone(),
             console.state.clone(),
+            crate::gateway::HostCustody::Local,
             Some(tokio::runtime::Handle::current()),
             ConfiguredSwitches {
                 web_accounts_read: false,

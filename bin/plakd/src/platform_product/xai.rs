@@ -94,7 +94,7 @@ impl plakous_hosted::platform::XaiCredentials for ProductPlatformCredentials {
         account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
         self.require_account(account, plakous_hosted::account::Vertical::XaiApi)?;
-        if let Some(gateway) = self.gateway()? {
+        if let Some(gateway) = self.gateway() {
             let authority = plakous::xai::XaiPlatformApiKeyAuthority::new(
                 "plak/xai-api",
                 &account.source_authority("plak/xai/environment-or-file"),
@@ -140,7 +140,8 @@ mod tests {
             )
             .unwrap();
         }
-        let product = ProductPlatformCredentials::shared(&paths);
+        let product =
+            ProductPlatformCredentials::shared(&paths, crate::gateway::HostCustody::Local);
         let source =
             plakous_hosted::platform::XaiCredentials::xai(&*product, &"xai-api".parse().unwrap())
                 .unwrap();

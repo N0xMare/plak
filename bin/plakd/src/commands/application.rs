@@ -392,6 +392,9 @@ pub struct PlakousApplication {
     /// The process's one job bound, shared by every state root it opens.
     jobs: plakous_hosted::agent::ProcessJobs,
     credential_telemetry: Option<crate::telemetry_sink::CredentialTelemetryGuard>,
+    /// Where this process's credentials live; the subscriptions above are
+    /// already under it.
+    custody: crate::gateway::HostCustody,
 }
 
 impl PlakousApplication {
@@ -411,15 +414,17 @@ impl PlakousApplication {
                 .and_then(crate::telemetry_sink::install_product_credential_telemetry);
         }
     }
-    /// `state_home` is the XDG state home and `extra_telemetry_sink` the
-    /// binary's optional OTLP bridge; both come from the composition root.
-    pub fn new(
+    /// `state_home` is the XDG state home, `extra_telemetry_sink` the
+    /// binary's optional OTLP bridge and `custody` the process's latched
+    /// credential custody; all come from the composition root.
+    pub(crate) fn new(
         state_home: PathBuf,
         extra_telemetry_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
         product: Option<(
             product_paths::PlakPaths,
             Arc<dyn crate::store::session_records::SessionRecordStore>,
         )>,
+        custody: crate::gateway::HostCustody,
     ) -> CliResult<Self> {
         let paths = SubscriptionPaths::from_xdg_state_home(state_home.clone())
             .map_err(|error| native_subscription_failure(error, None, &state_home))?;
@@ -436,13 +441,9 @@ impl PlakousApplication {
         } else {
             None
         };
-        let subscriptions = NativeSubscriptions::new(paths);
-        let subscriptions = match &product {
-            Some(home) => crate::gateway::with_subscription_custody(subscriptions, home)
-                .map_err(CliFailure::new)?,
-            None => subscriptions,
-        };
-        let subscriptions = subscriptions.with_exchange_observer(exchange_observer.clone());
+        let subscriptions = custody
+            .subscriptions(NativeSubscriptions::new(paths))
+            .with_exchange_observer(exchange_observer.clone());
         Ok(Self {
             executor,
             subscriptions,
@@ -454,6 +455,7 @@ impl PlakousApplication {
             exchange_observer,
             jobs: plakous_hosted::agent::ProcessJobs::default(),
             credential_telemetry,
+            custody,
         })
     }
 
@@ -467,13 +469,16 @@ impl PlakousApplication {
 
     /// An accounts-and-catalog handle that will never open product state
     /// roots: read-only account/catalog workflows need no session authority.
-    pub fn for_accounts(state_home: PathBuf) -> CliResult<Self> {
-        Self::new(state_home, None, None)
+    pub(crate) fn for_accounts(
+        state_home: PathBuf,
+        custody: crate::gateway::HostCustody,
+    ) -> CliResult<Self> {
+        Self::new(state_home, None, None, custody)
     }
 
     #[cfg(test)]
     pub(crate) fn for_test_accounts(state_home: PathBuf) -> CliResult<Self> {
-        let mut application = Self::for_accounts(state_home)?;
+        let mut application = Self::for_accounts(state_home, crate::gateway::HostCustody::Local)?;
         application.subscriptions = application.subscriptions.with_clock(test_clock());
         Ok(application)
     }
@@ -569,6 +574,11 @@ impl PlakousApplication {
         }
     }
 
+    /// The credential custody this service was built under.
+    pub(crate) const fn custody(&self) -> &crate::gateway::HostCustody {
+        &self.custody
+    }
+
     /// The product home this service resolved at construction.
     pub(crate) fn product_paths(&self) -> CliResult<&product_paths::PlakPaths> {
         self.product
@@ -593,6 +603,7 @@ impl PlakousApplication {
             self.extra_telemetry_sink.clone(),
             self.session_records()?,
             &self.jobs,
+            &self.custody,
         )?;
         let roots = roots.with_exchange_observer(self.exchange_observer.clone());
         Ok(roots)
@@ -833,6 +844,7 @@ impl AccountOps for PlakousApplication {
     ) -> CliResult<product_usage::VerticalObservation> {
         Ok(crate::openrouter_product::legacy_key_usage(
             self.product_paths()?,
+            &self.custody,
             account,
         ))
     }
@@ -978,7 +990,11 @@ impl AccountOps for PlakousApplication {
     fn openrouter_models(&mut self, account: &AccountRef) -> CliResult<Vec<String>> {
         let paths = self.product_paths()?;
         self.executor
-            .block_on(crate::openrouter_product::list_models(paths, account))
+            .block_on(crate::openrouter_product::list_models(
+                paths,
+                self.custody.clone(),
+                account,
+            ))
             .map_err(application_execution_failure)?
     }
 
@@ -996,7 +1012,10 @@ impl AccountOps for PlakousApplication {
                 }
             })?;
         let paths = self.product_paths()?.clone();
-        let credentials = crate::platform_product::ProductPlatformCredentials::shared(&paths);
+        let credentials = crate::platform_product::ProductPlatformCredentials::shared(
+            &paths,
+            self.custody.clone(),
+        );
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs());

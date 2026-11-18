@@ -218,6 +218,8 @@ pub enum OpenRouterCatalogStatus {
     KeyPresentNoModel,
     Ok,
     Failed(String),
+    /// A configured gateway holds the key.
+    Gateway,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -376,6 +378,8 @@ pub enum OauthRefreshLookup {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OauthRecordStatus {
     Missing,
+    /// A configured gateway holds the record; this process does not read it.
+    Gateway,
     Unreadable(String),
     Present {
         status: String,
@@ -400,7 +404,9 @@ fn current_credential_generation(provider: &str) -> Option<u64> {
         .join("credential.json");
     match inspect_oauth_record(&record) {
         OauthRecordStatus::Present { generation, .. } => Some(generation),
-        OauthRecordStatus::Missing | OauthRecordStatus::Unreadable(_) => None,
+        OauthRecordStatus::Missing
+        | OauthRecordStatus::Gateway
+        | OauthRecordStatus::Unreadable(_) => None,
     }
 }
 
@@ -488,6 +494,21 @@ pub fn probe_oauth_credential(
             Ok(None) => OauthRefreshLookup::None,
             Err(detail) => OauthRefreshLookup::Unavailable(detail),
         },
+    }
+}
+
+/// One account's credential verdict as a configured gateway reports it. The
+/// record and its refresh history live with the gateway.
+#[must_use]
+pub fn probe_gateway_credential(
+    provider: &'static str,
+    credential: Result<CliStatus, String>,
+) -> OauthCredentialProbe {
+    OauthCredentialProbe {
+        provider,
+        credential,
+        record: OauthRecordStatus::Gateway,
+        last_refresh: OauthRefreshLookup::None,
     }
 }
 
@@ -872,16 +893,33 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
     checks.push(storage_space::check(input.storage_admission));
     checks.push(config_check(&input.paths.config, input.config));
     if !input.forward_config_keys.is_empty() {
+        // `[gateway]` is newer than 0.0.4 itself: a 0.0.4 build without the
+        // gateway refuses it too.
+        let gateway = input
+            .forward_config_keys
+            .iter()
+            .any(|key| key.starts_with("[gateway]"));
+        let (refusing, remedy) = if gateway {
+            (
+                "a 0.0.3 build or a build without the gateway",
+                "remove them before running a 0.0.3 build or a build without the gateway on this home",
+            )
+        } else {
+            (
+                "a 0.0.3 build",
+                "remove them before running a 0.0.3 build on this home",
+            )
+        };
         checks.push(DoctorCheck::new(
             CheckKind::ConfigCompatibility,
             "config",
             Severity::Warning,
             "config uses 0.0.4-only keys",
             format!(
-                "{}; a 0.0.3 build sharing this home refuses this config.toml",
+                "{}; {refusing} sharing this home refuses this config.toml",
                 input.forward_config_keys.join(", ")
             ),
-            Some("remove them before running a 0.0.3 build on this home"),
+            Some(remedy),
         ));
     }
     checks.push(database_check(
@@ -1303,6 +1341,14 @@ fn openrouter_catalog_check(status: OpenRouterCatalogStatus) -> DoctorCheck {
             "no OpenRouter key; catalog allowlist is checked at attach",
             None,
         ),
+        OpenRouterCatalogStatus::Gateway => DoctorCheck::new(
+            CheckKind::OpenRouterCatalog,
+            "provider",
+            Severity::Ok,
+            "gateway",
+            "the gateway holds the OpenRouter key; catalog allowlist is checked at attach",
+            None,
+        ),
         OpenRouterCatalogStatus::KeyPresentNoModel => DoctorCheck::new(
             CheckKind::OpenRouterCatalog,
             "provider",
@@ -1464,6 +1510,7 @@ fn oauth_check(kind: CheckKind, probe: OauthCredentialProbe) -> DoctorCheck {
     };
     let record_detail = match &probe.record {
         OauthRecordStatus::Missing => "no record".to_owned(),
+        OauthRecordStatus::Gateway => "record held by the gateway".to_owned(),
         OauthRecordStatus::Unreadable(reason) => format!("record unreadable: {reason}"),
         OauthRecordStatus::Present {
             status,

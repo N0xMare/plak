@@ -16,6 +16,7 @@ fn fixture() -> Arc<Console> {
     Console::new(
         crate::home::paths::PlakPaths::explicit("unused".into()),
         "unused".into(),
+        crate::gateway::HostCustody::Local,
         None,
         dto::ConfiguredSwitches {
             web_accounts_read: false,

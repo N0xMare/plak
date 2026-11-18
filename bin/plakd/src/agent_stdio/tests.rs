@@ -692,6 +692,7 @@ fn openrouter_hello_preserves_canonical_effort_and_omission() {
             &injected.ready_catalog,
             None,
             &[],
+            &crate::gateway::HostCustody::Local,
         )
         .unwrap();
         assert_eq!(config.effort.map(effort_label).as_deref(), canonical_effort);

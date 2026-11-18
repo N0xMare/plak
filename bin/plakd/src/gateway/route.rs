@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use super::address::{self, GatewayAddress};
+use super::address::GatewayAddress;
 use super::holder;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -33,14 +33,18 @@ impl AccountRoute {
     }
 }
 
+/// Where an account command goes: the configured gateway, else a local
+/// service that advertised its socket, else this process. Discovery does
+/// not create the holder file.
 pub(crate) fn select(
-    configured: Option<&str>,
-    allow_non_tailnet: bool,
+    custody: &super::HostCustody,
     lock_path: &Path,
 ) -> Result<AccountRoute, String> {
-    if let Some(text) = configured.map(str::trim).filter(|text| !text.is_empty()) {
-        let address = address::parse(text, allow_non_tailnet).map_err(|error| error.to_string())?;
-        return Ok(AccountRoute::Configured(address));
+    if let Some(address) = custody.address() {
+        return Ok(AccountRoute::Configured(address.clone()));
+    }
+    if !lock_path.is_file() {
+        return Ok(AccountRoute::InProcess);
     }
     match holder::advertised_socket(lock_path) {
         Ok(Some(path)) => Ok(AccountRoute::Service(GatewayAddress::Unix(path))),

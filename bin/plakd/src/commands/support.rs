@@ -37,13 +37,15 @@ pub const HOST_WORKER_JOIN_TIMEOUT: Duration = Duration::from_secs(30);
 /// The binary owns the OTLP bridge. The composition root builds the sink once and
 /// passes it to every state root it opens, under the process's one job
 /// bound (`jobs`). This construction also captures HOME once to supply the
-/// conventional product-state protection paths.
-pub fn product_state_roots_from(
+/// conventional product-state protection paths. `custody` is the process's
+/// latched credential custody, never re-read from `context`.
+pub(crate) fn product_state_roots_from(
     context: &product_paths::PlakPaths,
     state_home: PathBuf,
     extra_telemetry_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
     session_records: Arc<dyn crate::store::session_records::SessionRecordStore>,
     jobs: &plakous_hosted::agent::ProcessJobs,
+    custody: &crate::gateway::HostCustody,
 ) -> CliResult<product_agent::ProductStateRoots> {
     // One canonical product home for both: `ProductStateRoots` canonicalises
     // its own copy, and the telemetry writer registry is keyed by the path the
@@ -55,8 +57,10 @@ pub fn product_state_roots_from(
     let telemetry = crate::telemetry_sink::ProductTelemetryFactory::new(paths.clone());
     let paths_for_roster = context.clone();
     let named_secret_paths = paths.clone();
-    let credentials = crate::openrouter_product::ProductOpenRouterCredentials::shared(&paths);
-    let platform_credentials = crate::platform_product::ProductPlatformCredentials::shared(&paths);
+    let credentials =
+        crate::openrouter_product::ProductOpenRouterCredentials::shared(&paths, custody.clone());
+    let platform_credentials =
+        crate::platform_product::ProductPlatformCredentials::shared(&paths, custody.clone());
     let runtime_database = paths.runtime_database();
     let job_outputs = paths.job_outputs();
     let tree_store = crate::store::tree::ProductTreeStoreFactory::new(paths);
@@ -88,10 +92,7 @@ pub fn product_state_roots_from(
             plakous_hosted::platform::ApiWindow::Working,
         );
     // A configured gateway holds the logins; the roots never open the store.
-    let roots = match crate::gateway::host_gateway(context).map_err(CliFailure::new)? {
-        Some(gateway) => crate::gateway::roots_under(roots, &gateway),
-        None => roots,
-    };
+    let roots = custody.roots(roots);
     if let Some(sink) = extra_telemetry_sink {
         roots.set_extra_telemetry_sink(sink);
     }

@@ -59,7 +59,8 @@ impl Gateway {
             .map_err(|error| format!("callers.json: {error}"))?;
         let flags = Flags::load(&server_config::flags_path(home))?;
         let audit = Audit::open(server_config::audit_dir(home), config.audit_retention_days)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| error.to_string())?
+            .publishing_failures(server_config::audit_failures_path(home), instance.as_str());
         let state = Arc::new(GatewayState {
             instance,
             config,
@@ -72,6 +73,7 @@ impl Gateway {
             draining: std::sync::atomic::AtomicBool::new(false),
             listeners: Mutex::new(Vec::new()),
             shutdown: tokio::sync::Notify::new(),
+            relays: Mutex::new(std::collections::HashMap::new()),
         });
         let product = Arc::new(ProductGateway::new(home, Arc::clone(&state)));
         let upstream = plakous::gateway::server::http1_upstream()
@@ -86,15 +88,24 @@ impl Gateway {
         })
     }
 
-    /// Foreground serve until SIGTERM, Ctrl-C or an admin drain.
+    /// Foreground serve until SIGTERM, Ctrl-C or an admin drain. The holder
+    /// lock is released only after in-flight relays and refresh claims
+    /// settled (or their deadline passed) and the runtime shut down.
     pub(crate) fn serve_foreground(self) -> Result<(), String> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .map_err(|error| error.to_string())?;
-        let state = Arc::clone(&self.state);
+        let Self {
+            state,
+            server,
+            lock,
+        } = self;
         let stop_state = Arc::clone(&state);
-        runtime.block_on(async move {
+        // The account bridge owns its own executor: the last reference to the
+        // state must drop here, outside the gateway runtime's tasks.
+        let held = Arc::clone(&state);
+        let result = runtime.block_on(async move {
             let stop = async move {
                 let mut terminate =
                     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
@@ -109,20 +120,21 @@ impl Gateway {
                 stop_state.draining.store(true, Ordering::Relaxed);
                 Ok(())
             };
-            self.run_until(stop).await
-        })
-    }
-
-    /// Serves until `stop` completes, then releases the holder lock.
-    pub(crate) async fn run_until(
-        self,
-        stop: impl Future<Output = Result<(), String>>,
-    ) -> Result<(), String> {
-        let result = run(Arc::clone(&self.state), self.server, stop).await;
-        drop(self.lock);
+            run(state, server, stop).await
+        });
+        runtime.shutdown_timeout(RUNTIME_SHUTDOWN);
+        drop(held);
+        drop(lock);
         result
     }
 }
+
+/// How long in-flight relays and refresh claims may take to settle once the
+/// service stops accepting.
+const DRAIN_DEADLINE: Duration = Duration::from_secs(30);
+
+/// How long the runtime's remaining tasks get after the drain deadline.
+const RUNTIME_SHUTDOWN: Duration = Duration::from_secs(5);
 
 pub(crate) async fn run(
     state: Arc<GatewayState>,
@@ -188,7 +200,10 @@ pub(crate) async fn run(
             }
         }
     }
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    // `inflight` counts every relay until its audit and every call, including
+    // refresh claims, which run to completion on their own task even when
+    // their caller leaves.
+    let deadline = tokio::time::Instant::now() + DRAIN_DEADLINE;
     while state.inflight.load(Ordering::Relaxed) > 0 && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -204,14 +219,27 @@ async fn accept_tcp(
     }
 }
 
+/// A stale socket of this user is replaced; anything else at the path is
+/// refused, never unlinked.
 fn prepare_socket(path: &PathBuf) -> Result<(), String> {
+    use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
     if let Some(parent) = path.parent() {
         ensure_private_dir(parent).map_err(|error| error.to_string())?;
     }
-    if path.exists() {
-        std::fs::remove_file(path).map_err(|error| error.to_string())?;
+    match std::fs::symlink_metadata(path) {
+        Ok(meta)
+            if meta.file_type().is_socket()
+                && meta.uid() == rustix::process::geteuid().as_raw() =>
+        {
+            std::fs::remove_file(path).map_err(|error| error.to_string())
+        }
+        Ok(_) => Err(format!(
+            "{} exists and is not this user's socket; remove it or set another gateway.toml socket",
+            path.display()
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
     }
-    Ok(())
 }
 
 impl std::fmt::Display for super::callers::CallerError {

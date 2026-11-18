@@ -61,6 +61,7 @@ impl Linked {
         let console = Console::new(
             paths.clone(),
             paths.home().join("state"),
+            crate::gateway::HostCustody::Local,
             Some(tokio::runtime::Handle::current()),
             dto::ConfiguredSwitches {
                 web_accounts_read: false,

@@ -184,16 +184,16 @@ reload_requests = false
 # The credential gateway this process calls. An absent address keeps account commands in this process.
 # [gateway]
 
-# Where this process sends account and relay calls. Unset keeps them in this process. A tcp address must be loopback, tailnet or allow_non_tailnet.
-# type: string · default: (unset) · unix:<absolute path> or tcp:<ip>:<port>; loopback, tailnet or allow_non_tailnet; home-scoped
+# Where this process sends account and relay calls. Unset keeps them in this process. A tcp address must be loopback, tailnet or allow_non_tailnet. Captured at host startup; restart to change it.
+# type: string · default: (unset) · unix:<absolute path> or tcp:<ip>:<port>; loopback, tailnet or allow_non_tailnet; home-scoped; host restart required
 # address = "unix:/run/user/1000/plak/gateway.sock"
 
-# The caller key file for a configured gateway address. The default is the home secrets gateway.key. A same-UID unix peer that is the local administrator does not need it.
-# type: string · default: (unset) · absolute path; mode 0600; home-scoped
+# The caller key file for a configured gateway address. A tcp address defaults to the home secrets gateway.key; a unix address sends a key only when this is set, and a same-UID unix peer without one is the local administrator. Captured at host startup.
+# type: string · default: (unset) · absolute path; mode 0600; home-scoped; host restart required
 # key_file = "/home/user/.plak/secrets/gateway.key"
 
-# Admit a tcp gateway address outside loopback and the tailnet ranges. Default false.
-# type: bool · default: false · true or false; home-scoped
+# Admit a tcp gateway address outside loopback and the tailnet ranges. Default false. Captured at host startup.
+# type: bool · default: false · true or false; home-scoped; host restart required
 # allow_non_tailnet = false
 
 # Optional-tool options. A table enables nothing: a template enables a tool by

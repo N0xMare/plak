@@ -345,7 +345,8 @@ pub(crate) fn run_agent_after_admission(
         ));
     }
     let presentation_started = Instant::now();
-    let presentation = super::host_config::binding_presentation(paths, &selected)?;
+    let custody = services.custody()?;
+    let presentation = super::host_config::binding_presentation(paths, &custody, &selected)?;
     let presentation_ms =
         u64::try_from(presentation_started.elapsed().as_millis()).unwrap_or(u64::MAX);
     let resolve_started = Instant::now();
@@ -361,6 +362,7 @@ pub(crate) fn run_agent_after_admission(
         &presentation.sections,
         None,
         &presentation.native_models,
+        &custody,
     )
     .map_err(|error| error.or_kind(CliFailureKind::Auth))?;
     config.ready_path = product_host::ReadyPathTiming {

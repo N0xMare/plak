@@ -37,11 +37,9 @@ pub(crate) use holder::{HolderLock, acquire_shared_creating};
 pub(crate) use install::{install, uninstall};
 pub(crate) use remote_account::{hold_in_process, try_remote_account};
 pub(crate) use route::{AccountRoute, provider_key_env_set, select};
-pub(crate) use route_custody::connect as host_gateway;
-pub(crate) use route_custody::{AdminLink, admin_link, with_subscription_custody};
+pub(crate) use route_custody::{AdminLink, HostCustody};
 pub(crate) use server_config::ServerConfig;
 pub(crate) use service::Gateway;
-pub(crate) use subscription_custody::roots_under;
 
 use std::io::Write;
 use std::net::SocketAddr;
@@ -56,9 +54,16 @@ use holder::lock_path;
 pub(crate) fn serve(home: &crate::home::paths::PlakPaths) -> Result<(), String> {
     let config = ServerConfig::load(home)?;
     ServerConfig::require_host_state_root(&config.state_root)?;
-    let app = crate::commands::application::PlakousApplication::new(config.state_root, None, None)
-        .map_err(|error| error.to_string())?
-        .with_account_home(Some(home.clone()));
+    // The service is the store's custodian: it never relays to a gateway,
+    // even when the shared home's config.toml names this one.
+    let app = crate::commands::application::PlakousApplication::new(
+        config.state_root,
+        None,
+        None,
+        HostCustody::Local,
+    )
+    .map_err(|error| error.to_string())?
+    .with_account_home(Some(home.clone()));
     let gateway = Gateway::open(
         home,
         Box::new(ops::OpsBridge::new(app, home.clone(), fresh_instance()?)),
@@ -103,6 +108,12 @@ pub(crate) fn status_text(
         Some(address) => {
             let versions = client::versions(address, key)?;
             lines.push(format!("instance {}", versions.instance.as_str()));
+            if let Some(count) = audit::published_failures(
+                &server_config::audit_failures_path(home),
+                versions.instance.as_str(),
+            ) {
+                lines.push(format!("audit append failures {count}"));
+            }
             lines.push(format!(
                 "versions {}",
                 versions
@@ -128,6 +139,7 @@ pub(crate) fn audit_text(
     since: Option<&str>,
     caller: Option<&str>,
 ) -> Result<String, String> {
+    let since = since.map(audit::parse_since).transpose()?;
     let lines = audit::read_lines(&server_config::audit_dir(home), since, caller)
         .map_err(|error| error.to_string())?;
     Ok(lines.join("\n"))
@@ -286,16 +298,20 @@ pub(crate) fn check(
     Ok(())
 }
 
-pub(crate) fn route_for(home: &crate::home::paths::PlakPaths) -> Result<AccountRoute, String> {
-    let config = crate::product_config::ProductConfig::load(home)
-        .unwrap_or_else(|_| crate::product_config::ProductConfig::default_product());
-    let (address, allow) = gateway_client_settings(&config);
-    let state = ServerConfig::load(home).map(|config| config.state_root);
-    let state = match state {
-        Ok(path) => path,
+/// The account route for a CLI gateway verb under `custody`. Discovery
+/// reads the state root `gateway.toml` names, else the host state home.
+pub(crate) fn route_for(
+    home: &crate::home::paths::PlakPaths,
+    custody: &HostCustody,
+) -> Result<AccountRoute, String> {
+    if let Some(address) = custody.address() {
+        return Ok(AccountRoute::Configured(address.clone()));
+    }
+    let state = match ServerConfig::load(home) {
+        Ok(config) => config.state_root,
         Err(_) => crate::home::paths::application_state_home()?,
     };
-    select(address.as_deref(), allow, &lock_path(&state))
+    select(custody, &lock_path(&state))
 }
 
 fn flag_target(account: Option<&str>, caller: Option<&str>) -> Result<DisableTarget, String> {
@@ -309,15 +325,6 @@ fn flag_target(account: Option<&str>, caller: Option<&str>) -> Result<DisableTar
         }),
         (Some(_), Some(_)) => Err("disable one of an account or a caller, not both".to_owned()),
     }
-}
-
-pub(crate) fn gateway_client_settings(
-    config: &crate::product_config::ProductConfig,
-) -> (Option<String>, bool) {
-    (
-        config.gateway_address.clone(),
-        config.gateway_allow_non_tailnet,
-    )
 }
 
 pub(crate) fn validate_client_config(
@@ -334,10 +341,10 @@ pub(crate) fn validate_client_config(
     Ok(())
 }
 
-pub(crate) fn host_may_open_store(
-    config: &crate::product_config::ProductConfig,
-) -> Result<(), String> {
-    if config.gateway_address.is_some() {
+/// A gateway host refuses provider key variables: the gateway's own
+/// environment is the one that resolves keys.
+pub(crate) fn host_may_open_store(custody: &HostCustody) -> Result<(), String> {
+    if custody.address().is_some() {
         let set = provider_key_env_set();
         if !set.is_empty() {
             return Err(format!(
@@ -349,8 +356,14 @@ pub(crate) fn host_may_open_store(
     Ok(())
 }
 
-/// Reads the caller key file. The value is not logged.
+/// Reads the caller key file, which must be a regular file only its owner
+/// can read or write. The value is not logged.
 pub(crate) fn read_key_file(path: &std::path::Path) -> Result<String, String> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let meta = std::fs::metadata(path).map_err(|error| error.to_string())?;
+    if !meta.is_file() || meta.permissions().mode() & 0o077 != 0 {
+        return Err("the gateway key file must be a regular file with mode 0600".to_owned());
+    }
     let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     let key = text.trim();
     if key.is_empty() {

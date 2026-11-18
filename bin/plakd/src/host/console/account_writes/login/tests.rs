@@ -20,6 +20,7 @@ fn console_at(root: &std::path::Path) -> Arc<Console> {
     Console::new(
         crate::home::paths::PlakPaths::explicit(root.join("home")),
         root.join("state"),
+        crate::gateway::HostCustody::Local,
         None,
         plakd_wire_types::console::ConfiguredSwitches {
             web_accounts_read: false,
@@ -125,6 +126,7 @@ async fn forged_attempt_poll_and_cancel_never_reveal_another_connections_challen
     let console = Console::new(
         crate::home::paths::PlakPaths::explicit(root.path().join("home")),
         root.path().join("state"),
+        crate::gateway::HostCustody::Local,
         None,
         plakd_wire_types::console::ConfiguredSwitches {
             web_accounts_read: false,

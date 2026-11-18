@@ -20,25 +20,24 @@ pub(super) struct Roster {
 
 pub(super) struct Reader {
     pub subscriptions: plakous::subscriptions::NativeSubscriptions,
+    custody: crate::gateway::HostCustody,
 }
 
-pub(super) fn reader(state: &std::path::Path) -> Result<Reader, ReadRefusal> {
-    reader_at(state, None)
-}
-
+/// The console's account reader under the host's latched `custody`. Under
+/// a gateway the subscriptions relay through it and key rows come from its
+/// admin status: this process opens neither the store nor `secrets/`.
 pub(super) fn reader_at(
     state: &std::path::Path,
-    home: Option<&PlakPaths>,
+    custody: &crate::gateway::HostCustody,
 ) -> Result<Reader, ReadRefusal> {
     let paths = plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(state.to_path_buf())
         .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))?;
-    let subscriptions = plakous::subscriptions::NativeSubscriptions::new(paths);
-    let subscriptions = match home {
-        Some(home) => crate::gateway::with_subscription_custody(subscriptions, home)
-            .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))?,
-        None => subscriptions,
-    };
-    Ok(Reader { subscriptions })
+    let subscriptions =
+        custody.subscriptions(plakous::subscriptions::NativeSubscriptions::new(paths));
+    Ok(Reader {
+        subscriptions,
+        custody: custody.clone(),
+    })
 }
 impl Reader {
     pub fn subscriptions_for(
@@ -60,10 +59,10 @@ impl Reader {
     }
 }
 
-fn gateway_names(paths: &PlakPaths) -> Result<Option<Vec<String>>, ReadRefusal> {
-    let Some(link) = crate::gateway::admin_link(paths)
-        .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))?
-    else {
+fn gateway_names(
+    custody: &crate::gateway::HostCustody,
+) -> Result<Option<Vec<String>>, ReadRefusal> {
+    let Some(link) = custody.admin() else {
         return Ok(None);
     };
     match link.call(&plakous::gateway::protocol::admin::AdminRequest::List {}) {
@@ -74,6 +73,38 @@ fn gateway_names(paths: &PlakPaths) -> Result<Option<Vec<String>>, ReadRefusal> 
                 .collect(),
         )),
         _ => Err(unavailable(ReadScope::Accounts, UnavailableCode::Storage)),
+    }
+}
+
+/// One API-key account's key facts from the gateway's admin status.
+fn gateway_key(
+    link: &crate::gateway::AdminLink,
+    account: &AccountRef,
+) -> Result<Option<plakous::gateway::protocol::facts::KeyFacts>, ()> {
+    link.status(account.as_str())
+        .map(|facts| facts.and_then(|facts| facts.key))
+        .map_err(|_| ())
+}
+
+fn gateway_key_status(key: Option<plakous::gateway::protocol::facts::KeyFacts>) -> KeyStatus {
+    use plakous::gateway::protocol::facts::KeySource as Source;
+    match key {
+        Some(key) => KeyStatus {
+            source: match key.source {
+                Source::Environment => KeySource::Environment,
+                Source::File => KeySource::File,
+                Source::Missing => KeySource::Missing,
+            },
+            fingerprint: key.fingerprint.map(|text| text.as_str().to_owned()),
+            environment_override: key.env_var.is_some(),
+            shadowed_file_fingerprint: None,
+        },
+        None => KeyStatus {
+            source: KeySource::Missing,
+            fingerprint: None,
+            environment_override: false,
+            shadowed_file_fingerprint: None,
+        },
     }
 }
 
@@ -116,7 +147,7 @@ pub(super) async fn roster(
             truncated: false,
         });
     }
-    if let Some(names) = gateway_names(paths)? {
+    if let Some(names) = gateway_names(&application.custody)? {
         return Ok(roster_from_names(names));
     }
     let mut accounts = BTreeSet::new();
@@ -187,7 +218,24 @@ pub(super) async fn status(
         remedies: Vec::new(),
         diagnostics: Vec::new(),
     };
-    if vertical.is_api() {
+    if vertical.is_api()
+        && let Some(link) = application.custody.admin()
+    {
+        match gateway_key(link, account) {
+            Ok(key) => {
+                let key = gateway_key_status(key);
+                if key.source == KeySource::Missing {
+                    row.remedies.push(remedy(ReadAction::SetKey, account));
+                }
+                row.key = Some(key);
+            }
+            Err(()) => row.diagnostics.push(diagnostic(
+                "key_status_unavailable",
+                Some(account.as_str()),
+                "the gateway did not answer key status",
+            )),
+        }
+    } else if vertical.is_api() {
         match secrets::key_status(paths, account.as_str()) {
             Ok(key) => {
                 if key.source == secrets::KeySource::Missing {
@@ -384,6 +432,10 @@ pub(super) async fn exists(
             .account_exists(provider)
             .await
             .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
+    } else if let Some(link) = application.custody.admin() {
+        gateway_key(link, account)
+            .map(|key| gateway_key_status(key).source != KeySource::Missing)
+            .map_err(|()| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
     } else {
         secrets::key_status(paths, account.as_str())
             .map(|key| key.source != secrets::KeySource::Missing)
@@ -419,7 +471,7 @@ impl super::Console {
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<plakd_wire_types::console::HostResponse, ReadRefusal> {
-        let reader = reader(&self.state)?;
+        let reader = reader_at(&self.state, &self.custody)?;
         if let Some(selected) = selected.as_deref()
             && !exists(&reader, &self.paths, &exact(selected)?).await?
         {

@@ -115,8 +115,12 @@ impl Drop for Flight {
     }
 }
 
-pub(crate) fn legacy(paths: &PlakPaths, account: &AccountRef) -> VerticalObservation {
-    let credentials = super::ProductOpenRouterCredentials::shared(paths);
+pub(crate) fn legacy(
+    paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
+    account: &AccountRef,
+) -> VerticalObservation {
+    let credentials = super::ProductOpenRouterCredentials::shared(paths, custody.clone());
     project(openrouter::probe_openrouter_key_usage(
         credentials.as_ref(),
         account,
@@ -132,11 +136,12 @@ struct Capture {
 }
 fn prepare_capture(
     paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
     account: &AccountRef,
 ) -> (Arc<dyn openrouter::OpenRouterCredentials>, Capture) {
     let flight = Flight::legacy(entry(paths, account));
     let before = fence(paths, account).ok();
-    let (credentials, receipt) = super::usage_credentials(paths);
+    let (credentials, receipt) = super::usage_credentials(paths, custody.clone());
     (
         credentials,
         Capture {
@@ -150,12 +155,13 @@ fn prepare_capture(
 }
 pub(super) fn capture(
     paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
     account: &AccountRef,
 ) -> (
     Arc<dyn openrouter::OpenRouterCredentials>,
     Box<dyn openrouter::KeyUsageObserver>,
 ) {
-    let (credentials, capture) = prepare_capture(paths, account);
+    let (credentials, capture) = prepare_capture(paths, custody, account);
     (credentials, Box::new(capture))
 }
 impl Capture {
@@ -205,7 +211,8 @@ mod tests {
             &super::super::UsageReceipt,
         ) -> VerticalObservation,
     ) -> VerticalObservation {
-        let (credentials, capture) = prepare_capture(paths, account);
+        let (credentials, capture) =
+            prepare_capture(paths, &crate::gateway::HostCustody::Local, account);
         let observation = fetch(credentials, &capture.receipt);
         capture.publish(&observation);
         observation

@@ -149,14 +149,12 @@ struct NativePresentationBackend {
 }
 
 impl NativePresentationBackend {
-    fn new(state_home: PathBuf, home: &PlakPaths) -> CliResult<Self> {
+    fn new(state_home: PathBuf, custody: &crate::gateway::HostCustody) -> CliResult<Self> {
         let paths = SubscriptionPaths::from_xdg_state_home(state_home.clone())
             .map_err(|error| native_subscription_failure(error, None, &state_home))?;
         let executor = ApplicationExecutor::new()
             .map_err(|_| CliFailure::new("application executor construction failed"))?;
-        let subscriptions =
-            crate::gateway::with_subscription_custody(NativeSubscriptions::new(paths), home)
-                .map_err(CliFailure::new)?;
+        let subscriptions = custody.subscriptions(NativeSubscriptions::new(paths));
         Ok(Self {
             executor,
             subscriptions,
@@ -217,9 +215,12 @@ impl PresentationBackend for NativePresentationBackend {
 
 /// Build host catalog rows and full-catalog native model facts from the
 /// persisted catalog snapshot. Does not refresh live catalogs.
-pub fn catalog_bundle(paths: &PlakPaths) -> CliResult<HostCatalogBundle> {
+pub(crate) fn catalog_bundle(
+    paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
+) -> CliResult<HostCatalogBundle> {
     let state_home = paths::application_state_home().map_err(CliFailure::new)?;
-    let mut backend = NativePresentationBackend::new(state_home, paths)?;
+    let mut backend = NativePresentationBackend::new(state_home, custody)?;
     Ok(catalog_bundle_with_backend_and_composition(
         paths,
         &mut backend,
@@ -229,27 +230,14 @@ pub fn catalog_bundle(paths: &PlakPaths) -> CliResult<HostCatalogBundle> {
 
 /// Build provider and model sections for external clients from the persisted catalog
 /// snapshot. Does not refresh live catalogs.
-pub fn catalog_values(
+pub(crate) fn catalog_values(
     paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
 ) -> CliResult<(
     Vec<plakous_host_protocol::views::ProviderDef>,
     Vec<plakous_host_protocol::views::ProviderSection>,
 )> {
-    let bundle = catalog_bundle(paths)?;
-    Ok((bundle.providers, bundle.sections.accounts))
-}
-
-/// Build provider and model sections for one composition selection.
-pub fn catalog_values_for_composition(
-    paths: &PlakPaths,
-    composition: ProductCompositionSelection,
-) -> CliResult<(
-    Vec<plakous_host_protocol::views::ProviderDef>,
-    Vec<plakous_host_protocol::views::ProviderSection>,
-)> {
-    let state_home = paths::application_state_home().map_err(CliFailure::new)?;
-    let mut backend = NativePresentationBackend::new(state_home, paths)?;
-    let bundle = catalog_bundle_with_backend_and_composition(paths, &mut backend, composition);
+    let bundle = catalog_bundle(paths, custody)?;
     Ok((bundle.providers, bundle.sections.accounts))
 }
 

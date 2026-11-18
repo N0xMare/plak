@@ -769,7 +769,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         ),
         Command::Doctor => run_doctor(&services, &mut stdout),
         Command::Gateway(command) => {
-            gateway::execute(services.paths()?, command, &mut stdout).map_err(CliFailure::new)?;
+            gateway::execute(&services, command, &mut stdout).map_err(CliFailure::new)?;
             Ok(ProcessOutcome::Success)
         }
         Command::TreeRelease { tree_id, force } => {
@@ -846,6 +846,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
                         .cloned()
                         .zip(services.session_records().ok())
                 },
+                services.custody()?,
             )?
             .with_account_home(services.paths().ok().cloned())
             .with_process_jobs(services.process_jobs());

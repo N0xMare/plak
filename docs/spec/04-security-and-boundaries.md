@@ -1347,8 +1347,33 @@ before authentication is a bare 401 with no detail. A TCP listener refuses
 TCP always requires a caller key, and the key's source list must contain the
 peer address. Caller secrets are stored only as hashes and compared in constant
 time. Remote admin may log in to a signed-out or new slot, or re-login the same
-account; replacing an account requires the local administrator. The audit log
-records metadata only.
+account; replacing an account requires the local administrator. The gateway
+decides this at `login_start`: for a non-local-admin caller whose slot is
+signed in (any state but signed out or revoked, an unreadable record
+included), the pending login is held to the slot's provider account. At
+completion, paste or device code alike, the private store compares the new
+record's account binding with the current one under its lock and the login's
+fence, and refuses a different account before writing
+(`PrivateStoreError::AccountReplacementRefused`); the caller gets
+`local_admin_required` and the store is unchanged. The local administrator's
+login is not held.
+
+A global kill switch blocks every relay, facts and refresh call, the local
+administrator's included, and every caller's admin call. The local
+administrator keeps `enable`, `disable`, `drain`, `caller list` and `status`, so a
+disable can always be cleared and the service drained. `disable --cut` saves
+the flag first, then cancels each matching relay in flight; the caller sees an
+`End` `cancelled` frame and the upstream exchange is dropped. A relay that
+registers while a disable lands re-checks the flag, so none escapes a cut.
+
+A host with a unix `[gateway] address` refuses to start unless the exclusive
+holder of its own state home's store advertises exactly that socket; `gateway
+check` and `plakd doctor` apply the same check, so a host never relays through a
+gateway that holds another store. The caller key file must be owner-only; a
+unix gateway gets a key only when `gateway.key_file` names one. The service
+replaces a stale socket only when it is this user's socket. The audit log
+records metadata only; a failed append is counted and shown by `plakd gateway
+status`.
 
 ## 3. Credentials
 

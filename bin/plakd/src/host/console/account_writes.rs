@@ -175,13 +175,9 @@ impl Console {
     }
 
     fn application(&self) -> Result<PlakousApplication, AccountError> {
-        let mut app = PlakousApplication::new(self.state.clone(), None, None)
+        PlakousApplication::new(self.state.clone(), None, None, self.custody.clone())
             .map(|app| app.with_account_home(Some(self.paths.clone())))
-            .map_err(|_| failed(false))?;
-        app.subscriptions =
-            crate::gateway::with_subscription_custody(app.subscriptions, &self.paths)
-                .map_err(|_| failed(false))?;
-        Ok(app)
+            .map_err(|_| failed(false))
     }
 
     fn execute_account(&self, request: HostRequest) -> Result<HostResponse, AccountError> {
@@ -189,8 +185,8 @@ impl Console {
             .and_then(|action| operator::account(&action).map(str::to_owned))
             .ok_or_else(|| failed(false))?;
         let account = super::accounts::exact(&selected)?;
-        if let Some(link) = crate::gateway::admin_link(&self.paths).map_err(|_| failed(false))? {
-            return remote::execute(&link, &selected, request);
+        if let Some(link) = self.custody.admin() {
+            return remote::execute(link, &selected, request);
         }
         let mut remote_grant_may_remain = None;
         match request {

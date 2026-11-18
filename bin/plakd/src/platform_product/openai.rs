@@ -90,7 +90,7 @@ impl plakous_hosted::platform::OpenAiCredentials for ProductPlatformCredentials 
         account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<Arc<OpenAiKeySource>> {
         self.require_account(account, plakous_hosted::account::Vertical::OpenAi)?;
-        if let Some(gateway) = self.gateway()? {
+        if let Some(gateway) = self.gateway() {
             let reference = CredentialReference::application(account.credential_reference())
                 .map_err(|_| CliFailure::new("OpenAI credential reference is invalid"))?;
             let authority = CredentialAuthorityId::new(
@@ -148,6 +148,7 @@ mod tests {
         Ok(Arc::new(OpenAiSource::new(
             ProductPlatformCredentials {
                 paths: paths.clone(),
+                custody: crate::gateway::HostCustody::Local,
             },
             plakous_hosted::account::AccountRef::default_for(
                 plakous_hosted::account::Vertical::OpenAi,
@@ -208,6 +209,7 @@ mod tests {
         }
         let product = ProductPlatformCredentials {
             paths: paths.clone(),
+            custody: crate::gateway::HostCustody::Local,
         };
         let work = OpenAiSource::new(product.clone(), "openai/work".parse().unwrap()).unwrap();
         let other = OpenAiSource::new(product.clone(), "openai/other".parse().unwrap()).unwrap();
