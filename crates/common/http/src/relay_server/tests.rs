@@ -142,6 +142,7 @@ struct Service {
     generation: AtomicU64,
     moves_per_inject: AtomicU64,
     held: Arc<AtomicUsize>,
+    audited: Mutex<Vec<super::RelayOutcome>>,
 }
 
 /// Counts itself held until dropped, as a store's Ready lease would be.
@@ -159,6 +160,7 @@ impl Service {
             generation: AtomicU64::new(7),
             moves_per_inject: AtomicU64::new(0),
             held: Arc::new(AtomicUsize::new(0)),
+            audited: Mutex::new(Vec::new()),
         })
     }
 
@@ -239,6 +241,10 @@ impl GatewayService for Service {
                 _ => Err(GatewayRefusal::ScopeDenied {}),
             }
         })
+    }
+
+    fn audit(&self, record: super::RelayRecord) {
+        self.audited.lock().unwrap().push(record.outcome);
     }
 }
 
@@ -859,5 +865,56 @@ async fn upstream_faults_apply_to_the_gateway_upstream_hop_only() {
         fixture.accepted.load(Ordering::SeqCst),
         0,
         "the injected status never dials"
+    );
+}
+
+#[tokio::test]
+async fn a_head_the_frames_cannot_carry_is_a_gateway_failure_not_an_abandonment() {
+    // More upstream headers than a Head frame carries, within the gateway
+    // upstream client's own bounds.
+    let mut reply =
+        String::from("HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 1\r\n");
+    for index in 0..plakous_gateway_protocol::frame::MAX_RESPONSE_HEADERS {
+        std::fmt::Write::write_fmt(&mut reply, format_args!("x-extra-{index}: v\r\n")).unwrap();
+    }
+    reply.push_str("\r\nx");
+    let fixture = upstream(Script::Reply(reply.into_bytes())).await;
+    let service = Service::new();
+    let upstream_client = Client::new_http1(Limits {
+        max_response_headers: 4 * plakous_gateway_protocol::frame::MAX_RESPONSE_HEADERS,
+        ..Limits::default()
+    })
+    .unwrap();
+    let client = relayed(gateway_with(
+        service.clone(),
+        &fixture,
+        Peer::InProcess,
+        upstream_client,
+    ));
+    let failure = client
+        .execute(
+            request(
+                Origin::parse(&format!("{LOGICAL}/")).unwrap(),
+                "/v1/x",
+                placeholder(7),
+            ),
+            control(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
+    assert_eq!(failure.cause(), Some("gateway_ended"));
+    assert_eq!(fixture.accepted.load(Ordering::SeqCst), 1);
+    for _ in 0..100 {
+        if !service.audited.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        *service.audited.lock().unwrap(),
+        [super::RelayOutcome::UpstreamFailed(
+            TransmissionFact::MayHaveTransmitted
+        )]
     );
 }

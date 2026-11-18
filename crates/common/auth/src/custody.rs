@@ -398,8 +398,9 @@ pub struct ProfileFacts {
 }
 
 /// The non-secret view of one custodied credential. Custody location
-/// (machine, path, gateway address) is never a fact.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// (machine, path, gateway address) is never a fact. Debug output names the
+/// wire-identity keys, not their values.
+#[derive(Clone, Eq, PartialEq)]
 pub struct AccountFacts {
     /// The account.
     pub slot: CustodySlot,
@@ -409,7 +410,8 @@ pub struct AccountFacts {
     pub generation: Option<CredentialGeneration>,
     /// When the access token expires, in Unix milliseconds, when known.
     pub access_expires_at_unix_ms: Option<u64>,
-    /// One-way digest of the login selection epoch, never the epoch.
+    /// One-way digest of the login selection epoch. A kind whose route
+    /// binds the raw epoch (`SuperGrok`) also reports it as wire identity.
     pub selection_epoch_digest: Option<IdentityDigest>,
     /// Digest of the provider account identity: the fence's account half.
     pub account_binding: Option<IdentityDigest>,
@@ -422,6 +424,27 @@ pub struct AccountFacts {
     /// Raw non-secret identity values a caller lowers into request bodies,
     /// under provider-owned keys.
     pub wire_identity: BTreeMap<String, String>,
+}
+
+impl fmt::Debug for AccountFacts {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AccountFacts")
+            .field("slot", &self.slot)
+            .field("status", &self.status)
+            .field("generation", &self.generation)
+            .field("access_expires_at_unix_ms", &self.access_expires_at_unix_ms)
+            .field("selection_epoch_digest", &self.selection_epoch_digest)
+            .field("account_binding", &self.account_binding)
+            .field("credential_authority", &self.credential_authority)
+            .field("profile", &self.profile)
+            .field("key", &self.key)
+            .field(
+                "wire_identity",
+                &self.wire_identity.keys().collect::<Vec<_>>(),
+            )
+            .finish()
+    }
 }
 
 impl AccountFacts {

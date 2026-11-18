@@ -5207,8 +5207,11 @@ fingerprint, provider-keyed wire identity), runs the single writer's refresh
 `Operator`) and hands out the fields of one request only while the
 credential still holds the request's `ExpectedFence` (account-binding digest
 and exact generation): a non-Ready credential refuses `NotReady`, another
-account `AccountChanged` and another generation `FenceMoved`. Custody
-location (machine, path, gateway address) is never a fact and never enters a
+account `AccountChanged` and another generation `FenceMoved`. The
+selection-epoch digest is one-way; a route that binds the raw epoch
+(SuperGrok) receives the epoch itself as wire identity (§7.5). Debug output
+of facts names wire-identity keys, never their values. Custody location
+(machine, path, gateway address) is never a fact and never enters a
 binding. `LocalKeyCustodian` holds API keys from an application key store:
 a key's account binding is a digest of its slot and its generation the
 leading eight bytes of its generation fingerprint, so replacing a key moves

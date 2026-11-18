@@ -53,7 +53,8 @@ pub struct CredentialFacts {
     pub generation: Option<u64>,
     /// When the access token expires, in Unix milliseconds, when known.
     pub access_expires_at_unix_ms: Option<u64>,
-    /// One-way digest of the login selection epoch, never the epoch.
+    /// One-way digest of the login selection epoch. A kind whose route
+    /// binds the raw epoch (`SuperGrok`) also reports it as wire identity.
     pub selection_epoch_digest: Option<HexDigest>,
 }
 
@@ -136,8 +137,9 @@ pub struct KeyFacts {
 }
 
 /// Raw, non-secret identity values a caller lowers into request bodies,
-/// keyed by provider-owned names matching `[a-z][a-z0-9_]{0,63}`.
-#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+/// keyed by provider-owned names matching `[a-z][a-z0-9_]{0,63}`. Debug
+/// output names the keys only.
+#[derive(Clone, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(
     try_from = "BTreeMap<String, BoundedText<MAX_WIRE_IDENTITY_VALUE_BYTES>>",
     into = "BTreeMap<String, BoundedText<MAX_WIRE_IDENTITY_VALUE_BYTES>>"
@@ -172,6 +174,15 @@ impl WireIdentity {
         self.0
             .iter()
             .map(|(key, value)| (key.as_str(), value.as_str()))
+    }
+}
+
+impl fmt::Debug for WireIdentity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("WireIdentity")
+            .field(&self.0.keys().collect::<Vec<_>>())
+            .finish()
     }
 }
 

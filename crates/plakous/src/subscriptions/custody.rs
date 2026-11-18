@@ -352,6 +352,7 @@ mod gateway {
         /// Nothing opens, creates or locks the subscription store; login,
         /// logout, consent and account listing refuse
         /// [`NativeSubscriptionError::GatewayCustody`].
+        #[doc(hidden)]
         #[must_use]
         pub fn with_custody(mut self, custody: &crate::custody::Custody) -> Self {
             self.gateway = custody.custodian().map(|custodian| SubscriptionGateway {

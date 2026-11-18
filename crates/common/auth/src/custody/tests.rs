@@ -156,3 +156,60 @@ fn local_key_custody_lowers_raw_keys_and_refuses_unknown_kinds() {
         Err(CustodyError::UnknownAccount)
     );
 }
+
+#[test]
+fn facts_debug_names_wire_identity_keys_but_not_values() {
+    let mut facts = AccountFacts::signed_out(CustodySlot::new("claude").unwrap());
+    facts
+        .wire_identity
+        .insert("claude_account_uuid".into(), "sentinel-account-uuid".into());
+    let printed = format!("{facts:?}");
+    assert!(printed.contains("claude_account_uuid"), "{printed}");
+    assert!(!printed.contains("sentinel-account-uuid"), "{printed}");
+}
+
+#[cfg(feature = "gateway")]
+#[test]
+fn wire_facts_refuse_identity_that_does_not_fit_instead_of_dropping_it() {
+    let instance =
+        plakous_gateway_protocol::UuidText::new("0b9e5f4c-7d3a-4e21-9f80-1a2b3c4d5e6f").unwrap();
+    let mut facts = AccountFacts::signed_out(CustodySlot::new("grok").unwrap());
+    facts
+        .wire_identity
+        .insert("grok_subject".into(), "fixture-subject".into());
+    let wire = gateway::wire_facts(&facts, &instance, 1).unwrap();
+    assert_eq!(
+        wire.wire_identity.get("grok_subject"),
+        Some("fixture-subject")
+    );
+
+    let mut oversize = facts.clone();
+    oversize.wire_identity.insert(
+        "grok_authority_id".into(),
+        "x".repeat(plakous_gateway_protocol::facts::MAX_WIRE_IDENTITY_VALUE_BYTES + 1),
+    );
+    assert_eq!(
+        gateway::wire_facts(&oversize, &instance, 1).err(),
+        Some(CustodyError::Internal)
+    );
+    let mut crowded = facts;
+    for index in 0..=plakous_gateway_protocol::facts::MAX_WIRE_IDENTITY_ENTRIES {
+        crowded
+            .wire_identity
+            .insert(format!("extra_{index}"), "v".into());
+    }
+    assert_eq!(
+        gateway::wire_facts(&crowded, &instance, 1).err(),
+        Some(CustodyError::Internal)
+    );
+    // A moved fence whose facts cannot be carried is an internal refusal.
+    assert_eq!(
+        gateway::gateway_refusal(
+            &CustodyError::FenceMoved {
+                facts: Box::new(crowded),
+            },
+            &instance
+        ),
+        plakous_gateway_protocol::refusal::GatewayRefusal::Internal {}
+    );
+}

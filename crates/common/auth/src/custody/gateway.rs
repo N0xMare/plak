@@ -221,8 +221,11 @@ pub fn gateway_refusal(error: &CustodyError, instance: &protocol::UuidText) -> G
         CustodyError::NotReady { facts } => GatewayRefusal::CredentialNotReady {
             status: wire_status(facts.status),
         },
-        CustodyError::FenceMoved { facts } => GatewayRefusal::FenceMoved {
-            facts: Box::new(wire_facts(facts, instance, 0)),
+        CustodyError::FenceMoved { facts } => match wire_facts(facts, instance, 0) {
+            Ok(facts) => GatewayRefusal::FenceMoved {
+                facts: Box::new(facts),
+            },
+            Err(_) => GatewayRefusal::Internal {},
         },
         CustodyError::AccountChanged => GatewayRefusal::AccountChanged {},
         CustodyError::UnknownAccount => GatewayRefusal::AccountUnknown {},
@@ -346,14 +349,17 @@ pub fn account_facts(
     })
 }
 
-/// Custody facts as the wire facts a gateway answers with. Text that does
-/// not fit its wire bound is omitted rather than truncated.
-#[must_use]
+/// Custody facts as the wire facts a gateway answers with. Profile and key
+/// text that does not fit its wire bound is omitted rather than truncated.
+///
+/// # Errors
+/// [`CustodyError::Internal`] when a wire-identity value or the entry count
+/// exceeds its wire bound: identity a caller binds to is never dropped.
 pub fn wire_facts(
     facts: &AccountFacts,
     instance: &protocol::UuidText,
     observed_at_unix_ms: u64,
-) -> protocol::facts::AccountFacts {
+) -> Result<protocol::facts::AccountFacts, CustodyError> {
     let hex = |digest: &IdentityDigest| protocol::HexDigest::from_bytes(digest.as_bytes());
     let identity = facts
         .account_binding
@@ -365,14 +371,19 @@ pub fn wire_facts(
             email: None,
             plan: None,
         });
-    let wire_identity: BTreeMap<_, _> = facts
+    let wire_identity = facts
         .wire_identity
         .iter()
-        .filter_map(|(key, value)| {
-            Some((key.clone(), protocol::BoundedText::new(value.clone()).ok()?))
+        .map(|(key, value)| {
+            Ok((
+                key.clone(),
+                protocol::BoundedText::new(value.clone()).map_err(|_| CustodyError::Internal)?,
+            ))
         })
-        .collect();
-    protocol::facts::AccountFacts {
+        .collect::<Result<BTreeMap<_, _>, CustodyError>>()?;
+    let wire_identity =
+        protocol::facts::WireIdentity::new(wire_identity).map_err(|_| CustodyError::Internal)?;
+    Ok(protocol::facts::AccountFacts {
         account: protocol::GatewayAccount::new(facts.slot.as_str())
             .unwrap_or_else(|_| unreachable!("custody slots share the account grammar")),
         instance: instance.clone(),
@@ -384,7 +395,7 @@ pub fn wire_facts(
             selection_epoch_digest: facts.selection_epoch_digest.as_ref().map(hex),
         },
         identity,
-        wire_identity: protocol::facts::WireIdentity::new(wire_identity).unwrap_or_default(),
+        wire_identity,
         profile: facts.profile.as_ref().and_then(|profile| {
             Some(protocol::facts::ProfileFacts {
                 id: protocol::BoundedText::new(profile.id.clone()).ok()?,
@@ -413,5 +424,5 @@ pub fn wire_facts(
                 .as_ref()
                 .and_then(|value| protocol::BoundedText::new(value.clone()).ok()),
         }),
-    }
+    })
 }

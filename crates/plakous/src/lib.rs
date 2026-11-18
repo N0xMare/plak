@@ -868,6 +868,7 @@ pub mod openrouter {
         /// # Errors
         ///
         /// Returns a safe connection error when the route or transport is invalid.
+        #[doc(hidden)]
         pub fn connect_with_retention_in(
             custody: &crate::custody::Custody,
             key_source: Arc<OpenRouterKeySource>,

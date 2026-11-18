@@ -167,7 +167,10 @@ impl LocalCustody {
                 .facts(&slot)
                 .await
                 .map_err(|error| self.refusal(&error))?;
-            facts.push(wire_facts(&current, &self.instance, now_unix_ms()));
+            facts.push(
+                wire_facts(&current, &self.instance, now_unix_ms())
+                    .map_err(|error| self.refusal(&error))?,
+            );
         }
         Ok(FactsReply { facts })
     }
@@ -232,7 +235,7 @@ impl LocalCustody {
             .refresh(&slot, request)
             .await
             .map_err(|error| self.refusal(&error))?;
-        Ok(wire_facts(&current, &self.instance, now_unix_ms()))
+        wire_facts(&current, &self.instance, now_unix_ms()).map_err(|error| self.refusal(&error))
     }
 
     /// Answers one JSON call: facts, refresh, or the admin operator refresh.

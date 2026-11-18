@@ -537,11 +537,17 @@ async fn stream(
         let _ = send(sender, &Frame::End(RelayEnd::GatewayFailed {})).await;
         return RelayOutcome::UpstreamFailed(TransmissionFact::MayHaveTransmitted);
     };
-    let head = Frame::Head(Head {
+    // A head the frame bounds cannot carry is the gateway's failure after
+    // the upstream may have acted, not the caller leaving.
+    let Ok(head) = Frame::Head(Head {
         status: response.status().as_u16(),
         headers,
-    });
-    if send(sender, &head).await.is_err() {
+    })
+    .encode() else {
+        let _ = send(sender, &Frame::End(RelayEnd::GatewayFailed {})).await;
+        return RelayOutcome::UpstreamFailed(TransmissionFact::MayHaveTransmitted);
+    };
+    if sender.send(Bytes::from(head)).await.is_err() {
         cancellation.cancel();
         return RelayOutcome::Abandoned;
     }
