@@ -598,15 +598,17 @@ export without `.git`), the checker reports a cache bypass and queries Cargo
 directly; no cache is read or written.
 
 Closures prove dependency edges, not that the code compiles. Without
-`--build`, the checker therefore also runs `cargo check --lib` on seven
-profiles. Five are facade resolutions, each un-unified:
+`--build`, the checker therefore also runs `cargo check --lib` on eight
+profiles. Six are facade resolutions, each un-unified:
 
 - no features: the always-on facade, with no optional route or evaluator;
 - `full`: every public facade feature together;
 - `composition` alone: the Code Mode and JavaScript cell client, and no provider;
 - `claude` alone: one native subscription route (Anthropic native auth);
 - `openai` alone: the OpenAI API route, including the `cfg(feature = "openai")`
-  paths in `responses_retrieval.rs`, without a native-auth route beside it.
+  paths in `responses_retrieval.rs`, without a native-auth route beside it;
+- `gateway` alone: the custody seam, the relay client and the relay server
+  core over local custody, with no provider route.
 
 `plakous-hosted` is compiled with no features and with `--all-features`.
 Hosted defaults are compiled through the supported plakd default resolution,

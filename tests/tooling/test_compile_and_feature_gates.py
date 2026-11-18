@@ -204,7 +204,7 @@ class FacadeProfileTests(unittest.TestCase):
 
     def test_checks_the_representative_facade_profiles(self):
         clean = subprocess.CompletedProcess([], 0, json.dumps({"reason": "build-finished"}), "")
-        errors, commands, _ = self.check([clean] * 5)
+        errors, commands, _ = self.check([clean] * 6)
         self.assertEqual(errors, [])
         base = ["cargo", "check", "--locked", "--offline", "-p", "plakous", "--no-default-features"]
         tail = ["--lib", "--message-format=json"]
@@ -216,6 +216,7 @@ class FacadeProfileTests(unittest.TestCase):
                 base + ["--features", "composition"] + tail,
                 base + ["--features", "claude"] + tail,
                 base + ["--features", "openai"] + tail,
+                base + ["--features", "gateway"] + tail,
             ],
         )
 
@@ -237,7 +238,7 @@ class FacadeProfileTests(unittest.TestCase):
         )
         aborted = subprocess.CompletedProcess([], 101, "", "error: no matching package\n")
         clean = subprocess.CompletedProcess([], 0, "", "")
-        errors, _, stderr = self.check([failed, warned, aborted, clean, clean])
+        errors, _, stderr = self.check([failed, warned, aborted, clean, clean, clean])
         self.assertEqual(
             errors,
             [

@@ -395,7 +395,8 @@ pub mod runner {
     feature = "openrouter",
     feature = "codex",
     feature = "grok",
-    feature = "claude"
+    feature = "claude",
+    feature = "gateway"
 ))]
 #[doc(hidden)]
 pub mod custody;
