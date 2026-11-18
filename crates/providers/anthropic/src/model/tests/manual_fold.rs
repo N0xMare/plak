@@ -395,6 +395,20 @@ fn tool_turn(
             "manual fold call id is invalid",
         )
     })?;
+    // Messages replays `tool_use.id` from the remote correlation. A default
+    // correlation has none, so the post-tool prepare is an invalid request
+    // before the fence can fold.
+    let correlation = ToolCorrelation::new(
+        Some(format!("call_{}", 8_000 + call)),
+        None,
+        ToolCallerLineage::Direct,
+    )
+    .map_err(|_| {
+        ModelError::new(
+            ModelErrorKind::InvalidEvent,
+            "manual fold tool correlation is invalid",
+        )
+    })?;
     let tool = ToolCallBlock::new(
         call_id,
         ToolName::new("probe").map_err(|_| {
@@ -405,7 +419,7 @@ fn tool_turn(
         })?,
         ToolExecutionOwner::Local,
         ToolCallState::Requested,
-        ToolCorrelation::default(),
+        correlation,
         "{}",
     )
     .map_err(|_| {
@@ -623,9 +637,28 @@ async fn manual_mid_turn_fold_ends_on_protected_history() -> TestResult {
         .result()
         .await?;
     let TurnResultOutcome::Failed(error) = result.outcome() else {
-        return Err(format!("turn did not end on protected history: {result:?}").into());
+        return Err(format!(
+            "turn did not end on protected history: outcome={:?} prepares={} ordinary={} summaries={} protected={}",
+            result.outcome(),
+            model.prepares.load(Ordering::Acquire),
+            model.ordinary.load(Ordering::Acquire),
+            model.summaries.load(Ordering::Acquire),
+            model.protected.load(Ordering::Acquire),
+        )
+        .into());
     };
-    assert_eq!(error.model_kind(), Some(ModelErrorKind::ProtectedHistory));
+    if error.model_kind() != Some(ModelErrorKind::ProtectedHistory) {
+        return Err(format!(
+            "turn ended on {:?} ({}) prepares={} ordinary={} summaries={} protected={}",
+            error.model_kind(),
+            error.message(),
+            model.prepares.load(Ordering::Acquire),
+            model.ordinary.load(Ordering::Acquire),
+            model.summaries.load(Ordering::Acquire),
+            model.protected.load(Ordering::Acquire),
+        )
+        .into());
+    }
     assert_eq!(model.summaries.load(Ordering::Acquire), 1);
     assert_eq!(model.ordinary.load(Ordering::Acquire), 3);
     assert_eq!(model.protected.load(Ordering::Acquire), 1);
