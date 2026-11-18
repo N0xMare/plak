@@ -614,10 +614,10 @@ fn the_stdio_bridge_relays_the_client_handshake_and_leaves_a_busy_root_running_o
 
 #[test]
 fn the_stdio_bridge_does_not_consume_a_separate_handshake_or_mask_a_version_refusal() {
+    const OLDER: u32 = WIRE_VERSION - 1;
     let Some(fixture) = fixture() else { return };
     let mut host = start(&fixture);
     let mut bridge = Bridge::start(&fixture);
-    const OLDER: u32 = WIRE_VERSION - 1;
     bridge.hello(OLDER);
     assert!(matches!(
         bridge.next(),

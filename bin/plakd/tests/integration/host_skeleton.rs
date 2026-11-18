@@ -504,13 +504,21 @@ fn lifecycle_real_product_archive_delete_releases_idle_actor_without_reopen() {
 }
 
 fn new_session(workspace: &std::path::Path) -> Op<PlakExtension> {
+    new_session_request(workspace, None, REQUEST)
+}
+
+fn new_session_request(
+    workspace: &std::path::Path,
+    template: Option<&str>,
+    request_id: &str,
+) -> Op<PlakExtension> {
     Op::NewSession {
         runner: plakous_host_protocol::wire::RunnerLabel::local(),
         profile: None,
         model: None,
         workspace: workspace.display().to_string(),
-        template: None,
-        request_id: REQUEST.into(),
+        template: template.map(str::to_owned),
+        request_id: request_id.into(),
         accounts: Vec::new(),
     }
 }
@@ -1418,15 +1426,7 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
     assert!(matches!(
         client.request(
             1,
-            Op::NewSession {
-                runner: plakous_host_protocol::wire::RunnerLabel::local(),
-                profile: None,
-                model: None,
-                workspace: fixture.workspace().display().to_string(),
-                template: None,
-                request_id: "not-a-uuid".into(),
-                accounts: Vec::new(),
-            }
+            new_session_request(&fixture.workspace(), None, "not-a-uuid")
         ),
         Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::Malformed { .. })
     ));
@@ -1440,15 +1440,7 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
     assert!(matches!(
         client.request(
             3,
-            Op::NewSession {
-                runner: plakous_host_protocol::wire::RunnerLabel::local(),
-                profile: None,
-                model: None,
-                workspace: fixture.workspace().display().to_string(),
-                template: Some("no-such-template".into()),
-                request_id: REQUEST.into(),
-                accounts: Vec::new(),
-            }
+            new_session_request(&fixture.workspace(), Some("no-such-template"), REQUEST)
         ),
         Outcome::Refused(
             plakous_host_protocol::wire::RequestRefusal::BindingRefused {
@@ -1481,21 +1473,18 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
         "account = \"codex\"\nmodel = \"another-model\"\neffort = \"medium\"\ncomposition = \"direct\"\ndescription = \"another binding\"\n",
     );
     let request_id = "00000000-0000-4000-8000-0000000000a3";
-    let made = |template: Option<&str>| Op::NewSession {
-        runner: plakous_host_protocol::wire::RunnerLabel::local(),
-        profile: None,
-        model: None,
-        workspace: fixture.workspace().display().to_string(),
-        template: template.map(str::to_owned),
-        request_id: request_id.into(),
-        accounts: Vec::new(),
-    };
     assert!(matches!(
-        client.request(11, made(None)),
+        client.request(
+            11,
+            new_session_request(&fixture.workspace(), None, request_id)
+        ),
         Outcome::Ok(Answer::Created { .. })
     ));
     assert!(matches!(
-        client.request(12, made(Some("other"))),
+        client.request(
+            12,
+            new_session_request(&fixture.workspace(), Some("other"), request_id)
+        ),
         Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::Malformed { .. })
     ));
     // A file is not a workspace.
@@ -1504,15 +1493,7 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
     assert!(matches!(
         client.request(
             9,
-            Op::NewSession {
-                runner: plakous_host_protocol::wire::RunnerLabel::local(),
-                profile: None,
-                model: None,
-                workspace: file.display().to_string(),
-                template: None,
-                request_id: "00000000-0000-4000-8000-0000000000a2".into(),
-                accounts: Vec::new(),
-            }
+            new_session_request(&file, None, "00000000-0000-4000-8000-0000000000a2")
         ),
         Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::PlacementRefused { reason, .. })
             if matches!(reason.as_ref(), plakous_host_protocol::wire::PlacementReason::WorkspaceRefused {
