@@ -21,6 +21,7 @@ use plakous_offline_crash_harness::protocol::CrashBoundary;
 use plakous_offline_crash_harness::script::{SCRIPT_VERSION, ScriptPlan};
 use plakous_offline_crash_harness::{BoundaryController, scripted_runtime_binding_with_cursor};
 
+use crate::runtime::test_kit::BlockOn as _;
 use crate::runtime::test_kit::TestExtension;
 use crate::runtime::test_support::{fresh_injected_attached_host, send_attached_action};
 use crate::runtime::{ScriptedRuntimeFactory, spawn_host_worker};
@@ -912,6 +913,14 @@ fn keep_notices(record: &crate::sessions::SessionRecord) -> usize {
 fn escalated_quit_keeps_a_running_job_only_when_the_runtime_retains_it() {
     let root = tempfile::tempdir().unwrap();
     let config = scripted_host_retaining(root.path(), running_job_script(), true);
+    let tree_id = super::topology_state::durable_tree_id(&config.topology_rows(), &config.session);
+    let topology = crate::topology_runtime::insert_root(
+        tree_id.clone(),
+        crate::topology_runtime::test_support::bootstrap(&tree_id, config.cwd.clone()),
+        None,
+    )
+    .block()
+    .unwrap();
     let session_id = config.session.id.clone();
     let store = Arc::clone(&config.store);
     let roots = config.state_roots.clone();
@@ -926,6 +935,10 @@ fn escalated_quit_keeps_a_running_job_only_when_the_runtime_retains_it() {
     );
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();
+    assert!(
+        topology.is_closed(),
+        "the keep path closed topology admission"
+    );
     let record = store.load(&session_id).unwrap();
     assert_eq!(keep_notices(&record), 1, "{seen:#?}");
     let locator = record.plakous_locator.expect("released locator");
@@ -942,6 +955,7 @@ fn escalated_quit_keeps_a_running_job_only_when_the_runtime_retains_it() {
             )
             .ok();
     }
+    crate::topology_runtime::force_release(&tree_id).block();
 
     let idle = tempfile::tempdir().unwrap();
     let config = scripted_host_retaining(

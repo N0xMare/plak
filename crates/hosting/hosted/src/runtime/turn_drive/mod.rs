@@ -67,6 +67,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnHost<'_, P> {
         // decision is the runtime's own transfer mode, the same one release
         // uses, so a second predicate cannot start the stop this skips.
         if self.job_agent.retains_background_jobs() {
+            let tree_id = super::topology_state::durable_tree_id(self.rows, self.session);
+            *self.quit_job_stops = Some(self.roots.session_tasks().spawn(async move {
+                let _ = crate::topology_runtime::abandon_live_agents(&tree_id).await;
+                Ok(())
+            }));
             let running = self
                 .job_agent
                 .jobs()
