@@ -176,6 +176,8 @@ fn an_api_account_ready_only_at_the_gateway_fills_chooses_and_spawns() {
 #[cfg(feature = "codex")]
 #[test]
 fn the_gateway_reports_the_default_and_named_subscription_slots() {
+    use plakous::gateway::protocol::GatewayAccount;
+    use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
     use plakous::subscriptions::{NativeProvider, NativeSubscriptions, SubscriptionPaths};
     use std::os::unix::fs::DirBuilderExt as _;
 
@@ -216,8 +218,6 @@ fn the_gateway_reports_the_default_and_named_subscription_slots() {
     )
     .unwrap();
     let custody = super::HostCustody::resolve(&host).unwrap();
-    use plakous::gateway::protocol::GatewayAccount;
-    use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
     let status = custody.admin().unwrap().call(&AdminRequest::Status {
         accounts: ["codex", "codex/work"]
             .into_iter()
