@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use plakous_agent::{AgentBuilder, AgentRequestPolicy, RuntimeLifecycle, TurnResultOutcome};
+use plakous_agent::{AgentBuilder, AgentRequestPolicy, TurnResultOutcome};
 use plakous_messages::{
     MessagesRequestError, MessagesRequestErrorKind, MessagesRequestPolicy,
     MessagesRequestPolicyInput, SIGNATURE_REPLAY_KIND, ToolOwnership, bind_replay_payload,
@@ -604,10 +604,10 @@ async fn manual_mid_turn_fold_ends_on_protected_history() -> TestResult {
     assert_eq!(model.summaries.load(Ordering::Acquire), 1);
     assert_eq!(model.ordinary.load(Ordering::Acquire), 3);
     assert_eq!(model.protected.load(Ordering::Acquire), 1);
-    assert!(matches!(
-        agent.checkpoint().manifest().lifecycle(),
-        RuntimeLifecycle::Quiescent
-    ));
+    assert!(
+        agent.conversation().working().segments().is_empty(),
+        "a protected-history terminal publishes an empty working projection"
+    );
     agent.shutdown().await?;
     Ok(())
 }
