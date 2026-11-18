@@ -187,6 +187,7 @@ agent, application, construction, sessions, model, tools, profiles, `VERSION` โ€
 | `composition-python` | Explicitly admits Python PTC and Python SDK profiles through the same cell client; implies `composition`, never an interpreter |
 | `codex`, `grok`, `claude` | Each selects exactly its native subscription implementation, without a provider re-export or evaluator. Subscription vocabulary remains readable without any route |
 | `mcp` | The MCP client (servers, tools, resources, prompts and MCP OAuth) through `plakous::mcp`. The frozen `McpToolRecord` vocabulary remains available without the client or its transports. The client links `plakous-auth` for MCP OAuth without exposing `plakous::auth`; of the other features only `full` enables it |
+| `gateway` | The credential gateway (chapter 01 ยง7.5) through the doc-hidden, unsupported `plakous::gateway` module: the wire protocol, and as they land the remote custodian and the relay server core. Implies `auth`; enables no provider and no JWT crypto. plakd always enables it |
 | `store` | `plakous::sessions`: the session workflows, the feed, portable histories and the process-memory `SessionStore` |
 | `sessions-sqlite` | The SQLite `SessionStore` backend; implies `store` |
 | `full` | All of the supported features above |

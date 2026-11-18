@@ -6316,6 +6316,7 @@ def _check_workspace() -> int:
             "composition-python",
             "default",
             "full",
+            "gateway",
             "test-clock",
             "mcp",
             "codex",

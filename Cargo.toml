@@ -143,6 +143,7 @@ plakous-cell = { version = "0.0.4", path = "crates/runtimes/cell", default-featu
 plakous-chat-completions = { version = "0.0.4", path = "crates/protocols/chat-completions", default-features = false }
 plakous-compose = { version = "0.0.4", path = "crates/harness/compose", default-features = false }
 plakous-exchange = { version = "0.0.4", path = "crates/protocols/exchange", default-features = false }
+plakous-gateway-protocol = { version = "0.0.4", path = "crates/common/gateway-protocol", default-features = false }
 plakous-host-protocol = { version = "0.0.4", path = "crates/hosting/host-protocol", default-features = false }
 plakd-wire-types = { version = "0.0.4", path = "crates/hosting/plakd-wire-types", default-features = false }
 plakous-hosted = { version = "0.0.4", path = "crates/hosting/hosted", default-features = false }
@@ -353,7 +354,7 @@ plakous-hosted = [
 ]
 
 [workspace.metadata.plakous.facade-features]
-plakd = ["sessions-sqlite"]
+plakd = ["gateway", "sessions-sqlite"]
 plakous-recursive-subagents = ["store"]
 plakous-hosted = ["sessions-sqlite"]
 

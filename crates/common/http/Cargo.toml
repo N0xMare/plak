@@ -20,6 +20,7 @@ class = "published-internal"
 bytes.workspace = true
 futures-util = { workspace = true, features = ["std"] }
 h2.workspace = true
+plakous-gateway-protocol = { workspace = true, optional = true }
 http.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
@@ -38,6 +39,13 @@ zeroize.workspace = true
 # (spec 05). Reached from the product only through `plakd/test-hooks`; never in
 # a default or release build.
 fault-injection = ["tokio/io-util"]
+# The credential gateway relay client: one upstream exchange per relay request
+# over a Unix socket, a tailnet TCP address or an in-memory duplex (spec 01 §7.5).
+gateway-client = ["dep:plakous-gateway-protocol", "tokio/io-util"]
+# The provider-blind relay server core: envelope intake, frame streaming and
+# the refusal envelope over one HTTP/1.1 connection, with credential injection
+# supplied by the caller's custodian.
+gateway-server = ["dep:plakous-gateway-protocol", "hyper/server", "tokio/io-util"]
 
 [dev-dependencies]
 hyper = { workspace = true, features = ["http2", "server"] }

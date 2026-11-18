@@ -31,6 +31,17 @@ default = []
 # Enabling openai/xai/openrouter/anthropic re-exports those crates as plakous::*.
 # TUI/embedder-safe surface is always-on: agent (curated), model, tools, profiles.
 # Provider-hosted tools and the local page fetcher are independent choices.
+# The credential gateway: the remote custodian a caller dispatches through and
+# the hidden relay server core a gateway serves (`plakous::gateway`).
+gateway = [
+    "auth",
+    "dep:futures-util",
+    "dep:plakous-gateway-protocol",
+    "dep:plakous-http",
+    "plakous-auth/gateway",
+    "plakous-http/gateway-client",
+    "plakous-http/gateway-server",
+]
 anthropic = ["dep:plakous-exchange", "dep:plakous-auth", "dep:plakous-anthropic", "dep:plakous-http", "dep:futures-util", "plakous-tool-web/image-gen"]
 auth = ["dep:plakous-auth"]
 web-fetch = ["plakous-tool-web/fetch", "dep:plakous-http", "dep:futures-util"]
@@ -50,6 +61,7 @@ full = [
     "auth",
     "composition",
     "composition-python",
+    "gateway",
     "mcp",
     "codex",
     "grok",
@@ -83,6 +95,7 @@ futures-util = { workspace = true, features = ["std"], optional = true }
 thiserror = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["v4"], optional = true }
 plakous-exchange = { workspace = true, optional = true }
+plakous-gateway-protocol = { workspace = true, optional = true }
 plakous-responses = { workspace = true, optional = true }
 plakous-agent.workspace = true
 plakous-anthropic = { workspace = true, optional = true }

@@ -386,6 +386,15 @@ pub mod runner {
     pub use plakous_runner_protocol as protocol;
 }
 
+/// Unsupported credential gateway seam for official hosting (spec 01 §7.5):
+/// the wire protocol now; the remote custodian and the relay server core
+/// join it as they land.
+#[cfg(feature = "gateway")]
+#[doc(hidden)]
+pub mod gateway {
+    pub use plakous_gateway_protocol as protocol;
+}
+
 /// High-level exact session workflows and opaque backend composition.
 ///
 /// This surface exposes semantic locators and reports only. Store traits,

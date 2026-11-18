@@ -26,6 +26,7 @@ base64.workspace = true
 getrandom.workspace = true
 jsonwebtoken = { workspace = true, optional = true }
 ring = { workspace = true, optional = true }
+plakous-gateway-protocol = { workspace = true, optional = true }
 plakous-http = { workspace = true, optional = true }
 plakous-model.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }
@@ -52,6 +53,8 @@ default = []
 http-refresh = ["dep:plakous-http", "dep:tokio"]
 # Content-free JWT rejection classification for signed-identity dialects.
 jwt = ["http-refresh", "dep:jsonwebtoken", "dep:ring"]
+# The remote credential custodian over the gateway relay client.
+gateway = ["http-refresh", "dep:plakous-gateway-protocol", "plakous-http/gateway-client"]
 
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }

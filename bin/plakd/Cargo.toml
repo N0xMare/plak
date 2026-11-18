@@ -38,7 +38,7 @@ plakous-host-protocol.workspace = true
 # model out of every build that does not explicitly ask for it.
 plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash", optional = true }
 tracing-subscriber.workspace = true
-plakous = { workspace = true, features = ["sessions-sqlite"] }
+plakous = { workspace = true, features = ["gateway", "sessions-sqlite"] }
 nix = { workspace = true, features = ["signal"] }
 rusqlite = { workspace = true, features = ["hooks"] }
 rustix = { workspace = true, features = ["event", "fs", "process", "system", "termios", "time"] }
