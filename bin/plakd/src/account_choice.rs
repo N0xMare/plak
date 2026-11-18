@@ -742,11 +742,9 @@ mod durability {
     use plakous_hosted::sessions::projector::{Submission, SubmissionKind, WorkflowRequest};
 
     fn locator() -> plakous::sessions::SessionLocator {
-        plakous::sessions::SessionLocator::new(
-            uuid::Uuid::nil(),
-            uuid::Uuid::from_u128(1),
-            uuid::Uuid::from_u128(2),
-        )
+        "00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-000000000003"
+            .parse()
+            .unwrap()
     }
 
     #[test]

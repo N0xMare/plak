@@ -26,7 +26,6 @@ fn local_runner_status(client: &mut Client) -> plakous_host_protocol::wire::Runn
         90,
         Op::SessionOptions {
             workspace: None,
-            accounts: Vec::new(),
         },
     );
     let Outcome::Ok(Answer::Options { options }) = outcome else {

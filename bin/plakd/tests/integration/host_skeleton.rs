@@ -138,7 +138,6 @@ fn a_host_launch_directory_containing_its_home_is_not_a_workspace_default() {
         1,
         Op::SessionOptions {
             workspace: None,
-            accounts: Vec::new(),
         },
     ) else {
         panic!("options refused")

@@ -104,7 +104,6 @@ pub(super) fn ready(client: &mut Client, id: &str) {
             8,
             Op::SessionOptions {
                 workspace: None,
-                accounts: Vec::new(),
             },
         ) else {
             panic!("options refused")

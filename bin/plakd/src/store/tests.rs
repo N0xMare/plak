@@ -541,7 +541,7 @@ fn frozen_root_tools_round_trip_and_are_written_once() {
         account: "codex".into(),
         model: "m".into(),
         tools: TemplateToolSelection::parse(tools).unwrap(),
-        tool_sections: std::collections::BTreeMap::from([(
+        tool_sections: BTreeMap::from([(
             "tools.fetch_url".to_owned(),
             "[tools.fetch_url]\nmax_bytes = 4096\n".to_owned(),
         )]),

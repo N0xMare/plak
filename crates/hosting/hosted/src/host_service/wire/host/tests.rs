@@ -1061,10 +1061,7 @@ fn picker_progress_is_scoped_and_precedes_exactly_one_final_without_opening_a_se
     request(
         &mut connection,
         7,
-        Op::SessionOptions {
-            workspace: None,
-            accounts: Vec::new(),
-        },
+        Op::SessionOptions { workspace: None },
     );
     let frames = out.take();
     assert_eq!(frames.len(), 3);

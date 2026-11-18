@@ -1044,14 +1044,11 @@ fn new_record(
     if let Some(root) = crate::account_choice::root_kind(&config) {
         record.account_choices.remove(&root);
     }
-    crate::account_choice::apply_fill(
-        &mut record,
-        &crate::account_choice::FilledChoices {
-            root_account: record.account.clone(),
-            choices: record.account_choices.clone(),
-        },
-        &kinds,
-    );
+    let filled = crate::account_choice::FilledChoices {
+        root_account: record.account.clone(),
+        choices: record.account_choices.clone(),
+    };
+    crate::account_choice::apply_fill(&mut record, &filled, &kinds);
     record.runner = validated.runner;
     record.root_profile = Some(plakous_hosted::sessions::RootProfile {
         root_template: config.root_agent.clone(),
@@ -1085,7 +1082,7 @@ fn open_session(
     idle_release: std::time::Duration,
 ) -> CliResult<OpenedSession<PlakExtension>> {
     if crate::account_choice::should_resubmit_on_reopen() {
-        return Err(plakous_hosted::error::CliFailure::new(
+        return Err(CliFailure::new(
             "an account switch is not resubmitted after reopen",
         ));
     }
