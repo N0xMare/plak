@@ -1,6 +1,7 @@
 //! The shared catalog inputs of a resolver and its models.
 
 use super::catalog::{contract_drift, raw_contract_drift};
+use super::custodied::CustodiedLogin;
 use super::{
     ACCESS_REFRESH_SKEW, Arc, BTreeMap, BTreeSet, CATALOG_TTL_SECONDS,
     CODEX_NATIVE_COMPACTION_NAMESPACE, Capability, CapabilityConstraints, CapabilitySet,
@@ -19,6 +20,9 @@ use super::{
     reference_client_envelope_context_contract, require_json_media_type, require_status,
     resolution_route_fingerprint, sensitive_header_value, validate_identifier,
 };
+use super::{
+    CredentialFence, Digest, HeaderMap, ReadyCredentialLease, StoredCredential, base_headers,
+};
 use plakous_auth::custody::CredentialField;
 
 /// The exact catalog inputs a resolver and its models share, so a running
@@ -33,10 +37,30 @@ pub(crate) struct CodexCatalogSource {
 }
 
 impl CodexCatalogSource {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "catalog admission keeps exact lease, wire, enum, evidence, and witness checks together"
-    )]
+    /// The custodied login's Ready fence and selection for one catalog
+    /// fetch, checked as the leased read checks the stored record.
+    async fn custodied_catalog_fence(
+        &self,
+        login: &CustodiedLogin,
+        renewal: Option<&CatalogRenewal<'_>>,
+    ) -> Result<(CredentialFence, Digest), NativeCodexAuthError> {
+        let ready = login.ready().await?;
+        if ready.fence.account_binding() != &self.manager.selected_account()?
+            || ready.access_expires_at
+                <= self
+                    .clock
+                    .now()
+                    .seconds()
+                    .saturating_add(ACCESS_REFRESH_SKEW)
+        {
+            return Err(NativeCodexAuthError::Unavailable);
+        }
+        if let Some(renewal) = renewal {
+            renewal.check(ready.fence.account_binding(), ready.selection_epoch)?;
+        }
+        Ok((ready.fence, ready.selection_epoch))
+    }
+
     pub(super) async fn fetch_catalog(
         &self,
         renewal: Option<&CatalogRenewal<'_>>,
@@ -57,6 +81,25 @@ impl CodexCatalogSource {
                     NativeCodexAuthError::Validation => NativeCodexAuthError::CatalogRefresh,
                     other => other,
                 })?;
+        }
+        if let Some(login) = &self.manager.custodied {
+            let (fence, selection_epoch) = self.custodied_catalog_fence(login, renewal).await?;
+            let requested_at = self.clock.now();
+            let (authorization, account) = login
+                .fields(&CustodiedLogin::expected(&fence)?)
+                .await
+                .map_err(|error| match error {
+                NativeCodexAuthError::Validation => {
+                    NativeCodexAuthError::CatalogAuthorizationHeader
+                }
+                other => other,
+            })?;
+            let mut headers = base_headers();
+            headers.insert(HeaderName::from_static("authorization"), authorization);
+            headers.insert(HeaderName::from_static("chatgpt-account-id"), account);
+            return self
+                .fetch_catalog_with(renewal, requested_at, fence, selection_epoch, headers, None)
+                .await;
         }
         let fence = self.manager.load_fence().await?;
         if fence.status() != CredentialStatus::Ready
@@ -85,13 +128,6 @@ impl CodexCatalogSource {
             renewal.check(fence.account_binding(), selection_epoch)?;
         }
         let requested_at = self.clock.now();
-        // The backend versions the catalog projection from the exact native
-        // client release. A fabricated future version can hide otherwise
-        // admitted models, so this must remain bound to the reviewed profile.
-        let path = format!(
-            "{OPENAI_CODEX_MODELS_PATH}?client_version={}",
-            crate::OPENAI_CODEX_REFERENCE_CLIENT_VERSION
-        );
         let mut headers =
             bearer_headers(&credential.access_token, false).map_err(|error| match error {
                 NativeCodexAuthError::Validation => {
@@ -103,6 +139,40 @@ impl CodexCatalogSource {
         let account = sensitive_header_value(account.into_header_bytes())
             .map_err(|_| NativeCodexAuthError::CatalogAccountHeader)?;
         headers.insert(HeaderName::from_static("chatgpt-account-id"), account);
+        self.fetch_catalog_with(
+            renewal,
+            requested_at,
+            fence,
+            selection_epoch,
+            headers,
+            Some((credential, lease)),
+        )
+        .await
+    }
+
+    /// The catalog exchange and its admission, for a fence and login
+    /// selection already checked; `hold` (the Ready record and its lease,
+    /// under local custody) is kept until the reply.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "catalog admission keeps exact lease, wire, enum, evidence, and witness checks together"
+    )]
+    async fn fetch_catalog_with(
+        &self,
+        renewal: Option<&CatalogRenewal<'_>>,
+        requested_at: Timestamp,
+        fence: CredentialFence,
+        selection_epoch: Digest,
+        headers: HeaderMap,
+        hold: Option<(StoredCredential, ReadyCredentialLease)>,
+    ) -> Result<ResolvedCatalog, NativeCodexAuthError> {
+        // The backend versions the catalog projection from the exact native
+        // client release. A fabricated future version can hide otherwise
+        // admitted models, so this must remain bound to the reviewed profile.
+        let path = format!(
+            "{OPENAI_CODEX_MODELS_PATH}?client_version={}",
+            crate::OPENAI_CODEX_REFERENCE_CLIENT_VERSION
+        );
         let reply = execute_catalog_bounded(
             &self.client,
             &self.manager.endpoints.chatgpt_origin,
@@ -122,8 +192,7 @@ impl CodexCatalogSource {
             self.manager.request_gate.clone(),
         )
         .await;
-        drop(credential);
-        drop(lease);
+        drop(hold);
         let reply = reply?;
         require_status(&reply, StatusCode::OK)?;
         require_json_media_type(&reply).map_err(|error| match error {

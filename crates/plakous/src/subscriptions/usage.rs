@@ -49,6 +49,28 @@ impl NativeSubscriptions {
         self.state
             .require_provider(provider)
             .map_err(|_| SubscriptionUsageUnavailable::LocalState)?;
+        if let Some(gateway) = &self.gateway {
+            let facts = match self.gateway_facts(gateway, provider).await {
+                Ok(facts) => facts,
+                Err(NativeSubscriptionError::Transport(cause)) => {
+                    return Err(SubscriptionUsageUnavailable::Transport(cause));
+                }
+                Err(_) => return Err(SubscriptionUsageUnavailable::LocalState),
+            };
+            let encoded = serde_json::to_vec(&(
+                facts
+                    .profile
+                    .map(|profile| (profile.id, profile.contract_revision)),
+                facts
+                    .generation
+                    .map(plakous_auth::CredentialGeneration::get),
+            ))
+            .map_err(|_| SubscriptionUsageUnavailable::LocalState)?;
+            return Ok(Some(plakous_model::sha256_bytes(&[
+                b"plak.console-observation.gateway.v1",
+                &encoded,
+            ])));
+        }
         let state = self.state.clone();
         if !run_blocking(move || state.layout_exists())
             .await
@@ -90,6 +112,10 @@ impl NativeSubscriptions {
         }
         if self.state.require_provider(provider).is_err() {
             return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState);
+        }
+        if let Some(gateway) = &self.gateway {
+            let _permit = before_get.await;
+            return Box::pin(self.gateway_usage(gateway, provider, false)).await;
         }
         let state = self.state.clone();
         match run_blocking(move || state.layout_exists()).await {
@@ -172,6 +198,9 @@ impl NativeSubscriptions {
         if super::vertical::vertical(provider).is_none() {
             return self.usage_unavailable(SubscriptionUsageUnavailable::NotConnected);
         }
+        if let Some(gateway) = &self.gateway {
+            return Box::pin(self.gateway_usage(gateway, provider, true)).await;
+        }
         let observation = Box::pin(self.read_usage_once(provider, false)).await;
         if matches!(
             observation,
@@ -229,25 +258,75 @@ impl NativeSubscriptions {
                     NativeSubscriptionError::CredentialUnavailable => {
                         self.fenced_credential_reason(provider).await
                     }
-                    NativeSubscriptionError::CredentialProfileChanged => {
-                        SubscriptionUsageUnavailable::CredentialState(
-                            SubscriptionUsageCredentialState::LoginRequired,
-                        )
-                    }
-                    NativeSubscriptionError::CredentialWrittenByNewerBuild => {
-                        SubscriptionUsageUnavailable::CredentialState(
-                            SubscriptionUsageCredentialState::WrittenByNewerBuild,
-                        )
-                    }
-                    NativeSubscriptionError::NotCompiled(_) => {
-                        SubscriptionUsageUnavailable::NotConnected
-                    }
-                    _ => SubscriptionUsageUnavailable::LocalState,
+                    other => reader_refusal(&other),
                 };
                 return self.usage_unavailable(reason);
             }
         };
         Box::pin(self.observe_usage_unlocked(provider, lock, reader)).await
+    }
+
+    /// One allowance read under gateway custody: the gateway's facts admit
+    /// it and the read relays through the gateway. After an `Unauthorized`
+    /// reply `refresh` asks the gateway's single writer to refresh the
+    /// rejected generation and reads once more.
+    async fn gateway_usage(
+        &self,
+        gateway: &super::custody::SubscriptionGateway,
+        provider: NativeProvider,
+        refresh: bool,
+    ) -> SubscriptionUsageRead {
+        let facts = match self.gateway_facts(gateway, provider).await {
+            Ok(facts) => facts,
+            Err(NativeSubscriptionError::Transport(cause)) => {
+                return self.usage_unavailable(SubscriptionUsageUnavailable::Transport(cause));
+            }
+            Err(_) => return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState),
+        };
+        let Ok(status) = Self::gateway_status_of(provider, &facts) else {
+            return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState);
+        };
+        if status.compatibility() != super::CompatibilityStatus::Current {
+            return self.usage_unavailable(SubscriptionUsageUnavailable::Unqualified);
+        }
+        if status.credential() != NativeAuthStatus::Ready {
+            return self.usage_unavailable(credential_reason(Some(status.credential())));
+        }
+        let observation = match self.usage_reader(provider).await {
+            Ok(reader) => reader.await,
+            Err(NativeSubscriptionError::Transport(cause)) => {
+                return self.usage_unavailable(SubscriptionUsageUnavailable::Transport(cause));
+            }
+            Err(error) => return self.usage_unavailable(reader_refusal(&error)),
+        };
+        let rejected = matches!(
+            observation,
+            SubscriptionUsageRead::Unavailable {
+                reason: SubscriptionUsageUnavailable::Unauthorized,
+                ..
+            }
+        );
+        let (true, true, Some(fence), Ok(slot)) = (
+            refresh,
+            rejected,
+            facts.expected_fence(),
+            self.custody_slot(provider),
+        ) else {
+            return observation;
+        };
+        let request = plakous_auth::custody::RefreshRequest::AfterRejection {
+            rejected: fence,
+            selection_epoch_digest: facts.selection_epoch_digest,
+        };
+        match gateway.custodian.refresh(&slot, request).await {
+            Ok(refreshed) if refreshed.status == plakous_auth::custody::CustodyStatus::Ready => {
+                match self.usage_reader(provider).await {
+                    Ok(reader) => reader.await,
+                    Err(error) => self.usage_unavailable(reader_refusal(&error)),
+                }
+            }
+            _ => observation,
+        }
     }
 
     async fn usage_reader(
@@ -304,31 +383,55 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> SubscriptionUsageUnavailable {
-        use SubscriptionUsageCredentialState as C;
-        match self
-            .status_unlocked(provider)
-            .await
-            .map(NativeSubscriptionStatus::credential)
-        {
-            Ok(NativeAuthStatus::SignedOut) => SubscriptionUsageUnavailable::NotConnected,
-            Ok(NativeAuthStatus::RefreshRequired) => {
-                SubscriptionUsageUnavailable::CredentialState(C::RefreshRequired)
-            }
-            Ok(NativeAuthStatus::Quarantined) => {
-                SubscriptionUsageUnavailable::CredentialState(C::Quarantined)
-            }
-            Ok(NativeAuthStatus::Refreshing) => SubscriptionUsageUnavailable::Busy,
-            Ok(NativeAuthStatus::Revoked) => {
-                SubscriptionUsageUnavailable::CredentialState(C::Revoked)
-            }
-            Ok(NativeAuthStatus::LoginRequired) => {
-                SubscriptionUsageUnavailable::CredentialState(C::LoginRequired)
-            }
-            Ok(NativeAuthStatus::WrittenByNewerBuild) => {
-                SubscriptionUsageUnavailable::CredentialState(C::WrittenByNewerBuild)
-            }
-            Ok(NativeAuthStatus::Ready) | Err(_) => SubscriptionUsageUnavailable::LocalState,
+        credential_reason(
+            self.status_unlocked(provider)
+                .await
+                .ok()
+                .map(NativeSubscriptionStatus::credential),
+        )
+    }
+}
+
+/// Why a usage reader could not be opened, other than an unadmitted credential.
+fn reader_refusal(error: &NativeSubscriptionError) -> SubscriptionUsageUnavailable {
+    match error {
+        NativeSubscriptionError::CredentialProfileChanged => {
+            SubscriptionUsageUnavailable::CredentialState(
+                SubscriptionUsageCredentialState::LoginRequired,
+            )
         }
+        NativeSubscriptionError::CredentialWrittenByNewerBuild => {
+            SubscriptionUsageUnavailable::CredentialState(
+                SubscriptionUsageCredentialState::WrittenByNewerBuild,
+            )
+        }
+        NativeSubscriptionError::NotCompiled(_) => SubscriptionUsageUnavailable::NotConnected,
+        _ => SubscriptionUsageUnavailable::LocalState,
+    }
+}
+
+/// Names the credential lifecycle rather than claiming a transport fault.
+fn credential_reason(status: Option<NativeAuthStatus>) -> SubscriptionUsageUnavailable {
+    use SubscriptionUsageCredentialState as C;
+    match status {
+        Some(NativeAuthStatus::SignedOut) => SubscriptionUsageUnavailable::NotConnected,
+        Some(NativeAuthStatus::RefreshRequired) => {
+            SubscriptionUsageUnavailable::CredentialState(C::RefreshRequired)
+        }
+        Some(NativeAuthStatus::Quarantined) => {
+            SubscriptionUsageUnavailable::CredentialState(C::Quarantined)
+        }
+        Some(NativeAuthStatus::Refreshing) => SubscriptionUsageUnavailable::Busy,
+        Some(NativeAuthStatus::Revoked) => {
+            SubscriptionUsageUnavailable::CredentialState(C::Revoked)
+        }
+        Some(NativeAuthStatus::LoginRequired) => {
+            SubscriptionUsageUnavailable::CredentialState(C::LoginRequired)
+        }
+        Some(NativeAuthStatus::WrittenByNewerBuild) => {
+            SubscriptionUsageUnavailable::CredentialState(C::WrittenByNewerBuild)
+        }
+        Some(NativeAuthStatus::Ready) | None => SubscriptionUsageUnavailable::LocalState,
     }
 }
 

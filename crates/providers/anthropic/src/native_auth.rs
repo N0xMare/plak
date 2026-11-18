@@ -57,6 +57,7 @@ use crate::{
 };
 use plakous_exchange::network_failure;
 
+mod custodied;
 mod custody;
 mod error;
 mod login;
@@ -65,6 +66,7 @@ mod manager_core;
 mod profile;
 mod refresh;
 
+pub(crate) use custodied::ClaudeOAuthAccess;
 pub use custody::{CLAUDE_ACCOUNT_UUID_IDENTITY, CLAUDE_DEVICE_ID_IDENTITY};
 pub use error::ClaudeNativeAuthError;
 pub use login::ClaudeOAuthLogin;
@@ -97,9 +99,15 @@ const HEADER_USER_AGENT: HeaderName = HeaderName::from_static("user-agent");
 const CLAUDE_USAGE_BETA: &str = "oauth-2025-04-20";
 
 fn oauth_control_headers(stored: &StoredTokens) -> Result<HeaderMap, SubscriptionUsageUnavailable> {
+    oauth_control_headers_with(CredentialField::bearer(stored.access_token.as_bytes()))
+}
+
+/// The control-plane read headers carrying `authorization` as `field`.
+fn oauth_control_headers_with(
+    field: CredentialField,
+) -> Result<HeaderMap, SubscriptionUsageUnavailable> {
     let mut headers = HeaderMap::new();
-    let bearer = CredentialField::bearer(stored.access_token.as_bytes());
-    let Ok(authorization) = sensitive_header_value(bearer.into_header_bytes()) else {
+    let Ok(authorization) = sensitive_header_value(field.into_header_bytes()) else {
         return Err(SubscriptionUsageUnavailable::InvalidResponse);
     };
     headers.insert(HEADER_AUTHORIZATION, authorization);
@@ -155,7 +163,9 @@ fn attach_claude_profile(
 
 struct ManagerCore {
     device_id: crate::ClaudeClientDeviceId,
-    store: PrivateCredentialStore,
+    /// The private slot under local custody; `None` when a custodian holds
+    /// the login.
+    store: Option<PrivateCredentialStore>,
     client: Client,
     acceptance: ClaudeCompatibilityAcceptance,
     token_origin: String,

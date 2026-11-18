@@ -68,6 +68,10 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<NativeAuthStatus, NativeSubscriptionError> {
+        if let Some(gateway) = &self.gateway {
+            super::vertical::require_vertical(provider)?;
+            return Ok(self.gateway_refresh(gateway, provider, false).await?.0);
+        }
         let lock = self.acquire_compatibility_lock(provider).await?;
         let status = self.refresh_locked(provider, false).await?;
         lock.verify()?;
@@ -84,6 +88,10 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<ForcedRefresh, NativeSubscriptionError> {
+        if let Some(gateway) = &self.gateway {
+            super::vertical::require_vertical(provider)?;
+            return self.gateway_refresh_now(gateway, provider).await;
+        }
         let lock = self.acquire_compatibility_lock(provider).await?;
         let status = self.refresh_locked(provider, true).await?;
         let access_expires_at = self.access_expires_at_locked(provider).await?;
@@ -123,6 +131,17 @@ impl NativeSubscriptions {
         provider: NativeProvider,
         window: Duration,
     ) -> Result<bool, NativeSubscriptionError> {
+        if let Some(gateway) = &self.gateway {
+            let facts = self.gateway_facts(gateway, provider).await?;
+            if facts.status != plakous_auth::custody::CustodyStatus::Ready {
+                return Err(NativeSubscriptionError::CredentialUnavailable);
+            }
+            let access_expires_at = facts
+                .access_expires_at_unix_ms
+                .ok_or(NativeSubscriptionError::CredentialUnavailable)?
+                / 1000;
+            return Ok(access_expires_at <= self.state.now()?.saturating_add(window.as_secs()));
+        }
         let lock = self.acquire_compatibility_lock(provider).await?;
         let access_expires_at = self.access_expires_at_locked(provider).await?;
         lock.verify()?;

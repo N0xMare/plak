@@ -123,6 +123,10 @@ pub enum NativeSubscriptionError {
     },
     /// A bounded provider transport operation failed.
     Transport(Option<plakous_model::ModelNetworkFailure>),
+    /// A credential gateway holds this login: the operation (login, logout,
+    /// consent, account listing) runs at the gateway, never on its store
+    /// from here.
+    GatewayCustody,
     /// Internal application execution or coordination failed.
     Internal,
 }
@@ -245,6 +249,7 @@ impl NativeSubscriptionError {
             Self::CatalogIdentifierRejected => "native catalog model identifier was rejected",
             Self::ModelLookup { .. } => unreachable!("handled above"),
             Self::Transport(_) => "native subscription transport failed",
+            Self::GatewayCustody => "native subscription login is held by a credential gateway",
             Self::Internal => "native subscription operation failed internally",
             #[cfg(any(
                 feature = "codex",

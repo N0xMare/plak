@@ -59,10 +59,12 @@ impl GatewayCustody {
     }
 
     /// Route custody through this gateway, for every route constructor and
-    /// credentials provider that takes a [`crate::custody::Custody`].
+    /// credentials provider that takes a [`crate::custody::Custody`], and for
+    /// `NativeSubscriptions::with_custody`.
     #[must_use]
     pub fn custody(&self) -> crate::custody::Custody {
-        crate::custody::Custody::relayed(self.transport())
+        let custodian: Arc<dyn CredentialCustodian> = self.custodian.clone();
+        crate::custody::Custody::gateway(self.transport(), custodian)
     }
 
     /// The remote custodian: facts, refresh and custodied fields.

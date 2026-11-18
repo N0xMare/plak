@@ -22,6 +22,8 @@ pub struct NativeSubscriptions {
     pub(super) catalog_retries: bool,
     pub(super) state: SubscriptionState,
     pub(super) exchange_observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
+    /// The credential gateway holding these logins, under gateway custody.
+    pub(super) gateway: Option<super::custody::SubscriptionGateway>,
 }
 
 impl NativeSubscriptions {
@@ -37,6 +39,7 @@ impl NativeSubscriptions {
     ) -> Result<Option<plakous_model::Digest>, NativeSubscriptionError> {
         let vertical = super::vertical::require_vertical(provider)?;
         self.state.require_provider(provider)?;
+        self.require_local_custody()?;
         let state = self.state.clone();
         if !run_blocking(move || state.layout_exists()).await?? {
             return Ok(None);
@@ -59,6 +62,7 @@ impl NativeSubscriptions {
     ) -> Result<Vec<String>, NativeSubscriptionError> {
         super::vertical::require_vertical(provider)?;
         self.state.require_provider(provider)?;
+        self.require_local_custody()?;
         let state = self.state.clone();
         run_blocking(move || state.named_accounts(provider)).await?
     }
@@ -75,6 +79,7 @@ impl NativeSubscriptions {
     ) -> Result<(Vec<String>, usize, bool), NativeSubscriptionError> {
         super::vertical::require_vertical(provider)?;
         self.state.require_provider(provider)?;
+        self.require_local_custody()?;
         let state = self.state.clone();
         run_blocking(move || state.named_accounts_bounded(provider, maximum)).await?
     }
@@ -91,6 +96,13 @@ impl NativeSubscriptions {
         self.state.require_provider(provider)?;
         if !self.state.is_named() {
             return Ok(true);
+        }
+        if let Some(gateway) = &self.gateway {
+            return match self.gateway_facts(gateway, provider).await {
+                Ok(_) => Ok(true),
+                Err(NativeSubscriptionError::CredentialUnavailable) => Ok(false),
+                Err(error) => Err(error),
+            };
         }
         let state = self.state.clone();
         run_blocking(move || state.layout_exists()).await?
@@ -122,6 +134,7 @@ impl NativeSubscriptions {
     ) -> Result<Self, NativeSubscriptionError> {
         super::vertical::require_vertical(provider)?;
         self.state.require_provider(provider)?;
+        self.require_local_custody()?;
         let mut selected = self.clone();
         let state = self.state.clone();
         selected.state = run_blocking(move || state.create_account_for_login()).await??;
@@ -158,6 +171,7 @@ impl NativeSubscriptions {
             state,
             exchange_observer: None,
             catalog_retries: true,
+            gateway: None,
         }
     }
     /// Creates the curated facade without filesystem or network I/O.
@@ -172,6 +186,7 @@ impl NativeSubscriptions {
             state: SubscriptionState::new(paths),
             exchange_observer: None,
             catalog_retries: true,
+            gateway: None,
         }
     }
 

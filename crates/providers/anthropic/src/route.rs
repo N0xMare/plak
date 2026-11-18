@@ -224,6 +224,9 @@ pub struct AnthropicApiKeyAuth {
     key: Arc<ApiKey>,
     audience_origin: &'static str,
     credential_authority: AnthropicCredentialAuthority,
+    /// A credential custodian's exact `authorization` value, which replaces
+    /// the key's on a Claude OAuth route whose login a custodian holds.
+    custodied: Option<Arc<secrecy::SecretSlice<u8>>>,
 }
 
 impl AnthropicApiKeyAuth {
@@ -235,6 +238,7 @@ impl AnthropicApiKeyAuth {
             key: Arc::new(key),
             audience_origin: ANTHROPIC_PLATFORM_ORIGIN,
             credential_authority,
+            custodied: None,
         }
     }
 
@@ -258,6 +262,7 @@ impl fmt::Debug for AnthropicApiKeyAuth {
             .field("audience_origin", &self.audience_origin)
             .field("credential_authority", &self.credential_authority)
             .field("key", &"<redacted>")
+            .field("custodied", &self.custodied.is_some())
             .finish()
     }
 }
@@ -313,6 +318,10 @@ impl AnthropicAttemptAuthorization {
             || self.auth.credential_authority != route.auth.credential_authority
         {
             return Err(credential_binding_error());
+        }
+        if let Some(field) = &self.auth.custodied {
+            use secrecy::ExposeSecret as _;
+            return Ok(CredentialField::exact(field.expose_secret().to_vec()));
         }
         let form = if route.is_claude_oauth() {
             KeyHeaderForm::Bearer
@@ -474,16 +483,18 @@ impl AnthropicPlatformRoute {
         self.id.as_str() == crate::CLAUDE_OAUTH_ROUTE_ID
     }
 
-    /// Replaces the OAuth access token without rotating the prepared credential authority.
+    /// Replaces the OAuth credential (the stored access token, or a
+    /// custodian's exact `authorization` value) without rotating the
+    /// prepared credential authority.
     ///
     /// # Errors
     ///
     /// Returns an invalid-configuration error when this is not the Claude OAuth
     /// route or the token is empty/control-bearing.
     #[cfg(feature = "native-auth")]
-    pub(crate) fn with_oauth_access_token(
+    pub(crate) fn with_oauth_access(
         &self,
-        token: impl Into<String>,
+        access: crate::native_auth::ClaudeOAuthAccess,
     ) -> Result<Self, AnthropicError> {
         if !self.is_claude_oauth() {
             return Err(AnthropicError::new(
@@ -492,6 +503,15 @@ impl AnthropicPlatformRoute {
                 "OAuth access-token rotation requires the Claude OAuth route",
             ));
         }
+        // A custodied route keeps a fixed key text only for its credential
+        // authority; the custodian's field is what the request sends.
+        let (token, custodied) = match access {
+            crate::native_auth::ClaudeOAuthAccess::Token(token) => (token, None),
+            crate::native_auth::ClaudeOAuthAccess::Custodied(field) => (
+                "plak-custodied-claude-login".to_owned(),
+                Some(Arc::new(secrecy::SecretSlice::from(field.to_vec()))),
+            ),
+        };
         let key = self.auth.key.renew_with(token).map_err(api_key_error)?;
         let credential_authority = AnthropicCredentialAuthority::from_key(&key);
         Ok(Self {
@@ -503,6 +523,7 @@ impl AnthropicPlatformRoute {
                 key: Arc::new(key),
                 audience_origin: self.auth.audience_origin,
                 credential_authority,
+                custodied,
             },
         })
     }

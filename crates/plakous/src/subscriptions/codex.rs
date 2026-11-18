@@ -24,7 +24,8 @@ pub(super) fn codex_native_http_config()
 pub(super) struct CodexOnline {
     pub(super) manager: Arc<plakous_openai::CodexSubscriptionCredentialManager>,
     pub(super) client: plakous_http::Client,
-    pub(super) acceptance: LoadedAcceptance,
+    /// The local consent receipt; `None` under gateway custody.
+    pub(super) acceptance: Option<LoadedAcceptance>,
 }
 
 impl NativeSubscriptions {
@@ -40,6 +41,20 @@ impl NativeSubscriptions {
     }
 
     pub(super) async fn codex_online_with_gate(
+        &self,
+        request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
+        enforce_login_recovery: bool,
+    ) -> Result<CodexOnline, NativeSubscriptionError> {
+        match &self.gateway {
+            Some(gateway) => self.codex_custodied(gateway, request_gate).await,
+            None => {
+                self.codex_online_local(request_gate, enforce_login_recovery)
+                    .await
+            }
+        }
+    }
+
+    async fn codex_online_local(
         &self,
         request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
         enforce_login_recovery: bool,
@@ -144,10 +159,55 @@ impl NativeSubscriptions {
             Ok(CodexOnline {
                 manager: Arc::new(manager),
                 client,
-                acceptance: loaded_acceptance,
+                acceptance: Some(loaded_acceptance),
             })
         })
         .await?
+    }
+
+    /// The Codex surface of a login a credential gateway holds: consent is
+    /// the gateway's, the manager answers from its facts and the client
+    /// relays through it.
+    async fn codex_custodied(
+        &self,
+        gateway: &super::custody::SubscriptionGateway,
+        request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
+    ) -> Result<CodexOnline, NativeSubscriptionError> {
+        let provider = NativeProvider::Codex;
+        let notice = Self::notice(provider)?;
+        self.require_gateway_consent(gateway, provider).await?;
+        let timestamp =
+            Timestamp::new(self.state.now()?, 0).map_err(|_| NativeSubscriptionError::Internal)?;
+        let acceptance = plakous_openai::CodexCompatibilityAcceptance::accept_exact(
+            notice.profile_id,
+            notice.source_revision,
+            notice.notice_revision,
+            timestamp,
+        )
+        .map_err(map_codex_error)?;
+        let client = gateway.transport.client(
+            plakous_http::Client::new_http1(plakous_http::Limits::default())
+                .map_err(|_| NativeSubscriptionError::Internal)?,
+        );
+        let mut manager = plakous_openai::CodexSubscriptionCredentialManager::custodied(
+            Arc::clone(&gateway.custodian),
+            self.custody_slot(provider)?,
+            client.clone(),
+            acceptance,
+        )
+        .await
+        .map_err(map_codex_error)?;
+        if let Some(gate) = request_gate {
+            manager = manager.with_subscription_request_gate(gate);
+        }
+        if let Some(observer) = credential_refresh_observer(provider, self.state.source_scope()) {
+            manager = manager.with_credential_refresh_observer(observer);
+        }
+        Ok(CodexOnline {
+            manager: Arc::new(manager),
+            client,
+            acceptance: None,
+        })
     }
 
     /// The account-admitted text models of a fresh Codex catalog.
@@ -852,12 +912,16 @@ impl NativeVertical for Vertical {
             let provider = NativeProvider::Codex;
             {
                 let online = subscriptions.codex_online_for_login().await?;
+                let acceptance = online
+                    .acceptance
+                    .as_ref()
+                    .ok_or(NativeSubscriptionError::GatewayCustody)?;
                 let consent = PendingCompatibilityConsent {
                     effects: crate::subscriptions::NativeLoginEffects(Arc::default()),
                     state: subscriptions.state.clone(),
                     notice: NativeSubscriptions::notice(provider)?,
-                    exact_receipt: online.acceptance.exact_bytes.clone(),
-                    generation: online.acceptance.generation.clone(),
+                    exact_receipt: acceptance.exact_bytes.clone(),
+                    generation: acceptance.generation.clone(),
                 };
                 let manager = online.manager;
                 let inner = match mode {

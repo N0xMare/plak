@@ -8,18 +8,68 @@ use super::{
 };
 use plakous_auth::custody::CredentialField;
 
+/// What an authorization holds its credential headers from.
+pub(super) enum AuthorizationMaterial {
+    /// The exact Ready lease and the record it read, under local custody.
+    Local {
+        lease: ReadyCredentialLease,
+        credential: StoredCredential,
+    },
+    /// A custodian's fields for the expected fence and the login selection
+    /// its facts named; the custodian checks the fence again at injection.
+    Custodied {
+        authorization: HeaderValue,
+        account: HeaderValue,
+        selection_epoch: Digest,
+    },
+}
+
 /// Private one-use inference authorization retaining the exact Ready lease.
 pub(crate) struct NativeCodexAuthorization {
-    pub(super) lease: ReadyCredentialLease,
+    pub(super) material: AuthorizationMaterial,
     pub(super) expected_fence: CredentialFence,
     pub(super) expected_selection_epoch: Digest,
-    pub(super) credential: StoredCredential,
     pub(super) preflight: NativeCodexPreflightRequest,
     pub(super) physical_request: Option<ResponsesPhysicalRequestBinding>,
     pub(super) headers_consumed: bool,
 }
 
 impl NativeCodexAuthorization {
+    /// The fence the credential is held at.
+    pub(super) fn held_fence(&self) -> CredentialFence {
+        match &self.material {
+            AuthorizationMaterial::Local { lease, .. } => lease.fence(),
+            AuthorizationMaterial::Custodied { .. } => self.expected_fence.clone(),
+        }
+    }
+
+    /// Whether the held record belongs to `fence`'s account.
+    pub(super) fn holds_account(&self, fence: &CredentialFence) -> bool {
+        match &self.material {
+            AuthorizationMaterial::Local { credential, .. } => {
+                fence.account_binding().as_str() == credential.account_id
+            }
+            AuthorizationMaterial::Custodied { .. } => true,
+        }
+    }
+
+    /// The held login selection, as a route with `account` and `authority`
+    /// binds it.
+    pub(super) fn held_selection_epoch(
+        &self,
+        account: Digest,
+        authority: Digest,
+    ) -> Result<Digest, super::NativeCodexAuthError> {
+        match &self.material {
+            AuthorizationMaterial::Local { credential, .. } => {
+                super::credential_selection_epoch(account, authority, &credential.selection_epoch)
+            }
+            AuthorizationMaterial::Custodied {
+                selection_epoch, ..
+            } => Ok(*selection_epoch),
+        }
+    }
+
     pub(crate) const fn target(&self) -> &OpenAiTarget {
         self.preflight.target()
     }
@@ -44,8 +94,8 @@ impl NativeCodexAuthorization {
         physical: &ResponsesPhysicalRequestBinding,
     ) -> Result<(), AuthError> {
         if physical != self.preflight.physical()
-            || self.lease.fence() != self.expected_fence
-            || self.expected_fence.account_binding().as_str() != self.credential.account_id
+            || self.held_fence() != self.expected_fence
+            || !self.holds_account(&self.expected_fence)
         {
             return Err(AuthError::BindingMismatch);
         }
@@ -81,18 +131,26 @@ impl NativeCodexAuthorization {
             &self.expected_fence,
             self.expected_selection_epoch,
         )?;
-        let fence = self.lease.fence();
-        if fence != self.expected_fence
-            || fence.account_binding().as_str() != self.credential.account_id
-        {
+        let fence = self.held_fence();
+        if fence != self.expected_fence || !self.holds_account(&fence) {
             return Err(AuthError::BindingMismatch);
         }
-        let bearer = CredentialField::bearer(self.credential.access_token.as_bytes());
-        let authorization = sensitive_header_value(bearer.into_header_bytes())
-            .map_err(|_| AuthError::SourceFailure)?;
-        let account = CredentialField::exact(self.credential.account_id.as_bytes().to_vec());
-        let account = sensitive_header_value(account.into_header_bytes())
-            .map_err(|_| AuthError::BindingMismatch)?;
+        let (authorization, account) = match &self.material {
+            AuthorizationMaterial::Local { credential, .. } => {
+                let bearer = CredentialField::bearer(credential.access_token.as_bytes());
+                let authorization = sensitive_header_value(bearer.into_header_bytes())
+                    .map_err(|_| AuthError::SourceFailure)?;
+                let account = CredentialField::exact(credential.account_id.as_bytes().to_vec());
+                let account = sensitive_header_value(account.into_header_bytes())
+                    .map_err(|_| AuthError::BindingMismatch)?;
+                (authorization, account)
+            }
+            AuthorizationMaterial::Custodied {
+                authorization,
+                account,
+                ..
+            } => (authorization.clone(), account.clone()),
+        };
         headers.insert(HeaderName::from_static("authorization"), authorization);
         headers.insert(HeaderName::from_static("chatgpt-account-id"), account);
         headers.insert(

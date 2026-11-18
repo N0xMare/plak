@@ -114,7 +114,10 @@ impl CodexSubscriptionCredentialManager {
         redirect_uri: String,
     ) -> Result<BrowserLoginAttempt, NativeCodexAuthError> {
         self.validate_profile_admission()?;
-        let credential_baseline = self.store.load().map_err(|_| NativeCodexAuthError::Store)?;
+        let credential_baseline = self
+            .store()?
+            .load()
+            .map_err(|_| NativeCodexAuthError::Store)?;
         let state =
             generate_oauth_correlation_token().map_err(|_| NativeCodexAuthError::Binding)?;
         let pkce = plakous_auth::PkceS256::generate().map_err(|_| NativeCodexAuthError::Binding)?;
@@ -240,7 +243,10 @@ impl CodexSubscriptionCredentialManager {
     /// responses.
     pub async fn begin_device_login(&self) -> Result<CodexDeviceLogin, NativeCodexAuthError> {
         self.validate_profile_admission()?;
-        let credential_baseline = self.store.load().map_err(|_| NativeCodexAuthError::Store)?;
+        let credential_baseline = self
+            .store()?
+            .load()
+            .map_err(|_| NativeCodexAuthError::Store)?;
         let body = serde_json::to_vec(&DeviceUserCodeRequest {
             client_id: OPENAI_CODEX_NATIVE_CLIENT_ID,
         })
@@ -449,7 +455,7 @@ impl CodexSubscriptionCredentialManager {
         deadline: Instant,
     ) -> Result<(), NativeCodexAuthError> {
         remaining_until(deadline, Instant::now()).ok_or(NativeCodexAuthError::LoginPersistence)?;
-        let store = Arc::clone(&self.store);
+        let store = Arc::clone(self.store()?);
         let accepted_at = self.acceptance.accepted_at;
         let clock = Arc::clone(&self.clock);
         let (account, committed) = run_blocking(move || {
@@ -492,7 +498,7 @@ impl CodexSubscriptionCredentialManager {
         .await
         .map_err(login_persistence_error)?;
         if Instant::now() >= deadline {
-            let store = Arc::clone(&self.store);
+            let store = Arc::clone(self.store()?);
             run_blocking(move || {
                 store
                     .logout(committed.generation())
@@ -505,7 +511,7 @@ impl CodexSubscriptionCredentialManager {
         self.install_selected_account(account)
             .map_err(|_| NativeCodexAuthError::LoginPersistence)?;
         if Instant::now() >= deadline {
-            let store = Arc::clone(&self.store);
+            let store = Arc::clone(self.store()?);
             run_blocking(move || {
                 store
                     .logout(committed.generation())

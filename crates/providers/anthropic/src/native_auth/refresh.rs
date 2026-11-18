@@ -57,7 +57,7 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
         let fence = self
             .core
-            .store
+            .store()?
             .load()?
             .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
         if fence.status() == CredentialStatus::RefreshRequired {

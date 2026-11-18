@@ -45,6 +45,8 @@ mod address_tests;
 #[cfg(feature = "fault-injection")]
 pub(crate) mod fault;
 mod pool;
+#[cfg(feature = "fault-injection")]
+mod test_dial;
 
 const HTTP1_MINIMUM_BUFFER_BYTES: usize = 8_192;
 const TRANSPORT_BEHAVIOR_REVISION: u32 = 5;

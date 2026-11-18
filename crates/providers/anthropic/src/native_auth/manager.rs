@@ -1,5 +1,6 @@
 //! The app-owned manager for one explicit Claude selected-account slot.
 
+use super::custodied::{ClaudeCustodiedLogin, ClaudeOAuthAccess};
 use super::refresh::RefreshForce;
 use super::{
     AccountBinding, Arc, AsyncMutex, AuthBodyError, CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID,
@@ -11,8 +12,8 @@ use super::{
     StoredTokens, SubscriptionRequestGate, SubscriptionUsageCredentialState, SubscriptionUsageRead,
     SubscriptionUsageUnavailable, Timestamp, attach_claude_profile, auth_profile_id,
     claude_authorize_url, credential_record, fmt, network_failure, oauth_control_headers,
-    run_claimed_refresh, system_unix_seconds, usage_credential_refusal, validate_acceptance,
-    validate_current_ready_record,
+    oauth_control_headers_with, run_claimed_refresh, system_unix_seconds, usage_credential_refusal,
+    validate_acceptance, validate_current_ready_record,
 };
 #[cfg(test)]
 use super::{Origin, parse_claude_oauth_token_grant};
@@ -24,6 +25,8 @@ pub struct ClaudeNativeAuthManager {
     pub(super) request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
     pub(super) refresh_observer: Option<Arc<dyn CredentialRefreshObserver>>,
     source_scope: Option<String>,
+    /// The custodian holding the login; `None` under local custody.
+    pub(super) custodied: Option<Arc<ClaudeCustodiedLogin>>,
 }
 
 impl ClaudeNativeAuthManager {
@@ -60,7 +63,11 @@ impl ClaudeNativeAuthManager {
         Ok(Self {
             core: Arc::new(ManagerCore {
                 device_id,
-                store: PrivateCredentialStore::open_slot(path, auth_profile_id()?, slot)?,
+                store: Some(PrivateCredentialStore::open_slot(
+                    path,
+                    auth_profile_id()?,
+                    slot,
+                )?),
                 client,
                 acceptance,
                 token_origin: CLAUDE_OAUTH_TOKEN_ORIGIN.to_owned(),
@@ -71,6 +78,43 @@ impl ClaudeNativeAuthManager {
             request_gate: None,
             refresh_observer: None,
             source_scope: None,
+            custodied: None,
+        })
+    }
+
+    /// Opens the login a credential custodian holds for `slot`: facts, the
+    /// `authorization` field and refresh are the custodian's, the client
+    /// device id is the one its facts report, and no local slot is opened.
+    /// `client` is the route's client (relayed through a gateway).
+    ///
+    /// # Errors
+    ///
+    /// Fails for an unaccepted or expired profile, an unreachable custodian,
+    /// or a login that is not Ready with its account identity.
+    pub async fn custodied(
+        custodian: Arc<dyn plakous_auth::custody::CredentialCustodian>,
+        slot: plakous_auth::custody::CustodySlot,
+        client: Client,
+        acceptance: ClaudeCompatibilityAcceptance,
+    ) -> Result<Self, ClaudeNativeAuthError> {
+        validate_acceptance(&acceptance, system_unix_seconds()?)?;
+        let login = ClaudeCustodiedLogin::open(custodian, slot).await?;
+        let ((_, _, _), identity) = login.identity_credentials()?;
+        Ok(Self {
+            core: Arc::new(ManagerCore {
+                device_id: identity.device_id().clone(),
+                store: None,
+                client,
+                acceptance,
+                token_origin: CLAUDE_OAUTH_TOKEN_ORIGIN.to_owned(),
+                #[cfg(test)]
+                control_origin: None,
+                refresh_flight: AsyncMutex::new(()),
+            }),
+            request_gate: None,
+            refresh_observer: None,
+            source_scope: None,
+            custodied: Some(Arc::new(login)),
         })
     }
 
@@ -119,10 +163,13 @@ impl ClaudeNativeAuthManager {
     ///
     /// Fails closed on malformed or unsafe storage.
     pub fn status(&self) -> Result<Option<ClaudeSubscriptionStatus>, ClaudeNativeAuthError> {
-        validate_current_ready_record(&self.core.store)?;
+        if let Some(login) = &self.custodied {
+            return Ok(login.status());
+        }
+        validate_current_ready_record(self.core.store()?)?;
         Ok(self
             .core
-            .store
+            .store()?
             .load()?
             .map(|fence| ClaudeSubscriptionStatus {
                 generation: fence.generation(),
@@ -133,6 +180,10 @@ impl ClaudeNativeAuthManager {
     pub(crate) async fn async_status(
         &self,
     ) -> Result<Option<ClaudeSubscriptionStatus>, ClaudeNativeAuthError> {
+        if let Some(login) = &self.custodied {
+            login.read().await?;
+            return Ok(login.status());
+        }
         let manager = self.clone();
         tokio::task::spawn_blocking(move || manager.status())
             .await
@@ -185,6 +236,12 @@ impl ClaudeNativeAuthManager {
         if self.core.ensure_active().is_err() {
             return unavailable(SubscriptionUsageUnavailable::Unqualified);
         }
+        if let Some(login) = &self.custodied {
+            return self.custodied_usage(login).await;
+        }
+        let Ok(store) = self.core.store() else {
+            return unavailable(SubscriptionUsageUnavailable::LocalState);
+        };
         // Usage never starts a refresh. Claude refresh tokens rotate and a
         // claimed refresh cannot be restored once it may have reached the
         // provider, so a usage read dropped by its caller's timeout mid-claim
@@ -194,7 +251,7 @@ impl ClaudeNativeAuthManager {
         let Some(_lifecycle) = self.core.refresh_flight.try_lock() else {
             return unavailable(SubscriptionUsageUnavailable::Busy);
         };
-        match validate_current_ready_record(&self.core.store) {
+        match validate_current_ready_record(store) {
             Ok(()) => {}
             Err(
                 ClaudeNativeAuthError::StoredCredentialWrittenByNewerBuild
@@ -206,7 +263,7 @@ impl ClaudeNativeAuthManager {
             }
             Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
         }
-        let fence = match self.core.store.load() {
+        let fence = match store.load() {
             Ok(Some(fence)) => fence,
             Ok(None) => return unavailable(SubscriptionUsageUnavailable::NotConnected),
             Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
@@ -214,7 +271,7 @@ impl ClaudeNativeAuthManager {
         // A durable Unknown record whose claim another process still holds is
         // a refresh in flight, not a settled quarantine.
         if fence.status() == CredentialStatus::RefreshOutcomeUnknown {
-            match self.core.store.refresh_outcome_settled(&fence) {
+            match store.refresh_outcome_settled(&fence) {
                 Ok(true) => {}
                 Ok(false) => return unavailable(SubscriptionUsageUnavailable::Busy),
                 Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
@@ -223,7 +280,7 @@ impl ClaudeNativeAuthManager {
         if let Some(reason) = usage_credential_refusal(fence.status()) {
             return unavailable(reason);
         }
-        let lease = match self.core.store.try_acquire_ready(&fence) {
+        let lease = match store.try_acquire_ready(&fence) {
             Ok(Some(lease)) => lease,
             Ok(None) => return unavailable(SubscriptionUsageUnavailable::Busy),
             Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
@@ -323,6 +380,93 @@ impl ClaudeNativeAuthManager {
         }
     }
 
+    /// The usage read of a custodied login: the usage GET alone, its
+    /// `authorization` the custodian's field, relayed through the route's
+    /// client. Profile hydration is never relayed, so no e-mail is attached.
+    async fn custodied_usage(&self, login: &ClaudeCustodiedLogin) -> SubscriptionUsageRead {
+        let unavailable = |reason| SubscriptionUsageRead::Unavailable {
+            observed_at: Timestamp::new(system_unix_seconds().unwrap_or(0), 0)
+                .unwrap_or_else(|_| unreachable!("Unix epoch is a valid timestamp")),
+            reason,
+        };
+        match login.read().await {
+            Ok(_) => {}
+            Err(ClaudeNativeAuthError::Transport(cause)) => {
+                return unavailable(SubscriptionUsageUnavailable::Transport(cause));
+            }
+            Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
+        }
+        let Some(status) = login.status() else {
+            return unavailable(SubscriptionUsageUnavailable::NotConnected);
+        };
+        if let Some(reason) = usage_credential_refusal(status.status()) {
+            return unavailable(reason);
+        }
+        let (Ok(expires_at), Ok(now), Some(field)) = (
+            login.access_expires_at(),
+            system_unix_seconds(),
+            login.field(),
+        ) else {
+            return unavailable(SubscriptionUsageUnavailable::LocalState);
+        };
+        if expires_at <= now {
+            return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                SubscriptionUsageCredentialState::RefreshRequired,
+            ));
+        }
+        let headers = match oauth_control_headers_with(
+            plakous_auth::custody::CredentialField::exact(field.to_vec()),
+        ) {
+            Ok(headers) => headers,
+            Err(reason) => return unavailable(reason),
+        };
+        let Ok(usage_request) = self
+            .core
+            .oauth_control_get(CLAUDE_SUBSCRIPTION_USAGE_PATH, headers)
+        else {
+            return unavailable(SubscriptionUsageUnavailable::LocalState);
+        };
+        let (status, is_json, body) = match self.core.execute_usage(usage_request).await {
+            Ok(reply) => reply,
+            Err(AuthBodyError::TooLarge) => {
+                return unavailable(SubscriptionUsageUnavailable::InvalidResponse);
+            }
+            Err(AuthBodyError::Failure(failure)) => {
+                return unavailable(SubscriptionUsageUnavailable::Transport(network_failure(
+                    failure,
+                )));
+            }
+        };
+        let observed_at = Timestamp::new(system_unix_seconds().unwrap_or(now), 0)
+            .unwrap_or_else(|_| unreachable!("Unix epoch is a valid timestamp"));
+        let reason = match status.as_u16() {
+            200 if is_json => None,
+            200 => Some(SubscriptionUsageUnavailable::InvalidResponse),
+            401 | 403 => Some(SubscriptionUsageUnavailable::Unauthorized),
+            429 => Some(SubscriptionUsageUnavailable::RateLimited),
+            _ => Some(SubscriptionUsageUnavailable::ProviderUnavailable),
+        };
+        if let Some(reason) = reason {
+            return SubscriptionUsageRead::Unavailable {
+                observed_at,
+                reason,
+            };
+        }
+        match crate::decode_claude_subscription_usage(&body, observed_at) {
+            Ok(snapshot) if snapshot.contains_ended_window() => {
+                SubscriptionUsageRead::Unavailable {
+                    observed_at,
+                    reason: SubscriptionUsageUnavailable::Stale,
+                }
+            }
+            Ok(snapshot) => SubscriptionUsageRead::Snapshot(snapshot),
+            Err(_) => SubscriptionUsageRead::Unavailable {
+                observed_at,
+                reason: SubscriptionUsageUnavailable::InvalidResponse,
+            },
+        }
+    }
+
     /// Begins PKCE Claude OAuth. Completion is always paste of code or callback URL.
     ///
     /// # Errors
@@ -331,7 +475,7 @@ impl ClaudeNativeAuthManager {
     pub fn begin_login(&self) -> Result<ClaudeOAuthLogin, ClaudeNativeAuthError> {
         self.core.ensure_active()?;
         let deadline = ManagerCore::flow_deadline(LOGIN_TIMEOUT)?;
-        let baseline = self.core.store.load()?;
+        let baseline = self.core.store()?.load()?;
         let pkce = PkceS256::generate()?;
         let state = plakous_auth::generate_oauth_correlation_token()?;
         let authorization_url =
@@ -373,9 +517,12 @@ impl ClaudeNativeAuthManager {
     ///
     /// Fails for a missing, non-Ready, or unreadable record.
     pub fn access_expires_at(&self) -> Result<u64, ClaudeNativeAuthError> {
+        if let Some(login) = &self.custodied {
+            return login.access_expires_at();
+        }
         let fence = self
             .core
-            .store
+            .store()?
             .load()?
             .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
         Ok(self.core.read_stored(&fence)?.expires_at)
@@ -385,7 +532,21 @@ impl ClaudeNativeAuthManager {
         &self,
         force: RefreshForce,
     ) -> Result<(), ClaudeNativeAuthError> {
-        validate_current_ready_record(&self.core.store)?;
+        if let Some(login) = &self.custodied {
+            match force {
+                RefreshForce::IfDue => login.refresh_if_due().await?,
+                RefreshForce::Always => login.refresh_after_rejection(None).await?,
+                RefreshForce::WhileCurrent(generation) => {
+                    login.refresh_after_rejection(Some(generation)).await?
+                }
+            };
+            return if login.is_ready() {
+                Ok(())
+            } else {
+                Err(ClaudeNativeAuthError::NotReady)
+            };
+        }
+        validate_current_ready_record(self.core.store()?)?;
         let flight = self.core.refresh_flight.lock().await;
         let mut hooks = ClaudeRefreshHooks {
             core: &self.core,
@@ -396,7 +557,7 @@ impl ClaudeNativeAuthManager {
             force,
             detail: CredentialRefreshDetail::default(),
         };
-        run_claimed_refresh(&self.core.store, &self.core.client, &mut hooks).await
+        run_claimed_refresh(self.core.store()?, &self.core.client, &mut hooks).await
     }
 
     /// Replaces the current credential with a local revoked tombstone.
@@ -409,10 +570,10 @@ impl ClaudeNativeAuthManager {
     pub fn logout_local(&self) -> Result<CredentialGeneration, ClaudeNativeAuthError> {
         let fence = self
             .core
-            .store
+            .store()?
             .load()?
             .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
-        Ok(self.core.store.logout(fence.generation())?)
+        Ok(self.core.store()?.logout(fence.generation())?)
     }
 
     /// Local-only retirement. There is no pinned Claude remote revoke.
@@ -430,14 +591,20 @@ impl ClaudeNativeAuthManager {
     ///
     /// Requires a Ready selected credential.
     pub fn enrolled_catalog(&self) -> Result<Vec<ClaudeEnrolledModel>, ClaudeNativeAuthError> {
-        validate_current_ready_record(&self.core.store)?;
-        let fence = self
-            .core
-            .store
-            .load()?
-            .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
-        if fence.status() != CredentialStatus::Ready {
-            return Err(ClaudeNativeAuthError::NotReady);
+        if let Some(login) = &self.custodied {
+            if !login.is_ready() {
+                return Err(ClaudeNativeAuthError::NotReady);
+            }
+        } else {
+            validate_current_ready_record(self.core.store()?)?;
+            let fence = self
+                .core
+                .store()?
+                .load()?
+                .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
+            if fence.status() != CredentialStatus::Ready {
+                return Err(ClaudeNativeAuthError::NotReady);
+            }
         }
         Ok(crate::oauth::CLAUDE_ENROLLMENTS
             .iter()
@@ -453,6 +620,15 @@ impl ClaudeNativeAuthManager {
     /// The credential lease fences the GET; the existing generation CAS fences
     /// persistence after releasing that lease. A concurrent login/refresh wins.
     pub(crate) async fn ensure_account_identity(&self) -> Result<(), ClaudeNativeAuthError> {
+        if let Some(login) = &self.custodied {
+            // The custodian hydrates the identity before it reports it.
+            login.read().await?;
+            return if login.has_account_identity() {
+                Ok(())
+            } else {
+                Err(ClaudeNativeAuthError::AccountIdentityUnavailable)
+            };
+        }
         let _flight = self.core.refresh_flight.lock().await;
         self.core.ensure_active()?;
         let mut observed_account = None;
@@ -461,10 +637,10 @@ impl ClaudeNativeAuthManager {
             let core = Arc::clone(&self.core);
             let (fence, lease) = tokio::task::spawn_blocking(move || {
                 let fence = core
-                    .store
+                    .store()?
                     .load()?
                     .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
-                let lease = core.store.acquire_ready(&fence)?;
+                let lease = core.store()?.acquire_ready(&fence)?;
                 Ok::<_, ClaudeNativeAuthError>((fence, lease))
             })
             .await
@@ -528,8 +704,12 @@ impl ClaudeNativeAuthManager {
             // Another manager can retain a Ready lease across its profile GET.
             // Never block the executor while waiting for that reader to finish.
             let core = Arc::clone(&self.core);
+            self.core.store()?;
             let replaced = tokio::task::spawn_blocking(move || {
-                core.store.replace(fence.generation(), &replacement)
+                core.store
+                    .as_ref()
+                    .ok_or(PrivateStoreError::InvalidPath)?
+                    .replace(fence.generation(), &replacement)
             })
             .await
             .map_err(|_| ClaudeNativeAuthError::NotReady)?;
@@ -553,14 +733,17 @@ impl ClaudeNativeAuthManager {
         &self,
     ) -> Result<
         (
-            (String, u64, AccountBinding),
+            (ClaudeOAuthAccess, u64, AccountBinding),
             crate::ClaudeOAuthRequestIdentity,
         ),
         ClaudeNativeAuthError,
     > {
+        if let Some(login) = &self.custodied {
+            return login.identity_credentials();
+        }
         let fence = self
             .core
-            .store
+            .store()?
             .load()?
             .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
         if fence.status() != CredentialStatus::Ready {
@@ -573,7 +756,7 @@ impl ClaudeNativeAuthManager {
             .ok_or(ClaudeNativeAuthError::AccountIdentityUnavailable)?;
         Ok((
             (
-                stored.access_token.clone(),
+                ClaudeOAuthAccess::Token(stored.access_token.clone()),
                 fence.generation().get(),
                 fence.account_binding().clone(),
             ),
@@ -584,11 +767,16 @@ impl ClaudeNativeAuthManager {
     /// Returns the Ready access token and credential generation for dispatch.
     pub(crate) fn dispatch_credentials(
         &self,
-    ) -> Result<(String, u64, AccountBinding), ClaudeNativeAuthError> {
-        validate_current_ready_record(&self.core.store)?;
+    ) -> Result<(ClaudeOAuthAccess, u64, AccountBinding), ClaudeNativeAuthError> {
+        if let Some(login) = &self.custodied {
+            return login
+                .identity_credentials()
+                .map(|(credentials, _)| credentials);
+        }
+        validate_current_ready_record(self.core.store()?)?;
         let fence = self
             .core
-            .store
+            .store()?
             .load()?
             .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
         if fence.status() != CredentialStatus::Ready {
@@ -596,7 +784,7 @@ impl ClaudeNativeAuthManager {
         }
         let stored = self.core.read_stored(&fence)?;
         Ok((
-            stored.access_token.clone(),
+            ClaudeOAuthAccess::Token(stored.access_token.clone()),
             fence.generation().get(),
             fence.account_binding().clone(),
         ))
@@ -634,7 +822,7 @@ impl ClaudeNativeAuthManager {
         let grant = parse_claude_oauth_token_grant(body.as_bytes())
             .map_err(|_| ClaudeNativeAuthError::InvalidTokenResponse)?;
         self.core
-            .persist_grant(self.core.store.load()?.as_ref(), &grant)
+            .persist_grant(self.core.store()?.load()?.as_ref(), &grant)
     }
 }
 

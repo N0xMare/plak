@@ -75,8 +75,8 @@ impl ClaudeNativeAuthManager {
         let mut facts = AccountFacts::signed_out(slot.clone());
         let core = std::sync::Arc::clone(&self.core);
         let read = tokio::task::spawn_blocking(move || {
-            let lifecycle = match validate_current_ready_record(&core.store) {
-                Ok(()) => CustodyStatus::from_lifecycle(core.store.offline_lifecycle()?),
+            let lifecycle = match validate_current_ready_record(core.store()?) {
+                Ok(()) => CustodyStatus::from_lifecycle(core.store()?.offline_lifecycle()?),
                 Err(ClaudeNativeAuthError::StoredCredentialWrittenByNewerBuild) => {
                     CustodyStatus::WrittenByNewerBuild
                 }
@@ -86,7 +86,7 @@ impl ClaudeNativeAuthManager {
                 ) => CustodyStatus::LoginRequired,
                 Err(error) => return Err(error),
             };
-            Ok::<_, ClaudeNativeAuthError>((lifecycle, core.store.load()?))
+            Ok::<_, ClaudeNativeAuthError>((lifecycle, core.store()?.load()?))
         })
         .await
         .map_err(|_| CustodyError::Internal)?;
@@ -158,7 +158,7 @@ impl ClaudeNativeAuthManager {
         let fence = fence.ok_or(CustodyError::Internal)?;
         let core = std::sync::Arc::clone(&self.core);
         let leased = tokio::task::spawn_blocking(move || {
-            let lease = core.store.acquire_ready(&fence).ok()?;
+            let lease = core.store().ok()?.acquire_ready(&fence).ok()?;
             (lease.fence() == fence).then_some(lease)
         })
         .await

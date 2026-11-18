@@ -15,7 +15,8 @@ use plakous_model::ResolvedProviderAuthorityBinding;
 
 pub(super) struct ClaudeOnline {
     pub(super) manager: Arc<plakous_anthropic::ClaudeNativeAuthManager>,
-    pub(super) acceptance: LoadedAcceptance,
+    /// The local consent receipt; `None` under gateway custody.
+    pub(super) acceptance: Option<LoadedAcceptance>,
 }
 
 impl NativeSubscriptions {
@@ -30,6 +31,68 @@ impl NativeSubscriptions {
     }
 
     pub(super) async fn claude_online_with_gate(
+        &self,
+        request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
+        enforce_login_recovery: bool,
+    ) -> Result<ClaudeOnline, NativeSubscriptionError> {
+        match &self.gateway {
+            Some(gateway) => self.claude_custodied(gateway, request_gate).await,
+            None => {
+                self.claude_online_local(request_gate, enforce_login_recovery)
+                    .await
+            }
+        }
+    }
+
+    /// The Claude surface of a login a credential gateway holds: consent is
+    /// the gateway's, the manager answers from its facts and its client
+    /// relays through it.
+    async fn claude_custodied(
+        &self,
+        gateway: &super::custody::SubscriptionGateway,
+        request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
+    ) -> Result<ClaudeOnline, NativeSubscriptionError> {
+        let provider = NativeProvider::Claude;
+        let notice = Self::notice(provider)?;
+        self.require_gateway_consent(gateway, provider).await?;
+        let timestamp =
+            Timestamp::new(self.state.now()?, 0).map_err(|_| NativeSubscriptionError::Internal)?;
+        let acceptance = plakous_anthropic::ClaudeCompatibilityAcceptance::accept_exact(
+            notice.profile_id,
+            notice.source_revision,
+            notice.notice_revision,
+            notice.kill_switch_revision,
+            timestamp,
+        )
+        .map_err(map_claude_error)?;
+        let client = gateway.transport.client(
+            plakous_http::Client::new_http1(plakous_http::Limits::default())
+                .map_err(|_| NativeSubscriptionError::Internal)?,
+        );
+        let mut manager = plakous_anthropic::ClaudeNativeAuthManager::custodied(
+            Arc::clone(&gateway.custodian),
+            self.custody_slot(provider)?,
+            client,
+            acceptance,
+        )
+        .await
+        .map_err(map_claude_error)?;
+        if let Some(scope) = self.state.source_scope() {
+            manager = manager.with_credential_source_scope(scope);
+        }
+        if let Some(gate) = request_gate {
+            manager = manager.with_subscription_request_gate(gate);
+        }
+        if let Some(observer) = credential_refresh_observer(provider, self.state.source_scope()) {
+            manager = manager.with_credential_refresh_observer(observer);
+        }
+        Ok(ClaudeOnline {
+            manager: Arc::new(manager),
+            acceptance: None,
+        })
+    }
+
+    async fn claude_online_local(
         &self,
         request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
         enforce_login_recovery: bool,
@@ -118,7 +181,7 @@ impl NativeSubscriptions {
             }
             Ok(ClaudeOnline {
                 manager: Arc::new(manager),
-                acceptance: loaded_acceptance,
+                acceptance: Some(loaded_acceptance),
             })
         })
         .await?
@@ -529,9 +592,11 @@ impl NativeVertical for Vertical {
                         NativeSubscriptionError::Internal,
                     )
                 })?;
-                let client = client
-                    .pooled()
-                    .with_observer(subscriptions.exchange_observer.clone());
+                let client = subscriptions.route_client(
+                    client
+                        .pooled()
+                        .with_observer(subscriptions.exchange_observer.clone()),
+                );
                 if !attach {
                     online.manager.refresh_if_needed().await.map_err(|error| {
                         NativeModelResolutionError::after_selection(
@@ -650,12 +715,16 @@ impl NativeVertical for Vertical {
             let provider = NativeProvider::Claude;
             {
                 let online = subscriptions.claude_online_for_login().await?;
+                let acceptance = online
+                    .acceptance
+                    .as_ref()
+                    .ok_or(NativeSubscriptionError::GatewayCustody)?;
                 let consent = PendingCompatibilityConsent {
                     effects: crate::subscriptions::NativeLoginEffects(Arc::default()),
                     state: subscriptions.state.clone(),
                     notice: NativeSubscriptions::notice(provider)?,
-                    exact_receipt: online.acceptance.exact_bytes.clone(),
-                    generation: online.acceptance.generation.clone(),
+                    exact_receipt: acceptance.exact_bytes.clone(),
+                    generation: acceptance.generation.clone(),
                 };
                 Ok(PendingNativeLogin {
                     inner: Box::new(PendingLogin(

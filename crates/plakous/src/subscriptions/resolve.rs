@@ -143,10 +143,16 @@ impl NativeSubscriptions {
                     NativeSubscriptionError::ModelUnavailable,
                 )
             })?;
-        let _lock = self
-            .acquire_compatibility_lock(provider)
-            .await
-            .map_err(NativeModelResolutionError::before_selection)?;
+        // Under gateway custody the gateway serializes its own store.
+        let _lock = if self.gateway.is_some() {
+            None
+        } else {
+            Some(
+                self.acquire_compatibility_lock(provider)
+                    .await
+                    .map_err(NativeModelResolutionError::before_selection)?,
+            )
+        };
         super::vertical::require_vertical(provider)
             .map_err(NativeModelResolutionError::before_selection)?
             .resolve(self, model_selector, gate, attach, lineage)

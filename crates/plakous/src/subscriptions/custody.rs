@@ -279,3 +279,236 @@ fn custody_error(error: &NativeSubscriptionError) -> CustodyError {
         _ => CustodyError::Internal,
     }
 }
+
+/// Subscription logins a credential gateway holds (spec 01 §7.1): status,
+/// consent and refresh answer from the gateway's facts, and every route
+/// exchange relays through its transport. The store is never opened.
+mod gateway {
+    use plakous_auth::custody::{
+        AccountFacts, Consent, CredentialCustodian, CustodyError, CustodySlot, CustodyStatus,
+        RefreshRequest,
+    };
+    use plakous_http::RouteTransport;
+
+    use super::super::{
+        Arc, CompatibilityStatus, ForcedRefresh, NativeAuthStatus, NativeProvider,
+        NativeSubscriptionError, NativeSubscriptionStatus, NativeSubscriptions,
+    };
+
+    /// Who holds this facade's logins when it is not the local store.
+    #[derive(Clone)]
+    pub(in crate::subscriptions) struct SubscriptionGateway {
+        pub(in crate::subscriptions) custodian: Arc<dyn CredentialCustodian>,
+        pub(in crate::subscriptions) transport: RouteTransport,
+    }
+
+    /// The account kind a gateway names `provider`'s logins by.
+    const fn kind(provider: NativeProvider) -> &'static str {
+        match provider {
+            NativeProvider::Codex => "codex",
+            NativeProvider::Xai => "grok",
+            NativeProvider::Claude => "claude",
+        }
+    }
+
+    /// A gateway refusal as the facade's error.
+    pub(in crate::subscriptions) fn gateway_error(error: &CustodyError) -> NativeSubscriptionError {
+        match error {
+            CustodyError::Unavailable => NativeSubscriptionError::Transport(None),
+            CustodyError::Busy { .. } => NativeSubscriptionError::AccountBusy,
+            CustodyError::AccountChanged => NativeSubscriptionError::AuthenticationAccountChanged,
+            CustodyError::NotReady { .. }
+            | CustodyError::FenceMoved { .. }
+            | CustodyError::UnknownAccount
+            | CustodyError::Disabled
+            | CustodyError::ScopeDenied => NativeSubscriptionError::CredentialUnavailable,
+            _ => NativeSubscriptionError::Internal,
+        }
+    }
+
+    const fn auth_status(status: CustodyStatus) -> NativeAuthStatus {
+        match status {
+            CustodyStatus::SignedOut => NativeAuthStatus::SignedOut,
+            CustodyStatus::Ready => NativeAuthStatus::Ready,
+            CustodyStatus::RefreshRequired => NativeAuthStatus::RefreshRequired,
+            CustodyStatus::Refreshing => NativeAuthStatus::Refreshing,
+            CustodyStatus::Quarantined => NativeAuthStatus::Quarantined,
+            CustodyStatus::LoginRequired | CustodyStatus::ProfileChanged => {
+                NativeAuthStatus::LoginRequired
+            }
+            CustodyStatus::WrittenByNewerBuild => NativeAuthStatus::WrittenByNewerBuild,
+            CustodyStatus::Revoked => NativeAuthStatus::Revoked,
+        }
+    }
+
+    impl NativeSubscriptions {
+        /// These subscriptions under `custody`. Local custody leaves them
+        /// unchanged. Under gateway custody the gateway holds every login:
+        /// status, consent, model catalogs, resolution, usage and refresh
+        /// answer from its facts for the account `<kind>` or `<kind>/<name>`
+        /// (kinds `codex`, `grok`, `claude`; the name of
+        /// [`Self::for_named_account`]), route exchanges relay through it with
+        /// custodied credential fields, and refresh is its single writer's.
+        /// Nothing opens, creates or locks the subscription store; login,
+        /// logout, consent and account listing refuse
+        /// [`NativeSubscriptionError::GatewayCustody`].
+        #[must_use]
+        pub fn with_custody(mut self, custody: &crate::custody::Custody) -> Self {
+            self.gateway = custody.custodian().map(|custodian| SubscriptionGateway {
+                custodian: Arc::clone(custodian),
+                transport: custody.transport(),
+            });
+            self
+        }
+
+        /// `client` taking this facade's route transport: relayed through the
+        /// gateway under gateway custody, unchanged otherwise.
+        pub(in crate::subscriptions) fn route_client(
+            &self,
+            client: plakous_http::Client,
+        ) -> plakous_http::Client {
+            match &self.gateway {
+                Some(gateway) => gateway.transport.client(client),
+                None => client,
+            }
+        }
+
+        /// Refuses unless the gateway reports this build's consent as current.
+        pub(in crate::subscriptions) async fn require_gateway_consent(
+            &self,
+            gateway: &SubscriptionGateway,
+            provider: NativeProvider,
+        ) -> Result<(), NativeSubscriptionError> {
+            match self
+                .gateway_status(gateway, provider)
+                .await?
+                .compatibility()
+            {
+                CompatibilityStatus::Current => Ok(()),
+                CompatibilityStatus::Required => Err(NativeSubscriptionError::AcceptanceRequired),
+                CompatibilityStatus::Inactive => Err(NativeSubscriptionError::ProfileInactive),
+            }
+        }
+
+        /// Refuses a store operation under gateway custody.
+        pub(in crate::subscriptions) const fn require_local_custody(
+            &self,
+        ) -> Result<(), NativeSubscriptionError> {
+            if self.gateway.is_some() {
+                return Err(NativeSubscriptionError::GatewayCustody);
+            }
+            Ok(())
+        }
+
+        /// The gateway account of `provider`'s selected login.
+        pub(in crate::subscriptions) fn custody_slot(
+            &self,
+            provider: NativeProvider,
+        ) -> Result<CustodySlot, NativeSubscriptionError> {
+            self.state.require_provider(provider)?;
+            CustodySlot::new(
+                self.state
+                    .source_scope()
+                    .unwrap_or_else(|| kind(provider).to_owned()),
+            )
+            .map_err(|_| NativeSubscriptionError::AuthenticationBinding)
+        }
+
+        /// The gateway's current facts for `provider`'s selected login.
+        pub(in crate::subscriptions) async fn gateway_facts(
+            &self,
+            gateway: &SubscriptionGateway,
+            provider: NativeProvider,
+        ) -> Result<AccountFacts, NativeSubscriptionError> {
+            super::super::vertical::require_vertical(provider)?;
+            let slot = self.custody_slot(provider)?;
+            gateway
+                .custodian
+                .facts(&slot)
+                .await
+                .map_err(|error| gateway_error(&error))
+        }
+
+        /// The status of `facts`: consent is current only for this build's
+        /// exact profile and notice revision.
+        pub(in crate::subscriptions) fn gateway_status_of(
+            provider: NativeProvider,
+            facts: &AccountFacts,
+        ) -> Result<NativeSubscriptionStatus, NativeSubscriptionError> {
+            let notice = Self::notice(provider)?;
+            let compatibility = match &facts.profile {
+                Some(profile)
+                    if profile.id == notice.profile_id
+                        && profile.contract_revision == notice.notice_revision =>
+                {
+                    match profile.consent {
+                        Consent::Current => CompatibilityStatus::Current,
+                        Consent::Required => CompatibilityStatus::Required,
+                        Consent::Inactive => CompatibilityStatus::Inactive,
+                    }
+                }
+                _ => CompatibilityStatus::Required,
+            };
+            Ok(NativeSubscriptionStatus {
+                compatibility,
+                credential: auth_status(facts.status),
+            })
+        }
+
+        pub(in crate::subscriptions) async fn gateway_status(
+            &self,
+            gateway: &SubscriptionGateway,
+            provider: NativeProvider,
+        ) -> Result<NativeSubscriptionStatus, NativeSubscriptionError> {
+            let facts = self.gateway_facts(gateway, provider).await?;
+            Self::gateway_status_of(provider, &facts)
+        }
+
+        /// The gateway's refresh: `IfDue` for the current generation, or the
+        /// operator's forced one, then the status it answers with.
+        pub(in crate::subscriptions) async fn gateway_refresh(
+            &self,
+            gateway: &SubscriptionGateway,
+            provider: NativeProvider,
+            force: bool,
+        ) -> Result<(NativeAuthStatus, AccountFacts), NativeSubscriptionError> {
+            let slot = self.custody_slot(provider)?;
+            let request = if force {
+                RefreshRequest::Operator
+            } else {
+                let facts = self.gateway_facts(gateway, provider).await?;
+                let Some(expected) = facts.expected_fence() else {
+                    return Ok((auth_status(facts.status), facts));
+                };
+                RefreshRequest::IfDue { expected }
+            };
+            let facts = gateway
+                .custodian
+                .refresh(&slot, request)
+                .await
+                .map_err(|error| gateway_error(&error))?;
+            Ok((auth_status(facts.status), facts))
+        }
+
+        /// [`Self::refresh_now`] under gateway custody.
+        pub(in crate::subscriptions) async fn gateway_refresh_now(
+            &self,
+            gateway: &SubscriptionGateway,
+            provider: NativeProvider,
+        ) -> Result<ForcedRefresh, NativeSubscriptionError> {
+            let (status, facts) = self.gateway_refresh(gateway, provider, true).await?;
+            Ok(ForcedRefresh {
+                status,
+                access_expires_at: facts
+                    .access_expires_at_unix_ms
+                    .ok_or(NativeSubscriptionError::CredentialUnavailable)?
+                    / 1000,
+            })
+        }
+    }
+}
+
+pub(super) use gateway::SubscriptionGateway;
+
+#[cfg(all(test, feature = "gateway", feature = "codex"))]
+mod tests;

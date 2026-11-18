@@ -1109,7 +1109,7 @@ async fn an_exhausted_codex_callback_pool_is_typed_busy_without_ephemeral_fallba
     ));
     assert!(
         manager
-            .store
+            .store()?
             .load()
             .map_err(|_| NativeCodexAuthError::Store)?
             .is_none()
@@ -1120,7 +1120,7 @@ async fn an_exhausted_codex_callback_pool_is_typed_busy_without_ephemeral_fallba
 async fn expire_ready_generation(
     manager: &Arc<CodexSubscriptionCredentialManager>,
 ) -> Result<CredentialFence, NativeCodexAuthError> {
-    let store = Arc::clone(&manager.store);
+    let store = Arc::clone(manager.store()?);
     run_blocking(move || {
         let fence = store
             .load()
@@ -2739,7 +2739,7 @@ async fn relogin_and_generation_mutation_fence_resolution_evidence() -> TestResu
     manager
         .commit_login(
             second_credential,
-            manager.store.load()?,
+            manager.store()?.load()?,
             Instant::now() + Duration::from_secs(5),
         )
         .await?;
@@ -2770,7 +2770,7 @@ async fn relogin_and_generation_mutation_fence_resolution_evidence() -> TestResu
     manager
         .commit_login(
             third_credential,
-            manager.store.load()?,
+            manager.store()?.load()?,
             Instant::now() + Duration::from_secs(5),
         )
         .await?;
@@ -5291,7 +5291,7 @@ async fn device_poll_expiry_is_typed_and_stores_nothing() -> TestResult {
     );
     assert_eq!(server.await??.len(), 1);
     assert_eq!(manager.status()?, CodexCredentialStatus::SignedOut);
-    assert!(manager.store.load()?.is_none());
+    assert!(manager.store()?.load()?.is_none());
 
     let expired = device_login_for_deadline_test(Instant::now());
     assert_eq!(
@@ -5317,7 +5317,7 @@ async fn device_poll_cancelled_while_pending_stores_nothing() -> TestResult {
     );
     assert_eq!(server.await??.len(), 1);
     assert_eq!(manager.status()?, CodexCredentialStatus::SignedOut);
-    assert!(manager.store.load()?.is_none());
+    assert!(manager.store()?.load()?.is_none());
     Ok(())
 }
 
@@ -5377,10 +5377,10 @@ async fn device_login_cannot_resurrect_a_concurrent_logout() -> TestResult {
         now_unix_secs() + 3_600,
     )?;
     let concurrent = manager
-        .store
+        .store()?
         .load()?
         .ok_or("concurrent credential missing")?;
-    manager.store.logout(concurrent.generation())?;
+    manager.store()?.logout(concurrent.generation())?;
 
     let mut replies = vec![device_code_reply("stale-device-code")?];
     replies.extend(browser_login_responses(
@@ -5445,7 +5445,10 @@ async fn local_browser_login_rejects_concurrent_credential_rotation() -> TestRes
     );
     assert_eq!(server.await??.len(), 3);
     assert!(std::str::from_utf8(&response)?.ends_with("Login failed"));
-    let current = manager.store.load()?.ok_or("rotated credential missing")?;
+    let current = manager
+        .store()?
+        .load()?
+        .ok_or("rotated credential missing")?;
     assert_eq!(current, rotated);
     assert_eq!(manager.status()?, CodexCredentialStatus::Ready);
     Ok(())
@@ -5632,8 +5635,8 @@ async fn subscription_usage_retains_one_ready_lease_without_recursive_store_lock
         now_unix_secs() + 3_600,
     )?;
     let manager = manager_for_endpoint(&slot, &endpoint)?;
-    let fence = manager.store.load()?.ok_or("missing Ready fence")?;
-    let _peer_ready = manager.store.acquire_ready(&fence)?;
+    let fence = manager.store()?.load()?.ok_or("missing Ready fence")?;
+    let _peer_ready = manager.store()?.acquire_ready(&fence)?;
     let server = spawn_sequence(
             endpoint,
             vec![response(
@@ -5812,7 +5815,7 @@ async fn subscription_usage_names_local_contention_and_credential_state_without_
     )?;
     let manager = manager_for_endpoint(&slot, &endpoint)?;
     {
-        let writer = std::fs::File::open(manager.store.lock_path())?;
+        let writer = std::fs::File::open(manager.store()?.lock_path())?;
         writer.lock()?;
         assert!(matches!(
             manager.subscription_usage().await,
@@ -5832,7 +5835,7 @@ async fn subscription_usage_names_local_contention_and_credential_state_without_
             }
         ));
     }
-    let store = Arc::clone(&manager.store);
+    let store = Arc::clone(manager.store()?);
     run_blocking(move || {
         store
             .mark_refresh_intent(
@@ -6314,7 +6317,7 @@ async fn claimed_refresh_store_busy_restores_without_send_and_responses_do_not_m
     assert_eq!(manager.load_fence().await?, main_before);
     // Cross-store quarantine must fail. Consuming the sibling response
     // also releases the directory lock so the worker can claim.
-    let wrong_store = Arc::clone(&manager.store);
+    let wrong_store = Arc::clone(manager.store()?);
     let mixed = run_blocking(move || {
         if wrong_store.quarantine_claimed_http(held_response).is_ok() {
             return Err(NativeCodexAuthError::Store);
@@ -6919,7 +6922,7 @@ async fn a_new_login_waits_or_refuses_a_different_account_before_any_dispatch() 
             .manager
             .commit_login(
                 relogin_credential(account, marker)?,
-                fixture.manager.store.load()?,
+                fixture.manager.store()?.load()?,
                 Instant::now() + Duration::from_secs(5),
             )
             .await?;
@@ -6978,7 +6981,7 @@ async fn credential_wait_renews_same_account_login_but_refuses_a_different_accou
         let before = Arc::clone(&fixture.model)
             .revalidate_runtime_authority(review_timestamp())
             .await?;
-        fixture.manager.store.logout_local()?;
+        fixture.manager.store()?.logout_local()?;
         let waiting_model = Arc::clone(&fixture.model);
         let mut waiters = tokio::spawn(async move {
             tokio::join!(
@@ -7001,7 +7004,7 @@ async fn credential_wait_renews_same_account_login_but_refuses_a_different_accou
             .manager
             .commit_login(
                 relogin_credential(account, "wait-login")?,
-                fixture.manager.store.load()?,
+                fixture.manager.store()?.load()?,
                 Instant::now() + Duration::from_secs(5),
             )
             .await?;
@@ -7071,7 +7074,7 @@ async fn prepared_call_after_login_wait_uses_renewed_service_and_exact_wire_once
         .manager
         .commit_login(
             relogin_credential("prepared-login-account", "prepared-login-new")?,
-            fixture.manager.store.load()?,
+            fixture.manager.store()?.load()?,
             Instant::now() + Duration::from_secs(5),
         )
         .await?;
@@ -7626,7 +7629,7 @@ async fn a_401_recovery_refreshes_only_its_own_login_and_generation() -> TestRes
         .manager
         .commit_login(
             relogin_credential(account, "newer-login")?,
-            fixture.manager.store.load()?,
+            fixture.manager.store()?.load()?,
             Instant::now() + Duration::from_secs(5),
         )
         .await?;

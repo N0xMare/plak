@@ -49,6 +49,18 @@ impl NativeSubscriptions {
         request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
         enforce_login_recovery: bool,
     ) -> Result<XaiOnline, NativeSubscriptionError> {
+        // A SuperGrok route binds the login's raw selection epoch and
+        // subject, which gateway facts do not carry yet.
+        self.require_local_custody()?;
+        self.xai_online_local(request_gate, enforce_login_recovery)
+            .await
+    }
+
+    async fn xai_online_local(
+        &self,
+        request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
+        enforce_login_recovery: bool,
+    ) -> Result<XaiOnline, NativeSubscriptionError> {
         let paths = self.state.clone();
         let notice = Self::notice(NativeProvider::Xai)?;
         let now = self.state.now()?;

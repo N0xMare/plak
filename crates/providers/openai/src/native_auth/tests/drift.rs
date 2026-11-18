@@ -28,7 +28,7 @@ async fn login_jwks_without_rs256_is_typed_before_account_or_storage() -> TestRe
         NativeCodexAuthError::CompatibilityDrift(CompatibilityDrift::SigningAlgorithm)
     ));
     assert!(failure.to_string().contains("install a newer build"));
-    assert!(manager.store.load()?.is_none());
+    assert!(manager.store()?.load()?.is_none());
     assert_eq!(server.await??.len(), 1);
     Ok(())
 }

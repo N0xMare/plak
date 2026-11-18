@@ -1,5 +1,7 @@
 //! Claimed refresh and revoke hooks and the selected credential lifecycle.
 
+use super::authorization::AuthorizationMaterial;
+use super::custodied::CustodiedLogin;
 use super::{
     ACCESS_REFRESH_SKEW, Arc, AuthSingleFlightGuard, BuildRequestFailure, CancellationToken,
     ClaimedHttpDisposition, ClaimedHttpError, ClaimedHttpResponse, ClaimedRefreshHooks,
@@ -19,6 +21,7 @@ use super::{
     pull_claimed_body_cancellable, run_blocking, run_claimed_refresh, run_claimed_revoke,
     stored_record, validate_exact_scopes, validate_profile, validate_profile_at,
 };
+use plakous_auth::custody::{IdentityDigest, RefreshRequest as CustodyRefresh};
 
 #[derive(Serialize)]
 pub(super) struct RefreshRequest<'a> {
@@ -557,6 +560,9 @@ impl CodexSubscriptionCredentialManager {
         force: RefreshForce<'_>,
         expected: Option<ExpectedSelection<'_>>,
     ) -> Result<(), NativeCodexAuthError> {
+        if let Some(login) = &self.custodied {
+            return self.custodied_refresh(login, force, expected).await;
+        }
         let mut hooks = CodexRefreshHooks {
             manager: self,
             expected,
@@ -569,7 +575,46 @@ impl CodexSubscriptionCredentialManager {
             force,
             detail: CredentialRefreshDetail::default(),
         };
-        run_claimed_refresh(&self.store, &self.client, &mut hooks).await
+        run_claimed_refresh(self.store()?, &self.client, &mut hooks).await
+    }
+
+    /// The custodian's refresh for `force`: due-ness is judged on its clock,
+    /// a rejection is refreshed only while it still holds that generation,
+    /// and the answer is held to the expected account and selection.
+    async fn custodied_refresh(
+        &self,
+        login: &CustodiedLogin,
+        force: RefreshForce<'_>,
+        expected: Option<ExpectedSelection<'_>>,
+    ) -> Result<(), NativeCodexAuthError> {
+        let request = match force {
+            RefreshForce::IfDue => {
+                let current = login.load_fence().await?;
+                if !matches!(
+                    current.status(),
+                    CredentialStatus::Ready | CredentialStatus::RefreshRequired
+                ) {
+                    return Err(NativeCodexAuthError::Unavailable);
+                }
+                CustodyRefresh::IfDue {
+                    expected: CustodiedLogin::expected(&current)?,
+                }
+            }
+            RefreshForce::Always => CustodyRefresh::Operator,
+            RefreshForce::WhileCurrent(rejected) => CustodyRefresh::AfterRejection {
+                rejected: CustodiedLogin::expected(rejected)?,
+                selection_epoch_digest: expected.map(|selection| {
+                    IdentityDigest::from_bytes(*selection.selection_epoch.bytes())
+                }),
+            },
+        };
+        if let Some(selection) = expected
+            && selection.account != &self.selected_account()?
+        {
+            return Err(NativeCodexAuthError::AccountChanged);
+        }
+        let facts = login.refresh(request).await?;
+        login.after_refresh(&facts, expected.map(|selection| selection.selection_epoch))
     }
 
     /// Forces one claimed refresh after the provider answered an inference
@@ -626,7 +671,7 @@ impl CodexSubscriptionCredentialManager {
             manager: self,
             flight: None,
         };
-        run_claimed_revoke(&self.store, &self.client, &mut hooks).await
+        run_claimed_revoke(self.store()?, &self.client, &mut hooks).await
     }
 
     /// Alias making explicit that logout performs provider revocation first.
@@ -649,14 +694,17 @@ impl CodexSubscriptionCredentialManager {
     /// by exact generation CAS.
     pub async fn logout_local(&self) -> Result<CodexCredentialStatus, NativeCodexAuthError> {
         let _lifecycle = self.lifecycle.lock().await;
-        let store = Arc::clone(&self.store);
+        let store = Arc::clone(self.store()?);
         let status = run_blocking(move || local_logout(&store)).await?;
         self.clear_selected_account()?;
         Ok(status)
     }
 
     pub(super) async fn load_fence(&self) -> Result<CredentialFence, NativeCodexAuthError> {
-        let store = Arc::clone(&self.store);
+        if let Some(login) = &self.custodied {
+            return login.load_fence().await;
+        }
+        let store = Arc::clone(self.store()?);
         run_blocking(move || {
             store
                 .load()
@@ -667,7 +715,7 @@ impl CodexSubscriptionCredentialManager {
     }
 
     pub(super) async fn try_load_fence(&self) -> Result<CredentialFence, NativeCodexAuthError> {
-        let store = Arc::clone(&self.store);
+        let store = Arc::clone(self.store()?);
         run_blocking(move || {
             store
                 .try_load()
@@ -687,7 +735,7 @@ impl CodexSubscriptionCredentialManager {
         &self,
         fence: CredentialFence,
     ) -> Result<bool, NativeCodexAuthError> {
-        let store = Arc::clone(&self.store);
+        let store = Arc::clone(self.store()?);
         run_blocking(move || {
             store
                 .refresh_outcome_settled(&fence)
@@ -700,7 +748,7 @@ impl CodexSubscriptionCredentialManager {
         &self,
         fence: CredentialFence,
     ) -> Result<ReadyCredentialLease, NativeCodexAuthError> {
-        let store = Arc::clone(&self.store);
+        let store = Arc::clone(self.store()?);
         run_blocking(move || {
             store
                 .acquire_ready(&fence)
@@ -715,7 +763,7 @@ impl CodexSubscriptionCredentialManager {
         &self,
         fence: CredentialFence,
     ) -> Result<Option<ReadyCredentialLease>, NativeCodexAuthError> {
-        let store = Arc::clone(&self.store);
+        let store = Arc::clone(self.store()?);
         run_blocking(move || {
             store
                 .try_acquire_ready(&fence)
@@ -758,6 +806,11 @@ impl CodexSubscriptionCredentialManager {
             .map_err(|_| RuntimeModelAuthorityError::Stale)?;
         if self.validate_catalog_witness(descriptor, witness).is_err() {
             return Err(RuntimeModelAuthorityError::Unavailable);
+        }
+        if let Some(login) = &self.custodied {
+            return self
+                .custodied_runtime_authority(login, descriptor, witness, checked_at)
+                .await;
         }
         let expected = witness.credential_fence();
         let current = self
@@ -887,6 +940,20 @@ impl CodexSubscriptionCredentialManager {
             .native_codex_credential_selection()
             .map(|(fence, epoch)| (fence.clone(), epoch))
             .ok_or(NativeCodexAuthError::Unavailable)?;
+        if let Some(login) = &self.custodied {
+            let material = self
+                .custodied_preflight(login, &expected_fence, expected_selection_epoch)
+                .await?;
+            self.validate_preflight_target(&request)?;
+            return Ok(NativeCodexAuthorization {
+                material,
+                expected_fence,
+                expected_selection_epoch,
+                preflight: request,
+                physical_request: None,
+                headers_consumed: false,
+            });
+        }
         let current = self.load_fence().await?;
         if current != expected_fence {
             return Err(NativeCodexAuthError::Unavailable);
@@ -916,13 +983,85 @@ impl CodexSubscriptionCredentialManager {
         }
         self.validate_preflight_target(&request)?;
         Ok(NativeCodexAuthorization {
-            lease,
+            material: AuthorizationMaterial::Local { lease, credential },
             expected_fence,
             expected_selection_epoch,
-            credential,
             preflight: request,
             physical_request: None,
             headers_consumed: false,
         })
+    }
+}
+
+impl CodexSubscriptionCredentialManager {
+    /// The custodied counterpart of the leased preflight read: the
+    /// custodian's current Ready facts must be exactly `expected` with its
+    /// login selection and a usable access token; the fields are the
+    /// custodian's for that fence.
+    async fn custodied_preflight(
+        &self,
+        login: &CustodiedLogin,
+        expected: &CredentialFence,
+        selection_epoch: Digest,
+    ) -> Result<AuthorizationMaterial, NativeCodexAuthError> {
+        let ready = login.ready().await?;
+        if ready.fence != *expected
+            || ready.selection_epoch != selection_epoch
+            || ready.access_expires_at
+                <= self
+                    .clock
+                    .now()
+                    .seconds()
+                    .saturating_add(ACCESS_REFRESH_SKEW)
+        {
+            return Err(NativeCodexAuthError::Unavailable);
+        }
+        let (authorization, account) = login.fields(&ready.expected).await?;
+        Ok(AuthorizationMaterial::Custodied {
+            authorization,
+            account,
+            selection_epoch: ready.selection_epoch,
+        })
+    }
+
+    /// The custodied counterpart of the leased runtime-authority read.
+    async fn custodied_runtime_authority(
+        &self,
+        login: &CustodiedLogin,
+        descriptor: &ResolvedModelDescriptor,
+        witness: &NativeCodexCatalogWitness,
+        checked_at: Timestamp,
+    ) -> Result<RuntimeModelAuthority, RuntimeModelAuthorityError> {
+        let ready = login
+            .ready()
+            .await
+            .map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
+        let selected = self
+            .selected_account()
+            .map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
+        let usable_until_seconds = ready.access_expires_at.saturating_sub(ACCESS_REFRESH_SKEW);
+        if ready.fence != *witness.credential_fence()
+            || ready.fence.account_binding() != &selected
+            || witness.credential_selection_epoch() != ready.selection_epoch
+            || usable_until_seconds <= checked_at.seconds()
+        {
+            return Err(RuntimeModelAuthorityError::Unavailable);
+        }
+        let access_until = Timestamp::new(usable_until_seconds, 0)
+            .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
+        let profile_until = Timestamp::new(PROFILE_EXPIRES_AT, 0)
+            .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
+        let valid_until = witness.expires_at().min(access_until).min(profile_until);
+        if valid_until <= checked_at {
+            return Err(RuntimeModelAuthorityError::Stale);
+        }
+        RuntimeModelAuthority::new(
+            descriptor,
+            login.account,
+            self.authority_binding,
+            ready.fence.generation().get(),
+            checked_at,
+            Some(valid_until),
+        )
     }
 }

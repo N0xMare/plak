@@ -6,7 +6,6 @@ use super::{
     NativeCodexForcedRefresh, NativeCodexPreflight, NativeCodexPreflightRequest,
     NativeCodexRuntimeAuthority, OPENAI_CODEX_COMPATIBILITY_PROFILE_ID, ResolvedModelDescriptor,
     ResponsesPhysicalRequestBinding, SubscriptionLimitError, SubscriptionRequestPermit, Timestamp,
-    credential_selection_epoch,
 };
 
 impl NativeCodexCredentialAuthority for CodexSubscriptionCredentialManager {
@@ -113,20 +112,20 @@ impl NativeCodexCredentialAuthority for CodexSubscriptionCredentialManager {
         self.validate_profile_admission()
             .map_err(|_| AuthError::Unavailable)?;
         let target = authorization.target();
-        let fence = authorization.lease.fence();
-        let expected_epoch = credential_selection_epoch(
-            target.account_binding(),
-            target.credential_authority_binding(),
-            &authorization.credential.selection_epoch,
-        )
-        .map_err(|_| AuthError::BindingMismatch)?;
+        let fence = authorization.held_fence();
+        let expected_epoch = authorization
+            .held_selection_epoch(
+                target.account_binding(),
+                target.credential_authority_binding(),
+            )
+            .map_err(|_| AuthError::BindingMismatch)?;
         if target.route_id().as_str() != crate::OPENAI_CODEX_SUBSCRIPTION_ROUTE_ID
             || target.profile().as_str() != OPENAI_CODEX_COMPATIBILITY_PROFILE_ID
             || target.account_binding() != self.route_account_digest()
             || target.credential_authority_binding() != self.authority_binding
             || fence != authorization.expected_fence
             || expected_epoch != authorization.expected_selection_epoch
-            || fence.account_binding().as_str() != authorization.credential.account_id
+            || !authorization.holds_account(&fence)
             || fence.account_binding()
                 != &self
                     .selected_account()

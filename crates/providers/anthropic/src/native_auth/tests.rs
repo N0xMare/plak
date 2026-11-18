@@ -22,18 +22,19 @@ async fn usage_expired_access_reports_refresh_required_without_claiming_refresh(
     manager
         .persist_test_grant("offline-access", "offline-refresh", 3600, "user:inference")
         .unwrap();
-    let fence = manager.core.store.load().unwrap().unwrap();
+    let fence = manager.core.store().unwrap().load().unwrap().unwrap();
     let mut stored = manager.core.read_stored(&fence).unwrap();
     stored.expires_at = 1;
     manager
         .core
-        .store
+        .store()
+        .unwrap()
         .replace(
             fence.generation(),
             &credential_record(fence.generation().next().unwrap(), &stored).unwrap(),
         )
         .unwrap();
-    let before = manager.core.store.load().unwrap().unwrap();
+    let before = manager.core.store().unwrap().load().unwrap().unwrap();
     // Dropped after its first poll, as the hosted usage timeout drops a
     // slow read; then read to completion.
     let _ = tokio::time::timeout(Duration::ZERO, manager.subscription_usage()).await;
@@ -46,7 +47,7 @@ async fn usage_expired_access_reports_refresh_required_without_claiming_refresh(
             ..
         }
     ));
-    let after = manager.core.store.load().unwrap().unwrap();
+    let after = manager.core.store().unwrap().load().unwrap().unwrap();
     assert_eq!(after, before);
     assert_eq!(after.status(), CredentialStatus::Ready);
     assert!(
@@ -81,7 +82,14 @@ async fn usage_reports_peer_refresh_claim_as_busy_not_quarantined() {
     let fence = peer.load().unwrap().unwrap();
     let claim = peer.begin_refresh(&fence).unwrap().start();
     assert_eq!(
-        manager.core.store.load().unwrap().unwrap().status(),
+        manager
+            .core
+            .store()
+            .unwrap()
+            .load()
+            .unwrap()
+            .unwrap()
+            .status(),
         CredentialStatus::RefreshOutcomeUnknown
     );
     assert!(matches!(

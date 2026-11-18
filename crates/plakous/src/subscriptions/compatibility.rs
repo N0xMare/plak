@@ -12,6 +12,7 @@ impl NativeSubscriptions {
         provider: NativeProvider,
     ) -> Result<PrivateFilesystemLock, NativeSubscriptionError> {
         super::vertical::require_vertical(provider)?;
+        self.require_local_custody()?;
         self.state.acquire_compatibility_lock(provider).await
     }
 
@@ -20,6 +21,7 @@ impl NativeSubscriptions {
         provider: NativeProvider,
     ) -> Result<Option<PrivateFilesystemLock>, NativeSubscriptionError> {
         super::vertical::require_vertical(provider)?;
+        self.require_local_custody()?;
         self.state.try_acquire_compatibility_lock(provider).await
     }
 
@@ -71,6 +73,9 @@ impl NativeSubscriptions {
     ) -> Result<NativeSubscriptionStatus, NativeSubscriptionError> {
         self.state.require_provider(provider)?;
         super::vertical::require_vertical(provider)?;
+        if let Some(gateway) = &self.gateway {
+            return self.gateway_status(gateway, provider).await;
+        }
         let paths = self.state.clone();
         if !run_blocking(move || paths.layout_exists()).await?? {
             return Ok(NativeSubscriptionStatus {
@@ -99,6 +104,12 @@ impl NativeSubscriptions {
         provider: NativeProvider,
     ) -> Result<CompatibilityStatus, NativeSubscriptionError> {
         super::vertical::require_vertical(provider)?;
+        if let Some(gateway) = &self.gateway {
+            return Ok(self
+                .gateway_status(gateway, provider)
+                .await?
+                .compatibility());
+        }
         let paths = self.state.clone();
         if !run_blocking(move || paths.layout_exists()).await?? {
             return Ok(SubscriptionState::absent_compatibility(

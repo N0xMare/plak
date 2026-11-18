@@ -150,6 +150,20 @@ impl NativeSubscriptions {
         provider: NativeProvider,
         gate: Arc<InMemorySubscriptionRequestGate>,
     ) -> Result<NativeModelCatalog, NativeSubscriptionError> {
+        if let Some(gateway) = &self.gateway {
+            let status = self.gateway_status(gateway, provider).await?;
+            let models =
+                run_classified_model_catalog_with_gate(provider, status, gate, |gate| async move {
+                    super::vertical::require_vertical(provider)?
+                        .catalog(self, gate)
+                        .await
+                })
+                .await?;
+            if models.is_empty() {
+                return Err(NativeSubscriptionError::ModelUnavailable);
+            }
+            return Ok(NativeModelCatalog { provider, models });
+        }
         let lock = self.acquire_compatibility_lock(provider).await?;
         let status = self.status_unlocked(provider).await?;
         let models =

@@ -53,7 +53,7 @@ impl CodexSubscriptionCredentialManager {
         let mut attempts = 0;
         loop {
             attempts += 1;
-            let store = Arc::clone(&self.store);
+            let store = Arc::clone(self.store().map_err(store_error)?);
             let lifecycle = run_blocking(move || local_credential_status(&store))
                 .await
                 .map_err(store_error)?;

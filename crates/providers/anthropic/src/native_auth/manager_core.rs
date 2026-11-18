@@ -5,13 +5,18 @@ use super::{
     ClaudeNativeAuthError, ClaudeOAuthTokenGrant, ClaudeSubscriptionStatus, CredentialFence,
     CredentialGeneration, Duration, ExchangeControl, HEADER_ACCEPT, HEADER_CONTENT_TYPE,
     HEADER_USER_AGENT, HeaderMap, HeaderValue, Instant, MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES,
-    MAX_TOKEN_BYTES, ManagerCore, Method, Origin, REQUEST_TIMEOUT, Request, SensitiveBytes,
-    StatusCode, StoredTokens, USER_AGENT, Zeroizing, credential_record_from_grant, network_failure,
-    remaining_until, system_unix_seconds, validate_acceptance,
+    MAX_TOKEN_BYTES, ManagerCore, Method, Origin, PrivateCredentialStore, REQUEST_TIMEOUT, Request,
+    SensitiveBytes, StatusCode, StoredTokens, USER_AGENT, Zeroizing, credential_record_from_grant,
+    network_failure, remaining_until, system_unix_seconds, validate_acceptance,
 };
 use plakous_auth::oauth_orchestrator::{is_json_media_type, pull_auth_body};
 
 impl ManagerCore {
+    /// The private slot, under local custody.
+    pub(super) fn store(&self) -> Result<&PrivateCredentialStore, ClaudeNativeAuthError> {
+        self.store.as_ref().ok_or(ClaudeNativeAuthError::NotReady)
+    }
+
     pub(super) fn ensure_active(&self) -> Result<(), ClaudeNativeAuthError> {
         validate_acceptance(&self.acceptance, system_unix_seconds()?)
     }
@@ -42,9 +47,9 @@ impl ManagerCore {
         };
         let record = credential_record_from_grant(generation, grant)?;
         let fence = if let Some(expected) = baseline {
-            self.store.replace_selected_login(expected, record)?
+            self.store()?.replace_selected_login(expected, record)?
         } else {
-            self.store.initialize_selected(&record)?;
+            self.store()?.initialize_selected(&record)?;
             record.fence()
         };
         Ok(ClaudeSubscriptionStatus {
@@ -147,7 +152,7 @@ impl ManagerCore {
         &self,
         fence: &CredentialFence,
     ) -> Result<StoredTokens, ClaudeNativeAuthError> {
-        let lease = self.store.acquire_ready(fence)?;
+        let lease = self.store()?.acquire_ready(fence)?;
         let stored: StoredTokens = serde_json::from_slice(lease.payload().expose_secret())
             .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
         stored.validate()?;

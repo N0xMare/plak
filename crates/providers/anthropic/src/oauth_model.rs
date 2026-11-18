@@ -164,7 +164,13 @@ impl ClaudeOAuthLanguageModel {
     pub(crate) async fn side_request_credential(
         self: &Arc<Self>,
         input_bound: u64,
-    ) -> Result<(String, crate::ClaudeOAuthRequestIdentity), AnthropicError> {
+    ) -> Result<
+        (
+            crate::native_auth::ClaudeOAuthAccess,
+            crate::ClaudeOAuthRequestIdentity,
+        ),
+        AnthropicError,
+    > {
         let checked_at = SubscriptionClock.now();
         self.resolved
             .ensure_current_admission(checked_at)
@@ -176,7 +182,7 @@ impl ClaudeOAuthLanguageModel {
         let mut permit = refresh_then_reserve_inference(&self.credentials, input_bound)
             .await
             .map_err(|_| oauth_retry_error())?;
-        let ((access_token, _, _), identity) = self
+        let ((access, _, _), identity) = self
             .credentials
             .identity_credentials()
             .map_err(|_| oauth_retry_error())?;
@@ -191,7 +197,7 @@ impl ClaudeOAuthLanguageModel {
         permit
             .authorize_dispatch()
             .map_err(|_| oauth_retry_error())?;
-        Ok((access_token, identity))
+        Ok((access, identity))
     }
 
     pub(crate) const fn resolved(&self) -> &ResolvedAnthropicMessages {
@@ -436,7 +442,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                     let permit = refresh_then_reserve_inference(&credentials, input_bound)
                         .await
                         .map_err(|error| contextual_refresh_error(error, &descriptor))?;
-                    let ((access_token, _, _), current_identity) =
+                    let ((access, _, _), current_identity) =
                         credentials.identity_credentials().map_err(|_| {
                             ModelError::new(
                                 ModelErrorKind::Authentication,
@@ -454,11 +460,9 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                             "Claude OAuth account identity changed",
                         ));
                     }
-                    let route = route
-                        .with_oauth_access_token(access_token)
-                        .map_err(|error| {
-                            ModelError::new(ModelErrorKind::Authentication, error.to_string())
-                        })?;
+                    let route = route.with_oauth_access(access).map_err(|error| {
+                        ModelError::new(ModelErrorKind::Authentication, error.to_string())
+                    })?;
                     #[cfg(test)]
                     let factory = match test_dial_origin {
                         Some(origin) => AnthropicLocalHttpServiceFactory::with_runtime(
@@ -517,7 +521,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                                     .revalidate_runtime_authority(checked_at)
                                     .await
                                     .map_err(|_| oauth_retry_error())?;
-                                let ((access_token, _, _), current_identity) = credentials
+                                let ((access, _, _), current_identity) = credentials
                                     .identity_credentials()
                                     .map_err(|_| oauth_retry_error())?;
                                 let account_binding = digest_binding(
@@ -530,7 +534,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                                 {
                                     return Err(oauth_retry_error());
                                 }
-                                let route = route.with_oauth_access_token(access_token)?;
+                                let route = route.with_oauth_access(access)?;
                                 Ok(AnthropicRetryGrant {
                                     route,
                                     dispatch_authorization: Some(permit_authorization(permit)),
@@ -671,13 +675,24 @@ impl ClaudeNativeAuthManager {
         }
         self.refresh_if_needed().await?;
         self.ensure_account_identity().await?;
-        let ((access_token, generation, _), identity) = self.identity_credentials()?;
-        let key = ApiKey::new(access_token)
-            .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
+        let ((access, generation, _), identity) = self.identity_credentials()?;
         let account = AnthropicAccountIdentity::new(identity.account_uuid().as_str())
             .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
-        let route = AnthropicPlatformRoute::claude_oauth(key, account)
-            .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
+        let route = match access {
+            crate::native_auth::ClaudeOAuthAccess::Token(access_token) => {
+                let key = ApiKey::new(access_token)
+                    .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
+                AnthropicPlatformRoute::claude_oauth(key, account)
+                    .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?
+            }
+            custodied @ crate::native_auth::ClaudeOAuthAccess::Custodied(_) => {
+                let key = ApiKey::new("plak-custodied-claude-login")
+                    .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
+                AnthropicPlatformRoute::claude_oauth(key, account)
+                    .and_then(|route| route.with_oauth_access(custodied))
+                    .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?
+            }
+        };
         let now = SubscriptionClock.now();
         let expires_at = pin_expires_at(now)?;
         let (account_binding, credential_authority_binding) =
@@ -774,7 +789,7 @@ impl ClaudeCredentialRenewal for ClaudeForcedRenewal {
             let permit = gate
                 .acquire_inference(self.input_bound)
                 .map_err(|_| renewal_error())?;
-            let ((access_token, _, _), identity) = self
+            let ((access, _, _), identity) = self
                 .credentials
                 .identity_credentials()
                 .map_err(|_| renewal_error())?;
@@ -795,7 +810,7 @@ impl ClaudeCredentialRenewal for ClaudeForcedRenewal {
                 .revalidate_runtime_authority(checked_at)
                 .await
                 .map_err(|_| renewal_error())?;
-            let route = route.with_oauth_access_token(access_token)?;
+            let route = route.with_oauth_access(access)?;
             Ok(AnthropicRetryGrant {
                 route,
                 dispatch_authorization: Some(permit_authorization(permit)),

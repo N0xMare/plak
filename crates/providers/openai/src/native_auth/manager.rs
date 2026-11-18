@@ -1,5 +1,6 @@
 //! The credential manager for one explicit Codex selected-account slot.
 
+use super::custodied::CustodiedLogin;
 use super::{
     AUTH_REQUEST_CAP, AccountBinding, Arc, AsyncMutex, AuthProfileId, AuthSingleFlight, Client,
     Clock, CodexCompatibilityAcceptance, CodexCredentialStatus,
@@ -14,12 +15,15 @@ use super::{
     parse_stored, require_json_media_type, sensitive_header_value, usage_credential_refusal,
     validate_profile, validate_profile_policy_at,
 };
-use plakous_auth::custody::CredentialField;
+use plakous_auth::custody::{CredentialCustodian, CredentialField, CustodySlot};
 
 /// Plak-owned credential manager for one explicit selected-account slot.
 pub struct CodexSubscriptionCredentialManager {
     pub(super) clock: Arc<dyn Clock>,
-    pub(super) store: Arc<PrivateCredentialStore>,
+    /// The private slot under local custody; `None` when a custodian holds
+    /// the login.
+    pub(super) store: Option<Arc<PrivateCredentialStore>>,
+    pub(super) custodied: Option<Arc<CustodiedLogin>>,
     pub(super) client: Client,
     pub(super) endpoints: ProfileEndpoints,
     pub(super) acceptance: CodexCompatibilityAcceptance,
@@ -133,7 +137,8 @@ impl CodexSubscriptionCredentialManager {
         )
         .map_err(|_| NativeCodexAuthError::Validation)?;
         Ok(Self {
-            store,
+            store: Some(store),
+            custodied: None,
             client,
             endpoints,
             clock: Arc::new(SystemClock),
@@ -146,6 +151,65 @@ impl CodexSubscriptionCredentialManager {
             request_gate: None,
             refresh_observer: None,
         })
+    }
+
+    /// Opens the login a credential custodian holds for `slot`: facts,
+    /// fields and refresh are the custodian's, and no local slot is opened.
+    /// `client` is the route's client (relayed through a gateway).
+    ///
+    /// # Errors
+    ///
+    /// Rejects profile drift, expiry or kill switch, and a login the
+    /// custodian reports without an account identity.
+    pub async fn custodied(
+        custodian: Arc<dyn CredentialCustodian>,
+        slot: CustodySlot,
+        client: Client,
+        acceptance: CodexCompatibilityAcceptance,
+    ) -> Result<Self, NativeCodexAuthError> {
+        Self::custodied_with_clock(custodian, slot, client, acceptance, Arc::new(SystemClock)).await
+    }
+
+    /// [`Self::custodied`] with an explicit clock.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::custodied`].
+    pub async fn custodied_with_clock(
+        custodian: Arc<dyn CredentialCustodian>,
+        slot: CustodySlot,
+        client: Client,
+        acceptance: CodexCompatibilityAcceptance,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self, NativeCodexAuthError> {
+        validate_profile_policy_at(
+            acceptance.accepted_at,
+            clock.now().seconds(),
+            PROFILE_KILLED,
+        )?;
+        let login = CustodiedLogin::open(custodian, slot).await?;
+        Ok(Self {
+            store: None,
+            selected: Mutex::new(SelectedAccount {
+                binding: Some(login.binding.clone()),
+            }),
+            authority_binding: login.authority,
+            custodied: Some(Arc::new(login)),
+            client,
+            endpoints: ProfileEndpoints::production(),
+            clock,
+            acceptance,
+            lifecycle: AsyncMutex::new(()),
+            flights: AuthSingleFlight::new(),
+            jwks: JwksCache::new(JwksResolvePolicy::codex(), MAX_JWKS_NEGATIVE_KEYS),
+            request_gate: None,
+            refresh_observer: None,
+        })
+    }
+
+    /// The private slot, under local custody.
+    pub(super) fn store(&self) -> Result<&Arc<PrivateCredentialStore>, NativeCodexAuthError> {
+        self.store.as_ref().ok_or(NativeCodexAuthError::Unavailable)
     }
 
     /// Binds callbacks on an ephemeral port and optionally serves test catalogs
@@ -193,10 +257,11 @@ impl CodexSubscriptionCredentialManager {
         CodexSubscriptionIntegrationProfile
     }
 
-    /// Returns the exact explicit slot path selected by the application.
+    /// Returns the exact explicit slot path selected by the application,
+    /// under local custody.
     #[must_use]
-    pub fn slot_path(&self) -> &Path {
-        self.store.path()
+    pub fn slot_path(&self) -> Option<&Path> {
+        self.store.as_deref().map(PrivateCredentialStore::path)
     }
 
     /// Returns credential-free lifecycle status.
@@ -205,7 +270,10 @@ impl CodexSubscriptionCredentialManager {
     ///
     /// Fails closed on unsafe or malformed storage.
     pub fn status(&self) -> Result<CodexCredentialStatus, NativeCodexAuthError> {
-        local_credential_status(&self.store)
+        if let Some(login) = &self.custodied {
+            return Ok(login.last_status());
+        }
+        local_credential_status(self.store()?)
     }
 
     /// Stored access-token expiry (Unix seconds) of the Ready credential.
@@ -214,13 +282,15 @@ impl CodexSubscriptionCredentialManager {
     ///
     /// Fails for a missing, non-Ready, or unreadable record.
     pub fn access_expires_at(&self) -> Result<u64, NativeCodexAuthError> {
-        let fence = self
-            .store
+        if let Some(login) = &self.custodied {
+            return login.last_access_expires_at();
+        }
+        let store = self.store()?;
+        let fence = store
             .load()
             .map_err(|_| NativeCodexAuthError::Store)?
             .ok_or(NativeCodexAuthError::Unavailable)?;
-        let lease = self
-            .store
+        let lease = store
             .acquire_ready(&fence)
             .map_err(|_| NativeCodexAuthError::Unavailable)?;
         Ok(parse_stored(lease.payload())?.access_expires_at)
@@ -251,6 +321,9 @@ impl CodexSubscriptionCredentialManager {
         };
         if self.validate_profile_admission().is_err() {
             return unavailable(SubscriptionUsageUnavailable::Unqualified);
+        }
+        if let Some(login) = &self.custodied {
+            return self.custodied_usage(login, deadline).await;
         }
         // Every refusal before the HTTP exchange is local and is named as such:
         // a held lifecycle or store lease is `Busy`, a non-Ready record is its
@@ -346,22 +419,10 @@ impl CodexSubscriptionCredentialManager {
         };
         let observed_at = Timestamp::new(self.clock.now().seconds(), 0)
             .unwrap_or_else(|_| unreachable!("system epoch is a valid timestamp"));
-        let reason = match reply.status.as_u16() {
-            401 | 403 => Some(SubscriptionUsageUnavailable::Unauthorized),
-            429 => Some(SubscriptionUsageUnavailable::RateLimited),
-            200 => None,
-            _ => Some(SubscriptionUsageUnavailable::ProviderUnavailable),
-        };
-        if let Some(reason) = reason {
+        if let Some(reason) = usage_reply_refusal(&reply) {
             return SubscriptionUsageRead::Unavailable {
                 observed_at,
                 reason,
-            };
-        }
-        if require_json_media_type(&reply).is_err() {
-            return SubscriptionUsageRead::Unavailable {
-                observed_at,
-                reason: SubscriptionUsageUnavailable::InvalidResponse,
             };
         }
         // The lease retains the exact Ready record and its cross-process
@@ -376,19 +437,95 @@ impl CodexSubscriptionCredentialManager {
                 reason: SubscriptionUsageUnavailable::AccountChanged,
             };
         }
-        match crate::decode_codex_subscription_usage(&reply.body, observed_at) {
-            Ok(snapshot) if snapshot.contains_ended_window() => {
-                SubscriptionUsageRead::Unavailable {
-                    observed_at,
-                    reason: SubscriptionUsageUnavailable::Stale,
-                }
+        decoded_usage(&reply.body, observed_at)
+    }
+
+    /// The usage read of a custodied login: the same request, its
+    /// credential headers the custodian's fields, relayed through the
+    /// route's client. Refresh stays with the custodian.
+    async fn custodied_usage(
+        &self,
+        login: &CustodiedLogin,
+        deadline: Instant,
+    ) -> SubscriptionUsageRead {
+        let unavailable = |reason| SubscriptionUsageRead::Unavailable {
+            observed_at: Timestamp::new(self.clock.now().seconds(), 0)
+                .unwrap_or_else(|_| unreachable!("system epoch is a valid timestamp")),
+            reason,
+        };
+        let ready = match login.ready().await {
+            Ok(ready) => ready,
+            Err(NativeCodexAuthError::Transport(cause)) => {
+                return unavailable(SubscriptionUsageUnavailable::Transport(cause));
             }
-            Ok(snapshot) => SubscriptionUsageRead::Snapshot(snapshot),
-            Err(_) => SubscriptionUsageRead::Unavailable {
-                observed_at,
-                reason: SubscriptionUsageUnavailable::InvalidResponse,
+            Err(NativeCodexAuthError::WrittenByNewerBuild) => {
+                return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                    SubscriptionUsageCredentialState::WrittenByNewerBuild,
+                ));
+            }
+            Err(NativeCodexAuthError::LoginRequired | NativeCodexAuthError::ProfileChanged) => {
+                return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                    SubscriptionUsageCredentialState::LoginRequired,
+                ));
+            }
+            Err(_) => match login.last_fence() {
+                Ok(fence) => {
+                    return unavailable(
+                        usage_credential_refusal(fence.status())
+                            .unwrap_or(SubscriptionUsageUnavailable::NotConnected),
+                    );
+                }
+                Err(_) => return unavailable(SubscriptionUsageUnavailable::NotConnected),
             },
+        };
+        if ready.access_expires_at <= self.clock.now().seconds() {
+            return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                SubscriptionUsageCredentialState::RefreshRequired,
+            ));
         }
+        if self.selected_account().as_ref() != Ok(ready.fence.account_binding()) {
+            return unavailable(SubscriptionUsageUnavailable::AccountChanged);
+        }
+        let Ok((authorization, account)) = login.fields(&ready.expected).await else {
+            return unavailable(SubscriptionUsageUnavailable::AccountChanged);
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("accept"),
+            HeaderValue::from_static("application/json"),
+        );
+        headers.insert(HeaderName::from_static("authorization"), authorization);
+        headers.insert(HeaderName::from_static("chatgpt-account-id"), account);
+        headers.insert(
+            HeaderName::from_static("user-agent"),
+            HeaderValue::from_static(USER_AGENT),
+        );
+        let reply = match execute_bounded(
+            &self.client,
+            &self.endpoints.chatgpt_origin,
+            Method::GET,
+            crate::subscription_usage::CODEX_SUBSCRIPTION_USAGE_PATH,
+            headers,
+            Vec::new(),
+            deadline,
+        )
+        .await
+        {
+            Ok(reply) => reply,
+            Err(NativeCodexAuthError::Transport(cause)) => {
+                return unavailable(SubscriptionUsageUnavailable::Transport(cause));
+            }
+            Err(_) => return unavailable(SubscriptionUsageUnavailable::Transport(None)),
+        };
+        let observed_at = Timestamp::new(self.clock.now().seconds(), 0)
+            .unwrap_or_else(|_| unreachable!("system epoch is a valid timestamp"));
+        if let Some(reason) = usage_reply_refusal(&reply) {
+            return SubscriptionUsageRead::Unavailable {
+                observed_at,
+                reason,
+            };
+        }
+        decoded_usage(&reply.body, observed_at)
     }
 
     pub(crate) fn validate_profile_admission(&self) -> Result<(), NativeCodexAuthError> {
@@ -430,6 +567,9 @@ impl CodexSubscriptionCredentialManager {
     }
 
     pub(super) fn route_account_digest(&self) -> Digest {
+        if let Some(login) = &self.custodied {
+            return login.account;
+        }
         codex_account_digest(self.selected_account().ok().as_ref())
     }
 
@@ -498,6 +638,36 @@ impl CodexSubscriptionCredentialManager {
             expires_at,
             responses_lite,
         ))
+    }
+}
+
+/// Why a usage reply carries no snapshot: its status or media type.
+fn usage_reply_refusal(reply: &super::http::HttpReply) -> Option<SubscriptionUsageUnavailable> {
+    let reason = match reply.status.as_u16() {
+        401 | 403 => Some(SubscriptionUsageUnavailable::Unauthorized),
+        429 => Some(SubscriptionUsageUnavailable::RateLimited),
+        200 => None,
+        _ => Some(SubscriptionUsageUnavailable::ProviderUnavailable),
+    };
+    if reason.is_some() {
+        return reason;
+    }
+    require_json_media_type(reply)
+        .is_err()
+        .then_some(SubscriptionUsageUnavailable::InvalidResponse)
+}
+
+fn decoded_usage(body: &[u8], observed_at: Timestamp) -> SubscriptionUsageRead {
+    match crate::decode_codex_subscription_usage(body, observed_at) {
+        Ok(snapshot) if snapshot.contains_ended_window() => SubscriptionUsageRead::Unavailable {
+            observed_at,
+            reason: SubscriptionUsageUnavailable::Stale,
+        },
+        Ok(snapshot) => SubscriptionUsageRead::Snapshot(snapshot),
+        Err(_) => SubscriptionUsageRead::Unavailable {
+            observed_at,
+            reason: SubscriptionUsageUnavailable::InvalidResponse,
+        },
     }
 }
 

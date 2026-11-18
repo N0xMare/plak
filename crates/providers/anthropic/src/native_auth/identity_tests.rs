@@ -100,7 +100,7 @@ async fn login_rejects_missing_required_scope_without_installing_credentials() {
         "{failure:?}"
     );
     assert!(failure.to_string().contains("install a newer build"));
-    assert!(manager.core.store.load().unwrap().is_none());
+    assert!(manager.core.store().unwrap().load().unwrap().is_none());
     assert!(peer.await.unwrap().starts_with("POST "));
 }
 
@@ -115,7 +115,7 @@ async fn login_accepts_inference_only_and_reordered_superset_grants() {
             login.state.expose_secret()
         );
         login.complete(&input).await.unwrap();
-        assert!(manager.core.store.load().unwrap().is_some());
+        assert!(manager.core.store().unwrap().load().unwrap().is_some());
         peer.await.unwrap();
     }
 }
@@ -262,7 +262,7 @@ async fn existing_credentials_hydrate_and_reopen_without_relogin() {
     manager.ensure_account_identity().await.unwrap();
     assert_eq!(peer.await.unwrap(), "GET /api/oauth/profile HTTP/1.1");
     let ((token, generation, binding), identity) = manager.identity_credentials().unwrap();
-    assert_eq!(token, before.0);
+    assert_eq!(token.token(), before.0.token());
     assert_eq!(generation, before.1 + 1);
     assert_eq!(binding, before.2);
     assert_eq!(identity.account_uuid().as_str(), ACCOUNT);
@@ -278,13 +278,16 @@ async fn missing_profile_uuid_preserves_credential_and_refuses_identity() {
     let (_temp, manager, peer) =
         fixture(serde_json::json!({"account":{"email":"fixture@example.invalid"}})).await;
     persist_without_uuid(&manager);
-    let before = manager.core.store.load().unwrap().unwrap();
+    let before = manager.core.store().unwrap().load().unwrap().unwrap();
     assert!(matches!(
         manager.ensure_account_identity().await,
         Err(ClaudeNativeAuthError::AccountIdentityUnavailable)
     ));
     peer.await.unwrap();
-    assert_eq!(manager.core.store.load().unwrap().unwrap(), before);
+    assert_eq!(
+        manager.core.store().unwrap().load().unwrap().unwrap(),
+        before
+    );
     assert!(manager.request_identity().is_err());
 }
 
@@ -304,7 +307,14 @@ async fn refresh_preserves_or_validates_provider_account_uuid() {
         if uuid == Some(OTHER_ACCOUNT) {
             assert!(result.is_err());
             assert_eq!(
-                manager.core.store.load().unwrap().unwrap().status(),
+                manager
+                    .core
+                    .store()
+                    .unwrap()
+                    .load()
+                    .unwrap()
+                    .unwrap()
+                    .status(),
                 CredentialStatus::RefreshOutcomeUnknown
             );
         } else {
@@ -323,7 +333,7 @@ fn stale_hydration_cannot_replace_refresh_or_login() {
         let temp = tempfile::tempdir().unwrap();
         let manager = tests::manager(tests::private_store(&temp));
         persist_without_uuid(&manager);
-        let before = manager.core.store.load().unwrap().unwrap();
+        let before = manager.core.store().unwrap().load().unwrap().unwrap();
         let mut stale = manager.core.read_stored(&before).unwrap();
         stale.account_uuid = Some(crate::ClaudeAccountUuid::new(ACCOUNT).unwrap());
         if login {
@@ -338,7 +348,8 @@ fn stale_hydration_cannot_replace_refresh_or_login() {
                 credential_record(before.generation().next().unwrap(), &refreshed).unwrap();
             manager
                 .core
-                .store
+                .store()
+                .unwrap()
                 .replace(before.generation(), &replacement)
                 .unwrap();
         }
@@ -346,11 +357,12 @@ fn stale_hydration_cannot_replace_refresh_or_login() {
         assert!(matches!(
             manager
                 .core
-                .store
+                .store()
+                .unwrap()
                 .replace(before.generation(), &replacement),
             Err(PrivateStoreError::StaleWriter)
         ));
-        let after = manager.core.store.load().unwrap().unwrap();
+        let after = manager.core.store().unwrap().load().unwrap().unwrap();
         assert_eq!(after.account_binding() != before.account_binding(), login);
         assert_ne!(
             manager.core.read_stored(&after).unwrap().access_token,
@@ -426,7 +438,7 @@ async fn separate_managers_hydrate_concurrently_without_blocking_the_executor() 
     let (temp, first, peer) =
         fixture_with_overlapping_reads(serde_json::json!({"account":{"uuid":ACCOUNT}}), true).await;
     persist_without_uuid(&first);
-    let before = first.core.store.load().unwrap().unwrap();
+    let before = first.core.store().unwrap().load().unwrap().unwrap();
     let mut second = tests::manager(temp.path().join("credentials/claude.json"));
     let core = Arc::get_mut(&mut second.core).unwrap();
     core.client = first.core.client.clone();
@@ -446,7 +458,7 @@ async fn separate_managers_hydrate_concurrently_without_blocking_the_executor() 
         peer.await.unwrap(),
         "GET /api/oauth/profile HTTP/1.1\nGET /api/oauth/profile HTTP/1.1"
     );
-    let after = first.core.store.load().unwrap().unwrap();
+    let after = first.core.store().unwrap().load().unwrap().unwrap();
     assert_eq!(after.generation().get(), before.generation().get() + 1);
     assert_eq!(after.account_binding(), before.account_binding());
     assert_eq!(

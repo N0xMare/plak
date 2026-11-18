@@ -217,13 +217,20 @@ impl MessagesRetrievalTransport for AnthropicRetrieval {
                 #[cfg(feature = "native-auth")]
                 Executor::ClaudeOAuth { model, session_id } => {
                     let input_bound = u64::try_from(body.len()).unwrap_or(u64::MAX).max(1);
-                    let (token, _) = model
+                    let (access, _) = model
                         .side_request_credential(input_bound)
                         .await
                         .map_err(|error| unauthorized(&error))?;
+                    let field = match access {
+                        crate::native_auth::ClaudeOAuthAccess::Token(token) => {
+                            plakous_auth::custody::CredentialField::bearer(token.as_bytes())
+                        }
+                        crate::native_auth::ClaudeOAuthAccess::Custodied(field) => {
+                            plakous_auth::custody::CredentialField::exact(field.to_vec())
+                        }
+                    };
                     let credential = plakous_http::sensitive_header_value(
-                        plakous_auth::custody::CredentialField::bearer(token.as_bytes())
-                            .into_header_bytes(),
+                        field.into_header_bytes(),
                     )
                     .map_err(|_| {
                         MessagesRetrievalError::new(

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
-const MODEL: &str = "gpt-5.6-luna";
+pub(in crate::subscriptions) const MODEL: &str = "gpt-5.6-luna";
 
 pub(in crate::subscriptions) struct CatalogFixture {
     pub(in crate::subscriptions) client: plakous_http::Client,
@@ -136,7 +136,7 @@ pub(in crate::subscriptions) fn seed(paths: &SubscriptionPaths, now: u64) -> Tes
     Ok(())
 }
 
-fn selection() -> TestResult<SelectedProviderConfiguration> {
+pub(in crate::subscriptions) fn selection() -> TestResult<SelectedProviderConfiguration> {
     Ok(SelectedProviderConfiguration::new(
         native_provider_route_selection(NativeProvider::Codex, ModelId::new(MODEL)?)?,
         ProviderBehaviorConfiguration {

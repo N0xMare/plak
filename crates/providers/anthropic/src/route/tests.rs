@@ -100,7 +100,9 @@ fn oauth_access_token_rotation_retains_prepared_credential_authority() -> Result
         ApiKey::new("oauth-access-token-one")?,
         AnthropicAccountIdentity::new("grant-fixture-authority")?,
     )?;
-    let rotated = route.with_oauth_access_token("oauth-access-token-two")?;
+    let rotated = route.with_oauth_access(crate::native_auth::ClaudeOAuthAccess::Token(
+        "oauth-access-token-two".to_owned(),
+    ))?;
     assert!(rotated.is_claude_oauth());
     assert_eq!(route.id(), rotated.id());
     assert_eq!(route.account(), rotated.account());
@@ -122,14 +124,26 @@ fn oauth_access_token_rotation_rejects_platform_and_empty_tokens() -> Result<(),
     let platform = AnthropicPlatformRoute::new(ApiKey::new("sk-ant-platform")?)?;
     assert!(
         platform
-            .with_oauth_access_token("oauth-access-token")
+            .with_oauth_access(crate::native_auth::ClaudeOAuthAccess::Token(
+                "oauth-access-token".to_owned()
+            ))
             .is_err()
     );
     let oauth = AnthropicPlatformRoute::claude_oauth(
         ApiKey::new("oauth-access-token-one")?,
         AnthropicAccountIdentity::new("grant-fixture-authority")?,
     )?;
-    assert!(oauth.with_oauth_access_token("").is_err());
-    assert!(oauth.with_oauth_access_token("oauth\naccess").is_err());
+    assert!(
+        oauth
+            .with_oauth_access(crate::native_auth::ClaudeOAuthAccess::Token(String::new()))
+            .is_err()
+    );
+    assert!(
+        oauth
+            .with_oauth_access(crate::native_auth::ClaudeOAuthAccess::Token(
+                "oauth\naccess".to_owned()
+            ))
+            .is_err()
+    );
     Ok(())
 }

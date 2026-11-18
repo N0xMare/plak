@@ -245,7 +245,7 @@ async fn start_local_model(
     let now = authority.observed_at();
     let ((token, _, _), identity) = manager.identity_credentials()?;
     let route = AnthropicPlatformRoute::claude_oauth(
-        ApiKey::new(token)?,
+        ApiKey::new(token.token().ok_or("local token")?)?,
         AnthropicAccountIdentity::new(identity.account_uuid().as_str())?,
     )?;
     let resolved = oauth_resolved_target(
@@ -1060,7 +1060,7 @@ async fn refreshed_session_models(
     let now = authority.observed_at();
     let ((token, _, _), identity) = manager.identity_credentials().unwrap();
     let route = AnthropicPlatformRoute::claude_oauth(
-        ApiKey::new(token).unwrap(),
+        ApiKey::new(token.token().unwrap()).unwrap(),
         AnthropicAccountIdentity::new(identity.account_uuid().as_str()).unwrap(),
     )
     .unwrap();
@@ -2200,7 +2200,7 @@ async fn generation_change_after_refresh_still_reserves_inference() {
         .expect("rotated Claude generation must still reserve inference");
     drop(permit);
     let (token, generation, _) = manager.dispatch_credentials().unwrap();
-    assert_eq!(token, "access-token-two");
+    assert_eq!(token.token(), Some("access-token-two"));
     assert_ne!(generation, first.generation().get());
     let inference = gate
         .snapshot()
@@ -2231,7 +2231,9 @@ fn oauth_access_token_rebind_keeps_prepared_target_binding() {
         AnthropicMessagesTargetBinding::from_resolved(&resolved).expect("prepared binding");
     let rotated = resolved
         .route()
-        .with_oauth_access_token("oauth-access-token-two")
+        .with_oauth_access(crate::native_auth::ClaudeOAuthAccess::Token(
+            "oauth-access-token-two".to_owned(),
+        ))
         .expect("OAuth rebind");
     binding
         .validate_route(&rotated)

@@ -1,5 +1,6 @@
 //! Route fingerprints and catalog receipt renewal.
 
+use super::custodied::CustodiedLogin;
 use super::{
     AccountBinding, Arc, CodexCatalogCapacityFacts, CodexCatalogSource, CodexCatalogToolMode,
     CodexReasoningEffortSet, CodexSubscriptionCredentialManager, CredentialFence, CredentialStatus,
@@ -235,6 +236,9 @@ impl CodexReceiptRenewal {
             .ok_or(RuntimeModelAuthorityError::Invalid)?
             .0
             .clone();
+        if let Some(login) = &self.source.manager.custodied {
+            return self.custodied_ready_selection(login, &expected).await;
+        }
         let renewal = self.clone();
         let fence = tokio::task::spawn_blocking(move || renewal.read_ready_fence(&expected))
             .await
@@ -254,6 +258,38 @@ impl CodexReceiptRenewal {
         .map_err(|_| RuntimeModelAuthorityError::Invalid)
     }
 
+    /// The custodied counterpart of [`Self::read_ready_fence`] and the
+    /// leased selection read.
+    async fn custodied_ready_selection(
+        &self,
+        login: &CustodiedLogin,
+        expected: &CredentialFence,
+    ) -> Result<Digest, RuntimeModelAuthorityError> {
+        let manager = &self.source.manager;
+        if manager.selected_account().map_err(renewal_error)? != *expected.account_binding() {
+            return Err(RuntimeModelAuthorityError::AccountChanged);
+        }
+        let ready = match login.ready().await {
+            Ok(ready) => ready,
+            Err(NativeCodexAuthError::Transport(_)) => {
+                return Err(RuntimeModelAuthorityError::Unavailable);
+            }
+            Err(_)
+                if login.last_status() == plakous_auth::OfflineCredentialLifecycle::Refreshing =>
+            {
+                return Err(RuntimeModelAuthorityError::Stale);
+            }
+            Err(_) => return Err(RuntimeModelAuthorityError::AwaitingCredential),
+        };
+        if ready.fence.account_binding() != expected.account_binding() {
+            return Err(RuntimeModelAuthorityError::AccountChanged);
+        }
+        if ready.fence.generation() < expected.generation() {
+            return Err(RuntimeModelAuthorityError::ForeignAuthority);
+        }
+        Ok(ready.selection_epoch)
+    }
+
     fn read_ready_fence(
         &self,
         expected: &CredentialFence,
@@ -270,7 +306,8 @@ impl CodexReceiptRenewal {
         let fence = self
             .source
             .manager
-            .store
+            .store()
+            .map_err(|_| RuntimeModelAuthorityError::Invalid)?
             .load()
             .map_err(|_| RuntimeModelAuthorityError::Invalid)?
             .ok_or(RuntimeModelAuthorityError::AwaitingCredential)?;
@@ -278,7 +315,8 @@ impl CodexReceiptRenewal {
             if matches!(
                 self.source
                     .manager
-                    .store
+                    .store()
+                    .map_err(|_| RuntimeModelAuthorityError::Invalid)?
                     .offline_lifecycle()
                     .map_err(|_| RuntimeModelAuthorityError::Invalid)?,
                 plakous_auth::OfflineCredentialLifecycle::Refreshing
@@ -450,11 +488,14 @@ pub(super) fn validate_catalog_fence(
     manager: &CodexSubscriptionCredentialManager,
     expected: &CredentialFence,
 ) -> Result<(), NativeCodexAuthError> {
-    let current = manager
-        .store
-        .load()
-        .map_err(|_| NativeCodexAuthError::Store)?
-        .ok_or(NativeCodexAuthError::Unavailable)?;
+    let current = match &manager.custodied {
+        Some(login) => login.last_fence()?,
+        None => manager
+            .store()?
+            .load()
+            .map_err(|_| NativeCodexAuthError::Store)?
+            .ok_or(NativeCodexAuthError::Unavailable)?,
+    };
     if current.status() != CredentialStatus::Ready {
         return Err(NativeCodexAuthError::Unavailable);
     }

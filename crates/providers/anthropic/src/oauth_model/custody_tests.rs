@@ -163,3 +163,108 @@ async fn concurrent_rejections_of_one_generation_claim_exactly_one_grant() -> Te
     );
     Ok(())
 }
+
+/// Local custody of one manager, served as a credential custodian.
+struct Served(ClaudeNativeAuthManager);
+
+impl plakous_auth::custody::CredentialCustodian for Served {
+    fn facts<'a>(
+        &'a self,
+        slot: &'a CustodySlot,
+    ) -> plakous_auth::custody::CustodyFuture<'a, plakous_auth::custody::AccountFacts> {
+        Box::pin(self.0.custody_facts(slot))
+    }
+
+    fn refresh<'a>(
+        &'a self,
+        slot: &'a CustodySlot,
+        request: plakous_auth::custody::RefreshRequest,
+    ) -> plakous_auth::custody::CustodyFuture<'a, plakous_auth::custody::AccountFacts> {
+        Box::pin(async move {
+            if let plakous_auth::custody::RefreshRequest::AfterRejection {
+                rejected,
+                selection_epoch_digest,
+            } = request
+            {
+                self.0
+                    .custody_refresh_after_rejection(slot, &rejected, selection_epoch_digest)
+                    .await
+            } else {
+                let _ = self.0.refresh_if_needed().await;
+                self.0.custody_facts(slot).await
+            }
+        })
+    }
+
+    fn fields<'a>(
+        &'a self,
+        slot: &'a CustodySlot,
+        expected: &'a ExpectedFence,
+    ) -> plakous_auth::custody::CustodyFuture<'a, plakous_auth::custody::CredentialFields> {
+        Box::pin(self.0.custody_fields(slot, expected))
+    }
+}
+
+#[tokio::test]
+async fn a_custodied_login_binds_and_sends_exactly_what_the_local_login_does() -> TestResult {
+    let temp = tempfile::tempdir()?;
+    let client = Client::new_http1(plakous_http::Limits::default())?;
+    let local = manager_with_client(private_store(&temp), client.clone())
+        .with_credential_source_scope("claude/work".into());
+    local.persist_test_grant("access", "refresh", 3600, CLAUDE_OAUTH_INFERENCE_SCOPE)?;
+    let (_, bound, _) = local
+        .resolve_oauth_model("claude-sonnet-5", client.clone(), SessionLineage::Root)
+        .await?;
+    let acceptance = crate::ClaudeCompatibilityAcceptance::accept_exact(
+        CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID,
+        CLAUDE_OAUTH_SOURCE_REVISION,
+        crate::oauth::CLAUDE_OAUTH_NOTICE_REVISION,
+        crate::oauth::CLAUDE_OAUTH_KILL_SWITCH_REVISION,
+        Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0)?,
+    )?;
+    let custodied = ClaudeNativeAuthManager::custodied(
+        Arc::new(Served(local.clone())),
+        CustodySlot::new("claude/work")?,
+        client.clone(),
+        acceptance,
+    )
+    .await?
+    .with_credential_source_scope("claude/work".into());
+
+    // The same binding, revalidated under its own scope.
+    let (model, reopened, _) = custodied
+        .resolve_oauth_model("claude-sonnet-5", client, SessionLineage::Root)
+        .await?;
+    assert_eq!(reopened.account_binding(), bound.account_binding());
+    assert_eq!(
+        reopened.credential_authority_binding(),
+        bound.credential_authority_binding()
+    );
+    assert_eq!(
+        reopened.credential_generation(),
+        bound.credential_generation()
+    );
+    let revalidated = model
+        .revalidate_runtime_authority(reopened.observed_at())
+        .await?;
+    assert_eq!(
+        revalidated.credential_authority_binding(),
+        bound.credential_authority_binding()
+    );
+
+    // The same request identity and `authorization` bytes.
+    let ((access, generation, _), identity) = custodied.identity_credentials()?;
+    let ((local_access, local_generation, _), local_identity) = local.identity_credentials()?;
+    assert_eq!(identity, local_identity);
+    assert_eq!(generation, local_generation);
+    let crate::native_auth::ClaudeOAuthAccess::Custodied(field) = access else {
+        return Err("a custodied login sends the custodian's field".into());
+    };
+    assert_eq!(
+        field.to_vec(),
+        format!("Bearer {}", local_access.token().ok_or("local token")?).into_bytes()
+    );
+    assert_eq!(custodied.status()?, local.status()?);
+    assert!(custodied.logout_local().is_err());
+    Ok(())
+}

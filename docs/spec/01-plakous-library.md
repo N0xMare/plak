@@ -6233,6 +6233,39 @@ gateway's facts there, once per attempt, with no cache across attempts and
 no blocking bridge; a local source does nothing. The gateway checks the
 fence again at injection either way.
 
+Subscription logins follow the same seam. `GatewayCustody::custody()`
+carries the remote custodian with the relayed transport
+(`Custody::custodian`), and `NativeSubscriptions::with_custody` puts a
+facade's Codex and Claude logins under it: the account is `<kind>` or
+`<kind>/<name>` (kinds `codex` and `claude`, the name of
+`for_named_account`). Status and consent come from the gateway's facts
+(consent is current only for this build's exact profile id and notice
+revision), and the managers open in a facts-backed mode
+(`CodexSubscriptionCredentialManager::custodied`,
+`ClaudeNativeAuthManager::custodied`) that never opens, creates or locks
+the store. Their preflight, catalog, revalidation and receipt-renewal reads
+answer from facts fetched per physical attempt (synchronous checks use the
+attempt's facts); the account and credential-authority digests are taken
+from the facts unchanged, so a session bound under direct custody reopens
+with an equal binding, and Claude's request identity comes from its wire
+identity. Each credential header is the custodian's field for the
+attempt's fence, inserted at the same header position, so catalog,
+inference, side-request and usage GETs relay as pinned rows byte for byte
+as they would be sent directly. Refresh is the custodian's single writer:
+the dispatch-time refresh is `IfDue`, a provider 401 asks `AfterRejection`
+for the rejected generation and selection, the operator's forced refresh is
+`Operator`, and nothing is resent by the gateway; whether the route
+re-dispatches stays the route's existing rule. The usage read relays the
+pinned usage GET (Claude's profile read is never relayed, so a custodied
+Claude allowance carries no e-mail) and, after an `Unauthorized` reply,
+asks `AfterRejection` once and reads again. Store operations (login,
+logout, revoke, consent, named-account listing and removal, the upstream
+account fingerprint and the persisted catalog snapshot) refuse
+`NativeSubscriptionError::GatewayCustody`; they belong to the gateway. A
+SuperGrok route binds the login's raw selection epoch and subject, which
+facts do not carry, so SuperGrok refuses `GatewayCustody` under gateway
+custody.
+
 ## 8. Tools and effects
 
 ### 8.1 Contracts
