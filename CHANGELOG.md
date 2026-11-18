@@ -13,8 +13,7 @@ for one version bump, without native protocol compatibility.
 
 - Transfer daemon jobs only when the runtime has a job host.
 - Process-tool descriptions state that a daemon or paired runner keeps
-  background jobs across quit and upgrade, and that delete and unpair are
-  refused while a job is still running.
+  background jobs across quit, including an escalated quit, and across upgrade.
 
 - State the existing prefix rule for replay reasoning, including OpenRouter Chat
   `reasoning_details`: an unchanged prefix stays byte-exact, and only reasoning

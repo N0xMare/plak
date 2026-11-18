@@ -7010,10 +7010,9 @@ tools is not told it has them. The process-starting tool of each family (`exec_c
 `run_terminal_command`, `Bash`, pi `bash`) states once that still-running
 processes continue in the background with an id, that completion is reported
 automatically, and that a local daemon or paired runner keeps background jobs
-across quit, including an escalated quit, and across upgrade, and records that
-keep. Without that keeper they stop on session release. They also stop on
-explicit stop, attempt end, or the hard cap. Deleting the session or unpairing
-the runner is refused while a job is still running.
+across quit, including an escalated quit, and across upgrade. Without that
+keeper they stop on session release. They also stop on explicit stop, attempt
+end, or the hard cap.
 `write_stdin`, Grok's output and kill tools, pi's `wait` and `stop`, and
 Claude's `TaskStop` state the numeric foreground budget and hard cap and do
 not repeat that sentence.
