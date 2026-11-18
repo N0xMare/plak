@@ -583,6 +583,10 @@ async fn manual_mid_turn_fold_ends_on_protected_history() -> TestResult {
         },
     ))
     .tool_policy(Arc::new(AlwaysAllowPolicy))
+    .identity_sources(
+        Arc::new(FixedClock::new(Timestamp::new(10, 0)?)),
+        Arc::new(SystemIdGenerator),
+    )
     .with_scheduled_compaction_enabled(true)
     .build()?;
     for prompt in ["older replaceable intent", "latest protected intent"] {
