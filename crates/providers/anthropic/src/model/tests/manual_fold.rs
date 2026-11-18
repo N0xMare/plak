@@ -508,10 +508,21 @@ impl LanguageModel for ManualFoldModel {
             )
         })?;
         if let Err(error) = lower_request(&plan, &policy, ToolOwnership::default()) {
-            if error.kind() == MessagesRequestErrorKind::ProtectedHistory {
-                self.protected.fetch_add(1, Ordering::AcqRel);
+            // Fold publication re-measures the successor on a workflow root.
+            // That tail has already lost its thinking, so lowering refuses, but
+            // the measurement still has to return a status or the fold stays
+            // ambiguous. The live turn, not the measurement, is the refusal.
+            let workflow_measurement = error.kind() == MessagesRequestErrorKind::ProtectedHistory
+                && matches!(
+                    plan.request().metadata().root(),
+                    ModelOperationRoot::SessionWorkflow(_)
+                );
+            if !workflow_measurement {
+                if error.kind() == MessagesRequestErrorKind::ProtectedHistory {
+                    self.protected.fetch_add(1, Ordering::AcqRel);
+                }
+                return Err(preparation_rejection(error));
             }
-            return Err(preparation_rejection(error));
         }
         let prepare = self.prepares.fetch_add(1, Ordering::AcqRel);
         let tokens = counted_tokens(&plan, prepare);
@@ -639,10 +650,16 @@ async fn manual_mid_turn_fold_ends_on_protected_history() -> TestResult {
         .await?
         .result()
         .await?;
-    let TurnResultOutcome::Failed(error) = result.outcome() else {
+    let outcome = result.outcome();
+    let TurnResultOutcome::Failed(error) = outcome else {
+        let message = match outcome {
+            TurnResultOutcome::Failed(error)
+            | TurnResultOutcome::Cancelled(error)
+            | TurnResultOutcome::RecoveryRequired(error) => error.message(),
+            TurnResultOutcome::Completed(_) => "",
+        };
         return Err(format!(
-            "turn did not end on protected history: outcome={:?} prepares={} ordinary={} summaries={} protected={}",
-            result.outcome(),
+            "turn did not end on protected history: message={message} prepares={} ordinary={} summaries={} protected={}",
             model.prepares.load(Ordering::Acquire),
             model.ordinary.load(Ordering::Acquire),
             model.summaries.load(Ordering::Acquire),
