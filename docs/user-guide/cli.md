@@ -579,7 +579,7 @@ printf '{"v":1,"kind":"prompt","id":"1","text":"hi"}\n' | plakd agent --account 
 ```
 
 Stdin commands: `prompt`, `interrupt`, `compact`, `resume_queue`, `resume`, `tree`,
-`interrupt_node`, `close_node`, `stop_all`, `clear`,
+`interrupt_node`, `close_node`, `stop_all`, `stop_processes`, `clear`,
 `invoke_tool`, `fork`, `recover`, `background`, `resolve_approval`, `quit`.
 `clear` starts a new session.
 `resume` with `agent_id` resumes that loss-held child; without it, it resumes

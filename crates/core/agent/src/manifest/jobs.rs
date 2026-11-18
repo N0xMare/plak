@@ -463,12 +463,12 @@ mod tests {
         let kept = stale.retaining_recorded_terminals(&prior).expect("kept");
         assert_eq!(kept.rows()[0].terminal, Some(stopped));
         let consumed = JobLedger::new(2, Vec::new()).expect("consumed");
-        assert!(
+        assert_eq!(
             consumed
                 .retaining_recorded_terminals(&prior)
                 .expect("consumed stays dropped")
-                .rows()
-                .is_empty()
+                .rows(),
+            &[]
         );
     }
     #[test]

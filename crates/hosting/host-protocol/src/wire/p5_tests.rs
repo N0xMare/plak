@@ -90,7 +90,7 @@ fn protocol_five_directory_requests_have_exact_closed_shapes() {
         r#"{"frame":"request","id":2,"op":{"op":"session_options","workspace":{"runner":{"name":"machine","runner_id":"pinned-id"},"path":"/work"}}}"#,
         r#"{"frame":"request","id":3,"op":{"op":"rename_session","session":"session-id","title":null}}"#,
         r#"{"frame":"request","id":4,"op":{"op":"archive_session","session":"session-id","archived":true}}"#,
-        r#"{"frame":"request","id":5,"op":{"op":"delete_session","session":"session-id","abandon_children":false}}"#,
+        r#"{"frame":"request","id":5,"op":{"op":"delete_session","session":"session-id","abandon_children":false,"abandon_jobs":false}}"#,
         r#"{"frame":"request","id":6,"op":{"op":"list_sessions","workspace":"/work","runner":"pinned-id","include_archived":true}}"#,
         r#"{"frame":"request","id":7,"op":{"op":"watch_sessions","include_archived":true}}"#,
     ] {

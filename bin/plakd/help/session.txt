@@ -11,7 +11,7 @@ USAGE:
   plakd session recover <session>
   plakd session export <session> [--out <path>]
   plakd session import <path>
-  plakd session delete <session> [--yes] [--abandon-children]
+  plakd session delete <session> [--yes] [--abandon-children] [--abandon-jobs]
   plakd session gc <session> | --all
   plakd session reload <session> --expect-binary <binary-id>
 
@@ -39,8 +39,10 @@ USAGE:
   sub-agents' history and its agent tree, and frees store space even when the
   session store is full. It refuses a session that is open in a running plakd,
   whose agent tree has running, resumable or recovery-required sub-agents, or
-  that other sessions continue from (forks, rebinds); it asks
-  first unless --yes is given. A delete that failed part way finishes on rerun.
+  that other sessions continue from (forks, rebinds), or while a job has no
+  terminal evidence; it asks first unless --yes is given. --abandon-jobs
+  deletes anyway and names the processes left running. A delete that failed
+  part way finishes on rerun.
 
   gc reclaims checkpoint history a session no longer needs: every turn's
   intermediate checkpoints. History, resume and forks are unaffected, and it

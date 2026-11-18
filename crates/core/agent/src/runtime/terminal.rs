@@ -738,7 +738,10 @@ impl DurableSessionStoreError {
             SessionStoreError::Invalid(reason) => Self::Invalid(reason),
             SessionStoreError::NotFound => Self::NotFound,
             SessionStoreError::IdentityConflict => Self::IdentityConflict,
-            SessionStoreError::Conflict => Self::Conflict,
+            // RunningJobs is the same durable tag as Conflict: archive refuses
+            // it before any checkpoint write, so the canonical error codec is
+            // unchanged.
+            SessionStoreError::Conflict | SessionStoreError::RunningJobs => Self::Conflict,
             SessionStoreError::LeaseHeld => Self::LeaseHeld,
             SessionStoreError::LeaseExpired => Self::LeaseExpired,
             SessionStoreError::LeaseDomainMismatch => Self::LeaseDomainMismatch,
@@ -762,9 +765,6 @@ impl DurableSessionStoreError {
             SessionStoreError::UnsupportedCodec => Self::UnsupportedCodec,
             SessionStoreError::Shutdown => Self::Shutdown,
             SessionStoreError::Pruned => Self::Pruned,
-            // Archive refuses this before any checkpoint write. It is not a
-            // durable terminal tag, so the canonical error codec is unchanged.
-            SessionStoreError::RunningJobs => Self::Conflict,
         }
     }
 

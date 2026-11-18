@@ -809,7 +809,9 @@ async fn a_working_head_answers_its_recorded_job_terminal_on_open() {
         .record_job_terminals(&registry.views())
         .await
         .unwrap();
-    assert_eq!(recorded, [number]);
+    // Quit already wrote the stop onto the Working head. A later snapshot
+    // records nothing new, and reopen still answers that first terminal.
+    assert_eq!(recorded, Vec::<u32>::new());
     holder.release().await.unwrap();
     let opened = fixture
         .sessions

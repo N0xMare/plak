@@ -32,8 +32,8 @@ OPTIONS:
 
 COMMANDS (stdin):
   prompt, interrupt, compact, resume_queue, tree, interrupt_node, close_node,
-  stop_all, clear, invoke_tool, fork, recover, resume, resolve_approval,
-  background, quit
+  stop_all, stop_processes, clear, invoke_tool, fork, recover, resume,
+  resolve_approval, background, quit
 
 EVENTS (stdout):
   hello, ready, status, busy, assistant, assistant_done, tool, error,
