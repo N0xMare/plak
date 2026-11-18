@@ -132,6 +132,7 @@ pub mod internal {
     /// Test stand-in for a keeper. Production hosts do not call this.
     #[doc(hidden)]
     #[must_use]
+    #[cfg(feature = "test-hooks")]
     pub fn retain_jobs_for_test(builder: AgentBuilder) -> AgentBuilder {
         builder.retain_jobs_for_test()
     }

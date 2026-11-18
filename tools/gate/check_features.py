@@ -1593,6 +1593,7 @@ def main() -> int:
     errors.extend(validate_uuid_features(workspace))
     errors.extend(validate_excluded_closures())
     errors.extend(validate_test_only_dependency_features())
+    errors.extend(validate_test_hook_methods(ROOT))
     validated = 0
     packages_run = 0
     profiles: dict[str, list[tuple[str, tuple[str, ...], bool]]] = {}
@@ -1670,6 +1671,24 @@ def main() -> int:
         "and the reviewed named closure-exclusion pins"
     )
     return 0
+
+
+def validate_test_hook_methods(root: Path) -> list[str]:
+    """Keep internal job-retention test seams out of normal library builds."""
+    checks = (
+        ("crates/core/agent/src/runtime/build.rs", "retain_jobs_for_test"),
+        ("crates/plakous/src/sessions.rs", "with_retained_jobs_for_test"),
+    )
+    errors = []
+    for relative, method in checks:
+        source = (root / relative).read_text()
+        declaration = source.find(f"pub fn {method}")
+        attributes = source[:declaration].splitlines()[-8:] if declaration >= 0 else []
+        if not any(
+            line.strip() == '#[cfg(feature = "test-hooks")]' for line in attributes
+        ):
+            errors.append(f"{relative}: {method} must be gated by the test-hooks feature")
+    return errors
 
 
 if __name__ == "__main__":

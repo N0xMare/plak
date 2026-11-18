@@ -329,6 +329,7 @@ impl AgentBuilder {
     /// Pretend a daemon or paired runner keeps jobs. Tests use this so an
     /// escalated quit can take the keep path without a live runner. A job
     /// host is still required.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     #[must_use]
     pub fn retain_jobs_for_test(mut self) -> Self {

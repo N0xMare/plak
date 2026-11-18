@@ -292,6 +292,7 @@ impl SessionRuntimeBinding {
     /// Test stand-in for a local daemon or paired runner. Transfer still
     /// requires the job host `with_job_host` installs. Production hosts do
     /// not call this.
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     #[must_use]
     pub fn with_retained_jobs_for_test(mut self) -> Self {
