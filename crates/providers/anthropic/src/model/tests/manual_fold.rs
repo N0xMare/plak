@@ -320,6 +320,18 @@ fn counted_tokens(plan: &ValidatedRequestPlan, prepare: usize) -> u64 {
     }
 }
 
+// Shared-window admission reserves the request's enforced output cap.
+// Omitting it is ExplicitOutputReservationUnavailable, reported as an
+// invalid request before any dispatch.
+fn enforced_output_limit(digest: Digest) -> Result<PreparedOutputLimit, PreparedCallError> {
+    PreparedOutputLimit::enforced_wire_maximum(
+        std::num::NonZeroU32::new(4_096).expect("output cap"),
+        "max_output_tokens",
+        digest,
+        "artifact-lowering-v1",
+    )
+}
+
 fn token_projection(
     digest: Digest,
     size: u64,
@@ -507,7 +519,7 @@ impl LanguageModel for ManualFoldModel {
             size,
             token_projection(digest, size, tokens)?,
             PreparedCacheUse::None,
-            None,
+            Some(enforced_output_limit(digest)?),
         )?;
         let record =
             PreparedCallRecord::for_prepared(&self.descriptor, &plan, projection, &context)?;
@@ -593,9 +605,10 @@ async fn manual_mid_turn_fold_ends_on_protected_history() -> TestResult {
         let result = agent.prompt(prompt).await?.result().await?;
         if let TurnResultOutcome::Failed(error) = result.outcome() {
             return Err(format!(
-                "setup turn failed kind={:?} model={:?} prepares={} ordinary={} summaries={} protected={}",
+                "setup turn failed kind={:?} model={:?} message={} prepares={} ordinary={} summaries={} protected={}",
                 error.kind(),
                 error.model_kind(),
+                error.message(),
                 model.prepares.load(Ordering::Acquire),
                 model.ordinary.load(Ordering::Acquire),
                 model.summaries.load(Ordering::Acquire),
