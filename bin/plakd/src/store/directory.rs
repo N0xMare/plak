@@ -305,16 +305,21 @@ impl ProductStore {
         &mut self,
         tree_id: &str,
     ) -> Result<Option<sessions::SessionRecord>, String> {
-        let id: Option<String> = self
+        let ids = self
             .connection
-            .query_row(
-                "SELECT s.id FROM sessions s WHERE s.node_tree_id=?1 AND s.node_agent_id=?1 AND NOT EXISTS (SELECT 1 FROM sessions successor WHERE successor.source_session_id=s.id AND successor.node_tree_id=s.node_tree_id AND successor.node_agent_id=s.node_agent_id) ORDER BY s.updated_at DESC, s.id ASC LIMIT 1",
-                [tree_id],
-                |row| row.get(0),
-            )
-            .optional()
+            .prepare("SELECT s.id FROM sessions s WHERE s.node_tree_id=?1 AND s.node_agent_id=?1 AND NOT EXISTS (SELECT 1 FROM sessions successor WHERE successor.source_session_id=s.id AND successor.node_tree_id=s.node_tree_id AND successor.node_agent_id=s.node_agent_id) LIMIT 2")
+            .and_then(|mut statement| {
+                statement
+                    .query_map([tree_id], |row| row.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()
+            })
             .map_err(|_| "could not read the root line of a tree".to_owned())?;
-        id.map(|id| self.load(&id)).transpose()
+        // Two heads would make the session's choice ambiguous: fail closed.
+        match ids.as_slice() {
+            [] => Ok(None),
+            [id] => self.load(id).map(Some),
+            _ => Err("the tree's root line has more than one head".to_owned()),
+        }
     }
 }
 

@@ -230,7 +230,13 @@ impl DormantSession {
             profile: record.root_profile.clone(),
             runner: record.runner.clone(),
             floor: self.floor.get(),
-            state: self.views.state.clone(),
+            // The last root turn is this build's continue bookkeeping, not
+            // part of export v13: a moved session continues after its next
+            // failure.
+            state: SessionViewState {
+                last_root_turn: None,
+                ..self.views.state.clone()
+            },
             rows: self
                 .views
                 .rows

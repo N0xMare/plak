@@ -5287,6 +5287,11 @@ never submits it. A continue whose rebind published but whose root-start could
 not be queued answers the choice (the root moved) with that same warning. A queued or written root-start is
 restored paused like any other queued prompt.
 
+**Host move.** The export v13 capsule carries neither the session's stored
+choices nor the `last_root_turn` view, so the document is unchanged: a moved
+session starts with no stored choices (spawns fill each kind best effort, then
+fail closed) and can continue only after its next failed root turn.
+
 **Wire.** `TurnLifecycle.usage_limit {kind, account, resets_at?,
 alternatives}` is set on a failed turn whose provider reported exhausted quota;
 `alternatives` are the other Ready accounts of that kind and `resets_at` is
