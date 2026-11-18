@@ -683,7 +683,7 @@ fn account_continue_sigkill_cuts_reopen_without_resubmitting() -> TestResult {
         let (second_report, repeated) = relaunch_report(&fixture.recover(false), &fixture.probe())?;
         assert_eq!(repeated, None);
         let expected = if cut == ProductCrashBoundary::ProductPublished {
-            let store = crate::store::ProductStore::open(&paths)?;
+            let mut store = crate::store::ProductStore::open(&paths)?;
             let failed = store
                 .load_views(&source.id)?
                 .ok_or("missing source views")?

@@ -152,11 +152,15 @@ fn assert_bound(fixture: &Fixture, child: &str, account: &str) -> SessionLocator
             node.session_locator.as_deref().unwrap().parse().unwrap()
         })
         .unwrap();
-    let head = plakous::sessions::inspect_binding_presentations_sqlite(fixture.database())
-        .unwrap()
-        .into_iter()
-        .find(|head| head.locator.session_ref() == locator.session_ref())
-        .unwrap();
+    let head =
+        plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(fixture.database())
+            .unwrap()
+            .into_iter()
+            .find(|head| {
+                head.locator.session_id() == locator.session_id()
+                    && head.locator.branch_id() == locator.branch_id()
+            })
+            .unwrap();
     let presentation = head.presentation.unwrap().unwrap();
     let stored = presentation
         .configuration()
