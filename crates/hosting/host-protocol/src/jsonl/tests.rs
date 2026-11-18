@@ -145,6 +145,43 @@ fn turn_lifecycle_omits_absent_error_context() {
     assert!(value.get("http_status").is_none());
 }
 
+/// A usage-limit failure projects its notice into the v1 `turn_lifecycle`
+/// line (spec 02 §4.4.1); an unreported reset time is omitted.
+#[test]
+fn turn_lifecycle_projects_a_usage_limit_notice() {
+    let lifecycle = |resets_at| {
+        SessionObservation::<Core>::TurnLifecycle(TurnLifecycle {
+            turn_id: "00000000-0000-4000-8000-0000000000cc".to_owned(),
+            phase: TurnPhase::Failed,
+            model_error_kind: Some("QuotaExceeded".to_owned()),
+            http_status: Some(429),
+            usage_limit: Some(crate::observation::UsageLimitNotice {
+                kind: "codex".to_owned(),
+                account: "codex/work".to_owned(),
+                resets_at,
+                alternatives: vec!["codex".to_owned(), "codex/b".to_owned()],
+            }),
+        })
+    };
+    let line =
+        project_host_event(&lifecycle(Some(1_900_000_000)), JsonlCorrelation::default()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(value["kind"], "turn_lifecycle");
+    assert_eq!(
+        value["usage_limit"],
+        serde_json::json!({
+            "kind": "codex",
+            "account": "codex/work",
+            "resets_at": 1_900_000_000,
+            "alternatives": ["codex", "codex/b"]
+        })
+    );
+    let line = project_host_event(&lifecycle(None), JsonlCorrelation::default()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert!(value["usage_limit"].get("resets_at").is_none(), "{value}");
+    assert_eq!(value["usage_limit"]["account"], "codex/work");
+}
+
 #[test]
 fn turn_phase_labels_match_the_serde_form() {
     for (phase, label) in [

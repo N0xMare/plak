@@ -1247,9 +1247,20 @@ pub(super) fn validate_rebind_effort(
     if effort.is_some() && !explicit {
         return Err(CliFailure::new("rebind target effort is invalid"));
     }
+    // The host's catalog has one section per kind's default slot; a named
+    // account of the kind serves the same provider's models.
+    let kind = account
+        .parse::<crate::account::AccountRef>()
+        .ok()
+        .map(|parsed| parsed.vertical().as_str());
     let entry = ready_catalog
         .iter()
         .find(|section| section.ready && section.account == account)
+        .or_else(|| {
+            ready_catalog
+                .iter()
+                .find(|section| section.ready && Some(section.account.as_str()) == kind)
+        })
         .and_then(|section| section.entries.iter().find(|entry| entry.id == model))
         .ok_or_else(|| CliFailure::new("rebind target is absent from the exact Ready catalog"))?;
     if entry.effort_options.is_empty() {

@@ -934,10 +934,15 @@ impl ScriptedRuntimeFactory {
             self.rebind_target.clone(),
         )))
     }
+    /// The credential-free route serves its account and every named account
+    /// of that account's kind.
     fn accepts_profile_route(&self, account: &str, model: &str) -> bool {
-        self.profile_route
-            .as_ref()
-            .is_none_or(|route| account == route.account && model == route.model)
+        self.profile_route.as_ref().is_none_or(|route| {
+            let of_kind = account
+                .parse::<crate::account::AccountRef>()
+                .is_ok_and(|parsed| parsed.vertical().as_str() == route.account);
+            (account == route.account || of_kind) && model == route.model
+        })
     }
 
     fn serves_profile_spec(&self, spec: &ProductAgentSpec) -> bool {

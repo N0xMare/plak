@@ -150,3 +150,108 @@ fn new_session_fills_each_used_kind_before_the_root_resolves() {
     ));
     stop(&mut host);
 }
+
+/// Waits for this attachment's profile verdict: the move to its successor or
+/// the refusal's reason.
+fn profile_moved(client: &mut Client) -> Result<NodeAddress, String> {
+    use plakd_wire_types::SurfaceObservation;
+    loop {
+        match client.next() {
+            HostFrame::Moved { node, .. } => return Ok(node),
+            HostFrame::Event {
+                observation:
+                    plakous_host_protocol::SessionObservation::Extension(
+                        SurfaceObservation::ProfileRefused { reason, .. }
+                        | SurfaceObservation::AccountChoiceRefused(
+                            plakd_wire_types::AccountChoiceRefusal::Failed { reason },
+                        ),
+                    ),
+                ..
+            } => return Err(reason),
+            _ => {}
+        }
+    }
+}
+
+/// A named root through the host (spec 02 §4.4.1): `new_session` with an
+/// explicit named root account binds and runs on it, and `ApplyProfile` with
+/// another named account switches the root's line onto that account, whose
+/// successor runs as well.
+#[test]
+fn a_named_root_creates_runs_and_switches_through_the_host() {
+    use plakd_wire_types::{ProfileApply, SurfaceIntent};
+    let Some(fixture) = fixture() else { return };
+    fixture.write_script(&json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [{"output": {"text": ANSWER}}]
+    }));
+    template(&fixture, "many", "codex", "offline-loopback-v1", "medium");
+    // The offline route binds every codex account alike, so the switch also
+    // moves the effort for the runtime configuration to change.
+    template(&fixture, "many-low", "codex", "offline-loopback-v1", "low");
+    let profiles = fixture.home().join("profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    write_private(
+        &profiles.join("many-low.toml"),
+        "root = \"many-low\"\nworking_set = [\"many\"]\n",
+    );
+    let mut host = start_env(
+        &fixture,
+        &[],
+        &[("PLAK_TEST_READY_ACCOUNTS", "codex/a,codex/b".to_owned())],
+    );
+    let mut client = Client::connect(&host);
+    let created = create(&mut client, &fixture, 1, "many", &[("codex", "codex/a")]);
+    assert_eq!(created_account(&fixture, &created), "codex/a");
+    let Outcome::Ok(Answer::Created { session, node, .. }) = created else {
+        unreachable!("created above");
+    };
+    let attachment = client.attach(2, &node);
+    client.prompt(3, attachment, "on the named root", ANSWER);
+    profiles::wait_idle(&mut client, &session);
+
+    client.retain_observations();
+    assert_eq!(
+        client.request(
+            4,
+            Op::Intent {
+                client_id: None,
+                attachment,
+                intent: SessionIntent::Extension(SurfaceIntent::ApplyProfile {
+                    name: "many-low".into(),
+                    apply: ProfileApply::Switch,
+                    accounts: vec![plakd_wire_types::AccountChoice {
+                        kind: plakd_wire_types::console::Vertical::Codex,
+                        account: "codex/b".into(),
+                    }],
+                }),
+                blobs: Vec::new(),
+            },
+        ),
+        Outcome::Ok(Answer::Accepted { duplicate: false })
+    );
+    let moved = profile_moved(&mut client).expect("the switch onto codex/b");
+    assert_eq!(moved, node, "a switch keeps the root's node");
+    let rows = client.rows(5);
+    let successor = rows
+        .iter()
+        .find(|row| row.session != session && row.node == node)
+        .expect("the switch's successor is listed")
+        .session
+        .clone();
+    let store = SqliteSessionStore::new(plakd::home::paths::PlakPaths::explicit(fixture.home()));
+    let switched = store.load(&successor).unwrap();
+    assert_eq!(switched.account.as_deref(), Some("codex/b"));
+    assert_eq!(switched.effort.as_deref(), Some("low"));
+    let attachment = client.attach(6, &node);
+    client.prompt(7, attachment, "on the switched root", ANSWER);
+    profiles::wait_idle(&mut client, &successor);
+    assert_eq!(
+        store.load(&session).unwrap().account.as_deref(),
+        Some("codex/a"),
+        "the source keeps its account"
+    );
+    drop(client);
+    stop(&mut host);
+}

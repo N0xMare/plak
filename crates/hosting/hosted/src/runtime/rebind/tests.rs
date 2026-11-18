@@ -1984,6 +1984,12 @@ fn rebind_defaults_reasoning_to_medium_when_admitted() {
     assert!(
         validate_rebind_effort(&catalog, "codex", "plain-non-reasoning", Some("medium")).is_err()
     );
+    // A named account of the kind reads its kind's section.
+    assert_eq!(
+        validate_rebind_effort(&catalog, "codex/b", "gpt-reasoning", None).unwrap(),
+        Some("medium".into())
+    );
+    assert!(validate_rebind_effort(&catalog, "claude/b", "gpt-reasoning", None).is_err());
 }
 
 #[test]
