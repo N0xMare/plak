@@ -273,14 +273,9 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
             // This receipt observes the resolved admission, not the order in
             // which callers sample clocks before asynchronous revalidation.
             let checked_at = checked_at.max(authority.observed_at());
-            let account = digest_binding(
-                b"claude-oauth-provider-account",
-                current_identity.account_uuid().as_str().as_bytes(),
-            )
-            .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
-            let credential_authority = digest_binding(
-                b"claude-oauth-provider-account-credential",
-                current_identity.account_uuid().as_str().as_bytes(),
+            let (account, credential_authority) = claude_route_bindings(
+                current_identity.account_uuid(),
+                self.credentials.credential_source_scope(),
             )
             .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
             if account != authority.account_binding()

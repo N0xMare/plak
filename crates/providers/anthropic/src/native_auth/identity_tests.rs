@@ -387,6 +387,40 @@ async fn revalidate_picks_up_rotated_credential_generation() {
     );
 }
 
+#[tokio::test]
+async fn a_named_source_revalidates_under_its_own_authority() {
+    let (_temp, manager, peer) = fixture(serde_json::json!({"access_token":"fixture-new-access","refresh_token":"fixture-new-refresh","expires_in":3600,"scope":"user:inference"})).await;
+    let manager = manager.with_credential_source_scope("claude/work".into());
+    manager
+        .persist_test_grant("fixture-access", "fixture-refresh", 3600, "user:inference")
+        .unwrap();
+    let (model, authority, _) = manager
+        .resolve_model(
+            "claude-sonnet-5",
+            manager.core.client.clone(),
+            plakous_model::SessionLineage::Root,
+        )
+        .await
+        .unwrap();
+    let current = Arc::clone(&model)
+        .revalidate_runtime_authority(authority.observed_at())
+        .await
+        .unwrap();
+    assert_eq!(current, authority);
+    manager.refresh_after_rejection().await.unwrap();
+    peer.await.unwrap();
+    let refreshed = model
+        .revalidate_runtime_authority(authority.observed_at())
+        .await
+        .unwrap();
+    assert!(refreshed.credential_generation() > authority.credential_generation());
+    assert_eq!(refreshed.account_binding(), authority.account_binding());
+    assert_eq!(
+        refreshed.credential_authority_binding(),
+        authority.credential_authority_binding()
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn separate_managers_hydrate_concurrently_without_blocking_the_executor() {
     let (temp, first, peer) =
