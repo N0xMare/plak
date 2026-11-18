@@ -633,6 +633,31 @@ where
         }
     }
 
+    fn answer_new_session(&mut self, op: Op<P>) -> CliResult<Forwarded<P>> {
+        let Op::NewSession {
+            runner,
+            profile,
+            model,
+            workspace,
+            template,
+            request_id,
+            accounts,
+            ..
+        } = op
+        else {
+            unreachable!("NewSession is the only op forwarded here");
+        };
+        Ok(Forwarded::Answered(self.create_session(&Creation {
+            runner: &runner,
+            workspace: &workspace,
+            profile: profile.as_deref(),
+            template: template.as_deref(),
+            model: model.as_ref(),
+            accounts: &accounts,
+            request_id: &request_id,
+        })))
+    }
+
     fn request(
         &mut self,
         request_id: plakous_host_protocol::wire::RequestId,
@@ -683,24 +708,7 @@ where
                 answered(Outcome::Ok(Answer::Detached))
             }
             Op::NewSession { .. } if self.host.closed() => refused(stopping()),
-            Op::NewSession {
-                runner,
-                profile,
-                model,
-                workspace,
-                template,
-                request_id,
-                accounts,
-                ..
-            } => answered(self.create_session(&Creation {
-                runner: &runner,
-                workspace: &workspace,
-                profile: profile.as_deref(),
-                template: template.as_deref(),
-                model: model.as_ref(),
-                accounts: &accounts,
-                request_id: &request_id,
-            })),
+            op @ Op::NewSession { .. } => self.answer_new_session(op),
             Op::ReleaseSession { session } => answered(self.release(&session)?),
             Op::SessionOptions { workspace, .. } => {
                 answered(self.session_options(request_id, workspace.as_ref()))

@@ -378,6 +378,10 @@ async fn freeze_spawn_choice(
     let Some(session) = session else {
         return Ok(card.to_owned());
     };
+    // A card that is not an account reference keeps the binding it already had.
+    if card.parse::<crate::account::AccountRef>().is_err() {
+        return Ok(card.to_owned());
+    }
     let resolved = session
         .resolve_spawn_account(card)
         .map_err(|message| SpawnBindError::Refused(message.into()))?;
