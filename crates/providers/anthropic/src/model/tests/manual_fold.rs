@@ -591,10 +591,18 @@ async fn manual_mid_turn_fold_ends_on_protected_history() -> TestResult {
     .build()?;
     for prompt in ["older replaceable intent", "latest protected intent"] {
         let result = agent.prompt(prompt).await?.result().await?;
-        assert!(
-            matches!(result.outcome(), TurnResultOutcome::Completed(_)),
-            "{result:?}"
-        );
+        if let TurnResultOutcome::Failed(error) = result.outcome() {
+            return Err(format!(
+                "setup turn failed kind={:?} model={:?} prepares={} ordinary={} summaries={} protected={}",
+                error.kind(),
+                error.model_kind(),
+                model.prepares.load(Ordering::Acquire),
+                model.ordinary.load(Ordering::Acquire),
+                model.summaries.load(Ordering::Acquire),
+                model.protected.load(Ordering::Acquire),
+            )
+            .into());
+        }
     }
     let result = agent
         .prompt("use the growing probe at the tool-group fence")
