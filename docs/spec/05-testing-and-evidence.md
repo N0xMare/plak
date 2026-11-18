@@ -4351,7 +4351,8 @@ because the refusal carries account facts. `retry-after-ms` belongs to
 `busy`, `credential-status` to `credential_not_ready`, and `supported` to
 `version_unsupported` (`+`-separated, default `1`).
 
-`map_relay` is the hop-1 composition onto the kernels. Unreachable,
+`RelayClient` composes hop 1 onto the kernels; no separate model of that
+composition exists. Unreachable,
 write-reset, `busy` and `fence_moved` are unsent `NotStarted` and refunded;
 `busy` also spends the unreachable budget, and `fence_moved` re-prepares
 inside the attempt. Other refusals, including `internal`, are unsent and not

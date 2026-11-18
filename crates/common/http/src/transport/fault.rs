@@ -76,12 +76,6 @@ use super::{
 };
 use crate::{ErrorKind, ExchangeControl, Failure, Limits, Phase, TransmissionFact, WireProtocol};
 
-mod relay;
-
-pub use relay::{
-    BeforeHead, MeasuredUpstream, RelayKernel, RelayObservation, Unsent, UnsentClass, map_relay,
-};
-
 /// The environment variable the plak binary reads its plan from.
 pub const FAULTS_ENV: &str = "PLAK_TEST_FAULTS";
 
