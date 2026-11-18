@@ -508,9 +508,9 @@ pub(super) fn session_root_template(
         return Some(frozen);
     }
     let template = configured?;
-    let matches_session = session.account.as_deref() == Some(template.account.as_str())
-        && session.model.as_deref() == Some(template.model.as_str());
-    matches_session.then(|| template.name.clone())
+    template
+        .binds(session.account.as_deref(), session.model.as_deref())
+        .then(|| template.name.clone())
 }
 
 pub(super) fn plan_state_authority(

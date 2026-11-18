@@ -720,3 +720,50 @@ fn each_delegation_value_renders_its_sentence_exactly_once_in_the_cards() {
     assert_eq!(hub_cards.matches(PLAK_DELEGATION_PROACTIVE).count(), 1);
     assert!(!hub_cards.contains(PLAK_DELEGATION_EXPLICIT));
 }
+
+/// A root the fill bound to a named account still runs its kind-only root
+/// template: the epoch keeps the root template name, its tool sections and
+/// the templates digest, and creation freezes the template's tools.
+#[test]
+fn a_named_root_account_runs_its_kind_only_root_template() {
+    let mut config =
+        ProductConfig::parse("[mcp_servers.linear]\ntransport = \"stdio\"\ncommand = \"lin\"\n")
+            .unwrap();
+    let mut lead = template("codex", "gpt");
+    lead.tools = TemplateToolSelection::parse(["web_search", "mcp:linear"]).unwrap();
+    config.templates.insert("lead".to_owned(), lead);
+    config.root_agent = Some("lead".to_owned());
+    let bare = roster_input_from_config(&config, "codex", "gpt", None);
+    let named = roster_input_from_config(&config, "codex/work", "gpt", None);
+    assert_eq!(named.root.template.as_deref(), Some("lead"));
+    assert_eq!(named.templates_digest, bare.templates_digest);
+    assert_eq!(named.tool_sections, bare.tool_sections);
+    let other = roster_input_from_config(&config, "claude/work", "gpt", None);
+    assert_eq!(
+        other.root.template, None,
+        "another kind is not the template"
+    );
+
+    let fact = config.root_template_fact();
+    let frozen = plakous_hosted::frozen_tools::FrozenRootTools::at_creation(
+        fact.clone(),
+        Some("codex/work"),
+        Some("gpt"),
+    );
+    assert_eq!(
+        frozen.selection(),
+        plakous_hosted::binding::RootTemplateFact::root_tool_selection(
+            fact.as_ref(),
+            Some("codex"),
+            Some("gpt"),
+        )
+    );
+    assert_ne!(
+        frozen.selection(),
+        plakous_hosted::tool_plan::NodeToolSelection::default()
+    );
+    assert_eq!(
+        config.composition_for_tuple(Some("codex/work"), Some("gpt")),
+        config.composition_for_tuple(Some("codex"), Some("gpt"))
+    );
+}

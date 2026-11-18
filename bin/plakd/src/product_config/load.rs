@@ -290,7 +290,8 @@ impl ProductConfig {
     ) -> ProductCompositionSelection {
         match (self.root_template(), account, model) {
             (Some(template), Some(account), Some(model))
-                if template.account == account && template.model == model =>
+                if plakous_hosted::binding::account_runs_template(&template.account, account)
+                    && template.model == model =>
             {
                 self.root_composition
                     .unwrap_or_else(|| template.composition_or_default())

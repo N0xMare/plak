@@ -87,9 +87,7 @@ impl FrozenRootTools {
         account: Option<&str>,
         model: Option<&str>,
     ) -> Self {
-        Self::new(configured.filter(|fact| {
-            account == Some(fact.account.as_str()) && model == Some(fact.model.as_str())
-        }))
+        Self::new(configured.filter(|fact| fact.binds(account, model)))
     }
 
     /// The same freeze with the MCP tools listed at creation, each frozen

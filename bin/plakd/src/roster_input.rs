@@ -112,7 +112,8 @@ fn roster_input_with_root(
     let root_template = saved_root_template.map(str::to_owned).or_else(|| {
         config.root_agent.clone().filter(|_| {
             config.root_template().is_some_and(|template| {
-                template.account == root_account && template.model == root_tuple
+                plakous_hosted::binding::account_runs_template(&template.account, &root_account)
+                    && template.model == root_tuple
             })
         })
     });

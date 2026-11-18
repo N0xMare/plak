@@ -91,7 +91,28 @@ pub struct RootTemplateFact {
     pub tool_sections: std::collections::BTreeMap<String, String>,
 }
 
+/// Whether a session bound to `account` runs a template naming `template`:
+/// the template names a provider kind and the session holds a full account
+/// of that kind (spec 02 §4.4.1), so the kinds are compared.
+#[must_use]
+pub fn account_runs_template(template: &str, account: &str) -> bool {
+    match (
+        template.parse::<crate::account::AccountRef>(),
+        account.parse::<crate::account::AccountRef>(),
+    ) {
+        (Ok(template), Ok(account)) => template.vertical() == account.vertical(),
+        _ => template == account,
+    }
+}
+
 impl RootTemplateFact {
+    /// Whether a session bound to (`account`, `model`) runs this template.
+    #[must_use]
+    pub fn binds(&self, account: Option<&str>, model: Option<&str>) -> bool {
+        account.is_some_and(|account| account_runs_template(&self.account, account))
+            && model == Some(self.model.as_str())
+    }
+
     /// The root's tool selection: the `[root] agent` template's list when
     /// the session runs exactly that template's tuple, and none for a root
     /// bound by explicit `--account` / `--model` or with no `[root] agent`.
@@ -102,9 +123,7 @@ impl RootTemplateFact {
         model: Option<&str>,
     ) -> crate::tool_plan::NodeToolSelection {
         configured
-            .filter(|fact| {
-                account == Some(fact.account.as_str()) && model == Some(fact.model.as_str())
-            })
+            .filter(|fact| fact.binds(account, model))
             .map_or_default(|fact| crate::tool_plan::NodeToolSelection {
                 selection: fact.tools.clone(),
                 tool_sections: fact.tool_sections.clone(),
