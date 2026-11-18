@@ -244,13 +244,13 @@ fn steering_item(id: u128, value: &str) -> TestResult<ConversationItem> {
     )?)
 }
 
-fn manual_budget() -> plakous_model::ReasoningPolicy {
-    ReasoningPolicy::Enabled {
+fn manual_budget() -> TestResult<ReasoningPolicy> {
+    Ok(ReasoningPolicy::Enabled {
         effort: Some(ReasoningEffort::TokenBudget(
-            std::num::NonZeroU32::new(1024).expect("budget"),
+            std::num::NonZeroU32::new(1024).ok_or("budget")?,
         )),
         requirement: CapabilityRequirement::Required,
-    }
+    })
 }
 
 #[test]
@@ -260,7 +260,7 @@ fn manual_validator_treats_steering_merged_into_tool_results_as_an_open_loop() -
         ToolChoice::Auto,
         vec![text_item(1, Actor::User, "task")?],
         limits.clone(),
-        manual_budget(),
+        manual_budget()?,
     )?;
     let thinking = ContentBlock::Reasoning(ReasoningBlock::new(
         ReasoningVisibility::Omitted,
@@ -282,7 +282,7 @@ fn manual_validator_treats_steering_merged_into_tool_results_as_an_open_loop() -
         ToolChoice::Auto,
         open,
         limits.clone(),
-        manual_budget(),
+        manual_budget()?,
     )?;
     let error = lower_request(&plan, &policy, ToolOwnership::default())
         .err()
@@ -298,7 +298,7 @@ fn manual_validator_treats_steering_merged_into_tool_results_as_an_open_loop() -
             steering_item(4, "steer: continue")?,
         ],
         limits.clone(),
-        manual_budget(),
+        manual_budget()?,
     )?;
     let lowered = lower_request(&plan, &policy, ToolOwnership::default())?;
     let wire: Value = serde_json::from_slice(lowered.body())?;
@@ -332,7 +332,7 @@ fn manual_validator_treats_steering_merged_into_tool_results_as_an_open_loop() -
             text_item(7, Actor::User, "next question")?,
         ],
         limits,
-        manual_budget(),
+        manual_budget()?,
     )?;
     lower_request(&plan, &policy, ToolOwnership::default())?;
     Ok(())

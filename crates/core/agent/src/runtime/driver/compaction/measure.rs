@@ -365,6 +365,7 @@ fn retained_tail_fit_history(
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, reason = "unit tests assert fixture construction")]
 mod tests {
     use super::retained_tail_fit_history;
     use plakous_model::{
@@ -482,8 +483,8 @@ mod tests {
             .expect("cut")
     }
 
-    fn has_reasoning(segments: &[HistorySegment]) -> bool {
-        segments.iter().any(|segment| {
+    fn has_reasoning<'a>(segments: impl IntoIterator<Item = &'a HistorySegment>) -> bool {
+        segments.into_iter().any(|segment| {
             segment.items().iter().any(|item| {
                 item.blocks()
                     .iter()
