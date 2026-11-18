@@ -1812,7 +1812,11 @@ when any of them refuses:
   set. The check follows one stale locator, and the archive transaction
   refuses again if the head still has a non-terminal job, so a stale root or
   child locator with no running job still deletes. `--abandon-jobs` archives
-  regardless and the command names the processes left running; it does not
+  regardless and the command names the processes left running; unreadable job
+  labels are reported as `unknown` and do not block this explicit choice. If
+  deletion is interrupted after archive, `session gc --all` cannot recover the
+  original abandon consent from the archive listing; rerun
+  `plakd session delete <id> --yes --abandon-jobs` to finish it. It does not
   invent a terminal status. The same check refuses `plakd runner unpair
   <name>` while any session on that runner, or a finished child in its tree,
   has such a row. `unpair --abandon-jobs` drops the pin anyway and names

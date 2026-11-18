@@ -208,7 +208,7 @@ pub(crate) fn delete_session(
         .map_err(|error| cli_delete_error(&record.id, error))?;
     }
     let abandoned = if abandon_jobs {
-        running_job_labels(paths, &record).map_err(|error| cli_delete_error(&record.id, error))?
+        running_job_labels(paths, &record, true).unwrap_or_else(|_| vec!["root unknown".to_owned()])
     } else {
         Vec::new()
     };
@@ -472,22 +472,23 @@ fn deletion_plan(
                 true
             };
         if let Some(child) = &node.session_locator {
-            let child = child.parse::<SessionLocator>().map_err(|_| {
-                CliFailure::new(format!(
-                    "child agent {label} has an invalid runtime locator"
-                ))
-            })?;
-            match AgentSessions::unsettled_job_labels(paths.runtime_database(), child) {
-                Ok(labels) => running_jobs.extend(labels),
-                Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => {}
-                Err(error) => {
+            let child = match child.parse::<SessionLocator>() {
+                Ok(child) => child,
+                Err(_) if abandon_jobs => {
+                    running_jobs.push(format!("child agent {label} unknown"));
+                    continue;
+                }
+                Err(_) => {
                     return Err(CliFailure::new(format!(
-                        "child agent {label} running jobs could not be read: {error}"
+                        "child agent {label} has an invalid runtime locator"
                     ))
                     .into());
                 }
-            }
-            if finished {
+            };
+            let (labels, child_readable) =
+                child_running_job_labels(paths, &label, child, abandon_jobs)?;
+            running_jobs.extend(labels);
+            if finished && child_readable {
                 children.push((label, child));
             }
         }
@@ -521,6 +522,29 @@ fn deletion_plan(
     })
 }
 
+fn child_running_job_labels(
+    paths: &crate::home::paths::PlakPaths,
+    agent_id: &str,
+    locator: SessionLocator,
+    abandon_jobs: bool,
+) -> Result<(Vec<String>, bool), LifecycleError> {
+    match AgentSessions::unsettled_job_labels(paths.runtime_database(), locator) {
+        Ok(labels) => Ok((
+            labels
+                .into_iter()
+                .map(|job| format!("child agent {agent_id} {job}"))
+                .collect(),
+            true,
+        )),
+        Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => Ok((Vec::new(), true)),
+        Err(_) if abandon_jobs => Ok((vec![format!("child agent {agent_id} unknown")], false)),
+        Err(error) => Err(CliFailure::new(format!(
+            "child agent {agent_id} running jobs could not be read: {error}"
+        ))
+        .into()),
+    }
+}
+
 fn refuse_running_jobs(
     paths: &crate::home::paths::PlakPaths,
     locators: &[SessionLocator],
@@ -528,7 +552,9 @@ fn refuse_running_jobs(
     let mut processes = Vec::new();
     for locator in locators {
         match AgentSessions::unsettled_job_labels(paths.runtime_database(), *locator) {
-            Ok(labels) => processes.extend(labels),
+            Ok(labels) => {
+                processes.extend(labels.into_iter().map(|label| format!("root {label}")));
+            }
             Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => {}
             Err(error) => {
                 return Err(
@@ -546,31 +572,48 @@ fn refuse_running_jobs(
 pub(crate) fn running_job_labels(
     paths: &crate::home::paths::PlakPaths,
     record: &product_sessions::SessionRecord,
+    abandon_jobs: bool,
 ) -> Result<Vec<String>, LifecycleError> {
     let Some(locator) = record.plakous_locator else {
         return Ok(Vec::new());
     };
-    let mut locators = vec![locator];
-    if let Ok((tree_id, observed)) = crate::topology_product::inspect_session_tree(paths, record)
-        && let TreeInspection::Tree(tree) = observed
-        && tree_id == record.id
-    {
-        for node in tree.rows().nodes().values() {
-            if node.parent_agent_id.is_none() {
-                continue;
-            }
-            if let Some(child) = &node.session_locator
-                && let Ok(child) = child.parse::<SessionLocator>()
-            {
-                locators.push(child);
+    let mut locators = vec![("root".to_owned(), Some(locator))];
+    match crate::topology_product::inspect_session_tree(paths, record) {
+        Ok((tree_id, TreeInspection::Tree(tree))) if tree_id == record.id => {
+            for node in tree.rows().nodes().values() {
+                if node.parent_agent_id.is_none() {
+                    continue;
+                }
+                let owner = format!("child agent {}", node.agent_id);
+                let child = node
+                    .session_locator
+                    .as_deref()
+                    .and_then(|value| value.parse::<SessionLocator>().ok());
+                if child.is_none() && !abandon_jobs {
+                    return Err(CliFailure::new(format!(
+                        "{owner} runtime locator could not be read"
+                    ))
+                    .into());
+                }
+                locators.push((owner, child));
             }
         }
+        Ok(_) => {}
+        Err(_) if abandon_jobs => locators.push(("root".to_owned(), None)),
+        Err(error) => return Err(CliFailure::new(error.to_string()).into()),
     }
     let mut processes = Vec::new();
-    for locator in locators {
+    for (agent, locator) in locators {
+        let Some(locator) = locator else {
+            processes.push(format!("{agent} unknown"));
+            continue;
+        };
         match AgentSessions::unsettled_job_labels(paths.runtime_database(), locator) {
-            Ok(labels) => processes.extend(labels),
+            Ok(labels) => {
+                processes.extend(labels.into_iter().map(|label| format!("{agent} {label}")));
+            }
             Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => {}
+            Err(_) if abandon_jobs => processes.push(format!("{agent} unknown")),
             Err(error) => {
                 return Err(
                     CliFailure::new(format!("running jobs could not be read: {error}")).into(),
@@ -752,7 +795,10 @@ impl RuntimeDeletion {
                 Err(error) if error.kind() == AgentSessionsErrorKind::UnsettledProcesses => {
                     let labels =
                         AgentSessions::unsettled_job_labels(paths.runtime_database(), head)
-                            .unwrap_or_default();
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|label| format!("root {label}"))
+                            .collect();
                     return Err(running_jobs_refused(labels));
                 }
                 Err(error)

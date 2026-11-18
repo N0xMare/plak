@@ -857,6 +857,14 @@ fn unpair_after_the_job_records_a_terminal(
 }
 
 fn fixture(leased: bool) -> TestResult<Fixture> {
+    fixture_with_child_locator(leased, true)
+}
+
+fn fixture_without_child_locator() -> TestResult<Fixture> {
+    fixture_with_child_locator(false, false)
+}
+
+fn fixture_with_child_locator(leased: bool, bind_child_locator: bool) -> TestResult<Fixture> {
     let (tmp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
     paths.ensure_layout().checked()?;
     let runtime = RuntimeDeletion {
@@ -885,8 +893,10 @@ fn fixture(leased: bool) -> TestResult<Fixture> {
         .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
         .checked()?
         .agent_id;
-    tree.bind_session_locator(&child_id, child_locator.to_string())
-        .checked()?;
+    if bind_child_locator {
+        tree.bind_session_locator(&child_id, child_locator.to_string())
+            .checked()?;
+    }
     tree.record_turn_failure(
         &child_id,
         FailedTurnDisposition::RecoveryRequired,
@@ -1475,6 +1485,27 @@ fn stale_root_and_child_locators_with_no_running_jobs_still_delete() -> TestResu
 }
 
 #[test]
+fn abandon_jobs_deletes_with_an_unreadable_child_locator() -> TestResult {
+    let mut f = fixture_without_child_locator()?;
+    f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let labels = running_job_labels(&f.paths, &f.record, true)?;
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == &format!("child agent {} unknown", f.child_id)),
+        "{labels:?}"
+    );
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    lifecycle::delete_confirmed(&services, &f.record.id, true, true)?;
+    assert_eq!(
+        f.product.load(&f.record.id).unwrap_err(),
+        "session not found"
+    );
+    Ok(())
+}
+
+#[test]
 fn abandon_jobs_deletes_while_a_job_is_still_running() -> TestResult {
     use plakous::tools::JobHost as _;
     let mut f = fixture(false)?;
@@ -1570,5 +1601,46 @@ fn unpair_refuses_a_finished_child_job_on_the_runner() -> TestResult {
             std::time::Duration::from_secs(2),
         )
         .ok();
+    Ok(())
+}
+
+#[test]
+fn unpair_abandon_jobs_continues_with_an_unreadable_child_locator() -> TestResult {
+    let mut f = fixture_without_child_locator()?;
+    f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+    f.tree.settle_for_test();
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let pin_dir = f.paths.home().join("runners").join("build");
+    std::fs::create_dir_all(&pin_dir).checked()?;
+    std::fs::write(
+        pin_dir.join("runner.json"),
+        r#"{"runner_id":"runner-1","source_revision":"abc","flavor":"test","binary_id":null,"machine_id":"machine-1","roots":["/tmp"]}"#,
+    )
+    .checked()?;
+    std::fs::write(pin_dir.join("runner.toml"), "hosts = []\n").checked()?;
+    let display = plakous_hosted::sessions::RunnerDisplay {
+        name: "build".into(),
+        runner_id: "runner-1".into(),
+        workspace_root: f.paths.home().to_path_buf(),
+        workspace_cwd: f.paths.home().to_path_buf(),
+    };
+    rusqlite::Connection::open(f.paths.product_database())
+        .checked()?
+        .execute(
+            "UPDATE sessions SET runner_display=?1 WHERE id=?2",
+            rusqlite::params![display.encode().checked()?, f.record.id],
+        )
+        .checked()?;
+    let mut output = Vec::new();
+    crate::commands::runner::run(
+        &f.paths,
+        crate::commands::runner::RunnerCommand::Unpair {
+            name: "build".into(),
+            abandon_jobs: true,
+        },
+        &mut output,
+    )?;
+    assert!(String::from_utf8(output)?.contains("unknown"));
+    assert!(!pin_dir.join("runner.json").exists());
     Ok(())
 }

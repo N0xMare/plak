@@ -887,6 +887,10 @@ listed as `recovery_required`. Recover it or use `--abandon-children`; recovery
 keeps it closed and does not send another result to its parent.
 If a delete fails part way, run it again: it finishes what is left. A session
 carried forward with `import` does not block deleting the one it came from.
+If deletion was interrupted after archive, `plakd session gc --all` cannot
+recover the abandon choice; rerun `plakd session delete <id> --yes
+--abandon-jobs` to finish it. Unreadable job labels are reported as `unknown`
+and do not block an explicit `--abandon-jobs` choice.
 
 A physical disk-full error is separate from the store's retention limit:
 `plakd session gc --all`, deleting unused sessions, or freeing disk space are

@@ -706,9 +706,14 @@ fn unpair(
         .map_err(CliFailure::new)?;
     let mut blocked = Vec::new();
     for id in sessions {
-        let record = product.load(&id).map_err(CliFailure::new)?;
-        let labels = crate::commands::session::running_job_labels(paths, &record)
-            .map_err(|error| CliFailure::new(error.to_string()))?;
+        let labels = match product.load(&id) {
+            Ok(record) => {
+                crate::commands::session::running_job_labels(paths, &record, abandon_jobs)
+                    .map_err(|error| CliFailure::new(error.to_string()))?
+            }
+            Err(_) if abandon_jobs => vec!["unknown".to_owned()],
+            Err(error) => return Err(CliFailure::new(error.clone())),
+        };
         if !labels.is_empty() {
             blocked.push(format!("{id} ({})", labels.join(", ")));
         }
