@@ -156,5 +156,60 @@ fn an_api_account_ready_only_at_the_gateway_fills_chooses_and_spawns() {
         "a spawn never reads the host's key file"
     );
 
+    // Without a configured route, discover the exclusive local service.
+    // Its key (not the local key) still supplies the readiness facts.
+    std::fs::remove_file(host.config_file()).unwrap();
+    std::fs::write(
+        super::ServerConfig::path(&host),
+        format!(
+            "state_root = \"{}\"\n",
+            directory.path().join("gateway-state").display()
+        ),
+    )
+    .unwrap();
+    let local_service = account_choice::ready_catalog(&host, &super::HostCustody::Local);
     drain(&socket, served);
+    assert_eq!(local_service.unwrap(), catalog);
+}
+
+#[cfg(feature = "codex")]
+#[test]
+fn the_gateway_reports_the_default_and_named_subscription_slots() {
+    use plakous::subscriptions::{NativeProvider, NativeSubscriptions, SubscriptionPaths};
+
+    let directory = tempfile::tempdir().unwrap();
+    let gateway_home = PlakPaths::explicit(directory.path().join("gateway-home"));
+    let state = directory.path().join("gateway-state");
+    std::fs::create_dir_all(gateway_home.home()).unwrap();
+    std::fs::create_dir_all(&state).unwrap();
+    let subscriptions =
+        NativeSubscriptions::new(SubscriptionPaths::from_xdg_state_home(&state).unwrap());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    // Keep the login reservation alive so the named, signed-out slot remains
+    // on the service's roster for the whole read.
+    let _named = runtime.block_on(async {
+        subscriptions
+            .for_named_account(NativeProvider::Codex, "work")
+            .unwrap()
+            .create_account_for_login(NativeProvider::Codex)
+            .await
+            .unwrap()
+    });
+    let (socket, served) = serve(&gateway_home, &state);
+    let host = PlakPaths::explicit(directory.path().join("host-home"));
+    std::fs::create_dir_all(host.home()).unwrap();
+    std::fs::write(
+        host.config_file(),
+        format!("[gateway]\naddress = \"unix:{}\"\n", socket.display()),
+    )
+    .unwrap();
+    let custody = super::HostCustody::resolve(&host).unwrap();
+    let catalog = account_choice::ready_catalog(&host, &custody);
+    drain(&socket, served);
+    let catalog = catalog.expect("the gateway reports status for both subscription slots");
+    assert_eq!(ready(&catalog, "codex"), Some(false), "{catalog:?}");
+    assert_eq!(ready(&catalog, "codex/work"), Some(false), "{catalog:?}");
 }

@@ -59,15 +59,8 @@ impl Reader {
     }
 }
 
-fn gateway_names(
-    custody: &crate::gateway::HostCustody,
-) -> Result<Option<Vec<String>>, ReadRefusal> {
-    let Some(link) = custody.admin() else {
-        return Ok(None);
-    };
+fn gateway_names(link: &crate::gateway::AdminLink) -> Result<Vec<String>, String> {
     link.accounts()
-        .map(Some)
-        .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
 }
 
 /// One API-key account's key facts from the gateway's admin status.
@@ -141,7 +134,9 @@ pub(super) async fn roster(
             truncated: false,
         });
     }
-    if let Some(names) = gateway_names(&application.custody)? {
+    if let Some(link) = application.custody.admin() {
+        let names = gateway_names(link)
+            .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))?;
         return Ok(roster_from_names(names));
     }
     let mut accounts = BTreeSet::new();
@@ -206,9 +201,9 @@ fn custody(paths: &PlakPaths, host: &crate::gateway::HostCustody) -> AccountCust
 }
 
 /// Every known account with whether its credential can serve a new dispatch
-/// now: the session account-choice fill reads this (spec 02 §4.4.1). With a
-/// gateway configured for this home, the gateway answers the roster and every
-/// account's credential status, and no local key file or store is read.
+/// now: the session account-choice fill reads this (spec 02 §4.4.1). The
+/// configured or local service gateway answers its roster and status; no
+/// local key file or subscription store is read under service custody.
 ///
 /// # Errors
 /// The roster or the gateway's status could not be read.
@@ -217,12 +212,18 @@ pub(crate) async fn ready_accounts(
     paths: &PlakPaths,
     custody: &crate::gateway::HostCustody,
 ) -> Result<Vec<crate::account_choice::ReadyAccount>, String> {
+    if let Some(link) = custody.admin() {
+        return gateway_ready_accounts(link);
+    }
+    if let crate::gateway::AccountRoute::Service(address) =
+        crate::gateway::route_for(paths, custody)?
+    {
+        return gateway_ready_accounts(&crate::gateway::AdminLink::local_service(address));
+    }
+    let _holder = crate::gateway::acquire_shared(state)?;
     let unreadable = |_| "the account roster could not be read".to_owned();
     let reader = reader_at(state, custody).map_err(unreadable)?;
     let roster = roster(&reader, paths, None).await.map_err(unreadable)?;
-    if let Some(link) = custody.admin() {
-        return gateway_ready_accounts(link, &roster.accounts);
-    }
     let mut rows = Vec::with_capacity(roster.accounts.len());
     for account in roster.accounts {
         let vertical = account.vertical();
@@ -255,26 +256,54 @@ pub(crate) async fn ready_accounts(
 /// Readiness as the gateway that holds this home's credentials reports it.
 fn gateway_ready_accounts(
     link: &crate::gateway::AdminLink,
-    accounts: &[AccountRef],
 ) -> Result<Vec<crate::account_choice::ReadyAccount>, String> {
     use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
     use plakous::gateway::protocol::facts::CredentialStatus;
-    let accounts = accounts
+    let names = gateway_names(link)?;
+    let expected = names
         .iter()
-        .map(|account| plakous::gateway::protocol::GatewayAccount::new(account.as_str()))
+        .filter_map(|name| exact(name).ok())
+        .filter(|account| account.vertical().capability().compiled)
+        .map(|account| account.to_string())
+        .collect::<BTreeSet<_>>();
+    let accounts = expected
+        .iter()
+        .map(plakous::gateway::protocol::GatewayAccount::new)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    match link.call(&AdminRequest::Status { accounts })? {
-        AdminResponse::Status { rows } => Ok(rows
-            .into_iter()
-            .map(|row| crate::account_choice::ReadyAccount {
-                account: row.facts.account.as_str().to_owned(),
-                ready: row.facts.credential.status == CredentialStatus::Ready,
-                label: None,
-            })
-            .collect()),
-        _ => Err("the gateway answered the account status read unexpectedly".to_owned()),
+    let mut readiness = std::collections::BTreeMap::new();
+    if !accounts.is_empty() {
+        match link.call(&AdminRequest::Status { accounts })? {
+            AdminResponse::Status { rows } => {
+                for row in rows {
+                    readiness.insert(
+                        row.facts.account.as_str().to_owned(),
+                        row.facts.credential.status == CredentialStatus::Ready,
+                    );
+                }
+            }
+            AdminResponse::Refused { refusal } => {
+                return Err(format!(
+                    "the gateway refused the account status read: {refusal:?}"
+                ));
+            }
+            _ => return Err("the gateway answered the account status read unexpectedly".to_owned()),
+        }
     }
+    if let Some(missing) = expected.iter().find(|name| !readiness.contains_key(*name)) {
+        return Err(format!(
+            "the gateway returned partial account status: missing {missing}"
+        ));
+    }
+    Ok(roster_from_names(names)
+        .accounts
+        .into_iter()
+        .map(|account| crate::account_choice::ReadyAccount {
+            account: account.to_string(),
+            ready: readiness.get(account.as_str()).copied().unwrap_or(false),
+            label: None,
+        })
+        .collect())
 }
 
 pub(super) async fn status(

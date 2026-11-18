@@ -37,6 +37,10 @@ pub(crate) struct AdminLink {
 }
 
 impl AdminLink {
+    pub(crate) fn local_service(address: GatewayAddress) -> Self {
+        Self { address, key: None }
+    }
+
     pub(crate) fn accounts(&self) -> Result<Vec<String>, String> {
         use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
         match self.call(&AdminRequest::List {})? {

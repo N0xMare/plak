@@ -5257,9 +5257,11 @@ cards name, before the root's route, wire and probe resolve:
 
 An invalid explicit choice is `account_choice_invalid {kind, account,
 reason}`. Ready is the account roster and readiness the console reports
-(the configured gateway's when one holds the credentials): a subscription
+(the configured or local service gateway's when one holds the credentials): a subscription
 whose credential is Ready under current compatibility, or an API account with
-a key. A `new_session` replay also compares its explicit accounts with the
+a key. Default slots absent from the gateway roster are listed as not Ready.
+A gateway that refuses status or omits status for an account it listed fails
+the read. A `new_session` replay also compares its explicit accounts with the
 stored choice. Interactive clients show the picker when a used kind has more
 than one Ready account; `SessionOptions.accounts` lists every account per
 kind with readiness, and allowance is the existing accounts-usage read.

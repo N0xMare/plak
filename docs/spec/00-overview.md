@@ -211,7 +211,7 @@ directly. Older native state remains untouched for its matching build.
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **28** (adds operation-bound runtime retirement and invisible semantic-install batches, with exact operation/session membership, immutable captured terminal sets in `runtime_move_members`, and imported-row inventories) |
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **39** (location-independent Codex and SuperGrok credential authority; retains context codec **4** for semantic imported-compaction selections and recorded strategy/count facts) |
-| Product store (`product.sqlite3`): intents and feed-derived views | plakd | schema **39** (session account choices; retains immutable semantic move seeds and permanent identity claims; terminal state is process-local) |
+| Product store (`product.sqlite3`): intents and feed-derived views | plakd | schema **39** (adds `sessions.account_choices`, the `last_root_turn` view and the `sessions_node` index; retains immutable semantic move seeds and permanent identity claims) |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), plakd (location) | schema **11** (adds immutable semantic move bases and imported custody floors) |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | plakd | schema **22**, disposable, never recovery authority |
 | Session export document | plakd | version **13** (closed portable-session and reserved host-upgrade kinds), imports **13** and **12**; 0.0.3 v11 exports cannot be carried directly |
