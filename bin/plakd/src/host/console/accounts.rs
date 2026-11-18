@@ -60,6 +60,40 @@ impl Reader {
     }
 }
 
+fn gateway_names(paths: &PlakPaths) -> Result<Option<Vec<String>>, ReadRefusal> {
+    let Some(link) = crate::gateway::admin_link(paths)
+        .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))?
+    else {
+        return Ok(None);
+    };
+    match link.call(&plakous::gateway::protocol::admin::AdminRequest::List {}) {
+        Ok(plakous::gateway::protocol::admin::AdminResponse::Accounts { accounts }) => Ok(Some(
+            accounts
+                .into_iter()
+                .map(|account| account.as_str().to_owned())
+                .collect(),
+        )),
+        _ => Err(unavailable(ReadScope::Accounts, UnavailableCode::Storage)),
+    }
+}
+
+fn roster_from_names(names: Vec<String>) -> Roster {
+    let mut accounts = BTreeSet::new();
+    for vertical in AccountVertical::ALL {
+        accounts.insert(AccountRef::default_for(vertical));
+    }
+    for name in names {
+        if let Ok(account) = exact(&name) {
+            accounts.insert(account);
+        }
+    }
+    Roster {
+        accounts: accounts.into_iter().collect(),
+        diagnostics: Vec::new(),
+        truncated: false,
+    }
+}
+
 pub(super) fn exact(value: &str) -> Result<AccountRef, ReadRefusal> {
     value
         .parse::<AccountRef>()
@@ -81,6 +115,9 @@ pub(super) async fn roster(
             diagnostics: Vec::new(),
             truncated: false,
         });
+    }
+    if let Some(names) = gateway_names(paths)? {
+        return Ok(roster_from_names(names));
     }
     let mut accounts = BTreeSet::new();
     let mut diagnostics = Vec::new();

@@ -368,8 +368,13 @@ fn announce_host(
 ) {
     crate::shell::catalog_refresh::hook(paths.clone(), None)(None);
     let identity = plakous_recursive_subagents::tree::custody_host();
+    let gateway = crate::product_config::ProductConfig::load(paths)
+        .ok()
+        .and_then(|config| config.gateway_address)
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or_else(|| "in-process".to_owned());
     eprintln!(
-        "plakd host: serving on {} (host {}, instance {}); gateway: in-process; tools get {}",
+        "plakd host: serving on {} (host {}, instance {}); gateway: {gateway}; tools get {}",
         bound.path().display(),
         identity.host_id,
         identity.instance,

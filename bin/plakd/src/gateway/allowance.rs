@@ -84,19 +84,46 @@ mod openrouter {
         AdminResponse::Allowance {
             account: account.clone(),
             observed_at_unix_ms: Some(observed_at_unix_ms),
-            view: Some(serde_json::json!({
-                "limit": usage.limit(),
-                "limit_remaining": usage.limit_remaining(),
-                "limit_reset": usage.limit_reset(),
-                "usage": usage.usage(),
-                "usage_daily": usage.usage_daily(),
-                "usage_weekly": usage.usage_weekly(),
-                "usage_monthly": usage.usage_monthly(),
-                "is_free_tier": usage.is_free_tier(),
-                "include_byok_in_limit": usage.include_byok_in_limit(),
-            })),
+            view: Some(allowance_view(usage)),
             unavailable: None,
         }
+    }
+
+    fn allowance_view(usage: &plakous::openrouter::OpenRouterKeyUsage) -> serde_json::Value {
+        let mut view = serde_json::Map::new();
+        view.insert("limit".to_owned(), json_f64(usage.limit()));
+        view.insert(
+            "limit_remaining".to_owned(),
+            json_f64(usage.limit_remaining()),
+        );
+        view.insert("limit_reset".to_owned(), json_text(usage.limit_reset()));
+        view.insert("usage".to_owned(), json_f64(usage.usage()));
+        view.insert("usage_daily".to_owned(), json_f64(usage.usage_daily()));
+        view.insert("usage_weekly".to_owned(), json_f64(usage.usage_weekly()));
+        view.insert("usage_monthly".to_owned(), json_f64(usage.usage_monthly()));
+        view.insert("is_free_tier".to_owned(), json_bool(usage.is_free_tier()));
+        view.insert(
+            "include_byok_in_limit".to_owned(),
+            json_bool(usage.include_byok_in_limit()),
+        );
+        serde_json::Value::Object(view)
+    }
+
+    fn json_f64(value: Option<f64>) -> serde_json::Value {
+        value.map_or(serde_json::Value::Null, |number| {
+            serde_json::Number::from_f64(number)
+                .map_or(serde_json::Value::Null, serde_json::Value::Number)
+        })
+    }
+
+    fn json_bool(value: Option<bool>) -> serde_json::Value {
+        value.map_or(serde_json::Value::Null, serde_json::Value::Bool)
+    }
+
+    fn json_text(value: Option<&str>) -> serde_json::Value {
+        value.map_or(serde_json::Value::Null, |text| {
+            serde_json::Value::String(text.to_owned())
+        })
     }
 
     fn unavailable(account: &GatewayAccount, reason: &str) -> AdminResponse {

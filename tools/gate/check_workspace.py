@@ -834,6 +834,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakd", "src/host/console/recorded.rs"): {"params"},
     # Private login cancellation races only; no process signal handler.
     ("plakd", "src/host/console/account_writes/login.rs"): {"select"},
+    ("plakd", "src/host/console/account_writes/login/gateway.rs"): {"select"},
     ("plakd", "src/commands/application/host.rs"): {"select"},
     # Bounded categorical operator audit fields, never frames or secrets.
     ("plakd", "src/host/console/audit.rs"): {"json"},

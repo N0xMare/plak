@@ -114,15 +114,13 @@ impl Console {
             };
             let newer =
                 status.credential == crate::presentation::CredentialState::WrittenByNewerBuild;
-            let identity = subscriptions
-                .upstream_account_fingerprint(provider)
-                .await
-                .ok()
-                .flatten()
-                .map_or_else(
-                    || "unknown or signed out".into(),
-                    |identity| format!("{identity:?}"),
-                );
+            let identity = match subscriptions.upstream_account_fingerprint(provider).await {
+                Ok(Some(identity)) => format!("{identity:?}"),
+                Err(plakous::subscriptions::NativeSubscriptionError::GatewayCustody) => {
+                    "held by the credential gateway".to_owned()
+                }
+                Ok(None) | Err(_) => "unknown or signed out".to_owned(),
+            };
             Some(format!(
                 " Experimental integration {}. Provenance: {}. Source revision: {}. Reviewed: {}; expires: {}. Stored credential written by a newer build: {}. Current safe upstream identity digest: {}.",
                 notice.profile_id(),

@@ -25,7 +25,50 @@ pub(crate) fn with_subscription_custody(
 
 /// The gateway a host or credential provider should use, when `[gateway]
 /// address` is set. Unset is local custody.
+/// Where admin verbs go when `[gateway] address` is set. This does not connect.
+pub(crate) struct AdminLink {
+    pub(crate) address: GatewayAddress,
+    key: Option<String>,
+}
+
+impl AdminLink {
+    pub(crate) fn call(
+        &self,
+        request: &impl serde::Serialize,
+    ) -> Result<plakous::gateway::protocol::admin::AdminResponse, String> {
+        super::client::admin(&self.address, self.key.as_deref(), request)
+    }
+}
+
+pub(crate) fn admin_link(home: &PlakPaths) -> Result<Option<AdminLink>, String> {
+    Ok(configured(home)?.map(|target| AdminLink {
+        address: target.address,
+        key: target.key,
+    }))
+}
+
 pub(crate) fn connect(home: &PlakPaths) -> Result<Option<GatewayCustody>, String> {
+    let Some(target) = configured(home)? else {
+        return Ok(None);
+    };
+    let endpoint = match target.address {
+        GatewayAddress::Unix(path) => GatewayEndpoint::Unix(path),
+        GatewayAddress::Tcp(addr) => GatewayEndpoint::Tcp(addr),
+    };
+    let key = target
+        .key
+        .map(|text| SensitiveBytes::new(text.into_bytes()));
+    GatewayCustody::connect(endpoint, key, credential_headers)
+        .map(Some)
+        .map_err(|error| format!("credential gateway: {error}"))
+}
+
+struct ConfiguredGateway {
+    address: GatewayAddress,
+    key: Option<String>,
+}
+
+fn configured(home: &PlakPaths) -> Result<Option<ConfiguredGateway>, String> {
     let config = ProductConfig::load(home).unwrap_or_else(|_| ProductConfig::default_product());
     let Some(text) = config.gateway_address.as_deref() else {
         return Ok(None);
@@ -33,14 +76,7 @@ pub(crate) fn connect(home: &PlakPaths) -> Result<Option<GatewayCustody>, String
     let address = super::address::parse(text, config.gateway_allow_non_tailnet)
         .map_err(|error| format!("gateway.address: {error}"))?;
     let key = super::cli_cmd::caller_key(home, &AccountRoute::Configured(address.clone()))?;
-    let endpoint = match address {
-        GatewayAddress::Unix(path) => GatewayEndpoint::Unix(path),
-        GatewayAddress::Tcp(addr) => GatewayEndpoint::Tcp(addr),
-    };
-    let key = key.map(|text| SensitiveBytes::new(text.into_bytes()));
-    GatewayCustody::connect(endpoint, key, credential_headers)
-        .map(Some)
-        .map_err(|error| format!("credential gateway: {error}"))
+    Ok(Some(ConfiguredGateway { address, key }))
 }
 
 fn credential_headers(kind: &str) -> Option<&'static [&'static str]> {
@@ -162,5 +198,22 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let paths = PlakPaths::explicit(directory.path().join("home"));
         assert!(connect(&paths).unwrap().is_none());
+        assert!(admin_link(&paths).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_configured_address_is_an_admin_link_without_connecting() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = PlakPaths::explicit(directory.path().join("home"));
+        std::fs::create_dir_all(paths.home()).unwrap();
+        std::fs::write(
+            paths.config_file(),
+            "[gateway]\naddress = \"unix:/tmp/plak-gateway-test.sock\"\n",
+        )
+        .unwrap();
+        let link = admin_link(&paths).unwrap().unwrap();
+        assert!(
+            matches!(link.address, GatewayAddress::Unix(path) if path.ends_with("plak-gateway-test.sock"))
+        );
     }
 }

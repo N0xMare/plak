@@ -6046,7 +6046,8 @@ keeps its separate readiness path.
   its work stands, under the unit's `TimeoutStopSec`; a session not
   released by then is left to the crash law (`owner_lost`). It prints
   `plakd host: serving on <socket> (host <host id>, instance <instance>);
-  tools get <source>` once it accepts.
+  gateway: <in-process or the configured address>; tools get <source>` once
+  it accepts.
 
 `SIGUSR1` reloads UI assets only (§4.5). It deliberately differs from
 `SIGHUP`, which remains a planned handoff. With `--ui`, use `systemctl

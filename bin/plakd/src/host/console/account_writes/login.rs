@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, watch};
 use zeroize::Zeroizing;
 
+mod gateway;
 #[cfg(test)]
 mod tests;
 
@@ -389,6 +390,13 @@ impl Console {
     }
 
     fn run_login(&self, work: LoginWork<'_>) -> Result<(), AccountError> {
+        if let Some(link) = crate::gateway::admin_link(&self.paths).map_err(|_| failed(false))? {
+            return gateway::run(&link, work);
+        }
+        self.run_local_login(work)
+    }
+
+    fn run_local_login(&self, work: LoginWork<'_>) -> Result<(), AccountError> {
         let LoginWork {
             id,
             account,

@@ -33,7 +33,7 @@ pub(crate) use install::{install, uninstall};
 pub(crate) use remote_account::{hold_in_process, try_remote_account};
 pub(crate) use route::{AccountRoute, provider_key_env_set, select};
 pub(crate) use route_custody::connect as host_gateway;
-pub(crate) use route_custody::with_subscription_custody;
+pub(crate) use route_custody::{AdminLink, admin_link, with_subscription_custody};
 pub(crate) use server_config::ServerConfig;
 pub(crate) use service::Gateway;
 
