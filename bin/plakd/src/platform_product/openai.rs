@@ -81,11 +81,34 @@ impl plakous::api_key::ApiKeySource<plakous::openai::OpenAiApiKeyRequest<'_>, Cr
 }
 
 impl plakous_hosted::platform::OpenAiCredentials for ProductPlatformCredentials {
+    fn custody(&self) -> plakous::custody::Custody {
+        self.route_custody()
+    }
+
     fn openai(
         &self,
         account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<Arc<OpenAiKeySource>> {
         self.require_account(account, plakous_hosted::account::Vertical::OpenAi)?;
+        if let Some(gateway) = self.gateway()? {
+            let reference = CredentialReference::application(account.credential_reference())
+                .map_err(|_| CliFailure::new("OpenAI credential reference is invalid"))?;
+            let authority = CredentialAuthorityId::new(
+                account.source_authority("plak/openai/environment-or-file"),
+            )
+            .map_err(|_| CliFailure::new("OpenAI credential authority is invalid"))?;
+            return Ok(Arc::new(
+                gateway
+                    .key_source(
+                        account.as_str(),
+                        plakous::api_key::CredentialProviderTag::OpenAiPlatform,
+                        "https://api.openai.com/",
+                        Some(reference.as_str().to_owned()),
+                        authority,
+                    )
+                    .map_err(|error| CliFailure::new(error.to_string()))?,
+            ));
+        }
         Ok(Arc::new(OpenAiSource::new(self.clone(), account.clone())?))
     }
 }

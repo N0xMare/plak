@@ -1,5 +1,4 @@
-//! Local custody of the home's API keys. Subscription kinds are not registered
-//! in this build; [`subscription_kind`] is the seam that will register them.
+//! Local custody of the home's API keys and subscription logins.
 
 use std::sync::Arc;
 
@@ -10,6 +9,7 @@ use plakous::gateway::custody::{
     LocalKeyCustodian, LocalKeyStore, UpstreamPin,
 };
 use plakous::gateway::server::LocalCustody;
+use plakous::subscriptions::{NativeSubscriptions, SubscriptionPaths};
 
 use crate::home::paths::PlakPaths;
 use crate::home::secrets::{self, KeySource};
@@ -28,6 +28,7 @@ struct CustodiedKeyKind {
 pub(crate) fn local_custody(
     home: &PlakPaths,
     instance: plakous::gateway::protocol::UuidText,
+    state_root: &std::path::Path,
 ) -> LocalCustody {
     let store = Arc::new(HomeKeyStore { home: home.clone() });
     let custodian: Arc<dyn plakous::gateway::custody::CredentialCustodian> =
@@ -36,37 +37,39 @@ pub(crate) fn local_custody(
     for kind in custodied_key_kinds() {
         custody = custody.with_kind(kind.name, Arc::clone(&custodian), kind.pins);
     }
-    register_subscriptions(custody)
+    register_subscriptions(custody, state_root)
 }
 
 /// Whether relay and facts for `account` come from [`local_custody`] rather
-/// than the account bridge. Subscription accounts do not, yet.
+/// than the account bridge.
+pub(crate) fn custodied(account: &plakous::gateway::protocol::GatewayAccount) -> bool {
+    custodied_api_key(account) || subscription_enabled(account.kind())
+}
+
+/// Whether `account` is an API-key kind this process relays.
 pub(crate) fn custodied_api_key(account: &plakous::gateway::protocol::GatewayAccount) -> bool {
     custodied_key_kinds()
         .iter()
         .any(|kind| kind.name == account.kind())
 }
 
-/// The subscription custodian and pin table for `kind` (`codex`, `claude`,
-/// `grok`). This build has none: route constructors do not take a custody
-/// context yet, and those kinds stay on the account bridge.
-pub(crate) fn subscription_kind(
-    kind: &str,
-) -> Option<(
-    Arc<dyn plakous::gateway::custody::CredentialCustodian>,
-    &'static [UpstreamPin],
-)> {
-    let _ = kind;
-    None
+fn subscription_enabled(kind: &str) -> bool {
+    codex_login::serves(kind) || claude_login::serves(kind) || grok_login::serves(kind)
 }
 
-fn register_subscriptions(mut custody: LocalCustody) -> LocalCustody {
-    for kind in ["codex", "claude", "grok"] {
-        if let Some((custodian, pins)) = subscription_kind(kind) {
-            custody = custody.with_kind(kind, custodian, pins);
-        }
-    }
-    custody
+fn register_subscriptions(custody: LocalCustody, state_root: &std::path::Path) -> LocalCustody {
+    let Some(subscriptions) = open_subscriptions(state_root) else {
+        return custody;
+    };
+    let custody = codex_login::register(custody, &subscriptions);
+    let custody = claude_login::register(custody, &subscriptions);
+    grok_login::register(custody, &subscriptions)
+}
+
+fn open_subscriptions(state_root: &std::path::Path) -> Option<NativeSubscriptions> {
+    SubscriptionPaths::from_xdg_state_home(state_root)
+        .ok()
+        .map(NativeSubscriptions::new)
 }
 
 fn injection_for(kind: &str) -> Option<KeyInjection> {
@@ -190,5 +193,137 @@ impl LocalKeyStore for HomeKeyStore {
             source,
             env_var: status.env_var.map(str::to_owned),
         }))
+    }
+}
+
+#[cfg(feature = "codex")]
+mod codex_login {
+    use std::sync::Arc;
+
+    use plakous::gateway::server::LocalCustody;
+    use plakous::subscriptions::custody::SubscriptionCustodian;
+    use plakous::subscriptions::{NativeProvider, NativeSubscriptions};
+
+    pub(super) fn serves(kind: &str) -> bool {
+        kind == "codex"
+    }
+
+    pub(super) fn register(
+        custody: LocalCustody,
+        subscriptions: &NativeSubscriptions,
+    ) -> LocalCustody {
+        custody.with_kind(
+            "codex",
+            Arc::new(SubscriptionCustodian::new(
+                subscriptions.clone(),
+                NativeProvider::Codex,
+            )),
+            plakous::gateway::pins::openai::CODEX_UPSTREAM_PINS,
+        )
+    }
+}
+
+#[cfg(not(feature = "codex"))]
+mod codex_login {
+    use plakous::gateway::server::LocalCustody;
+    use plakous::subscriptions::NativeSubscriptions;
+
+    pub(super) fn serves(_kind: &str) -> bool {
+        false
+    }
+
+    pub(super) fn register(
+        custody: LocalCustody,
+        _subscriptions: &NativeSubscriptions,
+    ) -> LocalCustody {
+        custody
+    }
+}
+
+#[cfg(feature = "claude")]
+mod claude_login {
+    use std::sync::Arc;
+
+    use plakous::gateway::server::LocalCustody;
+    use plakous::subscriptions::custody::SubscriptionCustodian;
+    use plakous::subscriptions::{NativeProvider, NativeSubscriptions};
+
+    pub(super) fn serves(kind: &str) -> bool {
+        kind == "claude"
+    }
+
+    pub(super) fn register(
+        custody: LocalCustody,
+        subscriptions: &NativeSubscriptions,
+    ) -> LocalCustody {
+        custody.with_kind(
+            "claude",
+            Arc::new(SubscriptionCustodian::new(
+                subscriptions.clone(),
+                NativeProvider::Claude,
+            )),
+            plakous::gateway::pins::anthropic::CLAUDE_UPSTREAM_PINS,
+        )
+    }
+}
+
+#[cfg(not(feature = "claude"))]
+mod claude_login {
+    use plakous::gateway::server::LocalCustody;
+    use plakous::subscriptions::NativeSubscriptions;
+
+    pub(super) fn serves(_kind: &str) -> bool {
+        false
+    }
+
+    pub(super) fn register(
+        custody: LocalCustody,
+        _subscriptions: &NativeSubscriptions,
+    ) -> LocalCustody {
+        custody
+    }
+}
+
+#[cfg(feature = "grok")]
+mod grok_login {
+    use std::sync::Arc;
+
+    use plakous::gateway::server::LocalCustody;
+    use plakous::subscriptions::custody::SubscriptionCustodian;
+    use plakous::subscriptions::{NativeProvider, NativeSubscriptions};
+
+    pub(super) fn serves(kind: &str) -> bool {
+        kind == "grok"
+    }
+
+    pub(super) fn register(
+        custody: LocalCustody,
+        subscriptions: &NativeSubscriptions,
+    ) -> LocalCustody {
+        custody.with_kind(
+            "grok",
+            Arc::new(SubscriptionCustodian::new(
+                subscriptions.clone(),
+                NativeProvider::Xai,
+            )),
+            plakous::gateway::pins::xai::SUPERGROK_UPSTREAM_PINS,
+        )
+    }
+}
+
+#[cfg(not(feature = "grok"))]
+mod grok_login {
+    use plakous::gateway::server::LocalCustody;
+    use plakous::subscriptions::NativeSubscriptions;
+
+    pub(super) fn serves(_kind: &str) -> bool {
+        false
+    }
+
+    pub(super) fn register(
+        custody: LocalCustody,
+        _subscriptions: &NativeSubscriptions,
+    ) -> LocalCustody {
+        custody
     }
 }

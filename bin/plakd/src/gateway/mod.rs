@@ -1,9 +1,10 @@
 //! The plakd credential gateway: listeners, caller keys, the kill switch,
-//! audit and the admin bridge. The listener relays API-key accounts through
-//! the shared server core. Subscription accounts stay on the account bridge,
-//! and a host that names a gateway still refuses to start.
+//! audit and the admin bridge. The listener relays API-key accounts and the
+//! subscription logins through the shared server core. A host that names a
+//! gateway sends API-key routes through it; subscription routes stay local.
 
 mod address;
+mod allowance;
 mod audit;
 mod auth;
 mod bridge;
@@ -31,6 +32,7 @@ pub(crate) use holder::{HolderLock, acquire_shared_creating};
 pub(crate) use install::{install, uninstall};
 pub(crate) use remote_account::{hold_in_process, try_remote_account};
 pub(crate) use route::{AccountRoute, provider_key_env_set, select};
+pub(crate) use route_custody::connect as host_gateway;
 pub(crate) use server_config::ServerConfig;
 pub(crate) use service::Gateway;
 
@@ -337,7 +339,6 @@ pub(crate) fn host_may_open_store(
                 set.join(", ")
             ));
         }
-        return route_custody::open_for_host(config);
     }
     Ok(())
 }

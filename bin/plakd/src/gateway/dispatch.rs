@@ -737,6 +737,27 @@ pub(crate) fn gate_relay(
     Ok(())
 }
 
+pub(crate) fn gate_admin_allowance(
+    state: &GatewayState,
+    principal: &Principal,
+    scopes: Option<&ScopeSet>,
+    account: &GatewayAccount,
+) -> Result<(), GatewayRefusal> {
+    if let Some(refusal) = killed(state, principal) {
+        return Err(refusal);
+    }
+    let request = AdminRequest::Allowance {
+        account: account.clone(),
+    };
+    if let Some(refusal) = admin_scope(principal, scopes, &request) {
+        return Err(refusal);
+    }
+    if flag_block(state, principal, Some(account)) {
+        return Err(blocked_refusal(state, principal, Some(account)));
+    }
+    Ok(())
+}
+
 pub(crate) fn gate_admin_refresh(
     state: &GatewayState,
     principal: &Principal,

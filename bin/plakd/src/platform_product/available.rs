@@ -39,6 +39,21 @@ impl ProductPlatformCredentials {
                 .into(),
             );
         }
+        if self.gateway()?.is_some() {
+            return Ok(());
+        }
         crate::home::secrets::require_api_key(&self.paths, account.as_str())
+    }
+
+    fn gateway(&self) -> plakous_hosted::CliResult<Option<plakous::gateway::GatewayCustody>> {
+        crate::gateway::host_gateway(&self.paths).map_err(plakous_hosted::CliFailure::new)
+    }
+
+    fn route_custody(&self) -> plakous::custody::Custody {
+        self.gateway()
+            .ok()
+            .flatten()
+            .map(|gateway| gateway.custody())
+            .unwrap_or_else(plakous::custody::Custody::local)
     }
 }

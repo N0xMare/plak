@@ -4,6 +4,7 @@
 
 pub use plakous_auth::custody;
 pub use plakous_gateway_protocol as protocol;
+pub use plakous_http::SensitiveBytes;
 pub use plakous_http::relay::{
     GatewayEndpoint, InMemoryGateway, MAX_FENCE_REPREPARATIONS, RelayCallError, RelayClient,
     custodied_placeholder,

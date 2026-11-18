@@ -795,11 +795,15 @@ it shared. The two modes do not overlap. An in-process account command, and
 `plakd host` with no `[gateway] address`, take that shared lock for as long as
 they hold the store. A host that finds the service already holding it refuses
 to start and names `[gateway] address`. The gateway listener relays the
-API-key accounts (`openai`, `xai-api`, `anthropic`, `openrouter`) through the
-shared server core; subscription accounts stay on the account bridge. A host
-whose `[gateway] address` is set still refuses to start, because its route
-constructors do not yet take a relayed client. If provider API-key variables
-are set in that host's environment, the refusal names them.
+API-key accounts (`openai`, `xai-api`, `anthropic`, `openrouter`) and the
+subscription logins (`codex`, `claude`, `grok`) through the shared server
+core. A host whose `[gateway] address` is set does not take the holder lock
+and does not resolve API keys: its API-key routes relay through that gateway.
+Subscription routes on that host stay in-process. If provider API-key
+variables are set in that host's environment, the host refuses to start and
+names them. OpenRouter allowance is the gateway's Allowance verb: one
+`GET /api/v1/key` answered in the gateway process. The other API-key kinds
+report `not-observed`. The key never appears in the admin JSON.
 
 This precedence belongs to the process resolving the key, not a connected
 client. With no gateway, explicit CLI `key set` and `key clear` stay in this
@@ -6171,19 +6175,21 @@ query strings, keys, tokens or pastes.
 `enable`, caller management and `drain` are local-admin only. `drain` waits up
 to 30 seconds for in-flight relays and refresh claims. Admin account verbs map
 to today's account operations on a blocking bridge. The listener serves each
-accepted connection with the shared relay server. API-key accounts are
-custodied from the gateway process's key files and environment and are relayed
-only to those providers' pin rows. Subscription facts, refresh and admin stay
-on the account bridge. The buffered dispatcher cannot stream a relay, so a
-relay it decodes is refused `internal` and nothing is dialed.
+accepted connection with the shared relay server. API-key accounts and the
+subscription logins are custodied in the gateway process and relayed only to
+those providers' pin rows. Other admin verbs stay on the account bridge. The
+buffered dispatcher cannot stream a relay, so a relay it decodes is refused
+`internal` and nothing is dialed. OpenRouter allowance is one
+`GET /api/v1/key` from this process; other API-key kinds answer Allowance
+with `not-observed`.
 
 `gateway install` writes a Linux user unit or macOS LaunchAgent and does not
 start it. The unit runs the executable that wrote it.
 
-A host with `[gateway] address` set does not open the credential store. It
-refuses to start rather than serving model traffic from a local store, because
-host routes do not yet take a relayed client. Unset, the host keeps today's
-in-process credential access.
+A host with `[gateway] address` set does not take the credential holder lock
+and does not resolve API keys. Its API-key routes relay through the gateway.
+Subscription routes stay in-process. Unset, the host keeps in-process
+credential access and takes the holder lock shared.
 
 ## 5. External client boundary
 

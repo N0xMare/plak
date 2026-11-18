@@ -26,6 +26,7 @@ use crate::home::paths::PlakPaths;
 
 pub(crate) struct ProductGateway {
     state: Arc<GatewayState>,
+    home: PlakPaths,
     custody: plakous::gateway::server::LocalCustody,
     notes: Mutex<HashMap<String, RelayNote>>,
 }
@@ -48,9 +49,10 @@ struct CallHold {
 
 impl ProductGateway {
     pub(crate) fn new(home: &PlakPaths, state: Arc<GatewayState>) -> Self {
-        let custody = local_custody(home, state.instance.clone());
+        let custody = local_custody(home, state.instance.clone(), &state.config.state_root);
         Self {
             state,
+            home: home.clone(),
             custody,
             notes: Mutex::new(HashMap::new()),
         }
@@ -176,7 +178,7 @@ impl ProductGateway {
             Ok(request) => request,
             Err(refusal) => return Err(refusal),
         };
-        if !accounts.iter().any(custody::custodied_api_key) {
+        if !accounts.iter().any(custody::custodied) {
             return self.forward(principal, Endpoint::Facts, body).await;
         }
         if accounts.len() > call::MAX_FACTS_ACCOUNTS {
@@ -201,7 +203,7 @@ impl ProductGateway {
         &self,
         account: &GatewayAccount,
     ) -> Result<Vec<plakous::gateway::protocol::facts::AccountFacts>, GatewayRefusal> {
-        if custody::custodied_api_key(account) {
+        if custody::custodied(account) {
             let reply = self
                 .custody
                 .facts(&FactsRequest {
@@ -222,7 +224,7 @@ impl ProductGateway {
             Ok(request) => request,
             Err(refusal) => return Err(refusal),
         };
-        if !custody::custodied_api_key(&request.account) {
+        if !custody::custodied(&request.account) {
             return self.forward(principal, Endpoint::Refresh, body).await;
         }
         let _hold = CallHold::acquire(&self.state, &principal.principal)?;
@@ -242,10 +244,15 @@ impl ProductGateway {
             Ok(request) => request,
             Err(_) => return self.forward(principal, Endpoint::Admin, body).await,
         };
+        if let AdminRequest::Allowance { account } = &request
+            && custody::custodied_api_key(account)
+        {
+            return self.allowance(principal, account).await;
+        }
         let AdminRequest::Refresh { account } = &request else {
             return self.forward(principal, Endpoint::Admin, body).await;
         };
-        if !custody::custodied_api_key(account) {
+        if !custody::custodied(account) {
             return self.forward(principal, Endpoint::Admin, body).await;
         }
         let _hold = CallHold::acquire(&self.state, &principal.principal)?;
@@ -260,6 +267,23 @@ impl ProductGateway {
         encode(&AdminResponse::Refreshed {
             facts: Box::new(facts),
         })
+    }
+
+    async fn allowance(
+        &self,
+        principal: &Authed,
+        account: &GatewayAccount,
+    ) -> Result<Vec<u8>, GatewayRefusal> {
+        let _hold = CallHold::acquire(&self.state, &principal.principal)?;
+        dispatch::gate_admin_allowance(
+            &self.state,
+            &principal.principal,
+            principal.scopes.as_ref(),
+            account,
+        )?;
+        let response = super::allowance::read(&self.home, account).await;
+        self.record(principal, "allowance", Some(account), None);
+        encode(&response)
     }
 
     async fn forward(

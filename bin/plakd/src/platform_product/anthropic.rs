@@ -56,11 +56,28 @@ impl plakous::api_key::ApiKeySource<plakous::anthropic::AnthropicApiKeyRequest>
     }
 }
 impl plakous_hosted::platform::AnthropicCredentials for ProductPlatformCredentials {
+    fn custody(&self) -> plakous::custody::Custody {
+        self.route_custody()
+    }
+
     fn anthropic(
         &self,
         account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
         self.require_account(account, plakous_hosted::account::Vertical::Anthropic)?;
+        if let Some(gateway) = self.gateway()? {
+            return Ok(Arc::new(
+                gateway
+                    .key_source(
+                        account.as_str(),
+                        plakous::api_key::CredentialProviderTag::AnthropicPlatform,
+                        plakous::anthropic::ANTHROPIC_PLATFORM_ORIGIN,
+                        None,
+                        (),
+                    )
+                    .map_err(|error| plakous_hosted::CliFailure::new(error.to_string()))?,
+            ));
+        }
         Ok(Arc::new(AnthropicSource {
             product: self.clone(),
             account: account.clone(),

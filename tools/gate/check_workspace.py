@@ -1656,7 +1656,27 @@ _GATEWAY_SYMBOLS = {
 }
 
 ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
-    "plakd": {**_SHARED_PLAKOUS_SYMBOLS, "gateway": _GATEWAY_SYMBOLS},
+    "plakd": {
+        **_SHARED_PLAKOUS_SYMBOLS,
+        "gateway": _GATEWAY_SYMBOLS
+        | {
+            "GatewayCustody",
+            "GatewayEndpoint",
+            "SensitiveBytes",
+        },
+        # Hidden, unsupported: who holds route credentials (spec 01 sec. 7.5).
+        "custody": {"Custody"},
+        "subscriptions": _SHARED_PLAKOUS_SYMBOLS["subscriptions"]
+        | {
+            "custody",
+            "SubscriptionCustodian",
+        },
+        "openrouter": _SHARED_PLAKOUS_SYMBOLS["openrouter"]
+        | {
+            "decode_openrouter_key_usage",
+            "static_openrouter_api_key_source",
+        },
+    },
     # Wire DTOs only; the facade is not a dependency.
     "plakd-wire-types": {},
     "plakous-host-protocol": _SHARED_PLAKOUS_SYMBOLS,

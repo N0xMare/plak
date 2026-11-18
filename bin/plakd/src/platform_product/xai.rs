@@ -85,11 +85,34 @@ impl
 }
 
 impl plakous_hosted::platform::XaiCredentials for ProductPlatformCredentials {
+    fn custody(&self) -> plakous::custody::Custody {
+        self.route_custody()
+    }
+
     fn xai(
         &self,
         account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
         self.require_account(account, plakous_hosted::account::Vertical::XaiApi)?;
+        if let Some(gateway) = self.gateway()? {
+            let authority = plakous::xai::XaiPlatformApiKeyAuthority::new(
+                "plak/xai-api",
+                &account.source_authority("plak/xai/environment-or-file"),
+                1,
+            )
+            .map_err(|error| plakous_hosted::CliFailure::new(error.to_string()))?;
+            return Ok(Arc::new(
+                gateway
+                    .key_source(
+                        account.as_str(),
+                        plakous::api_key::CredentialProviderTag::XaiPlatform,
+                        "https://api.x.ai",
+                        None,
+                        authority,
+                    )
+                    .map_err(|error| plakous_hosted::CliFailure::new(error.to_string()))?,
+            ));
+        }
         Ok(Arc::new(
             XaiSource::new(self.clone(), account.clone())
                 .map_err(|error| plakous_hosted::CliFailure::new(error.to_string()))?,

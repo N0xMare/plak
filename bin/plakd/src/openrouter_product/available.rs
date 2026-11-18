@@ -84,6 +84,14 @@ pub(crate) fn key_usage_fence(
 }
 
 impl OpenRouterCredentials for ProductOpenRouterCredentials {
+    fn custody(&self) -> plakous::custody::Custody {
+        crate::gateway::host_gateway(&self.paths)
+            .ok()
+            .flatten()
+            .map(|gateway| gateway.custody())
+            .unwrap_or_else(plakous::custody::Custody::local)
+    }
+
     fn usage_read(
         &self,
         account: &plakous_hosted::account::AccountRef,
@@ -97,6 +105,9 @@ impl OpenRouterCredentials for ProductOpenRouterCredentials {
     }
     fn key_label(&self, account: &plakous_hosted::account::AccountRef) -> CliResult<String> {
         require_openrouter(account)?;
+        if self.gateway()?.is_some() {
+            return Ok(account.as_str().to_owned());
+        }
         let status = crate::home::secrets::key_status(&self.paths, account.as_str())
             .map_err(|_| CliFailure::new("OpenRouter key store is unreadable"))?;
         key_usage_label(&status)
@@ -104,6 +115,9 @@ impl OpenRouterCredentials for ProductOpenRouterCredentials {
 
     fn preflight(&self, account: &plakous_hosted::account::AccountRef) -> CliResult<()> {
         require_openrouter(account)?;
+        if self.gateway()?.is_some() {
+            return Ok(());
+        }
         crate::home::secrets::require_api_key(&self.paths, account.as_str())
     }
 
@@ -112,9 +126,33 @@ impl OpenRouterCredentials for ProductOpenRouterCredentials {
         account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<Arc<OpenRouterKeySource>> {
         require_openrouter(account)?;
+        if let Some(gateway) = self.gateway()? {
+            let authority = OpenRouterCredentialBinding::platform(
+                "plak.openrouter",
+                account.source_authority("plak.product-secrets.openrouter.v1"),
+            )
+            .map_err(|_| CliFailure::new("OpenRouter credential binding is invalid"))?;
+            return Ok(Arc::new(
+                gateway
+                    .key_source(
+                        account.as_str(),
+                        plakous::api_key::CredentialProviderTag::OpenRouterPlatform,
+                        "https://openrouter.ai",
+                        None,
+                        authority,
+                    )
+                    .map_err(|error| CliFailure::new(error.to_string()))?,
+            ));
+        }
         let mut source = ProductOpenRouterApiKeySource::new(self.paths.clone(), account.clone())?;
         source.usage_receipt = self.usage_receipt.clone();
         Ok(Arc::new(source))
+    }
+}
+
+impl ProductOpenRouterCredentials {
+    fn gateway(&self) -> CliResult<Option<plakous::gateway::GatewayCustody>> {
+        crate::gateway::host_gateway(&self.paths).map_err(CliFailure::new)
     }
 }
 

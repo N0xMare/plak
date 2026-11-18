@@ -142,7 +142,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     let (runtime, reload, stop) = startup_runtime()?;
     let paths = services.paths()?;
     refuse_external_gateway(paths)?;
-    let holder = hold_host_store(services)?;
+    let holder = hold_host_store(services, paths)?;
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
     let (home_lock, lock) = lock::HostLock::take_home(paths, &binary)?;
@@ -320,9 +320,19 @@ fn refuse_external_gateway(paths: &crate::home::paths::PlakPaths) -> CliResult<(
     crate::gateway::host_may_open_store(&config).map_err(CliFailure::new)
 }
 
-fn hold_host_store(services: &Services) -> CliResult<crate::gateway::HolderLock> {
+fn hold_host_store(
+    services: &Services,
+    paths: &crate::home::paths::PlakPaths,
+) -> CliResult<Option<crate::gateway::HolderLock>> {
+    let config = crate::product_config::ProductConfig::load(paths)
+        .unwrap_or_else(|_| crate::product_config::ProductConfig::default_product());
+    if config.gateway_address.is_some() {
+        return Ok(None);
+    }
     let root = services.home().state()?;
-    crate::gateway::acquire_shared_creating(root).map_err(CliFailure::new)
+    crate::gateway::acquire_shared_creating(root)
+        .map(Some)
+        .map_err(CliFailure::new)
 }
 
 fn startup_scan(
