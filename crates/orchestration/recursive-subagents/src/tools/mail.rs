@@ -407,10 +407,6 @@ impl TopologyTool {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "mail admission and delivery retain the same attempt and independently owned operation receipt"
-    )]
     /// Recompiles or refuses a follow-up before any attempt opens. A send that
     /// already has a receipt is left alone so replay does not rebind.
     async fn prepare_followup_recompile(
@@ -448,6 +444,10 @@ impl TopologyTool {
             .await)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "mail admission and delivery retain the same attempt and independently owned operation receipt"
+    )]
     async fn send_after_recovery(
         &self,
         operation_id: String,

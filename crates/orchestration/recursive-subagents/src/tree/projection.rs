@@ -349,18 +349,17 @@ impl ProductAgentTree {
         }
         match self.recovery_need(&node.agent_id)? {
             RecoveryNeed::NotRequired => {}
-            RecoveryNeed::Session { .. } => match self.terminal_recovery_refusal(&node.agent_id) {
-                Some(refusal) => {
+            RecoveryNeed::Session { .. } => {
+                if let Some(refusal) = self.terminal_recovery_refusal(&node.agent_id) {
                     value["remedy"] = serde_json::Value::String("close_agent".to_owned());
                     value["recovery"] = serde_json::Value::String(format!(
                         "{}: {}; close_agent ends the node",
                         refusal.kind, refusal.message
                     ));
-                }
-                // The recovering sentence is only true while this process
-                // holds the child's recovery claim. A settled refusal that
-                // has not started says so, and close_agent ends the node.
-                None => {
+                } else {
+                    // The recovering sentence is only true while this process
+                    // holds the child's recovery claim. A settled refusal that
+                    // has not started says so, and close_agent ends the node.
                     let recovering = crate::hub::lookup(&self.tree_id)
                         .is_some_and(|runtime| runtime.is_recovering(&node.agent_id));
                     if recovering {
@@ -374,7 +373,7 @@ impl ProductAgentTree {
                         );
                     }
                 }
-            },
+            }
             RecoveryNeed::Workspace { reason, .. } => {
                 value["remedy"] = serde_json::Value::String("close_agent".to_owned());
                 value["recovery"] = serde_json::Value::String(reason);
