@@ -43,6 +43,19 @@ use crate::{product_agent, product_config, product_host, product_paths};
 /// The exact model id this hook answers to.
 pub(crate) const SELECTOR: &str = "offline-loopback-v1";
 
+pub(crate) fn gateway_review_clock(
+    subscriptions: plakous::subscriptions::NativeSubscriptions,
+    provider: NativeProvider,
+) -> plakous::subscriptions::NativeSubscriptions {
+    if std::env::var("PLAK_TEST_GATEWAY_REVIEW_CLOCK").as_deref() == Ok("1")
+        && let Ok(notice) = plakous::subscriptions::NativeSubscriptions::notice(provider)
+        && let Ok(at) = plakous::model::Timestamp::new(notice.reviewed_at() + 60, 0)
+    {
+        return subscriptions.with_clock(Arc::new(plakous::model::FixedClock::new(at)));
+    }
+    subscriptions
+}
+
 #[cfg(feature = "web")]
 pub(crate) mod host_lifecycle {
     pub(crate) fn record_handoff_budget(

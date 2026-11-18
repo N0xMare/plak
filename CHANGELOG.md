@@ -131,6 +131,10 @@ for one version bump, without native protocol compatibility.
   check` and `doctor` fail, unless the gateway holds this host's own store at
   the configured socket. Doctor reads credential rows from the gateway and
   counts a gateway failure.
+- Fix gateway subscription status, account listing, logout, removal and
+  login on an adopted store. Status refuses a failed read rather than
+  omitting the account, and gateway usage reads the held subscription's
+  allowance instead of always reporting it unobserved.
 - A remote admin login is held to the slot's signed-in provider account;
   replacing it with another account needs the local administrator.
 - A global disable no longer locks out the local administrator's `enable`,

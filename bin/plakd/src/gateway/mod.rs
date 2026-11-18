@@ -57,15 +57,16 @@ pub(crate) fn serve(home: &crate::home::paths::PlakPaths) -> Result<(), String> 
     // The service is the store's custodian: it never relays to a gateway,
     // even when the shared home's config.toml names this one.
     let app = crate::commands::application::PlakousApplication::new(
-        config.state_root,
+        config.state_root.clone(),
         None,
         None,
         HostCustody::Local,
     )
     .map_err(|error| error.to_string())?
     .with_account_home(Some(home.clone()));
-    let gateway = Gateway::open(
+    let gateway = Gateway::open_with(
         home,
+        config,
         Box::new(ops::OpsBridge::new(app, home.clone(), fresh_instance()?)),
     )?;
     gateway.serve_foreground()
@@ -290,12 +291,18 @@ pub(crate) fn check(
     )
     .map_err(|error| error.to_string())?;
     let accounts = client::admin::<AdminResponse>(address, key, &AdminRequest::List {})?;
-    if let AdminResponse::Accounts { accounts } = accounts {
-        for account in accounts {
-            writeln!(stdout, "account {account}").map_err(|error| error.to_string())?;
+    match accounts {
+        AdminResponse::Accounts { accounts } => {
+            for account in accounts {
+                writeln!(stdout, "account {account}").map_err(|error| error.to_string())?;
+            }
+            Ok(())
         }
+        AdminResponse::Refused { refusal } => {
+            Err(format!("gateway account list refused: {refusal:?}"))
+        }
+        _ => Err("gateway account list returned an unexpected response".to_owned()),
     }
-    Ok(())
 }
 
 /// The account route for a CLI gateway verb under `custody`. Discovery
@@ -374,6 +381,9 @@ pub(crate) fn read_key_file(path: &std::path::Path) -> Result<String, String> {
 
 #[cfg(test)]
 mod adoption_tests;
+#[cfg(all(test, feature = "codex", feature = "grok"))]
+#[path = "../../tests/integration/support/gateway_seed.rs"]
+mod gateway_seed;
 #[cfg(test)]
 mod tests;
 

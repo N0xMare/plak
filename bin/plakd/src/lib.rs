@@ -143,6 +143,13 @@ pub mod telemetry_store;
 mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]
 mod test_hooks {
+    pub(crate) const fn gateway_review_clock(
+        subscriptions: plakous::subscriptions::NativeSubscriptions,
+        _provider: plakous::subscriptions::NativeProvider,
+    ) -> plakous::subscriptions::NativeSubscriptions {
+        subscriptions
+    }
+
     #[cfg(feature = "web")]
     pub(crate) mod host_lifecycle;
     pub(crate) const fn binding_executor_cut() -> bool {

@@ -1685,6 +1685,10 @@ and API surfaces carry no calendar expiry. Facade fixtures that start real
 provider managers derive consent and their facade clock from that provider's own review, not another route's newer review:
 otherwise independently renewing OpenAI future-dates Claude or xAI consent
 against those managers' deterministic clocks.
+The real gateway service fixture selects those review-relative clocks for
+its subscription admin operations with `PLAK_TEST_GATEWAY_REVIEW_CLOCK=1`
+in the test-hooks process; provider replies are injected before any upstream
+dial.
 
 **A fixture process never outlives its test by more than its bound.** A test
 that dies leaves its spawned processes behind: its temporary directory goes,
@@ -4413,9 +4417,11 @@ store in place, and a keyless host sets `[gateway] address` to the service's
 Unix socket. Each topology runs one turn on each of seven routes (`codex`,
 `claude-haiku55-low`, `grok`, `api-openai`, `api-anthropic`, `api-xai`,
 `or-nemotron-free`), restarts its gateway, reopens every session and forces a
-refresh of each OAuth kind (codex, claude, grok). Each unix-socket turn and
-reopen records the gateway audit line count. A binary without `plakd gateway
-serve` fails as a harness error before any provider call. Tailnet TCP from a
+refresh of each OAuth kind (codex, claude, grok). The Unix-socket run checks
+that `plakd doctor` reports each OAuth row OK and Ready from the gateway,
+and that `plakd status <account>` reports each credential Ready. Each
+Unix-socket turn and reopen records the gateway audit line count. A binary
+without `plakd gateway serve` fails as a harness error before any provider call. Tailnet TCP from a
 second machine, remote login, the kill switch and a `hop=gateway` fault run
 are not driven. The estimate line covers the API-key turns; subscription
 routes stay quota. Results are recorded in `tests/live/STATUS.md`.

@@ -440,6 +440,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     # repository gate's offline model selector. Naming the model rather than a
     # bare flag keeps the selection an explicit binding fact.
     ("plakd", "src/test_hooks.rs"): [
+        ("var", (("string", "PLAK_TEST_GATEWAY_REVIEW_CLOCK"),)),
         ("var_os", (("string", "PLAK_TEST_HOST_HANDOFF_BUDGET"),)),
         ("var_os", (("string", "PLAK_TEST_HOST_UPGRADE_READY_ORDER"),)),
         ("var", (("string", "PLAK_TEST_STATE_KEY"),)),
@@ -2088,7 +2089,10 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # `test-hooks` only: the offline script's child runner, bound and journaled
     # as a host's dial is, then selected for the process (spec 01 §8.5).
-    ("plakd", "src/test_hooks.rs"): {'runner': {'RunnerServices'}},
+    ("plakd", "src/test_hooks.rs"): {
+        'model': {'FixedClock'},
+        'runner': {'RunnerServices'},
+    },
     ("plakd", "src/test_hooks/child_runner.rs"): {
         'runner': {
             'CallJournal',

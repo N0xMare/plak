@@ -535,13 +535,17 @@ impl PlakousApplication {
                 return Ok(subscriptions.clone());
             }
         }
-        if let Some(name) = account.name() {
-            return self
-                .subscriptions
+        let subscriptions = if let Some(name) = account.name() {
+            self.subscriptions
                 .for_named_account(provider, name.as_str())
-                .map_err(|error| self.account_failure(error, account));
-        }
-        Ok(self.subscriptions.clone())
+                .map_err(|error| self.account_failure(error, account))?
+        } else {
+            self.subscriptions.clone()
+        };
+        Ok(crate::test_hooks::gateway_review_clock(
+            subscriptions,
+            provider,
+        ))
     }
 
     pub(super) fn refreshed_credential(

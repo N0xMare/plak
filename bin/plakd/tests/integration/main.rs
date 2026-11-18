@@ -6,6 +6,21 @@ mod client_fixture_contract;
 #[cfg(all(feature = "test-hooks", feature = "maintainer"))]
 mod crash_sweep;
 mod diagnostics_contract;
+#[cfg(all(
+    feature = "test-hooks",
+    feature = "codex",
+    feature = "claude",
+    feature = "grok"
+))]
+mod gateway_admin;
+#[cfg(all(
+    feature = "test-hooks",
+    feature = "codex",
+    feature = "claude",
+    feature = "grok"
+))]
+#[path = "support/gateway_seed.rs"]
+mod gateway_seed;
 #[cfg(all(target_os = "linux", feature = "web"))]
 mod host_install;
 #[cfg(all(target_os = "macos", feature = "web"))]

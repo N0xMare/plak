@@ -212,12 +212,12 @@ mod codex_login {
         custody: LocalCustody,
         subscriptions: &NativeSubscriptions,
     ) -> LocalCustody {
+        let provider = NativeProvider::Codex;
+        let subscriptions =
+            crate::test_hooks::gateway_review_clock(subscriptions.clone(), provider);
         custody.with_kind(
             "codex",
-            Arc::new(SubscriptionCustodian::new(
-                subscriptions.clone(),
-                NativeProvider::Codex,
-            )),
+            Arc::new(SubscriptionCustodian::new(subscriptions, provider)),
             plakous::gateway::pins::openai::CODEX_UPSTREAM_PINS,
         )
     }
@@ -256,12 +256,12 @@ mod claude_login {
         custody: LocalCustody,
         subscriptions: &NativeSubscriptions,
     ) -> LocalCustody {
+        let provider = NativeProvider::Claude;
+        let subscriptions =
+            crate::test_hooks::gateway_review_clock(subscriptions.clone(), provider);
         custody.with_kind(
             "claude",
-            Arc::new(SubscriptionCustodian::new(
-                subscriptions.clone(),
-                NativeProvider::Claude,
-            )),
+            Arc::new(SubscriptionCustodian::new(subscriptions, provider)),
             plakous::gateway::pins::anthropic::CLAUDE_UPSTREAM_PINS,
         )
     }
@@ -300,12 +300,12 @@ mod grok_login {
         custody: LocalCustody,
         subscriptions: &NativeSubscriptions,
     ) -> LocalCustody {
+        let provider = NativeProvider::Xai;
+        let subscriptions =
+            crate::test_hooks::gateway_review_clock(subscriptions.clone(), provider);
         custody.with_kind(
             "grok",
-            Arc::new(SubscriptionCustodian::new(
-                subscriptions.clone(),
-                NativeProvider::Xai,
-            )),
+            Arc::new(SubscriptionCustodian::new(subscriptions, provider)),
             plakous::gateway::pins::xai::SUPERGROK_UPSTREAM_PINS,
         )
     }

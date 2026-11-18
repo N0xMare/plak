@@ -15,8 +15,9 @@ routes, private homes, `plakd run`) through a host in two topologies:
 
 Each topology runs one turn per route, restarts its gateway (a new in-process
 holder, or a new service instance), reopens every session, and forces one
-refresh of each OAuth kind. The unix-socket topology records the gateway audit
-line count of each turn and reopen. A binary without `plakd gateway serve`
+refresh of each OAuth kind. The unix-socket topology verifies the refreshed
+logins through doctor and status, and records the gateway audit line count of
+each turn and reopen. A binary without `plakd gateway serve`
 fails as a harness error before any provider call. Artifacts land in
 target/live/gateway-<stamp>/; homes are retained and listed in homes.json.
 """
@@ -99,6 +100,7 @@ def plan_text() -> str:
         "subscription store in place; the second host sets [gateway] address to its socket"
     )
     lines.append("each unix-socket turn and reopen records the gateway audit line count")
+    lines.append("unix-socket doctor and status must report every OAuth kind Ready")
     lines.append(NOT_DRIVEN)
     lines.append("estimate: just live estimate --rate-card RATE_CARD --soak-row grok")
     lines.append(
@@ -311,6 +313,36 @@ class GatewayRun:
             raise ScenarioFailure(HARNESS, f"the gateway's refresh of {kind} did not answer ready")
         return "forced refresh answered"
 
+    def doctor_oauth(self, home: Path) -> str:
+        completed = gateway_cli(self.env.binary, home, ["doctor"])
+        (self.artifacts / UNIX_SOCKET / "doctor.log").write_text(
+            f"exit {completed.returncode}\n--- stdout\n{completed.stdout}"
+            f"--- stderr\n{completed.stderr}"
+        )
+        # Doctor also checks unrelated product setup. Require all three
+        # gateway-backed OAuth rows regardless of those other results.
+        for kind in OAUTH_KINDS:
+            ready = re.search(
+                rf"^\s*OAuth {kind}\s+OK\s+ready · record held by the gateway",
+                completed.stdout,
+                re.MULTILINE,
+            )
+            if ready is None:
+                raise ScenarioFailure(HARNESS, f"doctor did not report {kind} Ready via gateway")
+        return "all three OAuth rows OK (ready, held by gateway)"
+
+    def credential_status(self, home: Path, kind: str) -> str:
+        completed = gateway_cli(self.env.binary, home, ["status", kind])
+        (self.artifacts / UNIX_SOCKET / f"status-{kind}.log").write_text(
+            f"exit {completed.returncode}\n--- stdout\n{completed.stdout}"
+            f"--- stderr\n{completed.stderr}"
+        )
+        if completed.returncode != 0:
+            live.classify_cli_failure(completed.returncode, completed.stderr, f"status {kind}")
+        if f"{kind}: credential=ready" not in completed.stdout.splitlines():
+            raise ScenarioFailure(HARNESS, f"status did not report {kind} Ready via gateway")
+        return "gateway status answered ready"
+
     def audit_lines(self, gateway_home: Path) -> int | None:
         completed = gateway_cli(self.env.binary, gateway_home, ["gateway", "audit"])
         if completed.returncode != 0:
@@ -346,6 +378,15 @@ class GatewayRun:
             self.attempt(
                 topology, "refresh", kind, lambda kind=kind: self.refresh(topology, home, kind)
             )
+        if topology == UNIX_SOCKET:
+            self.attempt(topology, "doctor", "oauth", lambda: self.doctor_oauth(home))
+            for kind in OAUTH_KINDS:
+                self.attempt(
+                    topology,
+                    "status",
+                    kind,
+                    lambda kind=kind: self.credential_status(home, kind),
+                )
 
 
 def write_homes(artifacts: Path, keyed: Path, keyless: Path, socket: Path) -> None:

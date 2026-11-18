@@ -6219,13 +6219,20 @@ that is the holder lock released. A failed audit append is counted; `plakd
 gateway status` prints the running instance's count. `audit --since` takes an
 RFC 3339 timestamp and compares instants. Admin account verbs map
 to today's account operations on a blocking bridge. The listener serves each
-accepted connection with the shared relay server. API-key accounts and the
+accepted connection with the shared relay server. The synchronous account
+bridge runs outside the listener runtime, using the state root the gateway
+already holds exclusively; it never takes a second holder lock. Status
+reads subscription posture without provider I/O. If a requested row cannot
+be read, Status refuses the call rather than returning a partial roster.
+List also refuses on a store read failure rather than reporting no accounts.
+API-key accounts and the
 subscription logins are custodied in the gateway process and relayed only to
 those providers' pin rows. Other admin verbs stay on the account bridge. The
 buffered dispatcher cannot stream a relay, so a relay it decodes is refused
 `internal` and nothing is dialed. OpenRouter allowance is one
 `GET /api/v1/key` from this process; other API-key kinds answer Allowance
-with `not-observed`.
+with `not-observed`. Subscription Allowance runs the held slot's provider usage
+workflow and returns its projected usage view or an explicit unavailable reason.
 
 `gateway install` writes a Linux user unit or macOS LaunchAgent and does not
 start it. The unit runs the executable that wrote it, with `UMask=0077`,

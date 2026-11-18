@@ -12,7 +12,7 @@ use plakous::gateway::server::{Peer, RelayServer};
 use tokio::net::{TcpListener, UnixListener};
 
 use super::audit::Audit;
-use super::bridge::AccountBridge;
+use super::bridge::{AccountBridge, AccountWorker};
 use super::callers::Callers;
 use super::dispatch::GatewayState;
 use super::flags::Flags;
@@ -31,11 +31,6 @@ pub(crate) struct Gateway {
 impl Gateway {
     /// Opens the service files and takes the exclusive holder. Fails while any
     /// in-process holder exists.
-    pub(crate) fn open(home: &PlakPaths, bridge: Box<dyn AccountBridge>) -> Result<Self, String> {
-        let config = ServerConfig::load(home)?;
-        Self::open_with(home, config, bridge)
-    }
-
     pub(crate) fn open_with(
         home: &PlakPaths,
         config: ServerConfig,
@@ -61,13 +56,15 @@ impl Gateway {
         let audit = Audit::open(server_config::audit_dir(home), config.audit_retention_days)
             .map_err(|error| error.to_string())?
             .publishing_failures(server_config::audit_failures_path(home), instance.as_str());
+        let bridge = AccountWorker::start(bridge)
+            .map_err(|error| format!("could not start gateway account worker: {error}"))?;
         let state = Arc::new(GatewayState {
             instance,
             config,
             callers: Mutex::new(callers),
             flags: Mutex::new(flags),
             audit,
-            bridge: Mutex::new(bridge),
+            bridge: Mutex::new(Box::new(bridge)),
             inflight: std::sync::atomic::AtomicU32::new(0),
             caller_inflight: Mutex::new(std::collections::HashMap::new()),
             draining: std::sync::atomic::AtomicBool::new(false),
@@ -102,8 +99,8 @@ impl Gateway {
             lock,
         } = self;
         let stop_state = Arc::clone(&state);
-        // The account bridge owns its own executor: the last reference to the
-        // state must drop here, outside the gateway runtime's tasks.
+        // Keep the account worker through runtime shutdown, so normal drain
+        // drops its executor (including pending logins) before the holder.
         let held = Arc::clone(&state);
         let result = runtime.block_on(async move {
             let stop = async move {

@@ -1,9 +1,11 @@
-//! OpenRouter allowance is one `GET /api/v1/key` from this process. Other
-//! API-key kinds have no provider allowance endpoint and stay unobserved.
-//! The key never enters the admin JSON.
+//! Allowance reads return the held account's usage observation. API-key kinds
+//! other than OpenRouter have no provider allowance endpoint.
 
 use plakous::gateway::protocol::admin::AdminResponse;
 use plakous::gateway::protocol::{BoundedText, GatewayAccount};
+use plakous::model::{SubscriptionUsageRead, SubscriptionUsageUnavailable, Timestamp};
+use plakous_host_protocol::views::presentation::SessionLedgerView;
+use plakous_hosted::subscription_usage::{VerticalObservation, project_limits};
 
 use crate::home::paths::PlakPaths;
 
@@ -14,13 +16,81 @@ pub(super) async fn read(home: &PlakPaths, account: &GatewayAccount) -> AdminRes
     not_observed(account)
 }
 
-fn not_observed(account: &GatewayAccount) -> AdminResponse {
+pub(super) fn not_observed(account: &GatewayAccount) -> AdminResponse {
     AdminResponse::Allowance {
         account: account.clone(),
         observed_at_unix_ms: None,
         view: None,
         unavailable: bounded("not-observed"),
     }
+}
+
+pub(super) fn subscription(account: &GatewayAccount, read: SubscriptionUsageRead) -> AdminResponse {
+    let (observed_at, view, unavailable) = match read {
+        SubscriptionUsageRead::Snapshot(ref snapshot) => {
+            let observed_at = unix_ms(snapshot.observed_at());
+            let Some(vertical) =
+                crate::commands::usage::usage_vertical_for_account(account.as_str())
+            else {
+                return not_observed(account);
+            };
+            let view = project_limits(
+                [(vertical, VerticalObservation::Native(read))],
+                SessionLedgerView::default(),
+            )
+            .verticals
+            .into_iter()
+            .find(|view| view.vertical.account() == account.as_str())
+            .and_then(|view| serde_json::to_value(view).ok());
+            let unavailable = view.is_none().then(|| bounded("unavailable")).flatten();
+            (observed_at, view, unavailable)
+        }
+        SubscriptionUsageRead::Unavailable {
+            observed_at,
+            reason,
+        } => (
+            unix_ms(observed_at),
+            None,
+            bounded(unavailable_reason(reason)),
+        ),
+    };
+    AdminResponse::Allowance {
+        account: account.clone(),
+        observed_at_unix_ms: Some(observed_at),
+        view,
+        unavailable,
+    }
+}
+
+fn unavailable_reason(reason: SubscriptionUsageUnavailable) -> &'static str {
+    use SubscriptionUsageUnavailable as U;
+    use plakous::model::SubscriptionUsageCredentialState as C;
+    match reason {
+        U::NotConnected => "not-connected",
+        U::CredentialState(state) => match state {
+            C::RefreshRequired => "refresh-required",
+            C::Quarantined => "quarantined",
+            C::Revoked => "revoked",
+            C::LoginRequired => "login-required",
+            C::WrittenByNewerBuild => "written-by-newer-build",
+        },
+        U::Busy => "busy",
+        U::LocalState => "local-state",
+        U::Unauthorized => "unauthorized",
+        U::RateLimited => "rate-limited",
+        U::ProviderUnavailable => "provider-unavailable",
+        U::Transport(_) => "transport",
+        U::InvalidResponse => "invalid-response",
+        U::Stale => "stale",
+        U::AccountChanged => "account-changed",
+        U::Unqualified => "not-observed",
+    }
+}
+
+fn unix_ms(at: Timestamp) -> u64 {
+    at.seconds()
+        .saturating_mul(1000)
+        .saturating_add(u64::from(at.nanoseconds()) / 1_000_000)
 }
 
 fn bounded(text: &str) -> Option<BoundedText<64>> {
@@ -31,7 +101,7 @@ fn bounded(text: &str) -> Option<BoundedText<64>> {
 mod openrouter {
     use std::sync::Arc;
 
-    use super::{GatewayAccount, PlakPaths, bounded, not_observed};
+    use super::{GatewayAccount, PlakPaths, bounded, not_observed, unix_ms};
     use plakous::gateway::protocol::admin::AdminResponse;
     use plakous::openrouter::{OpenRouterChatClient, OpenRouterRetentionPolicy};
 
@@ -76,14 +146,9 @@ mod openrouter {
         account: &GatewayAccount,
         usage: &plakous::openrouter::OpenRouterKeyUsage,
     ) -> AdminResponse {
-        let observed_at = usage.observed_at();
-        let observed_at_unix_ms = observed_at
-            .seconds()
-            .saturating_mul(1000)
-            .saturating_add(u64::from(observed_at.nanoseconds()) / 1_000_000);
         AdminResponse::Allowance {
             account: account.clone(),
-            observed_at_unix_ms: Some(observed_at_unix_ms),
+            observed_at_unix_ms: Some(unix_ms(usage.observed_at())),
             view: Some(allowance_view(usage)),
             unavailable: None,
         }

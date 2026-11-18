@@ -9,7 +9,6 @@ use super::{
     ResolvedNativeModel, RuntimeModelAuthority, SelectedProviderConfiguration, SessionLineage,
     SubscriptionRequestClass, SubscriptionRequestGate, SubscriptionResolutionEvidence,
     SubscriptionUsageRead, Timestamp, credential_refresh_observer, detached, run_blocking,
-    unix_now,
 };
 use plakous_model::ResolvedProviderAuthorityBinding;
 
@@ -379,13 +378,17 @@ impl super::login::NativePendingLogin for PendingLogin {
         authorization_input: &str,
     ) -> NativeFuture<'_, Result<NativeAuthStatus, NativeSubscriptionError>> {
         Box::pin(async move {
-            complete_pending_with_consent(&consent, unix_now, || async move {
-                self.0
-                    .complete(authorization_input)
-                    .await
-                    .map(|status| map_credential_status(status.status()))
-                    .map_err(map_claude_error)
-            })
+            complete_pending_with_consent(
+                &consent,
+                || consent.state.now(),
+                || async move {
+                    self.0
+                        .complete(authorization_input)
+                        .await
+                        .map(|status| map_credential_status(status.status()))
+                        .map_err(map_claude_error)
+                },
+            )
             .await
         })
     }

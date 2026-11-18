@@ -3,10 +3,9 @@
 //! the provider wait runs on the application executor, and each poll only
 //! observes it.
 
-use std::sync::mpsc::{Receiver, sync_channel};
-
 use plakous::gateway::protocol::admin::{
-    AdminRefusal, AdminRequest, AdminResponse, LoginMethod, LoginPhase, LogoutMode,
+    AccountStatusRow, AdminRefusal, AdminRequest, AdminResponse, LoginMethod, LoginPhase,
+    LogoutMode,
 };
 use plakous::gateway::protocol::facts::{
     AccountFacts, CredentialFacts, CredentialStatus, KeyFacts, KeySource, RefreshRequest,
@@ -17,10 +16,14 @@ use plakous::gateway::protocol::{BoundedText, UuidText};
 use plakous::gateway::protocol::{GatewayAccount, SecretText};
 use plakous::subscriptions::{NativeLoginCompletion, NativeLoginMode};
 use plakous_hosted::account::AccountRef;
+use tokio::sync::oneshot;
 
 use super::bridge::{AccountBridge, AttemptBook};
+use crate::commands::application::host::{
+    HostAccountError, logout_host_account, prepare_host_login,
+};
 use crate::commands::application::{
-    AccountOps as _, LoginOutcome, LoginResponse, PlakousApplication, Revocation,
+    AccountOps as _, LoginOutcome, LoginResponse, PlakousApplication,
 };
 use crate::home::paths::PlakPaths;
 use crate::presentation::CredentialState;
@@ -28,15 +31,23 @@ use crate::presentation::CredentialState;
 struct LiveLogin {
     method: LoginMethod,
     pending: Option<(AccountRef, plakous::subscriptions::PendingNativeLogin)>,
-    phase: LoginPhase,
-    device: Option<
-        Receiver<
-            Result<
-                plakous::subscriptions::NativeAuthStatus,
-                plakous::subscriptions::NativeSubscriptionError,
-            >,
+    device: Option<DeviceLogin>,
+}
+
+struct DeviceLogin {
+    result: oneshot::Receiver<
+        Result<
+            plakous::subscriptions::NativeAuthStatus,
+            plakous::subscriptions::NativeSubscriptionError,
         >,
     >,
+    task: tokio::task::AbortHandle,
+}
+
+impl Drop for DeviceLogin {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 pub(crate) struct OpsBridge {
@@ -64,21 +75,21 @@ impl OpsBridge {
 
     fn facts_for(&mut self, account: &GatewayAccount) -> Result<AccountFacts, GatewayRefusal> {
         let parsed = Self::account(account).map_err(|_| GatewayRefusal::AccountUnknown {})?;
-        let key = key_facts(account.as_str(), &self.home);
         // An API-key account has no login state: it is ready exactly when a
         // key resolves.
-        let status = if crate::home::secrets::is_api_key_account(account.as_str()) {
-            match key.as_ref().map(|key| &key.source) {
-                Some(KeySource::Environment | KeySource::File) => CredentialStatus::Ready,
-                Some(KeySource::Missing) | None => CredentialStatus::SignedOut,
-            }
+        let (status, key) = if parsed.vertical().is_api() {
+            let key = key_facts(account.as_str(), &self.home)?;
+            let status = match key.source {
+                KeySource::Environment | KeySource::File => CredentialStatus::Ready,
+                KeySource::Missing => CredentialStatus::SignedOut,
+            };
+            (status, Some(key))
         } else {
-            credential_status(
-                self.app
-                    .offline_status(&parsed)
-                    .map_err(|_| GatewayRefusal::Internal {})?
-                    .credential,
-            )
+            let status = self
+                .app
+                .offline_status(&parsed)
+                .map_err(|_| GatewayRefusal::Internal {})?;
+            (credential_status(status.credential), None)
         };
         Ok(AccountFacts {
             account: account.clone(),
@@ -96,42 +107,53 @@ impl OpsBridge {
             key,
         })
     }
+
+    fn accounts(&mut self) -> Result<Vec<GatewayAccount>, AdminRefusal> {
+        self.app
+            .accounts()
+            .map_err(|_| AdminRefusal::Unavailable {})?
+            .into_iter()
+            .map(|account| {
+                GatewayAccount::new(account.to_string()).map_err(|_| AdminRefusal::Unavailable {})
+            })
+            .collect()
+    }
+
+    fn status(
+        &mut self,
+        accounts: Vec<GatewayAccount>,
+    ) -> Result<Vec<AccountStatusRow>, AdminRefusal> {
+        let selected = if accounts.is_empty() {
+            self.accounts()?
+        } else {
+            accounts
+        };
+        self.facts(&selected)
+            .map_err(|refusal| match refusal {
+                GatewayRefusal::AccountUnknown {} => AdminRefusal::WrongAccountClass {},
+                _ => AdminRefusal::Unavailable {},
+            })
+            .map(|facts| {
+                facts
+                    .into_iter()
+                    .map(|facts| AccountStatusRow {
+                        facts,
+                        last_refresh: None,
+                    })
+                    .collect()
+            })
+    }
 }
 
 impl AccountBridge for OpsBridge {
     fn call(&mut self, local_admin: bool, request: AdminRequest) -> AdminResponse {
         match request {
-            AdminRequest::List {} => {
-                let accounts = self.app.accounts().unwrap_or_default();
-                AdminResponse::Accounts {
-                    accounts: accounts
-                        .iter()
-                        .filter_map(|account| GatewayAccount::new(account.to_string()).ok())
-                        .collect(),
-                }
-            }
-            AdminRequest::Status { accounts } => {
-                let selected = if accounts.is_empty() {
-                    self.app
-                        .accounts()
-                        .unwrap_or_default()
-                        .iter()
-                        .filter_map(|account| GatewayAccount::new(account.to_string()).ok())
-                        .collect()
-                } else {
-                    accounts
-                };
-                let mut rows = Vec::new();
-                for account in selected {
-                    if let Ok(facts) = self.facts_for(&account) {
-                        rows.push(plakous::gateway::protocol::admin::AccountStatusRow {
-                            facts,
-                            last_refresh: None,
-                        });
-                    }
-                }
-                AdminResponse::Status { rows }
-            }
+            AdminRequest::List {} => self
+                .accounts()
+                .map_or_else(refused, |accounts| AdminResponse::Accounts { accounts }),
+            AdminRequest::Status { accounts } => self
+                .status(accounts)
+                .map_or_else(refused, |rows| AdminResponse::Status { rows }),
             AdminRequest::KeySet { account, secret } => self.key_set(&account, secret.expose()),
             AdminRequest::KeyClear { account } => self.key_clear(&account),
             AdminRequest::Logout { account, mode } => self.logout(&account, mode),
@@ -152,12 +174,7 @@ impl AccountBridge for OpsBridge {
             }
             AdminRequest::LoginPoll { attempt } => self.login_poll(&attempt),
             AdminRequest::LoginCancel { attempt } => self.login_cancel(&attempt),
-            AdminRequest::Allowance { account } => AdminResponse::Allowance {
-                account,
-                observed_at_unix_ms: None,
-                view: None,
-                unavailable: bounded64("not-observed"),
-            },
+            AdminRequest::Allowance { account } => self.allowance(&account),
             AdminRequest::Disable { .. }
             | AdminRequest::Enable { .. }
             | AdminRequest::CallerAdd { .. }
@@ -249,17 +266,13 @@ impl OpsBridge {
         let Ok(parsed) = Self::account(account) else {
             return refused(AdminRefusal::WrongAccountClass {});
         };
-        let result = if mode == LogoutMode::Local {
-            self.app.logout_local(&parsed).map(|_| true)
-        } else {
-            self.app.revoke(&parsed).map(|revocation| match revocation {
-                Revocation::Revoked(_) => false,
-                Revocation::Unusable => true,
-            })
-        };
-        match result {
-            Ok(remain) => changed(account.clone(), Some(remain)),
-            Err(_) => refused(AdminRefusal::OutcomeUnknown {}),
+        if parsed.vertical().is_api() {
+            return refused(AdminRefusal::WrongAccountClass {});
+        }
+        match logout_host_account(&mut self.app, &parsed, mode == LogoutMode::Local) {
+            Ok(remain) => changed(account.clone(), remain),
+            Err(HostAccountError::Refused(_)) => refused(AdminRefusal::Unavailable {}),
+            Err(HostAccountError::OutcomeUnknown(_)) => refused(AdminRefusal::OutcomeUnknown {}),
         }
     }
 
@@ -310,15 +323,15 @@ impl OpsBridge {
         // Captured before the login can retire an unusable record: a remote
         // admin may only re-login the account this slot held (spec 04 §2.11).
         let keep_account = !local_admin && self.signed_in(&parsed);
-        if let Err(error) = crate::commands::application::host::prepare_host_login(
-            &mut self.app,
-            &parsed,
-            notice_revision,
-            replace_newer,
-        ) {
+        if let Err(error) =
+            prepare_host_login(&mut self.app, &parsed, notice_revision, replace_newer)
+        {
+            self.app.end_login_attempt(&parsed);
             return refused(login_prep(error.message()));
         }
-        let Ok(mut challenge) = self.app.begin_login(&parsed, NativeLoginMode::Remote) else {
+        let challenge = self.app.begin_login(&parsed, NativeLoginMode::Remote);
+        self.app.end_login_attempt(&parsed);
+        let Ok(mut challenge) = challenge else {
             return refused(AdminRefusal::ProviderRejected {});
         };
         if keep_account {
@@ -328,7 +341,6 @@ impl OpsBridge {
             NativeLoginCompletion::DeviceCode => LoginMethod::DeviceCode,
             NativeLoginCompletion::AuthorizationCodeOrRedirectUrl => LoginMethod::Paste,
             NativeLoginCompletion::Automatic => {
-                self.app.end_login_attempt(&parsed);
                 return refused(AdminRefusal::DeviceLoginUnavailable {});
             }
         };
@@ -346,21 +358,16 @@ impl OpsBridge {
             .unwrap_or(15 * 60 * 1000);
         let (stored_pending, device) = if method == LoginMethod::DeviceCode {
             let (_account, pending) = challenge.pending;
-            let (tx, rx) = sync_channel(1);
-            if self
-                .app
-                .executor
-                .block_on(async move {
-                    tokio::spawn(async move {
-                        let result = pending.complete().await;
-                        let _ = tx.send(result);
-                    });
-                })
-                .is_err()
-            {
+            let (tx, result) = oneshot::channel();
+            let Ok(task) = self.app.executor.block_on(async move {
+                let task = tokio::spawn(async move {
+                    let _ = tx.send(pending.complete().await);
+                });
+                task.abort_handle()
+            }) else {
                 return refused(AdminRefusal::Unavailable {});
-            }
-            (None, Some(rx))
+            };
+            (None, Some(DeviceLogin { result, task }))
         } else {
             (Some(challenge.pending), None)
         };
@@ -369,7 +376,6 @@ impl OpsBridge {
             LiveLogin {
                 method,
                 pending: stored_pending,
-                phase: LoginPhase::AwaitingInput,
                 device,
             },
         ) else {
@@ -392,23 +398,27 @@ impl OpsBridge {
         if found.payload.method != LoginMethod::Paste {
             return refused(AdminRefusal::PasteInvalid {});
         }
-        let Some(pending) = found.payload.pending.take() else {
+        let Some((_, pending)) = &found.payload.pending else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
-        let id = found.id.clone();
+        if pending.validate_remote_input(pasted).is_err() {
+            return refused(AdminRefusal::PasteInvalid {});
+        }
+        let Ok(found) = self.attempts.take(attempt) else {
+            return refused(AdminRefusal::AttemptUnknown {});
+        };
+        let Some(pending) = found.payload.pending else {
+            return refused(AdminRefusal::AttemptUnknown {});
+        };
         match self
             .app
             .finish_login(pending, LoginResponse::Pasted(pasted))
         {
-            Ok(LoginOutcome::Completed(_)) => {
-                let _ = self.attempts.take(attempt);
-                progress(id, LoginPhase::Succeeded)
-            }
+            Ok(LoginOutcome::Completed(_)) => progress(found.id, LoginPhase::Succeeded),
             Ok(LoginOutcome::Cancelled) | Ok(LoginOutcome::TimedOut) => {
                 refused(AdminRefusal::PasteInvalid {})
             }
             Err(error) if replacement_refused(error.message()) => {
-                let _ = self.attempts.take(attempt);
                 refused(AdminRefusal::LocalAdminRequired {})
             }
             Err(_) => refused(AdminRefusal::ProviderRejected {}),
@@ -416,14 +426,14 @@ impl OpsBridge {
     }
 
     fn login_poll(&mut self, attempt: &UuidText) -> AdminResponse {
-        if self.attempts.poll_allowed(attempt).is_err() {
-            return refused(AdminRefusal::AttemptLimit {});
+        if let Err(refusal) = self.attempts.poll_allowed(attempt) {
+            return refused(refusal);
         }
         let Ok(found) = self.attempts.get_mut(attempt) else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
-        if let Some(rx) = &found.payload.device {
-            match rx.try_recv() {
+        if let Some(device) = &mut found.payload.device {
+            match device.result.try_recv() {
                 Ok(Ok(_)) => {
                     let id = found.id.clone();
                     let _ = self.attempts.take(attempt);
@@ -435,29 +445,41 @@ impl OpsBridge {
                     let _ = self.attempts.take(attempt);
                     return refused(AdminRefusal::LocalAdminRequired {});
                 }
-                Ok(Err(_)) => return refused(AdminRefusal::ProviderRejected {}),
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                Ok(Err(_)) => {
+                    let _ = self.attempts.take(attempt);
+                    return refused(AdminRefusal::ProviderRejected {});
+                }
+                Err(oneshot::error::TryRecvError::Empty) => {
                     let id = found.id.clone();
                     return progress(id, LoginPhase::AwaitingInput);
                 }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    let _ = self.attempts.take(attempt);
                     return refused(AdminRefusal::OutcomeUnknown {});
                 }
             }
         }
-        let id = found.id.clone();
-        let phase = found.payload.phase;
-        progress(id, phase)
+        progress(found.id.clone(), LoginPhase::AwaitingInput)
     }
 
     fn login_cancel(&mut self, attempt: &UuidText) -> AdminResponse {
         let Ok(found) = self.attempts.take(attempt) else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
-        if let Some((account, _)) = found.payload.pending {
-            self.app.end_login_attempt(&account);
-        }
         progress(found.id, LoginPhase::Cancelled)
+    }
+
+    fn allowance(&mut self, account: &GatewayAccount) -> AdminResponse {
+        let Ok(parsed) = Self::account(account) else {
+            return refused(AdminRefusal::WrongAccountClass {});
+        };
+        if parsed.vertical().is_api() {
+            return super::allowance::not_observed(account);
+        }
+        self.app.subscription_usage(&parsed).map_or_else(
+            |_| refused(AdminRefusal::Unavailable {}),
+            |observation| super::allowance::subscription(account, observation),
+        )
     }
 }
 
@@ -476,14 +498,15 @@ fn credential_status(state: CredentialState) -> CredentialStatus {
     }
 }
 
-fn key_facts(account: &str, home: &PlakPaths) -> Option<KeyFacts> {
-    let status = crate::home::secrets::key_status(home, account).ok()?;
+fn key_facts(account: &str, home: &PlakPaths) -> Result<KeyFacts, GatewayRefusal> {
+    let status =
+        crate::home::secrets::key_status(home, account).map_err(|_| GatewayRefusal::Internal {})?;
     let source = match status.source {
         crate::home::secrets::KeySource::Env => KeySource::Environment,
         crate::home::secrets::KeySource::File => KeySource::File,
         crate::home::secrets::KeySource::Missing => KeySource::Missing,
     };
-    Some(KeyFacts {
+    Ok(KeyFacts {
         source,
         fingerprint: status
             .fingerprint
@@ -528,10 +551,6 @@ fn progress(attempt: UuidText, phase: LoginPhase) -> AdminResponse {
         phase,
         warning: None,
     }
-}
-
-fn bounded64(text: &str) -> Option<BoundedText<64>> {
-    BoundedText::new(text.to_owned()).ok()
 }
 
 #[cfg(test)]

@@ -25,6 +25,76 @@ pub(crate) trait AccountBridge: Send {
     fn refresh(&mut self, request: &RefreshRequest) -> Result<AccountFacts, GatewayRefusal>;
 }
 
+type BridgeCall = Box<dyn FnOnce(&mut dyn AccountBridge) + Send>;
+
+pub(super) struct AccountWorker {
+    calls: Option<std::sync::mpsc::SyncSender<BridgeCall>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl AccountWorker {
+    pub(super) fn start(mut bridge: Box<dyn AccountBridge>) -> std::io::Result<Self> {
+        let (calls, receiver) = std::sync::mpsc::sync_channel::<BridgeCall>(0);
+        // Tokio's spawn_blocking still enters a runtime. The synchronous
+        // application edge owns its own executor and must run outside it.
+        let thread = std::thread::Builder::new()
+            .name("gateway-accounts".to_owned())
+            .spawn(move || {
+                for call in receiver {
+                    call(bridge.as_mut());
+                }
+            })?;
+        Ok(Self {
+            calls: Some(calls),
+            thread: Some(thread),
+        })
+    }
+
+    fn run<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&mut dyn AccountBridge) -> T + Send + 'static,
+    ) -> Option<T> {
+        let (reply, result) = std::sync::mpsc::sync_channel(1);
+        self.calls
+            .as_ref()?
+            .send(Box::new(move |bridge| {
+                let _ = reply.send(operation(bridge));
+            }))
+            .ok()?;
+        result.recv().ok()
+    }
+}
+
+impl AccountBridge for AccountWorker {
+    fn call(&mut self, local_admin: bool, request: AdminRequest) -> AdminResponse {
+        self.run(move |bridge| bridge.call(local_admin, request))
+            .unwrap_or(AdminResponse::Refused {
+                refusal: AdminRefusal::Unavailable {},
+            })
+    }
+
+    fn facts(&mut self, accounts: &[GatewayAccount]) -> Result<Vec<AccountFacts>, GatewayRefusal> {
+        let accounts = accounts.to_vec();
+        self.run(move |bridge| bridge.facts(&accounts))
+            .ok_or(GatewayRefusal::Internal {})?
+    }
+
+    fn refresh(&mut self, request: &RefreshRequest) -> Result<AccountFacts, GatewayRefusal> {
+        let request = request.clone();
+        self.run(move |bridge| bridge.refresh(&request))
+            .ok_or(GatewayRefusal::Internal {})?
+    }
+}
+
+impl Drop for AccountWorker {
+    fn drop(&mut self) {
+        drop(self.calls.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 pub(crate) struct Attempt<T> {
     pub id: UuidText,
     pub account: GatewayAccount,
