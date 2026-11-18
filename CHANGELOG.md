@@ -422,10 +422,8 @@ for one version bump, without native protocol compatibility.
 
 ### Persisted formats
 
-- State key `r28.e39.p38.t11`: runtime SQLite schema 28, runtime format epoch
-  39, product schema 38 and agent tree schema 11. Epoch 39 removes the
-  credential-store path from Codex and SuperGrok credential-authority digests.
-  An epoch-38 session does not reopen; export and import carry it. Native 0.0.3 state
+- State key `r28.e38.p38.t11`: runtime SQLite schema 28, runtime format epoch
+  38, product schema 38 and agent tree schema 11. Native 0.0.3 state
   (`r26.e34.p35.t9`) is neither opened nor migrated; keep it with its matching
   build.
 - Write session export v13 and import v13/v12 only; v11 and older refuse.

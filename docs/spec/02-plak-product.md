@@ -4339,14 +4339,16 @@ saved placement, decorated by the host. Clients pair the existing product
 workspace text with this label; a child never borrows its root's placement.
 This is in-process chrome, not a persisted/exported field or a JSONL v1 event.
 
-Protocol 12 adds session account choice (§4.4.1). The client protocol number is
-**12**. It must match exactly; the runner
-transport has its own independent version. Protocol 5 adds explicit placement,
-bounded creation options, directory lifecycle and process-local draft identity.
-It does not change JSONL v1, canonical history or exported transcript rows.
+Protocol 12 adds session account choice (§4.4.1), `DeleteSession.abandon_jobs`
+(default `false`) and the `running_jobs` lifecycle refusal (§2.5.2). The client
+protocol number is **12** and must match exactly; the runner transport has its
+own version. These wire additions change neither canonical history nor exported
+transcript rows. The separate JSONL v1 command changes are described in §4.3.
+Protocol 5 introduced explicit placement, bounded creation options, directory
+lifecycle and process-local draft identity.
 
 The protocol-12 schema pin is SHA-256
-`430015594ff0bf2694f63f113b74cb9c65da72016006543c3786892cadbda7cf`:
+`8b865947bed5fa08a8b4e2a9c5887a6a124e8288907728da3066651d0b8a9b4b`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
 checks this build-independent pin. The schema title is `plakd wire v2`;
