@@ -435,13 +435,16 @@ env-ceiling = 17
 reason = "Capability registry, grouped interactive identity/carry helpers and host-upgrade ownership/probe guards preserve reduced products. Upgrade crash, capacity and state-key hooks are isolated at the composition root; native contract-drift errors exist only with their compiled route."
 
 [workspace.metadata.plakous.cfg.plakous]
-feature-ceiling = 63
+feature-ceiling = 64
+test-seam-ceiling = 1
 env-sites = ["src/test_session_lease.rs"]
-reason = "Existing placement debt plus the auth/native-only drift type, error formatting and Codex live-refusal summaries; reduced products must not link omitted auth. The store feature gates the sessions module at its one declaration. The test-hooks session lease override is the only environment read, and other builds do not compile it."
+reason = "Existing placement debt plus the auth/native-only drift type, error formatting and Codex live-refusal summaries; reduced products must not link omitted auth. The store feature gates the sessions module at its one declaration. The test-hooks session lease override and retained-job builder seam are counted test-only placements; other builds do not compile either."
 
 [workspace.metadata.plakous.cfg.plakous-agent]
+feature-ceiling = 1
+test-seam-ceiling = 1
 env-sites = ["src/test_hooks.rs"]
-reason = "The test-hooks mid-turn prune minimum and recency margin are the only environment reads. Other builds do not compile that module."
+reason = "The test-hooks mid-turn prune minimum and recency margin are the only environment reads. The retained-job builder seam is gated to test-hooks."
 
 [workspace.metadata.plakous.cfg.plakous-anthropic]
 feature-ceiling = 21

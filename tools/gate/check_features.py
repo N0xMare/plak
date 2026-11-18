@@ -1684,9 +1684,7 @@ def validate_test_hook_methods(root: Path) -> list[str]:
         source = (root / relative).read_text()
         declaration = source.find(f"pub fn {method}")
         attributes = source[:declaration].splitlines()[-8:] if declaration >= 0 else []
-        if not any(
-            line.strip() == '#[cfg(feature = "test-hooks")]' for line in attributes
-        ):
+        if not any(line.strip() == '#[cfg(feature = "test-hooks")]' for line in attributes):
             errors.append(f"{relative}: {method} must be gated by the test-hooks feature")
     return errors
 
