@@ -90,7 +90,7 @@ impl ProductMailDeliverer {
                         .await
                         .map_err(|error| session_refusal(&error))?
                 }
-                None => return session_read(error),
+                None => return session_read(&error),
             },
         };
         let recorded = recorded_binding(&sessions, locator).await?;
@@ -233,7 +233,7 @@ impl ProductMailDeliverer {
         .map_err(|error| {
             let cause = error
                 .binding_change()
-                .map_or_else(|| error.to_string(), std::string::ToString::to_string);
+                .map_or_else(|| error.to_string(), ToString::to_string);
             if error.kind() == AgentSessionsErrorKind::NotQuiescent {
                 refused("the child's session is not at a quiescent checkpoint")
             } else {
@@ -363,9 +363,9 @@ fn binding_failure(failure: &crate::CliFailure) -> TopologyError {
     }
 }
 
-fn session_read(error: AgentSessionsError) -> Result<Option<FollowupRecompile>, TopologyError> {
+fn session_read(error: &AgentSessionsError) -> Result<Option<FollowupRecompile>, TopologyError> {
     if error.kind() == AgentSessionsErrorKind::IncompatibleBuild {
-        Err(session_refusal(&error))
+        Err(session_refusal(error))
     } else {
         Ok(None)
     }
@@ -374,7 +374,7 @@ fn session_read(error: AgentSessionsError) -> Result<Option<FollowupRecompile>, 
 fn session_refusal(error: &AgentSessionsError) -> TopologyError {
     let cause = error
         .binding_change()
-        .map_or_else(|| error.to_string(), std::string::ToString::to_string);
+        .map_or_else(|| error.to_string(), ToString::to_string);
     refused(cause)
 }
 
