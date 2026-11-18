@@ -100,9 +100,11 @@ for one version bump, without native protocol compatibility.
 - Add `plakd gateway`: a same-user service that holds the credential store,
   caller keys, a kill switch, an audit log and the admin verbs. A configured
   `[gateway]` address is home-scoped. In-process account commands and the host
-  take the holder lock shared; the service takes it exclusive. Relay execution
-  stays refused until the shared server core is wired, and a host that names
-  an external gateway refuses to start. No persisted format changes.
+  take the holder lock shared; the service takes it exclusive. The listener
+  relays API-key accounts through the shared server core; subscription
+  accounts stay on the account bridge. A host that names an external gateway
+  still refuses to start, because its routes do not yet take a relayed client.
+  No persisted format changes.
 ## 0.0.4
 
 ### plakd

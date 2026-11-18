@@ -1,7 +1,7 @@
 //! The plakd credential gateway: listeners, caller keys, the kill switch,
-//! audit and the admin bridge. Relay execution waits for the shared server
-//! core; until then an authenticated relay is refused `internal` and nothing
-//! is dialed.
+//! audit and the admin bridge. The listener relays API-key accounts through
+//! the shared server core. Subscription accounts stay on the account bridge,
+//! and a host that names a gateway still refuses to start.
 
 mod address;
 mod audit;
@@ -10,6 +10,7 @@ mod bridge;
 mod callers;
 mod cli_cmd;
 mod client;
+mod custody;
 mod dispatch;
 mod flags;
 mod holder;
@@ -17,8 +18,10 @@ mod http;
 mod install;
 mod io_file;
 mod ops;
+mod product;
 mod remote_account;
 mod route;
+mod route_custody;
 mod server_config;
 mod service;
 
@@ -334,10 +337,7 @@ pub(crate) fn host_may_open_store(
                 set.join(", ")
             ));
         }
-        return Err(
-            "this build's host does not open the credential store while [gateway] address is set; relay execution is not available yet"
-                .to_owned(),
-        );
+        return route_custody::open_for_host(config);
     }
     Ok(())
 }

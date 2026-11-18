@@ -8,24 +8,23 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use plakous::gateway::protocol::UuidText;
-use tokio::io::{AsyncRead, AsyncWrite};
+use plakous::gateway::server::{Peer, RelayServer};
 use tokio::net::{TcpListener, UnixListener};
 
 use super::audit::Audit;
-use super::auth::Peer;
 use super::bridge::AccountBridge;
 use super::callers::Callers;
-use super::dispatch::{self, GatewayState};
+use super::dispatch::GatewayState;
 use super::flags::Flags;
 use super::holder::{self, HolderLock, HolderMode};
-use super::http;
 use super::io_file::ensure_private_dir;
+use super::product::ProductGateway;
 use super::server_config::{self, ServerConfig};
 use crate::home::paths::PlakPaths;
 
 pub(crate) struct Gateway {
     state: Arc<GatewayState>,
+    server: RelayServer<ProductGateway>,
     lock: HolderLock,
 }
 
@@ -54,8 +53,8 @@ impl Gateway {
         })?;
         lock.advertise(&config.socket)
             .map_err(|error| error.to_string())?;
-        let instance =
-            UuidText::new(uuid::Uuid::new_v4().to_string()).map_err(|error| error.to_string())?;
+        let instance = plakous::gateway::server::new_instance()
+            .ok_or_else(|| "could not mint a gateway instance".to_owned())?;
         let callers = Callers::load(&server_config::callers_path(home))
             .map_err(|error| format!("callers.json: {error}"))?;
         let flags = Flags::load(&server_config::flags_path(home))?;
@@ -74,7 +73,17 @@ impl Gateway {
             listeners: Mutex::new(Vec::new()),
             shutdown: tokio::sync::Notify::new(),
         });
-        Ok(Self { state, lock })
+        let product = Arc::new(ProductGateway::new(home, Arc::clone(&state)));
+        let upstream = plakous::gateway::server::http1_upstream()
+            .map_err(|error| format!("gateway upstream client: {error}"))?;
+        let bound = usize::try_from(state.config.max_request_body_bytes).unwrap_or(usize::MAX);
+        let server = RelayServer::new(product, upstream, state.instance.clone())
+            .with_max_request_body_bytes(bound);
+        Ok(Self {
+            state,
+            server,
+            lock,
+        })
     }
 
     /// Foreground serve until SIGTERM, Ctrl-C or an admin drain.
@@ -100,15 +109,24 @@ impl Gateway {
                 stop_state.draining.store(true, Ordering::Relaxed);
                 Ok(())
             };
-            run(state, stop).await
-        })?;
+            self.run_until(stop).await
+        })
+    }
+
+    /// Serves until `stop` completes, then releases the holder lock.
+    pub(crate) async fn run_until(
+        self,
+        stop: impl Future<Output = Result<(), String>>,
+    ) -> Result<(), String> {
+        let result = run(Arc::clone(&self.state), self.server, stop).await;
         drop(self.lock);
-        Ok(())
+        result
     }
 }
 
 pub(crate) async fn run(
     state: Arc<GatewayState>,
+    server: RelayServer<ProductGateway>,
     stop: impl Future<Output = Result<(), String>>,
 ) -> Result<(), String> {
     prepare_socket(&state.config.socket)?;
@@ -138,9 +156,8 @@ pub(crate) async fn run(
             listeners.push(format!("tcp:{addr}"));
         }
     }
-    let max_body = state.config.max_request_body_bytes;
-    let unix_state = Arc::clone(&state);
-    let tcp_state = Arc::clone(&state);
+    let unix_server = server.clone();
+    let tcp_server = server;
     tokio::pin!(stop);
     loop {
         if state.draining.load(Ordering::Relaxed) {
@@ -153,25 +170,20 @@ pub(crate) async fn run(
             }
             accepted = unix.accept() => {
                 let Ok((stream, _)) = accepted else { continue; };
-                let uid = stream.peer_cred().map(|cred| cred.uid()).ok();
-                let peer = Peer {
-                    uid_matches: uid == Some(rustix::process::geteuid().as_raw()),
-                    address: None,
-                };
-                let task_state = Arc::clone(&unix_state);
+                let same_user = stream.peer_cred().map(|cred| cred.uid()).ok()
+                    == Some(rustix::process::geteuid().as_raw());
+                let peer = Peer::Unix { same_user };
+                let task = unix_server.clone();
                 tokio::spawn(async move {
-                    let _ = serve_stream(task_state, peer, stream, max_body).await;
+                    let _ = task.serve(stream, peer).await;
                 });
             }
             accepted = accept_tcp(tcp.as_ref()), if tcp.is_some() => {
                 let Ok((stream, peer_addr)) = accepted else { continue; };
-                let peer = Peer {
-                    uid_matches: false,
-                    address: Some(peer_addr.ip()),
-                };
-                let task_state = Arc::clone(&tcp_state);
+                let peer = Peer::Tcp(peer_addr);
+                let task = tcp_server.clone();
                 tokio::spawn(async move {
-                    let _ = serve_stream(task_state, peer, stream, max_body).await;
+                    let _ = task.serve(stream, peer).await;
                 });
             }
         }
@@ -190,49 +202,6 @@ async fn accept_tcp(
         Some(listener) => listener.accept().await,
         None => std::future::pending().await,
     }
-}
-
-async fn serve_stream<S>(
-    state: Arc<GatewayState>,
-    peer: Peer,
-    mut stream: S,
-    max_body: u64,
-) -> std::io::Result<()>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let Ok(request) = http::read_request(&mut stream, max_body).await else {
-        let response = dispatch::refusal_response(
-            &plakous::gateway::protocol::refusal::GatewayRefusal::EnvelopeInvalid {},
-        );
-        http::write_response(&mut stream, &response).await?;
-        return Ok(());
-    };
-    let body_len = u64::try_from(request.body.len()).unwrap_or(u64::MAX);
-    if body_len > max_body {
-        let response = dispatch::refusal_response(
-            &plakous::gateway::protocol::refusal::GatewayRefusal::LimitExceeded {},
-        );
-        return http::write_response(&mut stream, &response).await;
-    }
-    let task_state = Arc::clone(&state);
-    let response =
-        tokio::task::spawn_blocking(move || dispatch::handle(&task_state, &peer, &request))
-            .await
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-    if matches_draining(&response) {
-        state.draining.store(true, Ordering::Relaxed);
-        state.shutdown.notify_one();
-    }
-    http::write_response(&mut stream, &response).await
-}
-
-fn matches_draining(response: &http::Response) -> bool {
-    response.status == 200
-        && response
-            .body
-            .windows(10)
-            .any(|window| window == b"\"draining\"")
 }
 
 fn prepare_socket(path: &PathBuf) -> Result<(), String> {

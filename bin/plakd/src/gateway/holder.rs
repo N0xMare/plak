@@ -78,6 +78,10 @@ impl HolderLock {
 /// The socket a live exclusive holder advertised, if this process cannot take
 /// the shared lock.
 pub(crate) fn advertised_socket(path: &Path) -> io::Result<Option<PathBuf>> {
+    // A missing store has no holder. Do not create the directory to find that out.
+    if path.parent().is_some_and(|parent| !parent.exists()) {
+        return Ok(None);
+    }
     match HolderLock::try_acquire(path, HolderMode::Shared) {
         Ok(_lock) => Ok(None),
         Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -175,7 +179,9 @@ mod tests {
         );
         drop(vacant);
         let state = dir.path().join("state");
-        fs::create_dir_all(state.join("plak/subscriptions")).unwrap();
+        let subscriptions = state.join("plak/subscriptions");
+        fs::create_dir_all(&subscriptions).unwrap();
+        fs::set_permissions(&subscriptions, fs::Permissions::from_mode(0o700)).unwrap();
         let held = acquire_shared(&state).unwrap();
         let blocked = HolderLock::try_acquire(&lock_path(&state), HolderMode::Exclusive);
         assert!(

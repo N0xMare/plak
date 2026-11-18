@@ -1,5 +1,7 @@
-//! One authenticated gateway call. Relay is authenticated and then refused
-//! `internal`: the shared relay server core is not in this build.
+//! One authenticated gateway call. The listener dials relays through the shared
+//! server core; this buffered dispatcher is the admin, facts and refresh path
+//! and the policy the tests call. It cannot stream a relay, so a decoded relay
+//! here is refused `internal` and nothing is dialed.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,7 +15,9 @@ use plakous::gateway::protocol::{Endpoint, SUPPORTED_VERSIONS, VersionsReply};
 use plakous::gateway::protocol::{GatewayAccount, SecretText};
 
 use super::audit::{Audit, AuditEvent};
-use super::auth::{self, Peer, Principal};
+use super::auth::Principal;
+#[cfg(test)]
+use super::auth::{self, Peer};
 use super::bridge::AccountBridge;
 use super::callers::{CallerError, Callers};
 use super::flags::Flags;
@@ -34,6 +38,7 @@ pub(crate) struct GatewayState {
     pub shutdown: tokio::sync::Notify,
 }
 
+#[cfg(test)]
 pub(crate) fn handle(state: &Arc<GatewayState>, peer: &Peer, request: &Request) -> Response {
     let started = std::time::Instant::now();
     if state.draining.load(Ordering::Relaxed) {
@@ -70,19 +75,37 @@ pub(crate) fn handle(state: &Arc<GatewayState>, peer: &Peer, request: &Request) 
             return refusal_response(&refusal);
         }
     };
-    if !admit_caller(state, &principal) {
+    serve_authed(state, &principal, record_scopes.as_ref(), request, started)
+}
+
+/// Runs one call for a principal the gateway has already authenticated.
+pub(crate) fn serve_authed(
+    state: &Arc<GatewayState>,
+    principal: &Principal,
+    scopes: Option<&ScopeSet>,
+    request: &Request,
+    started: std::time::Instant,
+) -> Response {
+    if state.draining.load(Ordering::Relaxed)
+        || state.inflight.load(Ordering::Relaxed) >= state.config.max_inflight
+    {
+        return refusal(&GatewayRefusal::Busy {
+            retry_after_ms: 1000,
+        });
+    }
+    if !admit_caller(state, principal) {
         return refusal(&GatewayRefusal::Busy {
             retry_after_ms: 500,
         });
     }
     state.inflight.fetch_add(1, Ordering::Relaxed);
-    let response = dispatch(state, &principal, record_scopes.as_ref(), request, started);
+    let response = dispatch(state, principal, scopes, request, started);
     state.inflight.fetch_sub(1, Ordering::Relaxed);
-    release_caller(state, &principal);
+    release_caller(state, principal);
     response
 }
 
-fn admit_caller(state: &GatewayState, principal: &Principal) -> bool {
+pub(crate) fn admit_caller(state: &GatewayState, principal: &Principal) -> bool {
     let Principal::Caller(id) = principal else {
         return true;
     };
@@ -98,7 +121,7 @@ fn admit_caller(state: &GatewayState, principal: &Principal) -> bool {
     true
 }
 
-fn release_caller(state: &GatewayState, principal: &Principal) {
+pub(crate) fn release_caller(state: &GatewayState, principal: &Principal) {
     let Principal::Caller(id) = principal else {
         return;
     };
@@ -235,6 +258,7 @@ fn admin(
         AdminRequest::Enable { target } => enable(state, target),
         AdminRequest::Drain {} => {
             state.draining.store(true, Ordering::Relaxed);
+            state.shutdown.notify_one();
             AdminResponse::Draining {}
         }
         other => bridge_call(state, principal.is_local_admin(), other.clone_request()),
@@ -358,7 +382,8 @@ fn relay(
     request: &Request,
     started: std::time::Instant,
 ) -> Response {
-    // The whole body is already in hand. Nothing is dialed.
+    // The listener's relay server core dials. This buffered path cannot stream
+    // frames, so it still refuses after the policy checks and dials nothing.
     let decoded = plakous::gateway::protocol::envelope::decode_request(&request.body);
     let Ok((envelope, _body)) = decoded else {
         return refusal(&GatewayRefusal::EnvelopeInvalid {});
@@ -497,7 +522,7 @@ fn accounts_scope(
 }
 
 /// A global or per-caller kill switch applies to every call, including versions.
-fn killed(state: &GatewayState, principal: &Principal) -> Option<GatewayRefusal> {
+pub(crate) fn killed(state: &GatewayState, principal: &Principal) -> Option<GatewayRefusal> {
     let flags = match state.flags.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
@@ -679,17 +704,68 @@ pub(crate) fn refusal_response(refusal: &GatewayRefusal) -> Response {
     let bytes = serde_json::to_vec(&body).unwrap_or_else(|_| {
         format!("{{\"gateway_error\":{{\"code\":\"{}\"}}}}", refusal.code()).into_bytes()
     });
-    Response::json(refusal.http_status(), bytes, Some(refusal.code()))
+    Response::json(refusal.http_status(), bytes)
 }
 
 fn json_ok(value: &impl serde::Serialize) -> Response {
     match call::encode(value) {
-        Ok(bytes) => Response::json(200, bytes, None),
+        Ok(bytes) => Response::json(200, bytes),
         Err(_) => refusal(&GatewayRefusal::Internal {}),
     }
 }
 
-fn audit(
+pub(crate) fn gate_relay(
+    state: &GatewayState,
+    principal: &Principal,
+    scopes: Option<&ScopeSet>,
+    account: &GatewayAccount,
+) -> Result<(), GatewayRefusal> {
+    if let Some(refusal) = killed(state, principal) {
+        return Err(refusal);
+    }
+    if let Some(refusal) = accounts_scope(
+        principal,
+        scopes,
+        Capability::Relay,
+        std::slice::from_ref(account),
+    ) {
+        return Err(refusal);
+    }
+    if flag_block(state, principal, Some(account)) {
+        return Err(blocked_refusal(state, principal, Some(account)));
+    }
+    Ok(())
+}
+
+pub(crate) fn gate_admin_refresh(
+    state: &GatewayState,
+    principal: &Principal,
+    scopes: Option<&ScopeSet>,
+    account: &GatewayAccount,
+) -> Result<(), GatewayRefusal> {
+    if let Some(refusal) = killed(state, principal) {
+        return Err(refusal);
+    }
+    let request = AdminRequest::Refresh {
+        account: account.clone(),
+    };
+    if let Some(refusal) = admin_scope(principal, scopes, &request) {
+        return Err(refusal);
+    }
+    if flag_block(state, principal, Some(account)) {
+        return Err(blocked_refusal(state, principal, Some(account)));
+    }
+    Ok(())
+}
+
+pub(crate) fn bridge_facts(
+    state: &GatewayState,
+    accounts: &[GatewayAccount],
+) -> Result<Vec<plakous::gateway::protocol::facts::AccountFacts>, GatewayRefusal> {
+    lock_bridge(state).facts(accounts)
+}
+
+pub(crate) fn audit(
     state: &GatewayState,
     caller: &str,
     verb: &str,

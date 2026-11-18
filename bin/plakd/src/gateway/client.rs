@@ -10,7 +10,6 @@ use plakous::gateway::protocol::refusal::RefusalBody;
 use plakous::gateway::protocol::{Endpoint, KEY_HEADER};
 
 use super::address::GatewayAddress;
-use super::http::Response;
 
 pub(crate) struct Call {
     pub status: u16,
@@ -118,10 +117,13 @@ fn write_and_read<S: Read + Write>(
 }
 
 fn parse_response(raw: &[u8]) -> Result<Call, String> {
-    let text = std::str::from_utf8(raw).map_err(|_| "gateway response is not utf-8".to_owned())?;
-    let (head, body) = text
-        .split_once("\r\n\r\n")
+    let split = raw
+        .windows(4)
+        .position(|mark| mark == b"\r\n\r\n")
         .ok_or_else(|| "gateway response has no body".to_owned())?;
+    let head = std::str::from_utf8(&raw[..split])
+        .map_err(|_| "gateway response head is not utf-8".to_owned())?;
+    let rest = &raw[split + 4..];
     let mut lines = head.split("\r\n");
     let status_line = lines
         .next()
@@ -132,18 +134,59 @@ fn parse_response(raw: &[u8]) -> Result<Call, String> {
         .and_then(|status| status.parse().ok())
         .ok_or_else(|| "gateway status is malformed".to_owned())?;
     let mut error = None;
+    let mut chunked = false;
+    let mut content_length = None;
     for line in lines {
         let Some((name, value)) = line.split_once(':') else {
             continue;
         };
         if name.eq_ignore_ascii_case(plakous::gateway::protocol::ERROR_HEADER) {
             error = Some(value.trim().to_owned());
+        } else if name.eq_ignore_ascii_case("transfer-encoding")
+            && value.to_ascii_lowercase().contains("chunked")
+        {
+            chunked = true;
+        } else if name.eq_ignore_ascii_case("content-length") {
+            content_length = value.trim().parse().ok();
         }
     }
-    let _ = Response::json(status, body.as_bytes().to_vec(), error.as_deref());
+    let body = if chunked {
+        decode_chunks(rest)?
+    } else if let Some(length) = content_length {
+        rest.get(..length)
+            .ok_or_else(|| "gateway body is shorter than content-length".to_owned())?
+            .to_vec()
+    } else {
+        rest.to_vec()
+    };
     Ok(Call {
         status,
         error,
-        body: body.as_bytes().to_vec(),
+        body,
     })
+}
+
+/// HTTP/1.1 chunked body. The relay server does not set a content length.
+fn decode_chunks(mut rest: &[u8]) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    loop {
+        let line_end = rest
+            .windows(2)
+            .position(|mark| mark == b"\r\n")
+            .ok_or_else(|| "chunk size line is truncated".to_owned())?;
+        let line = std::str::from_utf8(&rest[..line_end])
+            .map_err(|_| "chunk size line is not utf-8".to_owned())?;
+        let size_text = line.split(';').next().unwrap_or(line).trim();
+        let size = usize::from_str_radix(size_text, 16)
+            .map_err(|_| "chunk size is malformed".to_owned())?;
+        rest = &rest[line_end + 2..];
+        if size == 0 {
+            return Ok(body);
+        }
+        if rest.len() < size + 2 || &rest[size..size + 2] != b"\r\n" {
+            return Err("chunk is truncated".to_owned());
+        }
+        body.extend_from_slice(&rest[..size]);
+        rest = &rest[size + 2..];
+    }
 }

@@ -1011,9 +1011,9 @@ plakd gateway check
 ```
 
 A same-UID peer on the Unix socket is the local administrator and presents no
-key. TCP requires a caller key. Relay execution is refused until the shared
-server core is available, and a host with `[gateway] address` set refuses to
-start. See [credential gateway](gateway.md).
+key. TCP requires a caller key. The service relays API-key accounts;
+subscription accounts stay local to it. A host with `[gateway] address` set
+still refuses to start. See [credential gateway](gateway.md).
 
 ## Maintainer commands
 

@@ -262,6 +262,19 @@ impl LocalCustody {
     }
 }
 
+/// The HTTP/1.1 client a product gateway uses for its upstream hop.
+///
+/// The client has the transport's default limits and no fault plan. A product
+/// gateway passes it to [`RelayServer::new`]; plakd does not name the HTTP
+/// crate.
+///
+/// # Errors
+///
+/// Returns the transport configuration error.
+pub fn http1_upstream() -> Result<plakous_http::Client, plakous_http::ConfigError> {
+    plakous_http::Client::new_http1(plakous_http::Limits::default())
+}
+
 fn now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -794,9 +794,12 @@ the service takes it exclusive and records its socket; in-process holders take
 it shared. The two modes do not overlap. An in-process account command, and
 `plakd host` with no `[gateway] address`, take that shared lock for as long as
 they hold the store. A host that finds the service already holding it refuses
-to start and names `[gateway] address`. Until relay execution is available, a
-host whose `[gateway] address` is set also refuses to start; if provider
-API-key variables are set in that host's environment, the refusal names them.
+to start and names `[gateway] address`. The gateway listener relays the
+API-key accounts (`openai`, `xai-api`, `anthropic`, `openrouter`) through the
+shared server core; subscription accounts stay on the account bridge. A host
+whose `[gateway] address` is set still refuses to start, because its route
+constructors do not yet take a relayed client. If provider API-key variables
+are set in that host's environment, the refusal names them.
 
 This precedence belongs to the process resolving the key, not a connected
 client. With no gateway, explicit CLI `key set` and `key clear` stay in this
@@ -6167,17 +6170,20 @@ query strings, keys, tokens or pastes.
 `disable` engages the kill switch and may be called remotely with admin scope.
 `enable`, caller management and `drain` are local-admin only. `drain` waits up
 to 30 seconds for in-flight relays and refresh claims. Admin account verbs map
-to today's account operations on a blocking bridge. An authenticated relay is
-refused `internal` until the shared relay server core is wired; nothing is
-dialed.
+to today's account operations on a blocking bridge. The listener serves each
+accepted connection with the shared relay server. API-key accounts are
+custodied from the gateway process's key files and environment and are relayed
+only to those providers' pin rows. Subscription facts, refresh and admin stay
+on the account bridge. The buffered dispatcher cannot stream a relay, so a
+relay it decodes is refused `internal` and nothing is dialed.
 
 `gateway install` writes a Linux user unit or macOS LaunchAgent and does not
 start it. The unit runs the executable that wrote it.
 
-A host with `[gateway] address` set does not open the credential store. Until
-relay execution is wired, that host refuses to start rather than serving model
-traffic from a local store. Unset, the host keeps today's in-process credential
-access.
+A host with `[gateway] address` set does not open the credential store. It
+refuses to start rather than serving model traffic from a local store, because
+host routes do not yet take a relayed client. Unset, the host keeps today's
+in-process credential access.
 
 ## 5. External client boundary
 

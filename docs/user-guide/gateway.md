@@ -39,14 +39,17 @@ address = "unix:/run/user/1000/plak/gateway.sock"
 The server's own file is `<home>/gateway.toml`, separate from `config.toml`.
 `plakd gateway init` writes it and does not touch the store.
 
-## What is not relayed yet
+## What the gateway relays
 
-An authenticated relay is refused `internal` until the shared relay server
-core is available. Facts, refresh and admin calls are served. A host whose
-`[gateway] address` is set refuses to start, because this build cannot yet
-send its model traffic through the gateway. If that host's environment sets
-`OPENAI_API_KEY`, `XAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`,
-the refusal names those variables.
+The listener relays `openai`, `xai-api`, `anthropic` and `openrouter` from the
+gateway process's own key files and environment, and only to those providers'
+pinned upstreams. Subscription accounts (`codex`, `claude`, `grok`) stay on
+the account bridge. Facts, refresh and admin calls are served either way.
+
+A host whose `[gateway] address` is set still refuses to start: its routes do
+not yet send model traffic through the gateway. If that host's environment
+sets `OPENAI_API_KEY`, `XAI_API_KEY`, `ANTHROPIC_API_KEY` or
+`OPENROUTER_API_KEY`, the refusal names those variables.
 
 An account command that stays in this process, and a host with no gateway
 address, take the holder lock shared. `plakd gateway serve` takes it
