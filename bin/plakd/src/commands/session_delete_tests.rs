@@ -785,6 +785,17 @@ fn delete_and_unpair_refuse_until_the_running_job_ends() -> TestResult {
     );
     assert!(pin_dir.join("runner.json").exists());
     assert_eq!(f.product.load(&record.id).checked()?.id, record.id);
+    unpair_after_the_job_records_a_terminal(&mut f, host, line, locator, &pin_dir)
+}
+
+fn unpair_after_the_job_records_a_terminal(
+    f: &mut Fixture,
+    host: Arc<plakous::tools::LocalJobHost>,
+    line: plakous::model::LineId,
+    locator: SessionLocator,
+    pin_dir: &std::path::Path,
+) -> TestResult {
+    use plakous::tools::JobHost as _;
     host.service(line)
         .ok_or("process service")?
         .stop_jobs(
