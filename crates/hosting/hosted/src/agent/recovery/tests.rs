@@ -5570,3 +5570,31 @@ async fn children_stop_one_reserve_before_the_root_through_the_product_wiring() 
     session.release().await.unwrap();
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
+
+/// A card names a kind; a spawn resolves it through the tree's root line
+/// head (spec 03 §2.1): the root kind is the head's own account, another
+/// kind the head's stored choice. With no root session to read, the spawn
+/// fails closed instead of binding the card's bare kind.
+#[tokio::test]
+async fn a_kind_card_resolves_through_the_root_line_head_or_fails_closed() {
+    let fixture = Fixture::new("spawn-account-resolution");
+    let refused = crate::agent::children::spawn_account(&fixture.parent, "claude").unwrap_err();
+    assert!(refused.contains("could not be read"), "{refused}");
+    let mut head = crate::sessions::SessionRecord::new(fixture.root.path().to_path_buf());
+    head.node = crate::sessions::SessionNode::genesis(&fixture.tree_id);
+    head.account = Some("codex/work".into());
+    head.account_choices
+        .insert("claude".into(), "claude/alt".into());
+    fixture
+        .parent
+        .state_roots()
+        .session_records()
+        .save(&mut head)
+        .unwrap();
+    let resolve = |card: &str| crate::agent::children::spawn_account(&fixture.parent, card);
+    assert_eq!(resolve("claude").unwrap(), "claude/alt");
+    assert_eq!(resolve("codex").unwrap(), "codex/work");
+    assert_eq!(resolve("claude/frozen").unwrap(), "claude/frozen");
+    let unset = resolve("grok").unwrap_err();
+    assert!(unset.contains("no grok account is chosen"), "{unset}");
+}

@@ -19,10 +19,15 @@ type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
 #[test]
 fn continue_ids_are_stable_per_turn_and_account() {
-    let first = ContinueIds::of("turn-a", "codex/work");
-    assert_eq!(first, ContinueIds::of("turn-a", "codex/work"));
-    assert_ne!(first, ContinueIds::of("turn-b", "codex/work"));
-    assert_ne!(first, ContinueIds::of("turn-a", "codex/other"));
+    let first = ContinueIds::of("line", "turn-a", "codex/work");
+    assert_eq!(first, ContinueIds::of("line", "turn-a", "codex/work"));
+    assert_ne!(first, ContinueIds::of("line", "turn-b", "codex/work"));
+    assert_ne!(first, ContinueIds::of("line", "turn-a", "codex/other"));
+    assert_ne!(
+        first,
+        ContinueIds::of("fork", "turn-a", "codex/work"),
+        "a fork that inherited the turn continues under its own ids"
+    );
     assert!(first.operation_id.starts_with(CONTINUE_OPERATION));
     assert!(uuid::Uuid::parse_str(&first.item_id).is_ok());
     assert_eq!(
@@ -335,7 +340,7 @@ fn a_continue_after_a_usage_limit_rebinds_once_and_resubmits_the_exact_prompt() 
     let before = continue_on_b(&surface, &actions, &events, &mut seen);
     assert_eq!(lifecycle(&seen[before..], TurnPhase::Admitted).len(), 1);
     let head = line_head(store.as_ref(), &tree);
-    let ids = ContinueIds::of(&failed_turn, "codex/b");
+    let ids = ContinueIds::of(&source.id, &failed_turn, "codex/b");
     assert_eq!(head.account.as_deref(), Some("codex/b"));
     assert_eq!(
         head.source_product_session_id.as_deref(),
@@ -375,7 +380,7 @@ fn a_continue_after_a_usage_limit_rebinds_once_and_resubmits_the_exact_prompt() 
         .clone();
     let before = continue_on_b(&surface, &actions, &events, &mut seen);
     assert_eq!(lifecycle(&seen[before..], TurnPhase::Admitted).len(), 1);
-    let again = ContinueIds::of(&second_turn, "codex/b");
+    let again = ContinueIds::of(&head.id, &second_turn, "codex/b");
     assert_ne!(again, ids);
     assert_eq!(
         line_head(store.as_ref(), &tree).id,
@@ -439,7 +444,8 @@ fn a_non_root_choice_then_a_prompt_in_the_same_attachment() {
 fn an_unsent_continue_is_reported_on_reopen_and_never_resubmitted() {
     let mut session = SessionRecord::new(std::path::PathBuf::from("/tmp/plak-continue"));
     session.account = Some("codex/b".into());
-    let ids = ContinueIds::of("turn-a", "codex/b");
+    let ids = ContinueIds::of("source-line", "turn-a", "codex/b");
+    session.source_product_session_id = Some("source-line".into());
     session.source_workflow_operation_id = Some(ids.operation_id.clone());
     let mut views = crate::sessions::projector::SessionViews::empty();
     views.state.last_root_turn = Some(LastRootTurn {
@@ -570,7 +576,7 @@ mod account_continue_crash_cuts {
         }
 
         fn ids(&self) -> ContinueIds {
-            ContinueIds::of(&self.failed_turn, "codex/b")
+            ContinueIds::of(&self.source, &self.failed_turn, "codex/b")
         }
 
         /// One rebind at most: the head is the source or its one successor.

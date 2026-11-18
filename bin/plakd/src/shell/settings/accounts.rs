@@ -121,11 +121,25 @@ pub(super) fn fill_profile(
             account: choice.account.clone(),
         })
         .collect::<Vec<_>>();
+    let catalog = match host_catalog(paths, facts) {
+        Ok(catalog) => catalog,
+        Err(refusal) => {
+            refuse(events, refusal);
+            super::refuse_profile(
+                &prepared.id,
+                "account readiness could not be read".to_owned(),
+                events,
+            );
+            return None;
+        }
+    };
+    let mut explicit = explicit;
+    keep_current_choices(&mut explicit, config, facts.session.as_ref(), &catalog);
     let filled = account_choice::fill(
         &account_choice::profile_kinds(config),
         account_choice::root_kind(config).as_deref(),
         &explicit,
-        &host_catalog(paths, facts),
+        &catalog,
         FillMode::Require,
     );
     match filled {
@@ -144,10 +158,47 @@ pub(super) fn fill_profile(
     }
 }
 
+/// Before the fill's default slot, each kind the profile uses keeps the
+/// session's current account when it is still Ready: the line head's for the
+/// root kind, the stored choice for the others.
+fn keep_current_choices(
+    explicit: &mut Vec<plakous_host_protocol::wire::AccountChoice>,
+    config: &crate::product_config::ProductConfig,
+    session: Option<&SurfaceSession>,
+    catalog: &[account_choice::ReadyAccount],
+) {
+    let Some(session) = session else {
+        return;
+    };
+    let current =
+        account_choice::session_choices(session.account.as_deref(), &session.account_choices);
+    for kind in account_choice::profile_kinds(config) {
+        if explicit.iter().any(|choice| choice.kind == kind) {
+            continue;
+        }
+        let Some((_, account)) = current.iter().find(|(current, _)| *current == kind) else {
+            continue;
+        };
+        if catalog
+            .iter()
+            .any(|row| row.ready && row.account == *account)
+        {
+            explicit.push(plakous_host_protocol::wire::AccountChoice {
+                kind,
+                account: account.clone(),
+            });
+        }
+    }
+}
+
 /// The readiness a surface fill reads: every known account, and the host's
 /// own Ready catalog for the default slots it serves.
-fn host_catalog(paths: &PlakPaths, facts: &SurfaceFacts<'_>) -> Vec<account_choice::ReadyAccount> {
-    let mut catalog = account_choice::ready_catalog(paths);
+fn host_catalog(
+    paths: &PlakPaths,
+    facts: &SurfaceFacts<'_>,
+) -> Result<Vec<account_choice::ReadyAccount>, AccountChoiceRefusal> {
+    let mut catalog = account_choice::ready_catalog(paths)
+        .map_err(|reason| AccountChoiceRefusal::Failed { reason })?;
     for section in facts.catalog.iter().filter(|section| section.ready) {
         match catalog
             .iter_mut()
@@ -161,7 +212,7 @@ fn host_catalog(paths: &PlakPaths, facts: &SurfaceFacts<'_>) -> Vec<account_choi
             }),
         }
     }
-    catalog
+    Ok(catalog)
 }
 
 /// `ChooseAccount`: validates the choice, then asks the host to store a
@@ -185,7 +236,14 @@ pub(super) fn choose_account(
         return SurfaceEffect::default();
     };
     let kind = kind_id(kind);
-    let account = match account_choice::admit_choice(kind, &account, &host_catalog(paths, facts)) {
+    let catalog = match host_catalog(paths, facts) {
+        Ok(catalog) => catalog,
+        Err(refusal) => {
+            refuse(events, refusal);
+            return SurfaceEffect::default();
+        }
+    };
+    let account = match account_choice::admit_choice(kind, &account, &catalog) {
         Ok(account) => account,
         Err(refusal) => {
             refuse(events, from_request(refusal));
@@ -264,6 +322,7 @@ pub(super) fn ready_alternatives(paths: &PlakPaths, account: &str) -> Vec<String
         return Vec::new();
     };
     account_choice::ready_catalog(paths)
+        .unwrap_or_default()
         .into_iter()
         .filter(|row| {
             row.ready

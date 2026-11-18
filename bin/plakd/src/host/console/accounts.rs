@@ -206,18 +206,23 @@ fn custody(paths: &PlakPaths) -> AccountCustody {
 }
 
 /// Every known account with whether its credential can serve a new dispatch
-/// now: the session account-choice fill reads this (spec 02 §4.4.1). A
-/// gateway configured for this home answers the roster and readiness.
+/// now: the session account-choice fill reads this (spec 02 §4.4.1). With a
+/// gateway configured for this home, the gateway answers the roster and every
+/// account's credential status, and no local key file or store is read.
+///
+/// # Errors
+/// The roster or the gateway's status could not be read.
 pub(crate) async fn ready_accounts(
     state: &std::path::Path,
     paths: &PlakPaths,
-) -> Vec<crate::account_choice::ReadyAccount> {
-    let Ok(reader) = reader_at(state, Some(paths)) else {
-        return Vec::new();
-    };
-    let Ok(roster) = roster(&reader, paths, None).await else {
-        return Vec::new();
-    };
+    custody: &crate::gateway::HostCustody,
+) -> Result<Vec<crate::account_choice::ReadyAccount>, String> {
+    let unreadable = |_| "the account roster could not be read".to_owned();
+    let reader = reader_at(state, custody).map_err(unreadable)?;
+    let roster = roster(&reader, paths, None).await.map_err(unreadable)?;
+    if let Some(link) = custody.admin() {
+        return gateway_ready_accounts(link, &roster.accounts);
+    }
     let mut rows = Vec::with_capacity(roster.accounts.len());
     for account in roster.accounts {
         let vertical = account.vertical();
@@ -244,7 +249,32 @@ pub(crate) async fn ready_accounts(
             label: None,
         });
     }
-    rows
+    Ok(rows)
+}
+
+/// Readiness as the gateway that holds this home's credentials reports it.
+fn gateway_ready_accounts(
+    link: &crate::gateway::AdminLink,
+    accounts: &[AccountRef],
+) -> Result<Vec<crate::account_choice::ReadyAccount>, String> {
+    use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
+    use plakous::gateway::protocol::facts::CredentialStatus;
+    let accounts = accounts
+        .iter()
+        .map(|account| plakous::gateway::protocol::GatewayAccount::new(account.as_str()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    match link.call(&AdminRequest::Status { accounts })? {
+        AdminResponse::Status { rows } => Ok(rows
+            .into_iter()
+            .map(|row| crate::account_choice::ReadyAccount {
+                account: row.facts.account.as_str().to_owned(),
+                ready: row.facts.credential.status == CredentialStatus::Ready,
+                label: None,
+            })
+            .collect()),
+        _ => Err("the gateway answered the account status read unexpectedly".to_owned()),
+    }
 }
 
 pub(super) async fn status(

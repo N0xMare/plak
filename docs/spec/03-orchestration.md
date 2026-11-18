@@ -426,17 +426,21 @@ resolve failure is fail-closed (`model_not_admitted` or binder recovery),
 never a fallback to the caller. A non-empty `spawns` decides only whether a
 node may be a parent; it is independent of the node's tier.
 
-The card's account is a kind. At spawn the binder resolves it through the
-tree's current root line head, read from the product store when the spawn
-binds (chapter 02 §4.4.1): the root kind is that head's own account and any
-other kind is the head's stored choice. A kind with no stored choice takes the
-fill rule in best-effort mode (the kind's Ready bare default slot, else its
-single Ready account); when that fills nothing the spawn is refused, naming
-the kind. A store read failure refuses the spawn; nothing falls back to the
-card's bare kind or the caller's account. The child's own product session
-freezes the resolved full reference, so its reopen and follow-ups keep it,
-and a choice made later moves only later spawns. The tree names no account
-for the session's choice; a card stays the kind its template named.
+The card's account is a kind. At spawn, before product admission, the tree
+resolves it through the product (`resolve_account`) against the tree's
+current root line head, read from the product store at that moment (chapter
+02 §4.4.1): the root kind is that head's own account and any other kind is the
+head's stored choice. A kind with no stored choice takes the fill rule in
+best-effort mode (the kind's Ready bare default slot, else its single Ready
+account); when that fills nothing the spawn is refused, naming the kind. A
+store read failure refuses the spawn; nothing falls back to the card's bare
+kind or the caller's account. Admission then checks the resolved account, and
+the spawned node freezes that full reference before anything binds it, so
+the child's session, its reopen, follow-ups, mail Start and recovery all bind
+it; a choice made later moves only later spawns. A quota-failed child's
+retry or follow-up keeps its frozen reference; a new account for that work is
+a new spawn. The epoch's cards keep the kind their templates named, and the
+tree records no session-level choice.
 
 Native child materialization does not independently probe the catalog before
 provider resolution. Source-backed enrollment chooses only the tool-presentation
@@ -1517,7 +1521,7 @@ comparison. Requested tier remains outside this identity; the existing receipt
 reports the effective tier. A missing admitted identity is recovery-required,
 never permission to reconstruct it from current state or spawn again.
 
-The tree store is schema **11**, retaining this admitted identity, the nested `spawns` roster, and grant bounds up to the 64-child and 65-node ceilings. The tree names no account. Another schema lives
+The tree store is schema **11**, retaining this admitted identity, the nested `spawns` roster, and grant bounds up to the 64-child and 65-node ceilings. The tree records no session-level account choice; a spawned node holds the full account its card's kind resolved to (§2.1). Another schema lives
 in another build's state directory (chapter 02 §2.5) and is never read; no
 migration or guessed identity is performed.
 
@@ -3454,7 +3458,7 @@ knowledge. Sharing a build cache or priming a copy is the user's hook to write.
 ## 14. Persistence, reopen, and recovery
 
 Product state lives in `product.sqlite3` at **schema 39**: intents and
-feed-derived views (chapter 02 §2.6), including `sessions.account_choices` for non-root kinds. Its `submissions` bind queued commands to
+feed-derived views (chapter 02 §2.6), including `sessions.account_choices` for non-root kinds, a rebind request's optional filled choices, and the `last_root_turn` view a continue reads (chapter 02 §4.4.1). Its `submissions` bind queued commands to
 their exact bytes; the result-mail batch a root command carries is a tree
 intent. The tree lives separately in `subagents.sqlite3` at **schema 11**, owned
 by `plakous-recursive-subagents-store`. Its thirteen domain tables and its custody

@@ -221,7 +221,6 @@ pub(crate) enum AgentSession {
     Resume(String),
 }
 
-#[allow(clippy::fn_params_excessive_bools, reason = "clap-shaped agent verb")]
 /// Spec 02 §4.4.1: the fill picks every used kind's account before the root's
 /// route, wire and probe resolve. A bare `--account` (or `--provider`) is the
 /// root's own choice; `--account <kind>=<ref>` names the others.
@@ -258,7 +257,7 @@ fn fill_agent_accounts(
         &crate::account_choice::profile_kinds(cfg),
         root_kind.as_deref(),
         explicit,
-        &crate::account_choice::ready_catalog(paths),
+        &crate::account_choice::ready_catalog(paths).map_err(CliFailure::new)?,
         crate::account_choice::FillMode::Require,
     )
     .map_err(|refusal| CliFailure::new(crate::account_choice::refusal_text(&refusal)))?;
@@ -281,6 +280,7 @@ fn fill_agent_accounts(
     Ok((account, platform, wire, filled.choices))
 }
 
+#[allow(clippy::fn_params_excessive_bools, reason = "clap-shaped agent verb")]
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,

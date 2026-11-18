@@ -730,7 +730,9 @@ fn a_named_root_account_runs_its_kind_only_root_template() {
         ProductConfig::parse("[mcp_servers.linear]\ntransport = \"stdio\"\ncommand = \"lin\"\n")
             .unwrap();
     let mut lead = template("codex", "gpt");
-    lead.tools = TemplateToolSelection::parse(["web_search", "mcp:linear"]).unwrap();
+    lead.tools =
+        plakous_hosted::tool_plan::TemplateToolSelection::parse(["web_search", "mcp:linear"])
+            .unwrap();
     config.templates.insert("lead".to_owned(), lead);
     config.root_agent = Some("lead".to_owned());
     let bare = roster_input_from_config(&config, "codex", "gpt", None);

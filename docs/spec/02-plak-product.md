@@ -3951,7 +3951,7 @@ closes. This does not change the v1 command or event encoding.
 | `credential_wait` | nullable `account` — a native login wait starts for this account, or clears when null; carries the originating turn-scoped command `id` when proven (idle workflow waits omit it) |
 | `queue` | `drain` ∈ `live_auto_drain` \| `restored_paused`, and `items[]` of `{id, revision, text, rejected}` |
 | `turn` | terminal usage: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cached_input_tokens`, `cache_write_tokens` |
-| `turn_lifecycle` | `turn_id`, `phase` ∈ `admitted` \| `completed` \| `refused` \| `cancelled` \| `failed` \| `recovery_required` \| `unresolved`, and where known `model_error_kind`, `http_status` |
+| `turn_lifecycle` | `turn_id`, `phase` ∈ `admitted` \| `completed` \| `refused` \| `cancelled` \| `failed` \| `recovery_required` \| `unresolved`, and where known `model_error_kind`, `http_status`, and on a usage-limit failure `usage_limit {kind, account, resets_at?, alternatives}` (§4.4.1) |
 | `recovered` | `operations[]`, and when the reopen closed an unfinished turn its `claim` ∈ `running_tool` \| `model_request` \| `compaction_not_applied` \| `nothing_started` \| `tool_round_completed` and `cause` ∈ `process_lost` \| `interrupted`; correlated with the `prompt` or `recover` that triggered it, or emitted on its own when the host recovered a fenced turn in place at idle, or after `ready` when the attach itself recovered a crash |
 | `tree` | `tree_id`, `revision`, `state`, `restored_paused` (always `false`; an exact reopened tree is live), `nodes[]` |
 | `error` | `message`, and `code` for a typed refusal a client keys on (`tree_hosted_elsewhere`) |
@@ -5205,8 +5205,9 @@ Protocol 12 adds the session's account choice. A template names a provider
 kind (chapter 03 §1); the session holds the full account reference it uses for
 each kind. The root kind's account is the root line head's bound account and
 is never stored separately; every other kind the session's profile uses is an
-entry of `sessions.account_choices` (product schema 39, §2.6). The tree names
-no account.
+entry of `sessions.account_choices` (product schema 39, §2.6). The tree records
+no session-level choice; a spawned node freezes the full account its card's
+kind resolved to (chapter 03 §2.1).
 
 **Fill.** Host `new_session`, `ApplyProfile` (fork, switch, bind) and
 `plakd run` / `plakd agent` fill every kind the profile's root and working-set
@@ -5234,8 +5235,17 @@ kind with readiness, and allowance is the existing accounts-usage read.
 
 **Import and carry** keep the imported binding's account for the root kind
 and fill the profile's other kinds by steps 2 and 3 without refusing; they
-never wait on a picker. A kind left unset fails closed at spawn (chapter 03
-§2.1).
+never wait on a picker. A kind left unset takes the same best-effort fill when
+a spawn needs it and is refused when that fills nothing (chapter 03 §2.1).
+`plakd run` and `plakd agent` with a bare `--account` likewise fill the other
+kinds without refusing: their explicit `--account <kind>=<ref>` choices are
+still admitted strictly, and a spawn of an unfilled kind fails closed. A
+`ProfileRow` carries `account_kinds`, the kinds its root and cards name, so a
+picker knows which kinds a profile needs. `ApplyProfile` keeps the session's
+current account for a kind when that account is still Ready (the line head's
+for the root kind, the stored choice for the others) before falling back to
+steps 2 to 4, and a profile whose binding is unchanged but whose filled
+choices differ still rebinds.
 
 **`ChooseAccount {kind, account, continue_failed}`** validates the choice as
 step 1 does. A non-root kind is saved on the attached record by the session's
@@ -5252,7 +5262,9 @@ With `continue_failed`, the line head's last root turn, read by id from the
 projected lifecycle facts, must have failed (`no_failed_turn` otherwise). The
 rebind's workflow operation id is `plak:rebind:account:<digest>` and the
 root-start's queue item id is a UUID, both derived from the failed turn id and
-the target account, so its command id is `plak.queue.<item>.1`. Once the
+the target account and the product session id of the line head the continue
+was issued on (so a fork that inherited the failed turn continues under its
+own ids), and its command id is `plak.queue.<item>.1`. Once the
 rebind publishes, the host queues that root-start on the attached line head
 and drives it as a typed prompt: queue item, `save_submission`, ledger
 dispatch. Its text is the failed turn's exact canonical prompt segment when
@@ -5269,8 +5281,10 @@ Recovery follows §4.2. A rebind request without a fact is withdrawn with one
 notice and never resubmitted. A published continue whose root-start was never
 queued (the line head is its successor, its last root turn is still the failed
 one, and neither a queue item nor a delivery carries the derived command)
-reports one warning on each open with remedy `continue_on_account {account,
-command_id}`; reopen never submits it. A queued or written root-start is
+reports one warning on each open with the remedy `{"code":
+"continue_on_account", "continuation": {"account", "command_id"}}`; reopen
+never submits it. A continue whose rebind published but whose root-start could
+not be queued answers the choice (the root moved) with that same warning. A queued or written root-start is
 restored paused like any other queued prompt.
 
 **Wire.** `TurnLifecycle.usage_limit {kind, account, resets_at?,
@@ -5282,9 +5296,12 @@ serves a session (open, attach and every line-head move) and after each
 choice. Refusals of `ChooseAccount` and of `ApplyProfile`'s fill are
 `AccountChoiceRefused` with `account_choice_required`,
 `account_choice_invalid`, `root_busy`, `no_failed_turn`, `already_continued`
-or `failed {reason}`. The product DTOs name the kind as a `Vertical`; the
-neutral envelope's `new_session` accounts and refusals carry it as the
-provider kind id. `AccountStatus.custody {mode, gateway?}` is `service` with
+or `failed {reason}` (an unreadable readiness catalog is `failed`, never an
+empty catalog). In the product DTOs (`ApplyProfile.accounts`,
+`ChooseAccount.kind`, `AccountChoices`) a kind is the `Vertical` enum; in the
+neutral envelope (`NewSession.accounts`, `KindAccounts`, `UsageLimitNotice`,
+`account_choice_required` and `account_choice_invalid`) it is a string with
+the same spellings. `AccountStatus.custody {mode, gateway?}` is `service` with
 the gateway's address when a configured gateway or the local gateway service
 holds the credentials, and is omitted for in-process custody.
 

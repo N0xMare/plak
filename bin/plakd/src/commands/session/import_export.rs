@@ -151,7 +151,8 @@ fn fill_imported_accounts(
     crate::account_choice::fill_imported(
         record,
         &crate::account_choice::profile_kinds(&config),
-        &crate::account_choice::ready_catalog(paths),
+        // Best effort: an unreadable catalog leaves the kinds for spawn to fill.
+        &crate::account_choice::ready_catalog(paths).unwrap_or_default(),
     );
 }
 

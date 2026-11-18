@@ -271,7 +271,10 @@ async fn rebind_root<P: plakous_host_protocol::ProtocolExtension>(
             && config.session.effort.as_deref() == effort_label.as_deref()
             && config.session.composition == composition
             && config.session.target_selection == target_selection;
-        if same_binding && mode.cards_active(config)? {
+        let same_choices = mode
+            .account_choices()
+            .is_none_or(|choices| choices == config.session.account_choices);
+        if same_binding && same_choices && mode.cards_active(config)? {
             return Ok(Rebound::Unchanged);
         }
         if let Some(refusal) = frozen_tools_rebind_refusal(config, &account, &target_selection) {

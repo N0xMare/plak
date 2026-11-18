@@ -71,7 +71,7 @@ pub const TEMPLATE_FIELD_DOCS: &[TemplateFieldDoc] = &[
         key: "fast_mode",
         value_type: "bool",
         default: "false",
-        constraint: "true is only valid on the codex vertical, including named slots",
+        constraint: "true is only valid on the codex kind",
         meaning: "Fast mode: request the provider's faster processing lane for this Codex subscription template. It is not a model choice and does not grant additional tools. A child runs on its own template's setting, never its parent's.",
         example: "true",
     },

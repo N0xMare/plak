@@ -45,35 +45,34 @@ pub struct FilledChoices {
 }
 
 /// Every known account with its readiness, as the gateway or this home's
-/// stores report it. Runs off the caller's thread, so it is safe inside an
-/// async runtime.
-pub fn ready_catalog(paths: &PlakPaths) -> Vec<ReadyAccount> {
+/// stores report it. The read runs on its own thread, so it is safe from
+/// inside the host's runtime.
+///
+/// # Errors
+/// The roster or a status could not be read; nothing is guessed.
+pub fn ready_catalog(paths: &PlakPaths) -> Result<Vec<ReadyAccount>, String> {
     if let Some(accounts) = crate::test_hooks::ready_accounts() {
-        return accounts
+        return Ok(accounts
             .into_iter()
             .map(|account| ReadyAccount {
                 account,
                 ready: true,
                 label: None,
             })
-            .collect();
+            .collect());
     }
-    let Ok(state) = crate::home::paths::application_state_home() else {
-        return Vec::new();
-    };
+    let state = crate::home::paths::application_state_home()?;
     std::thread::scope(|scope| {
         scope
             .spawn(|| {
-                let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
-                else {
-                    return Vec::new();
-                };
-                runtime.block_on(crate::host::ready_accounts(&state, paths))
+                    .map_err(|_| "the account readiness read could not start".to_owned())?
+                    .block_on(crate::host::ready_accounts(&state, paths))
             })
             .join()
-            .unwrap_or_default()
+            .unwrap_or_else(|_| Err("the account readiness read failed".to_owned()))
     })
 }
 
@@ -346,9 +345,11 @@ pub fn split_account_flags(
     Ok((bare, choices))
 }
 
-/// The CLI fill for a session whose root account is already chosen: every
-/// other kind the profile uses, from `--account <kind>=<ref>` and the fill
-/// rule.
+/// The CLI fill for a session whose root account is already chosen: the
+/// explicit `--account <kind>=<ref>` choices are admitted strictly, and every
+/// other kind the profile names is filled without refusing, so a run never
+/// needs a choice for a kind it may not spawn (a spawn of an unfilled kind
+/// fails closed).
 ///
 /// # Errors
 /// The typed refusal, as operator text.
@@ -368,15 +369,10 @@ pub fn fill_cli(
     if explicit.is_empty() && kinds.is_empty() {
         return Ok(BTreeMap::new());
     }
-    fill(
-        &kinds,
-        None,
-        explicit,
-        &ready_catalog(paths),
-        FillMode::Require,
-    )
-    .map(|filled| filled.choices)
-    .map_err(|refusal| crate::CliFailure::new(refusal_text(&refusal)))
+    let catalog = ready_catalog(paths).map_err(crate::CliFailure::new)?;
+    fill(&kinds, None, explicit, &catalog, FillMode::BestEffort)
+        .map(|filled| filled.choices)
+        .map_err(|refusal| crate::CliFailure::new(refusal_text(&refusal)))
 }
 
 /// Operator text for a fill refusal.

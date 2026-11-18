@@ -121,6 +121,21 @@ pub trait ChildController: Send + Sync {
         Box::pin(async { Ok(()) })
     }
 
+    /// The full account a card's account resolves to for this spawn: a card
+    /// names a provider kind, the product resolves it through the session's
+    /// choice. Called before [`Self::admit_binding`], which then admits the
+    /// resolved account; the spawned node freezes it, so every later bind of
+    /// that node (reopen, follow-up, mail, recovery) reuses it. `None` keeps
+    /// the card's account. The default resolves nothing.
+    ///
+    /// # Errors
+    ///
+    /// Refuses when the choice cannot be read or nothing fills the kind.
+    fn resolve_account(&self, card_account: &str) -> Result<Option<String>, TopologyError> {
+        let _ = card_account;
+        Ok(None)
+    }
+
     /// Binds a spawned child to a real session **and starts its assignment
     /// turn**. Awaited with the tree mutex released; the spawn records the
     /// answer afterwards.

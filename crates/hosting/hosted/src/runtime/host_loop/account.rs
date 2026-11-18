@@ -18,8 +18,10 @@ pub const CONTINUATION_PROMPT: &str = "Continue the previous request from where 
 const CONTINUE_OPERATION: &str = "plak:rebind:account:";
 
 /// The exactly-once identities of continuing one failed root turn on one
-/// account: the rebind's workflow operation and the root-start's queue item,
-/// whose command id is `plak.queue.<item>.1`.
+/// account from one line head: the rebind's workflow operation and the
+/// root-start's queue item, whose command id is `plak.queue.<item>.1`. The
+/// line head's product session is part of them, so a fork that inherited the
+/// same failed turn continues under ids of its own.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ContinueIds {
     pub(crate) operation_id: String,
@@ -27,8 +29,9 @@ pub(crate) struct ContinueIds {
 }
 
 impl ContinueIds {
-    pub(crate) fn of(turn_id: &str, account: &str) -> Self {
-        let digest = crate::sessions::digest_parts(&["plak:account-continue", turn_id, account]);
+    pub(crate) fn of(line_head: &str, turn_id: &str, account: &str) -> Self {
+        let digest =
+            crate::sessions::digest_parts(&["plak:account-continue", line_head, turn_id, account]);
         let mut bytes = [0_u8; 16];
         for (index, byte) in bytes.iter_mut().enumerate() {
             *byte = u8::from_str_radix(&digest[index * 2..index * 2 + 2], 16).unwrap_or(0);
@@ -67,7 +70,11 @@ pub(crate) fn unsent_continue_notice(
     let operation = session.source_workflow_operation_id.as_deref()?;
     let account = session.account.as_deref()?;
     let turn = views.state.last_root_turn.as_ref()?;
-    let ids = ContinueIds::of(&turn.turn_id, account);
+    let ids = ContinueIds::of(
+        session.source_product_session_id.as_deref()?,
+        &turn.turn_id,
+        account,
+    );
     if operation != ids.operation_id || turn.outcome != Some(LastRootOutcome::Failed) {
         return None;
     }
@@ -80,22 +87,26 @@ pub(crate) fn unsent_continue_notice(
     {
         return None;
     }
-    Some(
-        TranscriptRow::warning(
-            NoticeScope::Recovery,
-            format!(
-                "the session continued on {account}, but its continue prompt was not submitted; \
-                 nothing was resent"
-            ),
-        )
-        .with_remedy(
-            plakous_host_protocol::notice_remedy::NoticeRemedy::ContinueOnAccount {
-                continuation: Box::new(plakous_host_protocol::notice_remedy::AccountContinuation {
-                    account: account.to_owned(),
-                    command_id,
-                }),
-            },
+    Some(unsent_notice(account, command_id))
+}
+
+/// The warning for a continue whose rebind published and whose prompt was
+/// not submitted, keyed by the continue's command id.
+fn unsent_notice(account: &str, command_id: String) -> TranscriptRow {
+    TranscriptRow::warning(
+        NoticeScope::Recovery,
+        format!(
+            "the session continued on {account}, but its continue prompt was not submitted; \
+             nothing was resent"
         ),
+    )
+    .with_remedy(
+        plakous_host_protocol::notice_remedy::NoticeRemedy::ContinueOnAccount {
+            continuation: Box::new(plakous_host_protocol::notice_remedy::AccountContinuation {
+                account: account.to_owned(),
+                command_id,
+            }),
+        },
     )
 }
 
@@ -192,7 +203,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     ) -> Result<Option<Selected>, AccountChoiceRefusal> {
         let resubmit = if continue_failed {
             let turn = self.failed_root_turn().await?;
-            let ids = ContinueIds::of(&turn.turn_id, account);
+            let session = &self.role.config.session;
+            // A continue whose rebind already published made this line head:
+            // it keeps the ids its source derived.
+            let ids = session
+                .source_product_session_id
+                .as_deref()
+                .map(|source| ContinueIds::of(source, &turn.turn_id, account))
+                .filter(|ids| {
+                    session.source_workflow_operation_id.as_deref()
+                        == Some(ids.operation_id.as_str())
+                })
+                .unwrap_or_else(|| ContinueIds::of(&session.id, &turn.turn_id, account));
             if self
                 .role
                 .config
@@ -228,7 +250,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let Some((ids, text)) = resubmit else {
             return Ok(None);
         };
-        self.submit_continue(&ids, text).map(Some)
+        // The rebind holds: a continue that could not be queued is reported
+        // with its one-click retry, and the choice still answers Chosen.
+        match self.submit_continue(&ids, text) {
+            Ok(selected) => Ok(Some(selected)),
+            Err(refusal) => {
+                let _ = self.role.events.notice(TranscriptRow::error(
+                    NoticeScope::Settings,
+                    refusal_note(&refusal),
+                ));
+                let _ = self
+                    .role
+                    .events
+                    .notice(unsent_notice(account, ids.command_id()));
+                Ok(None)
+            }
+        }
     }
 
     async fn rebind_account(

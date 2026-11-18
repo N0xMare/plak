@@ -1012,7 +1012,8 @@ fn creation_fill(
         &kinds,
         root_kind.as_deref(),
         &explicit,
-        &crate::account_choice::ready_catalog(context),
+        &crate::account_choice::ready_catalog(context)
+            .map_err(|detail| RequestRefusal::SessionUnavailable { detail })?,
         crate::account_choice::FillMode::Require,
     )
 }

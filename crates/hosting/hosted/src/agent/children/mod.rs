@@ -62,7 +62,7 @@ pub(super) use bind::{
 pub(super) use bind::{
     child_plan_state_authority, child_session_workspace_root, create_spawned_child_session,
     frozen_child_tool_selection, frozen_openrouter_child_pin, openrouter_child_runtime_binding,
-    openrouter_frozen_pin,
+    openrouter_frozen_pin, spawn_account,
 };
 pub(super) use continuation::continue_after_loss;
 pub(crate) use continuation::{LossResume, holds_after_loss, operator_resume_after_loss};

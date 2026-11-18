@@ -215,8 +215,9 @@ impl ProductSessions {
             .transpose()?;
         // Every known account per kind, named ones included, with the
         // readiness the creation fill reads.
-        let accounts =
-            crate::account_choice::kind_accounts(&crate::account_choice::ready_catalog(&home));
+        let accounts = crate::account_choice::kind_accounts(
+            &crate::account_choice::ready_catalog(&home).map_err(unavailable)?,
+        );
         Ok(wire::SessionOptions {
             runners,
             models: shared.models,

@@ -390,7 +390,7 @@ impl plakous_hosted::agent::RosterSource for ProductRosterSource {
     }
 
     fn fill_spawn_account(&self, kind: &str) -> Option<String> {
-        let catalog = crate::account_choice::ready_catalog(self.paths.as_ref()?);
+        let catalog = crate::account_choice::ready_catalog(self.paths.as_ref()?).ok()?;
         crate::account_choice::automatic(kind, &catalog)
     }
 

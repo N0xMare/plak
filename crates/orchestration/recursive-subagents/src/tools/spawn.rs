@@ -575,6 +575,7 @@ impl TopologyTool {
         // binder admission. Product binders re-lock the hub snapshot, so the
         // lock is released before `admit_spawn` / `admit_binding`; holding it
         // across those calls deadlocks live spawn.
+        let mut resolved_account = None;
         if replay.is_none()
             && let Some(binder) = self.binder()
         {
@@ -625,10 +626,18 @@ impl TopologyTool {
             if let Err(error) = binder.admit_spawn(&caller, &request) {
                 return Self::topology_failure(&error);
             }
-            if let Some(binding) = binding
-                && let Err(error) = binder.admit_binding(&request.template, &binding).await
-            {
-                return Self::topology_failure(&error);
+            if let Some(mut binding) = binding {
+                match binder.resolve_account(&binding.account) {
+                    Ok(Some(account)) => {
+                        resolved_account = Some(account.clone());
+                        binding.account = account;
+                    }
+                    Ok(None) => {}
+                    Err(error) => return Self::topology_failure(&error),
+                }
+                if let Err(error) = binder.admit_binding(&request.template, &binding).await {
+                    return Self::topology_failure(&error);
+                }
             }
         }
         let (output, effects) = if let Some(output) = replay {
@@ -665,6 +674,28 @@ impl TopologyTool {
                 caller.clone(),
                 request.template.clone(),
             );
+            let driver = self.driver.clone();
+            let frozen = self
+                .driver
+                .write({
+                    let agent_id = agent_id.clone();
+                    move |tree| -> Result<(), TopologyError> {
+                        // Before anything binds the node: every later bind
+                        // reads the account the spawn resolved and admitted.
+                        let Some(account) = resolved_account else {
+                            return Ok(());
+                        };
+                        if tree.freeze_node_account(&agent_id, &account)? {
+                            driver.save_guarded(tree)?;
+                        }
+                        Ok(())
+                    }
+                })
+                .await
+                .map_err(|_| poisoned())?;
+            if let Err(error) = frozen {
+                return self.fail_closed_session(&agent_id, error.message).await;
+            }
             self.driver
                 .write(move |tree| {
                     if let Some(observer) = observer.as_ref() {

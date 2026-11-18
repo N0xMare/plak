@@ -17,7 +17,7 @@ model = "gpt-6.2-astra"
 effort = "medium"
 
 # Fast mode: request the provider's faster processing lane for this Codex subscription template. It is not a model choice and does not grant additional tools. A child runs on its own template's setting, never its parent's.
-# type: bool · default: false · true is only valid on the codex vertical, including named slots
+# type: bool · default: false · true is only valid on the codex kind
 fast_mode = false
 
 # How the model composes the product tools: direct calls one at a time, or a programmatic tool calling (PTC) cell. native-ptc is the provider's own PTC system (today only Codex Code Mode is enrolled); js-ptc and py-ptc are harness PTC on every account. plakous-default uses the versioned Plakous-recommended tool presentation for this provider/model; the resolved presentation is pinned for the session and does not select or substitute a model.
