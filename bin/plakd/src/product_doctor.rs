@@ -497,8 +497,8 @@ pub fn probe_oauth_credential(
     }
 }
 
-/// One account's credential verdict as a configured gateway reports it. The
-/// record and its refresh history live with the gateway.
+/// One account's credential verdict from a configured gateway, which holds
+/// the record and its refresh history.
 #[must_use]
 pub fn probe_gateway_credential(
     provider: &'static str,
@@ -893,8 +893,7 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
     checks.push(storage_space::check(input.storage_admission));
     checks.push(config_check(&input.paths.config, input.config));
     if !input.forward_config_keys.is_empty() {
-        // `[gateway]` is newer than 0.0.4 itself: a 0.0.4 build without the
-        // gateway refuses it too.
+        // A 0.0.4 build without the gateway refuses `[gateway]` too.
         let gateway = input
             .forward_config_keys
             .iter()

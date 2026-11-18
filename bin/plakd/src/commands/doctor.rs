@@ -186,7 +186,7 @@ pub(crate) fn run_doctor(
             (Ok(custody), None) => custody
                 .admin()
                 .ok_or_else(|| "credential custody is unavailable".to_owned())
-                .and_then(|link| gateway_status_row(link, name)),
+                .and_then(|link| link.credential_status(name)),
             (Ok(_), Some(Ok(accounts))) => name
                 .parse()
                 .map_err(
@@ -405,38 +405,4 @@ fn doctor_spawn_templates(
     } else {
         product_doctor::SpawnTemplatesStatus::NotReady { templates }
     }
-}
-
-/// One subscription account's credential posture from the gateway's admin
-/// status, in the shape the offline read has.
-fn gateway_status_row(
-    link: &crate::gateway::AdminLink,
-    account: &str,
-) -> Result<presentation::CliStatus, String> {
-    use plakous::gateway::protocol::facts::{Consent, CredentialStatus};
-    use presentation::{CompatibilityState, CredentialState};
-    let facts = link
-        .status(account)
-        .map_err(|error| format!("gateway: {error}"))?
-        .ok_or_else(|| format!("gateway: {account} is not a gateway account"))?;
-    let credential = match facts.credential.status {
-        CredentialStatus::SignedOut => CredentialState::SignedOut,
-        CredentialStatus::Ready => CredentialState::Ready,
-        CredentialStatus::RefreshRequired => CredentialState::RefreshRequired,
-        CredentialStatus::Refreshing => CredentialState::Refreshing,
-        CredentialStatus::Quarantined => CredentialState::Quarantined,
-        CredentialStatus::LoginRequired => CredentialState::LoginRequired,
-        CredentialStatus::ProfileChanged => CredentialState::ProfileChanged,
-        CredentialStatus::WrittenByNewerBuild => CredentialState::WrittenByNewerBuild,
-        CredentialStatus::Revoked => CredentialState::Revoked,
-    };
-    let compatibility = match facts.profile.map(|profile| profile.consent) {
-        None | Some(Consent::Current) => CompatibilityState::Current,
-        Some(Consent::Required) => CompatibilityState::Required,
-        Some(Consent::Inactive) => CompatibilityState::Inactive,
-    };
-    Ok(presentation::CliStatus {
-        compatibility,
-        credential,
-    })
 }

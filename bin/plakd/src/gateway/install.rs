@@ -1,20 +1,35 @@
 //! `plakd gateway install` writes a user service definition and does not start it.
-//! The unit runs whatever executable is installing it, with the installing
-//! process's `PLAK_HOME` and `XDG_STATE_HOME`, so the service resolves the
-//! homes the operator's host does; the cutover runbook pins the executable to
-//! an immutable snapshot before the service is enabled.
+//! The unit runs whatever executable is installing it, with `PLAK_HOME` and
+//! `XDG_STATE_HOME` set to the home and state home the installing process
+//! resolved, so the service resolves the same bytes the operator's host does;
+//! the cutover runbook pins the executable to an immutable snapshot before the
+//! service is enabled.
 
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-pub(crate) fn install(executable: &Path, dry_run: bool) -> Result<PathBuf, String> {
+pub(crate) fn install(
+    executable: &Path,
+    home: &Path,
+    state_home: &Path,
+    dry_run: bool,
+) -> Result<PathBuf, String> {
     let executable = executable
         .to_str()
         .filter(|text| !text.is_empty())
         .ok_or_else(|| "the gateway executable path is not UTF-8".to_owned())?;
+    let text = |path: &Path, name: &str| {
+        path.to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| format!("the {name} path is not UTF-8"))
+    };
+    let homes = [
+        ("PLAK_HOME", text(home, "home")?),
+        ("XDG_STATE_HOME", text(state_home, "state home")?),
+    ];
     if cfg!(target_os = "linux") {
-        install_systemd(executable, dry_run)
+        install_systemd(executable, &homes, dry_run)
     } else if cfg!(target_os = "macos") {
         install_launchd(executable, dry_run)
     } else {
@@ -41,9 +56,13 @@ fn remove_definition(path: &Path, absent: &str) -> Result<String, String> {
     }
 }
 
-fn install_systemd(executable: &str, dry_run: bool) -> Result<PathBuf, String> {
+fn install_systemd(
+    executable: &str,
+    homes: &[(&str, String)],
+    dry_run: bool,
+) -> Result<PathBuf, String> {
     let path = systemd_path()?;
-    let unit = systemd_unit(executable, &crate::environment::inherited_homes());
+    let unit = systemd_unit(executable, homes);
     if dry_run {
         print_dry(&path, &unit)?;
         return Ok(path);

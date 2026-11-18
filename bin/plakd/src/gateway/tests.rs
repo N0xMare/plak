@@ -1116,7 +1116,7 @@ fn model_commands_run_in_process_under_a_configured_gateway_without_the_store() 
             services.custody().unwrap(),
         )
         .unwrap();
-        assert!(app.custody().gateway().is_some());
+        assert!(app.custody.gateway().is_some());
     }
     assert!(
         !state.join("plak/subscriptions").exists(),

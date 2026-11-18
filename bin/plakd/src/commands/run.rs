@@ -535,7 +535,7 @@ impl PlakousApplication {
                     &cwd,
                     &plakous_host_protocol::views::ReadyCatalog::default(),
                     None,
-                    self.custody(),
+                    &self.custody,
                 )
             })?;
             return run_config(

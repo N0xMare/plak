@@ -6222,8 +6222,9 @@ buffered dispatcher cannot stream a relay, so a relay it decodes is refused
 with `not-observed`.
 
 `gateway install` writes a Linux user unit or macOS LaunchAgent and does not
-start it. The unit runs the executable that wrote it, with `UMask=0077`, the
-installing process's `PLAK_HOME` and `XDG_STATE_HOME` when set, the optional
+start it. The unit runs the executable that wrote it, with `UMask=0077`,
+`PLAK_HOME` and `XDG_STATE_HOME` set to the home and state home the installing
+process resolved, the optional
 `EnvironmentFile=-%h/.config/plak/gateway.env`, `Restart=on-failure`,
 `RestartSec=2` and `TimeoutStopSec=45`, longer than the drain.
 

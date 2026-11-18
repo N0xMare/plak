@@ -34,8 +34,8 @@ time. `plakd gateway status` shows how many audit lines failed to append.
 ## Install
 
 `plakd gateway install` writes `~/.config/systemd/user/plak-gateway.service`
-running the executable that wrote it, with `UMask=0077`, the `PLAK_HOME` and
-`XDG_STATE_HOME` of the shell you ran it from, `EnvironmentFile=-%h/.config/plak/gateway.env`
+running the executable that wrote it, with `UMask=0077`, `PLAK_HOME` and
+`XDG_STATE_HOME` set to the home and state home the installing shell resolves, `EnvironmentFile=-%h/.config/plak/gateway.env`
 for API-key variables, `Restart=on-failure`, `RestartSec=2` and a stop timeout
 longer than the drain. Point `ExecStart` at an immutable build before enabling
 it.

@@ -23,7 +23,11 @@ pub(crate) fn execute(
         GatewayCommand::Serve => super::serve(home),
         GatewayCommand::Install { dry_run } => {
             let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-            let path = super::install(&executable, dry_run)?;
+            let state = services
+                .home()
+                .state()
+                .map_err(|failure| failure.message().to_owned())?;
+            let path = super::install(&executable, home.home(), state, dry_run)?;
             writeln!(stdout, "{}", path.display()).map_err(|error| error.to_string())
         }
         GatewayCommand::Uninstall => {

@@ -394,7 +394,7 @@ pub struct PlakousApplication {
     credential_telemetry: Option<crate::telemetry_sink::CredentialTelemetryGuard>,
     /// Where this process's credentials live; the subscriptions above are
     /// already under it.
-    custody: crate::gateway::HostCustody,
+    pub(crate) custody: crate::gateway::HostCustody,
 }
 
 impl PlakousApplication {
@@ -572,11 +572,6 @@ impl PlakousApplication {
             }
             Err(error) => Err(self.account_failure(error, account)),
         }
-    }
-
-    /// The credential custody this service was built under.
-    pub(crate) const fn custody(&self) -> &crate::gateway::HostCustody {
-        &self.custody
     }
 
     /// The product home this service resolved at construction.

@@ -135,8 +135,8 @@ for one version bump, without native protocol compatibility.
   owner-only, and a unix gateway gets a key only from an explicit
   `gateway.key_file`. Failed audit appends are counted in `gateway status`;
   `audit --since` takes an RFC 3339 timestamp. The service replaces only its
-  own stale socket. `gateway install` writes `UMask=0077`, the installing
-  `PLAK_HOME`/`XDG_STATE_HOME`, `EnvironmentFile=-%h/.config/plak/gateway.env`,
+  own stale socket. `gateway install` writes `UMask=0077`, the installing process's resolved
+  home and state home as `PLAK_HOME`/`XDG_STATE_HOME`, `EnvironmentFile=-%h/.config/plak/gateway.env`,
   `RestartSec` and `TimeoutStopSec=45`. Remote `key status` prints
   fingerprints.
 

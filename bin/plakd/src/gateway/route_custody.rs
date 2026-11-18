@@ -48,6 +48,37 @@ impl AdminLink {
         self.key.as_deref()
     }
 
+    /// One subscription account's credential posture from the gateway's
+    /// admin status, in the shape an offline read has.
+    pub(crate) fn credential_status(
+        &self,
+        account: &str,
+    ) -> Result<crate::presentation::CliStatus, String> {
+        use crate::presentation::{CompatibilityState, CredentialState};
+        use plakous::gateway::protocol::facts::CredentialStatus;
+        let facts = self
+            .status(account)
+            .map_err(|error| format!("gateway: {error}"))?
+            .ok_or_else(|| format!("gateway: {account} is not a gateway account"))?;
+        let credential = match facts.credential.status {
+            CredentialStatus::SignedOut => CredentialState::SignedOut,
+            CredentialStatus::Ready => CredentialState::Ready,
+            CredentialStatus::RefreshRequired => CredentialState::RefreshRequired,
+            CredentialStatus::Refreshing => CredentialState::Refreshing,
+            CredentialStatus::Quarantined => CredentialState::Quarantined,
+            CredentialStatus::LoginRequired => CredentialState::LoginRequired,
+            CredentialStatus::ProfileChanged => CredentialState::ProfileChanged,
+            CredentialStatus::WrittenByNewerBuild => CredentialState::WrittenByNewerBuild,
+            CredentialStatus::Revoked => CredentialState::Revoked,
+        };
+        // The gateway's status rows carry no consent; the gateway refuses a
+        // dispatch that needs one, so this row reports the credential only.
+        Ok(crate::presentation::CliStatus {
+            compatibility: CompatibilityState::Current,
+            credential,
+        })
+    }
+
     /// One account's facts from the gateway's admin status; `None` when the
     /// gateway does not know the account.
     pub(crate) fn status(
