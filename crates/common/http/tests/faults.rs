@@ -410,8 +410,8 @@ async fn hop_gateway_faults_do_not_open_a_socket() -> TestResult {
 
     let upstream = Client::new(Limits::default())?
         .with_faults(plan("hop=gateway,fault=relay-lost=before-head")?);
-    let pending = upstream.execute(request(&origin, "/v1/messages")?, control());
-    std::pin::pin!(pending);
+    let mut pending =
+        std::pin::pin!(upstream.execute(request(&origin, "/v1/messages")?, control()));
     let accepted = tokio::select! {
         accepted = listener.accept() => accepted.is_ok(),
         _ = &mut pending => false,
