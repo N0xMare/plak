@@ -312,6 +312,14 @@ pub(in crate::subscriptions) fn seed_claude(
 /// The stored generation of the Claude login under `paths`.
 #[cfg(feature = "claude")]
 pub(in crate::subscriptions) fn claude_generation(paths: &SubscriptionPaths) -> TestResult<u64> {
+    Ok(claude_stored(paths)?.0)
+}
+
+/// The stored generation and status of the Claude login under `paths`.
+#[cfg(feature = "claude")]
+pub(in crate::subscriptions) fn claude_stored(
+    paths: &SubscriptionPaths,
+) -> TestResult<(u64, plakous_auth::CredentialStatus)> {
     let provider = NativeProvider::Claude;
     let store = plakous_auth::PrivateCredentialStore::open_slot(
         paths.provider_record(provider),
@@ -320,7 +328,8 @@ pub(in crate::subscriptions) fn claude_generation(paths: &SubscriptionPaths) -> 
         )?,
         slot_of(paths)?,
     )?;
-    Ok(store.load()?.ok_or("no Claude record")?.generation().get())
+    let fence = store.load()?.ok_or("no Claude record")?;
+    Ok((fence.generation().get(), fence.status()))
 }
 
 /// A tool-free Claude selection of `model`, with the product's Claude

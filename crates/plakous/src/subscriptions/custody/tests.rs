@@ -317,6 +317,8 @@ async fn revalidate(provider: &ResolvedProvider) -> TestResult {
 mod anthropic_api;
 #[cfg(feature = "claude")]
 mod claude;
+#[cfg(feature = "claude")]
+mod durability;
 #[cfg(feature = "grok")]
 mod grok;
 #[cfg(feature = "openrouter")]

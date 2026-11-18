@@ -4379,20 +4379,28 @@ direct client exchange to the same peer, with the custodied value substituted
 in place and the header order unchanged.
 
 The durability profile holds the API-key crash rows
-(`test(gateway::durability::)`), and the offline lane excludes them. A
-gateway killed after
-`Head` ends the body as `MayHaveTransmitted` and does not replay. A host
-killed mid-stream, and a caller drop, each cancel the upstream within one
-second and leave one dial. A restarted gateway serves the next request on a
-new instance id. A holder lock is released by the kernel when its process
-dies. Subscription refresh claim steps stay names until OAuth custodians
-land: `RefreshOutcomeUnknown` and `credential_not_ready` quarantined, with
-Codex and Claude requiring a login and xAI reclaiming. Session-account
-switch rows cover the rewritten §7.3 steps 2-4: an unpublished rebind is
-withdrawn, a published rebind without a command gets a notice and one
-continue, and a submitted root-start is one prompt. Each row is one rebind
-and at most one prompt. The product cuts that walk those edges land with
-session account choice.
+(`test(gateway::durability::)`) and the subscription refresh crash cuts
+(`test(subscriptions::custody::tests::durability::)`); the offline lane
+excludes both. A gateway killed after `Head` ends the body as
+`MayHaveTransmitted` and does not replay. A host killed mid-stream, and a
+caller drop, each cancel the upstream within one second and leave one dial. A
+restarted gateway serves the next request on a new instance id.
+
+The refresh cuts run a gateway `SubscriptionCustodian`'s forced Claude refresh
+on the gateway's own runtime and shut that runtime down at the cut; a dropped
+caller is not a crash, because a forced refresh runs detached from it. A
+fault-injected token client places the cut: `hang` before the grant is sent,
+`stall` after the provider answered and rotated it, and none for the cut after
+the store commit. A gateway restarted over the same store answers the remote
+side through `GatewayCustody`. Both pre-commit cuts leave
+`RefreshOutcomeUnknown` at the claim's generation. The remote side must then
+see quarantined facts and a `credential_not_ready` refusal of a relayed
+request without a dial, and the operator's forced refresh sends no grant,
+because Claude never reclaims. The post-commit cut is Ready at the generation
+after the claim, and a request prepared on the seeded generation is
+re-prepared onto it and carries the rotated token. The two pre-commit cuts are
+ignored until the custodian reports a quarantined login as `NotReady`; it
+answers `internal` today.
 
 `just live gateway` prints the paid plan and does not call a provider.
 `just live gateway --paid` is the opt-in run. Until `plakd gateway serve` is
