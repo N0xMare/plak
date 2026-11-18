@@ -10,11 +10,15 @@
 //!
 //! | Field | Meaning |
 //! | --- | --- |
-//! | `host=<host>` | Only requests to this origin host (any host when absent) |
-//! | `path=<prefix>` | Only requests whose path and query start with this |
+//! | `host=<host>` | Only requests to this origin host (any host when absent). On `hop=gateway`, the logical upstream host |
+//! | `path=<prefix>` | Only requests whose path and query start with this. On `hop=gateway`, the logical upstream path |
 //! | `nth=<n>` | Only the n-th matching request, counting from 1 (every one when absent) |
-//! | `fault=<kind>` | `400`, `401`, `429`, `500`, `502`, `503`, `529`, `xai-refusal`, `connect`, `hang`, `write-reset`, `record-rejected`, `reset`, `eof` or `stall` |
+//! | `hop=<gateway\|upstream>` | Which hop the rule applies to. Absent means `upstream` |
+//! | `fault=<kind>` | `400`, `401`, `429`, `500`, `502`, `503`, `529`, `xai-refusal`, `connect`, `hang`, `write-reset`, `record-rejected`, `reset`, `eof`, `stall`, `relay-lost=<before-head\|after-head>` or `gateway-refusal=<code>` |
 //! | `retry-after=<secs>` | Status faults: send this `Retry-After` |
+//! | `retry-after-ms=<n>` | `gateway-refusal=busy`: the refusal's `retry_after_ms` |
+//! | `credential-status=<status>` | `gateway-refusal=credential_not_ready`: the credential status |
+//! | `supported=<versions>` | `gateway-refusal=version_unsupported`: `+`-separated versions (default `1`) |
 //! | `after-events=<n>` / `after-bytes=<n>` | Stream faults: deliver this many SSE events (comment-only blocks such as keep-alives do not count) or bytes of the body first |
 //! | `seconds=<secs>` | `hang`: pre-connect wait; `stall`: how long the real body goes silent |
 //!
@@ -28,8 +32,21 @@
 //! HTTP/1.1 TLS `bad_record_mac` proof without connecting or sending content.
 //! `reset` and `eof` let the real response through and then end its
 //! body with a transport error or a clean end of body; `stall` pauses it
-//! under the body's own deadlines. Every rule counts the requests it matches,
-//! so ordinals are per rule, and the first rule that fires wins.
+//! under the body's own deadlines. Every rule counts the requests it matches
+//! on its own hop, so ordinals are per rule, and the first rule that fires wins.
+//!
+//! `hop=upstream` (the default) applies to this process's provider client: the
+//! direct client, or the in-process gateway's own upstream client. It is refused
+//! when [`FaultPlacement::ExternalGateway`] is set, so a plan that cannot reach
+//! a provider from this process is never silently fault-free. `hop=gateway`
+//! matches the logical upstream host and path and applies to hop 1.
+//! `relay-lost` and `gateway-refusal` are hop 1 only.
+//!
+//! A gateway service process reads [`provider_from_env`]: today's grammar, with
+//! no `hop` field and no hop-1 fault. [`PLAK_TEST_GATEWAY`] tells the host plan
+//! which placement it is in (`in-process`, `external`, or unset for direct
+//! local custody). `provider` makes the host plan fail closed, because that
+//! process must use the provider grammar.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -47,8 +64,49 @@ use super::{
 };
 use crate::{ErrorKind, ExchangeControl, Failure, Limits, Phase, TransmissionFact, WireProtocol};
 
+mod relay;
+
+pub use relay::{
+    BeforeHead, MeasuredUpstream, RelayKernel, RelayObservation, Unsent, UnsentClass, map_relay,
+};
+
 /// The environment variable the plak binary reads its plan from.
 pub const FAULTS_ENV: &str = "PLAK_TEST_FAULTS";
+
+/// Where this process's gateway is, for a host fault plan.
+///
+/// Set [`PLAK_TEST_GATEWAY`] to `external` when `[gateway] address` names
+/// another process, or `in-process` for the in-process gateway. Unset means
+/// direct local custody. `provider` is the gateway service: the host plan
+/// fails closed and the service reads [`FaultPlan::parse_provider`].
+pub const PLAK_TEST_GATEWAY: &str = "PLAK_TEST_GATEWAY";
+
+/// Which hop a fault rule applies to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FaultHop {
+    /// The caller's exchange with the gateway.
+    Gateway,
+    /// The gateway's, or a direct client's, exchange with the provider.
+    Upstream,
+}
+
+/// Whether an upstream fault in this process can reach a provider.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FaultPlacement {
+    /// Direct local custody, or an in-process gateway in this process.
+    Local,
+    /// An external gateway address is configured. Upstream rules are refused.
+    ExternalGateway,
+}
+
+/// Where `relay-lost` cuts hop 1.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RelayCut {
+    /// The gateway may have dialed; no relay `Head` arrives.
+    BeforeHead,
+    /// A relay `Head` arrives, then hop 1 drops.
+    AfterHead,
+}
 
 /// A parsed fault plan. Clones share their per-rule request counters.
 #[derive(Clone, Debug)]
@@ -67,6 +125,9 @@ struct Rule {
     host: Option<String>,
     path: Option<String>,
     nth: Option<u64>,
+    /// `None` matches every hop. A parsed rule always sets this; the invalid
+    /// environment plan leaves it unset so every exchange fails.
+    hop: Option<FaultHop>,
     fault: Fault,
     matched: AtomicU64,
 }
@@ -82,10 +143,34 @@ enum Fault {
     WriteReset,
     RecordRejected,
     Invalid,
+    RelayLost(RelayCut),
+    GatewayRefusal(GatewayRefusalFault),
     Stream {
         action: StreamAction,
         after: Threshold,
     },
+}
+
+/// A synthetic gateway refusal. The body is the protocol's refusal JSON.
+#[derive(Clone, Debug)]
+pub(super) struct GatewayRefusalFault {
+    status: u16,
+    code: String,
+    body: String,
+}
+
+impl GatewayRefusalFault {
+    pub(super) fn reply(&self) -> Vec<u8> {
+        let reason = reason_phrase(self.status);
+        format!(
+            "HTTP/1.1 {} {reason}\r\ncontent-type: application/json\r\nplak-gateway-error: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            self.status,
+            self.code,
+            self.body.len(),
+            self.body
+        )
+        .into_bytes()
+    }
 }
 
 /// What happens to a response body once its threshold is reached.
@@ -113,35 +198,95 @@ pub(super) enum Selected {
     WriteReset,
     RecordRejected,
     Invalid,
+    RelayLost(RelayCut),
+    GatewayRefusal(GatewayRefusalFault),
     Stream(Box<StreamFault>),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Grammar {
+    /// The host process: `hop` and the hop-1 faults.
+    Host,
+    /// The gateway service's provider hop: today's grammar, unchanged.
+    Provider,
+}
+
 impl FaultPlan {
-    /// Parses a plan in the `PLAK_TEST_FAULTS` syntax.
+    /// Parses a host plan. Upstream rules are allowed ([`FaultPlacement::Local`]).
     ///
     /// # Errors
     ///
     /// Returns [`FaultSpecError`] naming the first rule that does not parse.
     pub fn parse(spec: &str) -> Result<Self, FaultSpecError> {
-        spec.split(';')
+        Self::parse_for(spec, FaultPlacement::Local)
+    }
+
+    /// Parses a host plan for `placement`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FaultSpecError`] naming the first rule that does not parse,
+    /// including an upstream rule under [`FaultPlacement::ExternalGateway`].
+    pub fn parse_for(spec: &str, placement: FaultPlacement) -> Result<Self, FaultSpecError> {
+        Self::parse_with(spec, Grammar::Host, placement)
+    }
+
+    /// Parses the gateway service's provider-hop plan. `hop`, `relay-lost` and
+    /// `gateway-refusal` are refused, which is today's grammar unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FaultSpecError`] naming the first rule that does not parse.
+    pub fn parse_provider(spec: &str) -> Result<Self, FaultSpecError> {
+        Self::parse_with(spec, Grammar::Provider, FaultPlacement::Local)
+    }
+
+    fn parse_with(
+        spec: &str,
+        grammar: Grammar,
+        placement: FaultPlacement,
+    ) -> Result<Self, FaultSpecError> {
+        let rules = spec
+            .split(';')
             .map(str::trim)
             .filter(|rule| !rule.is_empty())
             .enumerate()
             .map(|(index, rule)| {
-                parse_rule(rule).map_err(|reason| FaultSpecError {
+                parse_rule(rule, grammar).map_err(|reason| FaultSpecError {
                     rule: index + 1,
                     reason,
                 })
             })
-            .collect::<Result<Vec<_>, _>>()
-            .map(|rules| Self(Arc::new(rules)))
+            .collect::<Result<Vec<_>, _>>()?;
+        if placement == FaultPlacement::ExternalGateway {
+            for (index, rule) in rules.iter().enumerate() {
+                if rule.hop == Some(FaultHop::Upstream) {
+                    return Err(FaultSpecError {
+                        rule: index + 1,
+                        reason: "hop=upstream does not apply when an external gateway address \
+                                  is configured"
+                            .to_owned(),
+                    });
+                }
+            }
+        }
+        Ok(Self(Arc::new(rules)))
     }
 
-    /// Counts this request against every matching rule and returns the fault
-    /// of the first rule whose ordinal it is.
-    pub(super) fn select(&self, host: &str, path_and_query: &str) -> Option<Selected> {
+    /// Counts this request against every rule on `hop` and returns the fault
+    /// of the first rule whose ordinal it is. Rules on the other hop are not
+    /// counted.
+    pub(super) fn select(
+        &self,
+        hop: FaultHop,
+        host: &str,
+        path_and_query: &str,
+    ) -> Option<Selected> {
         let mut selected = None;
         for rule in self.0.iter() {
+            if rule.hop.is_some_and(|rule_hop| rule_hop != hop) {
+                continue;
+            }
             if rule
                 .host
                 .as_deref()
@@ -155,26 +300,32 @@ impl FaultPlan {
             }
             let ordinal = rule.matched.fetch_add(1, Ordering::Relaxed) + 1;
             if selected.is_none() && rule.nth.is_none_or(|nth| nth == ordinal) {
-                selected = Some(match rule.fault {
-                    Fault::Status {
-                        status,
-                        retry_after,
-                    } => Selected::Status {
-                        status,
-                        retry_after,
-                    },
-                    Fault::Connect => Selected::Connect,
-                    Fault::Hang(duration) => Selected::Hang(duration),
-                    Fault::WriteReset => Selected::WriteReset,
-                    Fault::RecordRejected => Selected::RecordRejected,
-                    Fault::Invalid => Selected::Invalid,
-                    Fault::Stream { action, after } => {
-                        Selected::Stream(Box::new(StreamFault::new(action, after)))
-                    }
-                });
+                selected = Some(selected_fault(&rule.fault));
             }
         }
         selected
+    }
+}
+
+fn selected_fault(fault: &Fault) -> Selected {
+    match fault {
+        Fault::Status {
+            status,
+            retry_after,
+        } => Selected::Status {
+            status: *status,
+            retry_after: *retry_after,
+        },
+        Fault::Connect => Selected::Connect,
+        Fault::Hang(duration) => Selected::Hang(*duration),
+        Fault::WriteReset => Selected::WriteReset,
+        Fault::RecordRejected => Selected::RecordRejected,
+        Fault::Invalid => Selected::Invalid,
+        Fault::RelayLost(cut) => Selected::RelayLost(*cut),
+        Fault::GatewayRefusal(refusal) => Selected::GatewayRefusal(refusal.clone()),
+        Fault::Stream { action, after } => {
+            Selected::Stream(Box::new(StreamFault::new(*action, *after)))
+        }
     }
 }
 
@@ -182,8 +333,35 @@ impl FaultPlan {
 /// client so request ordinals are process-wide.
 pub(super) fn from_env() -> Option<FaultPlan> {
     static PLAN: OnceLock<Option<FaultPlan>> = OnceLock::new();
-    PLAN.get_or_init(|| plan_from(std::env::var(FAULTS_ENV).ok().as_deref()))
-        .clone()
+    PLAN.get_or_init(|| {
+        plan_from_placement(
+            std::env::var(FAULTS_ENV).ok().as_deref(),
+            placement_from_env(),
+        )
+    })
+    .clone()
+}
+
+/// The gateway service's provider-hop plan, from [`FAULTS_ENV`], in today's
+/// grammar. A `plakd gateway serve` test-hooks build installs this on its
+/// upstream client instead of the host plan.
+#[must_use]
+pub fn provider_from_env() -> Option<FaultPlan> {
+    static PLAN: OnceLock<Option<FaultPlan>> = OnceLock::new();
+    PLAN.get_or_init(|| {
+        let spec = std::env::var(FAULTS_ENV).ok()?;
+        Some(FaultPlan::parse_provider(&spec).unwrap_or_else(|_| invalid_plan()))
+    })
+    .clone()
+}
+
+fn placement_from_env() -> Option<FaultPlacement> {
+    match std::env::var(PLAK_TEST_GATEWAY) {
+        Err(_) => Some(FaultPlacement::Local),
+        Ok(value) if value.is_empty() || value == "in-process" => Some(FaultPlacement::Local),
+        Ok(value) if value == "external" => Some(FaultPlacement::ExternalGateway),
+        Ok(_) => None,
+    }
 }
 
 /// A run with a mistyped plan must not quietly run fault-free, and the
@@ -191,93 +369,59 @@ pub(super) fn from_env() -> Option<FaultPlan> {
 /// lock), so every exchange then fails before it starts with a failure no
 /// network event produces: `Failure(Resolution, NotStarted, Internal)`.
 fn plan_from(spec: Option<&str>) -> Option<FaultPlan> {
-    let plan = FaultPlan::parse(spec?).unwrap_or_else(|_| {
-        FaultPlan(Arc::new(vec![Rule {
-            host: None,
-            path: None,
-            nth: None,
-            fault: Fault::Invalid,
-            matched: AtomicU64::new(0),
-        }]))
-    });
-    Some(plan)
+    plan_from_placement(spec, Some(FaultPlacement::Local))
 }
 
-fn parse_rule(rule: &str) -> Result<Rule, String> {
-    let mut host = None;
-    let mut path = None;
-    let mut nth = None;
-    let mut kind = None;
-    let mut retry_after = None;
-    let mut after = None;
-    let mut seconds = None;
-    for field in rule.split(',').map(str::trim) {
-        let (key, value) = field
-            .split_once('=')
-            .ok_or_else(|| format!("`{field}` is not key=value"))?;
-        let number = || {
-            value
-                .parse::<u64>()
-                .map_err(|_| format!("`{key}` needs a whole number, not `{value}`"))
-        };
-        match key {
-            "host" => host = Some(value.to_owned()),
-            "path" => path = Some(value.to_owned()),
-            "nth" => {
-                let ordinal = number()?;
-                if ordinal == 0 {
-                    return Err("`nth` counts from 1".to_owned());
-                }
-                nth = Some(ordinal);
-            }
-            "fault" => kind = Some(value),
-            "retry-after" => retry_after = Some(number()?),
-            "after-events" => after = Some(Threshold::Events(to_usize(number()?)?)),
-            "after-bytes" => after = Some(Threshold::Bytes(to_usize(number()?)?)),
-            "seconds" => {
-                seconds = Some(
-                    value
-                        .parse::<f64>()
-                        .ok()
-                        .and_then(|secs| Duration::try_from_secs_f64(secs).ok())
-                        .ok_or_else(|| format!("`seconds` needs a duration, not `{value}`"))?,
-                );
-            }
-            _ => return Err(format!("unknown field `{key}`")),
-        }
-    }
-    let kind = kind.ok_or("`fault` is required")?;
-    let fault = match kind {
-        "400" | "401" | "429" | "500" | "502" | "503" | "529" => Fault::Status {
-            status: kind.parse().map_err(|_| "status")?,
-            retry_after,
-        },
-        "xai-refusal" => Fault::Status {
-            status: 403,
-            retry_after,
-        },
-        "connect" => Fault::Connect,
-        "hang" => Fault::Hang(seconds.ok_or("`hang` needs `seconds`")?),
-        "write-reset" => Fault::WriteReset,
-        "record-rejected" => Fault::RecordRejected,
-        "reset" | "eof" | "stall" => Fault::Stream {
-            action: match kind {
-                "reset" => StreamAction::Reset,
-                "eof" => StreamAction::Eof,
-                _ => StreamAction::Stall(seconds.ok_or("`stall` needs `seconds`")?),
-            },
-            after: after.unwrap_or(Threshold::Events(0)),
-        },
-        other => return Err(format!("unknown fault `{other}`")),
+fn plan_from_placement(spec: Option<&str>, placement: Option<FaultPlacement>) -> Option<FaultPlan> {
+    let spec = spec?;
+    let Some(placement) = placement else {
+        return Some(invalid_plan());
     };
+    Some(FaultPlan::parse_for(spec, placement).unwrap_or_else(|_| invalid_plan()))
+}
+
+fn invalid_plan() -> FaultPlan {
+    FaultPlan(Arc::new(vec![Rule {
+        host: None,
+        path: None,
+        nth: None,
+        hop: None,
+        fault: Fault::Invalid,
+        matched: AtomicU64::new(0),
+    }]))
+}
+
+struct RuleFields {
+    host: Option<String>,
+    path: Option<String>,
+    nth: Option<u64>,
+    hop: FaultHop,
+    kind: Option<String>,
+    retry_after: Option<u64>,
+    after: Option<Threshold>,
+    seconds: Option<Duration>,
+    retry_after_ms: Option<u64>,
+    credential_status: Option<String>,
+    supported: Option<String>,
+}
+
+fn parse_rule(rule: &str, grammar: Grammar) -> Result<Rule, String> {
+    let fields = parse_fields(rule, grammar)?;
+    let kind = fields.kind.as_deref().ok_or("`fault` is required")?;
+    let fault = parse_fault(kind, &fields, grammar)?;
+    if matches!(fault, Fault::RelayLost(_) | Fault::GatewayRefusal(_))
+        && fields.hop != FaultHop::Gateway
+    {
+        return Err("`relay-lost` and `gateway-refusal` require hop=gateway".to_owned());
+    }
     let stream = matches!(fault, Fault::Stream { .. });
-    if retry_after.is_some() && !matches!(fault, Fault::Status { .. }) {
+    if fields.retry_after.is_some() && !matches!(fault, Fault::Status { .. }) {
         return Err("`retry-after` applies to status faults only".to_owned());
     }
-    if after.is_some() && !stream {
+    if fields.after.is_some() && !stream {
         return Err("`after-events`/`after-bytes` apply to stream faults only".to_owned());
     }
-    if seconds.is_some()
+    if fields.seconds.is_some()
         && !matches!(
             fault,
             Fault::Hang(_)
@@ -289,13 +433,265 @@ fn parse_rule(rule: &str) -> Result<Rule, String> {
     {
         return Err("`seconds` applies to `hang` or `stall` only".to_owned());
     }
+    if fields.retry_after_ms.is_some() && !matches!(fault, Fault::GatewayRefusal(_)) {
+        return Err("`retry-after-ms` applies to `gateway-refusal=busy` only".to_owned());
+    }
+    if fields.credential_status.is_some() && !matches!(fault, Fault::GatewayRefusal(_)) {
+        return Err(
+            "`credential-status` applies to `gateway-refusal=credential_not_ready` only".to_owned(),
+        );
+    }
+    if fields.supported.is_some() && !matches!(fault, Fault::GatewayRefusal(_)) {
+        return Err("`supported` applies to `gateway-refusal=version_unsupported` only".to_owned());
+    }
     Ok(Rule {
-        host,
-        path,
-        nth,
+        host: fields.host,
+        path: fields.path,
+        nth: fields.nth,
+        hop: Some(fields.hop),
         fault,
         matched: AtomicU64::new(0),
     })
+}
+
+fn parse_fields(rule: &str, grammar: Grammar) -> Result<RuleFields, String> {
+    let mut fields = RuleFields {
+        host: None,
+        path: None,
+        nth: None,
+        hop: FaultHop::Upstream,
+        kind: None,
+        retry_after: None,
+        after: None,
+        seconds: None,
+        retry_after_ms: None,
+        credential_status: None,
+        supported: None,
+    };
+    for field in rule.split(',').map(str::trim) {
+        let (key, value) = field
+            .split_once('=')
+            .ok_or_else(|| format!("`{field}` is not key=value"))?;
+        let number = || {
+            value
+                .parse::<u64>()
+                .map_err(|_| format!("`{key}` needs a whole number, not `{value}`"))
+        };
+        match key {
+            "host" => fields.host = Some(value.to_owned()),
+            "path" => fields.path = Some(value.to_owned()),
+            "nth" => {
+                let ordinal = number()?;
+                if ordinal == 0 {
+                    return Err("`nth` counts from 1".to_owned());
+                }
+                fields.nth = Some(ordinal);
+            }
+            "hop" => fields.hop = parse_hop(value, grammar)?,
+            "fault" => fields.kind = Some(value.to_owned()),
+            "retry-after" => fields.retry_after = Some(number()?),
+            "retry-after-ms" => {
+                refuse_provider_field(grammar, key)?;
+                fields.retry_after_ms = Some(number()?);
+            }
+            "credential-status" => {
+                refuse_provider_field(grammar, key)?;
+                fields.credential_status = Some(value.to_owned());
+            }
+            "supported" => {
+                refuse_provider_field(grammar, key)?;
+                fields.supported = Some(value.to_owned());
+            }
+            "after-events" => fields.after = Some(Threshold::Events(to_usize(number()?)?)),
+            "after-bytes" => fields.after = Some(Threshold::Bytes(to_usize(number()?)?)),
+            "seconds" => {
+                fields.seconds = Some(
+                    value
+                        .parse::<f64>()
+                        .ok()
+                        .and_then(|secs| Duration::try_from_secs_f64(secs).ok())
+                        .ok_or_else(|| format!("`seconds` needs a duration, not `{value}`"))?,
+                );
+            }
+            _ => return Err(format!("unknown field `{key}`")),
+        }
+    }
+    Ok(fields)
+}
+
+fn parse_hop(value: &str, grammar: Grammar) -> Result<FaultHop, String> {
+    refuse_provider_field(grammar, "hop")?;
+    match value {
+        "gateway" => Ok(FaultHop::Gateway),
+        "upstream" => Ok(FaultHop::Upstream),
+        other => Err(format!("unknown hop `{other}`")),
+    }
+}
+
+fn refuse_provider_field(grammar: Grammar, key: &str) -> Result<(), String> {
+    if grammar == Grammar::Provider {
+        Err(format!("unknown field `{key}`"))
+    } else {
+        Ok(())
+    }
+}
+
+fn parse_fault(kind: &str, fields: &RuleFields, grammar: Grammar) -> Result<Fault, String> {
+    if grammar == Grammar::Provider
+        && (kind.starts_with("relay-lost") || kind.starts_with("gateway-refusal"))
+    {
+        return Err(format!("unknown fault `{kind}`"));
+    }
+    Ok(match kind {
+        "400" | "401" | "429" | "500" | "502" | "503" | "529" => Fault::Status {
+            status: kind.parse().map_err(|_| "status")?,
+            retry_after: fields.retry_after,
+        },
+        "xai-refusal" => Fault::Status {
+            status: 403,
+            retry_after: fields.retry_after,
+        },
+        "connect" => Fault::Connect,
+        "hang" => Fault::Hang(fields.seconds.ok_or("`hang` needs `seconds`")?),
+        "write-reset" => Fault::WriteReset,
+        "record-rejected" => Fault::RecordRejected,
+        "reset" | "eof" | "stall" => Fault::Stream {
+            action: match kind {
+                "reset" => StreamAction::Reset,
+                "eof" => StreamAction::Eof,
+                _ => StreamAction::Stall(fields.seconds.ok_or("`stall` needs `seconds`")?),
+            },
+            after: fields.after.unwrap_or(Threshold::Events(0)),
+        },
+        "relay-lost=before-head" => Fault::RelayLost(RelayCut::BeforeHead),
+        "relay-lost=after-head" => Fault::RelayLost(RelayCut::AfterHead),
+        other => {
+            let Some(code) = other.strip_prefix("gateway-refusal=") else {
+                return Err(format!("unknown fault `{other}`"));
+            };
+            Fault::GatewayRefusal(gateway_refusal(code, fields)?)
+        }
+    })
+}
+
+fn gateway_refusal(code: &str, fields: &RuleFields) -> Result<GatewayRefusalFault, String> {
+    let (status, body) = match code {
+        "unauthenticated" => (401, unit_body(code)),
+        "scope_denied" => (403, unit_body(code)),
+        "account_unknown" => (404, unit_body(code)),
+        "account_changed" => (409, unit_body(code)),
+        "upstream_not_pinned"
+        | "reserved_header"
+        | "custodied_headers_mismatch"
+        | "envelope_invalid" => (422, unit_body(code)),
+        "limit_exceeded" => (413, unit_body(code)),
+        "internal" => (500, unit_body(code)),
+        "gateway_disabled" | "account_disabled" => (503, unit_body(code)),
+        "credential_not_ready" => {
+            let status_name = fields
+                .credential_status
+                .as_deref()
+                .ok_or("`credential_not_ready` needs `credential-status`")?;
+            if !CREDENTIAL_STATUSES.contains(&status_name) {
+                return Err(format!("unknown credential status `{status_name}`"));
+            }
+            (
+                409,
+                format!(
+                    r#"{{"gateway_error":{{"code":"credential_not_ready","status":"{status_name}"}}}}"#
+                ),
+            )
+        }
+        "busy" => {
+            let retry_after_ms = fields
+                .retry_after_ms
+                .ok_or("`busy` needs `retry-after-ms`")?;
+            (
+                503,
+                format!(
+                    r#"{{"gateway_error":{{"code":"busy","retry_after_ms":{retry_after_ms}}}}}"#
+                ),
+            )
+        }
+        "version_unsupported" => {
+            let supported = supported_list(fields.supported.as_deref())?;
+            (
+                426,
+                format!(
+                    r#"{{"gateway_error":{{"code":"version_unsupported","supported":[{supported}]}}}}"#
+                ),
+            )
+        }
+        "fence_moved" => {
+            return Err(
+                "`fence_moved` is scripted on the fixture gateway, not injected as a status"
+                    .to_owned(),
+            );
+        }
+        other => return Err(format!("unknown gateway refusal `{other}`")),
+    };
+    if code != "busy" && fields.retry_after_ms.is_some() {
+        return Err("`retry-after-ms` applies to `gateway-refusal=busy` only".to_owned());
+    }
+    if code != "credential_not_ready" && fields.credential_status.is_some() {
+        return Err(
+            "`credential-status` applies to `gateway-refusal=credential_not_ready` only".to_owned(),
+        );
+    }
+    if code != "version_unsupported" && fields.supported.is_some() {
+        return Err("`supported` applies to `gateway-refusal=version_unsupported` only".to_owned());
+    }
+    Ok(GatewayRefusalFault {
+        status,
+        code: code.to_owned(),
+        body,
+    })
+}
+
+fn unit_body(code: &str) -> String {
+    format!(r#"{{"gateway_error":{{"code":"{code}"}}}}"#)
+}
+
+fn supported_list(value: Option<&str>) -> Result<String, String> {
+    let value = value.unwrap_or("1");
+    if value.is_empty() {
+        return Err("`supported` needs a version".to_owned());
+    }
+    let mut versions = Vec::new();
+    for version in value.split('+') {
+        let version = version
+            .parse::<u16>()
+            .map_err(|_| format!("`supported` needs versions, not `{value}`"))?;
+        versions.push(version.to_string());
+    }
+    Ok(versions.join(","))
+}
+
+const CREDENTIAL_STATUSES: &[&str] = &[
+    "signed_out",
+    "ready",
+    "refresh_required",
+    "refreshing",
+    "quarantined",
+    "login_required",
+    "profile_changed",
+    "written_by_newer_build",
+    "revoked",
+];
+
+fn reason_phrase(status: u16) -> &'static str {
+    match status {
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        409 => "Conflict",
+        413 => "Content Too Large",
+        422 => "Unprocessable Content",
+        426 => "Upgrade Required",
+        500 => "Internal Server Error",
+        503 => "Service Unavailable",
+        _ => "Error",
+    }
 }
 
 fn to_usize(value: u64) -> Result<usize, String> {
@@ -394,7 +790,30 @@ pub(super) async fn injected_status(
     control: ExchangeControl,
     limits: &Limits,
 ) -> Result<Response, Failure> {
-    let reply = status_reply(status, retry_after);
+    injected_reply(status_reply(status, retry_after), control, limits).await
+}
+
+/// Answers with a relay `Head` frame and then drops the peer, leaving
+/// `content-length` unsatisfied so the caller sees a mid-body break.
+pub(super) async fn injected_relay_lost_after_head(
+    control: ExchangeControl,
+    limits: &Limits,
+) -> Result<Response, Failure> {
+    let head = head_frame();
+    let claimed = head.len() + 64;
+    let reply = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/vnd.plak.relay-frames\r\ncontent-length: {claimed}\r\nconnection: close\r\n\r\n"
+    );
+    let mut bytes = reply.into_bytes();
+    bytes.extend_from_slice(&head);
+    injected_reply_then_drop(bytes, control, limits).await
+}
+
+pub(super) async fn injected_reply(
+    reply: Vec<u8>,
+    control: ExchangeControl,
+    limits: &Limits,
+) -> Result<Response, Failure> {
     let (client_io, mut peer_io) = duplex(64 * 1_024);
     tokio::spawn(async move {
         // Answer only after the stand-in request head arrives: an HTTP/1.1
@@ -411,6 +830,35 @@ pub(super) async fn injected_status(
             let _ = peer_io.shutdown().await;
         }
     });
+    finish_injected(client_io, control, limits).await
+}
+
+/// Writes `prefix` and drops the peer without a clean close.
+async fn injected_reply_then_drop(
+    prefix: Vec<u8>,
+    control: ExchangeControl,
+    limits: &Limits,
+) -> Result<Response, Failure> {
+    let (client_io, mut peer_io) = duplex(64 * 1_024);
+    tokio::spawn(async move {
+        let mut head = Vec::new();
+        let mut buffer = [0_u8; 512];
+        while !head.ends_with(b"\r\n\r\n") {
+            match peer_io.read(&mut buffer).await {
+                Ok(0) | Err(_) => return,
+                Ok(read) => head.extend_from_slice(&buffer[..read]),
+            }
+        }
+        let _ = peer_io.write_all(&prefix).await;
+    });
+    finish_injected(client_io, control, limits).await
+}
+
+async fn finish_injected(
+    client_io: tokio::io::DuplexStream,
+    control: ExchangeControl,
+    limits: &Limits,
+) -> Result<Response, Failure> {
     let not_started = |kind| Failure::new(Phase::Connect, TransmissionFact::NotStarted, kind);
     let (mut sender, connection) = http1::Builder::new()
         .handshake(TokioIo::new(client_io))
@@ -441,6 +889,16 @@ pub(super) async fn injected_status(
         limits,
     )
     .await
+}
+
+fn head_frame() -> Vec<u8> {
+    let payload = br#"{"status":200,"headers":[]}"#;
+    let mut frame = Vec::with_capacity(5 + payload.len());
+    frame.push(0x01);
+    let length = u32::try_from(payload.len()).unwrap_or(0);
+    frame.extend_from_slice(&length.to_be_bytes());
+    frame.extend_from_slice(payload);
+    frame
 }
 
 fn status_reply(status: u16, retry_after: Option<u64>) -> Vec<u8> {

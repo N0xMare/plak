@@ -67,3 +67,9 @@ daily-driver *ARGS:
 [doc("rerun one qualification cell after a model or provider miss")]
 qualify *ARGS:
     tests/live/qualification.py {{ARGS}}
+
+# Credential gateway matrix. The default prints the plan and an estimate line.
+# `--paid` refuses before any provider call until `plakd gateway serve` exists.
+[doc("credential gateway plan; --paid refuses before any provider call")]
+gateway *ARGS:
+    tests/live/gateway.py {{ARGS}}

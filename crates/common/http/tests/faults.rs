@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use plakous_http::{
-    Bytes, Client, ConnectionUse, ErrorKind, ExchangeControl, Failure, FaultPlan, HeaderMap,
-    HeaderName, Limits, Method, Origin, Phase, Request, StatusCode, TransmissionFact,
+    Bytes, Client, ConnectionUse, ErrorKind, ExchangeControl, Failure, FaultHop, FaultPlan,
+    HeaderMap, HeaderName, Limits, Method, Origin, Phase, Request, StatusCode, TransmissionFact,
 };
 use rcgen::{CertifiedKey, generate_simple_self_signed};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -385,4 +385,81 @@ fn a_malformed_plan_is_refused_with_its_rule() {
         error.as_deref(),
         Some("PLAK_TEST_FAULTS rule 2: unknown fault `teapot`")
     );
+}
+
+#[tokio::test]
+async fn hop_gateway_faults_do_not_open_a_socket() -> TestResult {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let origin = Origin::parse(&format!("https://{}", listener.local_addr()?))?;
+    let client = Client::new(Limits::default())?
+        .with_faults(plan("hop=gateway,fault=relay-lost=before-head")?)
+        .with_fault_hop(FaultHop::Gateway);
+    let execute = client.execute(request(&origin, "/v1/messages")?, control());
+    let failure = tokio::select! {
+        _ = listener.accept() => return Err("relay-lost opened a socket".into()),
+        result = execute => result.err().ok_or("relay-lost succeeded")?,
+    };
+    assert_eq!(
+        (failure.phase(), failure.transmission(), failure.kind()),
+        (
+            Phase::ResponseHead,
+            TransmissionFact::MayHaveTransmitted,
+            ErrorKind::Io
+        )
+    );
+
+    let upstream = Client::new(Limits::default())?
+        .with_faults(plan("hop=gateway,fault=relay-lost=before-head")?);
+    let pending = upstream.execute(request(&origin, "/v1/messages")?, control());
+    std::pin::pin!(pending);
+    let accepted = tokio::select! {
+        accepted = listener.accept() => accepted.is_ok(),
+        _ = &mut pending => false,
+    };
+    assert!(accepted, "an upstream client applied a hop=gateway rule");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_gateway_refusal_is_a_synthetic_head() -> TestResult {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let origin = Origin::parse(&format!("https://{}", listener.local_addr()?))?;
+    let client = Client::new(Limits::default())?
+        .with_faults(plan("hop=gateway,fault=gateway-refusal=unauthenticated")?)
+        .with_fault_hop(FaultHop::Gateway);
+    let execute = client.execute(request(&origin, "/v1/messages")?, control());
+    let response = tokio::select! {
+        _ = listener.accept() => return Err("gateway-refusal opened a socket".into()),
+        result = execute => result?,
+    };
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let marker = response
+        .headers()
+        .get(&HeaderName::from_static("plak-gateway-error"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    assert_eq!(marker.as_deref(), Some("unauthenticated"));
+    let mut body = response.into_body();
+    let mut text = Vec::new();
+    while let Some(chunk) = body.next_chunk().await {
+        text.extend_from_slice(&chunk?);
+    }
+    let text = String::from_utf8(text)?;
+    assert!(text.contains(r#""code":"unauthenticated""#), "{text}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn relay_lost_after_head_breaks_the_body() -> TestResult {
+    let client = Client::new(Limits::default())?
+        .with_faults(plan("hop=gateway,fault=relay-lost=after-head")?)
+        .with_fault_hop(FaultHop::Gateway);
+    let origin = Origin::parse("https://fault.invalid")?;
+    let (status, bytes, failure) = drain(&client, request(&origin, "/v1/messages")?).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!bytes.is_empty());
+    let failure = failure.ok_or("after-head loss ended cleanly")?;
+    assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
+    assert_eq!(failure.phase(), Phase::ResponseBody);
+    Ok(())
 }

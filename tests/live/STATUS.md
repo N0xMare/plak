@@ -65,6 +65,14 @@ Rung 3 rows are sparing and run only for a targeted confirmation.
 | `codex-astra62-medium` | light, sparing | 3 | smoke pass at `080c15df` (Apple Silicon), confirming the `gpt-6.2-astra` tuple |
 | `api-openai-astra62-low` | light, sparing | 3 | smoke pass at `080c15df` (Apple Silicon, Linux x86_64 musl), confirming the `gpt-6.2-astra` tuple |
 
+## Credential gateway
+
+`just live gateway` prints the offline plan (seven routes, three topologies,
+reopen, OAuth refresh, remote login, kill switch, one `hop=gateway` fault
+run) and a `just live estimate` line. No paid gateway run is recorded.
+`just live gateway --paid` refuses before any provider call until
+`plakd gateway serve` is in the tree.
+
 ## History
 
 ### 0.0.4 candidate matrix (`86ddea1c`, re-confirmed at `080c15df`)

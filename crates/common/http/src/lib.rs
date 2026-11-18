@@ -56,7 +56,10 @@ pub use route_transport::RouteTransport;
 pub use sensitive::{SensitiveBytes, sensitive_header_value};
 pub use sse::{SseDecoder, SseError, SseLimits, SseMessage};
 #[cfg(feature = "fault-injection")]
-pub use transport::fault::{FAULTS_ENV, FaultPlan, FaultSpecError};
+pub use transport::fault::{
+    BeforeHead, FAULTS_ENV, FaultHop, FaultPlacement, FaultPlan, FaultSpecError, MeasuredUpstream,
+    PLAK_TEST_GATEWAY, RelayKernel, RelayObservation, Unsent, UnsentClass, map_relay,
+};
 pub use transport::{
     Client, Limits, Response, ResponseBody, STREAMING_IDLE_TIMEOUT, TlsConfigIdentity,
     TransportBehaviorIdentity, TransportPolicy,

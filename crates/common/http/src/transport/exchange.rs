@@ -48,9 +48,7 @@ impl Client {
         let stream_fault = match self
             .faults
             .as_ref()
-            // A dialed hop (a credential gateway relay) carries no upstream faults.
-            .filter(|_| self.inner.dial.is_none())
-            .and_then(|plan| plan.select(origin.host(), path_and_query.as_str()))
+            .and_then(|plan| plan.select(self.fault_hop, origin.host(), path_and_query.as_str()))
         {
             None => None,
             Some(super::fault::Selected::Invalid) => {
@@ -98,6 +96,21 @@ impl Client {
                     &self.inner.limits,
                 )
                 .await;
+            }
+            Some(super::fault::Selected::RelayLost(super::fault::RelayCut::BeforeHead)) => {
+                return Err(Failure::new(
+                    Phase::ResponseHead,
+                    TransmissionFact::MayHaveTransmitted,
+                    ErrorKind::Io,
+                ));
+            }
+            Some(super::fault::Selected::RelayLost(super::fault::RelayCut::AfterHead)) => {
+                return super::fault::injected_relay_lost_after_head(control, &self.inner.limits)
+                    .await;
+            }
+            Some(super::fault::Selected::GatewayRefusal(refusal)) => {
+                return super::fault::injected_reply(refusal.reply(), control, &self.inner.limits)
+                    .await;
             }
             Some(super::fault::Selected::Stream(stream_fault)) => Some(stream_fault),
         };

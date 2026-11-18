@@ -1,13 +1,19 @@
 use super::*;
 
 fn fired(plan: &FaultPlan, host: &str, path: &str) -> Option<&'static str> {
-    plan.select(host, path).map(|selected| match selected {
+    fired_on(plan, FaultHop::Upstream, host, path)
+}
+
+fn fired_on(plan: &FaultPlan, hop: FaultHop, host: &str, path: &str) -> Option<&'static str> {
+    plan.select(hop, host, path).map(|selected| match selected {
         Selected::Status { .. } => "status",
         Selected::Connect => "connect",
         Selected::Hang(_) => "hang",
         Selected::WriteReset => "write-reset",
         Selected::RecordRejected => "record-rejected",
         Selected::Invalid => "invalid",
+        Selected::RelayLost(_) => "relay-lost",
+        Selected::GatewayRefusal(_) => "gateway-refusal",
         Selected::Stream(_) => "stream",
     })
 }
@@ -252,4 +258,348 @@ fn byte_thresholds_cut_exactly_and_zero_fires_at_once() {
     assert_eq!(fault.cut_point(b"defg"), Some(2));
     let mut immediate = StreamFault::new(StreamAction::Eof, Threshold::Events(0));
     assert_eq!(immediate.due(), Some(StreamAction::Eof));
+}
+
+#[test]
+fn hops_count_only_their_own_rules() -> Result<(), FaultSpecError> {
+    let plan = FaultPlan::parse(
+        "hop=gateway,nth=2,fault=connect;hop=upstream,nth=1,host=api.x.ai,fault=500",
+    )?;
+    assert_eq!(
+        fired_on(&plan, FaultHop::Upstream, "api.x.ai", "/"),
+        Some("status")
+    );
+    assert_eq!(fired_on(&plan, FaultHop::Upstream, "api.x.ai", "/"), None);
+    assert_eq!(fired_on(&plan, FaultHop::Gateway, "api.x.ai", "/"), None);
+    assert_eq!(
+        fired_on(&plan, FaultHop::Gateway, "other.invalid", "/v1"),
+        Some("connect")
+    );
+    assert_eq!(fired(&plan, "api.x.ai", "/"), None);
+    Ok(())
+}
+
+#[test]
+fn an_absent_hop_is_upstream() -> Result<(), FaultSpecError> {
+    let plan = FaultPlan::parse("fault=429")?;
+    assert_eq!(fired_on(&plan, FaultHop::Gateway, "h", "/"), None);
+    assert_eq!(fired(&plan, "h", "/"), Some("status"));
+    Ok(())
+}
+
+#[test]
+fn an_external_gateway_refuses_upstream_rules_only() {
+    let refused = FaultPlan::parse_for("fault=500", FaultPlacement::ExternalGateway)
+        .err()
+        .map(|error| error.to_string());
+    assert_eq!(
+        refused.as_deref(),
+        Some(
+            "PLAK_TEST_FAULTS rule 1: hop=upstream does not apply when an external gateway \
+             address is configured"
+        )
+    );
+    assert!(
+        FaultPlan::parse_for(
+            "hop=gateway,fault=relay-lost=before-head",
+            FaultPlacement::ExternalGateway
+        )
+        .is_ok()
+    );
+    assert!(
+        FaultPlan::parse_for("hop=upstream,fault=500", FaultPlacement::ExternalGateway).is_err()
+    );
+    let mixed = FaultPlan::parse_for(
+        "hop=gateway,fault=connect;fault=500",
+        FaultPlacement::ExternalGateway,
+    )
+    .err()
+    .map(|error| error.to_string());
+    assert_eq!(
+        mixed.as_deref(),
+        Some(
+            "PLAK_TEST_FAULTS rule 2: hop=upstream does not apply when an external gateway \
+             address is configured"
+        )
+    );
+}
+
+#[test]
+fn a_mistyped_gateway_placement_fails_every_exchange() {
+    let plan = plan_from_placement(Some("hop=gateway,fault=connect"), None);
+    assert_eq!(
+        plan.as_ref()
+            .and_then(|plan| fired_on(plan, FaultHop::Gateway, "h", "/")),
+        Some("invalid")
+    );
+    assert_eq!(
+        plan.as_ref().and_then(|plan| fired(plan, "h", "/")),
+        Some("invalid")
+    );
+    let local = plan_from_placement(Some("fault=500"), Some(FaultPlacement::Local));
+    assert_eq!(
+        local.as_ref().and_then(|plan| fired(plan, "h", "/")),
+        Some("status")
+    );
+}
+
+#[test]
+fn the_provider_grammar_is_unchanged() {
+    for spec in [
+        "hop=upstream,fault=500",
+        "fault=relay-lost=before-head",
+        "fault=gateway-refusal=unauthenticated",
+        "fault=500,retry-after-ms=1",
+        "fault=500,credential-status=ready",
+        "fault=500,supported=1",
+    ] {
+        let error = FaultPlan::parse_provider(spec)
+            .err()
+            .map(|error| error.to_string());
+        assert!(
+            error
+                .as_deref()
+                .is_some_and(|text| text.contains("unknown")),
+            "{spec}: {error:?}"
+        );
+    }
+    match FaultPlan::parse_provider("host=api.x.ai,nth=2,fault=429,retry-after=3") {
+        Ok(plan) => {
+            assert_eq!(fired(&plan, "api.x.ai", "/"), None);
+            assert_eq!(fired(&plan, "api.x.ai", "/"), Some("status"));
+            assert_eq!(fired_on(&plan, FaultHop::Gateway, "api.x.ai", "/"), None);
+        }
+        Err(error) => panic!("{error}"),
+    }
+}
+
+#[test]
+fn hop_one_faults_require_the_gateway_hop() {
+    for spec in [
+        "fault=relay-lost=before-head",
+        "hop=upstream,fault=relay-lost=after-head",
+        "fault=gateway-refusal=busy,retry-after-ms=5",
+        "hop=gateway,fault=gateway-refusal=fence_moved",
+        "hop=nope,fault=500",
+        "hop=gateway,fault=gateway-refusal=credential_not_ready",
+        "hop=gateway,fault=gateway-refusal=no_such",
+    ] {
+        assert!(FaultPlan::parse(spec).is_err(), "{spec}");
+    }
+}
+
+#[test]
+fn gateway_refusals_carry_the_protocol_status_and_body() -> Result<(), String> {
+    let cases = [
+        (
+            "unauthenticated",
+            401_u16,
+            r#"{"gateway_error":{"code":"unauthenticated"}}"#,
+        ),
+        (
+            "scope_denied",
+            403,
+            r#"{"gateway_error":{"code":"scope_denied"}}"#,
+        ),
+        (
+            "account_unknown",
+            404,
+            r#"{"gateway_error":{"code":"account_unknown"}}"#,
+        ),
+        (
+            "account_changed",
+            409,
+            r#"{"gateway_error":{"code":"account_changed"}}"#,
+        ),
+        (
+            "upstream_not_pinned",
+            422,
+            r#"{"gateway_error":{"code":"upstream_not_pinned"}}"#,
+        ),
+        (
+            "limit_exceeded",
+            413,
+            r#"{"gateway_error":{"code":"limit_exceeded"}}"#,
+        ),
+        ("internal", 500, r#"{"gateway_error":{"code":"internal"}}"#),
+        (
+            "gateway_disabled",
+            503,
+            r#"{"gateway_error":{"code":"gateway_disabled"}}"#,
+        ),
+        (
+            "account_disabled",
+            503,
+            r#"{"gateway_error":{"code":"account_disabled"}}"#,
+        ),
+        (
+            "version_unsupported",
+            426,
+            r#"{"gateway_error":{"code":"version_unsupported","supported":[1]}}"#,
+        ),
+    ];
+    for (code, status, body) in cases {
+        let refusal = take_refusal(&format!("hop=gateway,fault=gateway-refusal={code}"))?;
+        assert_eq!(refusal.status, status, "{code}");
+        assert_eq!(refusal.code, code);
+        assert_eq!(refusal.body, body, "{code}");
+        assert!(
+            refusal
+                .reply()
+                .windows(body.len())
+                .any(|window| window == body.as_bytes())
+        );
+    }
+    let busy = take_refusal("hop=gateway,fault=gateway-refusal=busy,retry-after-ms=15")?;
+    assert_eq!(busy.status, 503);
+    assert_eq!(
+        busy.body,
+        r#"{"gateway_error":{"code":"busy","retry_after_ms":15}}"#
+    );
+    let waiting = take_refusal(
+        "hop=gateway,fault=gateway-refusal=credential_not_ready,credential-status=quarantined",
+    )?;
+    assert_eq!(waiting.status, 409);
+    assert_eq!(
+        waiting.body,
+        r#"{"gateway_error":{"code":"credential_not_ready","status":"quarantined"}}"#
+    );
+    let versions =
+        take_refusal("hop=gateway,fault=gateway-refusal=version_unsupported,supported=1+2")?;
+    assert_eq!(
+        versions.body,
+        r#"{"gateway_error":{"code":"version_unsupported","supported":[1,2]}}"#
+    );
+    Ok(())
+}
+
+#[cfg(feature = "gateway-server")]
+#[test]
+fn gateway_refusal_bodies_decode() -> Result<(), String> {
+    use plakous_gateway_protocol::call;
+    use plakous_gateway_protocol::facts::CredentialStatus;
+    use plakous_gateway_protocol::refusal::{GatewayRefusal, RefusalBody};
+
+    let refusal = take_refusal(
+        "hop=gateway,fault=gateway-refusal=credential_not_ready,credential-status=quarantined",
+    )?;
+    let decoded: RefusalBody =
+        call::decode(refusal.body.as_bytes()).map_err(|error| error.to_string())?;
+    assert_eq!(
+        decoded.gateway_error,
+        GatewayRefusal::CredentialNotReady {
+            status: CredentialStatus::Quarantined
+        }
+    );
+    let busy = take_refusal("hop=gateway,fault=gateway-refusal=busy,retry-after-ms=8")?;
+    let decoded: RefusalBody =
+        call::decode(busy.body.as_bytes()).map_err(|error| error.to_string())?;
+    assert_eq!(
+        decoded.gateway_error,
+        GatewayRefusal::Busy { retry_after_ms: 8 }
+    );
+    Ok(())
+}
+
+fn take_refusal(spec: &str) -> Result<GatewayRefusalFault, String> {
+    let plan = FaultPlan::parse(spec).map_err(|error| error.to_string())?;
+    match plan.select(FaultHop::Gateway, "h", "/") {
+        Some(Selected::GatewayRefusal(refusal)) => Ok(refusal),
+        _ => Err(format!("`{spec}` did not select a gateway refusal")),
+    }
+}
+
+#[test]
+fn map_relay_is_the_hop_one_composition() {
+    let measured = MeasuredUpstream {
+        phase: Phase::Connect,
+        transmission: TransmissionFact::NotStarted,
+        kind: ErrorKind::Io,
+    };
+    let cases = [
+        (
+            RelayObservation::BeforeHead(BeforeHead::Unreachable),
+            "transport-refund",
+        ),
+        (
+            RelayObservation::BeforeHead(BeforeHead::WriteReset),
+            "write-reset",
+        ),
+        (RelayObservation::BeforeHead(BeforeHead::Lost), "maybe"),
+        (RelayObservation::BeforeHead(BeforeHead::Cancelled), "maybe"),
+        (
+            RelayObservation::BeforeHead(BeforeHead::GatewayFailed),
+            "maybe",
+        ),
+        (
+            RelayObservation::BeforeHead(BeforeHead::UpstreamFailed(measured)),
+            "measured",
+        ),
+        (
+            RelayObservation::BeforeHead(BeforeHead::Refusal {
+                code: "busy".to_owned(),
+            }),
+            "busy",
+        ),
+        (
+            RelayObservation::BeforeHead(BeforeHead::Refusal {
+                code: "fence_moved".to_owned(),
+            }),
+            "fence",
+        ),
+        (
+            RelayObservation::BeforeHead(BeforeHead::Refusal {
+                code: "internal".to_owned(),
+            }),
+            "internal",
+        ),
+        (
+            RelayObservation::BeforeHead(BeforeHead::Refusal {
+                code: "unauthenticated".to_owned(),
+            }),
+            "refusal",
+        ),
+        (RelayObservation::BreakAfterHead, "mid"),
+        (RelayObservation::TrailersThenComplete, "trailers"),
+        (RelayObservation::Complete, "clean"),
+    ];
+    for (observation, expect) in cases {
+        match (expect, map_relay(&observation)) {
+            ("transport-refund", RelayKernel::Unsent(unsent)) => {
+                assert_eq!(unsent.transmission, TransmissionFact::NotStarted);
+                assert!(unsent.refund && unsent.unreachable_budget);
+                assert!(!unsent.reprepare && !unsent.incomplete_write_allowance);
+                assert_eq!(unsent.class, UnsentClass::Transport);
+            }
+            ("write-reset", RelayKernel::Unsent(unsent)) => {
+                assert_eq!(unsent.transmission, TransmissionFact::NotStarted);
+                assert!(unsent.refund);
+                assert!(!unsent.unreachable_budget && !unsent.incomplete_write_allowance);
+            }
+            ("maybe", RelayKernel::MayHaveTransmitted) => {}
+            ("measured", RelayKernel::Measured(got)) => assert_eq!(got, measured),
+            ("busy", RelayKernel::Unsent(unsent)) => {
+                assert!(unsent.refund && unsent.unreachable_budget);
+                assert!(!unsent.incomplete_write_allowance);
+                assert_eq!(unsent.class, UnsentClass::Busy);
+            }
+            ("fence", RelayKernel::Unsent(unsent)) => {
+                assert!(unsent.refund && unsent.reprepare);
+                assert!(!unsent.unreachable_budget && !unsent.incomplete_write_allowance);
+                assert_eq!(unsent.class, UnsentClass::FenceMoved);
+            }
+            ("internal", RelayKernel::Unsent(unsent)) => {
+                assert!(!unsent.refund && !unsent.unreachable_budget && !unsent.reprepare);
+                assert_eq!(unsent.class, UnsentClass::Internal);
+            }
+            ("refusal", RelayKernel::Unsent(unsent)) => {
+                assert!(!unsent.refund && !unsent.reprepare && !unsent.incomplete_write_allowance);
+                assert_eq!(unsent.class, UnsentClass::Refusal);
+            }
+            ("mid", RelayKernel::MidStream) => {}
+            ("trailers", RelayKernel::Clean { trailers: true }) => {}
+            ("clean", RelayKernel::Clean { trailers: false }) => {}
+            (expect, got) => panic!("{expect} mapped to {got:?}"),
+        }
+    }
 }

@@ -11,6 +11,9 @@ mod tool;
 /// Isolated loopback TLS peers for native-auth tests; never vendor endpoints.
 pub mod native_auth;
 
+/// Protocol-exact credential-gateway fixture over a duplex.
+pub mod gateway;
+
 pub use conformance::{recover_model_operation, run_model_operation};
 pub use model::{
     ExpectedRequest, ModelScenario, ScenarioBarrier, ScenarioStart, ScenarioStep, ScriptedModel,

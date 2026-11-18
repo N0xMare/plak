@@ -51,6 +51,8 @@ just live soak claude-sonnet55-low --hours 2
 just live jobs grok
 just live jobs grok --only promotion_budget,steer_command
 python3 tests/live/jobs.py grok --only crash_jobs
+just live gateway            # offline plan and estimate line; no provider call
+just live gateway --paid     # refuses before any provider call
 ```
 
 Startup lookup fault proof (opt-in, real provider usage, fresh private home):

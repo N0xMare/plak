@@ -176,6 +176,8 @@ pub struct Client {
     observer: Option<Arc<dyn ExchangeObserver>>,
     #[cfg(feature = "fault-injection")]
     faults: Option<fault::FaultPlan>,
+    #[cfg(feature = "fault-injection")]
+    fault_hop: fault::FaultHop,
 }
 
 struct ClientInner {
@@ -368,6 +370,8 @@ impl Client {
             observer: None,
             #[cfg(feature = "fault-injection")]
             faults: fault::from_env(),
+            #[cfg(feature = "fault-injection")]
+            fault_hop: fault::FaultHop::Upstream,
             inner: Arc::new(ClientInner {
                 limits,
                 policy,
@@ -408,6 +412,8 @@ impl Client {
             observer: self.observer.clone(),
             #[cfg(feature = "fault-injection")]
             faults: self.faults.clone(),
+            #[cfg(feature = "fault-injection")]
+            fault_hop: self.fault_hop,
             inner: Arc::new(ClientInner {
                 limits,
                 policy: inner.policy,
@@ -441,6 +447,8 @@ impl Client {
             observer: self.observer.clone(),
             #[cfg(feature = "fault-injection")]
             faults: self.faults.clone(),
+            #[cfg(feature = "fault-injection")]
+            fault_hop: self.fault_hop,
             inner: Arc::new(ClientInner {
                 limits: inner.limits.clone(),
                 policy: inner.policy,
@@ -478,6 +486,8 @@ impl Client {
             observer: self.observer.clone(),
             #[cfg(feature = "fault-injection")]
             faults: self.faults.clone(),
+            #[cfg(feature = "fault-injection")]
+            fault_hop: self.fault_hop,
             inner: Arc::new(ClientInner {
                 limits: inner.limits.clone(),
                 policy: inner.policy,
@@ -512,6 +522,8 @@ impl Client {
             observer: self.observer.clone(),
             #[cfg(feature = "fault-injection")]
             faults: self.faults.clone(),
+            #[cfg(feature = "fault-injection")]
+            fault_hop: self.fault_hop,
             inner: Arc::new(ClientInner {
                 limits: inner.limits.clone(),
                 policy: inner.policy,
@@ -593,6 +605,26 @@ impl Client {
     pub fn with_faults(mut self, faults: Option<fault::FaultPlan>) -> Self {
         self.faults = faults;
         self
+    }
+
+    /// Selects which hop of the fault plan this client applies. Provider and
+    /// direct clients stay on [`FaultHop::Upstream`](fault::FaultHop::Upstream).
+    /// The relay client uses [`FaultHop::Gateway`](fault::FaultHop::Gateway).
+    #[cfg(feature = "fault-injection")]
+    #[must_use]
+    pub fn with_fault_hop(mut self, hop: fault::FaultHop) -> Self {
+        self.fault_hop = hop;
+        self
+    }
+
+    /// Installs the gateway service's provider-hop plan. A test-hooks
+    /// `plakd gateway serve` uses this on its upstream client so that plan
+    /// keeps today's grammar.
+    #[cfg(feature = "fault-injection")]
+    #[must_use]
+    pub fn with_provider_faults_from_env(self) -> Self {
+        self.with_faults(fault::provider_from_env())
+            .with_fault_hop(fault::FaultHop::Upstream)
     }
 
     /// Returns the strict limits enforced by this client.

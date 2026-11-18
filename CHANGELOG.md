@@ -67,6 +67,11 @@ for one version bump, without native protocol compatibility.
 - Fix a Claude or SuperGrok custody facts read failing `Store` when a
   concurrent refresh moved the record; it reads again.
 
+- Host `PLAK_TEST_FAULTS` plans take `hop=gateway|upstream`. Upstream rules
+  apply to an in-process gateway and are refused when an external gateway is
+  configured. `relay-lost` and `gateway-refusal` fault the gateway hop only.
+  A gateway service reads the existing provider grammar for its own upstream
+  hop.
 ### plakd
 
 - A parent follow-up to a settled child whose account, model and template

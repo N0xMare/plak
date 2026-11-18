@@ -718,6 +718,7 @@ default-filter = '''
   | test(cross_runner_fork_stages)
   | test(mcp_on_a_runner_runs_there_and_restarts_after_the_runner_does)
   | test(mcp_on_a_runner_ends_with_its_host)
+  | test(gateway::durability::)
 '''
 
 # Reserve the whole pool for the closed-cell twin-pilot campaign: its
