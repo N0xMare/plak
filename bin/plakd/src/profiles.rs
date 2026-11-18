@@ -473,8 +473,25 @@ fn row(config: &ProductConfig, resolved: &Resolved, aliases: Vec<String>) -> Pro
         aliases,
         root: role("root", &resolved.root.1, 0),
         cards,
-        account_kinds: Vec::new(),
+        account_kinds: account_kinds(
+            std::iter::once(&resolved.root.1)
+                .chain(resolved.cards.iter().map(|(_, template)| template)),
+        ),
     }
+}
+
+fn account_kinds<'a>(templates: impl Iterator<Item = &'a AgentTemplate>) -> Vec<String> {
+    let mut kinds = std::collections::BTreeSet::new();
+    for template in templates {
+        if let Ok(account) = template
+            .account
+            .parse::<plakous_hosted::account::AccountRef>()
+            && !account.is_named()
+        {
+            kinds.insert(account.vertical().as_str().to_owned());
+        }
+    }
+    kinds.into_iter().collect()
 }
 
 fn role(label: &str, template: &AgentTemplate, depth: usize) -> ProfileRole {

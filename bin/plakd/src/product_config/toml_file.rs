@@ -488,7 +488,11 @@ pub(super) fn parse_template(text: &str, name: &str) -> Result<AgentTemplate, St
         .parse::<plakous_hosted::account::AccountRef>()
         .map_err(|error| error.to_string())?;
     if account.is_named() {
-        template.account = account.to_string();
+        return Err(format!(
+            "template {name}: account must name a provider kind such as {}, not a named account ({})",
+            account.vertical().as_str(),
+            account
+        ));
     }
     Ok(template)
 }

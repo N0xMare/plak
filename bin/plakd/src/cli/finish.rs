@@ -57,6 +57,7 @@ pub(super) fn finish_continue_session(
 )]
 pub(super) fn finish_run(
     account: String,
+    accounts: Vec<plakous_host_protocol::wire::AccountChoice>,
     model: String,
     effort: Option<String>,
     composition: Option<String>,
@@ -101,6 +102,7 @@ pub(super) fn finish_run(
             composition,
             prompt: plakous_host_protocol::Draft::new(prompt, images),
             print_session_id,
+            accounts,
         });
     }
     if account.vertical() == super::Vertical::OpenRouter {
@@ -134,6 +136,7 @@ pub(super) fn finish_run(
             wire,
             prompt: plakous_host_protocol::Draft::new(prompt, images),
             print_session_id,
+            accounts,
         });
     }
     if protocol.is_some() {
@@ -157,6 +160,7 @@ pub(super) fn finish_run(
         composition,
         prompt: plakous_host_protocol::Draft::new(prompt, images),
         print_session_id,
+        accounts,
     })
 }
 
@@ -172,6 +176,7 @@ fn validate_run_prompt(prompt: &str, no_images: bool) -> Result<(), String> {
 
 pub(super) fn finish_agent(
     account: Option<String>,
+    accounts: Vec<plakous_host_protocol::wire::AccountChoice>,
     model: Option<String>,
     effort: Option<String>,
     composition: Option<String>,
@@ -180,6 +185,7 @@ pub(super) fn finish_agent(
 ) -> Result<Command, String> {
     if let Some(session_id) = session {
         if account.is_some()
+            || !accounts.is_empty()
             || model.is_some()
             || effort.is_some()
             || composition.is_some()
@@ -204,6 +210,7 @@ pub(super) fn finish_agent(
             effort_explicit: false,
             composition: None,
             wire_v2: false,
+            accounts: Vec::new(),
         });
     }
     let account: Option<super::AccountRef> = account
@@ -218,10 +225,17 @@ pub(super) fn finish_agent(
             if protocol.is_some() {
                 return Err("--protocol is available only with --account openrouter".into());
             }
-            return finish_platform_agent(account, platform, model, effort, composition);
+            return finish_platform_agent(account, platform, model, effort, composition, accounts);
         }
         if account.vertical() == super::Vertical::OpenRouter {
-            return finish_openrouter_agent(account.clone(), model, effort, composition, protocol);
+            return finish_openrouter_agent(
+                account.clone(),
+                model,
+                effort,
+                composition,
+                protocol,
+                accounts,
+            );
         }
         if protocol.is_some() {
             return Err("--protocol is available only with --account openrouter".to_owned());
@@ -255,6 +269,7 @@ pub(super) fn finish_agent(
         effort_explicit,
         composition,
         wire_v2: false,
+        accounts,
     })
 }
 
@@ -264,6 +279,7 @@ fn finish_openrouter_agent(
     effort: Option<String>,
     composition: Option<String>,
     protocol: Option<String>,
+    accounts: Vec<plakous_host_protocol::wire::AccountChoice>,
 ) -> Result<Command, String> {
     let effort = effort
         .map(|value| {
@@ -297,6 +313,7 @@ fn finish_openrouter_agent(
         effort_explicit,
         composition: Some(composition),
         wire_v2: false,
+        accounts,
     })
 }
 
@@ -306,6 +323,7 @@ fn finish_platform_agent(
     model: Option<String>,
     effort: Option<String>,
     composition: Option<String>,
+    accounts: Vec<plakous_host_protocol::wire::AccountChoice>,
 ) -> Result<Command, String> {
     let effort = effort
         .as_deref()
@@ -347,5 +365,6 @@ fn finish_platform_agent(
         effort_explicit: effort.is_some(),
         composition,
         wire_v2: false,
+        accounts,
     })
 }

@@ -158,6 +158,7 @@ for one version bump, without native protocol compatibility.
   `RestartSec` and `TimeoutStopSec=45`. Remote `key status` prints
   fingerprints.
 
+||||||| parent of 5b06e9d1b (Persist session account choices and continue a root on another account.)
 ## 0.0.4
 
 ### plakd

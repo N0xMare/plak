@@ -227,7 +227,7 @@ impl TopCommand {
                     });
                 }
                 if let Some(session_id) = session {
-                    if account.is_some()
+                    if !account.is_empty()
                         || provider.is_some()
                         || model.is_some()
                         || effort.is_some()
@@ -249,12 +249,14 @@ impl TopCommand {
                         limits,
                     );
                 }
-                let account = account.or(provider).ok_or_else(|| {
+                let (bare, choices) = crate::account_choice::split_account_flags(account)?;
+                let account = bare.or(provider).ok_or_else(|| {
                     "run requires --account <codex|grok|claude|openrouter|openai|anthropic|xai-api>".to_owned()
                 })?;
                 let model = model.ok_or_else(|| "run requires --model".to_owned())?;
                 finish_run(
                     account,
+                    choices,
                     model,
                     effort,
                     composition,
@@ -276,14 +278,18 @@ impl TopCommand {
                 protocol,
                 session,
                 stdio_wire,
-            } => finish_agent(
-                account.or(provider),
-                model,
-                effort,
-                composition,
-                protocol,
-                session,
-            )
+            } => {
+                let (bare, choices) = crate::account_choice::split_account_flags(account)?;
+                finish_agent(
+                    bare.or(provider),
+                    choices,
+                    model,
+                    effort,
+                    composition,
+                    protocol,
+                    session,
+                )
+            }
             .map(|command| command.speaking_wire(stdio_wire.as_deref() == Some("v2"))),
             #[cfg(feature = "maintainer")]
             Self::Fork { session: None, .. } => Ok(Command::CommandHelp {

@@ -4379,7 +4379,7 @@ is either in the reference fixture, in sanitized authenticated evidence from
 that client version, or on an explicit reviewed API-only Direct list.
 Moving the reference-client pin rotates the Codex OAuth binding identity and
 requires a runtime format epoch cut. This pin move belongs to the same unshipped
-epoch 38 / `r28.e38.p38.t11` cut as the pending runtime changes; it adds no
+epoch 38 / `r28.e38.p39.t11` cut as the pending runtime changes; it adds no
 second bump. Cross-build session transfer uses export
 and import (§5.4).
 

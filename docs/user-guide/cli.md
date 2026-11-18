@@ -24,6 +24,16 @@ protocol version and binary id. It is a supported release command; see the
 Placement is selected through the host wire operations, not top-level launch
 flags. The host validates runner/workspace choices before session creation.
 
+`plakd run` and `plakd agent` accept repeatable `--account <kind>=<ref>`
+(`--account claude=claude/work`) in addition to one bare `--account` for the
+root. A template names a provider kind (`claude`), never a named account
+(`claude/work`); a named reference in a template file is a load error.
+Interactive clients read each kind's accounts and readiness from session
+options and can offer a picker when a used kind has more than one ready
+account. "Continue on <account>" rebinds the root and resubmits the failed
+turn once; a non-root kind only updates that session's choice. The root
+cannot be switched while it is busy.
+
 ## A persistent host and the stdio bridge
 
 `plakd host` serves the home's sessions in the foreground. Host/web serving is
@@ -629,13 +639,13 @@ Version            OK       available · 0.0.4                             —
 Home               OK       available · /home/you/.plak                   —
 Home free space    OK       available · product home volume has at least 5120 MiB available   —
 Config             OK       valid · /home/you/.plak/config.toml           —
-Product db         OK       available · /home/you/.plak/state/r28.e38.p38.t11/product.sqlite3   —
-Runtime db         OK       available · /home/you/.plak/state/r28.e38.p38.t11/runtime.sqlite3   —
+Product db         OK       available · /home/you/.plak/state/r28.e38.p39.t11/product.sqlite3   —
+Runtime db         OK       available · /home/you/.plak/state/r28.e38.p39.t11/runtime.sqlite3   —
 Runtime store      OK       available · checkpoints 412/524288 (new work stops at 458752), …   —
-Subagents db       OK       available · /home/you/.plak/state/r28.e38.p38.t11/subagents.sqlite3   —
+Subagents db       OK       available · /home/you/.plak/state/r28.e38.p39.t11/subagents.sqlite3   —
 Telemetry db       OK       ok · 1189 rows                                —
 Secrets dir        OK       available · /home/you/.plak/secrets           —
-Sessions dir       OK       available · /home/you/.plak/state/r28.e38.p38.t11/sessions          —
+Sessions dir       OK       available · /home/you/.plak/state/r28.e38.p39.t11/sessions          —
 Carry files        OK       none · /home/you/.plak/carry                  —
 Cwd                OK       available · /home/you/project                 —
 Jj cli             OK       missing · native workspace operations need no jj CLI; library not built   —

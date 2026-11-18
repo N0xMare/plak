@@ -43,6 +43,7 @@ pub(crate) fn run_agent(
     effort_explicit: bool,
     composition: Option<product_config::ProductCompositionSelection>,
     wire_v2: bool,
+    accounts: Vec<plakous_host_protocol::wire::AccountChoice>,
 ) -> CliResult<ProcessOutcome> {
     // Installed before admission, and before the session opens: a session open
     // reaches the provider for discovery and can take seconds, and a signal
@@ -76,6 +77,7 @@ pub(crate) fn run_agent(
         effort,
         effort_explicit,
         composition,
+        accounts,
     );
     // Exactly one terminal record. Everything before the host opens is
     // terminated here; once the host owns the stream it terminates its own,
@@ -237,6 +239,7 @@ pub(crate) fn run_agent_after_admission(
     effort: Option<ReasoningEffort>,
     effort_explicit: bool,
     composition: Option<product_config::ProductCompositionSelection>,
+    accounts: Vec<plakous_host_protocol::wire::AccountChoice>,
 ) -> CliResult<product_host::HostConfig<crate::surface_protocol::PlakExtension>> {
     if let Some(account) = &account {
         crate::build_features::require_account(account.as_str())?;
@@ -284,6 +287,7 @@ pub(crate) fn run_agent_after_admission(
                 composition,
                 None,
             )?;
+            crate::account_choice::store_explicit(&mut record, &accounts);
             crate::build_features::admit_selected(
                 &cfg,
                 record.account.as_deref(),

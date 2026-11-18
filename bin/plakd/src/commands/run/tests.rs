@@ -74,6 +74,7 @@ fn expired_run_timeout_precedes_authentication_preparation() {
                 leave_jobs_running: false,
                 deadline: Some(std::time::Instant::now()),
             },
+            &[],
         )
         .unwrap();
     assert_eq!(outcome, ProcessOutcome::Bounded);
@@ -957,6 +958,8 @@ fn run_refuses_an_invalid_config_before_any_account_or_session_work() {
             composition: None,
             prompt: "must not dispatch".into(),
             print_session_id: false,
+
+            accounts: Vec::new(),
         },
         crate::command::Command::ContinueSession {
             limits: plakous_hosted::runtime::RunBounds::default(),
@@ -1016,6 +1019,8 @@ fn run_with_a_signed_out_subscription_exits_3_naming_plak_login() {
             composition: None,
             prompt: "must not dispatch".into(),
             print_session_id: false,
+
+            accounts: Vec::new(),
         },
         &services,
         &mut app,

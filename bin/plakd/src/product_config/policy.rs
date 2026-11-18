@@ -282,6 +282,13 @@ impl AgentTemplate {
             .account
             .parse::<plakous_hosted::account::AccountRef>()
             .map_err(|error| error.to_string())?;
+        if account.is_named() {
+            return Err(format!(
+                "template {name}: account must name a provider kind such as {}, not a named account ({})",
+                account.vertical().as_str(),
+                account
+            ));
+        }
         self.validate_composition(self.composition)
             .map_err(|error| format!("template {name}: {error}"))?;
         if account.vertical() != plakous_hosted::account::Vertical::OpenRouter

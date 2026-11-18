@@ -3,6 +3,7 @@
 //! This store never opens the Plakous runtime database. Stable product and
 //! command identities bind each submission to its exact immutable content.
 
+use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -32,7 +33,7 @@ pub(crate) struct BindingRecordDisposition {
     pub(crate) superseded: bool,
 }
 
-pub(crate) const SCHEMA_VERSION: i64 = 38;
+pub(crate) const SCHEMA_VERSION: i64 = 39;
 const MAX_LIST_SESSIONS_SQL: i64 = 500;
 const MAX_LIST_PROMPTS_SQL: i64 = 500;
 const MAX_LIST_PROMPT_BYTES: usize = 1024 * 1024;
@@ -586,7 +587,7 @@ fn load_record(
 ) -> Result<SessionRecord, String> {
     let mut session = connection
             .query_row(
-                "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display, title_override, archived FROM sessions WHERE id = ?1",
+                "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display, title_override, archived, account_choices FROM sessions WHERE id = ?1",
                 [id],
                 |row| {
                     let locator: Option<String> = row.get(11)?;
@@ -615,6 +616,7 @@ fn load_record(
                         runner: decode_runner_display(row, 19)?,
                         title_override: row.get(20)?,
                         archived: row.get(21)?,
+                        account_choices: decode_account_choices(row.get(22)?)?,
                     })
                 },
             )
@@ -822,7 +824,7 @@ impl ProductStore {
             .map_err(|_| "could not start product listing read".to_owned())?;
         let mut query_count = 0usize;
         let mut statement = transaction.prepare(
-            "SELECT id,create_operation_id,workspace_root,created_at,updated_at,account,model,effort,title,source_session_id,source_operation_id,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,composition,target_selection,COALESCE(v.root_turn_count,0),COALESCE(v.tool_call_count,0),COALESCE(v.compaction_count,0),sessions.carry_intent,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,sessions.runner_display,sessions.title_override,sessions.archived FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE workspace_identity = ?1 AND (?3 OR sessions.archived=0) ORDER BY updated_at DESC, id ASC LIMIT ?2"
+            "SELECT id,create_operation_id,workspace_root,created_at,updated_at,account,model,effort,title,source_session_id,source_operation_id,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,composition,target_selection,COALESCE(v.root_turn_count,0),COALESCE(v.tool_call_count,0),COALESCE(v.compaction_count,0),sessions.carry_intent,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,sessions.runner_display,sessions.title_override,sessions.archived,sessions.account_choices FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE workspace_identity = ?1 AND (?3 OR sessions.archived=0) ORDER BY updated_at DESC, id ASC LIMIT ?2"
         ).map_err(|_| "could not query product sessions".to_owned())?;
         query_count += 1;
         let mut sessions = statement
@@ -877,6 +879,7 @@ impl ProductStore {
                         runner: decode_runner_display(row, 21)?,
                         title_override: row.get(22)?,
                         archived: row.get(23)?,
+                        account_choices: decode_account_choices(row.get(24)?)?,
                     })
                 },
             )
@@ -994,8 +997,8 @@ fn insert_session(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), RecordS
         .into_owned();
     let locator = s.plakous_locator.map(|value| value.to_string());
     let changed = tx.execute(
-        "INSERT INTO sessions(id, revision, create_operation_id, workspace_root, workspace_identity, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display, title_override, archived) VALUES (?1,1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
-        params![s.id, s.create_operation_id, workspace, workspace_identity, to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, locator, s.composition.as_str(), serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?, s.node.tree_id, s.node.agent_id, encoded_root_profile(s)?, encoded_runner_display(s)?, s.title_override, s.archived],
+        "INSERT INTO sessions(id, revision, create_operation_id, workspace_root, workspace_identity, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display, title_override, archived, account_choices) VALUES (?1,1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
+        params![s.id, s.create_operation_id, workspace, workspace_identity, to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, locator, s.composition.as_str(), serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?, s.node.tree_id, s.node.agent_id, encoded_root_profile(s)?, encoded_runner_display(s)?, s.title_override, s.archived, encoded_account_choices(s)?],
     ).map_err(|error| write_error(error, "product session identity already exists or is invalid".to_owned()))?;
     if changed != 1 {
         return Err("product session insert was not exact".to_owned().into());
@@ -1054,8 +1057,8 @@ fn update_session(
 ) -> Result<usize, RecordStoreError> {
     // A loaded record carries the view head, not a replacement genesis binding.
     tx.execute(
-        "UPDATE sessions SET revision=?2, workspace_root=?4, workspace_identity=?5, updated_at=?7, account=?8, model=?9, effort=?10, title=?11, source_session_id=?12, source_operation_id=?13, locator=COALESCE(locator,?14), composition=?15, target_selection=?17, frozen_tools=COALESCE(frozen_tools,?18), carry_intent=?19, root_profile=COALESCE(root_profile,?22) WHERE id=?1 AND revision=?3 AND create_operation_id=?16 AND created_at=?6 AND node_tree_id=?20 AND node_agent_id=?21 AND (root_profile IS NULL OR root_profile IS ?22) AND runner_display IS ?23",
-        params![s.id, to_i64(next)?, to_i64(expected)?, s.workspace_root.to_string_lossy(), sessions::workspace_identity(&s.workspace_root).to_string_lossy(), to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, s.plakous_locator.map(|v| v.to_string()), s.composition.as_str(), s.create_operation_id, serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?, s.node.tree_id, s.node.agent_id, encoded_root_profile(s)?, encoded_runner_display(s)?],
+        "UPDATE sessions SET revision=?2, workspace_root=?4, workspace_identity=?5, updated_at=?7, account=?8, model=?9, effort=?10, title=?11, source_session_id=?12, source_operation_id=?13, locator=COALESCE(locator,?14), composition=?15, target_selection=?17, frozen_tools=COALESCE(frozen_tools,?18), carry_intent=?19, root_profile=COALESCE(root_profile,?22), account_choices=?24 WHERE id=?1 AND revision=?3 AND create_operation_id=?16 AND created_at=?6 AND node_tree_id=?20 AND node_agent_id=?21 AND (root_profile IS NULL OR root_profile IS ?22) AND runner_display IS ?23",
+        params![s.id, to_i64(next)?, to_i64(expected)?, s.workspace_root.to_string_lossy(), sessions::workspace_identity(&s.workspace_root).to_string_lossy(), to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, s.plakous_locator.map(|v| v.to_string()), s.composition.as_str(), s.create_operation_id, serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?, s.node.tree_id, s.node.agent_id, encoded_root_profile(s)?, encoded_runner_display(s)?, encoded_account_choices(s)?],
     ).map_err(|error| write_error(error, "could not update product session".to_owned()))
 }
 
@@ -1067,6 +1070,15 @@ fn encoded_root_profile(s: &SessionRecord) -> Result<Option<String>, String> {
         .as_ref()
         .map(plakous_hosted::sessions::RootProfile::encode)
         .transpose()
+}
+
+fn encoded_account_choices(s: &SessionRecord) -> Result<String, String> {
+    serde_json::to_string(&s.account_choices)
+        .map_err(|_| "account choices are not serializable".to_owned())
+}
+
+fn decode_account_choices(text: String) -> Result<BTreeMap<String, String>, rusqlite::Error> {
+    serde_json::from_str(&text).map_err(|_| rusqlite::Error::InvalidQuery)
 }
 
 fn encoded_runner_display(s: &SessionRecord) -> Result<Option<String>, String> {
@@ -1444,7 +1456,7 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "sessions",
-        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc','py-sdk')), target_selection TEXT NOT NULL DEFAULT '\"native\"', frozen_tools TEXT CHECK(frozen_tools IS NULL OR json_valid(frozen_tools)), carry_intent TEXT CHECK(carry_intent IS NULL OR (json_valid(carry_intent) AND locator IS NULL)), node_tree_id TEXT NOT NULL CHECK(length(node_tree_id) BETWEEN 1 AND 128), node_agent_id TEXT NOT NULL CHECK(length(node_agent_id) BETWEEN 1 AND 128), root_profile TEXT CHECK(root_profile IS NULL OR json_valid(root_profile)), runner_display TEXT CHECK(runner_display IS NULL OR json_valid(runner_display)), title_override TEXT, archived INTEGER NOT NULL CHECK(archived IN (0,1)))",
+        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc','py-sdk')), target_selection TEXT NOT NULL DEFAULT '\"native\"', frozen_tools TEXT CHECK(frozen_tools IS NULL OR json_valid(frozen_tools)), carry_intent TEXT CHECK(carry_intent IS NULL OR (json_valid(carry_intent) AND locator IS NULL)), node_tree_id TEXT NOT NULL CHECK(length(node_tree_id) BETWEEN 1 AND 128), node_agent_id TEXT NOT NULL CHECK(length(node_agent_id) BETWEEN 1 AND 128), root_profile TEXT CHECK(root_profile IS NULL OR json_valid(root_profile)), runner_display TEXT CHECK(runner_display IS NULL OR json_valid(runner_display)), title_override TEXT, archived INTEGER NOT NULL CHECK(archived IN (0,1)), account_choices TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(account_choices) AND json_type(account_choices)='object'))",
     ),
     (
         "sessions_workspace_updated",

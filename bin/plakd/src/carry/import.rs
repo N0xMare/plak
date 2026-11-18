@@ -95,6 +95,13 @@ fn apply_record_fields(
         record.queue_drain_state = QueueDrainState::RestoredPaused;
     }
     record.link_carried_forward(&source.session_id, &source.state_key);
+    let mut kinds = std::collections::BTreeSet::new();
+    if let Some(account) = record.account.as_deref()
+        && let Ok(parsed) = account.parse::<plakous_hosted::account::AccountRef>()
+    {
+        kinds.insert(parsed.vertical().as_str().to_owned());
+    }
+    crate::account_choice::fill_imported(&mut record, &kinds, &[]);
 }
 
 fn import_note(

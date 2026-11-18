@@ -353,6 +353,8 @@ pub(crate) enum Command {
         prompt: plakous_host_protocol::Draft,
         print_session_id: bool,
         limits: plakous_hosted::runtime::RunBounds,
+        /// Repeatable `--account <kind>=<ref>` choices. The bare `--account` is `provider`.
+        accounts: Vec<plakous_host_protocol::wire::AccountChoice>,
     },
     RunOpenRouter {
         account: AccountRef,
@@ -363,6 +365,8 @@ pub(crate) enum Command {
         prompt: plakous_host_protocol::Draft,
         print_session_id: bool,
         limits: plakous_hosted::runtime::RunBounds,
+        /// Repeatable `--account <kind>=<ref>` choices.
+        accounts: Vec<plakous_host_protocol::wire::AccountChoice>,
     },
     RunPlatform {
         account: AccountRef,
@@ -373,6 +377,8 @@ pub(crate) enum Command {
         prompt: plakous_host_protocol::Draft,
         print_session_id: bool,
         limits: plakous_hosted::runtime::RunBounds,
+        /// Repeatable `--account <kind>=<ref>` choices.
+        accounts: Vec<plakous_host_protocol::wire::AccountChoice>,
     },
     ContinueSession {
         session_id: String,
@@ -393,6 +399,8 @@ pub(crate) enum Command {
         /// Speak wire v2 on stdio instead of JSONL v1 (hidden, not yet
         /// supported).
         wire_v2: bool,
+        /// Repeatable `--account <kind>=<ref>` choices. A bare `--account` is `account`.
+        accounts: Vec<plakous_host_protocol::wire::AccountChoice>,
     },
     /// `plakd host`: the per-user host process.
     Host(HostCommand),
@@ -483,6 +491,7 @@ impl Command {
                 effort,
                 effort_explicit,
                 composition,
+                accounts,
                 ..
             } => Self::Agent {
                 account,
@@ -495,6 +504,7 @@ impl Command {
                 effort_explicit,
                 composition,
                 wire_v2: v2,
+                accounts,
             },
             other => other,
         }

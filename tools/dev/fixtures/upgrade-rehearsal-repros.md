@@ -37,7 +37,7 @@ compatibility proof, not the shape check alone.
 
 The dormant cases use the real B image twice: source with the existing
 test-hooks-only `PLAK_TEST_STATE_KEY=r27.e37.p37.t10`, destination at its
-natural `r28.e38.p38.t11`. This simulates two keys, **not** compatibility with
+natural `r28.e38.p39.t11`. This simulates two keys, **not** compatibility with
 the old codecs. The separate `b-*` bootstrap cases use literal A and B.
 Every runtime process receives isolated HOME, PLAK_HOME, XDG directories and
 TMPDIR, an empty Git configuration and only the offline loopback provider.

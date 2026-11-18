@@ -138,7 +138,7 @@
         "frame": "welcome",
         "host_generation": "@generation:0",
         "proto": 11,
-        "state_key": "r28.e38.p38.t11"
+        "state_key": "r28.e38.p39.t11"
       }
     },
     {
@@ -773,7 +773,7 @@
         "frame": "welcome",
         "host_generation": "@generation:1",
         "proto": 11,
-        "state_key": "r28.e38.p38.t11"
+        "state_key": "r28.e38.p39.t11"
       }
     },
     {

@@ -2726,6 +2726,8 @@ fn parses_exact_run_route_for_both_providers() {
             composition: None,
             print_session_id: false,
             prompt: "hello world".into(),
+
+            accounts: Vec::new(),
         })
     );
     assert_eq!(
@@ -2747,6 +2749,8 @@ fn parses_exact_run_route_for_both_providers() {
             composition: None,
             print_session_id: false,
             prompt: "hello world".into(),
+
+            accounts: Vec::new(),
         })
     );
     assert_eq!(
@@ -2769,6 +2773,8 @@ fn parses_exact_run_route_for_both_providers() {
             composition: None,
             print_session_id: false,
             prompt: "research me".into(),
+
+            accounts: Vec::new(),
         })
     );
     assert_eq!(
@@ -2791,6 +2797,8 @@ fn parses_exact_run_route_for_both_providers() {
             composition: None,
             print_session_id: false,
             prompt: "spark me".into(),
+
+            accounts: Vec::new(),
         })
     );
     assert_eq!(
@@ -2813,6 +2821,8 @@ fn parses_exact_run_route_for_both_providers() {
             composition: None,
             print_session_id: false,
             prompt: "patch me".into(),
+
+            accounts: Vec::new(),
         })
     );
 }
@@ -3483,6 +3493,8 @@ fn concrete_run_declined_compatibility_cannot_open_a_product_session() {
             composition: None,
             prompt: "must not dispatch".into(),
             print_session_id: false,
+
+            accounts: Vec::new(),
         },
         &services,
         &mut app,

@@ -85,6 +85,7 @@ impl PlakousApplication {
         stdout: &mut dyn io::Write,
         stderr: &mut dyn io::Write,
         limits: product_host::RunBounds,
+        accounts: &[plakous_host_protocol::wire::AccountChoice],
     ) -> CliResult<ProcessOutcome> {
         let provider = super::application::native_provider(selection)?;
         let account = selection.as_str();
@@ -107,6 +108,7 @@ impl PlakousApplication {
             session.effort = effort.map(product_host::effort_label);
             session.composition = composition;
             session.target_selection = product_config::ProductTargetSelection::Native;
+            crate::account_choice::store_explicit(&mut session, accounts);
             return self.run_hosted(
                 config,
                 session,
@@ -206,6 +208,7 @@ impl PlakousApplication {
         session.effort = selected_effort.map(product_host::effort_label);
         session.composition = composition;
         session.target_selection = target_selection;
+        crate::account_choice::store_explicit(&mut session, accounts);
         let target = product_host::HostTargetAuthority::Native {
             provider,
             resolved,
@@ -264,6 +267,7 @@ impl PlakousApplication {
         stdout: &mut dyn io::Write,
         stderr: &mut dyn io::Write,
         limits: product_host::RunBounds,
+        accounts: &[plakous_host_protocol::wire::AccountChoice],
     ) -> CliResult<ProcessOutcome> {
         if run_expired(limits) {
             return run_timeout(stderr);
@@ -272,7 +276,8 @@ impl PlakousApplication {
             .api_target(&account)?
             .ok_or_else(|| CliFailure::new("API run requires an API target"))?;
         let cwd = self.workspace()?;
-        let session = api_run_record(cwd, &account, model, effort, composition, selection)?;
+        let mut session = api_run_record(cwd, &account, model, effort, composition, selection)?;
+        crate::account_choice::store_explicit(&mut session, accounts);
         self.product_paths()?
             .ensure_layout()
             .map_err(CliFailure::new)?;

@@ -34,6 +34,7 @@
     )
 )]
 
+mod account_choice;
 #[cfg(test)]
 mod agent_composition_tests;
 #[doc(hidden)]
@@ -1047,6 +1048,7 @@ fn execute_application_command(
             composition,
             prompt,
             print_session_id,
+            accounts,
         } => {
             let config = admit(stderr)?;
             #[cfg(feature = "test-hooks")]
@@ -1071,6 +1073,7 @@ fn execute_application_command(
                 stdout,
                 stderr,
                 limits,
+                &accounts,
             )
         }
         Command::RunOpenRouter {
@@ -1082,6 +1085,7 @@ fn execute_application_command(
             wire,
             prompt,
             print_session_id,
+            accounts,
         } => backend.run_api(
             &admit(stderr)?,
             account,
@@ -1097,6 +1101,7 @@ fn execute_application_command(
             stdout,
             stderr,
             limits,
+            &accounts,
         ),
         Command::RunPlatform {
             account,
@@ -1107,6 +1112,7 @@ fn execute_application_command(
             composition,
             prompt,
             print_session_id,
+            accounts,
         } => backend.run_api(
             &admit(stderr)?,
             account,
@@ -1119,6 +1125,7 @@ fn execute_application_command(
             stdout,
             stderr,
             limits,
+            &accounts,
         ),
         Command::ContinueSession {
             limits,
@@ -1467,6 +1474,7 @@ fn run_agent_command(services: &Services, command: Command) -> CliResult<Process
         effort_explicit,
         composition,
         wire_v2,
+        accounts,
     } = command
     else {
         return Err(CliFailure::new("internal command dispatch error"));
@@ -1483,6 +1491,7 @@ fn run_agent_command(services: &Services, command: Command) -> CliResult<Process
         effort_explicit,
         composition,
         wire_v2,
+        accounts,
     )
 }
 

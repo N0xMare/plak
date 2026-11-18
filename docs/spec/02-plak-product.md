@@ -330,10 +330,10 @@ another session's jobs.
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   cache/subscription-catalogs/<slot>-<binding>.json  gateway-custodied native model snapshots (§4.7), disposable
   state/
-    r28.e38.p38.t11/            this build's state (§2.5)
+    r28.e38.p39.t11/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 28, epoch 38
-      product.sqlite3             plakd intents and feed-derived views, schema 38
+      product.sqlite3             plakd intents and feed-derived views, schema 39
       subagents.sqlite3           the agent tree, schema 11
       custody-hosts/<instance>.lock  each live host process's custody liveness lock (chapter 03 §14)
       host.lock                   held by this build's `plakd host` for its life, naming its pid and binary (section 4.6); not state
@@ -1092,9 +1092,9 @@ recovery authority.
 plakd does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r28.e38.p38.t11`. The key is derived from the stores'
+schema>`, for example `r28.e38.p39.t11`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
-move it. A build therefore never finds another build's files in its own
+move it. Product schema 39 stores `sessions.account_choices`, a JSON object of non-root provider kinds to full account references. The root kind's account is the root line head and is not a map entry. A cross-key cut is the only move; nothing is migrated in place. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup. State-directory
 file formats outside the four stores ride the same key: a change to the runtime
 store's holder-claim files (chapter 01 §5.1) must ship with a bump of one of
@@ -4072,6 +4072,8 @@ target?, retry_after_ms?}`. `phase` is `draining`, `restarting`, `stopping` or
 `running`; `reason` is `paired_upgrade`, `cross_key_upgrade` or `shutdown`. A target has exactly `binary_id` and `state_key`. An optional
 retry hint is a u32 bounded to 30000 ms. These DTOs belong to `plakd-wire-types`;
 the neutral envelope carries the product's lifecycle extension.
+
+`ChooseAccount` continues a session on one account. The root kind rebinds through the existing rebind workflow and, after that publishes, submits one ordinary root-start. That submission is the failed turn's canonical prompt when no round committed after it; otherwise it is exactly `Continue the previous request from where it stopped. The tool results above are what actually ran.` The command id is the exactly-once key. A crash withdraws an unpublished rebind and never auto-resubmits the prompt. A non-root kind updates the session's account-choice map and does not rebind. A busy root is refused (`root_busy`) with no write. Resubmitting the exact prompt records a duplicate user message; that duplicate is the accepted continue. There is no automatic failover.
 
 A source announces `draining` only after admission of a planned upgrade and
 its admission pause, `restarting` after preparation commits, and `running`

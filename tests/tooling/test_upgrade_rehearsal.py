@@ -233,7 +233,7 @@ class UpgradeRehearsalTests(unittest.TestCase):
             "config_error": None,
         }
         destination = json.loads(json.dumps(source))
-        destination.update(state_key="r28.e38.p38.t11", export_versions=[13, 12])
+        destination.update(state_key="r28.e38.p39.t11", export_versions=[13, 12])
         DRIVER.check_probe_shape(source, destination)
         for field, value, detail in [
             ("live_move_protocol", 1, "unknown fields.*live_move_protocol"),

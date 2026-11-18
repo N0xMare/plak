@@ -47,10 +47,10 @@ retention-only host/line cannot regain native control by downgrade/reinstall. Na
 lease expiry does not revoke retention authority. Bare connection errors do not
 release retained capacity without positive original-instance/process-loss proof.
 
-The current state directory is `state/r28.e38.p38.t11/`: runtime SQLite
-schema 28, runtime format epoch 38, product schema 38, and tree schema 11.
-These are format identities, not configuration keys. Client wire protocol 11
-and runner protocol 9 require separate exact matches, with no negotiation. Product schema 38 adds the semantic `session_move_seeds` base; tree schema 11
+The current state directory is `state/r28.e38.p39.t11/`: runtime SQLite
+schema 28, runtime format epoch 38, product schema 39, and tree schema 11.
+These are format identities, not configuration keys. Client wire protocol 12
+and runner protocol 9 require separate exact matches, with no negotiation. Product schema 38 adds the semantic `session_move_seeds` base; product schema 39 adds `sessions.account_choices`. Tree schema 11
 adds `agent_move_seeds`. Runtime epoch 38 includes context codec 4
 with imported compaction strategy/count facts and no stale execution grants. Session export stays
 version 13; imports admit versions 13 and 12 and refuse version 11 and older.

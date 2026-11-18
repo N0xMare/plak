@@ -146,7 +146,7 @@ async fn source_with_fidelity(root: &PathFixture, rich: bool) -> TestResult<Caps
     };
     let capsule = producer::SourceCut {
         operation: [13; 32],
-        key: "r28.e38.p38.t11".into(),
+        key: "r28.e38.p39.t11".into(),
         binary: "111111111111".into(),
         host: "source-home".into(),
         instance: "1-0000000000000001".into(),

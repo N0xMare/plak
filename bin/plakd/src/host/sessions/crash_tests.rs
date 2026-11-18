@@ -26,6 +26,7 @@ fn create_crash_worker() {
             profile: replay.then_some("removed-profile"),
             template: None,
             model: None,
+            accounts: &[],
             request_id: REQUEST,
         })
         .unwrap();

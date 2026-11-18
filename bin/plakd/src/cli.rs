@@ -120,7 +120,11 @@ fn command_account(command: Option<&TopCommand>) -> Option<&str> {
             | TopCommand::Agent {
                 account, provider, ..
             },
-        ) => account.as_deref().or(provider.as_deref()),
+        ) => account
+            .iter()
+            .find(|flag| !flag.contains('='))
+            .map(String::as_str)
+            .or(provider.as_deref()),
         Some(TopCommand::Models { provider }) => provider.as_deref(),
         Some(TopCommand::Key {
             action:
@@ -342,8 +346,9 @@ enum TopCommand {
         provider: Option<String>,
     },
     Run {
-        #[arg(long)]
-        account: Option<String>,
+        /// Root account, or repeatable `<kind>=<ref>` for a profile kind.
+        #[arg(long = "account")]
+        account: Vec<String>,
         #[arg(long)]
         provider: Option<String>,
         #[arg(long)]
@@ -373,8 +378,9 @@ enum TopCommand {
     },
     /// Long-lived JSONL host client. Stdio is the default pipe.
     Agent {
-        #[arg(long)]
-        account: Option<String>,
+        /// Root account, or repeatable `<kind>=<ref>` for a profile kind.
+        #[arg(long = "account")]
+        account: Vec<String>,
         #[arg(long)]
         provider: Option<String>,
         #[arg(long)]

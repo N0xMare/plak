@@ -919,7 +919,7 @@ fn unknown_schema_is_refused() {
 fn current_schema_rejects_previous_product_store_without_modification() {
     // A product schema change moves the state directory; a store at
     // another version in this directory is refused with its rows intact.
-    assert_eq!(SCHEMA_VERSION, 38);
+    assert_eq!(SCHEMA_VERSION, 39);
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
     paths.ensure_layout().unwrap();

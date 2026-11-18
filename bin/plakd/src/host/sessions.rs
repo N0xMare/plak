@@ -1039,6 +1039,7 @@ fn new_record(
         Some(validated.probe.as_ref()),
     )
     .map_err(|_| binding(BindingRefusalKind::ModelUnavailable))?;
+    crate::account_choice::store_explicit(&mut record, creation.accounts);
     record.runner = validated.runner;
     record.root_profile = Some(plakous_hosted::sessions::RootProfile {
         root_template: config.root_agent.clone(),
@@ -1097,6 +1098,7 @@ fn open_session(
         None,
         false,
         None,
+        Vec::new(),
     )
     .inspect_err(|failure| {
         eprintln!(
@@ -1384,6 +1386,7 @@ mod tests {
             profile: Some("removed-profile"),
             template: None,
             model: None,
+            accounts: &[],
             request_id: "unused",
         };
         assert!(replays(&saved, &replay));
