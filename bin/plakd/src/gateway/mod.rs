@@ -25,6 +25,11 @@ mod route;
 mod route_custody;
 mod server_config;
 mod service;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+mod subscription_custody;
+#[cfg(not(any(feature = "codex", feature = "grok", feature = "claude")))]
+#[path = "subscription_custody_unavailable.rs"]
+mod subscription_custody;
 
 pub(crate) use address::GatewayAddress;
 pub(crate) use cli_cmd::{doctor_line, execute};
@@ -36,6 +41,7 @@ pub(crate) use route_custody::connect as host_gateway;
 pub(crate) use route_custody::{AdminLink, admin_link, with_subscription_custody};
 pub(crate) use server_config::ServerConfig;
 pub(crate) use service::Gateway;
+pub(crate) use subscription_custody::roots_under;
 
 use std::io::Write;
 use std::net::SocketAddr;
@@ -356,3 +362,15 @@ pub(crate) fn read_key_file(path: &std::path::Path) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(
+    test,
+    feature = "openai",
+    feature = "anthropic",
+    feature = "xai-api",
+    feature = "openrouter",
+    feature = "codex",
+    feature = "claude",
+    feature = "grok"
+))]
+mod continuity_tests;

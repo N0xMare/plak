@@ -18,13 +18,11 @@ pub(crate) fn with_subscription_custody(
     home: &PlakPaths,
 ) -> Result<plakous::subscriptions::NativeSubscriptions, String> {
     Ok(match connect(home)? {
-        Some(gateway) => subscriptions.with_custody(&gateway.custody()),
+        Some(gateway) => super::subscription_custody::subscriptions_under(subscriptions, &gateway),
         None => subscriptions,
     })
 }
 
-/// The gateway a host or credential provider should use, when `[gateway]
-/// address` is set. Unset is local custody.
 /// Where admin verbs go when `[gateway] address` is set. This does not connect.
 pub(crate) struct AdminLink {
     pub(crate) address: GatewayAddress,
@@ -47,6 +45,8 @@ pub(crate) fn admin_link(home: &PlakPaths) -> Result<Option<AdminLink>, String> 
     }))
 }
 
+/// The gateway a host or credential provider should use, when `[gateway]
+/// address` is set. Unset is local custody.
 pub(crate) fn connect(home: &PlakPaths) -> Result<Option<GatewayCustody>, String> {
     let Some(target) = configured(home)? else {
         return Ok(None);

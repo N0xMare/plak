@@ -49,7 +49,7 @@ stay on the account bridge.
 
 A host whose `[gateway] address` is set sends API-key and subscription
 model traffic through the gateway and does not take the holder lock or open
-the subscription store. Login, logout, consent and account listing use the
+the subscription store. Existing sessions reopen unchanged. Login, logout, consent and account listing use the
 gateway's admin verbs. If that host's environment sets `OPENAI_API_KEY`,
 `XAI_API_KEY`,
 `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`, the host refuses to start and

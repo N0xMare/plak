@@ -107,7 +107,10 @@ for one version bump, without native protocol compatibility.
   store. Login, logout, consent and account listing use the gateway admin
   verbs. OpenRouter
   allowance is one gateway-side `GET /api/v1/key`; other API-key kinds report
-  `not-observed`. No persisted format changes.
+  `not-observed`. Host sessions, child agents and `plakd run` take the
+  gateway's custody too. A host with no gateway address keeps direct
+  in-process custody. No persisted format changes.
+
 ## 0.0.4
 
 ### plakd

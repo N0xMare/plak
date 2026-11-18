@@ -20,6 +20,11 @@ mod recorded_sidecar;
 mod recorded_sidecar;
 #[cfg(all(test, feature = "js"))]
 use recorded_sidecar::RecordedSidecar;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+mod subscription_custody;
+#[cfg(not(any(feature = "codex", feature = "grok", feature = "claude")))]
+#[path = "roots/subscription_custody_unavailable.rs"]
+mod subscription_custody;
 
 /// Where a hosted session's agent tree is persisted: the product opens its
 /// store (`subagents.sqlite3` writer) and the roots hold the port,
@@ -181,6 +186,7 @@ pub struct ProductStateRoots {
     /// Skill notices new constructions raised, drained by the host loop.
     skill_notices: Arc<Mutex<Vec<String>>>,
     exchange_observer: crate::exchange_observation::Observer,
+    subscription_custody: subscription_custody::SubscriptionCustody,
     session_records: Arc<dyn crate::session_store::SessionRecordStore>,
     product: PathBuf,
     /// The runtime database the product bound at construction. It is an
@@ -313,6 +319,7 @@ impl ProductStateRoots {
             pending_epoch: None,
             skill_notices: Arc::default(),
             exchange_observer: None,
+            subscription_custody: subscription_custody::SubscriptionCustody::default(),
             session_records,
             product: std::fs::canonicalize(&product).unwrap_or(product),
             runtime_database: std::fs::canonicalize(&runtime_database).unwrap_or(runtime_database),
@@ -789,7 +796,10 @@ impl ProductStateRoots {
             plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(self.state_home.clone())
                 .map_err(|_| CliFailure::new("native subscription storage is unavailable"))?;
         Ok(crate::exchange_observation::observe(
-            plakous::subscriptions::NativeSubscriptions::new(paths),
+            subscription_custody::apply(
+                &self.subscription_custody,
+                plakous::subscriptions::NativeSubscriptions::new(paths),
+            ),
             self.exchange_observer(),
         ))
     }
@@ -1082,6 +1092,7 @@ impl ProductStateRoots {
             pending_epoch: None,
             skill_notices: Arc::default(),
             exchange_observer: None,
+            subscription_custody: subscription_custody::SubscriptionCustody::default(),
             session_records: Arc::new(crate::session_store::MemoryStore::new()),
             subscriptions: state_home.join("plak/subscriptions"),
             runtime_database: product.join("runtime.sqlite3"),

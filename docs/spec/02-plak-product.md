@@ -799,9 +799,9 @@ API-key accounts (`openai`, `xai-api`, `anthropic`, `openrouter`) and the
 subscription logins (`codex`, `claude`, `grok`) through the shared server
 core. A host whose `[gateway] address` is set does not take the holder lock
 and does not resolve API keys or open the subscription store. Its API-key
-routes and its Codex, Claude and SuperGrok routes use that gateway's
-custody. Login, logout, consent and account listing stay on the gateway's
-admin verbs. If provider API-key
+routes and its Codex, Claude and SuperGrok routes, for host sessions, child
+agents and `plakd run` alike, use that gateway's custody. Login, logout,
+consent and account listing stay on the gateway's admin verbs. If provider API-key
 variables are set in that host's environment, the host refuses to start and
 names them. OpenRouter allowance is the gateway's Allowance verb: one
 `GET /api/v1/key` answered in the gateway process. The other API-key kinds
@@ -6191,10 +6191,11 @@ start it. The unit runs the executable that wrote it.
 
 A host with `[gateway] address` set does not take the credential holder lock,
 does not resolve API keys, and does not open the subscription store. Its
-API-key routes and its subscription routes use the gateway's custody.
-Login, logout, consent and account listing use the gateway's admin verbs.
-Unset, the host keeps in-process credential access and takes the holder
-lock shared.
+API-key routes and its subscription routes use the gateway's custody, and an
+existing session reopens with its recorded binding, because the binding names
+the provider account and key generation, never where the credential is held.
+Login, logout, consent and account listing use the gateway's admin verbs. Unset, the host keeps direct
+in-process credential access and takes the holder lock shared.
 
 ## 5. External client boundary
 

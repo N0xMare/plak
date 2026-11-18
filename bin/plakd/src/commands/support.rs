@@ -87,6 +87,11 @@ pub fn product_state_roots_from(
             plakous_hosted::platform::ApiModelLists::Live,
             plakous_hosted::platform::ApiWindow::Working,
         );
+    // A configured gateway holds the logins; the roots never open the store.
+    let roots = match crate::gateway::host_gateway(context).map_err(CliFailure::new)? {
+        Some(gateway) => crate::gateway::roots_under(roots, &gateway),
+        None => roots,
+    };
     if let Some(sink) = extra_telemetry_sink {
         roots.set_extra_telemetry_sink(sink);
     }

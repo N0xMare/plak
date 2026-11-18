@@ -89,13 +89,13 @@ pub(super) fn run<P: plakous_host_protocol::ProtocolExtension>(
     );
     let (result, actor) = executor
         .block_on(async {
-            match RootActor::open(
+            match Box::pin(RootActor::open(
                 config,
                 actions,
                 events,
                 startup,
                 std::rc::Rc::clone(&executor),
-            )
+            ))
             .await
             {
                 Ok(mut actor) => (actor.run(one_shot).await, Some(actor)),
