@@ -103,8 +103,7 @@ async fn fixture(tree_id: &str) -> (Fixture, crate::sessions::SessionRecord) {
                 &[],
             ));
             for (name, alias) in [("codex-review", "chatgpt"), ("grok-review", "supergrok")] {
-                let mut binding =
-                    crate::orchestration::RosterBinding::leaf(alias, "offline-loopback-v1");
+                let mut binding = RosterBinding::leaf(alias, "offline-loopback-v1");
                 binding.composition = Some(plakous_host_protocol::CompositionSelection::Direct);
                 tree.pin_template(name, binding);
             }
