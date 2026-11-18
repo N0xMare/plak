@@ -365,7 +365,7 @@ fn read_env(name: &str) -> Option<String> {
 
 fn placement_from_env() -> Option<FaultPlacement> {
     match read_env(PLAK_TEST_GATEWAY).as_deref() {
-        None | Some("") | Some("in-process") => Some(FaultPlacement::Local),
+        None | Some("" | "in-process") => Some(FaultPlacement::Local),
         Some("external") => Some(FaultPlacement::ExternalGateway),
         Some(_) => None,
     }
@@ -710,7 +710,7 @@ fn to_usize(value: u64) -> Result<usize, String> {
 }
 
 pub(super) enum Applied {
-    Done(Response),
+    Done(Box<Response>),
     Continue(ExchangeControl, Option<Box<StreamFault>>),
 }
 
@@ -751,20 +751,20 @@ pub(super) async fn apply(
         Some(Selected::Status {
             status,
             retry_after,
-        }) => Ok(Applied::Done(
+        }) => Ok(Applied::Done(Box::new(
             injected_status(status, retry_after, control, limits).await?,
-        )),
+        ))),
         Some(Selected::RelayLost(RelayCut::BeforeHead)) => Err(Failure::new(
             Phase::ResponseHead,
             TransmissionFact::MayHaveTransmitted,
             ErrorKind::Io,
         )),
-        Some(Selected::RelayLost(RelayCut::AfterHead)) => Ok(Applied::Done(
+        Some(Selected::RelayLost(RelayCut::AfterHead)) => Ok(Applied::Done(Box::new(
             injected_relay_lost_after_head(control, limits).await?,
-        )),
-        Some(Selected::GatewayRefusal(refusal)) => Ok(Applied::Done(
+        ))),
+        Some(Selected::GatewayRefusal(refusal)) => Ok(Applied::Done(Box::new(
             injected_reply(refusal.reply(), control, limits).await?,
-        )),
+        ))),
         Some(Selected::Stream(stream_fault)) => Ok(Applied::Continue(control, Some(stream_fault))),
     }
 }

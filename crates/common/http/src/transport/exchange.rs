@@ -54,7 +54,7 @@ impl Client {
         )
         .await?
         {
-            super::fault::Applied::Done(response) => return Ok(response),
+            super::fault::Applied::Done(response) => return Ok(*response),
             super::fault::Applied::Continue(control, fault) => (control, fault),
         };
         let parts = RequestParts {
