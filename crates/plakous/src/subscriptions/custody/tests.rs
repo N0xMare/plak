@@ -441,3 +441,130 @@ async fn a_gateway_host_never_creates_the_subscription_store() -> TestResult {
     assert!(!host_root.exists());
     Ok(())
 }
+
+#[tokio::test]
+async fn a_dispatch_and_a_rejection_during_a_claimed_refresh_answer_the_settled_login() -> TestResult
+{
+    use plakous_auth::custody::{
+        CredentialCustodian as _, CustodySlot, CustodyStatus, RefreshRequest,
+    };
+
+    let root = tempfile::tempdir()?;
+    let paths = SubscriptionPaths::from_xdg_state_home(root.path())?;
+    seed(&paths, super::super::unix_now()?)?;
+    let custodian = Arc::new(SubscriptionCustodian::new(
+        NativeSubscriptions::new(paths.clone()),
+        NativeProvider::Codex,
+    ));
+    let slot = CustodySlot::new("codex")?;
+    let facts = custodian.facts(&slot).await?;
+    let expected = facts.expected_fence().ok_or("no fence")?;
+
+    // Another holder claims a refresh of that generation and holds it.
+    let store = crate::subscriptions::state::tests::child_catalog::codex_store(&paths)?;
+    let fence = store.load()?.ok_or("no record")?;
+    let payload = {
+        let lease = store.acquire_ready(&fence)?;
+        lease.payload().expose_secret().to_vec()
+    };
+    let claim = store.begin_refresh(&fence)?.start();
+    assert_eq!(
+        custodian.facts(&slot).await?.status,
+        CustodyStatus::Refreshing
+    );
+
+    // The dispatch-time refresh and a 401's refresh arrive during the claim.
+    let dispatch = {
+        let (custodian, slot) = (Arc::clone(&custodian), slot.clone());
+        tokio::spawn(async move {
+            custodian
+                .refresh(&slot, RefreshRequest::IfDue { expected })
+                .await
+        })
+    };
+    let rejection = {
+        let (custodian, slot) = (Arc::clone(&custodian), slot.clone());
+        let selection_epoch_digest = facts.selection_epoch_digest;
+        tokio::spawn(async move {
+            custodian
+                .refresh(
+                    &slot,
+                    RefreshRequest::AfterRejection {
+                        rejected: expected,
+                        selection_epoch_digest,
+                    },
+                )
+                .await
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!dispatch.is_finished(), "the dispatch waits for the claim");
+    let settled = claim.fence().generation().next()?;
+    store.complete_refresh(
+        claim,
+        plakous_auth::CredentialRecord::new(
+            fence.profile_id().clone(),
+            fence.account_binding().clone(),
+            settled,
+            plakous_auth::CredentialStatus::Ready,
+            plakous_auth::SecretBytes::new(payload),
+        )?,
+    )?;
+    for answer in [dispatch.await??, rejection.await??] {
+        assert_eq!(answer.status, CustodyStatus::Ready);
+        assert_eq!(answer.generation, Some(settled));
+        assert_eq!(answer.account_binding, Some(expected.account_binding));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_quarantined_login_reports_its_status_and_refuses_fields_not_ready() -> TestResult {
+    use plakous_auth::custody::{
+        CredentialCustodian as _, CustodyError, CustodySlot, CustodyStatus,
+    };
+    use plakous_gateway_protocol::facts::CredentialStatus;
+    use plakous_gateway_protocol::refusal::GatewayRefusal;
+
+    let root = tempfile::tempdir()?;
+    let paths = SubscriptionPaths::from_xdg_state_home(root.path())?;
+    seed(&paths, super::super::unix_now()?)?;
+    let custodian = SubscriptionCustodian::new(
+        NativeSubscriptions::new(paths.clone()),
+        NativeProvider::Codex,
+    );
+    let slot = CustodySlot::new("codex")?;
+    let expected = custodian
+        .facts(&slot)
+        .await?
+        .expected_fence()
+        .ok_or("no fence")?;
+
+    // A refresh claimed and then abandoned leaves the login quarantined.
+    let store = crate::subscriptions::state::tests::child_catalog::codex_store(&paths)?;
+    drop(
+        store
+            .begin_refresh(&store.load()?.ok_or("no record")?)?
+            .start(),
+    );
+
+    let facts = custodian.facts(&slot).await?;
+    assert_eq!(facts.status, CustodyStatus::Quarantined);
+    assert!(facts.profile.is_some());
+    let refusal = custodian.fields(&slot, &expected).await.err();
+    let Some(CustodyError::NotReady { facts }) = &refusal else {
+        return Err(format!("a quarantined login supplied fields: {refusal:?}").into());
+    };
+    assert_eq!(facts.status, CustodyStatus::Quarantined);
+    let instance = new_instance().ok_or("instance")?;
+    assert_eq!(
+        plakous_auth::custody::gateway::gateway_refusal(
+            refusal.as_ref().ok_or("refusal")?,
+            &instance
+        ),
+        GatewayRefusal::CredentialNotReady {
+            status: CredentialStatus::Quarantined
+        }
+    );
+    Ok(())
+}

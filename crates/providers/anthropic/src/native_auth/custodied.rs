@@ -11,7 +11,8 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use plakous_auth::custody::{
-    AccountFacts, CredentialCustodian, CustodyError, CustodySlot, CustodyStatus, RefreshRequest,
+    AccountFacts, CredentialCustodian, CustodyError, CustodySlot, CustodyStatus, ExpectedFence,
+    IdentityDigest, RefreshRequest,
 };
 use zeroize::Zeroizing;
 
@@ -76,6 +77,16 @@ const fn lifecycle_error(status: CustodyStatus) -> ClaudeNativeAuthError {
     }
 }
 
+/// The fence a dispatch asks `IfDue` with while `facts` show a claimed
+/// refresh in flight: their generation, under the account the facts name or
+/// the one the login last showed.
+fn refreshing_fence(facts: &AccountFacts, known: Option<IdentityDigest>) -> Option<ExpectedFence> {
+    (facts.status == CustodyStatus::Refreshing).then_some(ExpectedFence {
+        account_binding: facts.account_binding.or(known)?,
+        generation: facts.generation?,
+    })
+}
+
 impl ClaudeCustodiedLogin {
     /// Opens `slot` at `custodian` with one read.
     pub(super) async fn open(
@@ -122,13 +133,18 @@ impl ClaudeCustodiedLogin {
         Ok(facts)
     }
 
-    /// Current facts and field, read fresh.
+    /// Current facts and field, read fresh. While a claimed refresh is in
+    /// flight, the custodian's `IfDue` answers once it has settled.
     pub(super) async fn read(&self) -> Result<AccountFacts, ClaudeNativeAuthError> {
+        let known = self.view().facts.account_binding;
         let facts = self
             .custodian
             .facts(&self.slot)
             .await
             .map_err(custody_error)?;
+        if let Some(expected) = refreshing_fence(&facts, known) {
+            return self.refresh(RefreshRequest::IfDue { expected }).await;
+        }
         self.settle(facts).await
     }
 

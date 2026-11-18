@@ -207,9 +207,16 @@ impl CustodiedLogin {
         })
     }
 
-    /// The current Ready state, read fresh.
+    /// The current Ready state, read fresh. While a claimed refresh is in
+    /// flight, the custodian's `IfDue` answers once it has settled.
     pub(super) async fn ready(&self) -> Result<CustodiedReady, NativeCodexAuthError> {
-        Self::ready_of(&self.facts().await?)
+        let facts = self.facts().await?;
+        if facts.status == CustodyStatus::Refreshing
+            && let Some(expected) = facts.expected_fence()
+        {
+            return Self::ready_of(&self.refresh(RefreshRequest::IfDue { expected }).await?);
+        }
+        Self::ready_of(&facts)
     }
 
     /// The custodian's fence for `fence`, a fence of this login's facts.

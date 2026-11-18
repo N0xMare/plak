@@ -253,13 +253,28 @@ impl CustodiedLogin {
         Ok(facts)
     }
 
-    /// Current facts and fields, read fresh.
+    /// Current facts and fields, read fresh. While a claimed refresh is in
+    /// flight, the custodian's `IfDue` answers once it has settled.
     pub(super) async fn read(&self) -> Result<AccountFacts, XaiNativeAuthError> {
+        let known = self.view().facts.account_binding;
         let facts = self
             .custodian
             .facts(&self.slot)
             .await
             .map_err(custody_error)?;
+        if facts.status == CustodyStatus::Refreshing
+            && let (Some(account_binding), Some(generation)) =
+                (facts.account_binding.or(known), facts.generation)
+        {
+            return self
+                .refresh(RefreshRequest::IfDue {
+                    expected: ExpectedFence {
+                        account_binding,
+                        generation,
+                    },
+                })
+                .await;
+        }
         self.settle(facts).await
     }
 

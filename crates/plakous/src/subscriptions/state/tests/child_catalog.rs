@@ -110,7 +110,7 @@ pub(in crate::subscriptions) fn seed(paths: &SubscriptionPaths, now: u64) -> Tes
     let store = plakous_auth::PrivateCredentialStore::open_slot(
         paths.provider_record(NativeProvider::Codex),
         profile.clone(),
-        plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?,
+        slot_of(paths)?,
     )?;
     let payload = serde_json::to_vec(&serde_json::json!({
         "access_token": "opaque-seeded-access", "refresh_token": "opaque-seeded-refresh",
@@ -136,6 +136,28 @@ pub(in crate::subscriptions) fn seed(paths: &SubscriptionPaths, now: u64) -> Tes
     Ok(())
 }
 
+/// The credential slot id of `paths`: the primary slot, or a named one's.
+fn slot_of(paths: &SubscriptionPaths) -> TestResult<plakous_auth::CredentialSlotId> {
+    let token = paths.named.as_ref().map_or_else(
+        || PRIMARY_SLOT.to_owned(),
+        |slot| format!("named-{}", slot.name),
+    );
+    Ok(plakous_auth::CredentialSlotId::new(token)?)
+}
+
+/// The seeded Codex login's store, as another holder opens it.
+pub(in crate::subscriptions) fn codex_store(
+    paths: &SubscriptionPaths,
+) -> TestResult<plakous_auth::PrivateCredentialStore> {
+    Ok(plakous_auth::PrivateCredentialStore::open_slot(
+        paths.provider_record(NativeProvider::Codex),
+        plakous_auth::SubscriptionIntegrationProfileId::new(
+            plakous_openai::OPENAI_CODEX_COMPATIBILITY_PROFILE_ID,
+        )?,
+        slot_of(paths)?,
+    )?)
+}
+
 /// Seeds a consented Ready SuperGrok login for `subject` at the provider's
 /// test time, with its login recovery cleared.
 #[cfg(feature = "grok")]
@@ -149,7 +171,7 @@ pub(in crate::subscriptions) fn seed_grok(paths: &SubscriptionPaths, subject: &s
     let store = plakous_auth::PrivateCredentialStore::open_slot(
         paths.provider_record(provider),
         profile.clone(),
-        plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?,
+        slot_of(paths)?,
     )?;
     let payload = serde_json::to_vec(&serde_json::json!({
         "version": 3,
@@ -223,7 +245,7 @@ pub(in crate::subscriptions) fn seed_claude(
     let store = plakous_auth::PrivateCredentialStore::open_slot(
         paths.provider_record(provider),
         profile.clone(),
-        plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?,
+        slot_of(paths)?,
     )?;
     let client_id = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
     // The grant lineage digest the provider derives from the refresh token.
@@ -271,7 +293,7 @@ pub(in crate::subscriptions) fn claude_generation(paths: &SubscriptionPaths) -> 
         plakous_auth::SubscriptionIntegrationProfileId::new(
             NativeSubscriptions::notice(provider).unwrap().profile_id(),
         )?,
-        plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?,
+        slot_of(paths)?,
     )?;
     Ok(store.load()?.ok_or("no Claude record")?.generation().get())
 }

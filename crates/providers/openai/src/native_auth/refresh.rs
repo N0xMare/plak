@@ -21,7 +21,7 @@ use super::{
     pull_claimed_body_cancellable, run_blocking, run_claimed_refresh, run_claimed_revoke,
     stored_record, validate_exact_scopes, validate_profile, validate_profile_at,
 };
-use plakous_auth::custody::{IdentityDigest, RefreshRequest as CustodyRefresh};
+use plakous_auth::custody::{CustodyStatus, IdentityDigest, RefreshRequest as CustodyRefresh};
 
 #[derive(Serialize)]
 pub(super) struct RefreshRequest<'a> {
@@ -589,15 +589,21 @@ impl CodexSubscriptionCredentialManager {
     ) -> Result<(), NativeCodexAuthError> {
         let request = match force {
             RefreshForce::IfDue => {
-                let current = login.load_fence().await?;
+                // A claimed refresh in flight is asked too: the custodian
+                // answers once it settles.
+                let facts = login.facts().await?;
                 if !matches!(
-                    current.status(),
-                    CredentialStatus::Ready | CredentialStatus::RefreshRequired
+                    facts.status,
+                    CustodyStatus::Ready
+                        | CustodyStatus::RefreshRequired
+                        | CustodyStatus::Refreshing
                 ) {
                     return Err(NativeCodexAuthError::Unavailable);
                 }
                 CustodyRefresh::IfDue {
-                    expected: CustodiedLogin::expected(&current)?,
+                    expected: facts
+                        .expected_fence()
+                        .ok_or(NativeCodexAuthError::Unavailable)?,
                 }
             }
             RefreshForce::Always => CustodyRefresh::Operator,

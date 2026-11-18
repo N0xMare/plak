@@ -11,6 +11,11 @@ use super::{
     NativeSubscriptions,
 };
 
+/// How long an `IfDue` refresh waits for another caller's claimed refresh to
+/// settle before it judges due-ness, and how often it looks.
+const SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+const SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// Implements [`LoginCustody`] for one provider manager over its custody methods.
 macro_rules! login_custody {
     ($manager:ty) => {
@@ -72,9 +77,10 @@ pub(super) trait LoginCustody: Send + Sync {
 /// Every call opens the slot's login exactly as the library's own
 /// operations do, so consent, profile windows and newer-build refusals
 /// apply unchanged; the facts' identity digests are the bytes a route binds
-/// a session to. Refresh is the single writer's: `IfDue` runs only while the
-/// caller's fence is current, `AfterRejection` claims one grant only while
-/// the store still holds the rejected generation, and `Operator` forces one.
+/// a session to. Refresh is the single writer's: `IfDue` waits for a claimed
+/// refresh in flight to settle and then runs only while the caller's fence is
+/// current, `AfterRejection` claims one grant only while the store still
+/// holds the rejected generation, and `Operator` forces one.
 #[derive(Clone)]
 pub struct SubscriptionCustodian {
     subscriptions: NativeSubscriptions,
@@ -146,7 +152,7 @@ impl SubscriptionCustodian {
             .await
             .map_err(|error| custody_error(&error))?;
         let mut facts = if status.compatibility() == CompatibilityStatus::Current
-            && status.credential() != NativeAuthStatus::SignedOut
+            && opens_online(status.credential())
         {
             self.login(&subscriptions).await?.facts(slot).await?
         } else {
@@ -171,6 +177,20 @@ impl SubscriptionCustodian {
             },
             review_expires_at_unix_ms: Some(notice.expires_at.saturating_mul(1000)),
         })
+    }
+
+    /// The facts once no claimed refresh is in flight, waiting at most
+    /// [`SETTLE_WAIT`].
+    async fn settled(&self, slot: &CustodySlot) -> Result<AccountFacts, CustodyError> {
+        let deadline = tokio::time::Instant::now() + SETTLE_WAIT;
+        loop {
+            let facts = self.current(slot).await?;
+            if facts.status != CustodyStatus::Refreshing || tokio::time::Instant::now() >= deadline
+            {
+                return Ok(facts);
+            }
+            tokio::time::sleep(SETTLE_POLL).await;
+        }
     }
 
     async fn with_profile(&self, mut facts: AccountFacts) -> Result<AccountFacts, CustodyError> {
@@ -201,10 +221,12 @@ impl CredentialCustodian for SubscriptionCustodian {
             let _refreshing = lock.lock().await;
             match request {
                 RefreshRequest::IfDue { expected } => {
-                    if self.current(slot).await?.check_fence(&expected).is_ok() {
-                        // A failed refresh shows in the facts' status.
-                        let _ = subscriptions.refresh(self.provider).await;
+                    let current = self.settled(slot).await?;
+                    if current.check_fence(&expected).is_err() {
+                        return Ok(current);
                     }
+                    // A failed refresh shows in the facts' status.
+                    let _ = subscriptions.refresh(self.provider).await;
                     self.current(slot).await
                 }
                 RefreshRequest::AfterRejection {
@@ -240,7 +262,9 @@ impl CredentialCustodian for SubscriptionCustodian {
                 .status(self.provider)
                 .await
                 .map_err(|error| custody_error(&error))?;
-            if status.compatibility() != CompatibilityStatus::Current {
+            if status.compatibility() != CompatibilityStatus::Current
+                || status.credential() != NativeAuthStatus::Ready
+            {
                 return Err(CustodyError::NotReady {
                     facts: Box::new(self.current(slot).await?),
                 });
@@ -251,6 +275,17 @@ impl CredentialCustodian for SubscriptionCustodian {
                 .await
         })
     }
+}
+
+/// Whether a login in `status` opens online for its facts: a Ready login,
+/// and one whose claimed refresh is in flight (its identity is still the
+/// stored one). A quarantined, revoked or otherwise unusable login refuses to
+/// open, so its facts are the offline status alone.
+const fn opens_online(status: NativeAuthStatus) -> bool {
+    matches!(
+        status,
+        NativeAuthStatus::Ready | NativeAuthStatus::Refreshing
+    )
 }
 
 const fn auth_status(status: NativeAuthStatus) -> CustodyStatus {

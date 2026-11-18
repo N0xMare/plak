@@ -6223,8 +6223,18 @@ its route binds the raw epoch and authority id, which the one-way digests
 cannot reproduce. The authority id is the digest the gateway computes over
 its own slot path, slot id and account scope, so a gateway adopting the
 store in place reports the bytes a session already bound.
-Refresh is the single writer's: `IfDue` refreshes only while the caller's
-fence is current and the custodian's own clock says it is due;
+A login that is neither Ready nor mid-refresh (quarantined, revoked,
+refresh-required, login-required) is reported from its offline status
+alone, and its fields refuse `NotReady` (`credential_not_ready`). A fields
+read whose record moves between its facts read and its Ready lease (a
+refresh committing in between) judges the settled record once more, so a
+`fence_moved` refusal names the current facts and the relay re-prepares;
+a record still unleasable then is `busy`. Wire identity a caller binds to
+is never dropped from facts: a value or count over its wire bound is
+`internal`.
+Refresh is the single writer's: `IfDue` waits (at most 30 s) for a claimed
+refresh in flight to settle, then refreshes only while the caller's fence
+is current and the custodian's own clock says it is due;
 `AfterRejection` waits for any claimed refresh in flight to settle, then
 claims one grant only while the store still holds the rejected generation of
 the same account and selection (so concurrent rejections of one generation
@@ -6281,7 +6291,9 @@ renewal observation, and the dispatch-time refresh reads them again. Each creden
 attempt's fence, inserted at the same header position, so catalog,
 inference, side-request and usage GETs relay as pinned rows byte for byte
 as they would be sent directly. Refresh is the custodian's single writer:
-the dispatch-time refresh is `IfDue`, a provider 401 asks `AfterRejection`
+the dispatch-time refresh is `IfDue` (asked too while the facts show a
+claimed refresh in flight, so the dispatch waits once for it to settle), a
+provider 401 asks `AfterRejection`
 for the rejected generation and selection, the operator's forced refresh is
 `Operator`, and nothing is resent by the gateway; whether the route
 re-dispatches stays the route's existing rule. The usage read relays the
