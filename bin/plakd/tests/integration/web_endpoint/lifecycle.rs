@@ -36,6 +36,13 @@ fn notices_until_close(socket: &mut WebSocket<UnixStream>, generation: &Value) -
                     tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
                 ),
             ) => return notices,
+            // The host sent its close frame and exited, so the close reply
+            // had nowhere to go: the connection closed.
+            Err(tungstenite::Error::Io(error))
+                if error.kind() == std::io::ErrorKind::BrokenPipe =>
+            {
+                return notices;
+            }
             Ok(Message::Ping(_) | Message::Pong(_)) => {}
             other => panic!("unexpected web lifecycle result: {other:?}"),
         }
@@ -75,6 +82,10 @@ fn web_lifecycle_same_key_upgrade_delivers_draining_then_restarting() {
     let mut web = start(&fixture);
     let mut socket = upgrade(&web, &cookie(&web));
     let welcome = directory(&mut socket);
+    // Read while the upgrade runs: frames left unread until the host has
+    // exited cannot be reached once a pending reply fails to write.
+    let generation = welcome["host_generation"].clone();
+    let reader = std::thread::spawn(move || notices_until_close(&mut socket, &generation));
     let probe = fixture
         .command()
         .args(["version", "--host-upgrade-probe"])
@@ -99,7 +110,7 @@ fn web_lifecycle_same_key_upgrade_delivers_draining_then_restarting() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    let notices = notices_until_close(&mut socket, &welcome["host_generation"]);
+    let notices = reader.join().unwrap();
     assert_eq!(
         notices
             .first()
