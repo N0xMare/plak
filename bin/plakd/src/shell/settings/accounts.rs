@@ -236,40 +236,33 @@ fn host_catalog(
     Ok(catalog)
 }
 
-/// `ChooseAccount`: validates the choice, then asks the host to store a
-/// non-root kind or continue the root on the account. A busy root is refused
-/// `root_busy` with nothing written.
-pub(super) fn choose_account(
+/// Independent of readiness: whether the choice can reach admission and
+/// whether it would move the root.
+pub(super) fn choice_scope(
     kind: Vertical,
-    account: String,
-    continue_failed: bool,
+    account: &str,
     facts: &SurfaceFacts<'_>,
-    events: &Sender<PlakExtension>,
-) -> SurfaceEffect {
-    let Some(session) = facts.session.as_ref() else {
-        refuse(
-            events,
-            AccountChoiceRefusal::Failed {
-                reason: "choose an account in an open session".to_owned(),
-            },
-        );
-        return SurfaceEffect::default();
-    };
+) -> Result<bool, AccountChoiceRefusal> {
+    if facts.phase == SurfacePhase::Detached {
+        return Err(AccountChoiceRefusal::Failed {
+            reason: "this session is not attached; attach it before choosing an account".to_owned(),
+        });
+    }
+    let session = facts
+        .session
+        .as_ref()
+        .ok_or_else(|| AccountChoiceRefusal::Failed {
+            reason: "choose an account in an open session".to_owned(),
+        })?;
     let kind = kind_id(kind);
-    let catalog = match host_catalog(facts) {
-        Ok(catalog) => catalog,
-        Err(refusal) => {
-            refuse(events, refusal);
-            return SurfaceEffect::default();
-        }
-    };
-    let account = match account_choice::admit_choice(kind, &account, &catalog) {
-        Ok(account) => account,
-        Err(refusal) => {
-            refuse(events, from_request(refusal));
-            return SurfaceEffect::default();
-        }
-    };
+    let root = session
+        .account
+        .as_deref()
+        .and_then(|value| value.parse::<plakous_hosted::account::AccountRef>().ok())
+        .is_some_and(|root| root.vertical().as_str() == kind);
+    if root && facts.phase == SurfacePhase::Busy {
+        return Err(AccountChoiceRefusal::RootBusy);
+    }
     let used = used_kinds(
         session.account.as_deref(),
         session
@@ -279,25 +272,37 @@ pub(super) fn choose_account(
             .map(|card| card.account.as_str()),
     );
     if !used.iter().any(|used| used == kind) {
-        refuse(
-            events,
-            AccountChoiceRefusal::AccountChoiceInvalid {
-                kind: kind.to_owned(),
-                account,
-                reason: "kind is not used by this session".to_owned(),
-            },
-        );
-        return SurfaceEffect::default();
+        return Err(AccountChoiceRefusal::AccountChoiceInvalid {
+            kind: kind.to_owned(),
+            account: account.to_owned(),
+            reason: "kind is not used by this session".to_owned(),
+        });
     }
-    let root = session
-        .account
-        .as_deref()
-        .and_then(|value| value.parse::<plakous_hosted::account::AccountRef>().ok())
-        .is_some_and(|root| root.vertical().as_str() == kind);
-    if root && facts.phase == SurfacePhase::Busy {
-        refuse(events, AccountChoiceRefusal::RootBusy);
-        return SurfaceEffect::default();
-    }
+    Ok(root)
+}
+
+/// `ChooseAccount`: admits the exact account, then stores a non-root
+/// choice or continues the idle root on it.
+pub(super) fn choose_account(
+    kind: Vertical,
+    account: String,
+    continue_failed: bool,
+    facts: &SurfaceFacts<'_>,
+    events: &Sender<PlakExtension>,
+) -> SurfaceEffect {
+    let admitted = choice_scope(kind, &account, facts).and_then(|root| {
+        let catalog = host_catalog(facts)?;
+        account_choice::admit_choice(kind_id(kind), &account, &catalog)
+            .map(|account| (root, account))
+            .map_err(from_request)
+    });
+    let (root, account) = match admitted {
+        Ok(admitted) => admitted,
+        Err(refusal) => {
+            refuse(events, refusal);
+            return SurfaceEffect::default();
+        }
+    };
     let choice = if root {
         SurfaceAccountChoice::Root {
             account,
@@ -305,7 +310,7 @@ pub(super) fn choose_account(
         }
     } else {
         SurfaceAccountChoice::Store {
-            kind: kind.to_owned(),
+            kind: kind_id(kind).to_owned(),
             account,
         }
     };

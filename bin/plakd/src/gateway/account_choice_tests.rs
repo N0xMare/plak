@@ -34,36 +34,34 @@ fn choose_openai(
         account: "openai".into(),
         continue_failed: false,
     };
+    let (tx, refusals) = crate::surface_protocol::host_event_channel();
+    let mut facts = SurfaceFacts {
+        phase: SurfacePhase::Idle,
+        attached_one_shot: false,
+        catalog: &[],
+        queue_len: 0,
+        usage_reads: UsageReads::default(),
+        accounts: None,
+        session: Some(SurfaceSession {
+            runner: None,
+            id: "gateway-session".into(),
+            account: Some("openai".into()),
+            model: None,
+            effort: None,
+            fast: false,
+            workspace: workspace.to_path_buf(),
+            roster: None,
+            live_children: false,
+            mcp: None,
+            account_choices: std::collections::BTreeMap::new(),
+        }),
+    };
     let read = surface
-        .accounts_read(&intent)
+        .accounts_read(&intent, &facts)
         .expect("ChooseAccount reads readiness");
     let readiness = read();
-    let (tx, refusals) = crate::surface_protocol::host_event_channel();
-    let effect = surface.dispatch(
-        intent,
-        SurfaceFacts {
-            phase: SurfacePhase::Idle,
-            attached_one_shot: false,
-            catalog: &[],
-            queue_len: 0,
-            usage_reads: UsageReads::default(),
-            accounts: Some(&readiness),
-            session: Some(SurfaceSession {
-                runner: None,
-                id: "gateway-session".into(),
-                account: Some("openai".into()),
-                model: None,
-                effort: None,
-                fast: false,
-                workspace: workspace.to_path_buf(),
-                roster: None,
-                live_children: false,
-                mcp: None,
-                account_choices: std::collections::BTreeMap::new(),
-            }),
-        },
-        &plakous_hosted::runtime::Sender::over(tx),
-    );
+    facts.accounts = Some(&readiness);
+    let effect = surface.dispatch(intent, facts, &plakous_hosted::runtime::Sender::over(tx));
     let choice = effect.account.map(|effect| effect.choice);
     if choice.is_none() {
         eprintln!("refused: {:?}", refusals.try_iter().collect::<Vec<_>>());
@@ -176,12 +174,16 @@ fn an_api_account_ready_only_at_the_gateway_fills_chooses_and_spawns() {
 #[test]
 fn the_gateway_reports_the_default_and_named_subscription_slots() {
     use plakous::subscriptions::{NativeProvider, NativeSubscriptions, SubscriptionPaths};
+    use std::os::unix::fs::DirBuilderExt as _;
 
     let directory = tempfile::tempdir().unwrap();
     let gateway_home = PlakPaths::explicit(directory.path().join("gateway-home"));
     let state = directory.path().join("gateway-state");
     std::fs::create_dir_all(gateway_home.home()).unwrap();
-    std::fs::create_dir_all(&state).unwrap();
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&state)
+        .unwrap();
     let subscriptions =
         NativeSubscriptions::new(SubscriptionPaths::from_xdg_state_home(&state).unwrap());
     let runtime = tokio::runtime::Builder::new_current_thread()

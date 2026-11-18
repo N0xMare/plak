@@ -138,8 +138,18 @@ pub(super) fn serve(
     let bridge = super::ops::OpsBridge::new(app, paths.clone(), instance);
     let gateway = Gateway::open_with(paths, config, Box::new(bridge)).unwrap();
     let served = std::thread::spawn(move || gateway.serve_foreground());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     // The path appears at bind, before the listener accepts.
     while std::os::unix::net::UnixStream::connect(&socket).is_err() {
+        assert!(
+            !served.is_finished(),
+            "gateway exited before accepting on its socket: {:?}",
+            served.join().unwrap()
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "gateway did not accept on its socket"
+        );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     (socket, served)

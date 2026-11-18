@@ -527,27 +527,24 @@ fn handle_shell_extension<P: plakous_host_protocol::ProtocolExtension>(
         }
     }
     let with_tools = super::surface::needs_session_tools(config.surface.as_deref(), &intent);
+    let mut facts = super::surface::SurfaceFacts {
+        session: Some(super::surface::session_facts(
+            &config.session,
+            None,
+            with_tools,
+        )),
+        phase: super::surface::SurfacePhase::Detached,
+        attached_one_shot: false,
+        catalog: &config.ready_catalog.accounts,
+        queue_len: config.session.pending_queue.len(),
+        usage_reads: state.subscription_usage_refresh.reads(),
+        accounts: None,
+    };
     // The detached shell loop runs on its own thread, so the read runs inline.
-    let accounts =
-        super::surface::accounts_read(config.surface.as_deref(), &intent).map(|read| read());
-    let effect = super::surface::dispatch(
-        config.surface.as_deref(),
-        intent,
-        super::surface::SurfaceFacts {
-            session: Some(super::surface::session_facts(
-                &config.session,
-                None,
-                with_tools,
-            )),
-            phase: super::surface::SurfacePhase::Detached,
-            attached_one_shot: false,
-            catalog: &config.ready_catalog.accounts,
-            queue_len: config.session.pending_queue.len(),
-            usage_reads: state.subscription_usage_refresh.reads(),
-            accounts: accounts.as_ref(),
-        },
-        events,
-    );
+    let accounts = super::surface::accounts_read(config.surface.as_deref(), &intent, &facts)
+        .map(|read| read());
+    facts.accounts = accounts.as_ref();
+    let effect = super::surface::dispatch(config.surface.as_deref(), intent, facts, events);
     if let Some(account) = effect.account {
         account.refuse(super::surface::AccountChoiceRefusal::Failed(
             crate::CliFailure::new(

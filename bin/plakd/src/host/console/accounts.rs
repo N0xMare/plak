@@ -266,9 +266,12 @@ fn gateway_ready_accounts(
         .filter(|account| account.vertical().capability().compiled)
         .map(|account| account.to_string())
         .collect::<BTreeSet<_>>();
-    let accounts = expected
+    let roster = roster_from_names(names);
+    let accounts = roster
+        .accounts
         .iter()
-        .map(plakous::gateway::protocol::GatewayAccount::new)
+        .filter(|account| account.vertical().capability().compiled)
+        .map(|account| plakous::gateway::protocol::GatewayAccount::new(account.as_str()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
     let mut readiness = std::collections::BTreeMap::new();
@@ -295,7 +298,7 @@ fn gateway_ready_accounts(
             "the gateway returned partial account status: missing {missing}"
         ));
     }
-    Ok(roster_from_names(names)
+    Ok(roster
         .accounts
         .into_iter()
         .map(|account| crate::account_choice::ReadyAccount {

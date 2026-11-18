@@ -1126,12 +1126,20 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
     fn accounts_read(
         &self,
         intent: &SurfaceIntent,
+        facts: &SurfaceFacts<'_>,
     ) -> Option<plakous_hosted::runtime::AccountsRead> {
-        matches!(
-            intent,
-            SurfaceIntent::ApplyProfile { .. } | SurfaceIntent::ChooseAccount { .. }
-        )
-        .then(|| accounts::catalog_read(self.paths.clone(), self.custody.clone()))
+        use crate::surface_protocol::ProfileApply;
+        let needed = match intent {
+            SurfaceIntent::ApplyProfile { apply, .. } => {
+                *apply != ProfileApply::Default
+                    && now_refusal(*apply == ProfileApply::Switch, facts).is_none()
+            }
+            SurfaceIntent::ChooseAccount { kind, account, .. } => {
+                accounts::choice_scope(*kind, account, facts).is_ok()
+            }
+            _ => false,
+        };
+        needed.then(|| accounts::catalog_read(self.paths.clone(), self.custody.clone()))
     }
 
     #[allow(

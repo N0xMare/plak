@@ -491,7 +491,11 @@ pub trait SurfaceHandler<P: ProtocolExtension>: Send {
 
     /// The account readiness `intent`'s dispatch reads
     /// ([`SurfaceFacts::accounts`]); `None` when it reads none.
-    fn accounts_read(&self, _intent: &P::Intent) -> Option<AccountsRead> {
+    fn accounts_read(
+        &self,
+        _intent: &P::Intent,
+        _facts: &SurfaceFacts<'_>,
+    ) -> Option<AccountsRead> {
         None
     }
 
@@ -558,8 +562,9 @@ pub(super) async fn ready_alternatives(read: Option<AlternativesRead>) -> Vec<St
 pub(super) fn accounts_read<P: ProtocolExtension>(
     surface: Option<&dyn SurfaceHandler<P>>,
     intent: &P::Intent,
+    facts: &SurfaceFacts<'_>,
 ) -> Option<AccountsRead> {
-    surface.and_then(|handler| handler.accounts_read(intent))
+    surface.and_then(|handler| handler.accounts_read(intent, facts))
 }
 
 /// Runs the product's account readiness read off the host loop.
