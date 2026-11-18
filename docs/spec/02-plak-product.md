@@ -4317,7 +4317,7 @@ bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
 
 The protocol-12 schema pin is SHA-256
-`56114cf69135a433ba02ce8aa15a3447d800c04cc2094a2168a54cc52a0093c0`:
+`430015594ff0bf2694f63f113b74cb9c65da72016006543c3786892cadbda7cf`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
 checks this build-independent pin. The schema title is `plakd wire v2`;

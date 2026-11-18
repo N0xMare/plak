@@ -334,6 +334,16 @@ fn commit_profile(
     send_profiles(paths, events);
 }
 
+/// Whether a project's overlay owns the root or the working set.
+fn project_owns_profile(loaded: &ProductConfig) -> bool {
+    [
+        crate::product_config::ConfigField::RootAgent,
+        crate::product_config::ConfigField::WorkingSet,
+    ]
+    .into_iter()
+    .any(|field| loaded.origin(field) == crate::product_config::ConfigValueOrigin::Project)
+}
+
 /// Validates a profile and either saves it for the next session or asks the
 /// host to use it now. Nothing is saved before a requested fork lands.
 fn apply_profile(
@@ -351,11 +361,7 @@ fn apply_profile(
             return None;
         }
     };
-    if loaded.origin(crate::product_config::ConfigField::RootAgent)
-        == crate::product_config::ConfigValueOrigin::Project
-        || loaded.origin(crate::product_config::ConfigField::WorkingSet)
-            == crate::product_config::ConfigValueOrigin::Project
-    {
+    if project_owns_profile(&loaded) {
         refuse_profile(
             name,
             "this project's .plak/config.toml owns the root or the working set".to_owned(),
@@ -396,17 +402,8 @@ fn apply_profile(
         refuse_profile(&prepared.id, reason, events);
         return None;
     }
-    let Some(filled) = accounts::fill_profile(
-        paths,
-        &prepared.id,
-        &prepared.config,
-        accounts,
-        &facts,
-        events,
-    ) else {
-        return None;
-    };
-    let root_account = filled.root_account.unwrap_or_else(|| root.account.clone());
+    let (root_account, choices) =
+        accounts::fill_profile(paths, &prepared, accounts, &facts, events)?;
     let roster = crate::roster_input::roster_input_from_config(
         &prepared.config,
         root_account.clone(),
@@ -424,7 +421,7 @@ fn apply_profile(
         protocol: root.protocol,
         roster,
         switch: switch.then(|| prepared.id.clone()),
-        account_choices: Some(filled.choices),
+        account_choices: Some(choices),
         finish: Box::new({
             let paths = paths.clone();
             let events = events.answering();

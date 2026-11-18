@@ -4,8 +4,8 @@
 # template's name. A project's .plak/agents/<name>.toml wins over the
 # user's file of the same name. An unknown key is a named load error.
 
-# Credential lane the copy runs on.
-# type: string · default: (required) · vertical[/name]; vertical is codex|chatgpt|grok|supergrok|xai-oauth|claude|openrouter|openai|anthropic|xai-api; name is [a-z][a-z0-9-]{0,31}, except default
+# Provider kind the copy runs on. The session holds the named account per kind (chapter 02 §4.4.1); a spawn binds the session's account for this kind.
+# type: string · default: (required) · a provider kind: codex|chatgpt|grok|supergrok|xai-oauth|claude|openrouter|openai|anthropic|xai-api; a named account (codex/work) is a load error naming the template
 account = "codex"
 
 # Exact model id.

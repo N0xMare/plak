@@ -11,9 +11,8 @@ use plakous_hosted::runtime::{
     SurfaceFacts, SurfacePhase, SurfaceSession,
 };
 
-use crate::account_choice::{self, FillMode, FilledChoices};
+use crate::account_choice::{self, FillMode};
 use crate::home::paths::PlakPaths;
-use crate::product_config::ProductConfig;
 use crate::surface_protocol::{ContentEvent, PlakExtension, SurfaceObservation};
 
 /// The provider kind id a wire vertical names.
@@ -103,17 +102,18 @@ pub(super) fn send_choices(
     ));
 }
 
-/// `ApplyProfile`'s fill for a fork, a switch or a bind: the profile's root
-/// kind and every card kind, before the host resolves the root's route.
-/// `None` after publishing the typed refusal and the profile refusal.
+/// `ApplyProfile`'s fill for a fork, a switch or a bind: the root's account
+/// and the stored choices for every card kind, before the host resolves the
+/// root's route. `None` after publishing the typed refusal and the profile
+/// refusal.
 pub(super) fn fill_profile(
     paths: &PlakPaths,
-    profile: &str,
-    config: &ProductConfig,
+    prepared: &crate::profiles::Prepared,
     accounts: &[AccountChoice],
     facts: &SurfaceFacts<'_>,
     events: &Sender<PlakExtension>,
-) -> Option<FilledChoices> {
+) -> Option<(String, BTreeMap<String, String>)> {
+    let config = &prepared.config;
     let explicit = accounts
         .iter()
         .map(|choice| plakous_host_protocol::wire::AccountChoice {
@@ -129,11 +129,16 @@ pub(super) fn fill_profile(
         FillMode::Require,
     );
     match filled {
-        Ok(filled) => Some(filled),
+        Ok(filled) => Some((
+            filled
+                .root_account
+                .unwrap_or_else(|| prepared.root.account.clone()),
+            filled.choices,
+        )),
         Err(refusal) => {
             let reason = account_choice::refusal_text(&refusal);
             refuse(events, from_request(refusal));
-            super::refuse_profile(profile, reason, events);
+            super::refuse_profile(&prepared.id, reason, events);
             None
         }
     }

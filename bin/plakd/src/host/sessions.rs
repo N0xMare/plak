@@ -977,6 +977,46 @@ fn name_based(namespace: uuid::Uuid, name: &[u8]) -> uuid::Uuid {
     uuid::Builder::from_sha1_bytes(bytes).into_uuid()
 }
 
+/// Spec 02 §4.4.1: the fill picks every used kind's account before the
+/// route, wire and probe resolve. An advanced model override is the root
+/// kind's explicit choice.
+fn creation_fill(
+    config: &crate::product_config::ProductConfig,
+    creation: &plakous_hosted::host_service::wire::Creation<'_>,
+    context: &crate::home::paths::PlakPaths,
+) -> Result<crate::account_choice::FilledChoices, RequestRefusal> {
+    let root_kind = match creation.model {
+        Some(model) => Some(
+            model
+                .account
+                .parse::<plakous_hosted::account::AccountRef>()
+                .map_err(|_| RequestRefusal::BindingRefused {
+                    kind: plakous_host_protocol::wire::BindingRefusalKind::ModelUnavailable,
+                })?
+                .vertical()
+                .as_str()
+                .to_owned(),
+        ),
+        None => crate::account_choice::root_kind(config),
+    };
+    let mut explicit = creation.accounts.to_vec();
+    if let (Some(model), Some(kind)) = (creation.model, root_kind.as_ref()) {
+        explicit.push(plakous_host_protocol::wire::AccountChoice {
+            kind: kind.clone(),
+            account: model.account.clone(),
+        });
+    }
+    let mut kinds = crate::account_choice::profile_kinds(config);
+    kinds.extend(root_kind.clone());
+    crate::account_choice::fill(
+        &kinds,
+        root_kind.as_deref(),
+        &explicit,
+        &crate::account_choice::ready_catalog(context),
+        crate::account_choice::FillMode::Require,
+    )
+}
+
 /// The record `new_session` saves for `session`: a new session in
 /// `workspace` on `template`'s binding, or the workspace's `[root] agent`
 /// when none is named, as `plakd agent` with no overrides seeds one.
@@ -1021,37 +1061,7 @@ fn new_record(
         template.account.clone_from(&model.account);
         template.model.clone_from(&model.model);
     }
-    // Spec 02 §4.4.1: the fill picks every used kind's account before the
-    // route, wire and probe resolve. An advanced model override is the root
-    // kind's explicit choice.
-    let root_kind = match creation.model {
-        Some(model) => Some(
-            model
-                .account
-                .parse::<plakous_hosted::account::AccountRef>()
-                .map_err(|_| binding(BindingRefusalKind::ModelUnavailable))?
-                .vertical()
-                .as_str()
-                .to_owned(),
-        ),
-        None => crate::account_choice::root_kind(&config),
-    };
-    let mut explicit = creation.accounts.to_vec();
-    if let (Some(model), Some(kind)) = (creation.model, root_kind.as_ref()) {
-        explicit.push(plakous_host_protocol::wire::AccountChoice {
-            kind: kind.clone(),
-            account: model.account.clone(),
-        });
-    }
-    let mut kinds = crate::account_choice::profile_kinds(&config);
-    kinds.extend(root_kind.clone());
-    let filled = crate::account_choice::fill(
-        &kinds,
-        root_kind.as_deref(),
-        &explicit,
-        &crate::account_choice::ready_catalog(&context),
-        crate::account_choice::FillMode::Require,
-    )?;
+    let filled = creation_fill(&config, creation, &context)?;
     let account: Option<plakous_hosted::account::AccountRef> = filled
         .root_account
         .as_deref()

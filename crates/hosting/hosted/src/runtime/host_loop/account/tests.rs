@@ -229,6 +229,66 @@ fn continue_host(
     (config, surface)
 }
 
+/// Hands the host a continue onto `codex/b` and waits for its turn to
+/// complete; returns where its events start.
+fn continue_on_b(
+    surface: &Chooser,
+    actions: &crate::surface_protocol::UserActionSender<TestExtension>,
+    events: &crate::surface_protocol::HostEventReceiver<TestExtension>,
+    seen: &mut Vec<HostEvent>,
+) -> usize {
+    *surface.next.lock().unwrap() = Some(SurfaceAccountChoice::Root {
+        account: "codex/b".into(),
+        continue_failed: true,
+    });
+    let before = seen.len();
+    send_attached_action(actions, UserAction::Extension(ProbeIntent::InspectUsage));
+    wait_for(events, seen, before, |events| {
+        idle_after(events, TurnPhase::Completed)
+    });
+    before
+}
+
+/// Hands the host a continue onto `codex/b` that it refuses.
+fn refused_continue(
+    surface: &Chooser,
+    actions: &crate::surface_protocol::UserActionSender<TestExtension>,
+) -> AccountChoiceOutcome {
+    *surface.next.lock().unwrap() = Some(SurfaceAccountChoice::Root {
+        account: "codex/b".into(),
+        continue_failed: true,
+    });
+    let before = surface.outcomes.lock().unwrap().len();
+    send_attached_action(actions, UserAction::Extension(ProbeIntent::InspectUsage));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while surface.outcomes.lock().unwrap().len() == before {
+        assert!(
+            Instant::now() < deadline,
+            "no outcome for the refused continue"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    surface.outcomes.lock().unwrap().last().cloned().unwrap()
+}
+
+/// The line head's projected facts name `turn` as its failed last root turn
+/// with its exact prompt and nothing committed after it.
+fn assert_failed_turn(store: &dyn SessionRecordStore, session: &str, turn: &str) {
+    let last = store
+        .load_views(session)
+        .unwrap()
+        .unwrap()
+        .state
+        .last_root_turn;
+    assert!(
+        last.as_ref().is_some_and(|last| last.turn_id == turn
+            && last.outcome == Some(LastRootOutcome::Failed)
+            && last.prompt.as_deref() == Some("do the thing")
+            && !last.committed_after_prompt),
+        "the failed turn's facts: {last:?}"
+    );
+}
+
 /// A usage-limit failure, then `ChooseAccount` with a continue: one rebind
 /// onto the new account and exactly one admitted root turn of the exact
 /// prompt on the line head. The root's node, profile and tree epoch do not
@@ -269,30 +329,10 @@ fn a_continue_after_a_usage_limit_rebinds_once_and_resubmits_the_exact_prompt() 
         .unwrap()
     };
     let source = line_head(store.as_ref(), &tree);
-    let last = store
-        .load_views(&source.id)
-        .unwrap()
-        .unwrap()
-        .state
-        .last_root_turn;
-    assert!(
-        last.as_ref().is_some_and(|last| last.turn_id == failed_turn
-            && last.outcome == Some(LastRootOutcome::Failed)
-            && last.prompt.as_deref() == Some("do the thing")
-            && !last.committed_after_prompt),
-        "the failed turn's facts: {last:?}"
-    );
+    assert_failed_turn(store.as_ref(), &source.id, &failed_turn);
     let epoch_before = epoch();
 
-    *surface.next.lock().unwrap() = Some(SurfaceAccountChoice::Root {
-        account: "codex/b".into(),
-        continue_failed: true,
-    });
-    let before = seen.len();
-    send_attached_action(&actions, UserAction::Extension(ProbeIntent::InspectUsage));
-    wait_for(&events, &mut seen, before, |events| {
-        idle_after(events, TurnPhase::Completed)
-    });
+    let before = continue_on_b(&surface, &actions, &events, &mut seen);
     assert_eq!(lifecycle(&seen[before..], TurnPhase::Admitted).len(), 1);
     let head = line_head(store.as_ref(), &tree);
     let ids = ContinueIds::of(&failed_turn, "codex/b");
@@ -333,15 +373,8 @@ fn a_continue_after_a_usage_limit_rebinds_once_and_resubmits_the_exact_prompt() 
     let second_turn = lifecycle(&seen[before..], TurnPhase::Failed)[0]
         .turn_id
         .clone();
-    *surface.next.lock().unwrap() = Some(SurfaceAccountChoice::Root {
-        account: "codex/b".into(),
-        continue_failed: true,
-    });
-    let before = seen.len();
-    send_attached_action(&actions, UserAction::Extension(ProbeIntent::InspectUsage));
-    wait_for(&events, &mut seen, before, |events| {
-        idle_after(events, TurnPhase::Completed)
-    });
+    let before = continue_on_b(&surface, &actions, &events, &mut seen);
+    assert_eq!(lifecycle(&seen[before..], TurnPhase::Admitted).len(), 1);
     let again = ContinueIds::of(&second_turn, "codex/b");
     assert_ne!(again, ids);
     assert_eq!(
@@ -357,25 +390,9 @@ fn a_continue_after_a_usage_limit_rebinds_once_and_resubmits_the_exact_prompt() 
     );
 
     // A continue needs a failed last root turn.
-    *surface.next.lock().unwrap() = Some(SurfaceAccountChoice::Root {
-        account: "codex/b".into(),
-        continue_failed: true,
-    });
-    let before = surface.outcomes.lock().unwrap().len();
-    send_attached_action(&actions, UserAction::Extension(ProbeIntent::InspectUsage));
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while surface.outcomes.lock().unwrap().len() == before {
-        assert!(
-            Instant::now() < deadline,
-            "no outcome for the refused continue"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
     assert_eq!(
-        surface.outcomes.lock().unwrap().last(),
-        Some(&AccountChoiceOutcome::Refused(
-            AccountChoiceRefusal::NoFailedTurn
-        ))
+        refused_continue(&surface, &actions),
+        AccountChoiceOutcome::Refused(AccountChoiceRefusal::NoFailedTurn)
     );
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();
@@ -612,7 +629,7 @@ mod account_continue_crash_cuts {
                 .is_none(),
             "the unpublished request is withdrawn"
         );
-        assert!(head.pending_queue.is_empty());
+        assert_eq!(head.pending_queue.len(), 0);
         assert_eq!(user_rows(cut.store.as_ref(), &head.id), ["do the thing"]);
     }
 
@@ -624,7 +641,7 @@ mod account_continue_crash_cuts {
         let head = cut.head();
         assert_ne!(head.id, cut.source, "the rebind published");
         assert_eq!(head.account.as_deref(), Some("codex/b"));
-        assert!(head.pending_queue.is_empty());
+        assert_eq!(head.pending_queue.len(), 0);
         assert!(cut.continue_notice(), "{:?}", cut.reopened);
     }
 

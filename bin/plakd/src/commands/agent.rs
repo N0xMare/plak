@@ -222,11 +222,6 @@ pub(crate) enum AgentSession {
 }
 
 #[allow(clippy::fn_params_excessive_bools, reason = "clap-shaped agent verb")]
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "Agent admission carries the explicit binding overrides through capability checks, session selection, and host configuration."
-)]
 /// Spec 02 §4.4.1: the fill picks every used kind's account before the root's
 /// route, wire and probe resolve. A bare `--account` (or `--provider`) is the
 /// root's own choice; `--account <kind>=<ref>` names the others.
@@ -286,6 +281,11 @@ fn fill_agent_accounts(
     Ok((account, platform, wire, filled.choices))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "Agent admission carries the explicit binding overrides through capability checks, session selection, and host configuration."
+)]
 pub(crate) fn run_agent_after_admission(
     services: &crate::shell::services::Services,
     context: Option<&crate::home::paths::PlakPaths>,

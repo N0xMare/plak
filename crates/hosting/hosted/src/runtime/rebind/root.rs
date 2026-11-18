@@ -1,7 +1,14 @@
 //! The root rebind entry points: a profile fork or switch, and the account
 //! continue (spec 02 §4.4.1), over one shared rebind body.
 
-use super::*;
+use super::{
+    AttachedCodingSession, CliFailure, CliResult, HostConfig, HostLifecyclePhase, Instant,
+    InterruptWatch, ProfileBranchInput, ProfileTargetInput, Rebound, Sender, TargetSelection,
+    attach_profile_branch, frozen_tools_rebind_refusal, instruction_sources,
+    interrupted_before_dispatch, note_reread_instructions, observe_phase, profile_cards_active,
+    profile_rebind_selection, refuse_unready_rebind, release_profile_build_lease,
+    resolve_profile_target, sessions, source_skills_on, stage_rebind,
+};
 
 /// What a rebind does with the root node.
 #[derive(Clone, Copy)]
@@ -28,6 +35,33 @@ impl RebindMode<'_> {
     /// The root node keeps its line, its running processes and its children.
     pub(super) const fn continues_line(self) -> bool {
         !matches!(self, Self::Fork(..))
+    }
+
+    /// Whether the cards this rebind would freeze are the tree's own already.
+    fn cards_active<P: plakous_host_protocol::ProtocolExtension>(
+        self,
+        config: &HostConfig<P>,
+    ) -> CliResult<bool> {
+        match self {
+            Self::Fork(roster, _) | Self::Switch(_, roster, _) => {
+                profile_cards_active(config, roster)
+            }
+            Self::Account(_) => Ok(true),
+        }
+    }
+
+    /// The profile a successor that opens a tree of its own freezes; an
+    /// account continue keeps the line head's.
+    fn root_profile<P: plakous_host_protocol::ProtocolExtension>(
+        self,
+        config: &HostConfig<P>,
+    ) -> sessions::RootProfile {
+        match self {
+            Self::Fork(roster, _) | Self::Switch(_, roster, _) => {
+                sessions::RootProfile::from_roster(roster)
+            }
+            Self::Account(_) => config.session.root_profile.clone().unwrap_or_default(),
+        }
     }
 
     pub(super) fn account_choices(self) -> Option<std::collections::BTreeMap<String, String>> {
@@ -237,13 +271,7 @@ async fn rebind_root<P: plakous_host_protocol::ProtocolExtension>(
             && config.session.effort.as_deref() == effort_label.as_deref()
             && config.session.composition == composition
             && config.session.target_selection == target_selection;
-        let cards_active = match mode {
-            RebindMode::Fork(roster, _) | RebindMode::Switch(_, roster, _) => {
-                profile_cards_active(config, roster)?
-            }
-            RebindMode::Account(_) => true,
-        };
-        if same_binding && cards_active {
+        if same_binding && mode.cards_active(config)? {
             return Ok(Rebound::Unchanged);
         }
         if let Some(refusal) = frozen_tools_rebind_refusal(config, &account, &target_selection) {
@@ -257,12 +285,7 @@ async fn rebind_root<P: plakous_host_protocol::ProtocolExtension>(
         config.state_roots.set_inherited_skills(inherited);
         let (operation, target_product_id, own_tree, topology_tree_id, succession) =
             stage_rebind(config, opened, mode, &account, model, composition).await?;
-        let profile = match mode {
-            RebindMode::Fork(roster, _) | RebindMode::Switch(_, roster, _) => {
-                sessions::RootProfile::from_roster(roster)
-            }
-            RebindMode::Account(_) => config.session.root_profile.clone().unwrap_or_default(),
-        };
+        let profile = mode.root_profile(config);
         let target = resolve_profile_target(
             watch,
             config,
@@ -320,6 +343,16 @@ async fn rebind_root<P: plakous_host_protocol::ProtocolExtension>(
         branched
     })
     .await;
+    finish_root_rebind(config, events, &rebound);
+    rebound
+}
+
+/// What every rebind settles once it ends, published or not.
+fn finish_root_rebind<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut HostConfig<P>,
+    events: &Sender<P>,
+    rebound: &CliResult<Rebound>,
+) {
     config.state_roots.set_inherited_skills(None);
     config.state_roots.set_pending_epoch(None);
     // A switch onto another tree takes it for this root, so it runs the
@@ -331,5 +364,4 @@ async fn rebind_root<P: plakous_host_protocol::ProtocolExtension>(
             crate::runtime::tree::HeldNotice::CHILDREN,
         );
     }
-    rebound
 }

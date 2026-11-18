@@ -54,7 +54,7 @@ pub(in crate::runtime) async fn complete_rebind<P: plakous_host_protocol::Protoc
     let target_locator = transition
         .dispatch(source_was_detached, &target, runtime)
         .await?;
-    let target_record = transition.project_target(target_locator).await?;
+    let target_record = Box::pin(transition.project_target(target_locator)).await?;
     if let Some(succession) = succession {
         transition
             .settle_succession(succession, &target_record, &mut target)

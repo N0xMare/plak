@@ -406,6 +406,17 @@ pub(super) enum Rebound {
     Unchanged,
 }
 
+impl Rebound {
+    /// A published branch: the root's own line, or a new one.
+    const fn published(continues_line: bool) -> Self {
+        if continues_line {
+            Self::Succeeded
+        } else {
+            Self::Switched
+        }
+    }
+}
+
 /// Whether a profile's cards are the ones this session's tree already froze.
 fn profile_cards_active<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
@@ -780,13 +791,7 @@ async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
         succession,
     ))
     .await
-    .map(|()| {
-        if succession.is_some() {
-            Rebound::Succeeded
-        } else {
-            Rebound::Switched
-        }
-    })
+    .map(|()| Rebound::published(succession.is_some()))
 }
 
 async fn rebind_model_capabilities<P: plakous_host_protocol::ProtocolExtension>(
