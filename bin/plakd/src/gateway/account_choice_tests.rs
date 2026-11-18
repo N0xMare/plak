@@ -179,7 +179,10 @@ fn the_gateway_reports_the_default_and_named_subscription_slots() {
     let directory = tempfile::tempdir().unwrap();
     let gateway_home = PlakPaths::explicit(directory.path().join("gateway-home"));
     let state = directory.path().join("gateway-state");
-    std::fs::create_dir_all(gateway_home.home()).unwrap();
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(gateway_home.home())
+        .unwrap();
     std::fs::DirBuilder::new()
         .mode(0o700)
         .create(&state)

@@ -108,7 +108,7 @@ async fn fixture(tree_id: &str) -> (Fixture, crate::sessions::SessionRecord) {
         .unwrap();
     let mut head = crate::sessions::SessionRecord::new(fixture.root.path().to_path_buf());
     head.node = crate::sessions::SessionNode::genesis(tree_id);
-    head.account = Some("openrouter".to_owned());
+    head.account = Some("claude".to_owned());
     choose(&fixture, &mut head, "codex", "codex");
     choose(&fixture, &mut head, "grok", "grok");
     (fixture, head)
