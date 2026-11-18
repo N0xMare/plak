@@ -87,7 +87,7 @@ fn host_lifecycle_wire_ten_gets_only_version_mismatch_even_at_planned_stop() {
     reader.read_line(&mut line).unwrap();
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&line).unwrap(),
-        json!({"frame":"refused","kind":"version_mismatch","host":11,"client":10})
+        json!({"frame":"refused","kind":"version_mismatch","host":WIRE_VERSION,"client":10})
     );
     stop(&mut host);
     let mut remaining = String::new();
