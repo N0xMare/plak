@@ -80,7 +80,7 @@ mod loopback;
 mod responses;
 use responses::{
     loopback_response, native_summary_response, scripted_error, scripted_stall_is_deaf,
-    scripted_stream, stall,
+    scripted_stream, stall, with_account_reasoning,
 };
 
 #[cfg(test)]

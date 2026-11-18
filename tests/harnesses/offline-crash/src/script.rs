@@ -375,6 +375,11 @@ pub struct ScriptStep {
     /// `prefix`).
     #[serde(default)]
     pub stream: Vec<ScriptStreamEvent>,
+    /// Lead the terminal response with one opaque reasoning block whose
+    /// replay envelope is bound to this binding's exact account and model, as
+    /// a provider's encrypted reasoning is (chapter 01 §5.7).
+    #[serde(default)]
+    pub account_reasoning: bool,
 }
 
 /// One scripted event streamed ahead of a round's terminal response.
@@ -429,6 +434,10 @@ pub enum ScriptOutput {
     Images(u8),
     /// Reports the text actually present in the next model request.
     HistoryReport,
+    /// Reports how many reasoning blocks the request carries whose replay
+    /// material this binding may consume (its protocol, model and account,
+    /// as a provider adapter decides), as the text `reasoning blocks: <n>`.
+    ReasoningReport,
 }
 
 /// One scripted tool call.

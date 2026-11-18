@@ -210,6 +210,10 @@ pub(super) async fn stall(
     cancellation.is_cancelled()
 }
 
+/// The binding a request is for: its descriptor and its account's
+/// non-secret binding, which decide what replay material it may consume.
+pub(super) type ReplayTarget<'a> = (&'a ResolvedModelDescriptor, Digest);
+
 #[allow(
     clippy::too_many_lines,
     reason = "the deterministic fixture keeps its three closed response scenarios visibly exhaustive"
@@ -220,6 +224,7 @@ pub(super) fn loopback_response(
     scenario: &LoopbackScenario,
     identity_namespace: u128,
     prepared_input_tokens: u64,
+    target: ReplayTarget<'_>,
 ) -> Result<ModelResponse, ModelError> {
     if let LoopbackScenario::Scripted(script) = scenario {
         return scripted_response(
@@ -229,6 +234,7 @@ pub(super) fn loopback_response(
             identity_namespace,
             prepared_input_tokens,
             script.hosted_tool_call_final,
+            target,
         );
     }
     if let LoopbackScenario::ScriptedSummary(_, finish) = scenario {
@@ -473,6 +479,7 @@ fn scripted_response(
     identity_namespace: u128,
     prepared_input_tokens: u64,
     hosted_tool_call_final: bool,
+    (descriptor, account): ReplayTarget<'_>,
 ) -> Result<ModelResponse, ModelError> {
     let default_step = ScriptStep::default();
     let step = step.unwrap_or(&default_step);
@@ -512,6 +519,31 @@ fn scripted_response(
                 .join("\n");
             vec![ContentBlock::Text(
                 TextBlock::new(text, Some(TextPhase::Final)).map_err(invalid_model_fixture)?,
+            )]
+        }
+        ScriptOutput::ReasoningReport => {
+            let count = plan
+                .request()
+                .input()
+                .items()
+                .iter()
+                .flat_map(ConversationItem::blocks)
+                .filter_map(|block| match block {
+                    ContentBlock::Reasoning(reasoning) => reasoning.replay(),
+                    _ => None,
+                })
+                .filter(|replay| {
+                    replay.is_compatible(
+                        descriptor.protocol(),
+                        descriptor.model_family(),
+                        descriptor.requested_model(),
+                        Some(account),
+                    )
+                })
+                .count();
+            vec![ContentBlock::Text(
+                TextBlock::new(format!("reasoning blocks: {count}"), Some(TextPhase::Final))
+                    .map_err(invalid_model_fixture)?,
             )]
         }
         ScriptOutput::Images(count) => (0..*count)
@@ -984,4 +1016,54 @@ fn invalid_model_fixture(error: impl std::fmt::Display) -> ModelError {
         ModelErrorKind::InvalidEvent,
         format!("invalid loopback fixture: {error}"),
     )
+}
+
+/// `response` led by one opaque reasoning block bound to `account` and the
+/// descriptor's exact model ([`ScriptStep::account_reasoning`]).
+pub(super) fn with_account_reasoning(
+    response: &ModelResponse,
+    descriptor: &ResolvedModelDescriptor,
+    account: Digest,
+) -> Result<ModelResponse, ModelError> {
+    let envelope = plakous::model::ReplayEnvelope::new(
+        descriptor.protocol().clone(),
+        descriptor.model_family().cloned(),
+        plakous::model::ReplayScope::ExactAccountModel {
+            model: descriptor.requested_model().clone(),
+            account,
+        },
+        plakous::model::ReplayKindId::new("reasoning").map_err(invalid_model_fixture)?,
+        1,
+        plakous::model::DataClassification::Sensitive,
+        serde_json::value::RawValue::from_string(
+            json!({"type": "reasoning", "encrypted_content": "fixture-account-reasoning"})
+                .to_string(),
+        )
+        .map_err(invalid_model_fixture)?,
+    )
+    .map_err(invalid_model_fixture)?;
+    let reasoning = ContentBlock::Reasoning(
+        plakous::model::ReasoningBlock::new(
+            plakous::model::ReasoningVisibility::OpaqueReplay,
+            None,
+            Some(envelope),
+        )
+        .map_err(invalid_model_fixture)?,
+    );
+    let mut output = response.output().to_vec();
+    let first = output
+        .first()
+        .ok_or_else(|| invalid_model_fixture("a scripted response has no output item"))?;
+    let mut blocks = vec![reasoning];
+    blocks.extend(first.blocks().iter().cloned());
+    output[0] = ConversationItem::new(first.id(), first.actor(), blocks, first.provenance())
+        .map_err(invalid_model_fixture)?;
+    Ok(ModelResponse::new(
+        output,
+        response.finish().clone(),
+        response.usage(),
+        response.response_id().map(str::to_owned),
+        response.plan_digest(),
+    )
+    .with_metadata(response.metadata().clone()))
 }

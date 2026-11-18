@@ -10,6 +10,7 @@ use super::{
     ToolOutcome, ToolRuntimeError, ToolRuntimeErrorKind, ValidatedRequestPlan, descriptor,
     fixture_time, io, loopback_response, model_evidence_error, native_summary_response,
     scripted_error, scripted_stall_is_deaf, scripted_stream, seal_fixture_artifact, stall, stream,
+    with_account_reasoning,
 };
 
 impl LoopbackModel {
@@ -472,7 +473,22 @@ impl LanguageModel for LoopbackModel {
                         &self.scenario,
                         self.identity_namespace,
                         prepared_input_tokens,
+                        (&self.descriptor, self.authority.account_binding()),
                     )?
+                };
+                let account_reasoning = matches!(
+                    &self.scenario,
+                    LoopbackScenario::Scripted(script)
+                        if script.step(round).is_some_and(|step| step.account_reasoning)
+                );
+                let response = if account_reasoning {
+                    with_account_reasoning(
+                        &response,
+                        &self.descriptor,
+                        self.authority.account_binding(),
+                    )?
+                } else {
+                    response
                 };
                 let response = if self.seal_final_artifact {
                     seal_fixture_artifact(&plan, &response, cache_affinity)?

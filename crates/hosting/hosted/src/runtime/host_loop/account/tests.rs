@@ -176,6 +176,33 @@ fn continue_host(
     )>,
     primary_account: &'static [u8],
 ) -> (crate::runtime::HostConfig<TestExtension>, Arc<Chooser>) {
+    continue_host_scripted(root, cut, primary_account, &continue_steps(), 1)
+}
+
+/// Each prompt fails on its usage limit; each continue then answers.
+fn continue_steps() -> serde_json::Value {
+    serde_json::json!([
+        {"fault": {"at": "pre_stream", "kind": "quota_exceeded"}},
+        {"output": {"text": "continued"}},
+        {"fault": {"at": "pre_stream", "kind": "quota_exceeded"}},
+        {"output": {"text": "continued again"}}
+    ])
+}
+
+/// [`continue_host`] over its own script `steps`, whose shared cursor starts
+/// at `first_step`, so a reopened host takes the script up where the cut
+/// one left it.
+fn continue_host_scripted(
+    root: &std::path::Path,
+    cut: Option<(
+        crate::runtime::HostWorkflow,
+        crate::runtime::HostBoundary,
+        usize,
+    )>,
+    primary_account: &'static [u8],
+    steps: &serde_json::Value,
+    first_step: u64,
+) -> (crate::runtime::HostConfig<TestExtension>, Arc<Chooser>) {
     let (mut config, _) = fresh_injected_attached_host(root);
     let workspace = config.cwd.clone();
     let controller = plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
@@ -184,15 +211,9 @@ fn continue_host(
     )
     .unwrap();
     let script: Arc<plakous_offline_crash_harness::script::ScriptPlan> = Arc::new(
-        serde_json::from_value(serde_json::json!({"version": 1, "steps": [
-            {"fault": {"at": "pre_stream", "kind": "quota_exceeded"}},
-            {"output": {"text": "continued"}},
-            {"fault": {"at": "pre_stream", "kind": "quota_exceeded"}},
-            {"output": {"text": "continued again"}}
-        ]}))
-        .unwrap(),
+        serde_json::from_value(serde_json::json!({"version": 1, "steps": steps})).unwrap(),
     );
-    let cursor = Arc::new(AtomicU64::new(1));
+    let cursor = Arc::new(AtomicU64::new(first_step));
     let bind = move |account: &'static [u8]| {
         let (workspace, controller, script, cursor) = (
             workspace.clone(),
@@ -406,6 +427,102 @@ fn a_continue_after_a_usage_limit_rebinds_once_and_resubmits_the_exact_prompt() 
     worker.join().unwrap().unwrap();
 }
 
+fn assistant_rows(store: &dyn SessionRecordStore, id: &str) -> Vec<String> {
+    store
+        .load_views(id)
+        .unwrap()
+        .unwrap()
+        .rows
+        .values()
+        .filter_map(|row| match row {
+            TranscriptRow::Assistant { text } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A turn whose tool round committed before its usage limit: the continue
+/// resubmits the pinned continuation, read through the real projector's
+/// `committed_after_prompt`, and the new account's request omits the
+/// reasoning the old account's model bound to itself (chapter 01 §5.7). On
+/// the old account the same reasoning is replayed, so the report is not
+/// trivially empty.
+#[test]
+fn a_continue_after_a_committed_round_sends_the_continuation_without_the_old_accounts_reasoning() {
+    let root = tempfile::tempdir().unwrap();
+    let tool_round = serde_json::json!({"output": {"tool": {"name": "loopback_effect", "arguments": {}}}, "finish": "tool_calls"});
+    let (config, surface) = continue_host_scripted(
+        root.path(),
+        None,
+        b"offline-loopback-account",
+        &serde_json::json!([
+            {"account_reasoning": true, "output": {"tool": {"name": "loopback_effect", "arguments": {}}}, "finish": "tool_calls"},
+            {"output": {"text": "first done"}},
+            {"output": "reasoning_report"},
+            tool_round,
+            {"fault": {"at": "pre_stream", "kind": "quota_exceeded"}},
+            {"output": "reasoning_report"}
+        ]),
+        1,
+    );
+    let store = Arc::clone(&config.store);
+    let tree = config.session.id.clone();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    for prompt in ["do the thing", "check"] {
+        send_attached_action(&actions, UserAction::Prompt(prompt.into()));
+        let before = seen.len();
+        wait_for(&events, &mut seen, before, |events| {
+            idle_after(events, TurnPhase::Completed)
+        });
+    }
+    let source = line_head(store.as_ref(), &tree);
+    assert_eq!(
+        assistant_rows(store.as_ref(), &source.id)
+            .last()
+            .map(String::as_str),
+        Some("reasoning blocks: 1"),
+        "the producing account replays its own reasoning"
+    );
+    send_attached_action(&actions, UserAction::Prompt("next".into()));
+    let before = seen.len();
+    wait_for(&events, &mut seen, before, |events| {
+        idle_after(events, TurnPhase::Failed)
+    });
+    let last = store
+        .load_views(&source.id)
+        .unwrap()
+        .unwrap()
+        .state
+        .last_root_turn
+        .unwrap();
+    assert!(
+        last.outcome == Some(LastRootOutcome::Failed)
+            && last.prompt.as_deref() == Some("next")
+            && last.committed_after_prompt,
+        "the projector saw the committed round: {last:?}"
+    );
+
+    let before = continue_on_b(&surface, &actions, &events, &mut seen);
+    assert_eq!(lifecycle(&seen[before..], TurnPhase::Admitted).len(), 1);
+    let head = line_head(store.as_ref(), &tree);
+    assert_eq!(head.account.as_deref(), Some("codex/b"));
+    assert_eq!(
+        user_rows(store.as_ref(), &head.id),
+        ["do the thing", "check", "next", CONTINUATION_PROMPT],
+        "a committed round is continued, not repeated"
+    );
+    assert_eq!(
+        assistant_rows(store.as_ref(), &head.id)
+            .last()
+            .map(String::as_str),
+        Some("reasoning blocks: 0"),
+        "the new account's request omits the old account's reasoning"
+    );
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+}
+
 /// A non-root choice is written through the host's own record, so the next
 /// prompt's save in the same attachment succeeds.
 #[test]
@@ -501,9 +618,24 @@ mod account_continue_crash_cuts {
         source: String,
         failed_turn: String,
         reopened: Vec<HostEvent>,
+        repeated: Option<AccountChoiceOutcome>,
+        repeat_events: Vec<HostEvent>,
+    }
+
+    /// What the reopened host does once it settled: nothing, or the same
+    /// continue again, which is refused or runs.
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum Repeat {
+        No,
+        Refused,
+        Runs,
     }
 
     fn cut_at(workflow: HostWorkflow, boundary: HostBoundary, nth: usize) -> Cut {
+        cut_then(workflow, boundary, nth, Repeat::No)
+    }
+
+    fn cut_then(workflow: HostWorkflow, boundary: HostBoundary, nth: usize, repeat: Repeat) -> Cut {
         let root = tempfile::tempdir().unwrap();
         let (config, surface) = continue_host(
             root.path(),
@@ -537,13 +669,15 @@ mod account_continue_crash_cuts {
         };
         // A cut inside a turn leaves its branch lease held until it lapses.
         let deadline = Instant::now() + Duration::from_secs(120);
-        let (actions, events, worker) = loop {
-            let (mut config, _) = continue_host(root.path(), None, account);
+        let (actions, events, worker, surface) = loop {
+            // The cut host took the first step, the failed prompt.
+            let (mut config, surface) =
+                continue_host_scripted(root.path(), None, account, &continue_steps(), 2);
             config.store = Arc::clone(&store);
             config.state_roots = state_roots.clone();
             config.session = line_head(store.as_ref(), &tree);
             match spawn_host_worker(config) {
-                Ok(host) => break host,
+                Ok((actions, events, worker)) => break (actions, events, worker, surface),
                 Err(failure) if Instant::now() < deadline => {
                     assert!(
                         failure.message().contains("held by another plakd process"),
@@ -562,6 +696,15 @@ mod account_continue_crash_cuts {
                 reopened.push(event);
             }
         }
+        let mut repeat_events = Vec::new();
+        let repeated = match repeat {
+            Repeat::No => None,
+            Repeat::Refused => Some(refused_continue(&surface, &actions)),
+            Repeat::Runs => {
+                continue_on_b(&surface, &actions, &events, &mut repeat_events);
+                surface.outcomes.lock().unwrap().last().cloned()
+            }
+        };
         send_attached_action(&actions, UserAction::Quit);
         worker.join().unwrap().unwrap();
         Cut {
@@ -570,6 +713,8 @@ mod account_continue_crash_cuts {
             source,
             failed_turn,
             reopened,
+            repeated,
+            repeat_events,
         }
     }
 
@@ -709,6 +854,65 @@ mod account_continue_crash_cuts {
                 .iter()
                 .any(|item| item.id == cut.ids().item_id),
             "an admitted continue leaves no queued copy"
+        );
+    }
+
+    /// A repeat of a continue whose root-start is queued is refused
+    /// `already_continued` and queues nothing more.
+    #[test]
+    fn a_repeat_of_a_queued_continue_is_refused_already_continued() {
+        let cut = cut_then(
+            HostWorkflow::RootDelivery,
+            HostBoundary::Prepared,
+            2,
+            Repeat::Refused,
+        );
+        cut.assert_one_rebind();
+        cut.reopen_admitted_nothing();
+        assert_eq!(
+            cut.repeated,
+            Some(AccountChoiceOutcome::Refused(
+                AccountChoiceRefusal::AlreadyContinued
+            ))
+        );
+        let head = cut.head();
+        assert_eq!(
+            head.pending_queue
+                .iter()
+                .filter(|item| item.id == cut.ids().item_id)
+                .count(),
+            1,
+            "the queued continue stays the only one"
+        );
+    }
+
+    /// A repeat of a continue whose rebind published but whose root-start
+    /// was never queued does not rebind again: it resubmits the prompt once
+    /// on the continue's successor under the continue's own ids.
+    #[test]
+    fn a_repeat_of_a_published_continue_resubmits_once_without_a_second_rebind() {
+        let cut = cut_then(
+            HostWorkflow::Rebind,
+            HostBoundary::ProductPublished,
+            1,
+            Repeat::Runs,
+        );
+        cut.reopen_admitted_nothing();
+        assert!(cut.continue_notice(), "{:?}", cut.reopened);
+        let head = cut.head();
+        assert_ne!(head.id, cut.source, "the first attempt's rebind published");
+        cut.assert_one_rebind();
+        assert_eq!(lifecycle(&cut.repeat_events, TurnPhase::Admitted).len(), 1);
+        assert!(matches!(
+            &cut.repeated,
+            Some(AccountChoiceOutcome::Chosen { root: Some(root), .. }) if root == "codex/b"
+        ));
+        let views = cut.store.load_views(&head.id).unwrap().unwrap();
+        assert!(views.state.deliveries.contains_key(&cut.ids().command_id()));
+        assert_eq!(
+            user_rows(cut.store.as_ref(), &head.id),
+            ["do the thing", "do the thing"],
+            "the prompt and its one resubmission"
         );
     }
 }
