@@ -63,9 +63,18 @@ pub enum ActualHostBoundary {
 pub enum ActualHostAction {
     Prompt(String),
     PromptOnce(String),
-    SendQueuedNow { id: String, revision: u64 },
+    SendQueuedNow {
+        id: String,
+        revision: u64,
+    },
     Fork,
     Compact,
+    /// The product's `ChooseAccount` intent.
+    ChooseAccount {
+        kind: plakd_wire_types::console::Vertical,
+        account: String,
+        continue_failed: bool,
+    },
     Quit,
 }
 
@@ -152,6 +161,17 @@ pub fn run_actual_host(
                 compact: false,
             },
             ActualHostAction::Compact => crate::surface_protocol::UserAction::Compact,
+            ActualHostAction::ChooseAccount {
+                kind,
+                account,
+                continue_failed,
+            } => crate::surface_protocol::UserAction::Extension(
+                crate::surface_protocol::SurfaceIntent::ChooseAccount {
+                    kind,
+                    account,
+                    continue_failed,
+                },
+            ),
             ActualHostAction::Quit => crate::surface_protocol::UserAction::Quit,
         })
         .collect();

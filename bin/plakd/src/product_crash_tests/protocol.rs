@@ -19,6 +19,11 @@ pub(super) enum ProductWorkflow {
     /// §5.5), with the tree's `epoch_pending` publish-or-validate pair.
     Switch,
     Compact,
+    /// A root turn fails, then `ChooseAccount` continues it on another
+    /// account (spec 02 §4.4.1): the rebind workflow request, then one
+    /// root-start. `ProductPublished` cuts the rebind; `Prepared` and
+    /// `RuntimeReturned` cut the continue's root-start.
+    AccountContinue,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

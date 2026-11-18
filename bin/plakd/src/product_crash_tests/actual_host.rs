@@ -571,6 +571,136 @@ fn a_switch_cut_after_publication_reopens_onto_the_settled_successor() -> TestRe
     Ok(())
 }
 
+/// SIGKILL cuts of a continue on another account (spec 02 §4.4.1) against
+/// a real SQLite home: the root's first turn fails on its usage limit, then
+/// `ChooseAccount` continues it on `codex/b`. The host is killed after the
+/// rebind publishes, after the continue's root-start is prepared, and after
+/// the runtime returns its admission; a relaunch opens the root line's head.
+/// Each keeps one rebind and at most one resubmitted prompt, and no reopen
+/// submits or admits anything.
+#[test]
+fn account_continue_sigkill_cuts_reopen_without_resubmitting() -> TestResult {
+    let workflow = ProductWorkflow::AccountContinue;
+    let mut interrupted = Vec::new();
+    for cut in [
+        ProductCrashBoundary::ProductPublished,
+        ProductCrashBoundary::Prepared,
+        ProductCrashBoundary::RuntimeReturned,
+    ] {
+        eprintln!("account-continue case {cut:?}");
+        let fixture = Fixture::new()?;
+        kill_at(&fixture.run(workflow, cut), workflow, cut)?;
+        interrupted.push((cut, fixture));
+    }
+    // One bounded wait lapses every cut's branch lease.
+    std::thread::sleep(Duration::from_secs(31));
+    for (cut, fixture) in interrupted {
+        eprintln!("account-continue recovery {cut:?}");
+        let paths = PlakPaths::explicit(fixture.home.clone());
+        let state: serde_json::Value = serde_json::from_slice(&std::fs::read(&fixture.state)?)?;
+        let source_id = state["source_product_session_id"]
+            .as_str()
+            .ok_or("source id missing")?
+            .to_owned();
+        let source = crate::product_sessions::load_session(&paths, &source_id)?;
+        let head = |paths: &PlakPaths| -> TestResult<crate::product_sessions::SessionRecord> {
+            Ok(crate::store::ProductStore::open(paths)?
+                .root_line_head(&source.node.tree_id)?
+                .ok_or("the root line has no head")?)
+        };
+        let before = evidence(&fixture)?;
+        let (_, startup) = relaunch_report(&fixture.recover(false), &fixture.probe())?;
+        assert_eq!(startup, None, "{cut:?}: the line head reopens");
+        let after = evidence(&fixture)?;
+        assert_eq!(after, before, "{cut:?}: the reopen dispatched nothing");
+        let reopened = head(&paths)?;
+        assert_ne!(reopened.id, source.id, "{cut:?}: the rebind published");
+        assert_eq!(reopened.account.as_deref(), Some("codex/b"));
+        assert_eq!(
+            reopened.source_product_session_id.as_deref(),
+            Some(source.id.as_str()),
+            "{cut:?}: one rebind"
+        );
+        assert!(
+            reopened
+                .source_workflow_operation_id
+                .as_deref()
+                .is_some_and(|operation| operation.starts_with("plak:rebind:account:")),
+            "{cut:?}: the continue's rebind"
+        );
+        let intents = crate::store::ProductStore::open(&paths)?.load_intents(&reopened.id)?;
+        let root_starts = intents
+            .submissions
+            .iter()
+            .filter(|submission| {
+                submission.kind == plakous_hosted::sessions::projector::SubmissionKind::RootStart
+            })
+            .count();
+        let prompts = reopened
+            .transcript
+            .iter()
+            .filter(|row| {
+                matches!(row, TranscriptRow::User { .. }) && row.text() == Some("do the thing")
+            })
+            .count();
+        match cut {
+            ProductCrashBoundary::ProductPublished => {
+                assert_eq!(reopened.pending_queue.len(), 0, "nothing was queued");
+                assert_eq!(root_starts, 0, "the continue was never submitted");
+                assert_eq!(prompts, 1, "nothing was resent");
+            }
+            ProductCrashBoundary::Prepared => {
+                assert_eq!(
+                    reopened.pending_queue.len(),
+                    1,
+                    "the written root-start waits for the operator"
+                );
+                assert_eq!(root_starts, 1, "the written root-start is recorded once");
+                assert_eq!(prompts, 1, "the queued continue is not resent");
+            }
+            ProductCrashBoundary::RuntimeReturned => {
+                assert_eq!(reopened.pending_queue.len(), 0, "no queued copy");
+                assert_eq!(root_starts, 1, "exactly one resubmission");
+                let command = &intents.submissions[0].command_id;
+                assert!(
+                    matches!(
+                        crate::store::ProductStore::open(&paths)?
+                            .load_views(&reopened.id)?
+                            .ok_or("missing projected session")?
+                            .state
+                            .deliveries
+                            .get(command),
+                        Some(crate::store::sessions::projector::Delivery::Accepted)
+                    ),
+                    "the runtime admitted the resubmission once"
+                );
+                // The admitted turn was cut before it committed history.
+                assert!(prompts <= 2, "at most the prompt and its resubmission");
+            }
+            _ => unreachable!("the continue cells"),
+        }
+        // A second reopen converges and still admits nothing.
+        let (_, repeated) = relaunch_report(&fixture.recover(false), &fixture.probe())?;
+        assert_eq!(repeated, None);
+        assert_eq!(
+            evidence(&fixture)?,
+            after,
+            "{cut:?}: a second reopen dispatched"
+        );
+        let stable = head(&paths)?;
+        assert_eq!(stable.id, reopened.id, "{cut:?}");
+        assert_eq!(
+            crate::store::ProductStore::open(&paths)?
+                .load_intents(&stable.id)?
+                .submissions
+                .len(),
+            intents.submissions.len(),
+            "{cut:?}: a second reopen submitted"
+        );
+    }
+    Ok(())
+}
+
 fn reclaimed_delivery_after_another_face_advances(fixture: &Fixture) -> TestResult {
     use plakous::agent::{CommandAckDisposition, CommandId, ControlErrorKind};
     use plakous::sessions::{
@@ -819,6 +949,8 @@ fn spawn(command: &ControlCommand) -> TestResult<TestChild> {
     let mut child = Command::new(std::env::current_exe()?)
         .args(super::CHILD_TEST_ARGS)
         .env(super::CHILD_SENTINEL, "1")
+        // The continue cells choose `codex/b`; no other cell reads readiness.
+        .env("PLAK_TEST_READY_ACCOUNTS", "codex,codex/b")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

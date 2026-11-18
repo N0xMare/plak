@@ -52,13 +52,57 @@ struct ProductState {
 
 fn host_workflow(workflow: ProductWorkflow) -> ActualHostWorkflow {
     match workflow {
-        ProductWorkflow::RootDelivery => ActualHostWorkflow::RootDelivery,
+        ProductWorkflow::RootDelivery | ProductWorkflow::AccountContinue => {
+            ActualHostWorkflow::RootDelivery
+        }
         ProductWorkflow::SendNow => ActualHostWorkflow::SendNow,
         ProductWorkflow::Fork => ActualHostWorkflow::Fork,
         ProductWorkflow::Rebind | ProductWorkflow::Switch => ActualHostWorkflow::Rebind,
         ProductWorkflow::Compact => ActualHostWorkflow::Compact,
     }
 }
+
+/// Where an actual-host run parks for its SIGKILL: the first crossing of a
+/// host workflow's boundary, reported to the parent as `reported`.
+#[derive(Clone, Copy)]
+struct HostCut {
+    workflow: ActualHostWorkflow,
+    boundary: ActualHostBoundary,
+    reported: ProductWorkflow,
+}
+
+fn host_cut(workflow: ProductWorkflow, cut: ProductCrashBoundary) -> HostCut {
+    // A continue's published rebind is the rebind workflow's; its other cuts
+    // are the root-start's.
+    let host = if workflow == ProductWorkflow::AccountContinue
+        && cut == ProductCrashBoundary::ProductPublished
+    {
+        ActualHostWorkflow::Rebind
+    } else {
+        host_workflow(workflow)
+    };
+    HostCut {
+        workflow: host,
+        boundary: host_boundary(cut),
+        reported: workflow,
+    }
+}
+
+/// The runtime the host's primary role binds.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PrimaryRuntime {
+    /// The loopback, or the script the workspace names.
+    Actual,
+    /// The compaction fixture, for the primary and the compact role.
+    Compacting,
+    /// A line head a rebind made: the rebind role's account.
+    Rebound,
+}
+
+/// The account a continue moves the root onto, and the script that fails
+/// the root's first turn on its usage limit.
+const CONTINUE_ACCOUNT: &str = "codex/b";
+const CONTINUE_PROMPT: &str = "do the thing";
 
 fn host_boundary(boundary: ProductCrashBoundary) -> ActualHostBoundary {
     match boundary {
@@ -143,8 +187,8 @@ fn actual_runtime_binding(
 fn actual_host_injection(
     workspace: &Path,
     controller: &BoundaryController,
-    selected: Option<(ActualHostWorkflow, ActualHostBoundary)>,
-    compact_primary: bool,
+    selected: Option<HostCut>,
+    primary: PrimaryRuntime,
     finalization: Option<ProductCrashBoundary>,
     completed_tool_round: bool,
     database: &Path,
@@ -157,17 +201,24 @@ fn actual_host_injection(
     let runtime_workspace = workspace.clone();
     let runtime = Arc::new(move |role| {
         let result = match role {
-            InjectedRuntimeRole::Primary if compact_primary => {
+            InjectedRuntimeRole::Primary if primary == PrimaryRuntime::Compacting => {
                 compaction_runtime_binding_with_projected_input(
                     &runtime_workspace,
                     runtime_controller.clone(),
                     ACTUAL_HOST_COMPACT_INPUT_CEILING,
                 )
             }
+            InjectedRuntimeRole::Primary if primary == PrimaryRuntime::Rebound => {
+                runtime_binding_for_account(
+                    &runtime_workspace,
+                    runtime_controller.clone(),
+                    b"offline-loopback-rebind",
+                )
+            }
             InjectedRuntimeRole::Primary => {
                 actual_runtime_binding(&runtime_workspace, runtime_controller.clone())
             }
-            InjectedRuntimeRole::Compact if compact_primary => {
+            InjectedRuntimeRole::Compact if primary == PrimaryRuntime::Compacting => {
                 compaction_runtime_binding_with_projected_input(
                     &runtime_workspace,
                     runtime_controller.clone(),
@@ -208,16 +259,12 @@ fn actual_host_injection(
                 .unwrap();
         }
 
-        if selected == Some((workflow, boundary)) {
+        if let Some(cut) = selected
+            && (cut.workflow, cut.boundary) == (workflow, boundary)
+        {
             let _ = write_reply(&ChildReply::ProductBoundary {
                 version: PROTOCOL_VERSION,
-                workflow: match workflow {
-                    ActualHostWorkflow::RootDelivery => ProductWorkflow::RootDelivery,
-                    ActualHostWorkflow::SendNow => ProductWorkflow::SendNow,
-                    ActualHostWorkflow::Fork => ProductWorkflow::Fork,
-                    ActualHostWorkflow::Rebind => ProductWorkflow::Rebind,
-                    ActualHostWorkflow::Compact => ProductWorkflow::Compact,
-                },
+                workflow: cut.reported,
                 boundary: match boundary {
                     ActualHostBoundary::Prepared => ProductCrashBoundary::Prepared,
                     ActualHostBoundary::RuntimeReturned => ProductCrashBoundary::RuntimeReturned,
@@ -274,6 +321,15 @@ pub(crate) async fn run_actual_host_fixture(
         if cut != ProductCrashBoundary::CompletedToolRound {
             std::fs::write(workspace.join(FINALIZATION_SEAL_MARKER), b"")?;
         }
+    }
+    if workflow == ProductWorkflow::AccountContinue {
+        // The root's first model request fails on its usage limit; the
+        // rebound runtime is the plain loopback.
+        let script = serde_json::json!({"version": 1, "steps": [{"fault": {"at": "pre_stream", "kind": "quota_exceeded"}}]});
+        std::fs::write(
+            workspace.join("finalization-script.json"),
+            serde_json::to_vec(&script)?,
+        )?;
     }
     let initial_runtime = if workflow == ProductWorkflow::Compact {
         compaction_runtime_binding_with_projected_input(
@@ -343,6 +399,13 @@ pub(crate) async fn run_actual_host_fixture(
             return Err("actual-host rebind rows are seeded by the product fixture".into());
         }
         ProductWorkflow::Compact => vec![ActualHostAction::Compact],
+        // No Quit follows: the rebind watches the action channel, and the
+        // run ends at its cut.
+        ProductWorkflow::AccountContinue => vec![ActualHostAction::ChooseAccount {
+            kind: plakd_wire_types::console::Vertical::Codex,
+            account: CONTINUE_ACCOUNT.into(),
+            continue_failed: true,
+        }],
     };
     write_fsynced_json(
         state_path,
@@ -354,12 +417,19 @@ pub(crate) async fn run_actual_host_fixture(
             runtime_target: None,
         },
     )?;
+    if workflow == ProductWorkflow::AccountContinue {
+        fail_first_root_turn(home, workspace, &controller, &product_id)?;
+    }
     let host_home = home.to_path_buf();
     let injection = actual_host_injection(
         workspace,
         &controller,
-        Some((host_workflow(workflow), host_boundary(cut))),
-        workflow == ProductWorkflow::Compact,
+        Some(host_cut(workflow, cut)),
+        if workflow == ProductWorkflow::Compact {
+            PrimaryRuntime::Compacting
+        } else {
+            PrimaryRuntime::Actual
+        },
         matches!(
             cut,
             ProductCrashBoundary::Finalization | ProductCrashBoundary::FinalizationPendingTerminal
@@ -372,6 +442,40 @@ pub(crate) async fn run_actual_host_fixture(
         .join()
         .map_err(|_| "actual host thread panicked")??;
     probe_product_fixture(home, state_path)
+}
+
+/// A one-shot host runs the root's first prompt, which fails on its usage
+/// limit, so the continue that follows has a failed root turn to resubmit.
+fn fail_first_root_turn(
+    home: &Path,
+    workspace: &Path,
+    controller: &BoundaryController,
+    product_id: &str,
+) -> ProductResult {
+    let injection = actual_host_injection(
+        workspace,
+        controller,
+        None,
+        PrimaryRuntime::Actual,
+        None,
+        false,
+        &PlakPaths::explicit(home.to_path_buf()).runtime_database(),
+    )?;
+    let host_home = home.to_path_buf();
+    let product = product_id.to_owned();
+    // The one-shot reports its failed turn as an error; the failure is the
+    // point, and the store records it.
+    let _ = std::thread::spawn(move || {
+        run_actual_host(
+            host_home,
+            &product,
+            injection,
+            vec![ActualHostAction::PromptOnce(CONTINUE_PROMPT.into())],
+        )
+    })
+    .join()
+    .map_err(|_| "actual host failing-turn thread panicked")?;
+    Ok(())
 }
 
 /// A relaunch after a switch's cut, as startup runs it: the startup resolver
@@ -437,12 +541,30 @@ pub(crate) fn recover_actual_host_fixture(
     )?;
     let selected = None;
     let host_home = home.to_path_buf();
-    let product_id = state.source_product_session_id;
+    let (product_id, primary) = match state.workflow {
+        ProductWorkflow::Compact => (state.source_product_session_id, PrimaryRuntime::Compacting),
+        // A continue's rebind may have moved the root's line: reopen its head.
+        ProductWorkflow::AccountContinue => {
+            let paths = PlakPaths::explicit(home.to_path_buf());
+            let source =
+                crate::product_sessions::load_session(&paths, &state.source_product_session_id)?;
+            let head = crate::store::ProductStore::open(&paths)?
+                .root_line_head(&source.node.tree_id)?
+                .ok_or("the continue's root line has no head")?;
+            let primary = if head.id == source.id {
+                PrimaryRuntime::Actual
+            } else {
+                PrimaryRuntime::Rebound
+            };
+            (head.id, primary)
+        }
+        _ => (state.source_product_session_id, PrimaryRuntime::Actual),
+    };
     let injection = actual_host_injection(
         workspace,
         &controller,
         selected,
-        state.workflow == ProductWorkflow::Compact,
+        primary,
         None,
         false,
         &PlakPaths::explicit(home.to_path_buf()).runtime_database(),

@@ -676,10 +676,24 @@ mod account_continue_crash_cuts {
     fn a_cut_after_the_root_turn_is_admitted_runs_it_once() {
         let cut = cut_at(HostWorkflow::RootDelivery, HostBoundary::RuntimeReturned, 2);
         cut.assert_one_rebind();
+        cut.reopen_admitted_nothing();
         let head = cut.head();
         let views = cut.store.load_views(&head.id).unwrap().unwrap();
         assert!(views.state.deliveries.contains_key(&cut.ids().command_id()));
         assert!(!cut.continue_notice());
+        let root_starts = cut
+            .store
+            .load_intents(&head.id)
+            .unwrap()
+            .submissions
+            .iter()
+            .map(|submission| submission.command_id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            root_starts,
+            [cut.ids().command_id()],
+            "exactly one resubmission, the continue's"
+        );
         let prompts = user_rows(cut.store.as_ref(), &head.id);
         assert!(
             prompts
@@ -687,7 +701,7 @@ mod account_continue_crash_cuts {
                 .filter(|text| *text == "do the thing")
                 .count()
                 <= 2,
-            "at most one resubmitted prompt: {prompts:?}"
+            "at most the prompt and its one resubmission: {prompts:?}"
         );
         assert!(
             !head
