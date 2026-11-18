@@ -548,7 +548,7 @@ fn protocol_ten_is_explicitly_refused_before_any_attachment() {
     assert!(matches!(
         host_frames(&stdout).as_slice(),
         [HostFrame::Refused(HandshakeRefusal::VersionMismatch {
-            host: 11,
+            host: 12,
             client: 10
         })]
     ));

@@ -1058,11 +1058,7 @@ fn picker_progress_is_scoped_and_precedes_exactly_one_final_without_opening_a_se
         HostPrincipal::Socket(501),
         || false,
     );
-    request(
-        &mut connection,
-        7,
-        Op::SessionOptions { workspace: None },
-    );
+    request(&mut connection, 7, Op::SessionOptions { workspace: None });
     let frames = out.take();
     assert_eq!(frames.len(), 3);
     assert!(matches!(

@@ -465,7 +465,7 @@ fn append_settled_submission(
 fn exact_schema_wal_and_cas() {
     assert_eq!(
         SCHEMA.fingerprint(),
-        "880e4643bf1fc1c11fc81850a475759a8600779677210e21496e0ca56de60d02"
+        "6f82a7ac81c63e3a0561fe196cae47ebfd890c9712fe8e1f537200b25e3322e7"
     );
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
@@ -938,7 +938,7 @@ fn current_schema_rejects_previous_product_store_without_modification() {
         ProductStoreOpenErrorKind::UnsupportedPersistence
     );
     assert!(
-        error.to_string().contains("product schema 37, expected 38"),
+        error.to_string().contains("product schema 37, expected 39"),
         "{error}"
     );
     assert!(

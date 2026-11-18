@@ -134,12 +134,9 @@ fn a_host_launch_directory_containing_its_home_is_not_a_workspace_default() {
     });
     let mut host = serving_host((child, lines)).expect("host serves outside any workspace");
     let mut client = Client::connect(&host);
-    let Outcome::Ok(Answer::Options { options }) = client.request(
-        1,
-        Op::SessionOptions {
-            workspace: None,
-        },
-    ) else {
+    let Outcome::Ok(Answer::Options { options }) =
+        client.request(1, Op::SessionOptions { workspace: None })
+    else {
         panic!("options refused")
     };
     let local = options

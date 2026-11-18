@@ -29,7 +29,7 @@ fn bridge_refusal_wire_ten_never_gets_a_wire_eleven_discovery_frame_or_starts_a_
     );
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap(),
-        json!({"frame":"refused","kind":"version_mismatch","host":11,"client":10})
+        json!({"frame":"refused","kind":"version_mismatch","host":12,"client":10})
     );
     assert!(!fixture.home().join("host/host.lock").exists());
 }

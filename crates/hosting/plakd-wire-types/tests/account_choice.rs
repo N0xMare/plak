@@ -1,5 +1,7 @@
 //! Protocol 12 account-choice intents and observations.
 
+#![allow(clippy::unwrap_used, reason = "contract-owned codec values")]
+
 use plakd_wire_types::{ProfileApply, SurfaceIntent, SurfaceObservation};
 use plakous_host_protocol::wire::AccountChoice;
 

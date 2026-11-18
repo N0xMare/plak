@@ -100,12 +100,9 @@ fn start_remote_job(fixture: &Fixture, path: &str, id: &str) -> (Host, String) {
 pub(super) fn ready(client: &mut Client, id: &str) {
     let deadline = std::time::Instant::now() + WAIT;
     loop {
-        let Outcome::Ok(Answer::Options { options }) = client.request(
-            8,
-            Op::SessionOptions {
-                workspace: None,
-            },
-        ) else {
+        let Outcome::Ok(Answer::Options { options }) =
+            client.request(8, Op::SessionOptions { workspace: None })
+        else {
             panic!("options refused")
         };
         if options.runners.iter().any(|row| {

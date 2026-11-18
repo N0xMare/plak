@@ -14,7 +14,7 @@
         "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
-        "proto": 11
+        "proto": 12
       }
     },
     {
@@ -137,7 +137,7 @@
         },
         "frame": "welcome",
         "host_generation": "@generation:0",
-        "proto": 11,
+        "proto": 12,
         "state_key": "r28.e38.p39.t11"
       }
     },
@@ -649,7 +649,7 @@
         "binary_id": "<client-binary:1>",
         "caps": [],
         "frame": "hello",
-        "proto": 11
+        "proto": 12
       }
     },
     {
@@ -772,7 +772,7 @@
         },
         "frame": "welcome",
         "host_generation": "@generation:1",
-        "proto": 11,
+        "proto": 12,
         "state_key": "r28.e38.p39.t11"
       }
     },

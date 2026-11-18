@@ -11,7 +11,7 @@ fn protocol_eleven_schema_has_an_exact_build_independent_pin() {
     let digest = plakous::model::sha256_hex(&[&bytes]);
     assert_eq!(
         digest,
-        "f412603494165e8aa8f5e35cf883c71d4957c41dedb73755cd77ae09116fc787"
+        "d4e9139806c34da5ef7aa3a829ed6d53495d51ab3816f7b3f44bdf4fce03c12d"
     );
 }
 

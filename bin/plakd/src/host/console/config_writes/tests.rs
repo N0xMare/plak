@@ -289,7 +289,7 @@ async fn publish_named_worker_profile(
         "worker",
         vec![
             TemplateChange::Account {
-                value: "codex/work".into(),
+                value: "codex".into(),
             },
             TemplateChange::Model {
                 value: "gpt-5.6-luna".into(),

@@ -556,13 +556,22 @@ mod tests {
             &kinds(&["codex"]),
             "codex",
             &[],
-            &[ready("codex"), ready("codex/work")],
+            &[ready("codex/a"), ready("codex/b")],
             FillMode::Require,
         );
         assert!(matches!(
             many,
             Err(RequestRefusal::AccountChoiceRequired { .. })
         ));
+        let bare = fill(
+            &kinds(&["codex"]),
+            "codex",
+            &[],
+            &[ready("codex"), ready("codex/work")],
+            FillMode::Require,
+        )
+        .unwrap();
+        assert_eq!(bare.root_account.as_deref(), Some("codex"));
         let explicit = fill(
             &kinds(&["codex"]),
             "codex",
@@ -741,6 +750,25 @@ mod durability {
     use plakous_hosted::sessions::SessionWorkflowKind;
     use plakous_hosted::sessions::projector::{Submission, SubmissionKind, WorkflowRequest};
 
+    fn project_switch_views(store: &mut ProductStore, session_id: &str) {
+        use plakous_hosted::sessions::projector::{SessionViews, ViewWrites};
+        let mut views = SessionViews::empty();
+        views.cursor = plakous::sessions::feed::FeedSeq::new(1);
+        let writes = ViewWrites {
+            expected_cursor: plakous::sessions::feed::FeedSeq::ZERO,
+            cursor: views.cursor,
+            upserts: Vec::new(),
+            deletes: Vec::new(),
+            calls: Vec::new(),
+            open_turns: Vec::new(),
+            processes: Vec::new(),
+            successors: Vec::new(),
+        };
+        store
+            .commit_projection_views(session_id, &writes, &views.state)
+            .unwrap();
+    }
+
     fn locator() -> plakous::sessions::SessionLocator {
         "00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-000000000003"
             .parse()
@@ -804,6 +832,7 @@ mod durability {
         store.write_workflow_request(&session.id, &request).unwrap();
         drop(store);
         let mut reopened = ProductStore::open(&paths).unwrap();
+        project_switch_views(&mut reopened, &session.id);
         assert_eq!(
             recover_switch(false, false),
             SwitchRecovery::WithdrawRequest

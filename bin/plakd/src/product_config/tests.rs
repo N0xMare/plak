@@ -56,31 +56,31 @@ fn named_templates_canonicalize_aliases_and_keep_vertical_protocol_rules() {
         bare.account, "supergrok",
         "bare default spelling keeps its existing epoch bytes"
     );
-    for (alias, canonical) in [
-        ("chatgpt/work", "codex/work"),
-        ("supergrok/work", "grok/work"),
-        ("xai-oauth/work", "grok/work"),
-        ("claude/work", "claude/work"),
+    for named in [
+        "chatgpt/work",
+        "supergrok/work",
+        "xai-oauth/work",
+        "claude/work",
     ] {
-        let text = format!("account = \"{alias}\"\nmodel = \"m\"\n");
-        let template = parse_template(&text, "fixture").unwrap();
-        assert_eq!(template.account, canonical);
+        let text = format!("account = \"{named}\"\nmodel = \"m\"\n");
+        let error = parse_template(&text, "fixture").unwrap_err();
+        assert!(error.contains("not a named account"), "{named}: {error}");
     }
     let fast = parse_template(
-        "account = \"codex/work\"\nmodel = \"m\"\nfast_mode = true\n",
+        "account = \"codex\"\nmodel = \"m\"\nfast_mode = true\n",
         "fixture",
     )
     .unwrap();
     assert_eq!(fast.extra.as_deref(), Some("priority"));
     let wire = parse_template(
-        "account = \"openrouter/work\"\nmodel = \"author/model\"\nprotocol = \"messages\"\n",
+        "account = \"openrouter\"\nmodel = \"author/model\"\nprotocol = \"messages\"\n",
         "fixture",
     )
     .unwrap();
     assert_eq!(wire.protocol, Some(ProductProtocolSelection::Messages));
     assert!(
         parse_template(
-            "account = \"claude/work\"\nmodel = \"m\"\nprotocol = \"messages\"\n",
+            "account = \"claude\"\nmodel = \"m\"\nprotocol = \"messages\"\n",
             "fixture"
         )
         .is_err()

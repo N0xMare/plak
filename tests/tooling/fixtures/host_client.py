@@ -8,7 +8,7 @@ import socket
 import time
 
 # Exact match, not a negotiated range. Update alongside each wire bump.
-WIRE_VERSION = 11
+WIRE_VERSION = 12
 MAX_LINE_BYTES = 16 * 1024 * 1024
 
 

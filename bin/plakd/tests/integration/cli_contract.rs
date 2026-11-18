@@ -32,7 +32,7 @@ fn a_stdio_bridge_without_a_host_does_not_create_a_home_or_embed() {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"{\"frame\":\"hello\",\"proto\":11,\"binary_id\":\"fixture\",\"caps\":[]}\n")
+        .write_all(b"{\"frame\":\"hello\",\"proto\":12,\"binary_id\":\"fixture\",\"caps\":[]}\n")
         .unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(!output.status.success());
