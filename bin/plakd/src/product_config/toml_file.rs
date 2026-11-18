@@ -57,6 +57,7 @@ struct ConfigFile {
     host: Option<HostSection>,
     runners: Option<BTreeMap<String, RunnerSection>>,
     web: Option<WebSection>,
+    gateway: Option<GatewaySection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,6 +76,14 @@ struct WebSection {
     credentials_write: Entry,
     config_read: Entry,
     config_write: Entry,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GatewaySection {
+    address: Entry,
+    key_file: Entry,
+    allow_non_tailnet: Entry,
 }
 
 /// Every key is read as a spanned TOML value rather than a Rust type so the
@@ -291,11 +300,17 @@ fn forward_sections(
         assign("web.config_read", &section.config_read)?;
         assign("web.config_write", &section.config_write)?;
     }
-    Ok(ForwardPresence::of(
-        file.host.is_some(),
-        file.runners.is_some(),
-        file.web.is_some(),
-    ))
+    if let Some(section) = &file.gateway {
+        assign("gateway.address", &section.address)?;
+        assign("gateway.key_file", &section.key_file)?;
+        assign("gateway.allow_non_tailnet", &section.allow_non_tailnet)?;
+    }
+    Ok(ForwardPresence::of(&[
+        ("host", file.host.is_some()),
+        ("runners", file.runners.is_some()),
+        ("web", file.web.is_some()),
+        ("gateway", file.gateway.is_some()),
+    ]))
 }
 
 /// One template file. The file stem is the template's name; the body carries

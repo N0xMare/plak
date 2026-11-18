@@ -1,0 +1,23 @@
+plakd gateway — credential gateway
+
+USAGE:
+  plakd gateway init [--tcp <ip:port>] [--key-dir <dir>]
+  plakd gateway serve
+  plakd gateway install [--dry-run]
+  plakd gateway uninstall
+  plakd gateway status [--dry-run]
+  plakd gateway caller add <id> --source <net>... [--admin <account>]... [--key-out <file>]
+  plakd gateway caller list
+  plakd gateway caller rm <id>
+  plakd gateway caller rotate <id>
+  plakd gateway disable [--account <ref>] [--caller <id>] [--cut]
+  plakd gateway enable [--account <ref>] [--caller <id>]
+  plakd gateway drain
+  plakd gateway audit [--since <rfc3339>] [--caller <id>]
+  plakd gateway check
+
+  `serve` is the only process that opens the credential store while it holds
+  the exclusive holder lock. A same-UID client on its Unix socket is the local
+  administrator and needs no caller key. TCP listeners require a key and bind
+  only to loopback or tailnet addresses unless allow_non_tailnet is set.
+  Caller keys are shown once and stored hashed. Audit lines are metadata only.

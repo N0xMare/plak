@@ -231,6 +231,12 @@ pub struct ProductConfig {
     pub web_config_write: bool,
     pub web_files_read: bool,
     pub web_terminal: bool,
+    /// `[gateway] address`, home-scoped. Unset stays in this process.
+    pub gateway_address: Option<String>,
+    /// `[gateway] key_file`, home-scoped.
+    pub gateway_key_file: Option<String>,
+    /// `[gateway] allow_non_tailnet`.
+    pub gateway_allow_non_tailnet: bool,
     pub(super) forward: super::forward::ForwardPresence,
 }
 
@@ -512,6 +518,13 @@ impl ProductConfig {
             ConfigField::WebConfigWrite => self.web_config_write = source.web_config_write,
             ConfigField::WebFilesRead => self.web_files_read = source.web_files_read,
             ConfigField::WebTerminal => self.web_terminal = source.web_terminal,
+            ConfigField::GatewayAddress => self.gateway_address.clone_from(&source.gateway_address),
+            ConfigField::GatewayKeyFile => {
+                self.gateway_key_file.clone_from(&source.gateway_key_file);
+            }
+            ConfigField::GatewayAllowNonTailnet => {
+                self.gateway_allow_non_tailnet = source.gateway_allow_non_tailnet;
+            }
         }
     }
 
@@ -628,6 +641,9 @@ impl ProductConfig {
             web_config_write: false,
             web_files_read: false,
             web_terminal: false,
+            gateway_address: None,
+            gateway_key_file: None,
+            gateway_allow_non_tailnet: false,
             forward: super::forward::ForwardPresence::default(),
         }
     }
@@ -868,6 +884,7 @@ impl ProductConfig {
                 | ConfigField::WebConfigWrite
                 | ConfigField::WebFilesRead
                 | ConfigField::WebTerminal
+                | ConfigField::GatewayAllowNonTailnet
         ) && self.field_value(key.field)?.as_bool() == Some(false)
         {
             return None;
@@ -941,6 +958,9 @@ impl ProductConfig {
             ConfigField::WebConfigWrite => Value::from(self.web_config_write),
             ConfigField::WebFilesRead => Value::from(self.web_files_read),
             ConfigField::WebTerminal => Value::from(self.web_terminal),
+            ConfigField::GatewayAddress => Value::from(self.gateway_address.as_deref()?),
+            ConfigField::GatewayKeyFile => Value::from(self.gateway_key_file.as_deref()?),
+            ConfigField::GatewayAllowNonTailnet => Value::from(self.gateway_allow_non_tailnet),
         })
     }
 
@@ -1165,6 +1185,7 @@ impl ProductConfig {
     /// The one rule set: load, `plakd config set`, and `SaveRoster` share it.
     pub fn validate(&self) -> Result<(), String> {
         super::web::validate_switches(self)?;
+        crate::gateway::validate_client_config(self)?;
         self.job_config()?;
         for (name, template) in &self.templates {
             template.validate(name)?;
@@ -1432,6 +1453,42 @@ impl ProductConfig {
             ConfigField::WebConfigWrite => self.web_config_write = value.boolean()?,
             ConfigField::WebFilesRead => self.web_files_read = value.boolean()?,
             ConfigField::WebTerminal => self.web_terminal = value.boolean()?,
+            ConfigField::GatewayAddress
+            | ConfigField::GatewayKeyFile
+            | ConfigField::GatewayAllowNonTailnet => self.assign_gateway(key, value)?,
+        }
+        Ok(())
+    }
+
+    fn assign_gateway(&mut self, key: &ConfigKey, value: FieldValue<'_>) -> Result<(), String> {
+        match key.field {
+            ConfigField::GatewayAddress => {
+                let text = value.string(key)?;
+                if matches!(value, FieldValue::Cli(_)) && text.is_empty() {
+                    self.gateway_address = None;
+                } else if text.is_empty() {
+                    return Err(
+                        "gateway.address must be unix:<absolute path> or tcp:<ip>:<port>"
+                            .to_owned(),
+                    );
+                } else {
+                    self.gateway_address = Some(text.to_owned());
+                }
+            }
+            ConfigField::GatewayKeyFile => {
+                let text = value.string(key)?;
+                if matches!(value, FieldValue::Cli(_)) && text.is_empty() {
+                    self.gateway_key_file = None;
+                } else if text.is_empty() {
+                    return Err("gateway.key_file must be an absolute path".to_owned());
+                } else {
+                    self.gateway_key_file = Some(text.to_owned());
+                }
+            }
+            ConfigField::GatewayAllowNonTailnet => {
+                self.gateway_allow_non_tailnet = value.boolean()?;
+            }
+            _ => return Err(format!("not a gateway key: {}", key.path)),
         }
         Ok(())
     }

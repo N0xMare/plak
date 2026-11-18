@@ -180,12 +180,16 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
         "web",
         "The maintainer web endpoint (plakd host --web): who it admits and where it is served.",
     ),
+    (
+        "gateway",
+        "The credential gateway this process calls. An absent address keeps account commands in this process.",
+    ),
 ];
 
 /// Sections an earlier build refuses as unknown. A render writes one live
 /// only when one of its keys is set, so a file `plakd` writes stays loadable
 /// by those builds until the operator opts in.
-pub(crate) const FORWARD_ONLY_SECTIONS: &[&str] = &["host", "web"];
+pub(crate) const FORWARD_ONLY_SECTIONS: &[&str] = &["host", "web", "gateway"];
 
 /// One documented `config.toml` key.
 ///
@@ -295,6 +299,12 @@ pub enum ConfigField {
     WebConfigWrite,
     WebFilesRead,
     WebTerminal,
+    /// `[gateway] address`.
+    GatewayAddress,
+    /// `[gateway] key_file`.
+    GatewayKeyFile,
+    /// `[gateway] allow_non_tailnet`.
+    GatewayAllowNonTailnet,
 }
 
 impl ConfigField {
@@ -322,6 +332,9 @@ impl ConfigField {
                 | Self::WebConfigWrite
                 | Self::WebFilesRead
                 | Self::WebTerminal
+                | Self::GatewayAddress
+                | Self::GatewayKeyFile
+                | Self::GatewayAllowNonTailnet
         )
     }
 
@@ -341,6 +354,9 @@ impl ConfigField {
                     | Self::WebConfigWrite
                     | Self::WebFilesRead
                     | Self::WebTerminal
+                    | Self::GatewayAddress
+                    | Self::GatewayKeyFile
+                    | Self::GatewayAllowNonTailnet
             )
     }
 }
@@ -706,6 +722,33 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         kind: "bool",
         constraint: "true or false; home-scoped; host restart required",
         doc: "Allow confirmed interactive operator shells as the runner user. Shells are not confined to the workspace. Same-user sockets are trusted independently; default off and captured at host startup.",
+        example: "false",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "gateway.address",
+        field: ConfigField::GatewayAddress,
+        kind: "string",
+        constraint: "unix:<absolute path> or tcp:<ip>:<port>; loopback, tailnet or allow_non_tailnet; home-scoped",
+        doc: "Where this process sends account and relay calls. Unset keeps them in this process. A tcp address must be loopback, tailnet or allow_non_tailnet.",
+        example: "\"unix:/run/user/1000/plak/gateway.sock\"",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "gateway.key_file",
+        field: ConfigField::GatewayKeyFile,
+        kind: "string",
+        constraint: "absolute path; mode 0600; home-scoped",
+        doc: "The caller key file for a configured gateway address. The default is the home secrets gateway.key. A same-UID unix peer that is the local administrator does not need it.",
+        example: "\"/home/user/.plak/secrets/gateway.key\"",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "gateway.allow_non_tailnet",
+        field: ConfigField::GatewayAllowNonTailnet,
+        kind: "bool",
+        constraint: "true or false; home-scoped",
+        doc: "Admit a tcp gateway address outside loopback and the tailnet ranges. Default false.",
         example: "false",
         scope: ConfigScope::Immediate,
     },

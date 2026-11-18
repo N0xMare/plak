@@ -269,6 +269,10 @@ pub(crate) fn run_doctor(
         .map_err(|_| CliFailure::new("stdout failed"))?;
     let expiry_warnings = crate::review_expiry::write_warnings(stdout, services.now_unix_seconds())
         .map_err(|_| CliFailure::new("stdout failed"))?;
+    match crate::gateway::doctor_line(paths) {
+        Ok(line) => writeln!(stdout, "{line}").map_err(|_| CliFailure::new("stdout failed"))?,
+        Err(error) => writeln!(stdout, "{error}").map_err(|_| CliFailure::new("stdout failed"))?,
+    }
     writeln!(
         stdout,
         "\nResult: {} passed · {} warnings · {} failures\nProvider credentials: run `plakd status`",

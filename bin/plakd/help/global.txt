@@ -22,6 +22,7 @@ COMMANDS:
   agent       Long-lived JSONL agent loop (stdio)
   wire        Export this build's wire v2 JSON Schema
   config      Show/set/edit product config (~/.plak)
+  gateway     Credential gateway service, callers, and kill switch
   doctor      Local health diagnosis
   usage       Subscription limits and context-status availability
   session     List/show/log sessions (agent-readable events)

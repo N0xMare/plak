@@ -1,7 +1,66 @@
 use super::{
-    Command, HostAction, NativeLoginMode, RunPrompt, StateAction, TopCommand, TreeAction,
-    WireAction, finish_agent, finish_continue_session, finish_run, parse_oauth_account,
+    Command, GatewayAction, GatewayCallerAction, HostAction, NativeLoginMode, RunPrompt,
+    StateAction, TopCommand, TreeAction, WireAction, finish_agent, finish_continue_session,
+    finish_run, parse_oauth_account,
 };
+
+impl GatewayAction {
+    fn into_command(self) -> Command {
+        use crate::command::GatewayCommand;
+        let command = match self {
+            Self::Init { tcp, key_dir } => GatewayCommand::Init { tcp, key_dir },
+            Self::Serve => GatewayCommand::Serve,
+            Self::Install { dry_run } => GatewayCommand::Install { dry_run },
+            Self::Uninstall => GatewayCommand::Uninstall,
+            Self::Status { dry_run } => GatewayCommand::Status { dry_run },
+            Self::Caller { action: None } => {
+                return Command::CommandHelp {
+                    command: "gateway".to_owned(),
+                };
+            }
+            Self::Caller {
+                action: Some(action),
+            } => return action.into_command(),
+            Self::Disable {
+                account,
+                caller,
+                cut,
+            } => GatewayCommand::Disable {
+                account,
+                caller,
+                cut,
+            },
+            Self::Enable { account, caller } => GatewayCommand::Enable { account, caller },
+            Self::Drain => GatewayCommand::Drain,
+            Self::Audit { since, caller } => GatewayCommand::Audit { since, caller },
+            Self::Check => GatewayCommand::Check,
+        };
+        Command::Gateway(command)
+    }
+}
+
+impl GatewayCallerAction {
+    fn into_command(self) -> Command {
+        use crate::command::GatewayCommand;
+        let command = match self {
+            Self::Add {
+                id,
+                sources,
+                admin,
+                key_out,
+            } => GatewayCommand::CallerAdd {
+                id,
+                sources,
+                admin,
+                key_out,
+            },
+            Self::List => GatewayCommand::CallerList,
+            Self::Rm { id } => GatewayCommand::CallerRemove { id },
+            Self::Rotate { id } => GatewayCommand::CallerRotate { id },
+        };
+        Command::Gateway(command)
+    }
+}
 
 impl TopCommand {
     #[allow(
@@ -256,6 +315,12 @@ impl TopCommand {
             Self::Config {
                 action: Some(action),
             } => action.into_command(),
+            Self::Gateway { action: None } => Ok(Command::CommandHelp {
+                command: "gateway".to_owned(),
+            }),
+            Self::Gateway {
+                action: Some(action),
+            } => Ok(action.into_command()),
             Self::Doctor => Ok(Command::Doctor),
             Self::State { action: None } => Ok(Command::CommandHelp {
                 command: "state".to_owned(),

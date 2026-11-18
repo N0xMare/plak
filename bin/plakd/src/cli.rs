@@ -227,6 +227,7 @@ fn is_known_command(name: &str) -> bool {
             | "tree"
             | "usage"
             | "doctor"
+            | "gateway"
             | "config"
             | "telemetry"
             | "models"
@@ -435,6 +436,12 @@ enum TopCommand {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
+    /// Credential gateway: the only process that opens the credential store
+    /// when it is serving.
+    Gateway {
+        #[command(subcommand)]
+        action: Option<GatewayAction>,
+    },
     Doctor,
     State {
         #[command(subcommand)]
@@ -497,6 +504,82 @@ enum AccountAction {
         account: String,
         #[arg(long = "yes")]
         confirmed: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GatewayAction {
+    /// Write gateway.toml and create the gateway directory. Never touches the store.
+    Init {
+        #[arg(long, value_name = "IP:PORT")]
+        tcp: Option<String>,
+        #[arg(long, value_name = "DIR")]
+        key_dir: Option<std::path::PathBuf>,
+    },
+    /// Foreground service. Takes the exclusive holder lock, then listens.
+    Serve,
+    /// Write a user service definition without starting it.
+    Install {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Remove the user service definition. Does not stop a running service.
+    Uninstall,
+    /// Versions, listeners and flags. `--dry-run` prints paths without the lock.
+    Status {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    Caller {
+        #[command(subcommand)]
+        action: Option<GatewayCallerAction>,
+    },
+    /// Engage the kill switch. Remote admin may do this; `--cut` cancels in-flight relays.
+    Disable {
+        #[arg(long)]
+        account: Option<String>,
+        #[arg(long)]
+        caller: Option<String>,
+        #[arg(long)]
+        cut: bool,
+    },
+    /// Clear the kill switch. Local administrator only.
+    Enable {
+        #[arg(long)]
+        account: Option<String>,
+        #[arg(long)]
+        caller: Option<String>,
+    },
+    /// Stop accepting, wait for in-flight work, then exit. Local administrator only.
+    Drain,
+    /// Print audit metadata. Never prints secrets.
+    Audit {
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        caller: Option<String>,
+    },
+    /// Negotiate a version and list accounts.
+    Check,
+}
+
+#[derive(Debug, Subcommand)]
+enum GatewayCallerAction {
+    Add {
+        id: String,
+        #[arg(long = "source", required = true)]
+        sources: Vec<String>,
+        #[arg(long = "admin")]
+        admin: Vec<String>,
+        #[arg(long)]
+        key_out: Option<std::path::PathBuf>,
+    },
+    List,
+    Rm {
+        id: String,
+    },
+    Rotate {
+        id: String,
     },
 }
 

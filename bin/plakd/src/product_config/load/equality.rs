@@ -42,6 +42,9 @@ impl PartialEq for ProductConfig {
             && self.web_config_write == other.web_config_write
             && self.web_files_read == other.web_files_read
             && self.web_terminal == other.web_terminal
+            && self.gateway_address == other.gateway_address
+            && self.gateway_key_file == other.gateway_key_file
+            && self.gateway_allow_non_tailnet == other.gateway_allow_non_tailnet
     }
 }
 

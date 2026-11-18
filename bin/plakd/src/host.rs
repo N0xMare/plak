@@ -141,57 +141,45 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     // Arm reload before any startup I/O, even for a control-only host.
     let (runtime, reload, stop) = startup_runtime()?;
     let paths = services.paths()?;
+    refuse_external_gateway(paths)?;
+    let holder = hold_host_store(services)?;
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
     let (home_lock, lock) = lock::HostLock::take_home(paths, &binary)?;
     if let Some(replacement) = upgrade::startup_replacement(services)? {
+        drop(holder);
         drop(lock);
         drop(home_lock);
         runtime.shutdown_timeout(Duration::from_secs(1));
         return replacement.exec(paths);
     }
-    crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
-    let environment = environment::HostEnvironment::capture();
-    let entered = runtime.enter();
-    let mut bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
-    let upgrade_listener = upgrade::bind(paths)?;
-    drop(entered);
-    let restart_services = services.clone();
-    let (services, terminals) = terminals::TerminalRegistry::compose(services, host_generation())?;
-    let (services, local) = upgrade::prepare_host(&services)?;
-    let sessions = sessions::ProductSessions::new(
-        &services,
-        command.idle_release,
-        Some(runtime.handle().clone()),
-    )?;
-    // Read before the host serves, so nothing this host does is mistaken
-    // for what the last one left.
-    let owed = sessions.owed()?;
-    let console_switches = sessions.console_switches();
-    let host = SessionHost::new(sessions, binary.clone(), terminals.generation());
-    terminals.serve(&host, runtime.handle())?;
-    let (web, idle_reload) = match bind_web(
-        &runtime,
-        &services,
+    let opened = open_host(
+        services,
         command,
-        &host,
-        stop,
-        reload,
-        console_switches,
-    ) {
-        Ok(endpoint) => endpoint,
-        Err(failure) => {
-            bound.remove();
-            return Err(failure);
-        }
-    };
-    runner::host::start(&services, local, &environment, &runtime);
+        &runtime,
+        HostSignals { reload, stop },
+        paths,
+        &lock,
+        &binary,
+    )?;
+    let OpenedHost {
+        environment,
+        mut bound,
+        upgrade_listener,
+        services,
+        terminals,
+        host,
+        owed,
+        web,
+        idle_reload,
+        restart_services,
+    } = opened;
     let scanning = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    announce_host(&bound, &environment, services.paths()?);
+    announce_host(&bound, &environment, paths);
     let receipt_recovery = startup_scan(&services, &host, &runtime, stop, owed, &scanning);
     let reload_requests = runtime.spawn(requested_reload::serve(
         Arc::clone(&host),
-        services.paths()?.clone(),
+        paths.clone(),
         binary,
     ));
     // The web endpoint serves beside the control socket and stops with it.
@@ -219,7 +207,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         },
     ));
     receipt_recovery.cancel();
-    let ready = upgrades.stop(&runtime, services.paths()?);
+    let ready = upgrades.stop(&runtime, paths);
     lifecycle::stopping(&host);
     runtime.block_on(host.wait_lifecycle_delivery(Duration::from_secs(1)));
     stop_listeners(&runtime, reload_requests, web, idle_reload, ready.is_some());
@@ -237,6 +225,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         stopping.elapsed().as_millis()
     );
     drop(lock);
+    drop(holder);
     runtime.shutdown_timeout(Duration::from_secs(1));
     upgrade::replace(
         ready,
@@ -246,6 +235,94 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         &host_arguments,
         home_lock,
     )
+}
+
+struct HostSignals {
+    reload: tokio::signal::unix::Signal,
+    stop: crate::web::StopProbe,
+}
+
+struct OpenedHost {
+    environment: environment::HostEnvironment,
+    bound: socket::Bound,
+    upgrade_listener: tokio::net::UnixListener,
+    services: Services,
+    terminals: Arc<terminals::TerminalRegistry>,
+    host: Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
+    owed: Vec<String>,
+    web: Option<crate::web::WebEndpoint>,
+    idle_reload: Option<tokio::task::JoinHandle<()>>,
+    restart_services: Services,
+}
+
+fn open_host(
+    services: &Services,
+    command: &HostCommand,
+    runtime: &tokio::runtime::Runtime,
+    signals: HostSignals,
+    paths: &crate::home::paths::PlakPaths,
+    host_lock: &lock::HostLock,
+    binary: &str,
+) -> CliResult<OpenedHost> {
+    crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
+    let environment = environment::HostEnvironment::capture();
+    let entered = runtime.enter();
+    let bound = socket::Bound::bind(&paths.host_socket(), host_lock)?;
+    let upgrade_listener = upgrade::bind(paths)?;
+    drop(entered);
+    let restart_services = services.clone();
+    let (services, terminals) = terminals::TerminalRegistry::compose(services, host_generation())?;
+    let (services, local) = upgrade::prepare_host(&services)?;
+    let sessions = sessions::ProductSessions::new(
+        &services,
+        command.idle_release,
+        Some(runtime.handle().clone()),
+    )?;
+    // Read before the host serves, so nothing this host does is mistaken
+    // for what the last one left.
+    let owed = sessions.owed()?;
+    let console_switches = sessions.console_switches();
+    let host = SessionHost::new(sessions, binary.to_owned(), terminals.generation());
+    terminals.serve(&host, runtime.handle())?;
+    let (web, idle_reload) = match bind_web(
+        runtime,
+        &services,
+        command,
+        &host,
+        signals.stop,
+        signals.reload,
+        console_switches,
+    ) {
+        Ok(endpoint) => endpoint,
+        Err(failure) => {
+            bound.remove();
+            return Err(failure);
+        }
+    };
+    runner::host::start(&services, local, &environment, runtime);
+    Ok(OpenedHost {
+        environment,
+        bound,
+        upgrade_listener,
+        services,
+        terminals,
+        host,
+        owed,
+        web,
+        idle_reload,
+        restart_services,
+    })
+}
+
+fn refuse_external_gateway(paths: &crate::home::paths::PlakPaths) -> CliResult<()> {
+    let config = crate::product_config::ProductConfig::load(paths)
+        .unwrap_or_else(|_| crate::product_config::ProductConfig::default_product());
+    crate::gateway::host_may_open_store(&config).map_err(CliFailure::new)
+}
+
+fn hold_host_store(services: &Services) -> CliResult<crate::gateway::HolderLock> {
+    let root = services.home().state()?;
+    crate::gateway::acquire_shared(root).map_err(CliFailure::new)
 }
 
 fn startup_scan(
@@ -282,7 +359,7 @@ fn announce_host(
     crate::shell::catalog_refresh::hook(paths.clone(), None)(None);
     let identity = plakous_recursive_subagents::tree::custody_host();
     eprintln!(
-        "plakd host: serving on {} (host {}, instance {}); tools get {}",
+        "plakd host: serving on {} (host {}, instance {}); gateway: in-process; tools get {}",
         bound.path().display(),
         identity.host_id,
         identity.instance,

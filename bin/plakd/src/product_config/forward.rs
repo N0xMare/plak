@@ -33,11 +33,11 @@ pub(super) struct ForwardPresence {
 impl ForwardPresence {
     /// The presence a parsed file records: whether it spelled `[host]`,
     /// `[runners]` and `[web]` at all.
-    pub(super) fn of(host: bool, runners: bool, web: bool) -> Self {
+    pub(super) fn of(named: &[(&'static str, bool)]) -> Self {
         let mut sections = std::collections::BTreeSet::new();
-        for (name, present) in [("host", host), ("runners", runners), ("web", web)] {
-            if present {
-                sections.insert(name);
+        for (name, present) in named {
+            if *present {
+                sections.insert(*name);
             }
         }
         Self {
@@ -111,6 +111,22 @@ impl ProductConfig {
         keys.extend(set.map(|(_, key)| (*key).to_owned()));
         if keys.len() == before && self.forward.sections.contains("web") {
             keys.push("[web]".to_owned());
+        }
+        let gateway = [
+            (ConfigField::GatewayAddress, "[gateway] address"),
+            (ConfigField::GatewayKeyFile, "[gateway] key_file"),
+            (
+                ConfigField::GatewayAllowNonTailnet,
+                "[gateway] allow_non_tailnet",
+            ),
+        ];
+        let set = gateway
+            .iter()
+            .filter(|(field, _)| self.present.contains(field));
+        let before = keys.len();
+        keys.extend(set.map(|(_, key)| (*key).to_owned()));
+        if keys.len() == before && self.forward.sections.contains("gateway") {
+            keys.push("[gateway]".to_owned());
         }
         keys
     }

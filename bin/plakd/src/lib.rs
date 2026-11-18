@@ -57,6 +57,7 @@ mod composition_tests;
 mod diagnostics;
 mod dispatch;
 mod environment;
+mod gateway;
 mod host_status_text;
 mod log_text;
 mod lookup_status;
@@ -767,6 +768,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             &mut stdout,
         ),
         Command::Doctor => run_doctor(&services, &mut stdout),
+        Command::Gateway(command) => {
+            gateway::execute(services.paths()?, command, &mut stdout).map_err(CliFailure::new)?;
+            Ok(ProcessOutcome::Success)
+        }
         Command::TreeRelease { tree_id, force } => {
             if !force {
                 return Err(CliFailure::classified(
@@ -813,6 +818,16 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             Ok(ProcessOutcome::Success)
         }
         command => {
+            if let Some(outcome) = gateway::try_remote_account(
+                &services,
+                &command,
+                &mut stdin,
+                &mut stdout,
+                &mut stderr,
+            )? {
+                return Ok(outcome);
+            }
+            let _store = gateway::hold_in_process(&services, &command)?;
             let failure_kind = command.default_failure_kind();
             let read_only = command_is_read_only(&command);
             let mut backend = PlakousApplication::new(
@@ -1406,6 +1421,7 @@ fn execute_command(
         | Command::CarryProbe { .. }
         | Command::ExportVersion
         | Command::Doctor
+        | Command::Gateway(_)
         | Command::TelemetryStatus { .. }
         | Command::TelemetrySql { .. }
         | Command::TelemetryPrune { .. } => Err(CliFailure::new("internal command dispatch error")),

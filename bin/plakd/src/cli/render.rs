@@ -43,6 +43,7 @@ const COMMAND_PAGES: &[(&str, &str)] = &[
     #[cfg(feature = "maintainer")]
     ("compact", include_str!("../../help/compact.txt")),
     ("config", include_str!("../../help/config.txt")),
+    ("gateway", include_str!("../../help/gateway.txt")),
     ("doctor", include_str!("../../help/doctor.txt")),
     ("usage", include_str!("../../help/usage.txt")),
     ("models", include_str!("../../help/models.txt")),

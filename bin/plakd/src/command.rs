@@ -86,9 +86,71 @@ impl Command {
                 }
                 Self::Host(host)
             }
+            Self::Gateway(GatewayCommand::Init { tcp, key_dir }) => {
+                Self::Gateway(GatewayCommand::Init {
+                    tcp,
+                    key_dir: key_dir.map(at),
+                })
+            }
+            Self::Gateway(GatewayCommand::CallerAdd {
+                id,
+                sources,
+                admin,
+                key_out,
+            }) => Self::Gateway(GatewayCommand::CallerAdd {
+                id,
+                sources,
+                admin,
+                key_out: key_out.map(at),
+            }),
             other => other,
         }
     }
+}
+
+/// `plakd gateway`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum GatewayCommand {
+    Init {
+        tcp: Option<String>,
+        key_dir: Option<PathBuf>,
+    },
+    Serve,
+    Install {
+        dry_run: bool,
+    },
+    Uninstall,
+    Status {
+        dry_run: bool,
+    },
+    CallerAdd {
+        id: String,
+        sources: Vec<String>,
+        admin: Vec<String>,
+        key_out: Option<PathBuf>,
+    },
+    CallerList,
+    CallerRemove {
+        id: String,
+    },
+    CallerRotate {
+        id: String,
+    },
+    Disable {
+        account: Option<String>,
+        caller: Option<String>,
+        cut: bool,
+    },
+    Enable {
+        account: Option<String>,
+        caller: Option<String>,
+    },
+    Drain,
+    Audit {
+        since: Option<String>,
+        caller: Option<String>,
+    },
+    Check,
 }
 
 pub(crate) const NATIVE_RUN_MAX_PROMPT_BYTES: usize = 64 * 1024;
@@ -125,6 +187,7 @@ pub(crate) enum Command {
         confirmed: bool,
     },
     Doctor,
+    Gateway(GatewayCommand),
     StatusAll,
     AccountsList,
     AccountsRemove {
@@ -460,6 +523,7 @@ impl Command {
             Self::Fork { .. } => "fork",
             Self::Compact { .. } => "compact",
             Self::Doctor => "doctor",
+            Self::Gateway(_) => "gateway",
             Self::StatusAll | Self::AuthStatus(_) => "status",
             Self::AccountsList | Self::AccountsRemove { .. } => "accounts",
             Self::ConfigShow
