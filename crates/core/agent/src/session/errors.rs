@@ -447,7 +447,7 @@ pub enum SessionStoreError {
     /// A head manifest still has a job row without terminal evidence.
     ///
     /// Archive refuses this inside the same transaction as the lease fence.
-    /// An [`ArchiveSession::abandoning_jobs`] request is the operator override.
+    /// An [`super::ArchiveSession::abandoning_jobs`] request is the operator override.
     #[error("session has running jobs without terminal evidence")]
     RunningJobs,
     /// A configured hard bound was reached.
