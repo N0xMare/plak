@@ -71,6 +71,14 @@ pub enum LifecycleReason {
         /// Additional ids were omitted.
         dependents_truncated: bool,
     },
+    /// Durable job rows have no terminal evidence. Stop them before delete.
+    RunningJobs {
+        /// Bounded process ids (`pN`).
+        #[schemars(length(max = 100))]
+        processes: Vec<String>,
+        /// Additional process ids were omitted.
+        processes_truncated: bool,
+    },
 }
 
 /// Validate a non-null title without modifying its bytes.

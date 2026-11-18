@@ -119,6 +119,33 @@ impl AgentSessions {
         Ok(history)
     }
 
+    /// Process ids (`pN`) of durable job rows that have no terminal evidence.
+    ///
+    /// A product delete or runner unpair uses this before it changes anything.
+    /// The read takes no lease and writes nothing.
+    ///
+    /// # Errors
+    /// Returns the same typed lookup, stale-locator, integrity or storage
+    /// failure as [`Self::export_history_sqlite`].
+    #[cfg(feature = "sessions-sqlite")]
+    pub fn unsettled_job_labels(
+        path: impl AsRef<Path>,
+        locator: SessionLocator,
+    ) -> Result<Vec<String>, AgentSessionsError> {
+        let loaded =
+            SqliteSessionStore::inspect_branch(path, locator.session_ref()).map_err(store_error)?;
+        let exact = ExactSource::validate(locator, &loaded)?;
+        Ok(exact
+            .checkpoint
+            .manifest()
+            .jobs()
+            .rows()
+            .iter()
+            .filter(|row| row.terminal.is_none())
+            .map(|row| format!("p{}", row.number))
+            .collect())
+    }
+
     /// Whether the head at this locator is an unfinished turn awaiting recovery.
     ///
     /// A caller that has just been refused for a stale locator uses this to say

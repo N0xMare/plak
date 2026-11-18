@@ -106,6 +106,7 @@ pub(super) fn job_notices_once(
     first: &AgentOutcome,
     second: &AgentOutcome,
     survives: bool,
+    user_stopped: bool,
 ) {
     let notices = first
         .records()
@@ -146,10 +147,21 @@ pub(super) fn job_notices_once(
                 matches.is_empty(),
                 "retained running job reported terminal: {id}"
             );
-            assert!(
-                !second_ids.contains(id.as_str()),
-                "retained running job ended on second reopen: {id}"
-            );
+            let user_stops = second_notices
+                .iter()
+                .filter(|row| row["job_id"] == id && row["stop_reason"] == "user")
+                .count();
+            if user_stopped {
+                assert_eq!(
+                    user_stops, 1,
+                    "successor did not record exactly one user stop for {id}: {second_notices:?}"
+                );
+            } else {
+                assert!(
+                    !second_ids.contains(id.as_str()),
+                    "retained running job ended on second reopen: {id}"
+                );
+            }
             continue;
         }
         assert_eq!(matches.len(), 1, "durable job notice lost: {id}");

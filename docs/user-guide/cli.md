@@ -368,7 +368,7 @@ plakd mcp remove github
 
 ---
 
-### `plakd runner serve|connect|allow|ps|pair|secret`
+### `plakd runner serve|connect|allow|ps|pair|unpair|secret`
 
 Runners run a placed session's tools on another machine you can ssh to.
 These commands set one up and show what it holds. Local remains the explicit default.
@@ -393,6 +393,7 @@ command = "/opt/plakd/bin/plakd"  # absolute stable executable on the runner
 ```sh
 plakd runner pair build     # adds this host to the runner's allowlist over ssh
 plakd runner ps build       # the lines and jobs it holds for this host
+plakd runner unpair build   # drops this host's pin; refused while a job still runs
 ```
 
 Pairing needs a build that knows its source revision (a release or
@@ -532,7 +533,10 @@ answer and exits with code 4. `--print-session-id` still prints before the turn.
 Shell `&` leftovers become jobs but never hold `run` open. They stop at exit
 unless `--leave-jobs-running` gives up ownership; redirect service output to
 a file or `/dev/null` if it must survive output capture closing. Hosted and JSONL
-jobs remain owned until stop or session release.
+jobs remain owned until stop or session release. A local daemon or paired
+runner keeps background jobs across quit, including an escalated quit, and
+across upgrade. Deleting the session or unpairing the runner is refused while
+a job is still running; stop the jobs first.
 
 Waiting and continuation summaries go to stderr. A bound stops owned jobs,
 interrupts children resumably, and exits 6. Ctrl-C does the same and exits 4.

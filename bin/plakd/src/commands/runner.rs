@@ -67,10 +67,23 @@ const START_WAIT: Duration = Duration::from_secs(10);
 pub(crate) enum RunnerCommand {
     Serve,
     ServeLocal,
-    Connect { binary: Option<String> },
-    Allow { host_id: String },
-    Ps { name: Option<String> },
-    Pair { name: String },
+    Connect {
+        binary: Option<String>,
+    },
+    Allow {
+        host_id: String,
+    },
+    Ps {
+        name: Option<String>,
+    },
+    Pair {
+        name: String,
+    },
+    /// Removes the local pairing pin. Refuses while a session on this runner
+    /// still has a non-terminal job.
+    Unpair {
+        name: String,
+    },
 }
 
 /// Runs one `plakd runner` command.
@@ -102,6 +115,7 @@ pub(crate) fn run(
         RunnerCommand::Ps { name: None } => runtime.block_on(ps_local(paths, stdout)),
         RunnerCommand::Ps { name: Some(name) } => runtime.block_on(ps_remote(paths, &name, stdout)),
         RunnerCommand::Pair { name } => runtime.block_on(pair(paths, &name, stdout)),
+        RunnerCommand::Unpair { name } => unpair(paths, &name, stdout),
     }?;
     Ok(ProcessOutcome::Success)
 }
@@ -668,6 +682,57 @@ async fn pair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) ->
         dialed.hello.runner_id
     )
     .map_err(|_| CliFailure::new("stdout failed"))
+}
+
+/// `plakd runner unpair <name>`: drops this host's pairing pin after refusing
+/// while any session on that runner still has a non-terminal job. It does not
+/// ssh, and it does not edit the runner's `runner.toml`.
+fn unpair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) -> CliResult<()> {
+    let pin = registry::read_pin(paths, name).ok_or_else(|| {
+        CliFailure::new(format!("runner {name} is not paired; nothing to unpair"))
+    })?;
+    let mut product = crate::store::ProductStore::open(paths)
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    let sessions = product
+        .session_ids_for_runner(&pin.runner_id)
+        .map_err(CliFailure::new)?;
+    let mut blocked = Vec::new();
+    for id in sessions {
+        let record = product.load(&id).map_err(CliFailure::new)?;
+        let Some(locator) = record.plakous_locator else {
+            continue;
+        };
+        match plakous::sessions::AgentSessions::unsettled_job_labels(
+            paths.runtime_database(),
+            locator,
+        ) {
+            Ok(labels) if labels.is_empty() => {}
+            Ok(labels) => blocked.push(format!("{id} ({})", labels.join(", "))),
+            Err(error) if error.kind() == plakous::sessions::AgentSessionsErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(CliFailure::new(format!(
+                    "session {id} running jobs could not be read: {error}"
+                )));
+            }
+        }
+    }
+    if !blocked.is_empty() {
+        return Err(CliFailure::new(format!(
+            "runner {name} still has running jobs: {}; stop the jobs first",
+            blocked.join("; ")
+        )));
+    }
+    let path = paths.home().join("runners").join(name).join("runner.json");
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(CliFailure::new(format!(
+                "runner {name} pairing pin could not be removed: {error}"
+            )));
+        }
+    }
+    writeln!(stdout, "unpaired runner {name}").map_err(|_| CliFailure::new("stdout failed"))
 }
 
 /// What a host records of a runner it paired with.

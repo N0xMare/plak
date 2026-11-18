@@ -94,6 +94,11 @@ pub(super) fn delete_confirmed(
         .runner
         .as_ref()
         .map_or("local", |runner| runner.runner_id.as_str());
+    // Durable job rows are readable without a live runner. A paired session
+    // whose runner is down still must not be deleted out from under them.
+    if let Some(locator) = record.plakous_locator {
+        refuse_running_jobs(paths, &[locator])?;
+    }
     if crate::terminal_registry::session_pinned(services, id, runner_id).map_err(CliFailure::new)? {
         return Err(LifecycleError::Refused(LifecycleRefusal::Open));
     }
@@ -388,6 +393,7 @@ fn deletion_plan(
             &SessionDeleteRefusal::fork_dependency(dependents),
         ));
     }
+    refuse_running_jobs(paths, &[locator])?;
     let (tree_id, observed) = crate::topology_product::inspect_session_tree(paths, record)?;
     let TreeInspection::Tree(tree) = observed else {
         return Ok(DeletionPlan {
@@ -399,29 +405,46 @@ fn deletion_plan(
     let mut live = Vec::new();
     let mut recovering = Vec::new();
     let mut children = Vec::new();
+    let mut running_jobs = Vec::new();
     let may_abandon = abandon_children && tree_id == record.id;
     for node in tree.rows().nodes().values() {
         if node.parent_agent_id.is_none() {
             continue;
         }
         let label = node.agent_id.clone();
-        if node.status == plakous_host_protocol::topology::NodeStatus::RecoveryRequired {
-            recovering.push(label.clone());
-            if !may_abandon {
-                continue;
-            }
-        } else if !node.status.is_finished() {
-            live.push(label);
-            continue;
-        }
+        let finished =
+            if node.status == plakous_host_protocol::topology::NodeStatus::RecoveryRequired {
+                recovering.push(label.clone());
+                may_abandon
+            } else if !node.status.is_finished() {
+                live.push(label.clone());
+                false
+            } else {
+                true
+            };
         if let Some(child) = &node.session_locator {
             let child = child.parse::<SessionLocator>().map_err(|_| {
                 CliFailure::new(format!(
                     "child agent {label} has an invalid runtime locator"
                 ))
             })?;
-            children.push((label, child));
+            match AgentSessions::unsettled_job_labels(paths.runtime_database(), child) {
+                Ok(labels) => running_jobs.extend(labels),
+                Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(CliFailure::new(format!(
+                        "child agent {label} running jobs could not be read: {error}"
+                    ))
+                    .into());
+                }
+            }
+            if finished {
+                children.push((label, child));
+            }
         }
+    }
+    if !running_jobs.is_empty() {
+        return Err(running_jobs_refused(running_jobs));
     }
     if !recovering.is_empty() && !may_abandon {
         return Err(delete_refused(
@@ -446,6 +469,36 @@ fn deletion_plan(
         children,
         tree: Some((tree_id, tree.rows().revision)),
         abandon: recovering,
+    })
+}
+
+fn refuse_running_jobs(
+    paths: &crate::home::paths::PlakPaths,
+    locators: &[SessionLocator],
+) -> Result<(), LifecycleError> {
+    let mut processes = Vec::new();
+    for locator in locators {
+        match AgentSessions::unsettled_job_labels(paths.runtime_database(), *locator) {
+            Ok(labels) => processes.extend(labels),
+            Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(
+                    CliFailure::new(format!("running jobs could not be read: {error}")).into(),
+                );
+            }
+        }
+    }
+    if processes.is_empty() {
+        return Ok(());
+    }
+    Err(running_jobs_refused(processes))
+}
+
+fn running_jobs_refused(processes: Vec<String>) -> LifecycleError {
+    let (processes, processes_truncated) = super::lifecycle::bounded_ids(processes);
+    LifecycleError::Refused(LifecycleRefusal::RunningJobs {
+        processes,
+        processes_truncated,
     })
 }
 

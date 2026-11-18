@@ -62,6 +62,13 @@ pub(super) fn refusal(session: &str, error: LifecycleError) -> RequestRefusal {
                 dependents,
                 dependents_truncated,
             },
+            LifecycleRefusal::RunningJobs {
+                processes,
+                processes_truncated,
+            } => LifecycleReason::RunningJobs {
+                processes,
+                processes_truncated,
+            },
         },
     };
     RequestRefusal::SessionLifecycleRefused {

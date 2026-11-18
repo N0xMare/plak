@@ -62,6 +62,7 @@
 //! | `resolve_approval` | `approval_id`, `choice` (`allow` or `deny`) |
 //! | `fork` | optional `account` |
 //! | `tree`, `stop_all` | — |
+//! | `stop_processes` | `process` (`pN`) |
 //! | `interrupt_node`, `close_node` | `agent_id` |
 //! | `invoke_tool` | `name` (a [`topology::TOPOLOGY_PRESENTATION_ORDER`] entry), `arguments` (an object), optional `agent_id` |
 //!

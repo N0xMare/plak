@@ -336,6 +336,13 @@ fn closed_kinds_round_trip_to_user_actions() {
             UserAction::StopAllTopology,
         ),
         (
+            r#"{"v":1,"kind":"stop_processes","id":"sp","process":"p1"}"#,
+            UserAction::StopProcesses {
+                id: Some("p1".into()),
+                interrupt: false,
+            },
+        ),
+        (
             r#"{"v":1,"kind":"clear","id":"cl"}"#,
             UserAction::NewSession,
         ),

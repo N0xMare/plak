@@ -732,6 +732,10 @@ enum RunnerAction {
     Pair {
         name: Option<String>,
     },
+    /// Remove this host's pairing pin. Refuses while a job on that runner is still running.
+    Unpair {
+        name: Option<String>,
+    },
     /// This machine's runner secrets, which an MCP server placed on this
     /// runner reads.
     Secret {
@@ -763,7 +767,8 @@ impl RunnerAction {
             // A bare leaf routes to the parent group's help.
             Self::Connect { stdio: false, .. }
             | Self::Allow { host_id: None }
-            | Self::Pair { name: None } => {
+            | Self::Pair { name: None }
+            | Self::Unpair { name: None } => {
                 return help();
             }
             Self::Allow {
@@ -778,6 +783,10 @@ impl RunnerAction {
             Self::Pair { name: Some(name) } => {
                 crate::product_config::validate_runner_name(&name)?;
                 RunnerCommand::Pair { name }
+            }
+            Self::Unpair { name: Some(name) } => {
+                crate::product_config::validate_runner_name(&name)?;
+                RunnerCommand::Unpair { name }
             }
         }))
     }

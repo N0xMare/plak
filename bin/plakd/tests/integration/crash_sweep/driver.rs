@@ -814,6 +814,25 @@ fn cut_after_kill(
     let mut second = traced_reopen(fixture, session, "relaunch-2", None)
         .unwrap_or_else(|outcome| panic!("second reopen refused: {:?}", outcome.lines));
     summary::read_reopened(fixture);
+    let user_stopped = shape == "runner_job_survives_host_loss"
+        && before.jobs.iter().any(|job| job["terminal"] == false);
+    if user_stopped {
+        let number = before
+            .jobs
+            .iter()
+            .find(|job| job["terminal"] == false)
+            .and_then(|job| job["number"].as_u64())
+            .expect("retained job number");
+        second.send(&json!({
+            "v": 1,
+            "kind": "stop_processes",
+            "id": "stop-retained",
+            "process": format!("p{number}")
+        }));
+        second.wait_for("user-attributed job terminal", |row| {
+            row["kind"] == "job_terminal" && row["stop_reason"] == "user"
+        });
+    }
     second.send(&quit_frame());
     let second_outcome = second.finish();
     assert!(second_outcome.status.success());
@@ -822,8 +841,28 @@ fn cut_after_kill(
         &first,
         &second_outcome,
         shape == "runner_job_survives_host_loss",
+        user_stopped,
     );
     let mut converged = summary::read_converged(fixture);
+    if user_stopped {
+        let stopped = converged
+            .jobs
+            .iter()
+            .find(|job| job["terminal"] == true && job["user_stop"] == true)
+            .expect("durable row was not a user stop");
+        assert_eq!(
+            second_outcome
+                .records()
+                .iter()
+                .filter(|row| row["kind"] == "job_terminal" && row["stop_reason"] == "user")
+                .count(),
+            1,
+            "successor published more than one user terminal: {stopped}"
+        );
+        // The stop is the successor's ownership proof. The rest of the
+        // relaunch must still match the follow-up.
+        converged.jobs.clone_from(&stable.jobs);
+    }
     let second_revision = converged.revision;
     // Idle attach/quit advances the CAS revision without changing turn authority.
     converged.revision = stable.revision;

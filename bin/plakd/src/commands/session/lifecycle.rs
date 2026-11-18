@@ -81,6 +81,11 @@ pub(crate) enum LifecycleRefusal {
         dependents: Vec<String>,
         dependents_truncated: bool,
     },
+    /// Durable jobs are still running. The message names `pN` and says to stop them.
+    RunningJobs {
+        processes: Vec<String>,
+        processes_truncated: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -200,6 +205,11 @@ impl std::fmt::Display for LifecycleRefusal {
                 f,
                 "sessions {} continue from it or share its runtime history; finish their carry or delete the dependent sessions first",
                 dependents.join(", ")
+            ),
+            Self::RunningJobs { processes, .. } => write!(
+                f,
+                "background jobs are still running ({}); stop the jobs first",
+                processes.join(", ")
             ),
         }
     }

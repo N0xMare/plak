@@ -63,6 +63,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnHost<'_, P> {
             return;
         }
         self.quit_started_at.get_or_insert_with(Instant::now);
+        // Keep wins over a stop that quit escalation would start. Release
+        // already skips stops when a daemon owns the jobs; starting the stop
+        // here would lose that race.
+        if self.roots.daemon_processes() {
+            let text = "background jobs were kept across quit; a local daemon or paired runner still owns them";
+            let row = sessions::TranscriptRow::info(sessions::NoticeScope::Session, text);
+            self.session.record_notice(row.clone());
+            let _ = self.events.send(ContentEvent::Row(row));
+            return;
+        }
         self.job_agent.begin_job_stop();
         let tree_id = super::topology_state::durable_tree_id(self.rows, self.session);
         let root_owner = self.job_agent.id().to_string();

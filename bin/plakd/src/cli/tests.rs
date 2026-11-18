@@ -1117,6 +1117,13 @@ fn product_command_argv_matrix() {
                     if name == "build"
             )
         }),
+        (&["runner", "unpair", "build"], |c| {
+            matches!(
+                c,
+                Command::Runner(crate::commands::runner::RunnerCommand::Unpair { name })
+                    if name == "build"
+            )
+        }),
         (
             &["runner"],
             |c| matches!(c, Command::CommandHelp { command } if command == "runner"),

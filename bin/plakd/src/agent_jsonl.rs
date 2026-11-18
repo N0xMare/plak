@@ -63,6 +63,11 @@ pub enum AgentCommand {
     StopAll {
         id: String,
     },
+    /// Stop one background process (`process` is `pN`) without interrupting the turn.
+    StopProcesses {
+        id: String,
+        process: String,
+    },
     Clear {
         id: String,
     },
@@ -99,6 +104,7 @@ impl AgentCommand {
             Self::CloseNode { .. } => "close_node",
             Self::Resume { .. } => "resume",
             Self::StopAll { .. } => "stop_all",
+            Self::StopProcesses { .. } => "stop_processes",
             Self::Clear { .. } => "clear",
             Self::Quit { .. } => "quit",
             Self::InvokeTool { .. } => "invoke_tool",
@@ -128,6 +134,7 @@ impl AgentCommand {
             | Self::CloseNode { id, .. }
             | Self::Resume { id, .. }
             | Self::StopAll { id }
+            | Self::StopProcesses { id, .. }
             | Self::Clear { id }
             | Self::Quit { id }
             | Self::InvokeTool { id, .. }
@@ -180,6 +187,10 @@ impl AgentCommand {
             Self::CloseNode { agent_id, .. } => Some(UserAction::CloseTopologyNode { agent_id }),
             Self::Resume { agent_id, .. } => Some(UserAction::ResumeLossContinuation { agent_id }),
             Self::StopAll { .. } => Some(UserAction::StopAllTopology),
+            Self::StopProcesses { process, .. } => Some(UserAction::StopProcesses {
+                id: Some(process),
+                interrupt: false,
+            }),
             Self::Clear { .. } => Some(UserAction::NewSession),
             Self::Quit { .. } => Some(UserAction::Quit),
             Self::InvokeTool {
@@ -284,6 +295,7 @@ pub fn parse_command_line(line: &str) -> ParseOutcome {
         "close_node" => parse_node_action(id, &value, false),
         "resume" => parse_resume(id, &value),
         "stop_all" => ParseOutcome::Command(AgentCommand::StopAll { id }),
+        "stop_processes" => parse_stop_processes(id, &value),
         "clear" => ParseOutcome::Command(AgentCommand::Clear { id }),
         "quit" => ParseOutcome::Command(AgentCommand::Quit { id }),
         "invoke_tool" => parse_invoke_tool(id, &value),
@@ -296,6 +308,21 @@ pub fn parse_command_line(line: &str) -> ParseOutcome {
             ),
         },
     }
+}
+
+fn parse_stop_processes(id: String, value: &Map<String, Value>) -> ParseOutcome {
+    let Some(process) = string_field(value, "process").filter(|process| {
+        let Some(number) = process.strip_prefix('p') else {
+            return false;
+        };
+        !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()) && number != "0"
+    }) else {
+        return ParseOutcome::Diagnostic {
+            id: Some(id),
+            message: "stop_processes requires process set to a job id such as p1".into(),
+        };
+    };
+    ParseOutcome::Command(AgentCommand::StopProcesses { id, process })
 }
 
 fn parse_resolve_approval(id: String, value: &Map<String, Value>) -> ParseOutcome {

@@ -650,6 +650,132 @@ fn lifecycle_archive_refuses_running_process_without_a_turn() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn delete_and_unpair_refuse_until_the_running_job_ends() -> TestResult {
+    use plakous::tools::JobHost as _;
+    use plakous_hosted::sessions::RunnerDisplay;
+    use plakous_offline_crash_harness::evidence::EvidenceKind;
+    let mut f = fixture(false)?;
+    let host = Arc::new(plakous::tools::LocalJobHost::new());
+    let evidence = f.paths.home().join("process-evidence.jsonl");
+    let controller =
+        BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence).checked()?;
+    let plan = Arc::new(serde_json::from_value(serde_json::json!({
+        "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
+        "process_tools": true,
+        "steps": [
+            {"output": {"tool": {"name": "process_session_start", "arguments": {
+                "command": "read line", "workdir": ".", "login": false,
+                "tty": false, "keep_stdin_open": true, "yield_time_ms": 0,
+                "max_output_bytes": 8192
+            }}}, "finish": "tool_calls"},
+            {"stream": [{"text": "waiting"}, {"stall": 30000}]}
+        ]
+    }))?);
+    let mut record = product_sessions::SessionRecord::new(f.paths.home().to_path_buf());
+    let binding =
+        plakous_offline_crash_harness::scripted_runtime_binding(f.paths.home(), controller, plan)
+            .checked()?
+            .with_job_host(host.clone());
+    let CreateSessionOutcome::Created { session, .. } = f
+        .runtime
+        .run(f.runtime.sessions.create(CreateSessionRequest::new(
+            SessionOperationId::new(&record.create_operation_id).checked()?,
+            binding,
+        )))
+        .checked()??
+    else {
+        return Err("expected created session".into());
+    };
+    let line = session.line();
+    let agent = session.agent().clone();
+    f.runtime
+        .executor
+        .block_on(async {
+            let turn = agent.prompt("start process").await?;
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let dispatched =
+                        plakous_offline_crash_harness::evidence::read_evidence(&evidence)
+                            .unwrap()
+                            .iter()
+                            .filter(|record| record.kind == EvidenceKind::ProviderDispatched)
+                            .count();
+                    if !agent.jobs().is_empty() && dispatched >= 2 {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await?;
+            turn.control().cancel().await?;
+            turn.result().await?;
+            TestResult::Ok(())
+        })
+        .checked()??;
+    let pin_dir = f.paths.home().join("runners").join("build");
+    std::fs::create_dir_all(&pin_dir).checked()?;
+    std::fs::write(
+        pin_dir.join("runner.json"),
+        r#"{"runner_id":"runner-1","source_revision":"abc","flavor":"test","binary_id":null,"machine_id":"machine-1","roots":["/tmp"]}"#,
+    )
+    .checked()?;
+    let locator = f.runtime.run(session.release_for_transfer()).checked()??;
+    record.bind_plakous_locator(locator).checked()?;
+    f.product.commit(&mut record).checked()?;
+    // A runner display on commit asks the live runner for a terminal inventory.
+    // This test has no daemon, so the pin is written as stored display only.
+    let display = RunnerDisplay {
+        name: "build".into(),
+        runner_id: "runner-1".into(),
+        workspace_root: f.paths.home().to_path_buf(),
+        workspace_cwd: f.paths.home().to_path_buf(),
+    };
+    rusqlite::Connection::open(f.paths.product_database())
+        .checked()?
+        .execute(
+            "UPDATE sessions SET runner_display=?1 WHERE id=?2",
+            rusqlite::params![display.encode().checked()?, record.id],
+        )
+        .checked()?;
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    let refused = lifecycle::delete_confirmed(&services, &record.id, false);
+    let message = refused.as_ref().unwrap_err().to_string();
+    assert!(
+        message.contains("stop the jobs first") && message.contains("p1"),
+        "{message}"
+    );
+    assert!(matches!(
+        refused,
+        Err(LifecycleError::Refused(
+            LifecycleRefusal::RunningJobs { .. }
+        ))
+    ));
+    let mut unpair_out = Vec::new();
+    let unpair = crate::commands::runner::run(
+        &f.paths,
+        crate::commands::runner::RunnerCommand::Unpair {
+            name: "build".into(),
+        },
+        &mut unpair_out,
+    );
+    let unpair_message = unpair.unwrap_err().to_string();
+    assert!(
+        unpair_message.contains("stop the jobs first") && unpair_message.contains("p1"),
+        "{unpair_message}"
+    );
+    assert!(pin_dir.join("runner.json").exists());
+    assert_eq!(f.product.load(&record.id).checked()?.id, record.id);
+    host.service(line)
+        .ok_or("process service")?
+        .stop_jobs(
+            plakous::tools::JobStopReason::User,
+            std::time::Duration::from_secs(2),
+        )
+        .checked()?;
+    Ok(())
+}
+
 fn fixture(leased: bool) -> TestResult<Fixture> {
     let (tmp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
     paths.ensure_layout().checked()?;

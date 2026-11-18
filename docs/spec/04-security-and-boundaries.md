@@ -1014,7 +1014,10 @@ widens it.
 - **Pairing pins identities.** A host binds only when its identity is on
   `runner.toml` `hosts`; an unpaired host is refused (`NotPaired`) before any
   request, and the host fails every waiting and later call on that link at
-  once, of no effect. A host records the runner's identity when it pairs. A
+  once, of no effect. A host records the runner's identity when it pairs.
+  `plakd runner unpair` removes that local pin only after every session on
+  the runner has terminal evidence for its jobs; it does not change
+  `runner.toml`. A
   build that does not know its source revision pairs with no remote runner,
   since an exact version triple is the binding rule. An inspecting connection
   reads the line table and pings, and nothing else; it sees every host's lines

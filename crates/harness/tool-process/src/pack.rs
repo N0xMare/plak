@@ -275,12 +275,12 @@ static PROCESS_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "process.codex.exec_command",
         PLAKOUS_CODEX_EXEC_COMMAND_DESCRIPTION,
-        "fb3148dd71197c89f5e52117c809bbb56e396508b0a5a55a8a682937b04f3745",
+        "7d1654fc1691348cc9c578325e2aed1d397e65cc49fc142172445e5e58190027",
     ),
     PromptPin::new(
         "process.grok.run_terminal_command",
         PLAKOUS_GROK_RUN_TERMINAL_COMMAND_DESCRIPTION,
-        "91fb5eea215e01ab263d5017b0cc6483d2eda8d1255e84d6f60315faec913b2e",
+        "54b17c7faaea9c26192ecf31439854b1ad525db52122cedf78820721afe8fcec",
     ),
     PromptPin::new(
         "process.grok.get_command_or_subagent_output",
@@ -295,7 +295,7 @@ static PROCESS_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "process.claude.Bash",
         CLAUDE_OAUTH_BASH_DESCRIPTION,
-        "ab5febf5f713fcf74895630642b3d11aacbbb067840a6e1400134a4ff89b71db",
+        "5f9ed874421aace3b99a5da59196d74da6c911cc946520b2e1778332aabb0a6b",
     ),
     PromptPin::new(
         "process.claude.TaskStop",
@@ -305,7 +305,7 @@ static PROCESS_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "process.pi.bash",
         text::PI_BASH_DESCRIPTION,
-        "069856221b992e7042e6c787efa7c67eb2cf34d42a396aed1305976964a2ce63",
+        "e999d26647655cfd7cea218a35dae7d0274edc98e3190861a9b43673378da0d1",
     ),
     PromptPin::new(
         "process.pi.wait",

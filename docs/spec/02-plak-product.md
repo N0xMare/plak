@@ -1805,6 +1805,12 @@ when any of them refuses:
   or clear source) or keeps its head
   in the same runtime session, as a fork does; the dependents are named. A
   session carried forward from it holds its own copy and does not block it.
+- **running jobs**: the session or a finished child still has a durable job
+  row with no terminal evidence. The refusal names the process ids (`pN`)
+  and says to stop the jobs first. Nothing is archived or deleted. The same
+  check refuses `plakd runner unpair <name>` while any session on that
+  runner has such a row; unpair then removes only this host's
+  `runners/<name>/runner.json` and does not edit the runner's allowlist.
 
 Without `--yes` it asks on a terminal and refuses on a non-terminal stdin.
 Without `--abandon-children`, recovery-required children still refuse deletion.
@@ -2723,7 +2729,7 @@ version. There is no top-level prompt positional or terminal resume command.
 | `state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` | Confirm and delete unused non-current state and older-schema telemetry (including its SQLite sidecars); retain current/newer telemetry and session references unless explicitly selected; refuse locks or unsafe paths (§2.5). |
 | `telemetry status [--views]`, `telemetry sql [<query>] [--json]`, `telemetry prune [--max-age-days <n>] [--max-bytes <n>] [--yes]` | the local analytics store |
 | `models [<account>]` | read-only catalog discovery, in every build |
-| `runner serve`, `runner connect --stdio`, `runner allow <host-id>`, `runner ps [<name>]`, `runner pair <name>` | Runners (chapter 01 section 8.4, chapter 04 section 2.9). On a runner machine, `serve` runs the runner daemon in the foreground until it is idle (07 section 3.7), with the tree's version control registered as its extension: it answers only absolute paths without `..` that resolve under the roots or the `copies` root and outside the product home, and takes copies carried from another runner under `copies` (chapter 01 section 8.5); the hidden `serve --local` runs this home's home-local runner in the foreground until it is idle (300 s), or its socket is removed or replaced (chapter 01 section 8.4); startup creates runner directories only below an existing product home and refuses a deleted home rather than resurrecting it: it needs no `runner.toml`, binds only this home's `host-id` from any build of its runner protocol version, carries only process sessions, serves any workspace outside the product home, and its independently owned startup probe must reconcile before local sessions open; `connect --stdio` bridges standard input and output to the daemon of this build's version triple and, when none answers, starts `plakd runner serve` detached in its own process group with a cleared environment (`PATH`, `HOME`, `PLAK_HOME`) and its stderr in `runner/builds/<triple-key>/serve.log`; a host's ssh runs it. `allow` pairs a host by adding its id, a lowercase uuid, to `runner.toml` `hosts`. `ps` lists the daemon's lines for every host through an inspecting connection bound under this machine's own host id (a remote inspection sees only its own host's lines, without job commands or output), each `held` or `orphaned` with its job count, or prints `no runner is running`. On a host, `pair <name>` refuses a build whose source revision is `unknown`, runs `plakd runner allow <host-id>` on `[runners.<name>]` over ssh with the strict options, binds to prove it (an unpaired bind is reported at once) and records the runner's identity in `runners/<name>/runner.json`; `ps <name>` lists what that runner holds for this host. `secret set|rm|list <name>` manages this machine's runner secrets (`secrets/runner/`, chapter 04 section 3.1), which an MCP server placed on this runner reads; `set` reads the value from a hidden prompt. Session placement resolves paired runner identity explicitly; no process-global runner is selected. |
+| `runner serve`, `runner connect --stdio`, `runner allow <host-id>`, `runner ps [<name>]`, `runner pair <name>`, `runner unpair <name>` | Runners (chapter 01 section 8.4, chapter 04 section 2.9). On a runner machine, `serve` runs the runner daemon in the foreground until it is idle (07 section 3.7), with the tree's version control registered as its extension: it answers only absolute paths without `..` that resolve under the roots or the `copies` root and outside the product home, and takes copies carried from another runner under `copies` (chapter 01 section 8.5); the hidden `serve --local` runs this home's home-local runner in the foreground until it is idle (300 s), or its socket is removed or replaced (chapter 01 section 8.4); startup creates runner directories only below an existing product home and refuses a deleted home rather than resurrecting it: it needs no `runner.toml`, binds only this home's `host-id` from any build of its runner protocol version, carries only process sessions, serves any workspace outside the product home, and its independently owned startup probe must reconcile before local sessions open; `connect --stdio` bridges standard input and output to the daemon of this build's version triple and, when none answers, starts `plakd runner serve` detached in its own process group with a cleared environment (`PATH`, `HOME`, `PLAK_HOME`) and its stderr in `runner/builds/<triple-key>/serve.log`; a host's ssh runs it. `allow` pairs a host by adding its id, a lowercase uuid, to `runner.toml` `hosts`. `ps` lists the daemon's lines for every host through an inspecting connection bound under this machine's own host id (a remote inspection sees only its own host's lines, without job commands or output), each `held` or `orphaned` with its job count, or prints `no runner is running`. On a host, `pair <name>` refuses a build whose source revision is `unknown`, runs `plakd runner allow <host-id>` on `[runners.<name>]` over ssh with the strict options, binds to prove it (an unpaired bind is reported at once) and records the runner's identity in `runners/<name>/runner.json`; `ps <name>` lists what that runner holds for this host. `unpair <name>` refuses while any session on that runner has a durable job with no terminal evidence (stop the jobs first, §2.5.2) and otherwise removes only `runners/<name>/runner.json`. `secret set|rm|list <name>` manages this machine's runner secrets (`secrets/runner/`, chapter 04 section 3.1), which an MCP server placed on this runner reads; `set` reads the value from a hidden prompt. Session placement resolves paired runner identity explicitly; no process-global runner is selected. |
 | `version`, `help [<command>]` | |
 
 `session show` also inspects the root session's canonical Plakous branch head
@@ -3838,6 +3844,7 @@ after a gap; a fresh attachment starts with clean prompt provenance.
 | `quit` | — |
 | `fork` | optional `account`; optional `compact` (`true` compacts the new session). `account` together with `compact` is refused |
 | `tree`, `stop_all` | — |
+| `stop_processes` | `process` (`pN`, the job id). Stops that background process and does not interrupt the turn. |
 | `interrupt_node`, `close_node` | `agent_id` |
 | `resume` | optional `agent_id` (a non-empty string); without it the one Resume: every held child, the root's held continuation and its restored queue |
 | `invoke_tool` | `name`, `arguments` (an object), optional `agent_id` |
@@ -7002,8 +7009,11 @@ tools as "when presented", so a tier-filtered child or a leaf without agent
 tools is not told it has them. The process-starting tool of each family (`exec_command`,
 `run_terminal_command`, `Bash`, pi `bash`) states once that still-running
 processes continue in the background with an id, that completion is reported
-automatically, and that background jobs survive root-turn and cell cleanup and
-stop only on explicit stop, runtime release, attempt end or the hard cap.
+automatically, and that a local daemon or paired runner keeps background jobs
+across quit, including an escalated quit, and across upgrade, and records that
+keep. Without that keeper they stop on session release. They also stop on
+explicit stop, attempt end, or the hard cap. Deleting the session or unpairing
+the runner is refused while a job is still running.
 `write_stdin`, Grok's output and kill tools, pi's `wait` and `stop`, and
 Claude's `TaskStop` state the numeric foreground budget and hard cap and do
 not repeat that sentence.

@@ -133,6 +133,13 @@ fn lifecycle_refusal(
             dependents,
             dependents_truncated,
         },
+        LifecycleReason::RunningJobs {
+            processes,
+            processes_truncated,
+        } => R::RunningJobs {
+            processes,
+            processes_truncated,
+        },
     }
 }
 

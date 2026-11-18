@@ -854,6 +854,36 @@ struct RestoredEffectDecision {
     pending: PendingEffectDecision,
 }
 
+/// Transfer on release only when a daemon or runner can keep the processes
+/// and a `JobHost` can take the service (spec 01). A runner backend alone
+/// does not.
+pub(crate) const fn daemon_process_transfer(
+    local_daemon: bool,
+    runner_backend: bool,
+    job_host: bool,
+) -> bool {
+    (local_daemon || runner_backend) && job_host
+}
+
+#[cfg(test)]
+mod daemon_process_transfer_tests {
+    use super::daemon_process_transfer;
+
+    #[test]
+    fn transfer_needs_a_keeper_and_a_job_host() {
+        for local_daemon in [false, true] {
+            for runner_backend in [false, true] {
+                for job_host in [false, true] {
+                    assert_eq!(
+                        daemon_process_transfer(local_daemon, runner_backend, job_host),
+                        (local_daemon || runner_backend) && job_host
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod execution_value_tests {
     use super::ToolExecutionResult;

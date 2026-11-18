@@ -37,7 +37,10 @@ fn configured_runners(paths: &crate::home::paths::PlakPaths) -> CliResult<Vec<Co
         .collect())
 }
 
-fn read_pin(paths: &crate::home::paths::PlakPaths, name: &str) -> Option<super::PairedRunner> {
+pub(crate) fn read_pin(
+    paths: &crate::home::paths::PlakPaths,
+    name: &str,
+) -> Option<super::PairedRunner> {
     let path = paths.home().join("runners").join(name).join("runner.json");
     std::fs::read(path)
         .ok()

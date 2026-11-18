@@ -11,6 +11,11 @@ for one version bump, without native protocol compatibility.
 
 ### Plakous
 
+- Transfer daemon jobs only when the runtime has a job host.
+- Process-tool descriptions state that a daemon or paired runner keeps
+  background jobs across quit and upgrade, and that delete and unpair are
+  refused while a job is still running.
+
 - State the existing prefix rule for replay reasoning, including OpenRouter Chat
   `reasoning_details`: an unchanged prefix stays byte-exact, and only reasoning
   after the first changed content is omitted. A semantic summary is that change,
@@ -84,6 +89,13 @@ for one version bump, without native protocol compatibility.
   cancelled with an `End` `cancelled` frame and drops the upstream exchange.
 
 ### plakd
+
+- Refuse session delete and `plakd runner unpair` while a durable job has no
+  terminal evidence. The refusal names the process ids and says to stop the
+  jobs first. Unpair removes only the local pairing pin.
+- An escalated quit keeps daemon-owned background jobs and records that keep,
+  instead of racing a stop against the keep.
+- JSONL `stop_processes` stops one background job as a user stop.
 
 - Restore subscription model picking and Codex root prompts under gateway
   custody. Host startup and `plakd models` populate a host-owned catalog
