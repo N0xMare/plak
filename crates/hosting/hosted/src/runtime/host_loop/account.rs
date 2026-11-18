@@ -90,8 +90,10 @@ pub(crate) fn unsent_continue_notice(
         )
         .with_remedy(
             plakous_host_protocol::notice_remedy::NoticeRemedy::ContinueOnAccount {
-                account: account.to_owned(),
-                command_id,
+                continuation: Box::new(plakous_host_protocol::notice_remedy::AccountContinuation {
+                    account: account.to_owned(),
+                    command_id,
+                }),
             },
         ),
     )

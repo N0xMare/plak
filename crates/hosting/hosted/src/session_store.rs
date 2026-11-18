@@ -1017,7 +1017,11 @@ mod memory {
                         .then_with(|| right.id.cmp(&left.id))
                 })
                 .cloned()
-                .map(|record| loaded(&state, record)))
+                .map(|record| {
+                    let mut record = loaded(&state, record);
+                    record.pause_restored_work();
+                    record
+                }))
         }
 
         fn load_queue_head(&self, id: &str) -> Result<super::SessionQueueHead, String> {

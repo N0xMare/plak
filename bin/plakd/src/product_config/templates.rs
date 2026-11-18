@@ -47,8 +47,8 @@ pub const TEMPLATE_FIELD_DOCS: &[TemplateFieldDoc] = &[
         key: "account",
         value_type: "string",
         default: "(required)",
-        constraint: "vertical[/name]; vertical is codex|chatgpt|grok|supergrok|xai-oauth|claude|openrouter|openai|anthropic|xai-api; name is [a-z][a-z0-9-]{0,31}, except default",
-        meaning: "Credential lane the copy runs on.",
+        constraint: "a provider kind: codex|chatgpt|grok|supergrok|xai-oauth|claude|openrouter|openai|anthropic|xai-api; a named account (`codex/work`) is a load error naming the template",
+        meaning: "Provider kind the copy runs on. The session holds the named account per kind (chapter 02 §4.4.1); a spawn binds the session's account for this kind.",
         example: "\"codex\"",
     },
     TemplateFieldDoc {

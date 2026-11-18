@@ -1819,6 +1819,7 @@ fn a_stop_is_answered_after_its_attachment_detaches() {
     assert_eq!(answered[&5], Outcome::Ok(Answer::Detached));
 }
 
+mod accounts;
 mod bridge;
 mod child_continuation;
 mod continuation_identity;

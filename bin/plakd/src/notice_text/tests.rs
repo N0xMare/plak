@@ -70,8 +70,10 @@ pub(crate) fn all_remedies() -> Vec<NoticeRemedy> {
         },
         R::RepairThenAttach {},
         R::ContinueOnAccount {
-            account: "codex/work".into(),
-            command_id: "plak.queue.00112233-4455-4677-8899-aabbccddeeff.1".into(),
+            continuation: Box::new(plakous_host_protocol::notice_remedy::AccountContinuation {
+                account: "codex/work".into(),
+                command_id: "plak.queue.00112233-4455-4677-8899-aabbccddeeff.1".into(),
+            }),
         },
         R::RepairCredentialOrChooseProfile {
             account: AccountTarget::Grok,
@@ -280,11 +282,8 @@ fn remedies_are_exhaustive(remedy: &NoticeRemedy) {
         R::RepairCredentialOrChooseProfile { account, condition } => {
             let _ = (account, condition);
         }
-        R::ContinueOnAccount {
-            account,
-            command_id,
-        } => {
-            let _ = (account, command_id);
+        R::ContinueOnAccount { continuation } => {
+            let _ = continuation;
         }
     }
 }

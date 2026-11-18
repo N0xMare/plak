@@ -129,7 +129,7 @@ fn idle_after(events: &[HostEvent], phase: TurnPhase) -> bool {
                 matches!(
                     event,
                     HostEvent::Status {
-                        phase: plakous_host_protocol::status::HostPhase::Idle,
+                        phase: HostPhase::Idle,
                         ..
                     }
                 )
@@ -155,18 +155,24 @@ fn user_rows(store: &dyn SessionRecordStore, id: &str) -> Vec<String> {
         .collect()
 }
 
-/// A usage-limit failure, then `ChooseAccount` with a continue: one rebind
-/// onto the new account and exactly one admitted root turn of the exact
-/// prompt on the line head. The root's node, profile and tree epoch do not
-/// move. A later continue on the same account gets fresh ids.
-#[test]
-fn a_continue_after_a_usage_limit_rebinds_once_and_resubmits_the_exact_prompt() {
-    let root = tempfile::tempdir().unwrap();
-    let (mut config, _) = fresh_injected_attached_host(root.path());
+/// A host whose scripted model fails the first turn on its usage limit and
+/// answers the next, on `codex` and, after a rebind, on `codex/b`; `cut`
+/// stops the host at the nth crossing of one workflow boundary, and
+/// `primary_account` is the identity a reopened head was recorded under.
+fn continue_host(
+    root: &std::path::Path,
+    cut: Option<(
+        crate::runtime::HostWorkflow,
+        crate::runtime::HostBoundary,
+        usize,
+    )>,
+    primary_account: &'static [u8],
+) -> (crate::runtime::HostConfig<TestExtension>, Arc<Chooser>) {
+    let (mut config, _) = fresh_injected_attached_host(root);
     let workspace = config.cwd.clone();
     let controller = plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
         plakous_offline_crash_harness::protocol::CrashBoundary::None,
-        root.path().join("continue-evidence.jsonl"),
+        root.join("continue-evidence.jsonl"),
     )
     .unwrap();
     let script: Arc<plakous_offline_crash_harness::script::ScriptPlan> = Arc::new(
@@ -197,7 +203,7 @@ fn a_continue_after_a_usage_limit_rebinds_once_and_resubmits_the_exact_prompt() 
             .map_err(|error| error.to_string())
         }
     };
-    let primary = bind(b"offline-loopback-account");
+    let primary = bind(primary_account);
     let successor = bind(b"codex/b");
     let injection = test_kit::scripted_mut(&mut config);
     injection.rebind_target = successor().unwrap().target_binding();
@@ -208,11 +214,32 @@ fn a_continue_after_a_usage_limit_rebinds_once_and_resubmits_the_exact_prompt() 
             primary()
         }
     });
+    if let Some((workflow, boundary, nth)) = cut {
+        let crossed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        injection.observe = Arc::new(move |seen_workflow, seen_boundary| {
+            if (seen_workflow, seen_boundary) == (workflow, boundary)
+                && crossed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1 == nth
+            {
+                std::panic::panic_any("account continue crash cut");
+            }
+        });
+    }
+    let surface = Arc::new(Chooser::default());
+    config.surface = Some(Box::new(Arc::clone(&surface)));
+    (config, surface)
+}
+
+/// A usage-limit failure, then `ChooseAccount` with a continue: one rebind
+/// onto the new account and exactly one admitted root turn of the exact
+/// prompt on the line head. The root's node, profile and tree epoch do not
+/// move. A later continue on the same account gets fresh ids.
+#[test]
+fn a_continue_after_a_usage_limit_rebinds_once_and_resubmits_the_exact_prompt() {
+    let root = tempfile::tempdir().unwrap();
+    let (config, surface) = continue_host(root.path(), None, b"offline-loopback-account");
     let store = Arc::clone(&config.store);
     let state_roots = config.state_roots.clone();
     let tree = config.session.id.clone();
-    let surface = Arc::new(Chooser::default());
-    config.surface = Some(Box::new(Arc::clone(&surface)));
     let (actions, events, worker) = spawn_host_worker(config).unwrap();
     let mut seen = Vec::new();
 
@@ -409,8 +436,8 @@ fn an_unsent_continue_is_reported_on_reopen_and_never_resubmitted() {
     assert!(matches!(
         notice.remedy,
         Some(plakous_host_protocol::notice_remedy::NoticeRemedy::ContinueOnAccount {
-            account, command_id
-        }) if account == "codex/b" && command_id == ids.command_id()
+            continuation
+        }) if continuation.account == "codex/b" && continuation.command_id == ids.command_id()
     ));
     views.state.deliveries.insert(
         ids.command_id(),
@@ -431,4 +458,217 @@ fn an_unsent_continue_is_reported_on_reopen_and_never_resubmitted() {
     session.source_workflow_operation_id = Some("plak:rebind:other".into());
     session.pending_queue.clear();
     assert!(unsent_continue_notice(&session, &views).is_none());
+}
+
+/// Crash cuts of a continue (spec 02 §4.4.1): the host stops at the rebind's
+/// written request, its publication, the root-start's written submission and
+/// its admitted turn; a host then reopens the line head from the same stores.
+/// Each shows one rebind, at most one resubmitted prompt, and no resubmission
+/// by the reopen itself.
+mod account_continue_crash_cuts {
+    use super::*;
+    use crate::runtime::{HostBoundary, HostWorkflow};
+
+    struct Cut {
+        store: Arc<dyn SessionRecordStore>,
+        tree: String,
+        source: String,
+        failed_turn: String,
+        reopened: Vec<HostEvent>,
+    }
+
+    fn cut_at(workflow: HostWorkflow, boundary: HostBoundary, nth: usize) -> Cut {
+        let root = tempfile::tempdir().unwrap();
+        let (config, surface) = continue_host(
+            root.path(),
+            Some((workflow, boundary, nth)),
+            b"offline-loopback-account",
+        );
+        let store = Arc::clone(&config.store);
+        let state_roots = config.state_roots.clone();
+        let tree = config.session.id.clone();
+        let (actions, events, worker) = spawn_host_worker(config).unwrap();
+        let mut seen = Vec::new();
+        send_attached_action(&actions, UserAction::Prompt("do the thing".into()));
+        wait_for(&events, &mut seen, 0, |events| {
+            idle_after(events, TurnPhase::Failed)
+        });
+        let failed_turn = lifecycle(&seen, TurnPhase::Failed)[0].turn_id.clone();
+        let source = line_head(store.as_ref(), &tree).id;
+        *surface.next.lock().unwrap() = Some(SurfaceAccountChoice::Root {
+            account: "codex/b".into(),
+            continue_failed: true,
+        });
+        let _ = actions.send(UserAction::Extension(ProbeIntent::InspectUsage));
+        assert!(worker.join().is_err(), "the host stops at its cut");
+        drop((actions, events));
+
+        let head = line_head(store.as_ref(), &tree);
+        let account: &'static [u8] = if head.id == source {
+            b"offline-loopback-account"
+        } else {
+            b"codex/b"
+        };
+        // A cut inside a turn leaves its branch lease held until it lapses.
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let (actions, events, worker) = loop {
+            let (mut config, _) = continue_host(root.path(), None, account);
+            config.store = Arc::clone(&store);
+            config.state_roots = state_roots.clone();
+            config.session = line_head(store.as_ref(), &tree);
+            match spawn_host_worker(config) {
+                Ok(host) => break host,
+                Err(failure) if Instant::now() < deadline => {
+                    assert!(
+                        failure.message().contains("held by another plakd process"),
+                        "the line head reopens: {}",
+                        failure.message()
+                    );
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+                Err(failure) => panic!("the line head reopens: {}", failure.message()),
+            }
+        };
+        let mut reopened = Vec::new();
+        let settle = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < settle {
+            if let Ok(event) = events.recv_timeout(Duration::from_millis(100)) {
+                reopened.push(event);
+            }
+        }
+        send_attached_action(&actions, UserAction::Quit);
+        worker.join().unwrap().unwrap();
+        Cut {
+            store,
+            tree,
+            source,
+            failed_turn,
+            reopened,
+        }
+    }
+
+    impl Cut {
+        fn head(&self) -> SessionRecord {
+            line_head(self.store.as_ref(), &self.tree)
+        }
+
+        fn ids(&self) -> ContinueIds {
+            ContinueIds::of(&self.failed_turn, "codex/b")
+        }
+
+        /// One rebind at most: the head is the source or its one successor.
+        fn assert_one_rebind(&self) {
+            let head = self.head();
+            if head.id != self.source {
+                assert_eq!(
+                    head.source_product_session_id.as_deref(),
+                    Some(self.source.as_str())
+                );
+                assert_eq!(
+                    head.source_workflow_operation_id.as_deref(),
+                    Some(self.ids().operation_id.as_str())
+                );
+            }
+        }
+
+        fn reopen_admitted_nothing(&self) {
+            assert!(
+                lifecycle(&self.reopened, TurnPhase::Admitted).is_empty(),
+                "reopen never submits the continue: {:?}",
+                self.reopened
+            );
+        }
+
+        fn continue_notice(&self) -> bool {
+            self.reopened.iter().any(|event| {
+                matches!(
+                    event,
+                    HostEvent::Row(TranscriptRow::Notice(notice)) if matches!(
+                        &notice.remedy,
+                        Some(plakous_host_protocol::notice_remedy::NoticeRemedy::ContinueOnAccount {
+                            continuation
+                        }) if continuation.command_id == self.ids().command_id()
+                    )
+                )
+            })
+        }
+    }
+
+    #[test]
+    fn a_cut_after_the_rebind_request_is_written_withdraws_it_and_sends_nothing() {
+        let cut = cut_at(HostWorkflow::Rebind, HostBoundary::Prepared, 1);
+        cut.assert_one_rebind();
+        cut.reopen_admitted_nothing();
+        let head = cut.head();
+        assert_eq!(
+            head.id, cut.source,
+            "an unpublished rebind has no successor"
+        );
+        assert!(
+            cut.store
+                .load_intents(&head.id)
+                .unwrap()
+                .workflow_request(&cut.ids().operation_id)
+                .is_none(),
+            "the unpublished request is withdrawn"
+        );
+        assert!(head.pending_queue.is_empty());
+        assert_eq!(user_rows(cut.store.as_ref(), &head.id), ["do the thing"]);
+    }
+
+    #[test]
+    fn a_cut_after_the_rebind_publishes_reports_the_unsent_continue_once_opened() {
+        let cut = cut_at(HostWorkflow::Rebind, HostBoundary::ProductPublished, 1);
+        cut.assert_one_rebind();
+        cut.reopen_admitted_nothing();
+        let head = cut.head();
+        assert_ne!(head.id, cut.source, "the rebind published");
+        assert_eq!(head.account.as_deref(), Some("codex/b"));
+        assert!(head.pending_queue.is_empty());
+        assert!(cut.continue_notice(), "{:?}", cut.reopened);
+    }
+
+    #[test]
+    fn a_cut_after_the_root_start_is_written_keeps_it_queued_and_paused() {
+        let cut = cut_at(HostWorkflow::RootDelivery, HostBoundary::Prepared, 2);
+        cut.assert_one_rebind();
+        cut.reopen_admitted_nothing();
+        let head = cut.head();
+        assert!(
+            head.pending_queue
+                .iter()
+                .any(|item| item.id == cut.ids().item_id),
+            "the written root-start waits for the operator"
+        );
+        assert!(
+            !cut.continue_notice(),
+            "a queued continue is not reported as unsent"
+        );
+    }
+
+    #[test]
+    fn a_cut_after_the_root_turn_is_admitted_runs_it_once() {
+        let cut = cut_at(HostWorkflow::RootDelivery, HostBoundary::RuntimeReturned, 2);
+        cut.assert_one_rebind();
+        let head = cut.head();
+        let views = cut.store.load_views(&head.id).unwrap().unwrap();
+        assert!(views.state.deliveries.contains_key(&cut.ids().command_id()));
+        assert!(!cut.continue_notice());
+        let prompts = user_rows(cut.store.as_ref(), &head.id);
+        assert!(
+            prompts
+                .iter()
+                .filter(|text| *text == "do the thing")
+                .count()
+                <= 2,
+            "at most one resubmitted prompt: {prompts:?}"
+        );
+        assert!(
+            !head
+                .pending_queue
+                .iter()
+                .any(|item| item.id == cut.ids().item_id),
+            "an admitted continue leaves no queued copy"
+        );
+    }
 }

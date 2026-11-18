@@ -222,6 +222,16 @@ impl std::fmt::Display for ProductSessionId {
     }
 }
 
+/// The continue an account switch published without its root-start.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AccountContinuation {
+    /// Full account reference the session continued on.
+    pub account: String,
+    /// The continue's derived root-start command id.
+    pub command_id: String,
+}
+
 /// One semantic remedy; compound cases name alternatives, never arbitrary command lists.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(tag = "code", rename_all = "snake_case", deny_unknown_fields)]
@@ -305,10 +315,8 @@ pub enum NoticeRemedy {
     /// Submit the continue prompt an account switch published without:
     /// choose the same account with `continue_failed` again.
     ContinueOnAccount {
-        /// Full account reference the session continued on.
-        account: String,
-        /// The continue's derived root-start command id.
-        command_id: String,
+        /// The account and the continue's derived root-start command id.
+        continuation: Box<AccountContinuation>,
     },
     /// Repair the credential for its condition, or choose another profile.
     RepairCredentialOrChooseProfile {

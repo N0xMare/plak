@@ -551,7 +551,17 @@ pub(super) async fn handle_profile_rebind<P: plakous_host_protocol::ProtocolExte
     let selection =
         profile_rebind_selection(config, account, model, effort, extra, composition, protocol);
     rebind_root(
-        watch, config, opened, stderr_buf, events, account, model, selection, mode,
+        watch,
+        config,
+        opened,
+        stderr_buf,
+        events,
+        RootRebind {
+            account,
+            model,
+            selection,
+            mode,
+        },
     )
     .await
 }
@@ -589,34 +599,43 @@ pub(super) async fn handle_account_rebind<P: plakous_host_protocol::ProtocolExte
         opened,
         stderr_buf,
         events,
-        account,
-        &model,
-        selection,
-        RebindMode::Account(operation),
+        RootRebind {
+            account,
+            model: &model,
+            selection,
+            mode: RebindMode::Account(operation),
+        },
     )
     .await
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Every rebind receives the attached source, interrupt watch, target tuple and mode as distinct authorities."
-)]
-async fn rebind_root<P: plakous_host_protocol::ProtocolExtension>(
-    watch: InterruptWatch<'_, P>,
-    config: &mut HostConfig<P>,
-    opened: &mut AttachedCodingSession,
-    stderr_buf: &mut Vec<u8>,
-    events: &Sender<P>,
-    account: &str,
-    model: &str,
+/// The root binding a rebind moves to and what it does with the root node.
+struct RootRebind<'a> {
+    account: &'a str,
+    model: &'a str,
     selection: CliResult<(
         TargetSelection,
         bool,
         Option<String>,
         crate::binding::CompositionSelection,
     )>,
-    mode: RebindMode<'_>,
+    mode: RebindMode<'a>,
+}
+
+async fn rebind_root<P: plakous_host_protocol::ProtocolExtension>(
+    watch: InterruptWatch<'_, P>,
+    config: &mut HostConfig<P>,
+    opened: &mut AttachedCodingSession,
+    stderr_buf: &mut Vec<u8>,
+    events: &Sender<P>,
+    rebind: RootRebind<'_>,
 ) -> CliResult<Rebound> {
+    let RootRebind {
+        account,
+        model,
+        selection,
+        mode,
+    } = rebind;
     let rebound: CliResult<Rebound> = Box::pin(async {
         // A switch hands running processes to the successor on the same
         // line; a fork leaves them with the source.
