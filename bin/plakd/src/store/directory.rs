@@ -307,7 +307,7 @@ impl ProductStore {
     ) -> Result<Option<sessions::SessionRecord>, String> {
         let ids = self
             .connection
-            .prepare("SELECT s.id FROM sessions s WHERE s.node_tree_id=?1 AND s.node_agent_id=?1 AND NOT EXISTS (SELECT 1 FROM sessions successor WHERE successor.source_session_id=s.id AND successor.node_tree_id=s.node_tree_id AND successor.node_agent_id=s.node_agent_id) LIMIT 2")
+            .prepare(ROOT_LINE_HEAD_SQL)
             .and_then(|mut statement| {
                 statement
                     .query_map([tree_id], |row| row.get::<_, String>(0))?
@@ -322,6 +322,10 @@ impl ProductStore {
         }
     }
 }
+
+/// The heads of a tree's root line: root-node sessions no root-node session
+/// succeeds. More than one is an ambiguous line.
+const ROOT_LINE_HEAD_SQL: &str = "SELECT s.id FROM sessions s WHERE s.node_tree_id=?1 AND s.node_agent_id=?1 AND NOT EXISTS (SELECT 1 FROM sessions successor WHERE successor.source_session_id=s.id AND successor.node_tree_id=s.node_tree_id AND successor.node_agent_id=s.node_agent_id) LIMIT 2";
 
 pub(super) fn head_of_tree_on(
     connection: &rusqlite::Connection,
@@ -518,6 +522,31 @@ mod tests {
             carried.id
         );
         assert_carried_lookup_is_indexed(&store, &source, key, &alias);
+    }
+
+    /// The root line read a spawn's account resolution runs searches the
+    /// sessions by node rather than scanning every session.
+    #[test]
+    fn the_root_line_head_lookup_is_indexed_by_node() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::home::paths::PlakPaths::explicit(root.path().join("home"));
+        let store = ProductStore::open(&paths).unwrap();
+        let mut plan = store
+            .connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {ROOT_LINE_HEAD_SQL}"))
+            .unwrap();
+        let steps = plan
+            .query_map(["tree-a"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(
+            steps
+                .iter()
+                .any(|step| step
+                    .contains("INDEX sessions_node (node_tree_id=? AND node_agent_id=?)")),
+            "{steps:?}"
+        );
     }
 
     fn assert_carried_lookup_is_indexed(

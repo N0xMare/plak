@@ -610,7 +610,10 @@ format or the state-key version.
 When a projector transaction is refused, nothing of it is kept in memory: the
 cursor stays where it was, and the next tick, action or open applies the same
 records again. `submissions`, `workflow_requests` and `operator_notices` are
-indexed by `session_id`, because every load reads them by session.
+indexed by `session_id`, because every load reads them by session, and
+`sessions` by its tree node (`node_tree_id`, `node_agent_id`), because a
+spawn's account resolution and every tree-scoped head lookup read the root
+line by node.
 Each pass snapshots same-runtime ancestry once with a narrow metadata read and
 loads only ancestor submissions. It never hydrates ancestor records, transcripts
 or unrelated intents. Own intents are read after each feed page.
