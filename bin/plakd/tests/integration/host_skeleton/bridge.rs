@@ -617,19 +617,20 @@ fn the_stdio_bridge_does_not_consume_a_separate_handshake_or_mask_a_version_refu
     let Some(fixture) = fixture() else { return };
     let mut host = start(&fixture);
     let mut bridge = Bridge::start(&fixture);
-    bridge.hello(WIRE_VERSION - 1);
+    const OLDER: u32 = WIRE_VERSION - 1;
+    bridge.hello(OLDER);
     assert!(matches!(
         bridge.next(),
         HostFrame::Refused(
             plakous_host_protocol::wire::HandshakeRefusal::VersionMismatch {
                 host: WIRE_VERSION,
-                client: WIRE_VERSION - 1
+                client: OLDER
             }
         )
     ));
     assert!(
         bridge.lines.recv_timeout(WAIT).is_err(),
-        "wire 10 received another frame"
+        "the refused handshake received another frame"
     );
     bridge.finish();
     let mut client = Client::connect(&host);
