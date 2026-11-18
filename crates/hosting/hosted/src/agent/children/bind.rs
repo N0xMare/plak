@@ -390,23 +390,35 @@ pub(in crate::agent) async fn spawn_account(
                 .to_owned()
         })?;
     let kind = card_ref.vertical();
-    if let Some(account) = head.chosen_account(kind) {
-        return Ok(account);
-    }
-    let fill = parent
-        .state_roots()
-        .roster_source()
-        .fill_spawn_account(kind.as_str());
-    let filled = match fill {
-        Some(read) => crate::off_loop::await_read("plak-spawn-account", read, || None).await,
-        None => None,
+    let filled = if let Some(account) = head.chosen_account(kind) {
+        Some(account)
+    } else {
+        match parent
+            .state_roots()
+            .roster_source()
+            .fill_spawn_account(kind.as_str())
+        {
+            Some(read) => crate::off_loop::await_read("plak-spawn-account", read, || None).await,
+            None => None,
+        }
     };
-    filled.ok_or_else(|| {
+    let filled = filled.ok_or_else(|| {
         format!(
             "no {} account is chosen for this session; choose one before spawning",
             kind.as_str()
         )
-    })
+    })?;
+    let account = filled
+        .parse::<crate::account::AccountRef>()
+        .ok()
+        .filter(|account| account.vertical() == kind)
+        .ok_or_else(|| {
+            format!(
+                "the session's {} account choice has the wrong kind",
+                kind.as_str()
+            )
+        })?;
+    Ok(account.to_string())
 }
 
 /// Creates the child session and starts its assignment turn in one step.
@@ -435,10 +447,7 @@ pub(in crate::agent) async fn create_spawned_child_session(
     let tree_id = parent.child_inputs().tree_id.to_owned();
     let operation_id = spawn_child_operation_id(&tree_id, &spawned.agent_id)?;
     let fence = occupancy_session_fence(start.tier);
-    let resolved = spawn_account(parent, &start.account)
-        .await
-        .map_err(SpawnBindError::from)?;
-    let account = Some(resolved.as_str()).filter(|account| !account.is_empty());
+    let account = Some(start.account.as_str()).filter(|account| !account.is_empty());
     let start_kind = ChildAssignmentStartKind::from_composition(prompt_composition(
         spawn_child_start_composition(parent, &spawned.agent_id, account)?,
     ))?;

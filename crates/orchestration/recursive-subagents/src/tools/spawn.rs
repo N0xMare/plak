@@ -82,6 +82,11 @@ enum SpawnPhase {
     ),
 }
 
+struct SpawnBinding {
+    parent_composition: Option<plakous_host_protocol::selection::CompositionSelection>,
+    resolved_account: Option<String>,
+}
+
 impl TopologyTool {
     /// Spends one unit of the caller cell's agent budget, or refuses.
     ///
@@ -312,6 +317,7 @@ impl TopologyTool {
         caller: &str,
         operation_id: &str,
         request: &SpawnAgentRequest,
+        resolved_account: Option<String>,
     ) -> Result<(Result<(SpawnAgentOutput, bool), TopologyError>, Effects), ToolRuntimeError> {
         let tool = self.clone();
         let (caller, operation_id, request) =
@@ -326,9 +332,12 @@ impl TopologyTool {
                 ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
             })?;
         let jj_copy_dirs = self.driver.vcs().jj_copy_dirs(&launch).await;
-        let parent_composition = self
-            .binder()
-            .and_then(|binder| binder.spawn_parent_composition(&caller));
+        let binding = SpawnBinding {
+            parent_composition: self
+                .binder()
+                .and_then(|binder| binder.spawn_parent_composition(&caller)),
+            resolved_account,
+        };
         let (phase, effects) = self
             .driver
             .mutate({
@@ -341,7 +350,7 @@ impl TopologyTool {
                         &operation_id,
                         &request,
                         &jj_copy_dirs,
-                        parent_composition,
+                        binding,
                     )
                 }
             })
@@ -428,7 +437,7 @@ impl TopologyTool {
         operation_id: &str,
         request: &SpawnAgentRequest,
         jj_copy_dirs: &Result<std::collections::BTreeSet<String>, VcsError>,
-        parent_composition: Option<plakous_host_protocol::selection::CompositionSelection>,
+        binding: SpawnBinding,
     ) -> Result<SpawnPhase, TopologyError> {
         if let Some(prior) = tree.prepare_operation(operation_id, caller, "spawn_agent", request)? {
             let output = serde_json::from_str(&prior).map_err(|_| {
@@ -449,7 +458,8 @@ impl TopologyTool {
             // An `inherit` bind mints nothing, so its rows and its receipt
             // land in this same lock.
             Ok(SpawnAdmission::Reserved(mut reservation, None)) => {
-                reservation.set_parent_composition(parent_composition);
+                reservation.set_parent_composition(binding.parent_composition);
+                reservation.set_resolved_account(binding.resolved_account);
                 match tree.spawn_commit(*reservation, None) {
                     Ok(output) => {
                         self.driver.save(tree)?;
@@ -469,7 +479,8 @@ impl TopologyTool {
                 }
             }
             Ok(SpawnAdmission::Reserved(mut reservation, Some(ticket))) => {
-                reservation.set_parent_composition(parent_composition);
+                reservation.set_parent_composition(binding.parent_composition);
+                reservation.set_resolved_account(binding.resolved_account);
                 // On a runner the mint is a recorded stage, published before
                 // it runs (spec 03 §14).
                 let stage = match self.driver.vcs().stage_runner() {
@@ -643,7 +654,8 @@ impl TopologyTool {
         let (output, effects) = if let Some(output) = replay {
             (Ok((output, true)), Effects::default())
         } else {
-            self.spawn_admit(&caller, &operation_id, &request).await?
+            self.spawn_admit(&caller, &operation_id, &request, resolved_account)
+                .await?
         };
         let (output, replayed) = match output {
             Ok(output) => output,
@@ -674,28 +686,6 @@ impl TopologyTool {
                 caller.clone(),
                 request.template.clone(),
             );
-            let driver = self.driver.clone();
-            let frozen = self
-                .driver
-                .write({
-                    let agent_id = agent_id.clone();
-                    move |tree| -> Result<(), TopologyError> {
-                        // Before anything binds the node: every later bind
-                        // reads the account the spawn resolved and admitted.
-                        let Some(account) = resolved_account else {
-                            return Ok(());
-                        };
-                        if tree.freeze_node_account(&agent_id, &account)? {
-                            driver.save_guarded(tree)?;
-                        }
-                        Ok(())
-                    }
-                })
-                .await
-                .map_err(|_| poisoned())?;
-            if let Err(error) = frozen {
-                return self.fail_closed_session(&agent_id, error.message).await;
-            }
             self.driver
                 .write(move |tree| {
                     if let Some(observer) = observer.as_ref() {

@@ -525,6 +525,16 @@ pub struct SpawnReservation {
 }
 
 impl SpawnReservation {
+    /// Freeze the product's resolution of the card with the spawn receipt.
+    /// The product checks that this account belongs to the card's kind.
+    pub(crate) fn set_resolved_account(&mut self, account: Option<String>) {
+        if let Some(account) = account
+            && !self.account.contains('/')
+        {
+            self.account = account;
+        }
+    }
+
     /// Freezes the spawning parent's composition on the child this
     /// reservation commits: the one spawn-parent input a profile switch of
     /// the parent would otherwise change under the child.

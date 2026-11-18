@@ -434,10 +434,11 @@ head's stored choice. A kind with no stored choice takes the fill rule in
 best-effort mode (the kind's Ready bare default slot, else its single Ready
 account); when that fills nothing the spawn is refused, naming the kind. A
 store read failure refuses the spawn; nothing falls back to the card's bare
-kind or the caller's account. Admission then checks the resolved account, and
-the spawned node freezes that full reference before anything binds it, so
-the child's session, its reopen, follow-ups, mail Start and recovery all bind
-it; a choice made later moves only later spawns. A quota-failed child's
+kind or the caller's account. The product checks the resolved account belongs
+to the same kind, including when the card uses an alias, and admits it. The
+spawn receipt and node commit that full reference together, before anything
+binds the child. A replay, reopen, follow-up, mail Start or recovery uses it;
+a choice made later moves only later spawns. In 0.0.5 a quota-failed child's
 retry or follow-up keeps its frozen reference; a new account for that work is
 a new spawn. The epoch's cards keep the kind their templates named, and the
 tree records no session-level choice.
