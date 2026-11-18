@@ -4322,9 +4322,18 @@ which is today's grammar: no `hop`, `relay-lost`, `gateway-refusal`,
 `retry-after-ms`, `credential-status` or `supported`.
 
 `hop=gateway` matches the host and path of the exchange it is applied to.
-A relaying client returns before it consults its plan, and a dialed hop is
-excluded from selection, so neither applies these rules. Hop-1 rules are
-selected by a direct client placed on that hop with `Client::with_fault_hop(Gateway)`.
+A relaying client applies its plan's hop-1 rules to every relay request it
+sends (each re-preparation counts), matched on the logical upstream host and
+path, through the same composition a real hop event takes: `connect`,
+`hang`, `write-reset` and `record-rejected` fail the hop before the gateway
+holds the whole request (upstream `NotStarted`); a status fault or
+`gateway-refusal` answers in the gateway's place without sending the request;
+`relay-lost=before-head` sends the request and loses the answer
+(`MayHaveTransmitted`); `relay-lost=after-head` drops the hop right after
+the relayed head (a `ResponseBody` break); `reset`, `eof` and `stall` apply
+to the relayed body. The dialed hop itself is excluded from selection. A
+direct client placed on that hop with `Client::with_fault_hop(Gateway)`
+applies hop-1 rules to its own exchange.
 Hop-2 rules are selected by the gateway's upstream client. Rules on the other
 hop are not counted. On hop 1 the existing faults keep their meaning:
 `connect` and `hang` are gateway unreachable (`NotStarted`); `write-reset`

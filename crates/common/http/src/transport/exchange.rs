@@ -41,7 +41,10 @@ impl Client {
         }
 
         if let Some(relay) = &self.inner.relay {
-            return relay.execute(&self.inner.limits, request, control).await;
+            let faults = super::test_hop::relaying_faults(self);
+            return relay
+                .execute(&self.inner.limits, request, control, faults)
+                .await;
         }
         let (origin, method, path_and_query, headers, body) = request.into_parts();
         #[cfg(feature = "fault-injection")]

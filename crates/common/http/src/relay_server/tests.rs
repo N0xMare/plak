@@ -918,3 +918,159 @@ async fn a_head_the_frames_cannot_carry_is_a_gateway_failure_not_an_abandonment(
         )]
     );
 }
+
+/// A relaying client whose plan is `plan`, through a real gateway.
+fn faulty(plan: &str, service: Arc<Service>, fixture: &Upstream) -> Client {
+    Client::new_http1(Limits::default())
+        .unwrap()
+        .with_faults(Some(crate::FaultPlan::parse(plan).unwrap()))
+        .with_relay(Arc::new(
+            RelayClient::new(gateway(service, fixture, Peer::InProcess), None).unwrap(),
+        ))
+}
+
+fn logical_request() -> Request {
+    request(
+        Origin::parse(&format!("{LOGICAL}/")).unwrap(),
+        "/v1/x",
+        placeholder(7),
+    )
+}
+
+#[tokio::test]
+async fn gateway_hop_faults_before_the_send_are_unsent_upstream() {
+    let fixture = upstream(Script::Reply(ok_reply("text/plain", b"ok"))).await;
+    // Unsent before the gateway holds the request, or refused in its place:
+    // nothing reaches upstream.
+    for (plan, phase, kind, cause) in [
+        (
+            "hop=gateway,fault=connect",
+            Phase::Connect,
+            ErrorKind::Io,
+            None,
+        ),
+        (
+            "hop=gateway,fault=write-reset",
+            Phase::RequestWriteOrResponseHead,
+            ErrorKind::Protocol,
+            None,
+        ),
+        (
+            "hop=gateway,fault=gateway-refusal=busy,retry-after-ms=5",
+            Phase::Connect,
+            ErrorKind::Io,
+            Some("gateway_busy"),
+        ),
+        (
+            "hop=gateway,fault=gateway-refusal=internal",
+            Phase::RequestWrite,
+            ErrorKind::InvalidResponse,
+            Some("gateway_internal"),
+        ),
+        (
+            "hop=gateway,fault=gateway-refusal=account_disabled",
+            Phase::RequestWrite,
+            ErrorKind::InvalidResponse,
+            Some("gateway_account_disabled"),
+        ),
+        (
+            "hop=gateway,fault=gateway-refusal=credential_not_ready,credential-status=refreshing",
+            Phase::RequestWrite,
+            ErrorKind::InvalidResponse,
+            Some("gateway_credential_not_ready"),
+        ),
+    ] {
+        let failure = faulty(plan, Service::new(), &fixture)
+            .execute(logical_request(), control())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (failure.phase(), failure.transmission(), failure.kind()),
+            (phase, TransmissionFact::NotStarted, kind),
+            "{plan}"
+        );
+        if cause.is_some() {
+            assert_eq!(failure.cause(), cause, "{plan}");
+        }
+    }
+    assert_eq!(fixture.accepted.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn gateway_hop_faults_after_the_send_may_have_transmitted() {
+    let fixture = upstream(Script::Reply(ok_reply("text/plain", b"ok"))).await;
+    // A status in the gateway's place carries no refusal marker: the
+    // request may have been sent.
+    let failure = faulty("hop=gateway,fault=503", Service::new(), &fixture)
+        .execute(logical_request(), control())
+        .await
+        .unwrap_err();
+    assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
+    assert_eq!(failure.cause(), Some("gateway_unmarked"));
+    assert_eq!(fixture.accepted.load(Ordering::SeqCst), 0);
+
+    // Lost before the relayed head: sent, outcome unknown.
+    let failure = faulty(
+        "hop=gateway,fault=relay-lost=before-head",
+        Service::new(),
+        &fixture,
+    )
+    .execute(logical_request(), control())
+    .await
+    .unwrap_err();
+    assert_eq!(
+        (failure.phase(), failure.transmission(), failure.kind()),
+        (
+            Phase::ResponseHead,
+            TransmissionFact::MayHaveTransmitted,
+            ErrorKind::Io
+        )
+    );
+    assert_eq!(failure.cause(), Some("gateway_lost"));
+
+    // Lost after the relayed head: the upstream head arrives, then the body
+    // breaks after possible transmission.
+    let response = faulty(
+        "hop=gateway,fault=relay-lost=after-head",
+        Service::new(),
+        &fixture,
+    )
+    .execute(logical_request(), control())
+    .await
+    .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    let failure = body_chunks(response).await.unwrap_err();
+    assert_eq!(
+        (failure.phase(), failure.transmission()),
+        (Phase::ResponseBody, TransmissionFact::MayHaveTransmitted)
+    );
+
+    // A stream fault cuts the relayed body.
+    let response = faulty(
+        "hop=gateway,fault=reset,after-bytes=1",
+        Service::new(),
+        &fixture,
+    )
+    .execute(logical_request(), control())
+    .await
+    .unwrap();
+    let mut body = response.into_body();
+    assert_eq!(
+        body.next_chunk().await.unwrap().unwrap().as_ref(),
+        b"o".as_slice()
+    );
+    let failure = body.next_chunk().await.unwrap().unwrap_err();
+    assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
+
+    // A scripted fence move is prepared again inside the attempt and dials
+    // once; an upstream-hop rule is never applied to the gateway hop.
+    let service = Service::new();
+    service.moves_per_inject.store(1, Ordering::SeqCst);
+    let before = fixture.accepted.load(Ordering::SeqCst);
+    let response = faulty("fault=connect", service, &fixture)
+        .execute(logical_request(), control())
+        .await
+        .unwrap();
+    assert_eq!(body_chunks(response).await.unwrap().concat(), b"ok");
+    assert_eq!(fixture.accepted.load(Ordering::SeqCst), before + 1);
+}

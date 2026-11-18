@@ -33,6 +33,7 @@ use plakous_gateway_protocol::frame::{WireFailureKind, WirePhase, WireTransmissi
 
 mod frames;
 
+use crate::transport::test_hop::{self, BeforeSend};
 use frames::RelayFrames;
 
 /// How many times one relay request is prepared again after the gateway
@@ -143,8 +144,9 @@ impl crate::transport::hooks::Relay for RelayClient {
         limits: &'a Limits,
         request: Request,
         control: ExchangeControl,
+        faults: test_hop::HopFaults,
     ) -> crate::transport::hooks::HookFuture<'a, Result<Response, Failure>> {
-        Box::pin(self.relay(limits, request, control))
+        Box::pin(self.relay(limits, request, control, faults))
     }
 }
 
@@ -372,12 +374,15 @@ impl RelayClient {
         headers
     }
 
-    /// Relays one exchange; see the module documentation.
+    /// Relays one exchange; see the module documentation. Each relay
+    /// request takes the gateway-hop fault `faults` selects for the logical
+    /// upstream, through the same hop mapping as a real hop event.
     async fn relay(
         &self,
         limits: &Limits,
         request: Request,
         control: ExchangeControl,
+        faults: test_hop::HopFaults,
     ) -> Result<Response, Failure> {
         let (origin, method, path_and_query, headers, body) = request.into_parts();
         if origin.is_loopback_http() {
@@ -426,11 +431,15 @@ impl RelayClient {
                     "relay_request",
                 )
             })?;
-            let response = hop
-                .execute(hop_request, control.clone())
-                .await
-                .map_err(hop_failure)?;
-            match answer(response, limits, &control).await? {
+            let fault = test_hop::select(
+                &faults,
+                origin.host(),
+                path_and_query.as_str(),
+                &control,
+                hop.limits(),
+            )
+            .await?;
+            match exchange_hop(&hop, hop_request, limits, &control, fault).await? {
                 Answer::Relayed(response) => return Ok(*response),
                 Answer::Refused(GatewayRefusal::FenceMoved { facts })
                     if attempt < MAX_FENCE_REPREPARATIONS =>
@@ -495,12 +504,45 @@ enum Answer {
     Refused(GatewayRefusal),
 }
 
+/// Sends one relay request on `hop` and reads the gateway's answer, with
+/// the gateway-hop fault `fault` in place of, or on top of, the real event.
+async fn exchange_hop(
+    hop: &Client,
+    request: Request,
+    limits: &Limits,
+    control: &ExchangeControl,
+    mut fault: test_hop::Selection,
+) -> Result<Answer, Failure> {
+    let response = match test_hop::before_send(&mut fault) {
+        BeforeSend::Fail(failure) => return Err(hop_failure(failure)),
+        BeforeSend::Answer(answer) => *answer,
+        BeforeSend::Send => hop
+            .execute(request, control.clone())
+            .await
+            .map_err(hop_failure)?,
+    };
+    if test_hop::lost_before_head(&fault) {
+        let _ = response.into_body().close().await;
+        return Err(lost(ErrorKind::Io).with_cause("gateway_lost"));
+    }
+    Ok(
+        match answer(response, limits, control, test_hop::cut_after_head(&fault)).await? {
+            Answer::Relayed(response) => {
+                Answer::Relayed(Box::new(test_hop::relayed(fault, *response)))
+            }
+            refused @ Answer::Refused(_) => refused,
+        },
+    )
+}
+
 /// Reads the gateway's answer to one relay request: frames up to the
-/// upstream head, or its refusal.
+/// upstream head, or its refusal. `cut_after_head` drops the hop right after
+/// the head (a gateway-hop fault).
 async fn answer(
     response: Response,
     limits: &Limits,
     control: &ExchangeControl,
+    cut_after_head: bool,
 ) -> Result<Answer, Failure> {
     if let Some(code) = refusal_code(response.headers()) {
         let body = read_all(response.into_body(), call::MAX_CALL_BYTES)
@@ -534,6 +576,9 @@ async fn answer(
     .map_err(|_| lost(ErrorKind::DeadlineExceeded))??;
     match first {
         Frame::Head(head) => {
+            if cut_after_head {
+                frames.cut();
+            }
             let status =
                 StatusCode::from_u16(head.status).map_err(|_| lost(ErrorKind::InvalidResponse))?;
             let headers =

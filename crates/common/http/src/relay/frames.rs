@@ -10,6 +10,8 @@ use crate::{ErrorKind, Failure, LimitKind, Phase, ResponseBody, TransmissionFact
 pub(super) struct RelayFrames {
     hop: Option<ResponseBody>,
     decoder: FrameDecoder,
+    /// The hop drops before the next body frame.
+    cut: bool,
 }
 
 impl RelayFrames {
@@ -17,7 +19,13 @@ impl RelayFrames {
         Self {
             hop: Some(hop),
             decoder,
+            cut: false,
         }
+    }
+
+    /// Drops the hop before the next body frame, as a lost connection does.
+    pub(super) const fn cut(&mut self) {
+        self.cut = true;
     }
 
     /// The first frame: the upstream head, or an `End` before it. Every break
@@ -48,6 +56,10 @@ impl RelayFrames {
     /// it is returned.
     async fn next(&mut self) -> Option<Result<http_body::Frame<Bytes>, ErrorKind>> {
         self.hop.as_ref()?;
+        if self.cut {
+            self.hop = None;
+            return Some(Err(ErrorKind::Io));
+        }
         loop {
             match self.decoder.next_frame() {
                 Ok(Some(Frame::Data(data))) => {

@@ -22,12 +22,14 @@ pub(crate) type HookFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>
 
 /// Takes a client's whole exchange instead of its own connections.
 pub(crate) trait Relay: Send + Sync {
-    /// Performs the exchange under the client's `limits`.
+    /// Performs the exchange under the client's `limits`, applying the
+    /// client's gateway-hop `faults` to each relay request it sends.
     fn execute<'a>(
         &'a self,
         limits: &'a Limits,
         request: Request,
         control: ExchangeControl,
+        faults: super::test_hop::HopFaults,
     ) -> HookFuture<'a, Result<Response, Failure>>;
 }
 

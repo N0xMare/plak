@@ -47,6 +47,11 @@ pub(crate) mod fault;
 mod pool;
 #[cfg(feature = "fault-injection")]
 mod test_dial;
+#[cfg(feature = "fault-injection")]
+pub(crate) mod test_hop;
+#[cfg(not(feature = "fault-injection"))]
+#[path = "transport/test_hop_off.rs"]
+pub(crate) mod test_hop;
 
 const HTTP1_MINIMUM_BUFFER_BYTES: usize = 8_192;
 const TRANSPORT_BEHAVIOR_REVISION: u32 = 5;
@@ -759,8 +764,9 @@ impl Client {
     }
 
     /// Selects which hop of the fault plan this client applies. A relaying
-    /// client never consults its plan, and a dialed hop is excluded from
-    /// selection. Provider and direct clients stay on
+    /// client always applies the plan's gateway-hop rules to its relay
+    /// requests, and a dialed hop is excluded from selection. Provider and
+    /// direct clients stay on
     /// [`FaultHop::Upstream`](fault::FaultHop::Upstream). A direct client
     /// placed on [`FaultHop::Gateway`](fault::FaultHop::Gateway) applies
     /// hop-1 rules to that exchange.

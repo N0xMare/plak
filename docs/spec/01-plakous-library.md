@@ -6199,7 +6199,8 @@ duplex. A repository-only dial override (`plakous-http/fault-injection`,
 absent from product builds) maps a pinned origin to a loopback fixture
 while every check still runs on the logical URL; the gateway's upstream
 client keeps its own transport fault plan, so upstream faults apply to the
-in-process gateway's upstream hop, and the relayed client applies none.
+in-process gateway's upstream hop, and the relaying client applies only its
+plan's gateway-hop rules, to its own relay requests (chapter 05 §2.8).
 
 A custodian may keep what it read the fields from held until the request's
 response head (`CredentialFields::holding`, carried by the server's

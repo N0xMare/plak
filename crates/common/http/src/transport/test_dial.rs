@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use super::hooks::{HookFuture, Relay};
+use super::test_hop::HopFaults;
 use crate::{
     Client, ErrorKind, ExchangeControl, Failure, Limits, Origin, Phase, Request, Response,
     TransmissionFact,
@@ -21,6 +22,8 @@ impl Relay for DialOverride {
         limits: &'a Limits,
         request: Request,
         control: ExchangeControl,
+        // A direct client stand-in: `upstream` applies its own plan.
+        _faults: HopFaults,
     ) -> HookFuture<'a, Result<Response, Failure>> {
         Box::pin(async move {
             let (origin, method, path, headers, body) = request.into_parts();
