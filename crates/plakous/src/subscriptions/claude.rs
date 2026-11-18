@@ -294,6 +294,9 @@ pub(super) fn map_claude_error(
         | plakous_anthropic::ClaudeNativeAuthError::StoredCredentialWrittenByNewerBuild => {
             NativeSubscriptionError::CredentialWrittenByNewerBuild
         }
+        plakous_anthropic::ClaudeNativeAuthError::Store(
+            plakous_auth::PrivateStoreError::AccountReplacementRefused,
+        ) => NativeSubscriptionError::AccountReplacementRefused,
         plakous_anthropic::ClaudeNativeAuthError::Store(_) => {
             NativeSubscriptionError::UnsafeStorage
         }
@@ -348,6 +351,10 @@ fn messages_configuration_error(
 }
 struct PendingLogin(plakous_anthropic::ClaudeOAuthLogin);
 impl super::login::NativePendingLogin for PendingLogin {
+    fn keep_signed_in_account(&mut self) {
+        self.0
+            .set_replacement(plakous_auth::LoginReplacement::SameAccount);
+    }
     fn validate_remote_input(&self, input: &str) -> Result<(), NativeSubscriptionError> {
         self.0
             .validate_authorization_input(input)

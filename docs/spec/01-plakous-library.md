@@ -6206,7 +6206,21 @@ A custodian may keep what it read the fields from held until the request's
 response head (`CredentialFields::holding`, carried by the server's
 `Injection`): a subscription custodian holds the store's exact Ready lease,
 so refresh, replacement and logout of that record wait for the upstream head
-exactly as under direct dispatch. `plakous::gateway::server::SubscriptionCustodian`
+exactly as under direct dispatch. A gateway may also hand the server a
+cancellation token (`Injection::cut_by`, `plakous::gateway::server::CancellationToken`):
+when it is cancelled the relay drops its upstream exchange and ends with
+`End{cancelled}` (audited as `RelayOutcome::Cut`), the kill switch's
+`--cut`.
+
+`PendingNativeLogin::keep_signed_in_account` holds a login to the provider
+account the slot's record named when the login began: Codex and SuperGrok
+compare the private store's account binding (account id, subject) under the
+store lock (`LoginReplacement::SameAccount`); Claude, whose store binding is
+the grant lineage, compares the stored and granted account UUIDs, and a
+record that names none cannot prove it. A different account fails with
+`NativeSubscriptionError::AccountReplacementRefused` before anything is
+written; the login fence's CAS keeps the comparison the record written
+over. `plakous::gateway::server::SubscriptionCustodian`
 is local custody of one subscription kind's logins (Codex, Claude,
 SuperGrok) under a store, the default account and its named accounts: each
 call opens the login as the library's own operations do, so consent,

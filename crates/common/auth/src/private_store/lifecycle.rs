@@ -1,6 +1,8 @@
 //! Credential reads, Ready leases, login replacement and local retirement.
 
-use super::{PrivateCredentialStore, PrivateStoreError, ReadyCredentialLease, platform};
+use super::{
+    LoginReplacement, PrivateCredentialStore, PrivateStoreError, ReadyCredentialLease, platform,
+};
 use crate::{
     CredentialFence, CredentialGeneration, CredentialRecord, CredentialStatus, SecretBytes,
 };
@@ -234,6 +236,23 @@ impl PrivateCredentialStore {
         expected: &CredentialFence,
         replacement: CredentialRecord,
     ) -> Result<CredentialFence, PrivateStoreError> {
+        self.replace_selected_login_with(expected, replacement, LoginReplacement::AnyAccount)
+    }
+
+    /// [`Self::replace_selected_login`] under `policy`: with
+    /// [`LoginReplacement::SameAccount`] a signed-in slot that would change
+    /// its actual account is refused under the lock, before any write.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::replace_selected_login`], plus
+    /// [`PrivateStoreError::AccountReplacementRefused`].
+    pub fn replace_selected_login_with(
+        &self,
+        expected: &CredentialFence,
+        replacement: CredentialRecord,
+        policy: LoginReplacement,
+    ) -> Result<CredentialFence, PrivateStoreError> {
         self.require_fence_scope(expected)?;
         self.require_scope(&replacement)?;
         if replacement.status() != CredentialStatus::Ready {
@@ -250,6 +269,11 @@ impl PrivateCredentialStore {
                 .map_err(|_| PrivateStoreError::GenerationExhausted)?;
             if replacement.generation() != next {
                 return Err(PrivateStoreError::GenerationNotSequential);
+            }
+            if policy == LoginReplacement::SameAccount
+                && current.account_binding() != replacement.account_binding()
+            {
+                return Err(PrivateStoreError::AccountReplacementRefused);
             }
             platform::write_record(store, &replacement)?;
             Ok(replacement.fence())

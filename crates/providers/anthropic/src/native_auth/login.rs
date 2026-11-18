@@ -14,6 +14,7 @@ pub struct ClaudeOAuthLogin {
     pub(super) state: plakous_auth::SecretString,
     pub(super) authorization_url: String,
     pub(super) deadline: Instant,
+    pub(super) replacement: plakous_auth::LoginReplacement,
 }
 
 impl ClaudeOAuthLogin {
@@ -21,6 +22,12 @@ impl ClaudeOAuthLogin {
     #[must_use]
     pub fn authorization_url(&self) -> &str {
         &self.authorization_url
+    }
+
+    /// Which provider account this login may replace in a signed-in slot.
+    /// The default admits any account.
+    pub fn set_replacement(&mut self, replacement: plakous_auth::LoginReplacement) {
+        self.replacement = replacement;
     }
 
     /// Checks a paste without consuming this attempt or starting an exchange.
@@ -67,7 +74,8 @@ impl ClaudeOAuthLogin {
             return Err(ClaudeNativeAuthError::LoginTokenExchange);
         }
         self.core.ensure_flow_active(self.deadline)?;
-        self.core.persist_grant(self.baseline.as_ref(), &grant)
+        self.core
+            .persist_grant(self.baseline.as_ref(), &grant, self.replacement)
     }
 }
 

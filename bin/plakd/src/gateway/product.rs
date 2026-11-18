@@ -390,6 +390,7 @@ fn relay_error(outcome: &RelayOutcome) -> Option<String> {
         RelayOutcome::Complete => None,
         RelayOutcome::UpstreamFailed(_) => Some("upstream_failed".to_owned()),
         RelayOutcome::Abandoned => Some("abandoned".to_owned()),
+        RelayOutcome::Cut => Some("cut".to_owned()),
     }
 }
 

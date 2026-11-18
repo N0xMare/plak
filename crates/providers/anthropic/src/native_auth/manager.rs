@@ -488,6 +488,7 @@ impl ClaudeNativeAuthManager {
             state,
             authorization_url,
             deadline,
+            replacement: plakous_auth::LoginReplacement::AnyAccount,
         })
     }
 
@@ -821,8 +822,11 @@ impl ClaudeNativeAuthManager {
         );
         let grant = parse_claude_oauth_token_grant(body.as_bytes())
             .map_err(|_| ClaudeNativeAuthError::InvalidTokenResponse)?;
-        self.core
-            .persist_grant(self.core.store()?.load()?.as_ref(), &grant)
+        self.core.persist_grant(
+            self.core.store()?.load()?.as_ref(),
+            &grant,
+            plakous_auth::LoginReplacement::AnyAccount,
+        )
     }
 }
 

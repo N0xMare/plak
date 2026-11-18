@@ -79,13 +79,18 @@ pub type ServiceFuture<'a, T> =
 pub struct Injection {
     values: Vec<SensitiveBytes>,
     hold: Option<Box<dyn std::any::Any + Send>>,
+    cut: Option<CancellationToken>,
 }
 
 impl Injection {
     /// Values for the custodied entries, in order.
     #[must_use]
     pub const fn new(values: Vec<SensitiveBytes>) -> Self {
-        Self { values, hold: None }
+        Self {
+            values,
+            hold: None,
+            cut: None,
+        }
     }
 
     /// Keeps `hold` (a credential store's Ready lease, say) until the upstream
@@ -93,6 +98,15 @@ impl Injection {
     #[must_use]
     pub fn holding(mut self, hold: Box<dyn std::any::Any + Send>) -> Self {
         self.hold = Some(hold);
+        self
+    }
+
+    /// Ends this relay when `cut` is cancelled (the gateway's kill switch):
+    /// the upstream exchange is dropped and the caller gets an `End`
+    /// `cancelled` frame.
+    #[must_use]
+    pub fn cut_by(mut self, cut: CancellationToken) -> Self {
+        self.cut = Some(cut);
         self
     }
 }
@@ -103,6 +117,7 @@ impl std::fmt::Debug for Injection {
             .debug_struct("Injection")
             .field("values", &self.values.len())
             .field("holding", &self.hold.is_some())
+            .field("cut", &self.cut.is_some())
             .finish()
     }
 }
@@ -140,6 +155,8 @@ pub enum RelayOutcome {
     UpstreamFailed(TransmissionFact),
     /// The caller left; the upstream exchange was dropped.
     Abandoned,
+    /// The gateway's kill switch cut the exchange.
+    Cut,
 }
 
 /// The gateway's own policy: who may call, which upstreams a credential may
@@ -403,7 +420,7 @@ impl<S: GatewayService> ServerInner<S> {
             .map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
         let method = Method::from_bytes(envelope.method.as_bytes())
             .map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
-        let Injection { values, hold } = self.service.inject(principal, envelope).await?;
+        let Injection { values, hold, cut } = self.service.inject(principal, envelope).await?;
         let mut values = values.into_iter();
         let mut headers = HeaderMap::with_capacity(envelope.headers.len());
         for header in &envelope.headers {
@@ -452,6 +469,7 @@ impl<S: GatewayService> ServerInner<S> {
             upstream,
             request,
             hold,
+            cut,
             deadline: envelope_deadline(envelope),
             max_chunk: usize::try_from(envelope.limits.max_chunk_bytes)
                 .unwrap_or(MAX_DATA_BYTES)
@@ -480,6 +498,7 @@ impl<S: GatewayService> ServerInner<S> {
             upstream,
             request,
             hold,
+            cut,
             deadline,
             max_chunk,
             ..
@@ -491,18 +510,29 @@ impl<S: GatewayService> ServerInner<S> {
                 cancellation.cancel();
                 None
             }
-            result = upstream.execute(request, control) => Some(result),
+            () = cut_signal(cut.as_ref()) => {
+                cancellation.cancel();
+                let _ = send(&sender, &Frame::End(RelayEnd::Cancelled {})).await;
+                Some(None)
+            }
+            result = upstream.execute(request, control) => Some(Some(result)),
         };
         drop(hold);
         record.outcome = match outcome {
             None => RelayOutcome::Abandoned,
-            Some(Err(failure)) => {
+            Some(None) => RelayOutcome::Cut,
+            Some(Some(Err(failure))) => {
                 let _ = send(&sender, &upstream_failed(failure)).await;
                 RelayOutcome::UpstreamFailed(failure.transmission())
             }
-            Some(Ok(response)) => {
+            Some(Some(Ok(response))) => {
                 record.upstream_status = Some(response.status().as_u16());
-                stream(response, max_chunk, &sender, &cancellation, &mut record).await
+                let control = StreamControl {
+                    sender: &sender,
+                    cancellation: &cancellation,
+                    cut: cut.as_ref(),
+                };
+                stream(response, max_chunk, &control, &mut record).await
             }
         };
         record.duration = started.elapsed();
@@ -510,14 +540,33 @@ impl<S: GatewayService> ServerInner<S> {
     }
 }
 
+/// Resolves when `cut` is cancelled; never without one.
+async fn cut_signal(cut: Option<&CancellationToken>) {
+    match cut {
+        Some(cut) => cut.cancelled().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Where one relay's frames go and what ends it early.
+struct StreamControl<'a> {
+    sender: &'a mpsc::Sender<Bytes>,
+    cancellation: &'a CancellationToken,
+    cut: Option<&'a CancellationToken>,
+}
+
 /// Streams one upstream response as `Head`, `Data` and `End` frames.
 async fn stream(
     response: crate::Response,
     max_chunk: usize,
-    sender: &mpsc::Sender<Bytes>,
-    cancellation: &CancellationToken,
+    control: &StreamControl<'_>,
     record: &mut RelayRecord,
 ) -> RelayOutcome {
+    let StreamControl {
+        sender,
+        cancellation,
+        cut,
+    } = *control;
     let event_stream = response
         .headers()
         .get(&http::header::CONTENT_TYPE)
@@ -559,6 +608,11 @@ async fn stream(
             () = sender.closed() => {
                 cancellation.cancel();
                 return RelayOutcome::Abandoned;
+            }
+            () = cut_signal(cut) => {
+                cancellation.cancel();
+                let _ = send(sender, &Frame::End(RelayEnd::Cancelled {})).await;
+                return RelayOutcome::Cut;
             }
             next = body.next_chunk() => next,
         };
@@ -605,6 +659,7 @@ struct Prepared {
     upstream: Client,
     request: Request,
     hold: Option<Box<dyn std::any::Any + Send>>,
+    cut: Option<CancellationToken>,
     deadline: Instant,
     max_chunk: usize,
     audit_target: (String, String),

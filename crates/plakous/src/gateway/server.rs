@@ -23,6 +23,7 @@ use plakous_gateway_protocol::envelope::{self, RelayEnvelope};
 use plakous_gateway_protocol::facts::{self, FactsReply, FactsRequest, RefreshMode, RefreshReply};
 use plakous_gateway_protocol::refusal::GatewayRefusal;
 use plakous_gateway_protocol::{Endpoint, GatewayAccount, UuidText, call};
+pub use plakous_http::CancellationToken;
 use plakous_http::SensitiveBytes;
 pub use plakous_http::relay_server::{
     GatewayService, Injection, Peer, RelayOutcome, RelayRecord, RelayServer, ServeError,

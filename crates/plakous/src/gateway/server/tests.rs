@@ -111,7 +111,7 @@ async fn injection_checks_the_pin_row_names_and_fence_before_lowering_the_key() 
         .unwrap();
     assert_eq!(
         format!("{injected:?}"),
-        "Injection { values: 1, holding: false }"
+        "Injection { values: 1, holding: false, cut: false }"
     );
 
     let custody = &custody;

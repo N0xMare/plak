@@ -73,6 +73,8 @@ impl PendingCompatibilityConsent {
 }
 
 pub(super) trait NativePendingLogin: Send {
+    /// Holds a signed-in slot to its provider account at commit.
+    fn keep_signed_in_account(&mut self);
     fn instructions(&self) -> NativeLoginInstructions<'_>;
     fn validate_remote_input(&self, _input: &str) -> Result<(), NativeSubscriptionError> {
         Err(NativeSubscriptionError::InvalidCallback)
@@ -104,6 +106,16 @@ impl PendingNativeLogin {
     #[must_use]
     pub fn instructions(&self) -> NativeLoginInstructions<'_> {
         self.inner.instructions()
+    }
+
+    /// Holds this login to the provider account the slot's record named when
+    /// the login started: when the new login names another account,
+    /// completion fails with
+    /// [`NativeSubscriptionError::AccountReplacementRefused`] before the
+    /// record is written. Call it only for a slot that was signed in, or
+    /// unusable, when the login began; an empty slot has no account to keep.
+    pub fn keep_signed_in_account(&mut self) {
+        self.inner.keep_signed_in_account();
     }
 
     /// Validates a paste without consuming pending authority or provider I/O.

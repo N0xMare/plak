@@ -40,13 +40,19 @@ impl ManagerCore {
         &self,
         baseline: Option<&CredentialFence>,
         grant: &ClaudeOAuthTokenGrant,
+        replacement: plakous_auth::LoginReplacement,
     ) -> Result<ClaudeSubscriptionStatus, ClaudeNativeAuthError> {
         let generation = match baseline {
             Some(fence) => fence.generation().next()?,
             None => CredentialGeneration::new(1)?,
         };
+        if replacement == plakous_auth::LoginReplacement::SameAccount && baseline.is_some() {
+            self.require_same_account(grant)?;
+        }
         let record = credential_record_from_grant(generation, grant)?;
         let fence = if let Some(expected) = baseline {
+            // The store's binding is this grant's lineage, so the account is
+            // compared above; the fence CAS keeps that read the record written over.
             self.store()?.replace_selected_login(expected, record)?
         } else {
             self.store()?.initialize_selected(&record)?;
@@ -56,6 +62,28 @@ impl ManagerCore {
             generation: fence.generation(),
             status: fence.status(),
         })
+    }
+
+    /// The stored record must name the grant's Claude account UUID. A record
+    /// that names none (retired, or never hydrated) cannot prove it.
+    fn require_same_account(
+        &self,
+        grant: &ClaudeOAuthTokenGrant,
+    ) -> Result<(), ClaudeNativeAuthError> {
+        let current = self
+            .store()?
+            .inspect_payload(|payload| {
+                serde_json::from_slice::<StoredTokens>(payload.expose_secret())
+                    .ok()
+                    .and_then(|stored| stored.account_uuid.clone())
+            })?
+            .flatten();
+        if current.is_none() || current.as_ref() != grant.account_uuid() {
+            return Err(ClaudeNativeAuthError::Store(
+                plakous_auth::PrivateStoreError::AccountReplacementRefused,
+            ));
+        }
+        Ok(())
     }
 
     pub(super) async fn post_json(

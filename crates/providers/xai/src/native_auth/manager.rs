@@ -860,6 +860,7 @@ impl XaiNativeAuthManager {
             binding,
             authorization_url,
             deadline,
+            replacement: plakous_auth::LoginReplacement::AnyAccount,
         })
     }
 

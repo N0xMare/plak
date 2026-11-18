@@ -638,6 +638,20 @@ impl fmt::Debug for PrivateCredentialStore {
     }
 }
 
+/// Which provider account a login into a signed-in selected slot may leave.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum LoginReplacement {
+    /// Any account may replace the signed-in one.
+    #[default]
+    AnyAccount,
+    /// The slot keeps the provider account its current record names, in any
+    /// lifecycle state: a login that would bind another account is refused
+    /// under the store lock, before it is written. The caller chooses this
+    /// only for a slot that was signed in when its login started.
+    SameAccount,
+}
+
 /// Fail-closed private credential store error.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
@@ -705,6 +719,10 @@ pub enum PrivateStoreError {
     /// A generic replacement tried to change the stored actual account.
     #[error("foreign credential account")]
     ForeignAccount,
+    /// A login under [`LoginReplacement::SameAccount`] would have replaced
+    /// the signed-in provider account with another one; nothing was written.
+    #[error("the login would replace the signed-in provider account")]
+    AccountReplacementRefused,
     /// The stored selected-account slot does not match this handle.
     #[error("foreign credential slot")]
     ForeignSlot,

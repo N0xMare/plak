@@ -298,6 +298,7 @@ pub(super) fn map_codex_status(status: plakous_openai::CodexCredentialStatus) ->
 pub(super) fn map_codex_error(
     error: plakous_openai::NativeCodexAuthError,
 ) -> NativeSubscriptionError {
+    use plakous_openai::NativeCodexAuthError as Codex;
     match error {
         plakous_openai::NativeCodexAuthError::CompatibilityDrift(reason) => {
             NativeSubscriptionError::CompatibilityDrift {
@@ -360,9 +361,8 @@ pub(super) fn map_codex_error(
         plakous_openai::NativeCodexAuthError::LoginAccountVerification => {
             NativeSubscriptionError::LoginAccountVerification
         }
-        plakous_openai::NativeCodexAuthError::LoginPersistence => {
-            NativeSubscriptionError::LoginPersistence
-        }
+        Codex::LoginPersistence => NativeSubscriptionError::LoginPersistence,
+        Codex::AccountReplacementRefused => NativeSubscriptionError::AccountReplacementRefused,
         plakous_openai::NativeCodexAuthError::Lookup(error) => error.exhaustion().map_or(
             NativeSubscriptionError::Internal,
             |(attempts, cause, retry_after)| NativeSubscriptionError::ModelLookup {
@@ -478,6 +478,13 @@ enum PendingNativeLoginKind {
     },
 }
 impl super::login::NativePendingLogin for PendingNativeLoginKind {
+    fn keep_signed_in_account(&mut self) {
+        let same = plakous_auth::LoginReplacement::SameAccount;
+        match self {
+            PendingNativeLoginKind::CodexLocal { login, .. } => login.set_replacement(same),
+            PendingNativeLoginKind::CodexDevice { login, .. } => login.set_replacement(same),
+        }
+    }
     fn instructions(&self) -> NativeLoginInstructions<'_> {
         match self {
             PendingNativeLoginKind::CodexLocal { login, .. } => NativeLoginInstructions {

@@ -34,6 +34,7 @@ pub(super) struct BrowserLoginFlow {
     pub(super) binding: CallbackBinding,
     pub(super) authorization_url: Zeroizing<String>,
     pub(super) deadline: Instant,
+    pub(super) replacement: plakous_auth::LoginReplacement,
 }
 
 impl XaiBrowserLogin {
@@ -98,7 +99,10 @@ impl BrowserLoginFlow {
                 &self.redirect_uri,
                 &self.pkce,
                 Some(self.binding.expose_nonce()),
-                self.baseline.as_ref(),
+                super::manager_core::LoginCommit {
+                    baseline: self.baseline.as_ref(),
+                    replacement: self.replacement,
+                },
                 self.deadline,
             ),
         )
@@ -132,6 +136,12 @@ impl XaiRemoteBrowserLogin {
     #[must_use]
     pub fn authorization_url(&self) -> &str {
         self.flow.authorization_url()
+    }
+
+    /// Which provider account this login may replace in a signed-in slot.
+    /// The default admits any account.
+    pub fn set_replacement(&mut self, replacement: plakous_auth::LoginReplacement) {
+        self.flow.replacement = replacement;
     }
 
     /// Checks a paste without consuming this attempt or starting an exchange.
@@ -302,8 +312,12 @@ impl XaiDeviceLogin {
             .validate_tokens(tokens, None, None, None, None, Some(self.deadline))
             .await?;
         self.core.ensure_flow_active(self.deadline)?;
-        self.core
-            .persist_login(self.baseline.as_ref(), &stored, Some(self.deadline))
+        self.core.persist_login(
+            self.baseline.as_ref(),
+            &stored,
+            plakous_auth::LoginReplacement::AnyAccount,
+            Some(self.deadline),
+        )
     }
 }
 

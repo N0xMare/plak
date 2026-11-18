@@ -734,6 +734,7 @@ fn device_login_for_deadline_test(deadline: Instant) -> CodexDeviceLogin {
         interval: Duration::from_millis(1),
         deadline,
         credential_baseline: None,
+        replacement: plakous_auth::LoginReplacement::AnyAccount,
     }
 }
 

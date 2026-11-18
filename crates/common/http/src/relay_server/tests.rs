@@ -143,6 +143,7 @@ struct Service {
     moves_per_inject: AtomicU64,
     held: Arc<AtomicUsize>,
     audited: Mutex<Vec<super::RelayOutcome>>,
+    cut: Mutex<Option<crate::CancellationToken>>,
 }
 
 /// Counts itself held until dropped, as a store's Ready lease would be.
@@ -161,6 +162,7 @@ impl Service {
             moves_per_inject: AtomicU64::new(0),
             held: Arc::new(AtomicUsize::new(0)),
             audited: Mutex::new(Vec::new()),
+            cut: Mutex::new(None),
         })
     }
 
@@ -224,8 +226,12 @@ impl GatewayService for Service {
                 });
             }
             self.held.fetch_add(1, Ordering::SeqCst);
-            Ok(Injection::new(vec![SensitiveBytes::new(SECRET.to_vec())])
-                .holding(Box::new(Hold(self.held.clone()))))
+            let injection = Injection::new(vec![SensitiveBytes::new(SECRET.to_vec())])
+                .holding(Box::new(Hold(self.held.clone())));
+            Ok(match self.cut.lock().unwrap().clone() {
+                Some(cut) => injection.cut_by(cut),
+                None => injection,
+            })
         })
     }
 
@@ -650,6 +656,55 @@ async fn a_break_after_the_head_may_have_transmitted_and_leaving_cancels_upstrea
     let failure = body_chunks(response).await.unwrap_err();
     assert_eq!(failure.phase(), Phase::ResponseBody);
     assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
+}
+
+#[tokio::test]
+async fn a_cut_ends_a_streaming_relay_and_drops_the_upstream_exchange() {
+    let head = b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: 1\n\n".to_vec();
+    let fixture = upstream(Script::HangAfter(head)).await;
+    let service = Service::new();
+    let cut = crate::CancellationToken::new();
+    *service.cut.lock().unwrap() = Some(cut.clone());
+    let client = relayed(gateway(Arc::clone(&service), &fixture, Peer::InProcess));
+    let response = client
+        .execute(
+            request(
+                Origin::parse(&format!("{LOGICAL}/")).unwrap(),
+                "/v1/stream",
+                placeholder(7),
+            ),
+            control(),
+        )
+        .await
+        .unwrap();
+    let mut body = response.into_body();
+    assert_eq!(
+        body.next_chunk().await.unwrap().unwrap().as_ref(),
+        b"data: 1\n\n"
+    );
+    cut.cancel();
+    let next = tokio::time::timeout(Duration::from_secs(1), body.next_chunk())
+        .await
+        .expect("a cut relay ends within 1 s");
+    assert!(
+        !matches!(next, Some(Ok(_))),
+        "a cut relay carries no more data"
+    );
+    tokio::time::timeout(Duration::from_secs(1), fixture.closed.notified())
+        .await
+        .expect("a cut drops the upstream exchange within 1 s");
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !service
+            .audited
+            .lock()
+            .unwrap()
+            .contains(&super::RelayOutcome::Cut)
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the cut is audited");
 }
 
 #[tokio::test]

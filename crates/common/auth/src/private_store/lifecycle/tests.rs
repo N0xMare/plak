@@ -1,9 +1,9 @@
 //! Credential-store lifecycle regressions.
 
 use crate::private_store::PrivateCredentialStore;
-use crate::private_store::PrivateStoreError;
 use crate::private_store::platform;
 use crate::private_store::{Fixture, load_raw_for_test};
+use crate::private_store::{LoginReplacement, PrivateStoreError};
 use crate::{
     AccountBinding, CredentialGeneration, CredentialRecord, CredentialSlotId, CredentialStatus,
     SecretBytes, SubscriptionIntegrationProfileId,
@@ -206,6 +206,43 @@ fn independent_handles_reject_a_cas_race() -> Result<(), Box<dyn std::error::Err
             .generation(),
         CredentialGeneration::new(2)?
     );
+    Ok(())
+}
+
+#[test]
+fn a_same_account_login_refuses_another_account_before_writing()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new()?;
+    let slot = CredentialSlotId::new("primary")?;
+    let store = PrivateCredentialStore::open_slot(&fixture.path, fixture.profile.clone(), slot)?;
+    store.initialize_selected(&fixture.record(1, CredentialStatus::Ready, b"account-a")?)?;
+    let before = store.load()?.ok_or("missing selected account")?;
+    let other = CredentialRecord::new(
+        fixture.profile.clone(),
+        AccountBinding::new("another-account")?,
+        CredentialGeneration::new(2)?,
+        CredentialStatus::Ready,
+        SecretBytes::new(b"other".to_vec()),
+    )?;
+    assert_eq!(
+        store.replace_selected_login_with(&before, other, LoginReplacement::SameAccount),
+        Err(PrivateStoreError::AccountReplacementRefused)
+    );
+    assert_eq!(store.load()?, Some(before.clone()), "nothing was written");
+    let same = fixture.record(2, CredentialStatus::Ready, b"account-a-again")?;
+    let relogged =
+        store.replace_selected_login_with(&before, same, LoginReplacement::SameAccount)?;
+    assert_eq!(relogged.account_binding(), &fixture.account);
+    let other = CredentialRecord::new(
+        fixture.profile.clone(),
+        AccountBinding::new("another-account")?,
+        CredentialGeneration::new(3)?,
+        CredentialStatus::Ready,
+        SecretBytes::new(b"other".to_vec()),
+    )?;
+    let replaced =
+        store.replace_selected_login_with(&relogged, other, LoginReplacement::AnyAccount)?;
+    assert_eq!(replaced.account_binding().as_str(), "another-account");
     Ok(())
 }
 

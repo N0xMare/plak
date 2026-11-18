@@ -6,14 +6,13 @@ use super::ensure_compatibility;
 use super::{
     ACCESS_REFRESH_LEAD_SECONDS, AccountBinding, Arc, AuthTransportError, Bytes, CATALOG_PATH,
     CATALOG_TTL_SECONDS, COMPATIBILITY_EXPIRES_UNIX, CatalogReceiptCore, CatalogResponse,
-    CredentialFence, CredentialGeneration, CredentialRecord, CredentialRefreshDetail,
-    CredentialStatus, Duration, Endpoint, ExchangeControl, Failure, HEADER_ACCEPT,
-    HEADER_AUTHORIZATION, HeaderValue, Instant, LoginHttpStage, MAX_AUTH_BODY_BYTES,
-    MAX_TOKEN_BYTES, ManagerCore, Method, Ordering, Origin, PkceS256, REQUEST_TIMEOUT,
-    ReadyCredentialLease, Request, SecretString, SensitiveBytes, StatusCode, StoredTokens,
-    Timestamp, TokenResponse, XAI_GROK_COMPATIBILITY_PROFILE, XAI_PUBLIC_CLIENT_ID,
-    XaiNativeAuthError, XaiNativeCatalogReceipt, XaiRefreshCancelGuard, XaiRefreshHooks,
-    XaiRevokeHooks, XaiSubscriptionStatus, Zeroizing, access_needs_refresh,
+    CredentialFence, CredentialGeneration, CredentialRefreshDetail, CredentialStatus, Duration,
+    Endpoint, ExchangeControl, Failure, HEADER_ACCEPT, HEADER_AUTHORIZATION, HeaderValue, Instant,
+    LoginHttpStage, MAX_AUTH_BODY_BYTES, MAX_TOKEN_BYTES, ManagerCore, Method, Ordering, Origin,
+    PkceS256, REQUEST_TIMEOUT, ReadyCredentialLease, Request, SecretString, SensitiveBytes,
+    StatusCode, StoredTokens, Timestamp, TokenResponse, XAI_GROK_COMPATIBILITY_PROFILE,
+    XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError, XaiNativeCatalogReceipt, XaiRefreshCancelGuard,
+    XaiRefreshHooks, XaiRevokeHooks, XaiSubscriptionStatus, Zeroizing, access_needs_refresh,
     authorization_code_token_form, bearer_header, catalog_subject_header, credential_record,
     decode_json, fixed_headers, headers_are_json, insert_subscription_catalog_headers,
     network_failure, remaining_until, run_claimed_refresh, run_claimed_revoke, status_error,
@@ -21,6 +20,13 @@ use super::{
     valid_login_selection_epoch, validate_acceptance_until,
 };
 use plakous_auth::oauth_orchestrator::pull_auth_body;
+
+/// The slot state a login commits over and which account it may replace.
+#[derive(Clone, Copy)]
+pub(super) struct LoginCommit<'a> {
+    pub(super) baseline: Option<&'a CredentialFence>,
+    pub(super) replacement: plakous_auth::LoginReplacement,
+}
 
 impl ManagerCore {
     pub(super) async fn validate_login_discovery(&self) -> Result<(), XaiNativeAuthError> {
@@ -83,7 +89,7 @@ impl ManagerCore {
         redirect_uri: &str,
         pkce: &PkceS256,
         nonce: Option<&str>,
-        baseline: Option<&CredentialFence>,
+        commit: LoginCommit<'_>,
         deadline: Instant,
     ) -> Result<XaiSubscriptionStatus, XaiNativeAuthError> {
         self.ensure_flow_active(deadline)?;
@@ -105,7 +111,7 @@ impl ManagerCore {
             .validate_tokens(tokens, nonce, None, None, None, Some(deadline))
             .await?;
         self.ensure_flow_active(deadline)?;
-        self.persist_login(baseline, &stored, Some(deadline))
+        self.persist_login(commit.baseline, &stored, commit.replacement, Some(deadline))
     }
 
     pub(super) fn ensure_login_validation_active(
@@ -332,6 +338,7 @@ impl ManagerCore {
         &self,
         baseline: Option<&CredentialFence>,
         stored: &StoredTokens,
+        replacement: plakous_auth::LoginReplacement,
         flow_deadline: Option<Instant>,
     ) -> Result<XaiSubscriptionStatus, XaiNativeAuthError> {
         self.ensure_login_validation_active(flow_deadline)?;
@@ -343,8 +350,14 @@ impl ManagerCore {
         let record = credential_record(account.clone(), generation, stored)?;
         self.ensure_login_validation_active(flow_deadline)?;
         let fence = if let Some(expected) = baseline {
-            self.core_replace_selected(expected, record)
-                .map_err(|_| XaiNativeAuthError::LoginPersistence)?
+            self.store()?
+                .replace_selected_login_with(expected, record, replacement)
+                .map_err(|error| match error {
+                    plakous_auth::PrivateStoreError::AccountReplacementRefused => {
+                        XaiNativeAuthError::AccountReplacementRefused
+                    }
+                    _ => XaiNativeAuthError::LoginPersistence,
+                })?
         } else {
             self.store()?
                 .initialize_selected(&record)
@@ -356,16 +369,6 @@ impl ManagerCore {
             status: fence.status(),
             account,
         })
-    }
-
-    fn core_replace_selected(
-        &self,
-        expected: &CredentialFence,
-        record: CredentialRecord,
-    ) -> Result<CredentialFence, XaiNativeAuthError> {
-        self.store()?
-            .replace_selected_login(expected, record)
-            .map_err(Into::into)
     }
 
     pub(super) async fn refresh_if_needed(

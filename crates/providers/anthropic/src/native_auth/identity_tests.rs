@@ -251,7 +251,10 @@ async fn read_fixture_request(
 
 fn persist_without_uuid(manager: &ClaudeNativeAuthManager) {
     let grant = parse_claude_oauth_token_grant(br#"{"access_token":"fixture-access","refresh_token":"fixture-refresh","scope":"user:inference","expires_in":3600}"#).unwrap();
-    manager.core.persist_grant(None, &grant).unwrap();
+    manager
+        .core
+        .persist_grant(None, &grant, plakous_auth::LoginReplacement::AnyAccount)
+        .unwrap();
 }
 
 #[tokio::test]
@@ -469,4 +472,69 @@ async fn separate_managers_hydrate_concurrently_without_blocking_the_executor() 
         first.request_identity().unwrap().account_uuid().as_str(),
         ACCOUNT
     );
+}
+
+/// A login held to the signed-in account refuses another account before it
+/// writes, re-logs the same account, and an unheld login may replace it.
+#[tokio::test]
+async fn a_held_login_keeps_the_signed_in_account() {
+    let grant = |account: &str| {
+        serde_json::json!({
+            "access_token": "fixture-access-new",
+            "refresh_token": "fixture-refresh-new",
+            "expires_in": 3600,
+            "scope": "user:inference",
+            "account": {"uuid": account},
+        })
+    };
+    for (incoming, replacement, admitted) in [
+        (
+            OTHER_ACCOUNT,
+            plakous_auth::LoginReplacement::SameAccount,
+            false,
+        ),
+        (ACCOUNT, plakous_auth::LoginReplacement::SameAccount, true),
+        (
+            OTHER_ACCOUNT,
+            plakous_auth::LoginReplacement::AnyAccount,
+            true,
+        ),
+    ] {
+        let (_temp, manager, peer) = fixture(grant(incoming)).await;
+        manager
+            .persist_test_grant_for_account(
+                "fixture-access",
+                "fixture-refresh",
+                3600,
+                "user:inference",
+                ACCOUNT,
+            )
+            .unwrap();
+        let before = manager.core.store().unwrap().load().unwrap();
+        let mut login = manager.begin_login().unwrap();
+        login.set_replacement(replacement);
+        let input = format!(
+            "{}#{}",
+            "fixture-code".repeat(3),
+            login.state.expose_secret()
+        );
+        let result = login.complete(&input).await;
+        peer.await.unwrap();
+        let after = manager.core.store().unwrap().load().unwrap();
+        if admitted {
+            result.unwrap();
+            assert_ne!(after, before, "{incoming} {replacement:?}");
+        } else {
+            assert!(
+                matches!(
+                    result,
+                    Err(ClaudeNativeAuthError::Store(
+                        PrivateStoreError::AccountReplacementRefused
+                    ))
+                ),
+                "{result:?}"
+            );
+            assert_eq!(after, before, "a refused login must write nothing");
+        }
+    }
 }

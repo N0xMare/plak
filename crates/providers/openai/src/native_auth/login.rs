@@ -32,6 +32,7 @@ pub(super) struct BrowserLoginAttempt {
     pub(super) authorization_url: Zeroizing<String>,
     pub(super) redirect_uri: String,
     pub(super) credential_baseline: Option<CredentialFence>,
+    pub(super) replacement: plakous_auth::LoginReplacement,
     pub(super) state: AuthSecretString,
     pub(super) pkce: plakous_auth::PkceS256,
     pub(super) deadline: Instant,
@@ -42,6 +43,12 @@ impl CodexBrowserLogin {
     #[must_use]
     pub fn authorization_url(&self) -> &str {
         &self.attempt.authorization_url
+    }
+
+    /// Which provider account this login may replace in a signed-in slot.
+    /// The default admits any account.
+    pub fn set_replacement(&mut self, replacement: plakous_auth::LoginReplacement) {
+        self.attempt.replacement = replacement;
     }
 }
 
@@ -61,9 +68,16 @@ pub struct CodexDeviceLogin {
     pub(super) interval: Duration,
     pub(super) deadline: Instant,
     pub(super) credential_baseline: Option<CredentialFence>,
+    pub(super) replacement: plakous_auth::LoginReplacement,
 }
 
 impl CodexDeviceLogin {
+    /// Which provider account this login may replace in a signed-in slot.
+    /// The default admits any account.
+    pub fn set_replacement(&mut self, replacement: plakous_auth::LoginReplacement) {
+        self.replacement = replacement;
+    }
+
     /// Returns the exact verification origin/path.
     #[must_use]
     pub fn verification_url(&self) -> &str {
@@ -100,6 +114,7 @@ pub struct CodexDeviceAuthorization {
     pkce: plakous_auth::PkceS256,
     deadline: Instant,
     credential_baseline: Option<CredentialFence>,
+    replacement: plakous_auth::LoginReplacement,
 }
 
 impl fmt::Debug for CodexDeviceAuthorization {
@@ -137,6 +152,7 @@ impl CodexSubscriptionCredentialManager {
             authorization_url,
             redirect_uri,
             credential_baseline,
+            replacement: plakous_auth::LoginReplacement::AnyAccount,
             state,
             pkce,
             deadline: Instant::now() + BROWSER_DEADLINE,
@@ -228,8 +244,13 @@ impl CodexSubscriptionCredentialManager {
                 login.deadline,
             )
             .await?;
-        self.commit_login(credential, login.credential_baseline, login.deadline)
-            .await?;
+        self.commit_login_with(
+            credential,
+            login.credential_baseline,
+            login.replacement,
+            login.deadline,
+        )
+        .await?;
         Ok(CodexCredentialStatus::Ready)
     }
 
@@ -285,6 +306,7 @@ impl CodexSubscriptionCredentialManager {
             interval: Duration::from_secs(interval.max(MIN_DEVICE_INTERVAL_SECONDS)),
             deadline: Instant::now() + DEVICE_DEADLINE,
             credential_baseline,
+            replacement: plakous_auth::LoginReplacement::AnyAccount,
         })
     }
 
@@ -365,6 +387,7 @@ impl CodexSubscriptionCredentialManager {
             pkce,
             deadline: login.deadline,
             credential_baseline: login.credential_baseline,
+            replacement: login.replacement,
         })
     }
 
@@ -397,9 +420,10 @@ impl CodexSubscriptionCredentialManager {
                 authorization.deadline,
             )
             .await?;
-        self.commit_login(
+        self.commit_login_with(
             credential,
             authorization.credential_baseline,
+            authorization.replacement,
             authorization.deadline,
         )
         .await?;
@@ -448,10 +472,27 @@ impl CodexSubscriptionCredentialManager {
             .await
     }
 
+    #[cfg(test)]
     pub(super) async fn commit_login(
         &self,
         credential: StoredCredential,
         credential_baseline: Option<CredentialFence>,
+        deadline: Instant,
+    ) -> Result<(), NativeCodexAuthError> {
+        self.commit_login_with(
+            credential,
+            credential_baseline,
+            plakous_auth::LoginReplacement::AnyAccount,
+            deadline,
+        )
+        .await
+    }
+
+    pub(super) async fn commit_login_with(
+        &self,
+        credential: StoredCredential,
+        credential_baseline: Option<CredentialFence>,
+        replacement: plakous_auth::LoginReplacement,
         deadline: Instant,
     ) -> Result<(), NativeCodexAuthError> {
         remaining_until(deadline, Instant::now()).ok_or(NativeCodexAuthError::LoginPersistence)?;
@@ -474,8 +515,13 @@ impl CodexSubscriptionCredentialManager {
                 let record = stored_record(&credential, next)
                     .map_err(|_| NativeCodexAuthError::LoginPersistence)?;
                 store
-                    .replace_selected_login(&fence, record)
-                    .map_err(|_| NativeCodexAuthError::LoginPersistence)?
+                    .replace_selected_login_with(&fence, record, replacement)
+                    .map_err(|error| match error {
+                        plakous_auth::PrivateStoreError::AccountReplacementRefused => {
+                            NativeCodexAuthError::AccountReplacementRefused
+                        }
+                        _ => NativeCodexAuthError::LoginPersistence,
+                    })?
             } else {
                 let first = CredentialGeneration::new(1)
                     .map_err(|_| NativeCodexAuthError::LoginPersistence)?;
@@ -527,7 +573,9 @@ impl CodexSubscriptionCredentialManager {
 
 pub(super) fn login_persistence_error(error: NativeCodexAuthError) -> NativeCodexAuthError {
     match error {
-        NativeCodexAuthError::ProfileNotAccepted | NativeCodexAuthError::ProfileNotCurrent => error,
+        NativeCodexAuthError::ProfileNotAccepted
+        | NativeCodexAuthError::ProfileNotCurrent
+        | NativeCodexAuthError::AccountReplacementRefused => error,
         _ => NativeCodexAuthError::LoginPersistence,
     }
 }

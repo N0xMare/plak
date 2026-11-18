@@ -57,6 +57,10 @@ pub enum NativeCodexAuthError {
     /// A validated login could not be committed safely.
     #[error("native Codex login persistence failed")]
     LoginPersistence,
+    /// The login would have replaced the signed-in provider account with
+    /// another one under a same-account rule; nothing was written.
+    #[error("the Codex login would replace the signed-in account")]
+    AccountReplacementRefused,
     /// Provider transport failed without exposing provider data.
     #[error("native Codex authentication transport failed")]
     Transport(Option<plakous_model::ModelNetworkFailure>),

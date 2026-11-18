@@ -344,6 +344,10 @@ impl PendingNativeLogin {
     pub fn instructions(&self) -> NativeLoginInstructions<'_> {
         match self.0 {}
     }
+    /// Holds this login to the slot's signed-in provider account.
+    pub fn keep_signed_in_account(&mut self) {
+        match self.0 {}
+    }
     /// Validates pasted input without consuming pending authority or provider I/O.
     ///
     /// # Errors

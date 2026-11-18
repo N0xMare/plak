@@ -1394,6 +1394,7 @@ async fn browser_and_device_login_failures_report_only_the_narrow_stage() -> Tes
         persistence_manager.core.persist_login(
             None,
             &stored,
+            plakous_auth::LoginReplacement::AnyAccount,
             Some(Instant::now() + Duration::from_secs(2)),
         ),
         Err(XaiNativeAuthError::LoginPersistence)

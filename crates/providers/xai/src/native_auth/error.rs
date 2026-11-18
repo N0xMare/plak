@@ -53,6 +53,10 @@ pub enum XaiNativeAuthError {
     /// A verified browser or device login could not be committed durably.
     #[error("the xAI login credential could not be persisted")]
     LoginPersistence,
+    /// The login would have replaced the signed-in provider account with
+    /// another one under a same-account rule; nothing was written.
+    #[error("the xAI login would replace the signed-in account")]
+    AccountReplacementRefused,
     /// A strict OAuth token response check failed.
     #[error("the xAI OAuth token response is invalid ({})", .0.as_str())]
     InvalidTokenResponse(CredentialRefreshFailureReason),

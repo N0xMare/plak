@@ -368,6 +368,9 @@ pub(super) fn map_xai_error(error: plakous_xai::XaiNativeAuthError) -> NativeSub
         plakous_xai::XaiNativeAuthError::LoginPersistence => {
             NativeSubscriptionError::LoginPersistence
         }
+        plakous_xai::XaiNativeAuthError::AccountReplacementRefused => {
+            NativeSubscriptionError::AccountReplacementRefused
+        }
         plakous_xai::XaiNativeAuthError::InvalidCallback => {
             NativeSubscriptionError::InvalidCallback
         }
@@ -438,6 +441,10 @@ fn responses_configuration_error(
 }
 struct PendingLogin(plakous_xai::XaiRemoteBrowserLogin);
 impl super::login::NativePendingLogin for PendingLogin {
+    fn keep_signed_in_account(&mut self) {
+        self.0
+            .set_replacement(plakous_auth::LoginReplacement::SameAccount);
+    }
     fn validate_remote_input(&self, input: &str) -> Result<(), NativeSubscriptionError> {
         self.0
             .validate_authorization_input(input)
