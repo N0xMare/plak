@@ -63,7 +63,14 @@ RESPONSIBILITIES = (
 # production source and reconciles every line to the scope totals.
 RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     ("store", (("plakous-store", "src/"),)),
-    ("auth", (("plakous-auth", "src/"), ("plakous-runner-dial", "src/"))),
+    (
+        "auth",
+        (
+            ("plakous-auth", "src/"),
+            ("plakous-runner-dial", "src/"),
+            ("plakous-gateway-protocol", "src/"),
+        ),
+    ),
     (
         "auth",
         (

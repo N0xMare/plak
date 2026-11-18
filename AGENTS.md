@@ -144,8 +144,8 @@ requests count too. Syntax and classification: spec 05 §2.8.
 Prompt renders are regenerated locally into the gitignored `target/prompt-renders/`
 and are **never committed**; correctness is pinned by sha256 tables in code.
 
-The workspace has 42 packages in three classes: supported (5),
-published-internal (34), repository-only (3). Publication and nameability
+The workspace has 43 packages in three classes: supported (5),
+published-internal (35), repository-only (3). Publication and nameability
 confer accessibility, not support.
 
 Packages declare the dependency features their Rust targets use rather than
@@ -196,6 +196,14 @@ in a change; amend the chapter that owns them.
   performs workspace effects or replays effects. Any change to its verbs or
   encodings bumps its version; the previous version's speaker is kept for one
   bump only.
+- The third exception is the credential gateway protocol: a gateway MUST
+  serve, and the next build's callers MUST speak, the gateway protocol of its
+  own version and of the immediately previous version, so that a planned
+  upgrade of either side keeps inference and account operations working. Its
+  endpoints are fixed and path-versioned; it relays one upstream exchange per
+  request, never retries, translates or fails over, and grants no session or
+  store authority. Any change to its endpoints or encodings bumps its version;
+  the previous version's speaker is kept for one bump only.
 - Choose the simplest implementation that fully meets the current architecture.
   Avoid speculative abstractions, configuration, and indirection.
 - Grow in layers: smallest end-to-end product first, then add capability on a

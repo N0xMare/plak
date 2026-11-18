@@ -69,7 +69,7 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 42 packages: five supported, 34 published internal
+The workspace contains 43 packages: five supported, 35 published internal
 (the vendored `plakous-codex-code-mode-protocol` among them), and three
 repository-only. The supported and published-internal packages are publishable
 to crates.io as one exact cohort; the repository-only packages set
@@ -120,6 +120,7 @@ classes and directory policy.
 | `plakous-auth` | `crates/common/auth` | `common` | Provider-neutral auth foundations: secret containers, OAuth pins and workflow, callback binding, credential metadata, durable private storage |
 | `plakous-runner-protocol` | `crates/common/runner-protocol` | `common` | Runner protocol (chapter 01 §8.4): length-prefixed JSON frames, the hello, bind and paired read-only qualification handshake, request classes, owner transfer, fixed Changes reads, separate operator-terminal control and answers |
 | `plakous-runner-dial` | `crates/common/runner-dial` | `common` | Portable Noise IK, pairing proofs, offers, fingerprint confirmation and transport framing; no product caller or I/O |
+| `plakous-gateway-protocol` | `crates/common/gateway-protocol` | `common` | Portable credential gateway protocol (chapter 01 §7.5): relay envelope, response frames and their bounded decoder, refusals, account facts, admin calls, caller keys and scopes; no product caller or I/O |
 | `plakous-image` | `crates/common/image` | `common` | The one image sniffer (re-exported by `plakous-tools`), the attachment count and per-message byte budget, and, under `normalize`, the one attachment and tool-result normalizer and image-file reader: decode, bound, downscale and re-encode, clipboard RGBA, the 64 MiB unread refusal; no runtime, and it reads only a caller-named file |
 | `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v2`), worker client and session for isolated interpreter workers; never links an interpreter |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |
@@ -298,6 +299,15 @@ snapshot/watch, read/poll, write, stop, disown, ack); it never starts work,
 performs workspace effects or replays effects. Any change to its verbs or
 encodings bumps its version; the previous version's speaker is kept for one
 bump only.
+
+The third exception is the credential gateway protocol (chapter 01 §7.5): a
+gateway MUST serve, and the next build's callers MUST speak, the gateway
+protocol of its own version and of the immediately previous version, so that
+a planned upgrade of either side keeps inference and account operations
+working. Its endpoints are fixed and path-versioned; it relays one upstream
+exchange per request, never retries, translates or fails over, and grants no
+session or store authority. Any change to its endpoints or encodings bumps
+its version; the previous version's speaker is kept for one bump only.
 
 Retention-only authority is irreversible for a host/line during that worker's
 lifetime. Downgrading or reinstalling the drainer's own build triple does not

@@ -1,0 +1,26 @@
+[package]
+name = "plakous-gateway-protocol"
+description = "Credential gateway relay and admin protocol between a Plakous caller and its credential gateway"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation = "https://docs.rs/plakous-gateway-protocol"
+readme = "README.md"
+keywords = ["llm", "agent", "protocol"]
+categories = ["development-tools", "network-programming"]
+exclude.workspace = true
+
+[package.metadata.plakous]
+layer = "common"
+class = "published-internal"
+
+[dependencies]
+base64.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true

@@ -88,7 +88,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages, kept outside the production dependency closure entirely and never published |
 
-The workspace holds 42 packages: five supported, 34 published internal, three
+The workspace holds 43 packages: five supported, 35 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -104,13 +104,13 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 use the same name. The `plak` package is retired; this tree provides no
 package alias or executable shim.
 
-**Published internal (34)**
+**Published internal (35)**
 
 `plakd-wire-types`, `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
 `plakous-anthropic`, `plakous-attempt`, `plakous-auth`,
 `plakous-chat-completions`, `plakous-codex-code-mode-protocol`,
-`plakous-compose`, `plakous-exchange`,
+`plakous-compose`, `plakous-exchange`, `plakous-gateway-protocol`,
 `plakous-http`, `plakous-image`, `plakous-cell`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
 `plakous-openrouter`, `plakous-prompts`,
 `plakous-responses`, `plakous-runner`, `plakous-runner-protocol`, `plakous-runner-dial`, `plakous-store`,
@@ -153,7 +153,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | Directory | Contents | Layer |
 | --- | --- | --- |
 | `crates/core/` | model, tools, agent | core |
-| `crates/common/` | attempt, http, auth, runner-protocol, runner-dial, image | common |
+| `crates/common/` | attempt, http, auth, runner-protocol, runner-dial, gateway-protocol, image | common |
 | `crates/runtimes/` | cell, js-runtime, py-worker, runner | engine |
 | `crates/protocols/` | Responses (with its shared dialect hosts), exchange, Messages, Chat | protocol |
 | `crates/providers/` | OpenAI, Anthropic, xAI, OpenRouter | provider |
@@ -1990,7 +1990,7 @@ the external `monty-proto` / `monty-types` / `monty-alloc` at
 
 `PORTABLE_CRATES` in `tools/gate/check_workspace.py` is the only portable-crate
 list: `plakous-model` and `plakous-runner-protocol` (closure `serde` and
-`serde_json`), then `plakous-runner-dial`, `plakous-image`, `plakous-tools` and `plakous-agent`. All six have
+`serde_json`), then `plakous-runner-dial`, `plakous-gateway-protocol`, `plakous-image`, `plakous-tools` and `plakous-agent`. All seven have
 portable defaults. `plakous-image`'s default `normalize` closure is the
 pure-Rust `image` crate with its png, jpeg, gif and webp codecs; it is checked
 for the target with those defaults, and `plakous-tools` reaches it without
@@ -2118,6 +2118,11 @@ RUSTSEC-2024-0011's stateful nonce fix. The additions are checked by cargo-deny.
 The resolver uses only getrandom 0.4 for entropy; snow adds no RNG dependency
 or backend. Its fallible RNG interface propagates failures. The official IK
 vector and negative tests pin the chosen suite's behavior.
+
+`plakous-gateway-protocol` is a published-internal common crate with empty
+defaults, no I/O and no product caller yet. Its normal closure is `base64`,
+`serde`, `serde_json` and `zeroize`; it draws no randomness (a gateway mints
+caller-key secrets itself) and validates addresses with `core::net` alone.
 
 `plakous-agent` calls `getrandom` 0.4 directly for spawn salts, bootstrap
 nonces and checkpoint entropy. That version has no default backend on

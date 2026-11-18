@@ -18,6 +18,7 @@ members = [
     "crates/common/auth",
     "crates/common/runner-protocol",
     "crates/common/runner-dial",
+    "crates/common/gateway-protocol",
     "crates/common/image",
     "crates/runtimes/cell",
     "crates/runtimes/js-runtime",

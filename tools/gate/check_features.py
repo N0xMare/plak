@@ -732,6 +732,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-tools": "b5cb29f4feba31566baa6de551d2511031754ea3eabba9e266e5e4da9e350d12",
     "plakous-xai": "6c24dec4fcb79689b8531e065dad57506b711b74b7f12d804c820fbf52eb5f99",
     "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",
+    "plakous-gateway-protocol": "cfed7c1c57d094c562580177e4a0728ec596318e81609ca85c99e2892cba01c5",
     # Independent operator PTYs use the existing PTY/descriptor and account
     # lookup dependencies directly; authority is specified in chapter 04 §2.9.
     "plakous-runner": "d66265ca4ae462a54102e718f6bde52f315a86ac778de4b35fce916115917bea",

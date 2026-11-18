@@ -5066,6 +5066,7 @@ PORTABLE_CRATES = (
     "plakous-model",
     "plakous-runner-protocol",
     "plakous-runner-dial",
+    "plakous-gateway-protocol",
     "plakous-image",
     "plakous-tools",
     "plakous-agent",

@@ -3766,6 +3766,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "plakous-gateway-protocol"
+version = "0.0.4"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "zeroize",
+]
+
+[[package]]
 name = "plakous-host-protocol"
 version = "0.0.4"
 dependencies = [

@@ -6063,6 +6063,62 @@ head. **A subscription
 route never falls back to an API-key route, another subscription, or another
 account.**
 
+### 7.5 The credential gateway protocol
+
+`plakous-gateway-protocol` is the portable, I/O-free vocabulary between a
+Plakous caller and a credential gateway: the process that holds credentials,
+injects them into one upstream exchange at a time and reports how far that
+exchange got. Nothing in this build calls it yet; local custody (§7.1-§7.4)
+is unchanged. It is the third cross-build exception (chapter 00): a gateway
+serves its own protocol version and the immediately previous one, a caller
+speaks the same two, and any change to an endpoint or encoding bumps the
+version. Each version's JSON and binary encodings are pinned by golden files
+in the crate.
+
+The carrier is HTTP/1.1, one exchange per connection use. Endpoints are
+`GET /versions` (served versions and the gateway instance id) and, under
+`/v<N>/`, `relay`, `facts`, `refresh` and `admin`. A caller key
+(`plakgw1.<id>.<secret>`, 32 random bytes) travels in `plak-gateway-key`.
+Scopes are `relay:<accounts>` (facts, refresh-on-demand, relay, listing,
+status and allowance reads) and `admin:<accounts>`, where `<accounts>` is `*`,
+`<kind>/*` or one exact `<kind>[/<name>]`; accounts are shapes only and name
+no provider. A key also carries the source networks it may arrive from.
+
+A relay request is a `u32` big-endian envelope length, a strict JSON
+envelope and the upstream body bytes unchanged. The envelope names the
+operation id, physical attempt, account, the expected fence (account binding
+digest and exact credential generation), method, absolute `https` URL,
+caller limits and optional hard deadline, and the upstream header list in
+exact order. Credential fields appear in that list as custodied entries
+(`[name, null]`) that the custodian fills at their own position; the caller
+may not send framing, hop-by-hop, proxy or `plak-gateway-*` fields, or a
+plain field with a custodied name. The gateway reads the whole request
+before validating or dialing upstream.
+
+A gateway refusal is a non-200 status with `plak-gateway-error: <code>` and
+`{"gateway_error": {"code": ...}}`; it is always decided before any upstream
+byte. An upstream status is never a refusal: after validation the gateway
+answers `200` with frames, each a type byte, a `u32` big-endian length and a
+payload: `Head` (upstream status and headers), `Data` (`seq` dense from 0,
+the upstream body `offset`, at least one byte, at most 1 MiB, one frame per
+event for an event stream), `Trailers` and `End` (`complete`,
+`upstream_failed` with the measured phase, transmission fact, kind and timeout
+flag, `cancelled`, or `gateway_failed`). The decoder refuses any other order,
+a sequence or offset gap, an oversized response and bytes after `End`. There
+is no keepalive frame, so relay silence is upstream silence.
+
+Account facts are the non-secret view of one custodied credential: status,
+generation, access expiry, login selection epoch digest, account binding and
+credential authority digests, presentation-only email and plan, profile and
+consent, key source and fingerprint, and bounded provider-keyed wire
+identity values a caller lowers into request bodies. Custody location is
+never a fact. Admin calls cover listing, status, key set and clear, logout,
+forced refresh, removal, login start, complete, poll and cancel, allowance
+reads, disable and, for the local administrator only, enable, caller
+management and drain; operation-level refusals are typed, and secret
+inputs (keys, pastes, authorize URLs, user codes, issued caller keys) are
+zeroized and never printed.
+
 ## 8. Tools and effects
 
 ### 8.1 Contracts
