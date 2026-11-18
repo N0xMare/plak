@@ -36,6 +36,8 @@ mod controller;
 mod deliver;
 mod failed_worktree;
 mod followup_recompile;
+#[cfg(test)]
+pub(crate) use followup_recompile::CUT_AFTER_REBIND;
 mod reopen;
 mod turns;
 mod waiter;

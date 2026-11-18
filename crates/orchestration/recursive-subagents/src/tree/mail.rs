@@ -314,6 +314,64 @@ impl ProductAgentTree {
         self.wait_targets(grant, caller_id, agents)
     }
 
+    /// Read-only admission for an explicit follow-up, before any session rebind.
+    ///
+    /// The same parent, grant, idle, mailbox and budget checks a send applies.
+    /// `storage_unavailable` is the tree store's capacity refusal. A failure
+    /// here publishes nothing.
+    pub(crate) fn preflight_followup(
+        &self,
+        caller_id: &str,
+        request: &SendAgentMessageRequest,
+        storage_unavailable: bool,
+    ) -> Result<(), TopologyError> {
+        self.require_live()?;
+        request.validate(caller_id).map_err(|code| {
+            TopologyError::new(
+                code,
+                topology_mail_request_invalid_message(code, request, caller_id),
+            )
+        })?;
+        if storage_unavailable {
+            return Err(TopologyError::new(
+                TopologyErrorCode::Capacity,
+                "the tree store is refusing publications for capacity",
+            ));
+        }
+        let node = self.node(&request.agent_id)?;
+        if node.parent_agent_id.as_deref() != Some(caller_id)
+            || !self
+                .grant(caller_id)?
+                .message_peers
+                .iter()
+                .any(|id| id == &request.agent_id)
+        {
+            return Err(TopologyError::new(
+                TopologyErrorCode::GrantDenied,
+                "only the recipient's parent may follow up",
+            ));
+        }
+        if self.reclaimed(&node.workspace_id) {
+            return Err(TopologyError::new(
+                TopologyErrorCode::FollowupWorkspaceGone,
+                "reclaimed checkout must be rehydrated before opening a followup",
+            ));
+        }
+        let settled = self
+            .current_attempt(&request.agent_id)
+            .is_some_and(|attempt| attempt.status.is_stopped());
+        let active_turn = !settled && self.has_current_turn_owner(&request.agent_id);
+        self.admit_followup(
+            &request.agent_id,
+            node.status,
+            active_turn,
+            request.output_schema_json.as_deref(),
+            request.acknowledge_recovery.as_ref(),
+        )?;
+        self.check_mailbox_budget(&request.agent_id, request.message.len())?;
+        Ok(())
+    }
+
     /// Writes one message into the tree's mailbox and decides what it does to
     /// the recipient's turn: start it, steer it, or queue behind it.
     ///

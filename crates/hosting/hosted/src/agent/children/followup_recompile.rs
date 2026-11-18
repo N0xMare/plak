@@ -10,6 +10,8 @@
 
 use std::future::Future;
 use std::pin::Pin;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use plakous::agent::BindingChange;
 use plakous::model::{
@@ -31,6 +33,10 @@ use crate::agent_tree_protocol::{NodeStatus, TopologyErrorCode};
 use crate::agent_tree_tools::FollowupRecompile;
 
 const NOTICE: &str = "the follow-up recompiled provider configuration onto the current catalog at the quiescent checkpoint; this is not failover";
+
+/// Test cut: the rebind has committed and the tree has not saved the locator.
+#[cfg(test)]
+pub(crate) static CUT_AFTER_REBIND: AtomicBool = AtomicBool::new(false);
 
 struct RecordedBinding {
     protocol: ProtocolId,
@@ -56,19 +62,24 @@ struct ChildFacts {
 impl ProductMailDeliverer {
     pub(in crate::agent) fn prepare_followup(
         &self,
+        caller_id: String,
         agent_id: String,
         acknowledged: bool,
     ) -> Pin<Box<dyn Future<Output = Result<Option<FollowupRecompile>, TopologyError>> + Send + '_>>
     {
-        Box::pin(async move { self.recompile_or_refuse(&agent_id, acknowledged).await })
+        Box::pin(async move {
+            self.recompile_or_refuse(&caller_id, &agent_id, acknowledged)
+                .await
+        })
     }
 
     async fn recompile_or_refuse(
         &self,
+        caller_id: &str,
         agent_id: &str,
         acknowledged: bool,
     ) -> Result<Option<FollowupRecompile>, TopologyError> {
-        let Some(facts) = self.idle_facts(agent_id, acknowledged)? else {
+        let Some(facts) = self.idle_facts(caller_id, agent_id, acknowledged)? else {
             return Ok(None);
         };
         let sessions = self
@@ -80,6 +91,13 @@ impl ProductMailDeliverer {
             .locator
             .parse::<SessionLocator>()
             .map_err(|_| refused("child session locator is invalid"))?;
+        locator = line_head_locator(
+            &sessions,
+            spawn_parent_tree_id(&self.parent),
+            &facts,
+            locator,
+        )
+        .await?;
         let bound = match sessions.created_request_output_bound(locator).await {
             Ok(bound) => bound,
             Err(error) => match crate::driver::reopen::stale_head(&error) {
@@ -103,7 +121,7 @@ impl ProductMailDeliverer {
                     return Err(refused(cause));
                 }
                 if same_configuration(&recorded, &runtime) {
-                    return Ok(None);
+                    return Ok(moved_locator(&facts, locator));
                 }
                 self.recompile(&sessions, &facts, locator, runtime).await
             }
@@ -115,15 +133,13 @@ impl ProductMailDeliverer {
                 if let Some(cause) = authority_cause(&recorded, &runtime) {
                     return Err(refused(cause));
                 }
-                if same_configuration(&recorded, &runtime)
-                    && binding_change_of(&failure).is_none()
-                    && !looks_recompilable(failure.message())
-                {
-                    return Ok(None);
-                }
                 match binding_change_of(&failure) {
                     Some(change) if !recompilable(&change) => Err(refused(change.to_string())),
-                    _ => self.recompile(&sessions, &facts, locator, runtime).await,
+                    Some(_) => self.recompile(&sessions, &facts, locator, runtime).await,
+                    None if same_configuration(&recorded, &runtime) => {
+                        Ok(moved_locator(&facts, locator))
+                    }
+                    None => self.recompile(&sessions, &facts, locator, runtime).await,
                 }
             }
         }
@@ -131,11 +147,18 @@ impl ProductMailDeliverer {
 
     fn idle_facts(
         &self,
+        caller_id: &str,
         agent_id: &str,
         acknowledged: bool,
     ) -> Result<Option<ChildFacts>, TopologyError> {
         self.runtime.read(|tree| {
             let node = tree.node(agent_id)?;
+            if node.parent_agent_id.as_deref() != Some(caller_id) {
+                return Err(TopologyError::new(
+                    TopologyErrorCode::GrantDenied,
+                    "only the recipient's parent may follow up",
+                ));
+            }
             let locator = node.session_locator.clone();
             let turn_bound = tree
                 .attempt(agent_id)
@@ -241,10 +264,16 @@ impl ProductMailDeliverer {
             }
         })?;
         match outcome {
-            RebindSessionOutcome::Rebound { target, .. } => Ok(Some(FollowupRecompile {
-                notice: NOTICE.to_owned(),
-                locator: target.to_string(),
-            })),
+            RebindSessionOutcome::Rebound { target, .. } => {
+                #[cfg(test)]
+                if CUT_AFTER_REBIND.load(Ordering::Acquire) {
+                    std::future::pending::<()>().await;
+                }
+                Ok(Some(FollowupRecompile {
+                    notice: NOTICE.to_owned(),
+                    locator: target.to_string(),
+                }))
+            }
             RebindSessionOutcome::RecoveryRequired { .. } => Err(refused(
                 "the recompiling configuration transition requires recovery",
             )),
@@ -346,14 +375,23 @@ fn recompilable(change: &BindingChange) -> bool {
     )
 }
 
-fn looks_recompilable(message: &str) -> bool {
-    message.contains("provider configuration") || message.contains("tool presentation")
+fn moved_locator(facts: &ChildFacts, locator: SessionLocator) -> Option<FollowupRecompile> {
+    let head = locator.to_string();
+    (head != facts.locator).then(|| FollowupRecompile {
+        notice: NOTICE.to_owned(),
+        locator: head,
+    })
 }
 
 fn binding_change_of(failure: &crate::CliFailure) -> Option<BindingChange> {
-    std::error::Error::source(failure)
-        .and_then(|error| error.downcast_ref::<AgentSessionsError>())
-        .and_then(|error| error.binding_change().cloned())
+    let mut source = std::error::Error::source(failure);
+    while let Some(error) = source {
+        if let Some(sessions) = error.downcast_ref::<AgentSessionsError>() {
+            return sessions.binding_change().cloned();
+        }
+        source = error.source();
+    }
+    None
 }
 
 fn binding_failure(failure: &crate::CliFailure) -> TopologyError {
@@ -364,11 +402,25 @@ fn binding_failure(failure: &crate::CliFailure) -> TopologyError {
 }
 
 fn session_read(error: &AgentSessionsError) -> Result<Option<FollowupRecompile>, TopologyError> {
-    if error.kind() == AgentSessionsErrorKind::IncompatibleBuild {
-        Err(session_refusal(error))
-    } else {
-        Ok(None)
+    if error.kind() == AgentSessionsErrorKind::NotQuiescent {
+        return Err(refused(
+            "the child's session is not at a quiescent checkpoint",
+        ));
     }
+    let code = match error.kind() {
+        AgentSessionsErrorKind::StorageBusy
+        | AgentSessionsErrorKind::StorageUnavailable
+        | AgentSessionsErrorKind::StorageFull
+        | AgentSessionsErrorKind::StoragePressure => TopologyErrorCode::RecoveryStorageUnavailable,
+        _ => TopologyErrorCode::FollowupBindingChanged,
+    };
+    let cause = error
+        .binding_change()
+        .map_or_else(|| error.to_string(), ToString::to_string);
+    Err(TopologyError::new(
+        code,
+        format!("{cause}; spawn a new child from the template"),
+    ))
 }
 
 fn session_refusal(error: &AgentSessionsError) -> TopologyError {
@@ -385,6 +437,35 @@ fn refused(cause: impl std::fmt::Display) -> TopologyError {
     )
 }
 
+/// A crash between the rebind commit and the tree save leaves the node on a
+/// superseded branch. Reads of that branch still succeed; the line's head is
+/// the rebound session. Resolve it before comparing or rebinding, and do not
+/// hold its lease across the rebind.
+async fn line_head_locator(
+    sessions: &AgentSessions,
+    tree_id: &str,
+    facts: &ChildFacts,
+    locator: SessionLocator,
+) -> Result<SessionLocator, TopologyError> {
+    let head = sessions
+        .line_head_of(locator)
+        .await
+        .map_err(|error| session_refusal(&error))?;
+    if head.session_id() == locator.session_id() && head.branch_id() == locator.branch_id() {
+        return Ok(locator);
+    }
+    let operation_id = recompile_operation_id(tree_id, &facts.agent_id, facts.generation)?;
+    let held = sessions
+        .open_lease_only(&operation_id, head.line())
+        .await
+        .map_err(|error| session_refusal(&error))?;
+    let current = held.locator();
+    held.release()
+        .await
+        .map_err(|error| session_refusal(&error))?;
+    Ok(current)
+}
+
 fn recompile_operation_id(
     tree_id: &str,
     agent_id: &str,
@@ -394,11 +475,7 @@ fn recompile_operation_id(
     if let Ok(id) = SessionOperationId::new(&preferred) {
         return Ok(id);
     }
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in preferred.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    SessionOperationId::new(format!("plak:child-recompile:{hash:016x}"))
+    let digest = plakous::model::sha256_hex(&[preferred.as_bytes()]);
+    SessionOperationId::new(format!("plak:child-recompile:{digest}"))
         .map_err(|_| refused("child recompile operation identity is invalid"))
 }

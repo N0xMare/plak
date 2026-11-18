@@ -358,14 +358,24 @@ impl ProductAgentTree {
                     ));
                 } else {
                     // The recovering sentence is only true while this process
-                    // holds the child's recovery claim. A settled refusal that
-                    // has not started says so, and close_agent ends the node.
-                    let recovering = crate::hub::lookup(&self.tree_id)
+                    // holds the child's recovery claim. A scheduled run that
+                    // has not claimed the child yet is pending, and says
+                    // nothing about closing it. close_agent is the remedy
+                    // only when no recovery will run.
+                    let runtime = crate::hub::lookup(&self.tree_id);
+                    let recovering = runtime
+                        .as_ref()
                         .is_some_and(|runtime| runtime.is_recovering(&node.agent_id));
+                    let pending = runtime
+                        .as_ref()
+                        .is_some_and(|runtime| runtime.recovery_running());
                     if recovering {
                         value["recovery"] = serde_json::Value::String(
                             "the host is recovering its session; no call is needed".to_owned(),
                         );
+                    } else if pending {
+                        value["recovery"] =
+                            serde_json::Value::String("recovery is pending".to_owned());
                     } else {
                         value["remedy"] = serde_json::Value::String("close_agent".to_owned());
                         value["recovery"] = serde_json::Value::String(

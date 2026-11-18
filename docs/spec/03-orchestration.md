@@ -1707,9 +1707,20 @@ follow-up performs the head-advancing recompiling rebind of spec 01 §5.7 at
 the child's quiescent checkpoint before it opens an attempt. The receipt's
 `configuration_notice` records that recompile. It is the parent's act, not
 automatic failover, and an exact reopen still refuses a changed configuration
-on its own. The node's session locator advances to the rebound head in the
-same successful send. A replay of that send returns the stored receipt and
-does not rebind again.
+on its own. Before that rebind, under the tree lock, the send applies the
+same admission a follow-up send applies: the caller is the direct parent, the
+grant reaches the child, the node is idle and not closed, and the mailbox,
+spawn, attempt and capacity checks pass. A refusal there does not rebind. The node's
+session locator advances to the rebound head in the same successful send, and
+the child's recorded create follows that branch of the same session so the
+start admits the head. If
+the rebind has already committed and the tree transaction then refuses, the
+locator advances in its own transaction, so the node does not keep a
+superseded head. A crash after the rebind commit and before the tree save
+leaves the child listable and not `recovery_required`. The next follow-up
+converges the locator to that published head, does not rebind again, and does
+not dispatch beyond the follow-up turn. Delete still works. A replay of a
+send that committed returns the stored receipt and does not rebind again.
 A Start rejected for storage pressure before admission is likewise a definite
 refusal: the attempted follow-up is rolled back, the existing child session and
 its prior history remain intact, and the caller receives `capacity`. Lost or

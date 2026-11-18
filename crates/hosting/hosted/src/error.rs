@@ -512,6 +512,19 @@ impl CliFailure {
         self.wire_refusal.as_deref()
     }
 
+    /// Keeps the sessions error, including its binding change, as this
+    /// failure's source. An incompatible-build message is rewritten for the
+    /// product, and the typed cause still has to travel with it.
+    #[must_use]
+    pub(crate) fn with_recovery_source(
+        mut self,
+        error: plakous::sessions::AgentSessionsError,
+    ) -> Self {
+        self.attach_failure = sessions_attach_failure(&error);
+        self.source = Some(Box::new(LookupFailure::Recovery(error)));
+        self
+    }
+
     /// Attach transient typed refusal facts without rendering frontend text.
     #[must_use]
     pub fn with_optional_advice(

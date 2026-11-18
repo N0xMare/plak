@@ -391,7 +391,7 @@ impl TopologyTool {
             false
         };
         let recompile = match self
-            .prepare_followup_recompile(value, &operation_id)
+            .prepare_followup_recompile(&caller, value, &operation_id)
             .await?
         {
             Ok(recompile) => recompile,
@@ -408,9 +408,12 @@ impl TopologyTool {
     }
 
     /// Recompiles or refuses a follow-up before any attempt opens. A send that
-    /// already has a receipt is left alone so replay does not rebind.
+    /// already has a receipt is left alone so replay does not rebind. Parent,
+    /// grant, idle, mailbox and capacity are checked under the tree lock
+    /// before a rebind can publish.
     async fn prepare_followup_recompile(
         &self,
+        caller: &str,
         value: &Value,
         operation_id: &str,
     ) -> Result<Result<Option<FollowupRecompile>, TopologyError>, ToolRuntimeError> {
@@ -420,12 +423,20 @@ impl TopologyTool {
         if request.purpose != Some(MessagePurpose::Followup) {
             return Ok(Ok(None));
         }
-        let answered = self
+        let storage_unavailable = self.driver.store_refusing_capacity();
+        let caller = caller.to_owned();
+        let preflight_caller = caller.clone();
+        let admitted = self
             .driver
-            .read(|tree| {
-                tree.operations().get(operation_id).is_some_and(|row| {
+            .read(move |tree| {
+                let answered = tree.operations().get(operation_id).is_some_and(|row| {
                     row.terminal_response.is_some() || row.terminal_code.is_some()
-                })
+                });
+                if answered {
+                    return Ok(None);
+                }
+                tree.preflight_followup(&preflight_caller, &request, storage_unavailable)?;
+                Ok(Some(request))
             })
             .map_err(|_| {
                 ToolRuntimeError::new(
@@ -433,15 +444,49 @@ impl TopologyTool {
                     "topology tree lock is poisoned",
                 )
             })?;
-        if answered {
-            return Ok(Ok(None));
-        }
+        let request = match admitted {
+            Ok(Some(request)) => request,
+            Ok(None) => return Ok(Ok(None)),
+            Err(error) => return Ok(Err(error)),
+        };
         let Some(deliverer) = self.deliverer() else {
             return Ok(Ok(None));
         };
         Ok(deliverer
-            .prepare_followup(request.agent_id, request.acknowledge_recovery.is_some())
+            .prepare_followup(
+                caller,
+                request.agent_id,
+                request.acknowledge_recovery.is_some(),
+            )
             .await)
+    }
+
+    /// Records a rebind that already committed when the tree transaction that
+    /// should have stored its locator refused. The node must not keep a
+    /// superseded head.
+    async fn publish_followup_locator(
+        &self,
+        agent_id: String,
+        locator: String,
+    ) -> Result<(), ToolRuntimeError> {
+        let driver = self.driver.clone();
+        let (published, effects) = self
+            .driver
+            .mutate(move |tree| {
+                tree.advance_session_locator(&agent_id, locator.clone())?;
+                tree.retarget_recompiled_child_session(&agent_id, &locator)?;
+                driver.save(tree)?;
+                Ok::<(), TopologyError>(())
+            })
+            .await
+            .map_err(|error| {
+                ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
+            })?;
+        published.map_err(|error| {
+            ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
+        })?;
+        self.settle(effects).await?;
+        Ok(())
     }
 
     #[allow(
@@ -472,12 +517,26 @@ impl TopologyTool {
                 .await
                 .map_err(|e| ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, e.message))?;
             if let Err(error) = prepared {
+                if let Some(recompile) = recompile.as_ref() {
+                    self.publish_followup_locator(
+                        request.agent_id.clone(),
+                        recompile.locator.clone(),
+                    )
+                    .await?;
+                }
                 return ToolOutcome::failure_text(
                     json!({ "code": error.code, "message": error.message }).to_string(),
                 );
             }
             let settled = self.settle(effects).await?;
             if let Some(error) = settled.cleanup_failures.first() {
+                if let Some(recompile) = recompile.as_ref() {
+                    self.publish_followup_locator(
+                        request.agent_id.clone(),
+                        recompile.locator.clone(),
+                    )
+                    .await?;
+                }
                 return ToolOutcome::failure_text(
                     json!({ "code": error.code, "message": error.message }).to_string(),
                 );
@@ -486,12 +545,19 @@ impl TopologyTool {
                 .refresh_followup(&caller, &request, &operation_id)
                 .await?
             {
+                if let Some(recompile) = recompile.as_ref() {
+                    self.publish_followup_locator(request.agent_id, recompile.locator.clone())
+                        .await?;
+                }
                 return Ok(refusal);
             }
         }
         let tool = self.clone();
         let (writer_caller, writer_operation, writer_value) =
             (caller.clone(), operation_id.clone(), value.clone());
+        let recorded = recompile
+            .as_ref()
+            .map(|recompile| (recompile.locator.clone(), recompile.notice.clone()));
         let (output, effects) = self
             .driver
             .mutate(move |tree| {
@@ -505,12 +571,10 @@ impl TopologyTool {
                         |tree, caller, request, operation_id| {
                             let mut output =
                                 tree.send_agent_message(caller, request, operation_id)?;
-                            if let Some(recompile) = recompile.as_ref() {
-                                tree.advance_session_locator(
-                                    &request.agent_id,
-                                    recompile.locator.clone(),
-                                )?;
-                                output.configuration_notice = Some(recompile.notice.clone());
+                            if let Some((locator, notice)) = recorded.as_ref() {
+                                tree.advance_session_locator(&request.agent_id, locator.clone())?;
+                                tree.retarget_recompiled_child_session(&request.agent_id, locator)?;
+                                output.configuration_notice = Some(notice.clone());
                                 if let Some(id) = operation_id {
                                     tree.remember_success(
                                         id,
@@ -535,6 +599,12 @@ impl TopologyTool {
         let output = match output {
             Ok(output) => output,
             Err(error) => {
+                if let Some(recompile) = recompile.as_ref()
+                    && let Ok(request) = decode::<SendAgentMessageRequest>(value)
+                {
+                    self.publish_followup_locator(request.agent_id, recompile.locator.clone())
+                        .await?;
+                }
                 return ToolOutcome::failure_text(
                     json!({ "code": error.code, "message": error.message }).to_string(),
                 );

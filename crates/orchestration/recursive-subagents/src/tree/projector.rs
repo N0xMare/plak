@@ -1095,6 +1095,54 @@ impl ProductAgentTree {
         self.record_session_bound_after_failure(agent_id)
     }
 
+    /// Moves a child's recorded create onto the branch a recompiling rebind
+    /// published. The session identity does not change. A child with no
+    /// recorded create is left for the start that records it.
+    ///
+    /// # Errors
+    /// Refuses an unknown child, an invalid locator, or a different session.
+    pub fn retarget_recompiled_child_session(
+        &mut self,
+        agent_id: &str,
+        locator: &str,
+    ) -> Result<(), TopologyError> {
+        self.node(agent_id)?;
+        let requested = locator
+            .parse::<plakous::sessions::SessionLocator>()
+            .map_err(|_| {
+                TopologyError::new(
+                    TopologyErrorCode::GrantDenied,
+                    "child session allocation is invalid",
+                )
+            })?;
+        let id = format!("{CHILD_SESSION_KIND}:{agent_id}");
+        let Some(existing) = self.operations.get_mut(&id) else {
+            return Ok(());
+        };
+        let recorded = existing
+            .canonical_request
+            .parse::<plakous::sessions::SessionLocator>()
+            .map_err(|_| {
+                TopologyError::new(
+                    TopologyErrorCode::OperationRecoveryRequired,
+                    "recorded child session allocation is invalid",
+                )
+            })?;
+        if recorded.session_id() != requested.session_id() {
+            return Err(TopologyError::new(
+                TopologyErrorCode::OperationRecoveryRequired,
+                "child session allocation differs from its recorded create",
+            ));
+        }
+        if recorded.branch_id() == requested.branch_id() {
+            return Ok(());
+        }
+        existing.canonical_request = locator.to_owned();
+        existing.request_digest = super::digest_text(locator);
+        self.bump();
+        Ok(())
+    }
+
     /// Records what the host observed when `turn_id` of `attempt_id` failed
     /// (its failed-worktree snapshot line), before the turn's terminal is
     /// projected: the projector joins it into the failure message on every

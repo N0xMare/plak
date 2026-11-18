@@ -36,8 +36,16 @@ for one version bump, without native protocol compatibility.
   checkpoint, records `configuration_notice` on the send receipt, and
   continues. A changed account, model, template or authority, or a refused
   recompile, refuses the follow-up as `followup_binding_changed` and leaves
-  the child settled. `list_agents` says the host is recovering a child only
-  while that recovery is in progress.
+  the child settled. That code is an additive JSONL v1 topology vocabulary
+  entry. The follow-up is admitted before any rebind, and a rebind that
+  already committed still moves the child's session locator when the tree
+  transaction refuses. The child's recorded create follows the rebound
+  branch of the same session. A crash after the rebind commit and before
+  the tree save stays listable; the next follow-up converges the locator
+  and does not rebind again. `list_agents` says the host is recovering a child only
+  while that recovery holds the child. A scheduled recovery that has not
+  claimed the child yet says recovery is pending, and `close_agent` is the
+  remedy only when no recovery will run.
 
 ## 0.0.4
 

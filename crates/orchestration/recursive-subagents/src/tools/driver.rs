@@ -1265,6 +1265,12 @@ impl TreeDriver {
         *self.storage_waiting.borrow()
     }
 
+    /// The store is already refusing publications, before this driver has parked.
+    #[must_use]
+    pub(crate) fn store_refusing_capacity(&self) -> bool {
+        self.store.storage_unavailable()
+    }
+
     /// Interrupts a capacity-refused publication, including a write whose
     /// refusal has not returned yet, without claiming it was recorded.
     pub fn cancel_storage_waits(&self, agent_id: &str) {

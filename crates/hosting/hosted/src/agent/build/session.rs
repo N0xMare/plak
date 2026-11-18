@@ -109,6 +109,7 @@ impl From<AgentSessionsError> for CodingSessionOpenFailure {
         let failure = if error.kind() == AgentSessionsErrorKind::IncompatibleBuild {
             CliFailure::new(incompatible_session_message(&error))
                 .with_optional_advice(crate::error::incompatible_session_advice(&error))
+                .with_recovery_source(error)
         } else {
             CliFailure::from(error)
         };

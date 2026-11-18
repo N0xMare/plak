@@ -181,11 +181,12 @@ pub trait ChildController: Send + Sync {
     /// that already has a receipt must not call this.
     fn prepare_followup(
         &self,
+        caller_id: String,
         agent_id: String,
         acknowledged: bool,
     ) -> Pin<Box<dyn Future<Output = Result<Option<FollowupRecompile>, TopologyError>> + Send + '_>>
     {
-        let _ = (agent_id, acknowledged);
+        let _ = (caller_id, agent_id, acknowledged);
         Box::pin(async { Ok(None) })
     }
 

@@ -97,6 +97,7 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
 
     fn prepare_followup(
         &self,
+        caller_id: String,
         agent_id: String,
         acknowledged: bool,
     ) -> Boxed<
@@ -106,7 +107,8 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
             crate::agent_tree::TopologyError,
         >,
     > {
-        self.deliverer.prepare_followup(agent_id, acknowledged)
+        self.deliverer
+            .prepare_followup(caller_id, agent_id, acknowledged)
     }
 
     fn recover_followup(

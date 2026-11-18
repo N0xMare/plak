@@ -5,21 +5,21 @@ use super::{
     Digest, DigestDomain, EffectiveProviderConfiguration, FamilyPolicyEnvelope, FinishReason,
     FixedClock, GenerationLimits, HarnessResult, InMemoryPlanState, LOOPBACK_PROTOCOL,
     LanguageModel, LocalDurabilityDisposition, LoopbackModel, LoopbackScenario,
-    ModelAdapterProfileId, ModelErrorKind, ModelImplementationIdentity, NamespaceId, NonZeroU32,
-    OutputBoundDisposition, OutputPolicy, ParallelToolDisposition, Path, PlanStateIdentity,
-    ProcessSessionTools, ProviderAuthorityClassId, ProviderBehaviorConfiguration,
-    ProviderProfileRevisionId, ProviderRouteSelection, ProviderSemanticEvidence,
-    ProviderStorageDisposition, ReasoningEffortDisposition, ReasoningIncludeDisposition,
-    ReasoningPolicy, ReasoningSummaryDisposition, ReplayDisposition, ResolvedModelDescriptor,
-    ResolvedProviderAuthorityBinding, ResponseStateDisposition, RetentionDisposition,
-    RuntimeModelAuthority, SEMANTIC_COMPACTION_MAX_OUTPUT_TOKENS, ScriptPlan, ScriptedOperation,
-    SelectedProviderConfiguration, SessionRuntimeBinding, SystemIdGenerator, ToolChoice,
-    ToolConcurrency, ToolDefinition, ToolEffect, ToolExecutionDisposition, ToolInputContract,
-    ToolName, ToolOutputContract, ToolRegistration, ToolRegistryBuilder, WorkspacePolicy,
-    authority_bindings, descriptor, descriptor_over_protocol, descriptor_with_projected_input,
-    fixture_time, json, script_descriptor, scripted_agent_config, scripted_code_mode_descriptor,
-    scripted_runtime_binding_with_cursor_inner, scripted_tool_policy,
-    scripted_topology_runtime_binding_inner,
+    ModelAdapterProfileId, ModelErrorKind, ModelId, ModelImplementationIdentity, NamespaceId,
+    NonZeroU32, OutputBoundDisposition, OutputPolicy, ParallelToolDisposition, Path,
+    PlanStateIdentity, ProcessSessionTools, ProviderAuthorityClassId,
+    ProviderBehaviorConfiguration, ProviderProfileRevisionId, ProviderRouteSelection,
+    ProviderSemanticEvidence, ProviderStorageDisposition, ReasoningEffortDisposition,
+    ReasoningIncludeDisposition, ReasoningPolicy, ReasoningSummaryDisposition, ReplayDisposition,
+    ResolvedModelDescriptor, ResolvedProviderAuthorityBinding, ResponseStateDisposition,
+    RetentionDisposition, RuntimeModelAuthority, SEMANTIC_COMPACTION_MAX_OUTPUT_TOKENS, ScriptPlan,
+    ScriptedOperation, SelectedProviderConfiguration, SessionRuntimeBinding, SystemIdGenerator,
+    ToolChoice, ToolConcurrency, ToolDefinition, ToolEffect, ToolExecutionDisposition,
+    ToolInputContract, ToolName, ToolOutputContract, ToolRegistration, ToolRegistryBuilder,
+    WorkspacePolicy, authority_bindings, descriptor, descriptor_over_protocol,
+    descriptor_with_projected_input, fixture_time, json, script_descriptor, scripted_agent_config,
+    scripted_code_mode_descriptor, scripted_runtime_binding_with_cursor_inner,
+    scripted_tool_policy, scripted_topology_runtime_binding_inner,
 };
 
 /// [`super::scripted_code_mode_runtime_binding`] whose nested catalog also lists a
@@ -680,6 +680,52 @@ pub fn projected_scripted_runtime_binding_with(
         plakous::tools::CodingPresentation::Codex,
         Vec::new(),
         effort,
+    )?;
+    Ok(SessionRuntimeBinding::new(builder))
+}
+
+/// [`projected_scripted_runtime_binding_with`] whose model and adapter profile
+/// identities are named by the caller. Account and the projected-input ceiling
+/// stay the configuration facts they are there.
+///
+/// # Errors
+///
+/// Returns an error when an identity, the model, the coding packs, or the
+/// projection is invalid.
+pub fn projected_scripted_runtime_binding_named(
+    workspace: &Path,
+    controller: BoundaryController,
+    script: Arc<ScriptPlan>,
+    account: &[u8],
+    maximum_projected_input: u64,
+    model: &str,
+    adapter: &str,
+) -> HarnessResult<SessionRuntimeBinding> {
+    let base = descriptor_with_projected_input(account, maximum_projected_input)?;
+    let named = ResolvedModelDescriptor::new_custom(
+        base.protocol().clone(),
+        base.route().clone(),
+        ModelId::new(model)?,
+        None,
+        base.model_family().cloned(),
+        ModelAdapterProfileId::new(adapter)?,
+        base.capabilities().clone(),
+    );
+    let descriptor = match base.context_contract() {
+        Some(contract) => named.with_context_contract(contract.clone()),
+        None => named,
+    };
+    let mut loopback =
+        LoopbackModel::with_descriptor(controller, account, true, descriptor.clone())?;
+    loopback.scenario = LoopbackScenario::Scripted(script);
+    let builder = projected_coding_builder(
+        workspace,
+        Arc::new(loopback),
+        &descriptor,
+        account,
+        plakous::tools::CodingPresentation::Codex,
+        Vec::new(),
+        None,
     )?;
     Ok(SessionRuntimeBinding::new(builder))
 }

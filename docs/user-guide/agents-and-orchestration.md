@@ -402,6 +402,12 @@ Home-scoped `orchestration.workspace_idle_seconds` and
 - **Follow-up** — `send_agent_message` with `purpose = "followup"` re-tasks a
   finished child on a new attempt, optionally with a new output schema. This is
   how a parent iterates on a child's result instead of spawning a fresh one.
+  When only the provider configuration or compiled presentation changed, and
+  the account, model and template are the same, that follow-up recompiles the
+  configuration at the child's quiescent checkpoint and continues. It is not
+  failover. If the account, model, template or authority changed, or the
+  recompile is refused, the follow-up fails as `followup_binding_changed` and
+  the child stays settled: spawn a new child from the template.
   A live-fork copy first catches up with its parent's current state when the
   merge is clean; `refresh:false` keeps its old base. Copies minted over a
   candidate, including reviewers and resolvers, never catch up automatically.
