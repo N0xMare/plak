@@ -22,23 +22,20 @@ pub(crate) fn install(executable: &Path, dry_run: bool) -> Result<PathBuf, Strin
 
 pub(crate) fn uninstall() -> Result<String, String> {
     if cfg!(target_os = "linux") {
-        let path = systemd_path()?;
-        if path.is_file() {
-            fs::remove_file(&path).map_err(|error| error.to_string())?;
-            Ok(format!("removed {}", path.display()))
-        } else {
-            Ok(format!("no unit at {}", path.display()))
-        }
+        remove_definition(&systemd_path()?, "no unit at")
     } else if cfg!(target_os = "macos") {
-        let path = launchd_path()?;
-        if path.is_file() {
-            fs::remove_file(&path).map_err(|error| error.to_string())?;
-            Ok(format!("removed {}", path.display()))
-        } else {
-            Ok(format!("no LaunchAgent at {}", path.display()))
-        }
+        remove_definition(&launchd_path()?, "no LaunchAgent at")
     } else {
         Err("plakd gateway uninstall supports Linux user units and macOS LaunchAgents".to_owned())
+    }
+}
+
+fn remove_definition(path: &Path, absent: &str) -> Result<String, String> {
+    if path.is_file() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+        Ok(format!("removed {}", path.display()))
+    } else {
+        Ok(format!("{absent} {}", path.display()))
     }
 }
 
@@ -46,7 +43,7 @@ fn install_systemd(executable: &str, dry_run: bool) -> Result<PathBuf, String> {
     let path = systemd_path()?;
     let unit = systemd_unit(executable);
     if dry_run {
-        print_dry(&path, &unit);
+        print_dry(&path, &unit)?;
         return Ok(path);
     }
     if let Some(parent) = path.parent() {
@@ -60,7 +57,7 @@ fn install_launchd(executable: &str, dry_run: bool) -> Result<PathBuf, String> {
     let path = launchd_path()?;
     let plist = launchd_plist(executable);
     if dry_run {
-        print_dry(&path, &plist);
+        print_dry(&path, &plist)?;
         return Ok(path);
     }
     if let Some(parent) = path.parent() {
@@ -71,15 +68,16 @@ fn install_launchd(executable: &str, dry_run: bool) -> Result<PathBuf, String> {
 }
 
 fn systemd_path() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is unavailable".to_owned())?;
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
+    let home =
+        crate::environment::inherited_home().ok_or_else(|| "HOME is unavailable".to_owned())?;
+    let config = crate::environment::xdg_config_home()
         .unwrap_or_else(|| PathBuf::from(home).join(".config"));
     Ok(config.join("systemd/user/plak-gateway.service"))
 }
 
 fn launchd_path() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is unavailable".to_owned())?;
+    let home =
+        crate::environment::inherited_home().ok_or_else(|| "HOME is unavailable".to_owned())?;
     Ok(PathBuf::from(home).join("Library/LaunchAgents/com.plakd.gateway.plist"))
 }
 
@@ -140,7 +138,9 @@ fn write_new(path: &Path, body: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn print_dry(path: &Path, body: &str) {
-    println!("# {path}", path = path.display());
-    println!("{body}");
+fn print_dry(path: &Path, body: &str) -> Result<(), String> {
+    let mut out = std::io::stdout();
+    writeln!(out, "# {}", path.display()).map_err(|error| error.to_string())?;
+    writeln!(out, "{body}").map_err(|error| error.to_string())?;
+    Ok(())
 }

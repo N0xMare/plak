@@ -24,7 +24,7 @@ mod service;
 
 pub(crate) use address::GatewayAddress;
 pub(crate) use cli_cmd::{doctor_line, execute};
-pub(crate) use holder::{HolderLock, acquire_shared};
+pub(crate) use holder::{HolderLock, acquire_shared, acquire_shared_creating};
 pub(crate) use install::{install, uninstall};
 pub(crate) use remote_account::{hold_in_process, try_remote_account};
 pub(crate) use route::{AccountRoute, provider_key_env_set, select};

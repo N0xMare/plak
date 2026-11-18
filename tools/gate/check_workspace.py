@@ -412,6 +412,10 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "SSH_CLIENT"),)),
         ("var_os", (("string", "SYSTEMD_UNIT_PATH"),)),
         ("var_os", (("string", "SHELL"),)),
+        # Provider-key presence for the host refusal, and the gateway socket's
+        # runtime directory. Values are not returned from the presence check.
+        ("var_os", (("identifier", "name"),)),
+        ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
     ],
     # Maintainer/test-hooks private inference capture, explicitly selected per process.
     ("plakd", "src/commands/exchange_capture.rs"): [
@@ -539,7 +543,7 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # files under `bin/plakd/help/` included at compile time — three global
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
-    ("plakd", "src/cli/render.rs"): ("include_str",) * 28,
+    ("plakd", "src/cli/render.rs"): ("include_str",) * 29,
     # The source revision the build recipe states, half of the version
     # triple a runner binds on (chapter 01 §8.4); `unknown` when unset.
     ("plakd", "src/build_identity.rs"): ("option_env",),
@@ -755,6 +759,10 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakd", "src/commands/secret_input.rs"): {"select"},
     # The SIGTERM/SIGHUP watcher thread waits on two signal streams at once.
     ("plakd", "src/signals.rs"): {"select"},
+    # Gateway serve waits on SIGTERM, Ctrl-C and the admin drain together.
+    ("plakd", "src/gateway/service.rs"): {"pin", "select"},
+    # Install selects the user-service definition for this operating system.
+    ("plakd", "src/gateway/install.rs"): {"cfg"},
     ("plakous-hosted", "src/runtime/turn_drive/mod.rs"): {"pin", "select", "debug_assert"},
     ("plakous-hosted", "src/runtime/network_watch.rs"): {"select"},
     ("plakous-hosted", "src/host_service/wire/host.rs"): {"info", "select"},
@@ -1560,8 +1568,75 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "target_instructions",
     },
 }
+# Doc-hidden credential-gateway vocabulary (spec 01 §7.5). plakd is the only
+# product caller; other host packages do not import it.
+_GATEWAY_SYMBOLS = {
+    "AccountFacts",
+    "AccountGlob",
+    "AccountStatusRow",
+    "AdminRefusal",
+    "AdminRequest",
+    "AdminResponse",
+    "AfterRejection",
+    "Any",
+    "BoundedText",
+    "CallError",
+    "CallerExists",
+    "CallerId",
+    "CallerKey",
+    "CallerRow",
+    "CallerUnknown",
+    "Capability",
+    "CredentialFacts",
+    "CredentialStatus",
+    "DeviceCode",
+    "DisableTarget",
+    "ERROR_HEADER",
+    "Endpoint",
+    "EnvelopeInvalid",
+    "FactsReply",
+    "FactsRequest",
+    "GatewayAccount",
+    "GatewayRefusal",
+    "IfDue",
+    "KEY_HEADER",
+    "KeyFacts",
+    "KeySource",
+    "LimitExceeded",
+    "Local",
+    "LocalAdminRequired",
+    "LoginMethod",
+    "LoginPhase",
+    "LogoutMode",
+    "PROTOCOL_VERSION",
+    "PasteInvalid",
+    "RefreshMode",
+    "RefreshReply",
+    "RefreshRequest",
+    "RefusalBody",
+    "SUPPORTED_VERSIONS",
+    "ScopeSet",
+    "SecretText",
+    "SourceNet",
+    "TextError",
+    "UuidText",
+    "VERSIONS_PATH",
+    "VersionsReply",
+    "WireIdentity",
+    "admin",
+    "call",
+    "decode_request",
+    "envelope",
+    "facts",
+    "new",
+    "protocol",
+    "refusal",
+    "scope",
+    "self",
+}
+
 ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
-    "plakd": _SHARED_PLAKOUS_SYMBOLS,
+    "plakd": {**_SHARED_PLAKOUS_SYMBOLS, "gateway": _GATEWAY_SYMBOLS},
     # Wire DTOs only; the facade is not a dependency.
     "plakd-wire-types": {},
     "plakous-host-protocol": _SHARED_PLAKOUS_SYMBOLS,

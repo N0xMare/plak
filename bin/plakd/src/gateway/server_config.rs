@@ -169,8 +169,7 @@ fn render(config: &ServerConfig) -> String {
 }
 
 fn default_socket(home: &PlakPaths) -> PathBuf {
-    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
-        let runtime = PathBuf::from(runtime);
+    if let Some(runtime) = crate::environment::xdg_runtime_dir() {
         if runtime.is_absolute() {
             return runtime.join("plak/gateway.sock");
         }

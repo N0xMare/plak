@@ -12,9 +12,10 @@ use rustix::fs::{FlockOperation, flock};
 
 use super::io_file::{ensure_private_dir, private_file};
 
-/// One held lock. Dropping it releases the kernel lock.
+/// One held lock. Dropping it releases the kernel lock. `file` is absent when
+/// there is no store yet: a read does not create the directory just to lock it.
 pub(crate) struct HolderLock {
-    file: File,
+    file: Option<File>,
     mode: HolderMode,
 }
 
@@ -36,7 +37,18 @@ impl HolderLock {
             HolderMode::Shared => FlockOperation::NonBlockingLockShared,
         };
         flock(&file, operation)?;
-        Ok(Self { file, mode })
+        Ok(Self {
+            file: Some(file),
+            mode,
+        })
+    }
+
+    /// No store exists, so nothing can hold it. Does not create a directory.
+    pub(crate) fn vacant() -> Self {
+        Self {
+            file: None,
+            mode: HolderMode::Shared,
+        }
     }
 
     /// Records the service socket. Only the exclusive holder writes it.
@@ -47,11 +59,14 @@ impl HolderLock {
                 "only the service holder advertises a socket",
             ));
         }
+        let Some(file) = self.file.as_ref() else {
+            return Err(io::Error::new(io::ErrorKind::NotFound, "no holder file"));
+        };
         let text = socket
             .to_str()
             .filter(|text| !text.contains('\n') && !text.is_empty())
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "socket path"))?;
-        let mut file = self.file.try_clone()?;
+        let mut file = file.try_clone()?;
         file.set_len(0)?;
         file.write_all(text.as_bytes())?;
         file.write_all(b"\n")?;
@@ -90,10 +105,28 @@ pub(crate) fn lock_path(state_root: &Path) -> PathBuf {
     state_root.join("plak/subscriptions/.custody-holder.lock")
 }
 
-/// Shared hold for an in-process account command or host. Fails while the
-/// service holds the store, and the message names the config remedy.
+/// Shared hold when the store directory already exists. A missing directory
+/// yields a vacant lock and creates nothing: a read-only command must not
+/// invent subscription state. Fails while the service holds the store.
 pub(crate) fn acquire_shared(state_root: &Path) -> Result<HolderLock, String> {
-    HolderLock::try_acquire(&lock_path(state_root), HolderMode::Shared).map_err(|error| {
+    let path = lock_path(state_root);
+    if path.parent().is_some_and(|parent| !parent.exists()) {
+        return Ok(HolderLock::vacant());
+    }
+    map_shared(HolderLock::try_acquire(&path, HolderMode::Shared))
+}
+
+/// Shared hold that creates the lock directory. Writers and the host use
+/// this so they exclude `gateway serve` before they open the store.
+pub(crate) fn acquire_shared_creating(state_root: &Path) -> Result<HolderLock, String> {
+    map_shared(HolderLock::try_acquire(
+        &lock_path(state_root),
+        HolderMode::Shared,
+    ))
+}
+
+fn map_shared(result: io::Result<HolderLock>) -> Result<HolderLock, String> {
+    result.map_err(|error| {
         if is_busy(&error) {
             "the credential store is held by plakd gateway serve; set [gateway] address".to_owned()
         } else {
@@ -134,17 +167,25 @@ mod tests {
         assert!(HolderLock::try_acquire(&path, HolderMode::Exclusive).is_err());
         drop(shared);
         assert!(advertised_socket(&path).unwrap().is_none());
-        let held = acquire_shared(dir.path()).unwrap();
-        let blocked = HolderLock::try_acquire(&lock_path(dir.path()), HolderMode::Exclusive);
+        let absent = dir.path().join("absent");
+        let vacant = acquire_shared(&absent).unwrap();
+        assert!(
+            !absent.exists(),
+            "a missing store must not be created to take the shared lock"
+        );
+        drop(vacant);
+        let state = dir.path().join("state");
+        fs::create_dir_all(state.join("plak/subscriptions")).unwrap();
+        let held = acquire_shared(&state).unwrap();
+        let blocked = HolderLock::try_acquire(&lock_path(&state), HolderMode::Exclusive);
         assert!(
             blocked.is_err(),
             "a service must not overlap an in-process holder"
         );
         drop(held);
-        assert!(HolderLock::try_acquire(&lock_path(dir.path()), HolderMode::Exclusive).is_ok());
-        let exclusive =
-            HolderLock::try_acquire(&lock_path(dir.path()), HolderMode::Exclusive).unwrap();
-        match acquire_shared(dir.path()) {
+        assert!(HolderLock::try_acquire(&lock_path(&state), HolderMode::Exclusive).is_ok());
+        let exclusive = HolderLock::try_acquire(&lock_path(&state), HolderMode::Exclusive).unwrap();
+        match acquire_shared(&state) {
             Err(message) => assert!(message.contains("[gateway] address"), "{message}"),
             Ok(_lock) => panic!("shared acquire must fail while the service holds the store"),
         }

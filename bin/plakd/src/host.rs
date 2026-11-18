@@ -322,7 +322,7 @@ fn refuse_external_gateway(paths: &crate::home::paths::PlakPaths) -> CliResult<(
 
 fn hold_host_store(services: &Services) -> CliResult<crate::gateway::HolderLock> {
     let root = services.home().state()?;
-    crate::gateway::acquire_shared(root).map_err(CliFailure::new)
+    crate::gateway::acquire_shared_creating(root).map_err(CliFailure::new)
 }
 
 fn startup_scan(

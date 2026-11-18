@@ -137,3 +137,13 @@ pub(crate) fn login_shell() -> Option<String> {
         .and_then(|value| value.into_string().ok())
         .filter(|shell| shell.starts_with('/'))
 }
+
+/// Whether `name` is set. The value is never read or returned.
+pub(crate) fn variable_is_set(name: &str) -> bool {
+    std::env::var_os(name).is_some()
+}
+
+/// `XDG_RUNTIME_DIR` when the process has one.
+pub(crate) fn xdg_runtime_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)
+}

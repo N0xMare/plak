@@ -37,9 +37,12 @@ pub(crate) fn hold_in_process(
         return Ok(None);
     }
     let root = services.home().state()?;
-    super::holder::acquire_shared(root)
-        .map(Some)
-        .map_err(CliFailure::new)
+    let held = if crate::command::command_is_read_only(command) {
+        super::holder::acquire_shared(root)
+    } else {
+        super::holder::acquire_shared_creating(root)
+    };
+    held.map(Some).map_err(CliFailure::new)
 }
 
 /// Forwards a credential command to a configured or discovered gateway.

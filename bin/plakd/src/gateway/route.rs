@@ -65,6 +65,6 @@ pub(crate) const PROVIDER_KEY_ENV: [&str; 4] = [
 pub(crate) fn provider_key_env_set() -> Vec<&'static str> {
     PROVIDER_KEY_ENV
         .into_iter()
-        .filter(|name| std::env::var_os(name).is_some())
+        .filter(|name| crate::environment::variable_is_set(name))
         .collect()
 }
