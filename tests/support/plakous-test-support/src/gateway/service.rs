@@ -79,6 +79,10 @@ impl Scripted {
     }
 
     fn injection(&self, envelope: &RelayEnvelope) -> Result<Injection, GatewayRefusal> {
+        // A prefix match on the logical origin, not a provider's exact pin
+        // rows (method, path, query): fixture relays are transport evidence,
+        // never pin-enforcement evidence. Each provider's `upstream_pins`
+        // tests and the custody tests over the real pin tables own that.
         if !envelope.url.starts_with(&format!("{LOGICAL}/")) {
             return Err(GatewayRefusal::UpstreamNotPinned {});
         }

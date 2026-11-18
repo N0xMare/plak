@@ -4371,7 +4371,11 @@ only protocol implementation. Loopback upstreams are reached through
 checks still see the logical URL. The service can refuse, drop before a
 response or after `Head`, stall, restart onto a new instance id, and answer
 `fence_moved` on a chosen relay. The scripted credential is an API key.
-Subscription refresh is not scripted.
+Subscription refresh is not scripted. The service admits any upstream URL
+under its logical origin rather than a provider's pin rows, so its relays are
+transport evidence, not pin-enforcement evidence; each provider's
+`upstream_pins` tests and the custody tests over the real pin tables own pin
+enforcement.
 
 Relayed-path parity captures the upstream HTTP/1.1 request at that loopback
 peer. Those bytes, with the dial authority normalized, are pinned equal to a
