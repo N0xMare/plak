@@ -468,7 +468,7 @@ pub fn project_host_event<P: ProtocolExtension>(
                 fields.insert("http_status".to_owned(), Value::from(status));
             }
             if let Some(notice) = &lifecycle.usage_limit {
-                let mut usage = serde_json::Map::new();
+                let mut usage = Map::new();
                 usage.insert("kind".to_owned(), Value::from(notice.kind.as_str()));
                 usage.insert("account".to_owned(), Value::from(notice.account.as_str()));
                 if let Some(resets_at) = notice.resets_at {

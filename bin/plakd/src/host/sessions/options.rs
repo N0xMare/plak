@@ -213,24 +213,25 @@ impl ProductSessions {
                 }
             })
             .transpose()?;
+        let accounts = crate::account_choice::kind_accounts(
+            &shared
+                .models
+                .accounts
+                .iter()
+                .map(|section| crate::account_choice::ReadyAccount {
+                    account: section.account.clone(),
+                    ready: section.ready,
+                    label: Some(section.label.clone()),
+                })
+                .collect::<Vec<_>>(),
+        );
         Ok(wire::SessionOptions {
             runners,
             models: shared.models,
             profiles: shared.profiles,
             templates: shared.templates,
             workspace,
-            accounts: crate::account_choice::kind_accounts(
-                &shared
-                    .models
-                    .accounts
-                    .iter()
-                    .map(|section| crate::account_choice::ReadyAccount {
-                        account: section.account.clone(),
-                        ready: section.ready,
-                        label: Some(section.label.clone()),
-                    })
-                    .collect::<Vec<_>>(),
-            ),
+            accounts,
         })
     }
 }

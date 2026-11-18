@@ -94,7 +94,7 @@ impl DormantSessionDocument {
     /// # Errors
     /// Refuses malformed records, frozen tools, duplicate rows or unsettled work.
     pub fn into_cut(self) -> Result<DormantSession, String> {
-        let mut rows = std::collections::BTreeMap::new();
+        let mut rows = BTreeMap::new();
         for (key, value) in self.rows {
             if rows.insert(key, value).is_some() {
                 return Err("duplicate move transcript row".into());

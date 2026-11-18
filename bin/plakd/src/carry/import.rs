@@ -101,7 +101,7 @@ fn apply_record_fields(
     {
         kinds.insert(parsed.vertical().as_str().to_owned());
     }
-    crate::account_choice::fill_imported(&mut record, &kinds, &[]);
+    crate::account_choice::fill_imported(record, &kinds, &[]);
 }
 
 fn import_note(

@@ -735,10 +735,10 @@ mod durability {
     use crate::home::paths::PlakPaths;
     use crate::store::ProductStore;
     use plakous_hosted::sessions::projector::{Submission, SubmissionKind, WorkflowRequest};
-    use plakous_hosted::sessions::{SessionLocator, SessionWorkflowKind};
+    use plakous_hosted::sessions::SessionWorkflowKind;
 
-    fn locator() -> SessionLocator {
-        SessionLocator::new(
+    fn locator() -> plakous::sessions::SessionLocator {
+        plakous::sessions::SessionLocator::new(
             uuid::Uuid::nil(),
             uuid::Uuid::from_u128(1),
             uuid::Uuid::from_u128(2),
@@ -786,9 +786,8 @@ mod durability {
                     account: account.clone(),
                     model: "gpt".into(),
                     effort: None,
-                    composition:
-                        plakous_hosted::sessions::ProductCompositionSelection::FollowCatalog,
-                    target_selection: plakous_hosted::sessions::ProductTargetSelection::Native,
+                    composition: session.composition,
+                    target_selection: session.target_selection.clone(),
                     protocol: "native".into(),
                     route: "native".into(),
                     requested_model: "gpt".into(),

@@ -578,7 +578,7 @@ fn write_non_root_choice(
 }
 
 fn failed_prompt(paths: PlakPaths, session_id: &str) -> (String, bool) {
-    let Ok(store) = crate::store::ProductStore::open(&paths) else {
+    let Ok(mut store) = crate::store::ProductStore::open(&paths) else {
         return (String::new(), true);
     };
     let Ok(record) = store.load(session_id) else {

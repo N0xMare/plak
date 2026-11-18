@@ -208,7 +208,7 @@ impl TopCommand {
                         .transpose()?,
                 };
                 // Bare `plakd run` prints run help (no flags, no prompt).
-                if account.is_none()
+                if account.is_empty()
                     && provider.is_none()
                     && model.is_none()
                     && effort.is_none()
