@@ -67,8 +67,9 @@ mod tests {
             ("GET", "/api/v1/models"),
             (
                 "GET",
-                "/api/v1/models/anthropic/claude-sonnet-5%2E1/endpoints",
+                "/api/v1/models/anthropic/claude-sonnet-5.1/endpoints",
             ),
+            ("GET", "/api/v1/models/vendor/model-v1%3Afree/endpoints"),
             ("GET", "/api/v1/key"),
         ] {
             assert!(
@@ -81,6 +82,9 @@ mod tests {
             ("GET", "/api/v1/models/a/endpoints"),
             ("POST", "/api/v1/models"),
             ("GET", "/api/v1/models?x=1"),
+            ("GET", "/api/v1/models/a/%2E%2E/endpoints"),
+            ("GET", "/api/v1/models/a%2Fb/c/endpoints"),
+            ("GET", "/api/v1/models/../c/endpoints"),
         ] {
             assert!(
                 pinned(OPENROUTER_UPSTREAM_PINS, method, origin, path).is_none(),

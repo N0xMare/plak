@@ -10,7 +10,9 @@
 pub enum PathSegment {
     /// Exactly this segment.
     Literal(&'static str),
-    /// One nonempty segment of unreserved or percent-encoded characters.
+    /// One nonempty slug segment: ASCII letters, digits, `-`, `_` and `.`,
+    /// and the `%3A` escape (`:`), never `.` or `..`. No other escape is
+    /// admitted, so no segment can decode to a separator or a dot segment.
     Any,
 }
 
@@ -92,9 +94,7 @@ fn path_matches(rule: PinPath, path: &str) -> bool {
                     .zip(segments)
                     .all(|(part, segment)| match segment {
                         PathSegment::Literal(literal) => part == literal,
-                        PathSegment::Any => {
-                            !matches!(*part, "" | "." | "..") && part.bytes().all(unreserved)
-                        }
+                        PathSegment::Any => slug_segment(part),
                     })
         }
     }
@@ -117,6 +117,28 @@ fn query_matches(rule: PinQuery, query: Option<&str>) -> bool {
         }
         _ => false,
     }
+}
+
+/// Whether `part` is one slug segment the send sites emit (see
+/// [`PathSegment::Any`]).
+fn slug_segment(part: &str) -> bool {
+    if matches!(part, "" | "." | "..") {
+        return false;
+    }
+    let mut rest = part.as_bytes();
+    while let Some((&byte, tail)) = rest.split_first() {
+        rest = if byte == b'%' {
+            match tail {
+                [b'3', b'A' | b'a', after @ ..] => after,
+                _ => return false,
+            }
+        } else if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.') {
+            tail
+        } else {
+            return false;
+        };
+    }
+    true
 }
 
 const fn unreserved(byte: u8) -> bool {
@@ -174,7 +196,17 @@ mod tests {
                 "{refused:?}"
             );
         }
-        assert!(pinned(PINS, "GET", origin, "/v1/models/a-b/endpoints").is_some());
+        for admitted in [
+            "/v1/models/a-b/endpoints",
+            "/v1/models/claude-sonnet-5.1/endpoints",
+            "/v1/models/model%3Afree/endpoints",
+            "/v1/models/a_b.c/endpoints",
+        ] {
+            assert!(
+                pinned(PINS, "GET", origin, admitted).is_some(),
+                "{admitted}"
+            );
+        }
         assert!(
             pinned(
                 PINS,
@@ -191,7 +223,21 @@ mod tests {
             "/v1/models/a/endpoints?limit=1&limit=2",
             "/v1/models/a/endpoints?other=1",
             "/v1/models/a/endpoints?limit",
-            "/v1/models/a%2Fb/endpoints?limit=a/b",
+            "/v1/models/a/endpoints?limit=a/b",
+            // Escapes that decode to a separator, a dot or a dot segment.
+            "/v1/models/a%2Fb/endpoints",
+            "/v1/models/a%2fb/endpoints",
+            "/v1/models/%2E%2E/endpoints",
+            "/v1/models/%2e/endpoints",
+            "/v1/models/a%2E1/endpoints",
+            "/v1/models/a%3Fb/endpoints",
+            "/v1/models/a%23b/endpoints",
+            "/v1/models/a%5Cb/endpoints",
+            "/v1/models/a%25b/endpoints",
+            "/v1/models/a%3/endpoints",
+            "/v1/models/a%/endpoints",
+            "/v1/models/a~b/endpoints",
+            "/v1/models/./endpoints",
         ] {
             assert!(pinned(PINS, "GET", origin, refused).is_none(), "{refused}");
         }

@@ -6186,7 +6186,10 @@ credential must hold the request's fence. Pin tables are `pub const` rows
 built from each provider crate's path constants (`CODEX_UPSTREAM_PINS`,
 `CLAUDE_UPSTREAM_PINS`, `SUPERGROK_UPSTREAM_PINS` and the four API-key
 tables, including OpenRouter's per-model endpoint list and the SuperGrok
-credits read); token, device, JWKS, userinfo, discovery and profile
+credits read). A templated path segment admits only the slug the send sites
+emit (ASCII letters, digits, `-`, `_`, `.` and the `%3A` escape), never `.`
+or `..` and no other escape, so no segment decodes to a separator or a dot
+segment; token, device, JWKS, userinfo, discovery and profile
 endpoints are never rows. `InProcessGateway` serves local custody to the
 process's own host (and a same-user Unix socket peer) over an in-memory
 duplex. A repository-only dial override (`plakous-http/fault-injection`,
