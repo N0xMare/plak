@@ -163,17 +163,17 @@ impl FixtureGateway {
 
     /// Queues one action. Requests consume the queue in order.
     pub fn push(&self, action: GatewayScript) {
-        self.lock(&self.inner.script).push_back(action);
+        Self::lock(&self.inner.script).push_back(action);
     }
 
     /// On the n-th decoded relay, answer `fence_moved` and do not dial.
     pub fn script_fence_moved(&self, nth: u64, facts: AccountFacts) {
-        *self.lock(&self.inner.fence) = Some((nth, facts));
+        *Self::lock(&self.inner.fence) = Some((nth, facts));
     }
 
     /// Facts returned by `/facts` and `/refresh`.
     pub fn set_facts(&self, facts: Option<AccountFacts>) {
-        *self.lock(&self.inner.facts) = facts;
+        *Self::lock(&self.inner.facts) = facts;
     }
 
     /// Replaces the instance id. A restart does not clear the dial counter.
@@ -181,32 +181,35 @@ impl FixtureGateway {
     /// # Errors
     /// Refuses an id that is not a canonical UUID.
     pub fn restart(&self) -> Result<UuidText, FixtureError> {
-        let mut instance = self.lock(&self.inner.instance);
+        let mut instance = Self::lock(&self.inner.instance);
         instance.n += 1;
         instance.id = instance_at(instance.n)?;
         Ok(instance.id.clone())
     }
 
     /// The instance id `/versions` currently reports.
+    #[must_use]
     pub fn instance(&self) -> UuidText {
-        self.lock(&self.inner.instance).id.clone()
+        Self::lock(&self.inner.instance).id.clone()
     }
 
     /// Upstream dials. A refusal, a drop before the response, a stall and an
     /// incomplete body do not increment it.
+    #[must_use]
     pub fn dials(&self) -> u64 {
         self.inner.dials.load(Ordering::Relaxed)
     }
 
     /// Upstream requests recorded at dial, in order.
+    #[must_use]
     pub fn captured(&self) -> Vec<CapturedUpstream> {
-        self.lock(&self.inner.captured).clone()
+        Self::lock(&self.inner.captured).clone()
     }
 
-    fn lock<'a, T>(&'a self, mutex: &'a Mutex<T>) -> std::sync::MutexGuard<'a, T> {
+    fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         mutex
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -279,14 +282,12 @@ pub(crate) fn dial(
     let headers = substitute(&envelope.headers, &gateway.inner.credentials)?;
     let http = render_upstream(&envelope.method, &envelope.url, &headers, body)?;
     gateway.inner.dials.fetch_add(1, Ordering::Relaxed);
-    gateway
-        .lock(&gateway.inner.captured)
-        .push(CapturedUpstream {
-            method: envelope.method.clone(),
-            url: envelope.url.clone(),
-            headers,
-            body: body.to_vec(),
-            http,
-        });
+    FixtureGateway::lock(&gateway.inner.captured).push(CapturedUpstream {
+        method: envelope.method.clone(),
+        url: envelope.url.clone(),
+        headers,
+        body: body.to_vec(),
+        http,
+    });
     Ok(())
 }

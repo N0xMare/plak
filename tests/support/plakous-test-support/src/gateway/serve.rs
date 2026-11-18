@@ -175,12 +175,9 @@ async fn serve_relay<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let (envelope, upstream_body) = match envelope::decode_request(body) {
-        Ok(decoded) => decoded,
-        Err(_) => {
-            write_refusal(stream, GatewayRefusal::EnvelopeInvalid {}).await?;
-            return Ok(undialed());
-        }
+    let Ok((envelope, upstream_body)) = envelope::decode_request(body) else {
+        write_refusal(stream, GatewayRefusal::EnvelopeInvalid {}).await?;
+        return Ok(undialed());
     };
     let ordinal = next_relay(gateway);
     if let Some(facts) = take_fence(gateway, ordinal) {
@@ -238,7 +235,7 @@ fn take_fence(
     gateway: &FixtureGateway,
     ordinal: u64,
 ) -> Option<plakous_gateway_protocol::facts::AccountFacts> {
-    let fence = gateway.lock(&gateway.inner.fence);
+    let fence = FixtureGateway::lock(&gateway.inner.fence);
     match fence.as_ref() {
         Some((nth, facts)) if *nth == ordinal => Some(facts.clone()),
         _ => None,
@@ -253,14 +250,11 @@ async fn serve_facts<S>(
 where
     S: AsyncWrite + Unpin,
 {
-    let request: FactsRequest = match call::decode(body) {
-        Ok(request) => request,
-        Err(_) => {
-            write_refusal(stream, GatewayRefusal::EnvelopeInvalid {}).await?;
-            return Ok(undialed());
-        }
+    let Ok(request) = call::decode::<FactsRequest>(body) else {
+        write_refusal(stream, GatewayRefusal::EnvelopeInvalid {}).await?;
+        return Ok(undialed());
     };
-    let Some(facts) = gateway.lock(&gateway.inner.facts).clone() else {
+    let Some(facts) = FixtureGateway::lock(&gateway.inner.facts).clone() else {
         write_refusal(stream, GatewayRefusal::AccountUnknown {}).await?;
         return Ok(undialed());
     };
@@ -291,7 +285,7 @@ where
         write_refusal(stream, GatewayRefusal::EnvelopeInvalid {}).await?;
         return Ok(undialed());
     }
-    let Some(facts) = gateway.lock(&gateway.inner.facts).clone() else {
+    let Some(facts) = FixtureGateway::lock(&gateway.inner.facts).clone() else {
         write_refusal(stream, GatewayRefusal::AccountUnknown {}).await?;
         return Ok(undialed());
     };
@@ -303,12 +297,9 @@ async fn serve_admin<S>(stream: &mut S, body: &[u8]) -> Result<ServeReport, Fixt
 where
     S: AsyncWrite + Unpin,
 {
-    let request: AdminRequest = match call::decode(body) {
-        Ok(request) => request,
-        Err(_) => {
-            write_refusal(stream, GatewayRefusal::EnvelopeInvalid {}).await?;
-            return Ok(undialed());
-        }
+    let Ok(request) = call::decode::<AdminRequest>(body) else {
+        write_refusal(stream, GatewayRefusal::EnvelopeInvalid {}).await?;
+        return Ok(undialed());
     };
     let response = match request {
         AdminRequest::List {} => AdminResponse::Accounts {
@@ -335,16 +326,13 @@ where
 }
 
 fn pop_action(gateway: &FixtureGateway) -> GatewayScript {
-    gateway
-        .lock(&gateway.inner.script)
+    FixtureGateway::lock(&gateway.inner.script)
         .pop_front()
         .unwrap_or(GatewayScript::Relay(UpstreamReply::default()))
 }
 
 fn authenticate(gateway: &FixtureGateway, headers: &[(String, String)]) -> Option<GatewayRefusal> {
-    let Some(key) = gateway.inner.key.as_deref() else {
-        return None;
-    };
+    let key = gateway.inner.key.as_deref()?;
     let presented = headers
         .iter()
         .find(|(name, _)| name == KEY_HEADER)
