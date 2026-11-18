@@ -630,7 +630,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 pending_usage,
                 subscription_usage_refresh,
                 readiness: super::super::shell::ReadinessRefresh::new(),
-                account_reads: Default::default(),
+                account_reads: surface::AccountReads::default(),
                 live: None,
                 projection_finished: false,
                 shown_skill_notices: crate::skills::ShownSkillNotices::default(),

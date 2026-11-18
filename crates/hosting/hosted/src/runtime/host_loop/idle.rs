@@ -203,7 +203,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             let Some((received, accounts)) = self.role.account_reads.poll(
                 &self.role.config.session.id,
                 received,
-                RecvTimeoutError::Timeout,
+                &RecvTimeoutError::Timeout,
                 read,
             ) else {
                 self.role.idle_since = None;

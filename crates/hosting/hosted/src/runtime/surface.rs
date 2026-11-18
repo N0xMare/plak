@@ -596,7 +596,7 @@ impl<P: ProtocolExtension> AccountReads<P> {
         &mut self,
         session: &str,
         incoming: Result<AccountDelivery<P>, E>,
-        empty: E,
+        empty: &E,
         read: Option<AccountsRead>,
     ) -> Option<AccountDispatch<P, E>> {
         match incoming {
@@ -606,7 +606,7 @@ impl<P: ProtocolExtension> AccountReads<P> {
                     .map(|(delivery, answer)| (Ok(delivery), Some(answer))),
                 None => Some((Ok(delivery), None)),
             },
-            Err(error) if error == empty => Some(
+            Err(error) if &error == empty => Some(
                 self.take_ready(session)
                     .map_or((Err(error), None), |(delivery, answer)| {
                         (Ok(delivery), Some(answer))

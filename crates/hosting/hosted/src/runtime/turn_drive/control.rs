@@ -205,7 +205,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
             let Some((received, accounts)) = self.host.account_reads.poll(
                 &self.host.session.id,
                 received,
-                TryRecvError::Empty,
+                &TryRecvError::Empty,
                 read,
             ) else {
                 return true;
