@@ -7,7 +7,7 @@
 //! that open `product.sqlite3` live in `bin/plakd`, and
 //! nothing here names a path.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -255,6 +255,9 @@ pub struct SessionRecord {
     /// A display copy of the runner and workspace the root runs on; `None`
     /// is the local runner at `workspace_root`, which is every session today.
     pub runner: Option<RunnerDisplay>,
+    /// Named-account choice for every non-root kind this session uses.
+    /// The root kind is the root line head's account, not an entry here.
+    pub account_choices: BTreeMap<String, String>,
 }
 
 /// The write-ahead marker of a same-store carry (spec 02 §2.5.1, §2.6):
@@ -405,6 +408,7 @@ impl SessionRecord {
             carry_intent: None,
             root_profile: None,
             runner: None,
+            account_choices: BTreeMap::new(),
         }
     }
 
@@ -644,8 +648,88 @@ impl SessionRecord {
         validate_pending_queue(&self.pending_queue)?;
         validate_portable_identity(&self.create_operation_id, "create operation")?;
         validate_product_lineage(self)?;
+        self.validate_account_choices()?;
 
         Ok(())
+    }
+
+    /// Non-root choices are kind to a full account reference. The root kind
+    /// is the line head's account and is not stored here.
+    fn validate_account_choices(&self) -> Result<(), String> {
+        let root_kind = self
+            .account
+            .as_deref()
+            .and_then(|account| account.parse::<crate::account::AccountRef>().ok())
+            .map(|account| account.vertical());
+        for (kind, account) in &self.account_choices {
+            let choice = account
+                .parse::<crate::account::AccountRef>()
+                .map_err(|_| format!("account choice {kind} is not an account reference"))?;
+            if choice.vertical().as_str() != kind {
+                return Err(format!(
+                    "account choice {kind} does not match {}",
+                    choice.vertical().as_str()
+                ));
+            }
+            if root_kind == Some(choice.vertical()) {
+                return Err(format!(
+                    "the root kind {kind} is the line head's account and is not stored"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// The account a spawn freezes for a card.
+    ///
+    /// A named reference is already frozen. A kind uses the root line head
+    /// when it is the root kind, otherwise the stored choice. No choice is
+    /// fail-closed: spawn does not guess.
+    ///
+    /// # Errors
+    /// Returns a message when a kind has no stored choice and is not the root.
+    pub fn resolve_spawn_account(&self, kind_or_frozen: &str) -> Result<String, String> {
+        let card = kind_or_frozen
+            .parse::<crate::account::AccountRef>()
+            .map_err(|error| error.to_string())?;
+        if card.is_named() {
+            return Ok(card.to_string());
+        }
+        let kind = card.vertical().as_str();
+        if let Some(root) = self
+            .account
+            .as_deref()
+            .and_then(|account| account.parse::<crate::account::AccountRef>().ok())
+            && root.vertical().as_str() == kind
+        {
+            return Ok(root.to_string());
+        }
+        self.account_choices
+            .get(kind)
+            .cloned()
+            .ok_or_else(|| format!("no ready account for {kind}; choose one before spawning"))
+    }
+
+    /// When the root changes kind, keep the previous root account for any
+    /// card that still names that kind. The new root kind is never stored.
+    pub fn retain_previous_root_kind(&mut self, previous_account: &str) {
+        let Ok(previous) = previous_account.parse::<crate::account::AccountRef>() else {
+            return;
+        };
+        let Some(next) = self
+            .account
+            .as_deref()
+            .and_then(|account| account.parse::<crate::account::AccountRef>().ok())
+        else {
+            return;
+        };
+        self.account_choices.remove(next.vertical().as_str());
+        if previous.vertical() != next.vertical() {
+            self.account_choices.insert(
+                previous.vertical().as_str().to_owned(),
+                previous.to_string(),
+            );
+        }
     }
 }
 

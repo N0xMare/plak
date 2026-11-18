@@ -56,11 +56,19 @@ impl SessionRecord {
                     target.node = crate::sessions::SessionNode::genesis(&target.id);
                     target.root_profile = Some(profile.clone());
                 }
+                let previous = self.account.clone();
                 target.bind_selection(selection);
+                if let Some(previous) = previous.as_deref() {
+                    target.retain_previous_root_kind(previous);
+                }
             }
             SessionWorkflowKind::Switch(switch) => {
+                let previous = self.account.clone();
                 target.bind_selection(&switch.rebind);
                 target.root_profile = Some(switch.root.clone());
+                if let Some(previous) = previous.as_deref() {
+                    target.retain_previous_root_kind(previous);
+                }
             }
             _ => {}
         }

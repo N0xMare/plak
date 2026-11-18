@@ -10,6 +10,7 @@ use crate::sessions::{
 use plakous::sessions::SessionLocator;
 use plakous::sessions::feed::FeedSeq;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Closed export-v13 product cut. No process-local draft registry is represented.
@@ -162,6 +163,7 @@ impl DormantSessionDocument {
             carry_intent: None,
             root_profile: self.profile,
             runner: self.runner,
+            account_choices: BTreeMap::new(),
         };
         let mut cut =
             DormantSession::prepare(record, views, self.intents, FeedSeq::new(self.floor))?

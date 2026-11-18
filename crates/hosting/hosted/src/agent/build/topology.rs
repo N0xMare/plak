@@ -153,6 +153,14 @@ impl SpawnParent {
     /// rest belongs to the session and its tree, so a profile switch keeps
     /// it, and a node's frozen `parent_composition` is the one input a
     /// switch has to carry.
+    /// The product session whose account choices this tree's spawns resolve.
+    pub(in crate::agent) fn product_session_id(&self) -> &str {
+        match self {
+            Self::Native(spec) => spec.plan_state_authority.as_str(),
+            Self::Api(parent) => parent.plan_state_authority.as_str(),
+        }
+    }
+
     pub(in crate::agent) fn child_inputs(&self) -> SpawnParentInputs<'_> {
         let (workspace_root, product_home, state_roots, composition) = match self {
             Self::Native(spec) => (

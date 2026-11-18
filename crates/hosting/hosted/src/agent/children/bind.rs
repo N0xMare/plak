@@ -364,6 +364,39 @@ impl Drop for StartupCaller {
     }
 }
 
+async fn freeze_spawn_choice(
+    parent: &SpawnParent,
+    agent_id: &str,
+    card: &str,
+) -> Result<String, SpawnBindError> {
+    let inputs = parent.child_inputs();
+    let records = inputs.state_roots.session_records();
+    let session = records
+        .load(inputs.tree_id)
+        .ok()
+        .or_else(|| records.load(parent.product_session_id()).ok());
+    let Some(session) = session else {
+        return Ok(card.to_owned());
+    };
+    let resolved = session
+        .resolve_spawn_account(card)
+        .map_err(|message| SpawnBindError::Refused(message.into()))?;
+    if resolved == card {
+        return Ok(resolved);
+    }
+    let runtime = crate::topology_runtime::lookup(inputs.tree_id)
+        .ok_or_else(|| SpawnBindError::Refused("topology hub is not attached".into()))?;
+    let account = resolved.clone();
+    let id = agent_id.to_owned();
+    runtime
+        .record_then_apply(agent_id, move |tree| {
+            tree.freeze_spawn_account(&id, &account)
+        })
+        .await
+        .map_err(|message| SpawnBindError::Refused(message.into()))?;
+    Ok(resolved)
+}
+
 /// Creates the child session and starts its assignment turn in one step.
 ///
 /// The spawn brief is the child's first prompt; nothing else ever delivers it
@@ -390,7 +423,8 @@ pub(in crate::agent) async fn create_spawned_child_session(
     let tree_id = parent.child_inputs().tree_id.to_owned();
     let operation_id = spawn_child_operation_id(&tree_id, &spawned.agent_id)?;
     let fence = occupancy_session_fence(start.tier);
-    let account = Some(start.account.as_str()).filter(|account| !account.is_empty());
+    let resolved = freeze_spawn_choice(parent, &spawned.agent_id, &start.account).await?;
+    let account = Some(resolved.as_str()).filter(|account| !account.is_empty());
     let start_kind = ChildAssignmentStartKind::from_composition(prompt_composition(
         spawn_child_start_composition(parent, &spawned.agent_id, account)?,
     ))?;

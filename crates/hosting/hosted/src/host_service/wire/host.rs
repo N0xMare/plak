@@ -94,6 +94,8 @@ pub struct Creation<'a> {
     pub template: Option<&'a str>,
     /// Advanced root model override.
     pub model: Option<&'a plakous_host_protocol::wire::CreationModel>,
+    /// Explicit account choices. Empty means the product fills each kind.
+    pub accounts: &'a [plakous_host_protocol::wire::AccountChoice],
     /// Stable create-action UUID.
     pub request_id: &'a str,
 }
@@ -688,6 +690,7 @@ where
                 workspace,
                 template,
                 request_id,
+                accounts,
                 ..
             } => answered(self.create_session(&Creation {
                 runner: &runner,
@@ -695,6 +698,7 @@ where
                 profile: profile.as_deref(),
                 template: template.as_deref(),
                 model: model.as_ref(),
+                accounts: &accounts,
                 request_id: &request_id,
             })),
             Op::ReleaseSession { session } => answered(self.release(&session)?),
