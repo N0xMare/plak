@@ -140,7 +140,7 @@ mod equal_binding {
             let instance =
                 plakous::gateway::protocol::UuidText::new(uuid::Uuid::new_v4().to_string())
                     .unwrap();
-            let custody = super::custody::local_custody(&paths, instance, &state);
+            let custody = crate::gateway::custody::local_custody(&paths, instance, &state);
             let reply = custody
                 .facts(&FactsRequest {
                     accounts: vec![
