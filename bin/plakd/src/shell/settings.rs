@@ -526,7 +526,34 @@ fn choose_account(
     let session_id = session.id.clone();
     let kind = kind.to_owned();
     let account_owned = account.to_owned();
-    let prompt = continue_failed.then(|| failed_prompt(paths.clone(), &session_id));
+    let (failed, committed) = if continue_failed {
+        failed_prompt(paths.clone(), &session_id)
+    } else {
+        (String::new(), false)
+    };
+    let (operation_id, command_id) =
+        crate::account_choice::switch_ids(&session_id, &kind, &account_owned);
+    let prompt = crate::account_choice::plan_switch(
+        &kind,
+        &account_owned,
+        root_kind.as_deref().unwrap_or(kind.as_str()),
+        facts.phase == SurfacePhase::Busy,
+        continue_failed,
+        (!failed.is_empty()).then_some(failed.as_str()),
+        committed,
+        operation_id,
+        command_id,
+    )
+    .ok()
+    .and_then(|plan| match plan {
+        crate::account_choice::SwitchPlan::Root {
+            prompt: Some(prompt),
+            ..
+        } => Some(crate::account_choice::switch_prompt_text(&prompt).to_owned()),
+        crate::account_choice::SwitchPlan::Root { prompt: None, .. }
+        | crate::account_choice::SwitchPlan::MapOnly { .. }
+        | crate::account_choice::SwitchPlan::RootBusy => None,
+    });
     SurfaceEffect {
         profile_fork: Some(SurfaceProfileFork {
             account: account_owned.clone(),
@@ -538,17 +565,12 @@ fn choose_account(
             roster,
             switch: config.root_agent.clone().or(Some("root".to_owned())),
             finish: Box::new(move |outcome| {
-                let Some((exact, committed)) = prompt else {
+                let Some(text) = prompt else {
                     return;
                 };
                 if !matches!(outcome, ProfileForkOutcome::Switched) {
                     return;
                 }
-                let text = if !committed && !exact.is_empty() {
-                    exact
-                } else {
-                    crate::account_choice::CONTINUATION_PROMPT.to_owned()
-                };
                 let _ = write_root_start(&paths, &session_id, &kind, &account_owned, &text);
             }),
         }),

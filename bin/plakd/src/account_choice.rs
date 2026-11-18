@@ -391,17 +391,6 @@ pub fn split_account_flags(
     Ok((bare, choices))
 }
 
-/// The account a spawn freezes for a card that names `kind_or_frozen`.
-///
-/// A named reference is already frozen and is kept. A kind resolves through
-/// the root line head or the stored choice. Nothing Ready is an error.
-pub fn resolve_spawn_account(
-    kind_or_frozen: &str,
-    session: &SessionRecord,
-) -> Result<String, String> {
-    session.resolve_spawn_account(kind_or_frozen)
-}
-
 /// Plan one `ChooseAccount`. `root_busy` refuses a root switch before any write.
 pub fn plan_switch(
     kind: &str,
@@ -482,6 +471,21 @@ pub const fn recover_switch(request_published: bool, command_written: bool) -> S
 /// A crashed switch is never submitted again by reopen.
 pub const fn auto_resubmit_after_reopen() -> bool {
     false
+}
+
+/// Reopen never submits a prompt for an account switch. An unpublished rebind
+/// stays withdrawn; a written command stays the one command of its id.
+pub(crate) fn should_resubmit_on_reopen() -> bool {
+    let resubmit = auto_resubmit_after_reopen();
+    let withdraw = matches!(
+        recover_switch(false, false),
+        SwitchRecovery::WithdrawRequest
+    );
+    let keep = matches!(
+        recover_switch(true, true),
+        SwitchRecovery::KeepExistingCommand
+    );
+    resubmit && withdraw && keep
 }
 
 /// Stable ids for one continue-on action, derived from the session and account
@@ -623,18 +627,18 @@ mod tests {
             .account_choices
             .insert("claude".into(), "claude/alt".into());
         assert_eq!(
-            resolve_spawn_account("claude/old", &session).unwrap(),
+            session.resolve_spawn_account("claude/old").unwrap(),
             "claude/old"
         );
         assert_eq!(
-            resolve_spawn_account("claude", &session).unwrap(),
+            session.resolve_spawn_account("claude").unwrap(),
             "claude/alt"
         );
         assert_eq!(
-            resolve_spawn_account("codex", &session).unwrap(),
+            session.resolve_spawn_account("codex").unwrap(),
             "codex/work"
         );
-        let error = resolve_spawn_account("grok", &session).unwrap_err();
+        let error = session.resolve_spawn_account("grok").unwrap_err();
         assert!(error.contains("no ready account"), "{error}");
     }
 
@@ -734,8 +738,8 @@ mod durability {
     use super::*;
     use crate::home::paths::PlakPaths;
     use crate::store::ProductStore;
-    use plakous_hosted::sessions::projector::{Submission, SubmissionKind, WorkflowRequest};
     use plakous_hosted::sessions::SessionWorkflowKind;
+    use plakous_hosted::sessions::projector::{Submission, SubmissionKind, WorkflowRequest};
 
     fn locator() -> plakous::sessions::SessionLocator {
         plakous::sessions::SessionLocator::new(
