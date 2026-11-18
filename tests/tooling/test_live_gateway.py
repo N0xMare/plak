@@ -50,6 +50,19 @@ case "$1 $2" in
     echo "gateway $(cat "$d/serving") protocol 1"; exit 0 ;;
   "gateway audit") cat "$PLAK_HOME/audit.log" 2>/dev/null; exit 0 ;;
 esac
+if [ "$1" = doctor ]; then
+  [ -f "$(gw_dir)/serving" ] || exit 1
+  for kind in codex claude grok; do
+    printf 'OAuth %s\tOK\tready · record held by the gateway\n' "$kind"
+  done
+  exit 0
+fi
+if [ "$1" = status ]; then
+  [ -f "$(gw_dir)/serving" ] || exit 1
+  echo "via gateway unix:$(gw_dir)/gateway.sock"
+  echo "$2: credential=ready"
+  exit 0
+fi
 if [ "$1" = refresh ]; then echo "$2: credential=ready"; exit 0; fi
 if [ "$1" = run ] && [ "$2" = --session ]; then audit reopen; echo MAGENTA; exit 0; fi
 if [ "$1" = run ]; then audit turn; echo "session_id=s$$"; echo ok; exit 0; fi
@@ -80,6 +93,9 @@ class LiveGatewayPlan(unittest.TestCase):
         self.assertIn("plakd gateway serve", completed.stdout)
         self.assertIn("[gateway] address", completed.stdout)
         self.assertIn("audit line count", completed.stdout)
+        self.assertIn(
+            "unix-socket doctor and status must report every OAuth kind Ready", completed.stdout
+        )
         self.assertIn("not driven: tailnet TCP", completed.stdout)
         self.assertIn("no provider call", completed.stdout)
 
@@ -154,6 +170,10 @@ class LiveGatewayPaid(unittest.TestCase):
             self.assertEqual(subjects(topology, "turn"), list(ROUTES))
             self.assertEqual(subjects(topology, "reopen"), list(ROUTES))
             self.assertEqual(subjects(topology, "refresh"), list(gateway.OAUTH_KINDS))
+        self.assertEqual(subjects(gateway.UNIX_SOCKET, "doctor"), ["oauth"])
+        self.assertEqual(subjects(gateway.UNIX_SOCKET, "status"), list(gateway.OAUTH_KINDS))
+        self.assertEqual(subjects(gateway.IN_PROCESS, "doctor"), [])
+        self.assertEqual(subjects(gateway.IN_PROCESS, "status"), [])
         restart = next(
             s for s in steps if s["topology"] == gateway.UNIX_SOCKET and s["step"] == "restart"
         )
