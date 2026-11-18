@@ -1,7 +1,10 @@
 """The credential-gateway live recipe prints a plan and does not call a provider."""
 
+import stat
 import subprocess
 import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -34,8 +37,42 @@ class LiveGatewayPlan(unittest.TestCase):
         self.assertIn("unix-socket", completed.stdout)
         self.assertIn("tailnet TCP", completed.stdout)
         self.assertIn("just live estimate --rate-card RATE_CARD --soak-row grok", completed.stdout)
+        self.assertIn("plakd gateway serve", completed.stdout)
+        self.assertIn("[gateway] address", completed.stdout)
+        self.assertIn("audit line count", completed.stdout)
         self.assertIn("hop=gateway", completed.stdout)
         self.assertIn("no provider call", completed.stdout)
+
+    def test_paid_starts_serve_when_the_command_exists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "plakd"
+            binary.write_text(
+                textwrap.dedent(
+                    """\
+                    #!/bin/sh
+                    if [ "$1" = gateway ] && [ "$2" = --help ]; then
+                        echo serve
+                        exit 0
+                    fi
+                    if [ "$1" = gateway ] && [ "$2" = serve ]; then
+                        sleep 30
+                    fi
+                    exit 1
+                    """
+                ),
+                encoding="utf-8",
+            )
+            binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
+            completed = subprocess.run(
+                [sys.executable, str(SCRIPT), "--paid", "--binary", str(binary)],
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=ROOT,
+            )
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertIn("started and was stopped", completed.stderr)
+        self.assertIn("no provider call", completed.stderr)
 
     def test_paid_refuses_before_a_provider_call(self):
         completed = subprocess.run(

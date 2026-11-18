@@ -39,8 +39,14 @@
 //! direct client, or the in-process gateway's own upstream client. It is refused
 //! when [`FaultPlacement::ExternalGateway`] is set, so a plan that cannot reach
 //! a provider from this process is never silently fault-free. `hop=gateway`
-//! matches the logical upstream host and path and applies to hop 1.
+//! matches the host and path of the exchange it is applied to.
 //! `relay-lost` and `gateway-refusal` are hop 1 only.
+//!
+//! A relaying client returns before it consults its plan, and a dialed hop is
+//! excluded from selection, so neither of those clients applies a rule. Hop-1
+//! rules are selected by a client placed on `hop=gateway` that is neither
+//! relaying nor dialing. Hop-2 rules are selected by the gateway's upstream
+//! client.
 //!
 //! A gateway service process reads [`provider_from_env`]: today's grammar, with
 //! no `hop` field and no hop-1 fault. [`PLAK_TEST_GATEWAY`] tells the host plan

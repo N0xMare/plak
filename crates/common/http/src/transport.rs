@@ -758,9 +758,12 @@ impl Client {
         self
     }
 
-    /// Selects which hop of the fault plan this client applies. Provider and
-    /// direct clients stay on [`FaultHop::Upstream`](fault::FaultHop::Upstream).
-    /// The relay client uses [`FaultHop::Gateway`](fault::FaultHop::Gateway).
+    /// Selects which hop of the fault plan this client applies. A relaying
+    /// client never consults its plan, and a dialed hop is excluded from
+    /// selection. Provider and direct clients stay on
+    /// [`FaultHop::Upstream`](fault::FaultHop::Upstream). A direct client
+    /// placed on [`FaultHop::Gateway`](fault::FaultHop::Gateway) applies
+    /// hop-1 rules to that exchange.
     #[must_use]
     pub fn with_fault_hop(mut self, hop: fault::FaultHop) -> Self {
         if let Some(plan) = self.faults.take() {

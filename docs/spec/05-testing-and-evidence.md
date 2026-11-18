@@ -4322,13 +4322,15 @@ which is today's grammar: no `hop`, `relay-lost`, `gateway-refusal`,
 `retry-after-ms`, `credential-status` or `supported`.
 
 `hop=gateway` matches the host and path of the exchange it is applied to.
-The relay client applies it to the logical upstream target
-(`Client::with_fault_hop(Gateway)`), not to the gateway's listen address.
-Rules on the other hop are not counted. On hop 1 the existing faults keep
-their meaning: `connect` and `hang` are gateway unreachable (`NotStarted`);
-`write-reset` is an incomplete hop-1 write, which the relay map turns into
-upstream `NotStarted`; `reset`, `eof` and `stall` cut the hop-1 body; a
-status fault is a synthetic head and does not open a socket.
+A relaying client returns before it consults its plan, and a dialed hop is
+excluded from selection, so neither applies these rules. Hop-1 rules are
+selected by a direct client placed on that hop with `Client::with_fault_hop(Gateway)`.
+Hop-2 rules are selected by the gateway's upstream client. Rules on the other
+hop are not counted. On hop 1 the existing faults keep their meaning:
+`connect` and `hang` are gateway unreachable (`NotStarted`); `write-reset`
+is an incomplete hop-1 write, which the relay map turns into upstream
+`NotStarted`; `reset`, `eof` and `stall` cut the hop-1 body; a status fault
+is a synthetic head and does not open a socket.
 
 `relay-lost=before-head` and `relay-lost=after-head` require `hop=gateway`.
 Before head the caller sees `Failure(ResponseHead, MayHaveTransmitted, Io)`.
@@ -4352,36 +4354,42 @@ does not apply to hop 1.
 
 ### 2.9 Credential gateway evidence
 
-`plakous-test-support`'s `gateway` module is a protocol-exact in-process peer
-over a duplex. It encodes and decodes with `plakous-gateway-protocol` and
-records a scripted upstream only after the whole request body is read. It can
-refuse, drop before a response or after `Head`, stall, restart onto a new
-instance id, and answer `fence_moved` on a chosen relay. It is the scripted
-authority the shared relay server core will own. That core is not wrapped
-until it lands, so this peer is not a second framing implementation: frame
-bytes are the protocol crate's.
+`plakous-test-support`'s `gateway` module is a scripted
+`GatewayService` on `plakous_http::relay_server::RelayServer`, which is the
+only protocol implementation. Loopback upstreams are reached through
+`RelayServer::with_dial_override` (`fault-injection`, repository-only); pin
+checks still see the logical URL. The service can refuse, drop before a
+response or after `Head`, stall, restart onto a new instance id, and answer
+`fence_moved` on a chosen relay. The scripted credential is an API key.
+Subscription refresh is not scripted.
 
-Relayed-path parity renders the upstream HTTP/1.1 request at that fixture.
-`host` comes from the URL, then the envelope headers in order with custodied
-entries substituted in place, then `content-length`. Those bytes are pinned
-equal to the same request built as direct local custody.
+Relayed-path parity captures the upstream HTTP/1.1 request at that loopback
+peer. Those bytes, with the dial authority normalized, are pinned equal to a
+direct client exchange to the same peer, with the custodied value substituted
+in place and the header order unchanged.
 
-The durability profile holds the crash skeleton, also matched by
-`test(durability::)` so the serial lane runs it: a gateway task aborted
-mid-refresh dials nothing; a gateway task aborted mid-stream ends the body
-after `Head`; a caller dropped mid-stream leaves one dial; a holder lock is
-released by the kernel when its process dies. Refresh claim steps name
-`RefreshOutcomeUnknown` and `credential_not_ready` quarantined, with Codex
-and Claude requiring a login and xAI reclaiming. Session-account switch rows
-cover the rewritten §7.3 steps 2-4: an unpublished rebind is withdrawn, a
-published rebind without a command gets a notice and one continue, and a
-submitted root-start is one prompt. Each row is one rebind and at most one
-prompt. The product cuts that walk those edges land with session account
-choice.
+The durability profile holds the API-key crash rows
+(`test(gateway::durability::)`), and the offline lane excludes them. A
+gateway killed after
+`Head` ends the body as `MayHaveTransmitted` and does not replay. A host
+killed mid-stream, and a caller drop, each cancel the upstream within one
+second and leave one dial. A restarted gateway serves the next request on a
+new instance id. A holder lock is released by the kernel when its process
+dies. Subscription refresh claim steps stay names until OAuth custodians
+land: `RefreshOutcomeUnknown` and `credential_not_ready` quarantined, with
+Codex and Claude requiring a login and xAI reclaiming. Session-account
+switch rows cover the rewritten §7.3 steps 2-4: an unpublished rebind is
+withdrawn, a published rebind without a command gets a notice and one
+continue, and a submitted root-start is one prompt. Each row is one rebind
+and at most one prompt. The product cuts that walk those edges land with
+session account choice.
 
 `just live gateway` prints the paid plan and does not call a provider.
-`just live gateway --paid` is the opt-in run and refuses before any provider
-call until `plakd gateway serve` is in the tree. The plan drives seven routes
+`just live gateway --paid` is the opt-in run. Until `plakd gateway serve` is
+in the tree it refuses before any provider call. When that command is
+present it starts the service under an isolated home with no copied
+credentials, stops it, and still makes no provider call: host dispatch
+through the gateway is not in this tree. The plan drives seven routes
 (`codex`, `claude-haiku55-low`, `grok`, `api-openai`, `api-anthropic`,
 `api-xai`, `or-nemotron-free`) through an in-process gateway, a same-machine
 Unix socket, and a second machine over tailnet TCP with a scoped key. Each
@@ -4389,9 +4397,9 @@ topology does one turn per route, a reopen across a gateway restart, a forced
 refresh of each OAuth kind (codex, claude, grok), remote device-code and paste
 login, the kill switch, and one `hop=gateway` fault run. Results are recorded
 in `tests/live/STATUS.md`. The recipe prints the `just live estimate` line
-for the API-key turns; subscription routes stay quota. The test-only
-dial-origin override that maps a pinned origin to a loopback peer is not part
-of this fixture. Pin checks stay on the logical URL when that override lands.
+for the API-key turns; subscription routes stay quota. `plakd gateway serve`
+adopts the machine's existing test logins, and the host sets `[gateway]
+address`. Each route records the gateway audit line count and certainty.
 
 ## 3. Evidence classes
 

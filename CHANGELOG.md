@@ -72,6 +72,13 @@ for one version bump, without native protocol compatibility.
   configured. `relay-lost` and `gateway-refusal` fault the gateway hop only.
   A gateway service reads the existing provider grammar for its own upstream
   hop.
+- Host `PLAK_TEST_FAULTS` plans take `hop=gateway|upstream`. A relaying
+  client does not apply its own plan, and a dialed hop is excluded from
+  fault selection. Upstream rules apply to the gateway's upstream client and
+  are refused when an external gateway is configured. `relay-lost` and
+  `gateway-refusal` fault the gateway hop only. The test fixture is a
+  scripted service on the shared relay server core.
+
 ### plakd
 
 - A parent follow-up to a settled child whose account, model and template

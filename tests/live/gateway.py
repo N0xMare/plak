@@ -2,16 +2,19 @@
 """Offline plan for the credential-gateway live matrix.
 
 `just live gateway` prints the plan and a `just live estimate` line. It does
-not build, and it does not call a provider. `just live gateway --paid` is the
-opt-in run. This tree has no `plakd gateway serve`, so the paid form checks
-the binary and then refuses before any provider call.
+not build, and it does not call a provider. `just live gateway --paid` starts
+`plakd gateway serve` when that command exists, under an isolated home, and
+stops it again. It still makes no provider call: a host cannot dispatch
+through the gateway yet.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # One gateway turn is one smoke scenario's share of the measured smoke budget
@@ -61,6 +64,11 @@ def plan_text() -> str:
         lines.append(f"  - {name}")
         for step in PER_TOPOLOGY:
             lines.append(f"      {step}")
+    lines.append(
+        "gateway: plakd gateway serve adopts the machine's existing test logins; "
+        "the host sets [gateway] address"
+    )
+    lines.append("each route records the audit line count and certainty")
     lines.append("estimate: just live estimate --rate-card RATE_CARD --soak-row grok")
     lines.append(
         "gateway_api_turns "
@@ -91,10 +99,60 @@ def paid_block(binary: Path) -> str:
         return "plakd gateway could not be started; no provider call was made"
     if completed.returncode != 0 or "serve" not in completed.stdout:
         return "plakd gateway serve is not available; no provider call was made"
-    return (
-        "plakd gateway serve is present, but this build does not drive it; "
-        "no provider call was made"
-    )
+    return drive_serve(binary)
+
+
+def drive_serve(binary: Path) -> str:
+    """Start `gateway serve` in an isolated home and stop it.
+
+    The child environment is not the caller's: no credential or provider key
+    is copied. Provider turns wait until a host can dispatch through the
+    gateway.
+    """
+    try:
+        home = tempfile.TemporaryDirectory(prefix="plak-gateway-live-")
+    except OSError:
+        return "plakd gateway serve could not be started; no provider call was made"
+    state = Path(home.name) / "state"
+    try:
+        state.mkdir(mode=0o700)
+    except OSError:
+        return "plakd gateway serve could not be started; no provider call was made"
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": home.name,
+        "PLAK_HOME": home.name,
+        "XDG_STATE_HOME": str(state),
+        "PLAK_TEST_GATEWAY": "external",
+    }
+    try:
+        process = subprocess.Popen(
+            [str(binary), "gateway", "serve"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError:
+        return "plakd gateway serve could not be started; no provider call was made"
+    try:
+        try:
+            process.wait(timeout=0.4)
+        except subprocess.TimeoutExpired:
+            return (
+                "plakd gateway serve started and was stopped; "
+                "provider turns wait until a host can dispatch through it; "
+                "no provider call was made"
+            )
+        return "plakd gateway serve exited before listening; no provider call was made"
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
 
 
 def main(argv: list[str]) -> int:

@@ -70,8 +70,9 @@ Rung 3 rows are sparing and run only for a targeted confirmation.
 `just live gateway` prints the offline plan (seven routes, three topologies,
 reopen, OAuth refresh, remote login, kill switch, one `hop=gateway` fault
 run) and a `just live estimate` line. No paid gateway run is recorded.
-`just live gateway --paid` refuses before any provider call until
-`plakd gateway serve` is in the tree.
+`just live gateway --paid` makes no provider call. Until `plakd gateway
+serve` is in the tree it refuses; when that command exists it starts the
+service under an isolated home and stops it.
 
 ## History
 

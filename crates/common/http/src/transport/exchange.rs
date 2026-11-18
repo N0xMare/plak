@@ -45,17 +45,22 @@ impl Client {
         }
         let (origin, method, path_and_query, headers, body) = request.into_parts();
         #[cfg(feature = "fault-injection")]
-        let (control, stream_fault) = match super::fault::apply(
-            self.faults.as_ref(),
-            origin.host(),
-            path_and_query.as_str(),
-            control,
-            &self.inner.limits,
-        )
-        .await?
-        {
-            super::fault::Applied::Done(response) => return Ok(*response),
-            super::fault::Applied::Continue(control, fault) => (control, fault),
+        let (control, stream_fault) = if self.inner.dial.is_some() {
+            // A dialed hop (the gateway socket) is not a fault-selection site.
+            (control, None)
+        } else {
+            match super::fault::apply(
+                self.faults.as_ref(),
+                origin.host(),
+                path_and_query.as_str(),
+                control,
+                &self.inner.limits,
+            )
+            .await?
+            {
+                super::fault::Applied::Done(response) => return Ok(*response),
+                super::fault::Applied::Continue(control, fault) => (control, fault),
+            }
         };
         let parts = RequestParts {
             origin,

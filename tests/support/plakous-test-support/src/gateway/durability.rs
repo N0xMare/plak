@@ -1,19 +1,17 @@
-//! Crash skeleton for the credential gateway.
+//! API-key crash rows for the credential gateway.
 //!
-//! The switch rows name the recovery edges. The product cuts that walk them
-//! land with session account choice. Refresh claim steps name what a restart
-//! sees; the in-process abort below proves a killed refresh dials nothing.
+//! Subscription refresh claim steps stay names: the OAuth custodians that
+//! own those writes are not in this tree. Switch rows name the recovery
+//! edges the product cut walks later.
 
 use std::io::BufRead as _;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use plakous_gateway_protocol::call;
-use plakous_gateway_protocol::facts::{RefreshMode, RefreshRequest};
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use plakous_http::{Phase, StatusCode, TransmissionFact};
 
 use super::tests::{self};
-use super::{FixtureError, GatewayScript, serve_one};
+use super::{FixtureError, GatewayScript};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -23,6 +21,7 @@ struct RefreshClaimStep {
     remote_sees: &'static str,
 }
 
+/// Subscription kinds only. An API key has no refresh claim to kill.
 const REFRESH_CLAIM_STEPS: &[RefreshClaimStep] = &[
     RefreshClaimStep {
         step: "before_claim",
@@ -95,7 +94,7 @@ const SWITCH_CRASH_ROWS: &[SwitchCrashRow] = &[
 ];
 
 #[test]
-fn refresh_claim_steps_name_the_quarantine() {
+fn subscription_refresh_crash_rows_wait_for_oauth_custodians() {
     assert!(REFRESH_CLAIM_STEPS.len() >= 4);
     for step in REFRESH_CLAIM_STEPS {
         assert!(!step.step.is_empty(), "{}", step.durable);
@@ -167,117 +166,128 @@ async fn holder_lock_crash_releases_the_kernel_lock() -> TestResult {
 }
 
 #[tokio::test]
-async fn gateway_killed_mid_refresh_dials_nothing() -> TestResult {
-    let gateway = tests::gateway()?;
-    gateway.push(GatewayScript::Stall(Duration::from_secs(30)));
-    let (client, server) = tokio::io::duplex(8 * 1024);
-    let running = gateway.clone();
-    let task = tokio::spawn(async move { serve_one(server, &running).await });
-    let (mut read, mut write) = tokio::io::split(client);
-    let body = refresh_body()?;
-    write.write_all(&http_post("/v1/refresh", &body)).await?;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(gateway.dials(), 0);
-    task.abort();
-    let _ = task.await;
-    let mut response = Vec::new();
-    let _ = read.read_to_end(&mut response).await;
-    assert!(!response.starts_with(b"HTTP/1.1 200"));
-    assert_eq!(gateway.dials(), 0);
-    Ok(())
-}
-
-#[tokio::test]
-async fn gateway_killed_mid_stream_ends_the_body_after_head() -> TestResult {
-    let gateway = tests::gateway()?;
-    gateway.push(GatewayScript::Relay(large_reply()));
-    let (client, server) = tokio::io::duplex(256);
-    let running = gateway.clone();
-    let task = tokio::spawn(async move { serve_one(server, &running).await });
-    let (mut read, mut write) = tokio::io::split(client);
-    write
-        .write_all(&http_post("/v1/relay", &tests::relay_body()?))
+async fn gateway_killed_mid_stream_is_may_have_transmitted_without_replay() -> TestResult {
+    let gateway = hung_gateway()?;
+    let client = gateway.relayed().await?;
+    let response = client
+        .execute(
+            tests::api_request(logical()?, tests::placeholder()?)?,
+            tests::control(),
+        )
         .await?;
-    write.shutdown().await?;
-    let mut response = Vec::new();
-    let mut tmp = [0_u8; 64];
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while response.len() < 180 && tokio::time::Instant::now() < deadline {
-        let read = tokio::time::timeout(Duration::from_millis(200), read.read(&mut tmp)).await;
-        match read {
-            Ok(Ok(0)) => break,
-            Ok(Ok(n)) => response.extend_from_slice(&tmp[..n]),
-            _ => break,
-        }
-    }
-    assert!(response.contains(&0x01), "head frame missing");
-    assert!(
-        response.len() < 4_096,
-        "the body finished before the gateway was killed"
-    );
-    task.abort();
-    let _ = task.await;
+    assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(gateway.dials(), 1);
-    Ok(())
-}
-
-#[tokio::test]
-async fn host_killed_mid_stream_cancels_after_one_dial() -> TestResult {
-    let gateway = tests::gateway()?;
-    gateway.push(GatewayScript::Relay(large_reply()));
-    let (client, server) = tokio::io::duplex(256);
-    let running = gateway.clone();
-    let task = tokio::spawn(async move { serve_one(server, &running).await });
-    let (mut read, mut write) = tokio::io::split(client);
-    write
-        .write_all(&http_post("/v1/relay", &tests::relay_body()?))
-        .await?;
-    write.shutdown().await?;
-    let mut tmp = [0_u8; 32];
-    let _ = tokio::time::timeout(Duration::from_secs(2), read.read(&mut tmp)).await;
-    drop(read);
-    drop(write);
-    let report = tokio::time::timeout(Duration::from_secs(2), task).await??;
-    match report {
-        Ok(report) => {
-            assert!(report.dialed || gateway.dials() == 1);
-            assert!(report.caller_cancelled || gateway.dials() == 1);
-        }
-        Err(FixtureError::Io(_)) => {}
-        Err(error) => return Err(error.into()),
-    }
-    assert_eq!(gateway.dials(), 1);
-    Ok(())
-}
-
-fn large_reply() -> super::UpstreamReply {
-    super::UpstreamReply {
-        status: 200,
-        headers: Vec::new(),
-        body: vec![b'x'; 8 * 1024],
-        trailers: Vec::new(),
-    }
-}
-
-fn http_post(path: &str, body: &[u8]) -> Vec<u8> {
-    let mut bytes = format!(
-        "POST {path} HTTP/1.1\r\nhost: gateway.invalid\r\ncontent-length: {}\r\n\r\n",
-        body.len()
-    )
-    .into_bytes();
-    bytes.extend_from_slice(body);
-    bytes
-}
-
-fn refresh_body() -> TestResult<Vec<u8>> {
-    let request = RefreshRequest {
-        account: plakous_gateway_protocol::GatewayAccount::new("anthropic")?,
-        mode: RefreshMode::IfDue {
-            expected: plakous_gateway_protocol::envelope::ExpectedFence {
-                account_binding: plakous_gateway_protocol::HexDigest::new("ab".repeat(32))?,
-                generation: 1,
-            },
-        },
+    gateway.kill();
+    let mut body = response.into_body();
+    let outcome = tokio::time::timeout(Duration::from_secs(2), body.next_chunk())
+        .await
+        .map_err(|_| "the body did not break within 2s of the gateway being killed")?;
+    let Some(result) = outcome else {
+        return Err("the body ended cleanly after the gateway was killed".into());
     };
-    Ok(call::encode(&request)?)
+    let Err(failure) = result else {
+        return Err("the body continued after the gateway was killed".into());
+    };
+    assert_eq!(failure.phase(), Phase::ResponseBody);
+    assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
+    assert_eq!(gateway.dials(), 1, "a killed gateway must not be replayed");
+    Ok(())
+}
+
+#[tokio::test]
+async fn host_killed_mid_stream_cancels_the_upstream() -> TestResult {
+    let gateway = hung_gateway()?;
+    let running = gateway.clone();
+    let task = tokio::spawn(async move {
+        let client = running.relayed().await?;
+        let response = client
+            .execute(
+                tests::api_request(logical()?, tests::placeholder()?)?,
+                tests::control(),
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut body = response.into_body();
+        let _ = body.next_chunk().await;
+        Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+    });
+    wait_until(|| gateway.dials() == 1).await?;
+    task.abort();
+    let _ = task.await;
+    tokio::time::timeout(Duration::from_secs(1), gateway.wait_for_upstream_close())
+        .await
+        .map_err(|_| "the upstream was still open 1s after the host was killed")?;
+    assert_eq!(gateway.dials(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn dropping_the_caller_cancels_the_upstream_within_a_bound() -> TestResult {
+    let gateway = hung_gateway()?;
+    let client = gateway.relayed().await?;
+    let response = client
+        .execute(
+            tests::api_request(logical()?, tests::placeholder()?)?,
+            tests::control(),
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(gateway.dials(), 1);
+    drop(response);
+    tokio::time::timeout(Duration::from_secs(1), gateway.wait_for_upstream_close())
+        .await
+        .map_err(|_| "dropping the caller did not cancel the upstream within 1s")?;
+    assert_eq!(gateway.dials(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_restarted_gateway_serves_the_next_request() -> TestResult {
+    let gateway = tests::open_gateway()?;
+    let first = gateway.instance();
+    let client = gateway.relayed().await?;
+    let response = client
+        .execute(
+            tests::api_request(logical()?, tests::placeholder()?)?,
+            tests::control(),
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let restarted = gateway.restart()?;
+    assert_ne!(restarted, first);
+    assert_eq!(gateway.instance(), restarted);
+    let client = gateway.relayed().await?;
+    let response = client
+        .execute(
+            tests::api_request(logical()?, tests::placeholder()?)?,
+            tests::control(),
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(gateway.dials(), 2);
+    Ok(())
+}
+
+fn hung_gateway() -> Result<super::FixtureGateway, FixtureError> {
+    let gateway = tests::open_gateway()?;
+    gateway.push(GatewayScript::DropAfterHead);
+    Ok(gateway)
+}
+
+fn logical() -> TestResult<plakous_http::Origin> {
+    Ok(plakous_http::Origin::parse(&format!(
+        "{}/",
+        super::service::LOGICAL
+    ))?)
+}
+
+async fn wait_until(mut ready: impl FnMut() -> bool) -> TestResult {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while tokio::time::Instant::now() < deadline {
+        if ready() {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    Err("the upstream was not dialed".into())
 }

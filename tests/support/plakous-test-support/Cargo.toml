@@ -21,14 +21,14 @@ futures-core.workspace = true
 futures-util = { workspace = true, features = ["std"] }
 plakous-model.workspace = true
 plakous-gateway-protocol.workspace = true
-plakous-http = { workspace = true, features = ["gateway-client", "gateway-server"] }
+plakous-http = { workspace = true, features = ["fault-injection", "gateway-client", "gateway-server"] }
 plakous-tools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
-tokio = { workspace = true, features = ["io-util", "net", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 
 [dev-dependencies]
