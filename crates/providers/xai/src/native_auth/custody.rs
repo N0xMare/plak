@@ -14,6 +14,9 @@ use super::{
 
 const SELECTION_DOMAIN: &[u8] = b"plak.custody.grok-selection.v1";
 
+/// How often a facts read retries when the record moves under it.
+const SNAPSHOT_ATTEMPTS: usize = 3;
+
 /// How long a refresh after a rejection waits for another caller's claimed
 /// refresh to settle before it judges the record, and how often it looks.
 const SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -61,7 +64,22 @@ impl XaiNativeAuthManager {
         Ok(self.custody_snapshot(slot).await?.0)
     }
 
+    /// The snapshot, read again when the record moved between its reads
+    /// (a concurrent refresh), at most [`SNAPSHOT_ATTEMPTS`] times.
     async fn custody_snapshot(
+        &self,
+        slot: &CustodySlot,
+    ) -> Result<(AccountFacts, Option<(CredentialFence, String)>), CustodyError> {
+        let mut attempts = 1;
+        loop {
+            match self.custody_snapshot_once(slot).await {
+                Err(CustodyError::Store) if attempts < SNAPSHOT_ATTEMPTS => attempts += 1,
+                result => return result,
+            }
+        }
+    }
+
+    async fn custody_snapshot_once(
         &self,
         slot: &CustodySlot,
     ) -> Result<(AccountFacts, Option<(CredentialFence, String)>), CustodyError> {
