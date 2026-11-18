@@ -110,7 +110,7 @@ async fn grants(paths: &PlakPaths) -> Grants {
 
 /// Runs `plakd gateway serve` over `paths` with its store at
 /// `gateway_state`, exactly as the service runs, until an admin drain.
-fn serve(
+pub(super) fn serve(
     paths: &PlakPaths,
     gateway_state: &std::path::Path,
 ) -> (
@@ -146,7 +146,7 @@ fn serve(
 }
 
 /// `plakd gateway drain`: the service stops accepting and exits cleanly.
-fn drain(socket: &std::path::Path, served: std::thread::JoinHandle<Result<(), String>>) {
+pub(super) fn drain(socket: &std::path::Path, served: std::thread::JoinHandle<Result<(), String>>) {
     let address = super::GatewayAddress::Unix(socket.to_path_buf());
     let response: AdminResponse =
         super::client::admin(&address, None, &AdminRequest::Drain {}).unwrap();

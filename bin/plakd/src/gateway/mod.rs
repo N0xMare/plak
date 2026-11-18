@@ -398,3 +398,15 @@ mod tests;
     feature = "grok"
 ))]
 mod continuity_tests;
+
+#[cfg(all(
+    test,
+    feature = "openai",
+    feature = "anthropic",
+    feature = "xai-api",
+    feature = "openrouter",
+    feature = "codex",
+    feature = "claude",
+    feature = "grok"
+))]
+mod account_choice_tests;
