@@ -633,7 +633,7 @@ where
         }
     }
 
-    fn answer_new_session(&mut self, op: Op<P>) -> CliResult<Forwarded<P>> {
+    fn answer_new_session(&mut self, op: Op<P>) -> Forwarded<P> {
         let Op::NewSession {
             runner,
             profile,
@@ -647,7 +647,7 @@ where
         else {
             unreachable!("NewSession is the only op forwarded here");
         };
-        Ok(Forwarded::Answered(self.create_session(&Creation {
+        Forwarded::Answered(self.create_session(&Creation {
             runner: &runner,
             workspace: &workspace,
             profile: profile.as_deref(),
@@ -655,7 +655,7 @@ where
             model: model.as_ref(),
             accounts: &accounts,
             request_id: &request_id,
-        })))
+        }))
     }
 
     fn request(
@@ -708,7 +708,7 @@ where
                 answered(Outcome::Ok(Answer::Detached))
             }
             Op::NewSession { .. } if self.host.closed() => refused(stopping()),
-            op @ Op::NewSession { .. } => self.answer_new_session(op),
+            op @ Op::NewSession { .. } => Ok(self.answer_new_session(op)),
             Op::ReleaseSession { session } => answered(self.release(&session)?),
             Op::SessionOptions { workspace, .. } => {
                 answered(self.session_options(request_id, workspace.as_ref()))

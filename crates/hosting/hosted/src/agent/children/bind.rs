@@ -364,11 +364,7 @@ impl Drop for StartupCaller {
     }
 }
 
-fn freeze_spawn_choice(
-    parent: &SpawnParent,
-    _agent_id: &str,
-    card: &str,
-) -> Result<String, SpawnBindError> {
+fn freeze_spawn_choice(parent: &SpawnParent, _agent_id: &str, card: &str) -> String {
     let inputs = parent.child_inputs();
     let records = inputs.state_roots.session_records();
     let session = records
@@ -376,19 +372,19 @@ fn freeze_spawn_choice(
         .ok()
         .or_else(|| records.load(parent.product_session_id()).ok());
     let Some(session) = session else {
-        return Ok(card.to_owned());
+        return card.to_owned();
     };
     // A card that is not an account reference keeps the binding it already had.
     if card.parse::<crate::account::AccountRef>().is_err() {
-        return Ok(card.to_owned());
+        return card.to_owned();
     }
     // The child session binds the resolved reference. The node already carries
     // the card; rewriting it here re-enters the tree writer the spawn tool is
     // waiting on. A kind with no stored choice keeps the card, and spawn fails
     // closed later if that card cannot authenticate.
-    Ok(session
+    session
         .resolve_spawn_account(card)
-        .unwrap_or_else(|_| card.to_owned()))
+        .unwrap_or_else(|_| card.to_owned())
 }
 
 /// Creates the child session and starts its assignment turn in one step.
@@ -417,7 +413,7 @@ pub(in crate::agent) async fn create_spawned_child_session(
     let tree_id = parent.child_inputs().tree_id.to_owned();
     let operation_id = spawn_child_operation_id(&tree_id, &spawned.agent_id)?;
     let fence = occupancy_session_fence(start.tier);
-    let resolved = freeze_spawn_choice(parent, &spawned.agent_id, &start.account)?;
+    let resolved = freeze_spawn_choice(parent, &spawned.agent_id, &start.account);
     let account = Some(resolved.as_str()).filter(|account| !account.is_empty());
     let start_kind = ChildAssignmentStartKind::from_composition(prompt_composition(
         spawn_child_start_composition(parent, &spawned.agent_id, account)?,
