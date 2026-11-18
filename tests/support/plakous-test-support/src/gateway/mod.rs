@@ -20,11 +20,11 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use plakous_gateway_protocol::UuidText;
 use plakous_gateway_protocol::envelope::{RelayEnvelope, split_upstream_url};
 use plakous_gateway_protocol::facts::AccountFacts;
 use plakous_gateway_protocol::header::{RequestHeader, WireHeader};
 use plakous_gateway_protocol::refusal::GatewayRefusal;
-use plakous_gateway_protocol::text::UuidText;
 
 /// Why the fixture refused to finish an exchange. It never echoes a header
 /// value or a request body.

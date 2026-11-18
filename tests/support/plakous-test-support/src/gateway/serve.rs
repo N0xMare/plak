@@ -201,18 +201,19 @@ where
         }
         return Err(error);
     }
+    let after_head = matches!(relay, Some(Cut::AfterHead));
     let reply = match relay {
         Some(Cut::None(reply)) => reply,
         _ => UpstreamReply::default(),
     };
-    let frames = encode_frames(&reply, matches!(relay, Some(Cut::AfterHead)))?;
+    let frames = encode_frames(&reply, after_head)?;
     if write_bytes(stream, &frames).await.is_err() {
         return Ok(ServeReport {
             dialed: gateway.dials() > before,
             caller_cancelled: true,
         });
     }
-    if matches!(relay, Some(Cut::AfterHead)) {
+    if after_head {
         return Ok(ServeReport {
             dialed: true,
             caller_cancelled: false,
@@ -558,7 +559,7 @@ where
     } else {
         let mut pending = vec![0_u8; length - rest.len()];
         match stream.read_exact(&mut pending).await {
-            Ok(()) => {
+            Ok(_) => {
                 rest.extend_from_slice(&pending);
                 false
             }
