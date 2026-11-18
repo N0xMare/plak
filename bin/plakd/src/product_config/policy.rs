@@ -278,17 +278,7 @@ impl AgentTemplate {
                 "template {name} account is not a supported template account"
             ));
         }
-        let account = self
-            .account
-            .parse::<plakous_hosted::account::AccountRef>()
-            .map_err(|error| error.to_string())?;
-        if account.is_named() {
-            return Err(format!(
-                "template {name}: account must name a provider kind such as {}, not a named account ({})",
-                account.vertical().as_str(),
-                account
-            ));
-        }
+        let account = self.kind_account(name)?;
         self.validate_composition(self.composition)
             .map_err(|error| format!("template {name}: {error}"))?;
         if account.vertical() != plakous_hosted::account::Vertical::OpenRouter
@@ -361,6 +351,21 @@ impl AgentTemplate {
             return Err(format!("template {name} max_turns must be 1 or more"));
         }
         Ok(())
+    }
+
+    fn kind_account(&self, name: &str) -> Result<plakous_hosted::account::AccountRef, String> {
+        let account = self
+            .account
+            .parse::<plakous_hosted::account::AccountRef>()
+            .map_err(|error| error.to_string())?;
+        if account.is_named() {
+            return Err(format!(
+                "template {name}: account must name a provider kind such as {}, not a named account ({})",
+                account.vertical().as_str(),
+                account
+            ));
+        }
+        Ok(account)
     }
 
     pub(super) fn validate_composition(

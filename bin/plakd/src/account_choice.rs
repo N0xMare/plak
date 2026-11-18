@@ -186,7 +186,7 @@ pub fn fill(
             None => {}
         }
     }
-    for (kind, account) in chosen {
+    if let Some((kind, account)) = chosen.into_iter().next() {
         return Err(RequestRefusal::AccountChoiceInvalid {
             kind,
             account,
@@ -391,17 +391,27 @@ pub fn split_account_flags(
     Ok((bare, choices))
 }
 
+/// The continue-on facts of one root switch. Grouped so the plan stays readable.
+pub struct SwitchContinue<'a> {
+    /// Submit a root-start after the rebind.
+    pub continue_failed: bool,
+    /// The failed turn's prompt, when one was recorded.
+    pub failed_prompt: Option<&'a str>,
+    /// A round committed after that prompt, so the start uses the continuation.
+    pub round_committed_after_prompt: bool,
+    /// Stable workflow operation id for this switch.
+    pub operation_id: String,
+    /// Stable root-start command id. A repeat is the same command.
+    pub command_id: String,
+}
+
 /// Plan one `ChooseAccount`. `root_busy` refuses a root switch before any write.
 pub fn plan_switch(
     kind: &str,
     account: &str,
     root_kind: &str,
     root_busy: bool,
-    continue_failed: bool,
-    failed_prompt: Option<&str>,
-    round_committed_after_prompt: bool,
-    operation_id: String,
-    command_id: String,
+    continue_on: SwitchContinue<'_>,
 ) -> Result<SwitchPlan, RequestRefusal> {
     let account = admit_choice(kind, account, &[]).or_else(|refusal| match refusal {
         RequestRefusal::AccountChoiceInvalid { reason, .. } if reason == "not ready" => {
@@ -435,15 +445,20 @@ pub fn plan_switch(
     if root_busy {
         return Ok(SwitchPlan::RootBusy);
     }
-    let prompt = continue_failed.then(|| match (round_committed_after_prompt, failed_prompt) {
-        (false, Some(prompt)) if !prompt.is_empty() => SwitchPrompt::Exact(prompt.to_owned()),
-        _ => SwitchPrompt::Continuation,
+    let prompt = continue_on.continue_failed.then(|| {
+        match (
+            continue_on.round_committed_after_prompt,
+            continue_on.failed_prompt,
+        ) {
+            (false, Some(prompt)) if !prompt.is_empty() => SwitchPrompt::Exact(prompt.to_owned()),
+            _ => SwitchPrompt::Continuation,
+        }
     });
     Ok(SwitchPlan::Root {
         account,
         prompt,
-        operation_id,
-        command_id,
+        operation_id: continue_on.operation_id,
+        command_id: continue_on.command_id,
     })
 }
 
@@ -497,6 +512,22 @@ pub fn switch_ids(session_id: &str, kind: &str, account: &str) -> (String, Strin
         format!("plak:rebind:account:{digest}"),
         format!("plak:root-start:account:{digest}"),
     )
+}
+
+#[cfg(test)]
+fn test_continue<'a>(
+    prompt: Option<&'a str>,
+    committed: bool,
+    operation_id: &str,
+    command_id: &str,
+) -> SwitchContinue<'a> {
+    SwitchContinue {
+        continue_failed: true,
+        failed_prompt: prompt,
+        round_committed_after_prompt: committed,
+        operation_id: operation_id.to_owned(),
+        command_id: command_id.to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -658,11 +689,7 @@ mod tests {
             "claude/alt",
             "codex",
             true,
-            true,
-            Some("do the thing"),
-            false,
-            "op".into(),
-            "cmd".into(),
+            test_continue(Some("do the thing"), false, "op", "cmd"),
         )
         .unwrap();
         assert!(matches!(map, SwitchPlan::MapOnly { .. }));
@@ -671,11 +698,7 @@ mod tests {
             "codex/work",
             "codex",
             true,
-            true,
-            Some("do the thing"),
-            false,
-            "op".into(),
-            "cmd".into(),
+            test_continue(Some("do the thing"), false, "op", "cmd"),
         )
         .unwrap();
         assert_eq!(busy, SwitchPlan::RootBusy);
@@ -688,11 +711,7 @@ mod tests {
             "codex/work",
             "codex",
             false,
-            true,
-            Some("do the thing"),
-            false,
-            "op".into(),
-            "cmd".into(),
+            test_continue(Some("do the thing"), false, "op", "cmd"),
         )
         .unwrap();
         let SwitchPlan::Root {
@@ -708,11 +727,7 @@ mod tests {
             "codex/work",
             "codex",
             false,
-            true,
-            Some("do the thing"),
-            true,
-            "op".into(),
-            "cmd".into(),
+            test_continue(Some("do the thing"), true, "op", "cmd"),
         )
         .unwrap();
         let SwitchPlan::Root { prompt, .. } = continued else {
@@ -792,11 +807,7 @@ mod durability {
             "codex/work",
             "codex",
             false,
-            true,
-            Some("do the thing"),
-            false,
-            operation_id.clone(),
-            command_id.clone(),
+            test_continue(Some("do the thing"), false, &operation_id, &command_id),
         )
         .unwrap();
         let SwitchPlan::Root {
@@ -843,7 +854,7 @@ mod durability {
             .unwrap();
         let intents = reopened.load_intents(&session.id).unwrap();
         assert!(intents.workflow_request(&operation_id).is_none());
-        assert!(intents.submissions.is_empty());
+        assert_eq!(intents.submissions, Vec::new());
         let submission = Submission {
             command_id: command_id.clone(),
             kind: SubmissionKind::RootStart,
@@ -869,6 +880,6 @@ mod durability {
             persisted.account_choices.get("claude").map(String::as_str),
             Some("claude/alt")
         );
-        assert!(persisted.account_choices.get("codex").is_none());
+        assert!(!persisted.account_choices.contains_key("codex"));
     }
 }

@@ -538,11 +538,13 @@ fn choose_account(
         &account_owned,
         root_kind.as_deref().unwrap_or(kind.as_str()),
         facts.phase == SurfacePhase::Busy,
-        continue_failed,
-        (!failed.is_empty()).then_some(failed.as_str()),
-        committed,
-        operation_id,
-        command_id,
+        crate::account_choice::SwitchContinue {
+            continue_failed,
+            failed_prompt: (!failed.is_empty()).then_some(failed.as_str()),
+            round_committed_after_prompt: committed,
+            operation_id,
+            command_id,
+        },
     )
     .ok()
     .and_then(|plan| match plan {
@@ -592,7 +594,7 @@ fn write_non_root_choice(
     account: &str,
 ) -> Result<(), String> {
     let mut store = crate::store::ProductStore::open(paths).map_err(|error| error.to_string())?;
-    let mut record = store.load(session_id).map_err(|error| error.to_string())?;
+    let mut record = store.load(session_id)?;
     record
         .account_choices
         .insert(kind.to_owned(), account.to_owned());
@@ -614,10 +616,8 @@ fn failed_prompt(paths: PlakPaths, session_id: &str) -> (String, bool) {
                 last_user.clone_from(text);
                 committed = false;
             }
-            TranscriptRow::Assistant { .. } | TranscriptRow::Tool(_) => {
-                if !last_user.is_empty() {
-                    committed = true;
-                }
+            TranscriptRow::Assistant { .. } | TranscriptRow::Tool(_) if !last_user.is_empty() => {
+                committed = true;
             }
             _ => {}
         }
