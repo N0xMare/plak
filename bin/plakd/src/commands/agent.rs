@@ -227,7 +227,7 @@ pub(crate) enum AgentSession {
     clippy::too_many_lines,
     reason = "Agent admission carries the explicit binding overrides through capability checks, session selection, and host configuration."
 )]
-/// Spec 02 §4.4.3: the fill picks every used kind's account before the root's
+/// Spec 02 §4.4.1: the fill picks every used kind's account before the root's
 /// route, wire and probe resolve. A bare `--account` (or `--provider`) is the
 /// root's own choice; `--account <kind>=<ref>` names the others.
 #[allow(

@@ -4379,8 +4379,9 @@ is either in the reference fixture, in sanitized authenticated evidence from
 that client version, or on an explicit reviewed API-only Direct list.
 Moving the reference-client pin rotates the Codex OAuth binding identity and
 requires a runtime format epoch cut. This pin move belongs to the same unshipped
-epoch 38 / `r28.e38.p39.t11` cut as the pending runtime changes; it adds no
-second bump. Cross-build session transfer uses export
+epoch 38 / `r28.e38.p38.t11` cut as the pending runtime changes; it adds no
+second bump. Product schema 39 later moves the state key to `r28.e38.p39.t11`
+without a runtime format change. Cross-build session transfer uses export
 and import (§5.4).
 
 On a sampling request, a Responses `response.incomplete` with reason
@@ -6858,7 +6859,7 @@ operator resolution, never process-death proof. Closed/expired namespaces permit
 and close for resolution. Results use the control channel; output production reserves
 remaining bulk-frame capacity before advancing any cursor or directional sequence.
 
-Client protocol 11 maps these operations through consented product requests,
+Client protocol 12 maps these operations through consented product requests,
 independent terminal streams and explicit operator-terminal residency outcomes
 (chapter 02 §4.4); runner versioning remains independent.
 `operator.scope.inventory` is paired-host recovery metadata, not a client listing:

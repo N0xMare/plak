@@ -337,6 +337,37 @@ pub(super) fn head_of_tree_on(
 mod tests {
     use super::*;
 
+    /// A spawn after a root account switch resolves through the root line's
+    /// head: the successor on the root's node, never a child's record.
+    #[test]
+    fn the_root_line_head_is_the_newest_record_on_the_root_node() {
+        let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let mut store = ProductStore::open(&paths).unwrap();
+        let mut source = sessions::SessionRecord::new(paths.home().to_owned());
+        source.account = Some("codex".into());
+        store.commit(&mut source).unwrap();
+        let tree = source.node.tree_id.clone();
+        assert_eq!(store.root_line_head(&tree).unwrap().unwrap().id, source.id);
+        let mut child = sessions::SessionRecord::new(paths.home().to_owned());
+        child.node = plakous_hosted::sessions::SessionNode::parse(&tree, "child-1").unwrap();
+        child.updated_at_unix = source.updated_at_unix + 5;
+        store.commit(&mut child).unwrap();
+        let mut successor = sessions::SessionRecord::new(paths.home().to_owned());
+        successor.node = source.node.clone();
+        successor.account = Some("codex/b".into());
+        successor.source_product_session_id = Some(source.id.clone());
+        successor.source_workflow_operation_id = Some("plak:rebind:account:00".into());
+        store.commit(&mut successor).unwrap();
+        let head = store.root_line_head(&tree).unwrap().unwrap();
+        assert_eq!(head.id, successor.id);
+        assert_eq!(
+            head.chosen_account(plakous_hosted::account::Vertical::Codex)
+                .as_deref(),
+            Some("codex/b")
+        );
+        assert!(store.root_line_head("no-such-tree").unwrap().is_none());
+    }
+
     #[test]
     fn workspace_list_filters_archived_before_its_limit() {
         let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();

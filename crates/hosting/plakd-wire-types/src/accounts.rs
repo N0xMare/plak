@@ -1,4 +1,4 @@
-//! Session account choice DTOs (protocol 12, spec 02 §4.4.3). A kind is a
+//! Session account choice DTOs (protocol 12, spec 02 §4.4.1). A kind is a
 //! provider vertical; a choice is the full account reference the session
 //! uses for it. The neutral envelope carries the same shape with a string
 //! kind (`plakous_host_protocol::wire::AccountChoice`).

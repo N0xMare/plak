@@ -36,7 +36,7 @@ Templates MUST NOT be authored through `plakd config set`, which refuses
 
 | Field | Meaning |
 | --- | --- |
-| `account`, `model`, `effort` | the bind tuple; never shown on the card unless `show_model` |
+| `account`, `model`, `effort` | the bind tuple; never shown on the card unless `show_model`. `account` is a provider kind (`codex`, `claude`, `grok`, `anthropic`, `openai`, `xai-api`, `openrouter`) or an accepted alias, never a named account: a named reference such as `codex/work` is a named load error. The session holds the named account per kind (§2.1, chapter 02 §4.4.1) |
 | `fast_mode` | Codex-only fast lane (provider-native `priority` processing tier) |
 | `composition` | catalog selection for this node (`direct`, `plakous-default`, `native-ptc`, `js-ptc`, `py-ptc`) |
 | `protocol` | OpenRouter-only wire selection |
@@ -425,6 +425,18 @@ authenticated catalog, a tier the exact catalog row does not advertise, or a
 resolve failure is fail-closed (`model_not_admitted` or binder recovery),
 never a fallback to the caller. A non-empty `spawns` decides only whether a
 node may be a parent; it is independent of the node's tier.
+
+The card's account is a kind. At spawn the binder resolves it through the
+tree's current root line head, read from the product store when the spawn
+binds (chapter 02 §4.4.1): the root kind is that head's own account and any
+other kind is the head's stored choice. A kind with no stored choice takes the
+fill rule in best-effort mode (the kind's Ready bare default slot, else its
+single Ready account); when that fills nothing the spawn is refused, naming
+the kind. A store read failure refuses the spawn; nothing falls back to the
+card's bare kind or the caller's account. The child's own product session
+freezes the resolved full reference, so its reopen and follow-ups keep it,
+and a choice made later moves only later spawns. The tree names no account
+for the session's choice; a card stays the kind its template named.
 
 Native child materialization does not independently probe the catalog before
 provider resolution. Source-backed enrollment chooses only the tool-presentation

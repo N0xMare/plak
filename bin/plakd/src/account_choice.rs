@@ -1,4 +1,4 @@
-//! Session account choice (spec 02 §4.4.3): the fill rule, its refusals and
+//! Session account choice (spec 02 §4.4.1): the fill rule, its refusals and
 //! the CLI's `--account <kind>=<ref>`.
 //!
 //! Templates name a provider kind. The root kind's account is the root line

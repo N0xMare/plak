@@ -1,4 +1,4 @@
-//! `ChooseAccount` on an idle root (spec 02 §4.4.3). A non-root kind is a
+//! `ChooseAccount` on an idle root (spec 02 §4.4.1). A non-root kind is a
 //! record write. The root kind continues its line through the rebind
 //! workflow; a continue then submits one ordinary root-start on the line head.
 
@@ -11,7 +11,7 @@ use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 use surface::{AccountChoiceOutcome, AccountChoiceRefusal, SurfaceAccountChoice};
 
 /// The root-start a continue submits when a round committed after the failed
-/// prompt. Pinned: spec 02 §4.4.3.
+/// prompt. Pinned: spec 02 §4.4.1.
 pub const CONTINUATION_PROMPT: &str = "Continue the previous request from where it stopped. The tool results above are what actually ran.";
 
 /// The workflow operation prefix of a continue's rebind.
@@ -344,41 +344,4 @@ fn refusal_note(refusal: &AccountChoiceRefusal) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn continue_ids_are_stable_per_turn_and_account() {
-        let first = ContinueIds::of("turn-a", "codex/work");
-        assert_eq!(first, ContinueIds::of("turn-a", "codex/work"));
-        assert_ne!(first, ContinueIds::of("turn-b", "codex/work"));
-        assert_ne!(first, ContinueIds::of("turn-a", "codex/other"));
-        assert!(first.operation_id.starts_with(CONTINUE_OPERATION));
-        assert!(uuid::Uuid::parse_str(&first.item_id).is_ok());
-        assert_eq!(
-            first.command_id(),
-            format!("plak.queue.{}.1", first.item_id)
-        );
-    }
-
-    fn turn(prompt: Option<&str>, committed: bool) -> LastRootTurn {
-        LastRootTurn {
-            turn_id: "t".into(),
-            command_id: "c".into(),
-            outcome: Some(LastRootOutcome::Failed),
-            prompt: prompt.map(str::to_owned),
-            committed_after_prompt: committed,
-            history_seen: true,
-        }
-    }
-
-    #[test]
-    fn a_continue_resubmits_the_exact_prompt_or_the_pinned_continuation() {
-        assert_eq!(continue_text(&turn(Some("do it\n  "), false)), "do it\n  ");
-        assert_eq!(
-            continue_text(&turn(Some("do it"), true)),
-            CONTINUATION_PROMPT
-        );
-        assert_eq!(continue_text(&turn(None, false)), CONTINUATION_PROMPT);
-    }
-}
+mod tests;

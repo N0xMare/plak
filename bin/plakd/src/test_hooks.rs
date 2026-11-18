@@ -163,8 +163,17 @@ pub(crate) fn refresh_profile_ready_catalog(
 
 /// `PLAK_TEST_READY_ACCOUNTS`, a comma list, replaces the readiness the
 /// session account-choice fill reads: exactly those accounts are Ready.
+/// Without it, the offline selector's credential-free routes make every
+/// kind's bare default slot Ready.
 pub(crate) fn ready_accounts() -> Option<Vec<String>> {
-    let value = hook_environment("PLAK_TEST_READY_ACCOUNTS")?;
+    let Some(value) = hook_environment("PLAK_TEST_READY_ACCOUNTS") else {
+        return (selector().as_deref() == Some(std::ffi::OsStr::new(SELECTOR))).then(|| {
+            plakous_hosted::account::Vertical::ALL
+                .iter()
+                .map(|vertical| vertical.as_str().to_owned())
+                .collect()
+        });
+    };
     Some(
         value
             .to_string_lossy()

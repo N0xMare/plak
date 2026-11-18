@@ -560,6 +560,8 @@ pub enum ScriptErrorKind {
     Timeout,
     /// The route refused for rate reasons.
     RateLimited,
+    /// The account's usage limit is exhausted.
+    QuotaExceeded,
     /// The stream ended before a complete response.
     IncompleteResponse,
     /// The operation's outcome is unknown.

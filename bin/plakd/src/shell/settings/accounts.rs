@@ -1,5 +1,5 @@
 //! `ChooseAccount`, the account fill `ApplyProfile` applies, and the session
-//! account observations (spec 02 §4.4.3).
+//! account observations (spec 02 §4.4.1).
 
 use std::collections::BTreeMap;
 
@@ -111,6 +111,7 @@ pub(super) fn fill_profile(
     profile: &str,
     config: &ProductConfig,
     accounts: &[AccountChoice],
+    facts: &SurfaceFacts<'_>,
     events: &Sender<PlakExtension>,
 ) -> Option<FilledChoices> {
     let explicit = accounts
@@ -124,7 +125,7 @@ pub(super) fn fill_profile(
         &account_choice::profile_kinds(config),
         account_choice::root_kind(config).as_deref(),
         &explicit,
-        &account_choice::ready_catalog(paths),
+        &host_catalog(paths, facts),
         FillMode::Require,
     );
     match filled {
@@ -136,6 +137,26 @@ pub(super) fn fill_profile(
             None
         }
     }
+}
+
+/// The readiness a surface fill reads: every known account, and the host's
+/// own Ready catalog for the default slots it serves.
+fn host_catalog(paths: &PlakPaths, facts: &SurfaceFacts<'_>) -> Vec<account_choice::ReadyAccount> {
+    let mut catalog = account_choice::ready_catalog(paths);
+    for section in facts.catalog.iter().filter(|section| section.ready) {
+        match catalog
+            .iter_mut()
+            .find(|row| row.account == section.account)
+        {
+            Some(row) => row.ready = true,
+            None => catalog.push(account_choice::ReadyAccount {
+                account: section.account.clone(),
+                ready: true,
+                label: Some(section.label.clone()),
+            }),
+        }
+    }
+    catalog
 }
 
 /// `ChooseAccount`: validates the choice, then asks the host to store a
@@ -159,14 +180,13 @@ pub(super) fn choose_account(
         return SurfaceEffect::default();
     };
     let kind = kind_id(kind);
-    let account =
-        match account_choice::admit_choice(kind, &account, &account_choice::ready_catalog(paths)) {
-            Ok(account) => account,
-            Err(refusal) => {
-                refuse(events, from_request(refusal));
-                return SurfaceEffect::default();
-            }
-        };
+    let account = match account_choice::admit_choice(kind, &account, &host_catalog(paths, facts)) {
+        Ok(account) => account,
+        Err(refusal) => {
+            refuse(events, from_request(refusal));
+            return SurfaceEffect::default();
+        }
+    };
     let used = used_kinds(
         session.account.as_deref(),
         session

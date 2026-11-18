@@ -364,7 +364,7 @@ impl Drop for StartupCaller {
     }
 }
 
-/// The account a spawned child binds for its card (spec 03 §2.3). A named
+/// The account a spawned child binds for its card (spec 03 §2.1). A named
 /// reference is already frozen. A kind resolves through the tree's root line
 /// head: the root kind is that head's account, any other kind its stored
 /// choice, else the product's best-effort fill. A store read failure or a

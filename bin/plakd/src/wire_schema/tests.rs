@@ -3,7 +3,7 @@ use serde_json::Value;
 use super::*;
 
 #[test]
-fn protocol_eleven_schema_has_an_exact_build_independent_pin() {
+fn protocol_twelve_schema_has_an_exact_build_independent_pin() {
     let mut schema = document();
     schema.as_object_mut().unwrap().remove("binary_id");
     schema.sort_all_objects();
@@ -11,7 +11,7 @@ fn protocol_eleven_schema_has_an_exact_build_independent_pin() {
     let digest = plakous::model::sha256_hex(&[&bytes]);
     assert_eq!(
         digest,
-        "d4e9139806c34da5ef7aa3a829ed6d53495d51ab3816f7b3f44bdf4fce03c12d"
+        "56114cf69135a433ba02ce8aa15a3447d800c04cc2094a2168a54cc52a0093c0"
     );
 }
 

@@ -191,7 +191,7 @@ pub(super) fn turn_lifecycle(result: &TurnResult) -> TurnLifecycle {
 }
 
 /// The usage-limit facts of a turn whose provider reported exhausted quota
-/// (spec 02 §4.4.3): the account, when the provider says it resets, and the
+/// (spec 02 §4.4.1): the account, when the provider says it resets, and the
 /// other Ready accounts of its kind. Clients offer one continue per
 /// alternative; the host never switches by itself.
 pub(super) fn usage_limit_notice(

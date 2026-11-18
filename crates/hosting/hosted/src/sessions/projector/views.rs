@@ -116,7 +116,7 @@ pub struct Counters {
 }
 
 /// The newest root turn on the followed lineage: what a continue on another
-/// account reads (spec 02 §4.4.3). A successor's views inherit it with the
+/// account reads (spec 02 §4.4.1). A successor's views inherit it with the
 /// rest of its source's state.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]

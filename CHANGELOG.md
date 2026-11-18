@@ -158,7 +158,31 @@ for one version bump, without native protocol compatibility.
   `RestartSec` and `TimeoutStopSec=45`. Remote `key status` prints
   fingerprints.
 
-||||||| parent of 5b06e9d1b (Persist session account choices and continue a root on another account.)
+- Add session account choice (host wire protocol 12, product schema 39,
+  state key `r28.e38.p39.t11`). Templates name a provider kind; a named
+  account in a template is a load error. A session holds the account it uses
+  per kind: the root kind's is the root line head's, every other used kind's
+  is stored on the session. Host `new_session`, `ApplyProfile`, `plakd run`
+  and `plakd agent` fill each used kind before the root resolves: an
+  explicit choice (`accounts`, or repeatable `--account <kind>=<ref>`), else
+  the kind's Ready default slot, else its single Ready account, else
+  `account_choice_required` listing the accounts; an unusable explicit choice
+  is `account_choice_invalid`. Import and carry keep the imported root
+  account and fill the other kinds without refusing. A spawn binds its card's
+  kind through the root line head's choice and is refused when the choice
+  cannot be read or filled.
+- `ChooseAccount` stores a non-root kind's account, or continues the root on
+  another account through the ordinary rebind workflow (same model, effort,
+  composition, target, epoch and profile). With `continue_failed` it then
+  submits the failed root turn's exact prompt, or `Continue the previous
+  request from where it stopped. The tool results above are what actually
+  ran.` when a round committed after it, once, under ids derived from the
+  turn and the account. A busy root is refused `root_busy`. A continue whose
+  rebind published without its prompt is reported on reopen, never resent.
+  Failed turns carry `usage_limit` with that kind's Ready alternatives,
+  `AccountChoices` is published on attach and after each change, and
+  account status reports gateway custody.
+
 ## 0.0.4
 
 ### plakd

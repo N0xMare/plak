@@ -18,6 +18,7 @@ pub(super) fn scripted_error(
         ScriptErrorKind::Transport => ModelErrorKind::Transport,
         ScriptErrorKind::Timeout => ModelErrorKind::Timeout,
         ScriptErrorKind::RateLimited => ModelErrorKind::RateLimited,
+        ScriptErrorKind::QuotaExceeded => ModelErrorKind::QuotaExceeded,
         ScriptErrorKind::IncompleteResponse => ModelErrorKind::IncompleteResponse,
         ScriptErrorKind::OutcomeUnknown => ModelErrorKind::OutcomeUnknown,
         ScriptErrorKind::Protocol => ModelErrorKind::Protocol,

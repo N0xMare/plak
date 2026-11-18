@@ -150,7 +150,9 @@ impl Applier<'_> {
             }
             return;
         }
-        last.committed_after_prompt = true;
+        if commits_a_round(segment, items) {
+            last.committed_after_prompt = true;
+        }
     }
 
     #[allow(
@@ -251,4 +253,22 @@ fn operator_text(items: &[ReadItem]) -> Option<String> {
         text.push_str(part);
     }
     Some(text)
+}
+
+/// Whether a segment after a prompt is a committed round: model output, a
+/// tool exchange, replay material, a compaction or steering. Harness text
+/// alone is not; a segment whose items were not retained counts.
+fn commits_a_round(
+    segment: plakous::model::HistorySegmentKind,
+    items: Option<&[ReadItem]>,
+) -> bool {
+    use plakous::model::HistorySegmentKind as Kind;
+    match segment {
+        Kind::Conversation | Kind::RecentIntent => items.is_none_or(|items| {
+            items
+                .iter()
+                .any(|item| item.actor == ReadActor::Assistant || !item.harness_authored)
+        }),
+        _ => true,
+    }
 }

@@ -242,17 +242,19 @@ named state and saved placement/profile; v11 and older are refused. Version 13
 introduces the closed `portable_session` / `host_upgrade` kind. Ordinary import
 accepts only portable sessions; dormant ownership move remains unavailable.
 The carrier cut itself changes no native schema. The host-only runtime move seam
-changes runtime SQLite 27 → 28 and the state key to `r28.e38.p39.t11`; checkpoint/
+changes runtime SQLite 27 → 28 and the state key to `r28.e38.p38.t11`; checkpoint/
 feed epoch 37 → 38 incorporates context codec 3 → 4 in the same unshipped cut;
 product schema 37 → 38 and tree schema 10 → 11 add native semantic bases in
 that same state-key cut. Schema 28 records each move's exact selected session
 set, including across continued lines, its original installed heads, and the
 explicit settled/retained promoted-job cut. That cut is bound into semantic
 batch fingerprints and recovered from schema 28; this finalizes the same
-unshipped `r28.e38.p39.t11` cut, not a second version transition. Export v13's
+unshipped `r28.e38.p38.t11` cut, not a second version transition. Export v13's
 host-upgrade job family pins allocation identity separately from optional
 terminal evidence. Retained metadata is neither liveness nor execution authority;
-public live cross-key move capability remains disabled.
+public live cross-key move capability remains disabled. Product schema 39
+(session account choices, chapter 02 §4.4.1) then moves the key to
+`r28.e38.p39.t11`.
 Its execution-open marker distinguishes ordinary durable drivers from read-only
 verification and lease-only importer reconciliation before guarded withdrawal.
 Move receipt fingerprints use version-1 length-framed semantic fields, not

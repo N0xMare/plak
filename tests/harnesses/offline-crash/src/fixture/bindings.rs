@@ -902,6 +902,34 @@ pub fn scripted_runtime_binding_with_telemetry(
     Ok(binding)
 }
 
+/// [`scripted_runtime_binding_with_cursor`] bound to an exact account
+/// identity, so a rebind onto another account continues the same script.
+///
+/// # Errors
+///
+/// As [`scripted_runtime_binding_with_cursor`].
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the caller hands the script's ownership to the binding it builds"
+)]
+pub fn scripted_runtime_binding_for_account(
+    workspace: &Path,
+    controller: BoundaryController,
+    script: Arc<ScriptPlan>,
+    cursor: Arc<AtomicU64>,
+    account: &[u8],
+) -> HarnessResult<SessionRuntimeBinding> {
+    scripted_runtime_binding_for(
+        workspace,
+        controller,
+        &script,
+        ScriptedOperation::Turn(cursor),
+        Vec::new(),
+        None,
+        account,
+    )
+}
+
 pub(super) fn scripted_runtime_binding_with_cursor_inner(
     workspace: &Path,
     controller: BoundaryController,
@@ -910,7 +938,26 @@ pub(super) fn scripted_runtime_binding_with_cursor_inner(
     extensions: Vec<ToolRegistration>,
     telemetry: Option<Arc<plakous::agent::TelemetryEmitter>>,
 ) -> HarnessResult<SessionRuntimeBinding> {
-    let account = b"offline-loopback-account";
+    scripted_runtime_binding_for(
+        workspace,
+        controller,
+        script,
+        operation,
+        extensions,
+        telemetry,
+        b"offline-loopback-account",
+    )
+}
+
+fn scripted_runtime_binding_for(
+    workspace: &Path,
+    controller: BoundaryController,
+    script: &Arc<ScriptPlan>,
+    operation: ScriptedOperation,
+    extensions: Vec<ToolRegistration>,
+    telemetry: Option<Arc<plakous::agent::TelemetryEmitter>>,
+    account: &[u8],
+) -> HarnessResult<SessionRuntimeBinding> {
     let descriptor = if matches!(&operation, ScriptedOperation::ArtifactTurn(_)) {
         profile_descriptor(
             artifact_fixture_descriptor(account, script.maximum_projected_input)?,

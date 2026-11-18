@@ -657,7 +657,7 @@ an already resident session and its recorded node workspace; acquiring its
 `ResidencyHold` must not open an agent or admit a turn. Every live or unresolved
 terminal retains that hold and prevents dormancy and host idle exit, including
 when another principal requests release. The private residency outcome is
-`operator_terminal` on client protocol 11. Release never implicitly closes another
+`operator_terminal` on client protocol 12. Release never implicitly closes another
 principal's shell; confirmed close of the requester's terminals precedes normal release.
 Completed unpinned rows
 are skipped, and ambiguous close dispatch reports `operation_outcome_unknown`.
@@ -1945,6 +1945,8 @@ view, and nothing is both.
 | `title_override`, `archived` | intent | product-session id | home-local presentation/admission metadata; fresh successors and imports start with None/false; never exported. Separate revision-fenced, serialized writes preserve runtime projections; runtime saves never overwrite these columns |
 | `first_prompt` | not stored | — | a read projection of the first user row of the transcript view, for pickers and lists |
 | Selection: account, model, effort, composition, target selection | intent | the create request, then each rebind request | the effective selection is a view: the selection of the request whose `WorkflowSettled { Published }` the successor was created from, else the creation selection |
+| Account choices of the non-root kinds (`sessions.account_choices`, product schema 39) | intent | the create fill, `ChooseAccount`, or the rebind request that carries them | written with the record by creation, import and carry, and by the attached host loop for a non-root `ChooseAccount` (§4.4.1); a fork or rebind successor copies its source's, or takes the profile fill's that its rebind or switch selection carries (`account_choices`, omitted when absent); a root that changes kind keeps its previous account for cards of that kind. Never the root kind: that is the line head's account |
+| Last root turn (`last_root_turn`: turn id, command id, outcome, the exact prompt text when its segment was operator text alone, and whether history was committed after it) | view | `CommandAccepted`, `HistoryAppended`, `TurnTerminal` on the followed lineage | what a continue on another account reads (§4.4.1); a successor's seeded views inherit it |
 | Head locator | view | `Created`, `Advanced`, `Branched` on the session's branch | the checkpoint of the newest applied record on that branch |
 | Applied cursor | view | — | (runtime session id, sequence), stored in every projector transaction |
 | Queue items: text, position, submit time, revision | intent | item id and revision | operator edits bump the revision |
@@ -4062,7 +4064,7 @@ latency, and nothing else. Prompt text never reaches a span.
 
 ### 4.4 Wire v2
 
-Current client protocol **11** requires `Welcome.state_key`, the serving host's
+Current client protocol **12** requires `Welcome.state_key`, the serving host's
 native state identity, alongside its binary id and process generation.
 `host_generation` is a wall-clock-nanosecond identity, not a monotonic counter.
 Compare generations for inequality only; numeric ordering confers no authority. An
@@ -4072,8 +4074,6 @@ target?, retry_after_ms?}`. `phase` is `draining`, `restarting`, `stopping` or
 `running`; `reason` is `paired_upgrade`, `cross_key_upgrade` or `shutdown`. A target has exactly `binary_id` and `state_key`. An optional
 retry hint is a u32 bounded to 30000 ms. These DTOs belong to `plakd-wire-types`;
 the neutral envelope carries the product's lifecycle extension.
-
-`ChooseAccount` continues a session on one account. The root kind rebinds through the existing rebind workflow and, after that publishes, submits one ordinary root-start. That submission is the failed turn's canonical prompt when no round committed after it; otherwise it is exactly `Continue the previous request from where it stopped. The tool results above are what actually ran.` The command id is the exactly-once key. A crash withdraws an unpublished rebind and never auto-resubmits the prompt. A non-root kind updates the session's account-choice map and does not rebind. A busy root is refused (`root_busy`) with no write. Resubmitting the exact prompt records a duplicate user message; that duplicate is the accepted continue. There is no automatic failover.
 
 A source announces `draining` only after admission of a planned upgrade and
 its admission pause, `restarting` after preparation commits, and `running`
@@ -4270,7 +4270,7 @@ repositories using jj answer `vcs_unsupported`; colocated ones say git view.
 The fixed execution policy is chapter 04 §2.6.
 
 `config_patch`, `template_put` and `profile_put`, introduced in protocol 7
-(current client protocol 11), use the P6
+(current client protocol 12), use the P6
 attachment-free seam, typed allowlisted fields and mandatory if_match etags.
 Prepare/confirm binds the exact target/revision; conflict never auto-merges.
 Publication replies distinguish Saved from published/durability-uncertain
@@ -4310,17 +4310,18 @@ saved placement, decorated by the host. Clients pair the existing product
 workspace text with this label; a child never borrows its root's placement.
 This is in-process chrome, not a persisted/exported field or a JSONL v1 event.
 
-The client protocol number is **11**. It must match exactly; the runner
+Protocol 12 adds session account choice (§4.4.1). The client protocol number is
+**12**. It must match exactly; the runner
 transport has its own independent version. Protocol 5 adds explicit placement,
 bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
 
-The protocol-11 schema pin is SHA-256
-`f412603494165e8aa8f5e35cf883c71d4957c41dedb73755cd77ae09116fc787`:
+The protocol-12 schema pin is SHA-256
+`56114cf69135a433ba02ce8aa15a3447d800c04cc2094a2168a54cc52a0093c0`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
 checks this build-independent pin. The schema title is `plakd wire v2`;
-frame and protocol identifiers retain their exact protocol-11 spellings.
+frame and protocol identifiers retain their exact protocol-12 spellings.
 
 Protocol 7 adds process-local `operator_prepare {action}` and
 `operator_confirm {nonce}` through that same attachment-free seam. Prepare
@@ -5198,9 +5199,98 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   checks the path for a clear error, then the connected peer's uid
   (`SO_PEERCRED`, or `getpeereid` on macOS), which must be the user's.
 
+#### 4.4.1 Session account choice
+
+Protocol 12 adds the session's account choice. A template names a provider
+kind (chapter 03 §1); the session holds the full account reference it uses for
+each kind. The root kind's account is the root line head's bound account and
+is never stored separately; every other kind the session's profile uses is an
+entry of `sessions.account_choices` (product schema 39, §2.6). The tree names
+no account.
+
+**Fill.** Host `new_session`, `ApplyProfile` (fork, switch, bind) and
+`plakd run` / `plakd agent` fill every kind the profile's root and working-set
+cards name, before the root's route, wire and probe resolve:
+
+1. an explicit choice wins: `Op::NewSession.accounts`,
+   `ApplyProfile.accounts`, an advanced model override's account for the root
+   kind, or the CLI's bare `--account` (root) and repeatable
+   `--account <kind>=<ref>` (others). Its kind must be its account's vertical,
+   the kind must be used, and the account must be Ready;
+2. else the kind's bare default slot (`codex`), if Ready;
+3. else the kind's single Ready account;
+4. else the operation is refused `account_choice_required {kinds}`, each kind
+   with every account of it and its readiness, and nothing is created or
+   applied.
+
+An invalid explicit choice is `account_choice_invalid {kind, account,
+reason}`. Ready is the account roster and readiness the console reports
+(the configured gateway's when one holds the credentials): a subscription
+whose credential is Ready under current compatibility, or an API account with
+a key. A `new_session` replay also compares its explicit accounts with the
+stored choice. Interactive clients show the picker when a used kind has more
+than one Ready account; `SessionOptions.accounts` lists every account per
+kind with readiness, and allowance is the existing accounts-usage read.
+
+**Import and carry** keep the imported binding's account for the root kind
+and fill the profile's other kinds by steps 2 and 3 without refusing; they
+never wait on a picker. A kind left unset fails closed at spawn (chapter 03
+§2.1).
+
+**`ChooseAccount {kind, account, continue_failed}`** validates the choice as
+step 1 does. A non-root kind is saved on the attached record by the session's
+own host loop and nothing rebinds; running children keep their bindings and
+new spawns use it. A root-kind choice while the root runs a turn is refused
+`root_busy` with nothing written. Otherwise the root continues its line on the
+account through the ordinary rebind workflow request (§2.6): the same model,
+effort, composition and target selection, the new account, and the current
+tree epoch, cards and root profile unchanged (no roster is frozen again and
+the tree is not written). Account-scoped replay material is omitted at the
+rebind's canonical boundary, never retagged (chapter 01 §5.7).
+
+With `continue_failed`, the line head's last root turn, read by id from the
+projected lifecycle facts, must have failed (`no_failed_turn` otherwise). The
+rebind's workflow operation id is `plak:rebind:account:<digest>` and the
+root-start's queue item id is a UUID, both derived from the failed turn id and
+the target account, so its command id is `plak.queue.<item>.1`. Once the
+rebind publishes, the host queues that root-start on the attached line head
+and drives it as a typed prompt: queue item, `save_submission`, ledger
+dispatch. Its text is the failed turn's exact canonical prompt segment when
+that segment is operator text alone and nothing was committed after it;
+otherwise it is exactly `Continue the previous request from where it stopped.
+The tool results above are what actually ran.` The prompt then appears twice
+in canonical history and the transcript: that duplicate user message is the
+accepted continue. A repeat of the same continue whose rebind already
+published (this line head is its successor) does not rebind again; one whose
+root-start is already queued is refused `already_continued`. A later failure
+has another turn id and so new ids. There is no automatic failover.
+
+Recovery follows §4.2. A rebind request without a fact is withdrawn with one
+notice and never resubmitted. A published continue whose root-start was never
+queued (the line head is its successor, its last root turn is still the failed
+one, and neither a queue item nor a delivery carries the derived command)
+reports one warning on each open with remedy `continue_on_account {account,
+command_id}`; reopen never submits it. A queued or written root-start is
+restored paused like any other queued prompt.
+
+**Wire.** `TurnLifecycle.usage_limit {kind, account, resets_at?,
+alternatives}` is set on a failed turn whose provider reported exhausted quota;
+`alternatives` are the other Ready accounts of that kind and `resets_at` is
+present when the provider advised a retry time. `AccountChoices {choices}`, a
+state observation with the root kind first, is published whenever the host
+serves a session (open, attach and every line-head move) and after each
+choice. Refusals of `ChooseAccount` and of `ApplyProfile`'s fill are
+`AccountChoiceRefused` with `account_choice_required`,
+`account_choice_invalid`, `root_busy`, `no_failed_turn`, `already_continued`
+or `failed {reason}`. The product DTOs name the kind as a `Vertical`; the
+neutral envelope's `new_session` accounts and refusals carry it as the
+provider kind id. `AccountStatus.custody {mode, gateway?}` is `service` with
+the gateway's address when a configured gateway or the local gateway service
+holds the credentials, and is omitted for in-process custody.
+
 ### 4.5 The web endpoint
 
-Console operations introduced in protocol 7 (current client protocol 11)
+Console operations introduced in protocol 7 (current client protocol 12)
 have structured host audit evidence: time,
 verified login or socket uid, face, connection/request ID, action and safe
 target, outcome category and applicable revision. This is an ordinary bounded
@@ -5695,7 +5785,7 @@ read ownership receipts, acquire custody or resend an ambiguously accepted
 submission. The upgrade command reports success only after destination
 acknowledgement; a timeout names an unknown outcome and the retry remedy.
 
-Native login, introduced in protocol 7 (current client protocol 11), runs in
+Native login, introduced in protocol 7 (current client protocol 12), runs in
 a dedicated account-service worker, never the
 session intent mailbox or host action loop. Only the owning authenticated
 connection receives its challenge; poll returns sanitized phase, not a replay
@@ -7577,7 +7667,7 @@ product observations without moving product vocabulary into the agent sink.
 
 ### 7.2 Usage and allowances
 
-`account_refresh`, introduced in protocol 7 (current client protocol 11), is
+`account_refresh`, introduced in protocol 7 (current client protocol 12), is
 a confirmed, explicit claimed refresh, not
 `accounts_status`/`accounts_usage` or automatic login. The exact account is
 selected throughout; an unaccepted/inactive integration refuses before provider
@@ -7983,7 +8073,7 @@ caller-supplied endpoint, discovered client id, or copied token can promote a
 profile's provenance.
 
 **Login, logout and API keys are explicit operator operations:** the CLI and
-authenticated host console (introduced in protocol 7; current client protocol 11)
+authenticated host console (introduced in protocol 7; current client protocol 12)
 share the account service. Integrator clients consume that wire contract;
 they do not own credential resolution or storage.
 

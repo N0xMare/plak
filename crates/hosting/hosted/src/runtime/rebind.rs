@@ -445,7 +445,7 @@ enum RebindMode<'a> {
     ),
     /// The root continues its line on another account of its kind with the
     /// same model, effort, composition, target, epoch and profile (spec 02
-    /// §4.4.3). The operation is the switch's derived workflow id.
+    /// §4.4.1). The operation is the switch's derived workflow id.
     Account(&'a str),
 }
 
@@ -573,24 +573,16 @@ pub(super) async fn handle_account_rebind<P: plakous_host_protocol::ProtocolExte
             "the root has no model to continue on another account",
         ));
     };
+    // The model, effort, composition and target are the line head's own;
+    // the target account's resolution admits them against its catalog.
     let target_selection = config.session.target_selection.clone();
     let api_root = target_selection.is_api();
-    let selection = if api_root {
-        Ok((
-            target_selection,
-            true,
-            config.session.effort.clone(),
-            config.session.composition,
-        ))
-    } else {
-        validate_rebind_effort(
-            &config.ready_catalog.accounts,
-            account,
-            &model,
-            config.session.effort.as_deref(),
-        )
-        .map(|effort| (target_selection, false, effort, config.session.composition))
-    };
+    let selection = Ok((
+        target_selection,
+        api_root,
+        config.session.effort.clone(),
+        config.session.composition,
+    ));
     rebind_root(
         watch,
         config,

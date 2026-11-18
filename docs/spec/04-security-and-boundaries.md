@@ -915,7 +915,7 @@ or claim they died. Closed/expired namespaces still allow list and close for
 this resolution. Fast double-fork escapes reparented before observation remain
 an explicit unsandboxed-shell residual, even when the original SID is absent.
 
-Client protocol 11 applies the startup-captured `web.terminal` switch to every
+Client protocol 12 applies the startup-captured `web.terminal` switch to every
 terminal request and its prepare/confirm flow. Verified same-user sockets are
 trusted independently of web switches, but use the same one-shot consent and
 principal/connection/generation binding. Open and attach/takeover cannot borrow a
@@ -1116,7 +1116,7 @@ before allocating bounded execution work. This does not sanitize workspace
 secrets or make an admitted shell a sandbox.
 
 An admitted web client is an operator acting with the serving user's authority.
-In addition to session and directory operations, console capabilities introduced in protocol 7 (current client protocol 11)
+In addition to session and directory operations, console capabilities introduced in protocol 7 (current client protocol 12)
 manage provider accounts and publish allowlisted home configuration.
 These are real credential and deferred-execution powers, not cosmetic settings.
 Capability switches and confirmations are product controls, not an OS sandbox
@@ -1927,7 +1927,7 @@ Chapter 03 §6.1 holds the exact list.
 
 Native login, logout, explicit refresh and API-key management are explicit
 operator operations on CLI or host console, introduced in protocol 7
-(current client protocol 11). Web writes require the
+(current client protocol 12). Web writes require the
 startup-captured credentials-write capability; verified same-user sockets are
 trusted, with identical consent and quota checks. Private clients own forms,
 not credential authority; the retained embedded Providers view remains
@@ -2546,6 +2546,13 @@ the product home. Its authority is exactly the user's own:
   `.plak/` overlay still applies to it only when trusted (`plakd config
   trust`), which no connection can do. A connection is a remote face, so
   it is refused the intents that exec or hand off the host's build (§4.6).
+- `ChooseAccount` (chapter 02 §4.4.1) is admitted from the local and remote
+  faces alike, as a typed prompt is: it binds only accounts this home already
+  holds and reports Ready, writes no configuration or credential, never
+  starts a login, and its continue submits through the session's ordinary
+  queue and ledger. It reaches only the attached session. It names an account
+  by reference and carries no credential; refusals name the kind, the
+  account reference and a categorical reason, never credential material.
 
 ## 5. Redaction
 

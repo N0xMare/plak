@@ -396,9 +396,14 @@ fn apply_profile(
         refuse_profile(&prepared.id, reason, events);
         return None;
     }
-    let Some(filled) =
-        accounts::fill_profile(paths, &prepared.id, &prepared.config, accounts, events)
-    else {
+    let Some(filled) = accounts::fill_profile(
+        paths,
+        &prepared.id,
+        &prepared.config,
+        accounts,
+        &facts,
+        events,
+    ) else {
         return None;
     };
     let root_account = filled.root_account.unwrap_or_else(|| root.account.clone());

@@ -1021,7 +1021,7 @@ fn new_record(
         template.account.clone_from(&model.account);
         template.model.clone_from(&model.model);
     }
-    // Spec 02 §4.4.3: the fill picks every used kind's account before the
+    // Spec 02 §4.4.1: the fill picks every used kind's account before the
     // route, wire and probe resolve. An advanced model override is the root
     // kind's explicit choice.
     let root_kind = match creation.model {

@@ -344,7 +344,7 @@ impl std::fmt::Debug for SurfaceProfileFork {
     }
 }
 
-/// An account choice the product validated (spec 02 §4.4.3).
+/// An account choice the product validated (spec 02 §4.4.1).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SurfaceAccountChoice {
     /// Store `account` as the session's choice for the non-root `kind`.

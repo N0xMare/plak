@@ -14,7 +14,7 @@ Operator-facing instructions live in
 ## 1. Files and discovery
 
 Host operators may edit a home template through confirmed, typed
-`template_put`, introduced in protocol 7 (current client protocol 11). This is
+`template_put`, introduced in protocol 7 (current client protocol 12). This is
 the explicit exception to file-authored template
 bodies: ordinary config saves and `config_patch` still refuse body changes.
 User-profile writes use root/working_set only; built-ins are read-only. No
@@ -801,7 +801,7 @@ One flat object plus an optional `[env]` table. The file stem is the name.
 
 | field | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
-| `account` | string | `(required)` | vertical[/name]; vertical is codex\|chatgpt\|grok\|supergrok\|xai-oauth\|claude\|openrouter\|openai\|anthropic\|xai-api; name is [a-z][a-z0-9-]{0,31}, except default | Credential lane the copy runs on. |
+| `account` | string | `(required)` | a provider kind: codex\|chatgpt\|grok\|supergrok\|xai-oauth\|claude\|openrouter\|openai\|anthropic\|xai-api; a named account (`codex/work`) is a load error naming the template | Provider kind the copy runs on. The session holds the named account per kind (chapter 02 §4.4.1); a spawn binds the session's account for this kind. |
 | `model` | string | `(required)` | non-empty; a direct API account must name an enrolled model, checked at load; every other account is checked at bind | Exact model id. |
 | `effort` | string | `(unset)` | none\|low\|medium\|high\|xhigh\|max\|ultra; Codex offers low through max (never ultra); none is an explicit API effort, not an omitted one; a direct API account requires a level on the model's published ladder, checked at load; every other account is checked at bind | Reasoning effort; on a subscription account a typo surfaces as a bind failure, not a load error. |
 | `fast_mode` | bool | `false` | true is only valid on the codex vertical, including named slots | Fast mode: request the provider's faster processing lane for this Codex subscription template. It is not a model choice and does not grant additional tools. A child runs on its own template's setting, never its parent's. |
@@ -884,6 +884,7 @@ and a template message is prefixed `template <name>: `.
 | `[roster.<x>]` | `unknown config section [roster.<x>]; [roster] holds only working_set = ["<template>", ...]` |
 | `[tui]` or its subtables | `the [tui] section was removed with the public terminal client in 0.0.4; delete it` |
 | any other unknown section | `unknown config section [<name>]` |
+| a template `account` naming an account (`codex/work`) | `account must name a provider kind such as codex, not a named account (codex/work)` |
 | any other `[roster]` key | `[roster] only accepts working_set; move <key> into agents/<name>.toml` |
 | any other unknown key | `unknown config key: <section>.<key>` |
 | a duplicate key or table | `duplicate key` |
@@ -950,11 +951,11 @@ fresh unshared name (`default`, `default-2`, and so on), preserving its other
 fields and leaving the previous template file untouched. Saves preflight all
 existing template bodies and refuse changes to them; edit user or project
 files directly, or use the confirmed home `template_put` exception introduced
-in protocol 7 (current client protocol 11).
+in protocol 7 (current client protocol 12).
 `config_patch` never edits a body. Unrelated settings saves do not rewrite templates.
 
 `config_patch`, `template_put` and `profile_put`, introduced in protocol 7
-(current client protocol 11), publish one file per request. All require a matching content etag and one-use consent; stale
+(current client protocol 12), publish one file per request. All require a matching content etag and one-use consent; stale
 etags return conflict and no write. The shared home publication lock covers
 read-current, comparison, complete candidate validation and atomic publication;
 CLI home key edits reread under this lock as well. Recheck actual bytes before

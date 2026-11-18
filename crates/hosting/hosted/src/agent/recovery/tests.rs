@@ -965,7 +965,9 @@ async fn panicking_child_create_frees_startup_owner_and_triggers_recovery() {
                 turn_token: tree.attempt(&spawned.agent_id).unwrap().turn_token,
                 path: node.path.display().to_string(),
                 tier: node.tier,
-                account: node.account.clone(),
+                // A frozen reference: this fixture's tree has no root line
+                // head record to resolve a kind through.
+                account: "claude/frozen".to_owned(),
                 tuple_id: node.tuple_id.clone(),
                 effort: node.effort.clone(),
                 spawned,
@@ -2356,7 +2358,7 @@ async fn a_create_refused_before_it_wrote_anything_is_a_definite_spawn_refusal()
         output_schema_json: "{}".into(),
         turn_token: 1,
         tier: Tier::ReadOnly,
-        account: "claude".into(),
+        account: "claude/frozen".into(),
         tuple_id: "claude-opus-5-5".into(),
         effort: None,
     };
@@ -5449,7 +5451,7 @@ async fn children_stop_one_reserve_before_the_root_through_the_product_wiring() 
         output_schema_json: "{}".into(),
         turn_token: 1,
         tier: Tier::ReadOnly,
-        account: "claude".into(),
+        account: "claude/frozen".into(),
         tuple_id: "claude-opus-5-5".into(),
         effort: None,
     };

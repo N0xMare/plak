@@ -90,7 +90,7 @@ pub(crate) fn all_remedies() -> Vec<NoticeRemedy> {
 
 #[test]
 fn every_remedy_has_each_existing_frontend_route_and_strict_encoding() {
-    assert_eq!(all_remedies().len(), 37);
+    assert_eq!(all_remedies().len(), 38);
     for remedy in all_remedies() {
         let value = serde_json::to_value(&remedy).unwrap();
         assert_eq!(

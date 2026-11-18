@@ -187,7 +187,7 @@ pub(super) fn import_prepared_with_fallback(
     }
     record.validate_for_store().map_err(CliFailure::new)?;
     let profile = profile.or(document_profile);
-    // Spec 02 §4.4.3: the root kind is the imported binding's; the profile's
+    // Spec 02 §4.4.1: the root kind is the imported binding's; the profile's
     // other kinds are filled without refusing and never wait on a picker.
     if let Ok(loaded) = product_config::ProductConfig::load(&paths) {
         let config = profile

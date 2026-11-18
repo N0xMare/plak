@@ -191,8 +191,22 @@ pub(super) async fn roster(
     })
 }
 
+/// Where this home's credentials are held: the configured gateway or the
+/// local gateway service that holds the store, else in process.
+fn custody(paths: &PlakPaths) -> AccountCustody {
+    match crate::gateway::route_for(paths) {
+        Ok(route) => route
+            .remote()
+            .map_or_else(AccountCustody::in_process, |address| AccountCustody {
+                mode: plakd_wire_types::console::CustodyMode::Service,
+                gateway: Some(address.label()),
+            }),
+        Err(_) => AccountCustody::in_process(),
+    }
+}
+
 /// Every known account with whether its credential can serve a new dispatch
-/// now: the session account-choice fill reads this (spec 02 §4.4.3). A
+/// now: the session account-choice fill reads this (spec 02 §4.4.1). A
 /// gateway configured for this home answers the roster and readiness.
 pub(crate) async fn ready_accounts(
     state: &std::path::Path,
@@ -253,7 +267,7 @@ pub(super) async fn status(
         last_refresh: None,
         remedies: Vec::new(),
         diagnostics: Vec::new(),
-        custody: AccountCustody::in_process(),
+        custody: custody(paths),
     };
     if vertical.is_api()
         && let Some(link) = application.custody.admin()

@@ -28,10 +28,14 @@ flags. The host validates runner/workspace choices before session creation.
 (`--account claude=claude/work`) in addition to one bare `--account` for the
 root. A template names a provider kind (`claude`), never a named account
 (`claude/work`); a named reference in a template file is a load error.
+Without a choice a kind takes its default slot when that is ready, else its
+only ready account; with several ready accounts and no choice the command is
+refused with `account_choice_required`, naming the kind and its accounts.
 Interactive clients read each kind's accounts and readiness from session
-options and can offer a picker when a used kind has more than one ready
-account. "Continue on <account>" rebinds the root and resubmits the failed
-turn once; a non-root kind only updates that session's choice. The root
+options and offer a picker when a used kind has more than one ready account.
+"Continue on <account>" after a usage limit rebinds the root onto that
+account and submits the failed prompt once more (the transcript then shows
+it twice); a non-root kind only updates that session's choice. The root
 cannot be switched while it is busy.
 
 ## A persistent host and the stdio bridge

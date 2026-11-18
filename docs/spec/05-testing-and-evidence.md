@@ -4580,7 +4580,7 @@ public runtime invariant.
 Settings payload and publication fixtures use product fields. Client-local
 preferences are not serialized or persisted by the host. Role checks refuse
 remote legacy saves before product dispatch; confirmed operator paths keep
-their capability, consent and etag rules (current client protocol 11).
+their capability, consent and etag rules (current client protocol 12).
 Product DTO contract examples decode and re-encode unchanged before and after
 extraction, including temporary reload values. Schema extraction is checked
 against raw `plakd wire schema` output with an uninstalled executable and an
@@ -6661,7 +6661,7 @@ The witness neither changes nor replaces the existing recovery crash contracts.
 They use synthetic account IDs and no provider traffic. No persisted format
 or binding input changes are introduced by the consent machinery.
 
-Account-write contracts, introduced in protocol 7 (current client protocol 11),
+Account-write contracts, introduced in protocol 7 (current client protocol 12),
 use temporary isolated homes and synthetic
 secrets to verify write-only replies, Debug/input-bound redaction, exact named
 creation/removal and absent-slot isolation. Attempt-table contracts verify
@@ -6699,7 +6699,7 @@ never partial publication or false no-effect after rename. New template
 exclusive-link and replacement-rename paths are checked separately. The
 legacy remote settings/default/credential-refresh path refuses at role
 classification; local-face dispatch remains available. Schema/DTO and public
-compile contracts follow exact client protocol 11 and runner protocol 9.
+compile contracts follow exact client protocol 12 and runner protocol 9.
 Wire-11 lifecycle tests observe real host sockets and authenticated WebSockets through planned stop and
 same/cross-key upgrade, assert advisory notices precede EOF, and assert an
 aborted preparation returns to `running`. A publication-lock observer pins
