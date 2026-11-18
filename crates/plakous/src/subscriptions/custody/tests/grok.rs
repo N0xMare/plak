@@ -5,25 +5,18 @@
 
 use std::sync::Arc;
 
-use super::{GROK_MODEL, TestResult, Upstream, binding, dispatch_once, limits, upstream};
+use super::{
+    GROK_MODEL, TestResult, Upstream, at_review, binding, dispatch_once, limits, revalidate,
+    upstream,
+};
 use crate::gateway::GatewayCustody;
 use crate::gateway::pins::xai::{SUPERGROK_CREDENTIAL_HEADERS, SUPERGROK_UPSTREAM_PINS};
 use crate::gateway::server::{InProcessGateway, LocalCustody, new_instance};
 use crate::subscriptions::custody::SubscriptionCustodian;
 use crate::subscriptions::state::tests::child_catalog::{grok_selection, seed_grok};
-use crate::subscriptions::{
-    NativeProvider, NativeSubscriptionError, NativeSubscriptions, SubscriptionPaths,
-};
+use crate::subscriptions::{NativeProvider, NativeSubscriptionError, SubscriptionPaths};
 
 const SUPERGROK: &str = "https://cli-chat-proxy.grok.com";
-
-/// Subscriptions over `paths` on the SuperGrok profile's test clock.
-fn at_review(paths: &SubscriptionPaths) -> TestResult<NativeSubscriptions> {
-    let now = NativeSubscriptions::notice(NativeProvider::Xai)?.reviewed_at() + 60;
-    Ok(NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
-        plakous_model::FixedClock::new(plakous_model::Timestamp::new(now, 0)?),
-    )))
-}
 
 /// Custody through an in-process gateway that serves the SuperGrok logins
 /// of `paths` and dials the production origin at `upstream`.
@@ -31,7 +24,8 @@ fn gateway_custody(
     paths: &SubscriptionPaths,
     upstream: &Upstream,
 ) -> TestResult<crate::custody::Custody> {
-    let custodian = SubscriptionCustodian::new(at_review(paths)?, NativeProvider::Xai);
+    let custodian =
+        SubscriptionCustodian::new(at_review(paths, NativeProvider::Xai)?, NativeProvider::Xai);
     let custody = LocalCustody::new(new_instance().ok_or("gateway instance")?).with_kind(
         "grok",
         Arc::new(custodian),
@@ -45,18 +39,6 @@ fn gateway_custody(
     Ok(gateway.custody())
 }
 
-/// The model's own runtime revalidation at its catalog observation, on the
-/// SuperGrok profile's clock: the custodied facts are read and every
-/// synchronous check passes.
-async fn revalidate(provider: &crate::subscriptions::ResolvedProvider) -> TestResult {
-    let observed = provider.initial_authority().observed_at();
-    provider
-        .model()
-        .revalidate_runtime_authority(observed)
-        .await?;
-    Ok(())
-}
-
 #[tokio::test]
 async fn a_supergrok_session_reopens_through_a_gateway_with_an_equal_binding_and_identical_bytes()
 -> TestResult {
@@ -68,7 +50,7 @@ async fn a_supergrok_session_reopens_through_a_gateway_with_an_equal_binding_and
 
     // Bound under direct custody: the route keeps its production origin and
     // every client dials the fixture, exactly as the gateway's upstream does.
-    let mut direct = at_review(&paths)?;
+    let mut direct = at_review(&paths, NativeProvider::Xai)?;
     direct.xai_test_transport = Some(
         plakous_http::Client::new_http1(plakous_http::Limits::default())?.with_test_dial_override(
             plakous_http::Origin::parse(&format!("{SUPERGROK}/"))?,
@@ -85,7 +67,8 @@ async fn a_supergrok_session_reopens_through_a_gateway_with_an_equal_binding_and
     let direct_requests = upstream.take();
 
     // Reopened through a gateway over the same store.
-    let gateway = at_review(&paths)?.with_custody(&gateway_custody(&paths, &upstream)?);
+    let gateway =
+        at_review(&paths, NativeProvider::Xai)?.with_custody(&gateway_custody(&paths, &upstream)?);
     assert_eq!(
         gateway.status(provider).await?,
         direct.status(provider).await?

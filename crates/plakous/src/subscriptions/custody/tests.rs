@@ -1,7 +1,7 @@
 //! Session continuity under gateway custody (spec 01 §7.1): a login bound
 //! under direct custody reopens through an in-process gateway over the same
-//! store with an equal binding, and its exchanges reach the upstream byte for
-//! byte as they do directly.
+//! store with an equal binding, and its exchanges (and a key-holding route's)
+//! reach the upstream byte for byte as they do directly.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -38,7 +38,37 @@ struct Upstream {
     requests: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
+/// How a fixture upstream answers one whole request: status line,
+/// content type and body.
+type Respond = Arc<dyn Fn(&[u8]) -> (&'static str, &'static str, Vec<u8>) + Send + Sync>;
+
 async fn upstream() -> TestResult<Upstream> {
+    upstream_with(Arc::new(|request: &[u8]| {
+        let (status, body) = fixture_reply(request);
+        (status, "application/json", body)
+    }))
+    .await
+}
+
+fn fixture_reply(request: &[u8]) -> (&'static str, Vec<u8>) {
+    if request.starts_with(b"GET /backend-api/codex/models?") {
+        ("200 OK", catalog_body())
+    } else if request.starts_with(b"GET /backend-api/wham/usage ") {
+        ("200 OK", usage_body())
+    } else if request.starts_with(b"GET /v1/models ") {
+        ("200 OK", grok_catalog_body())
+    } else if request.starts_with(b"GET /v1/billing?format=credits ") {
+        ("200 OK", grok_usage_body())
+    } else {
+        (
+            "400 Bad Request",
+            br#"{"error":{"message":"fixture refusal","type":"invalid_request_error"}}"#.to_vec(),
+        )
+    }
+}
+
+/// A loopback TLS upstream answering each whole request with `respond`.
+async fn upstream_with(respond: Respond) -> TestResult<Upstream> {
     let rcgen::CertifiedKey { cert, signing_key } =
         rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()])?;
     let certificate = cert.der().clone();
@@ -71,6 +101,7 @@ async fn upstream() -> TestResult<Upstream> {
         while let Ok((stream, _)) = listener.accept().await {
             let acceptor = acceptor.clone();
             let recorded = Arc::clone(&recorded);
+            let respond = Arc::clone(&respond);
             tokio::spawn(async move {
                 let Ok(mut stream) = acceptor.accept(stream).await else {
                     return;
@@ -94,27 +125,13 @@ async fn upstream() -> TestResult<Upstream> {
                         Ok(read) => request.extend_from_slice(&buffer[..read]),
                     }
                 }
-                let (status, body) = if request.starts_with(b"GET /backend-api/codex/models?") {
-                    ("200 OK", catalog_body())
-                } else if request.starts_with(b"GET /backend-api/wham/usage ") {
-                    ("200 OK", usage_body())
-                } else if request.starts_with(b"GET /v1/models ") {
-                    ("200 OK", grok_catalog_body())
-                } else if request.starts_with(b"GET /v1/billing?format=credits ") {
-                    ("200 OK", grok_usage_body())
-                } else {
-                    (
-                        "400 Bad Request",
-                        br#"{"error":{"message":"fixture refusal","type":"invalid_request_error"}}"#
-                            .to_vec(),
-                    )
-                };
+                let (status, content_type, body) = respond(&request);
                 recorded
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .push(request);
                 let head = format!(
-                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    "HTTP/1.1 {status}\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
                     body.len()
                 );
                 let _ = stream.write_all(head.as_bytes()).await;
@@ -273,8 +290,35 @@ async fn dispatch_once(provider: &ResolvedProvider) -> TestResult {
     Ok(())
 }
 
+/// Subscriptions over `paths` on `provider`'s profile test clock.
+fn at_review(
+    paths: &SubscriptionPaths,
+    provider: NativeProvider,
+) -> TestResult<NativeSubscriptions> {
+    let now = NativeSubscriptions::notice(provider)?.reviewed_at() + 60;
+    Ok(NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
+        plakous_model::FixedClock::new(plakous_model::Timestamp::new(now, 0)?),
+    )))
+}
+
+/// The model's own runtime revalidation at its catalog observation, on the
+/// profile's clock: the custodied facts are read and every synchronous
+/// check passes.
+async fn revalidate(provider: &ResolvedProvider) -> TestResult {
+    let observed = provider.initial_authority().observed_at();
+    provider
+        .model()
+        .revalidate_runtime_authority(observed)
+        .await?;
+    Ok(())
+}
+
+#[cfg(feature = "claude")]
+mod claude;
 #[cfg(feature = "grok")]
 mod grok;
+#[cfg(feature = "openrouter")]
+mod openrouter;
 
 /// Custody through an in-process gateway that serves the Codex logins of
 /// `paths` and dials the production origin at `upstream`.

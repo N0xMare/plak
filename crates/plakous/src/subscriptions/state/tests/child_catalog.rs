@@ -202,6 +202,111 @@ pub(in crate::subscriptions) fn grok_selection(
     )?)
 }
 
+/// The account UUID of the seeded Claude login.
+#[cfg(feature = "claude")]
+pub(in crate::subscriptions) const CLAUDE_ACCOUNT: &str = "12345678-1234-4234-8234-123456789abc";
+
+/// Seeds a consented Ready Claude login with `access` and `refresh` at the
+/// provider's test time, with its login recovery cleared.
+#[cfg(feature = "claude")]
+pub(in crate::subscriptions) fn seed_claude(
+    paths: &SubscriptionPaths,
+    access: &str,
+    refresh: &str,
+) -> TestResult {
+    let provider = NativeProvider::Claude;
+    let notice = NativeSubscriptions::notice(provider).unwrap();
+    let now = notice.reviewed_at() + 60;
+    paths.prepare()?;
+    store_acceptance(paths, notice, now)?;
+    let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
+    let store = plakous_auth::PrivateCredentialStore::open_slot(
+        paths.provider_record(provider),
+        profile.clone(),
+        plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?,
+    )?;
+    let client_id = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+    // The grant lineage digest the provider derives from the refresh token.
+    let grant = format!(
+        "grant-{}",
+        Digest::sha256(
+            DigestDomain::ProviderAuthorityBinding,
+            1,
+            &[
+                b"anthropic-claude-oauth-grant-lineage",
+                client_id.as_bytes(),
+                refresh.as_bytes(),
+            ],
+        )?
+    );
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "account_uuid": CLAUDE_ACCOUNT,
+        "version": 3,
+        "client_id": client_id,
+        "scope": "user:inference",
+        "access_token": access,
+        "refresh_token": refresh,
+        "expires_at": now + 3_600,
+        "grant_binding": grant,
+    }))?;
+    store.initialize_selected(&plakous_auth::CredentialRecord::new(
+        profile,
+        plakous_auth::AccountBinding::new(grant)?,
+        plakous_auth::CredentialGeneration::new(1)?,
+        plakous_auth::CredentialStatus::Ready,
+        plakous_auth::SecretBytes::new(payload),
+    )?)?;
+    let consent = load_acceptance_exact(paths, notice, now)?;
+    let operation = arm_login_recovery(paths, provider, &consent.generation)?;
+    clear_login_recovery(paths, provider, &operation, 1)?;
+    Ok(())
+}
+
+/// The stored generation of the Claude login under `paths`.
+#[cfg(feature = "claude")]
+pub(in crate::subscriptions) fn claude_generation(paths: &SubscriptionPaths) -> TestResult<u64> {
+    let provider = NativeProvider::Claude;
+    let store = plakous_auth::PrivateCredentialStore::open_slot(
+        paths.provider_record(provider),
+        plakous_auth::SubscriptionIntegrationProfileId::new(
+            NativeSubscriptions::notice(provider).unwrap().profile_id(),
+        )?,
+        plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?,
+    )?;
+    Ok(store.load()?.ok_or("no Claude record")?.generation().get())
+}
+
+/// A tool-free Claude selection of `model`, with the product's Claude
+/// behavior otherwise.
+#[cfg(feature = "claude")]
+pub(in crate::subscriptions) fn claude_selection(
+    model: &str,
+) -> TestResult<SelectedProviderConfiguration> {
+    let route = native_provider_route_selection(NativeProvider::Claude, ModelId::new(model)?)?;
+    let retention = RetentionDisposition::RouteContract {
+        profile: route.integration_profile().clone(),
+        revision: route.integration_revision().clone(),
+    };
+    Ok(SelectedProviderConfiguration::new(
+        route,
+        ProviderBehaviorConfiguration {
+            reasoning_effort: ReasoningEffortDisposition::Disabled,
+            reasoning_summary: ReasoningSummaryDisposition::Omit,
+            reasoning_include: ReasoningIncludeDisposition::Omit,
+            output_bound: OutputBoundDisposition::Enforced(
+                std::num::NonZeroU32::new(plakous_anthropic::claude_max_output_tokens(model))
+                    .ok_or("claude output ceiling")?,
+            ),
+            storage: ProviderStorageDisposition::OmittedRouteContract,
+            cache: CachePolicy::Enabled {
+                requirement: CapabilityRequirement::Required,
+            },
+            retention,
+            ..selection()?.behavior().clone()
+        },
+    )?)
+}
+
 pub(in crate::subscriptions) fn selection() -> TestResult<SelectedProviderConfiguration> {
     Ok(SelectedProviderConfiguration::new(
         native_provider_route_selection(NativeProvider::Codex, ModelId::new(MODEL)?)?,

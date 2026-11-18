@@ -22,9 +22,12 @@ pub struct NativeSubscriptions {
     /// The client every SuperGrok exchange dials through, in tests.
     #[cfg(test)]
     pub(super) xai_test_transport: Option<plakous_http::Client>,
-    /// The client Claude inference dials through, in tests.
+    /// The client every Claude exchange dials through, in tests.
     #[cfg(test)]
     pub(super) claude_test_transport: Option<plakous_http::Client>,
+    /// The session Claude requests name, in tests.
+    #[cfg(test)]
+    pub(super) claude_test_session: Option<plakous_model::SessionId>,
     pub(super) catalog_retries: bool,
     pub(super) state: SubscriptionState,
     pub(super) exchange_observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
@@ -178,6 +181,8 @@ impl NativeSubscriptions {
             xai_test_transport: None,
             #[cfg(test)]
             claude_test_transport: None,
+            #[cfg(test)]
+            claude_test_session: None,
             state,
             exchange_observer: None,
             catalog_retries: true,
@@ -197,6 +202,8 @@ impl NativeSubscriptions {
             xai_test_transport: None,
             #[cfg(test)]
             claude_test_transport: None,
+            #[cfg(test)]
+            claude_test_session: None,
             state: SubscriptionState::new(paths),
             exchange_observer: None,
             catalog_retries: true,

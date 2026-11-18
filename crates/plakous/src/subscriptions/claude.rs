@@ -645,6 +645,8 @@ impl NativeVertical for Vertical {
                         NativeSubscriptionError::Internal,
                     )
                 })?;
+                #[cfg(test)]
+                let session_id = subscriptions.claude_test_session.unwrap_or(session_id);
                 let (model, authority, descriptor, retrieval) = online
                     .manager
                     .resolve_model_with_retrieval(
