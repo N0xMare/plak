@@ -725,7 +725,6 @@ fn open_session_with_a_running_job(
 
 #[test]
 fn delete_and_unpair_refuse_until_the_running_job_ends() -> TestResult {
-    use plakous::tools::JobHost as _;
     use plakous_hosted::sessions::RunnerDisplay;
     let mut f = fixture(false)?;
     let (host, session, mut record) = open_session_with_a_running_job(&mut f)?;
