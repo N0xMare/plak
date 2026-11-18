@@ -139,8 +139,22 @@ pub(in super::super) fn after_kill(shape: &str, fixture: &Fixture) {
     }
 }
 
+/// The host-loss cut stops the retained job only on its second reopen.
+/// Until that stop, the runner process and the non-terminal row both remain.
+pub(in super::super) fn assert_retained_before_stop(
+    fixture: &Fixture,
+    before: &summary::Summary,
+    reopened: &summary::Summary,
+) {
+    let (pid, _) = job(fixture).expect("retained job lost its start marker");
+    assert!(alive(pid), "the successor stopped the retained runner job");
+    retained_jobs(before, reopened);
+}
+
 /// What the successor left: the job started at most once over the cut and
 /// both reopens, never again for a tool call the cut had already run.
+/// The second reopen's user stop is the ownership proof, so a job that was
+/// running at the cut is a user stop afterwards, on the same generation.
 pub(in super::super) fn after_recovery(shape: &str, fixture: &Fixture, before: &summary::Summary) {
     if shape.starts_with("runner_") {
         assert!(starts(fixture) <= 1, "the successor started the job again");
@@ -148,9 +162,26 @@ pub(in super::super) fn after_recovery(shape: &str, fixture: &Fixture, before: &
     if shape == "runner_job_survives_host_loss"
         && before.jobs.iter().any(|job| job["terminal"] == false)
     {
-        let (pid, _) = job(fixture).expect("retained job lost its start marker");
-        assert!(alive(pid), "the successor stopped the retained runner job");
-        retained_jobs(before, &summary::read_converged(fixture));
+        let after = summary::read_converged(fixture);
+        for job in before.jobs.iter().filter(|job| job["terminal"] == false) {
+            let retained = after
+                .jobs
+                .iter()
+                .find(|row| row["number"] == job["number"])
+                .expect("the successor lost the retained job row");
+            assert_eq!(
+                retained["owner_generation"], job["owner_generation"],
+                "retained job changed owner generation"
+            );
+            assert_eq!(
+                retained["terminal"], true,
+                "ownership stop left no terminal"
+            );
+            assert_eq!(
+                retained["user_stop"], true,
+                "ownership stop was not a user stop"
+            );
+        }
     }
 }
 

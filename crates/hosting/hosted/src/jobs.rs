@@ -493,9 +493,9 @@ impl JobRegistry {
         };
         let mut targets = Vec::new();
         let mut rows = Vec::new();
-        for (key, service) in services {
-            let row_id = |number: u32| format!("{}:{}:p{}", key.0, key.1, number);
-            let Some(id) = id else {
+        let Some(id) = id else {
+            for (key, service) in services {
+                let row_id = |number: u32| format!("{}:{}:p{}", key.0, key.1, number);
                 rows.extend(
                     service
                         .jobs()
@@ -504,27 +504,43 @@ impl JobRegistry {
                         .map(|job| row_id(job.number)),
                 );
                 targets.push(UserStopTarget::All(service));
-                continue;
-            };
-            let Some(number) = service
-                .jobs()
-                .into_iter()
-                .map(|job| job.number)
-                .find(|number| row_id(*number) == id)
-            else {
-                continue;
-            };
-            if service.session_for_number(number).is_none() {
-                // Already retired: the stop has nothing left to do.
-                return Ok(());
             }
-            rows.push(row_id(number));
-            targets.push(UserStopTarget::One(service, number));
-            break;
+            return self.spawn_user_stop(targets, rows);
+        };
+        // JSONL names the job `pN`. The registry row id is `line:branch:pN`.
+        // A bare number must name one visible job; two lines can both have p1.
+        let mut matches = Vec::new();
+        for (key, service) in services {
+            for job in service.jobs() {
+                let row = format!("{}:{}:p{}", key.0, key.1, job.number);
+                let bare = format!("p{}", job.number);
+                let exact = row == id;
+                if !exact && bare != id {
+                    continue;
+                }
+                if service.session_for_number(job.number).is_none() {
+                    // The exact row already retired: nothing left to stop.
+                    // A bare number can still name a live job on another line.
+                    if exact {
+                        return Ok(());
+                    }
+                    continue;
+                }
+                matches.push((service.clone(), job.number, row));
+                if exact {
+                    break;
+                }
+            }
         }
-        if id.is_some() && targets.is_empty() {
+        if matches.is_empty() {
             return Err("background process is no longer available".into());
         }
+        if matches.len() > 1 {
+            return Err(format!("more than one background process is named {id}"));
+        }
+        let (service, number, row) = matches.remove(0);
+        rows.push(row);
+        targets.push(UserStopTarget::One(service, number));
         self.spawn_user_stop(targets, rows)
     }
 
@@ -782,6 +798,21 @@ impl JobRegistry {
             .values()
             .find(|entry| entry.key() == (session, branch))
             .map(|entry| entry.service.clone())
+    }
+
+    /// Whether any line in this registry still has a non-terminal job.
+    pub(crate) fn has_running_jobs(&self) -> bool {
+        self.services
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .any(|entry| {
+                entry
+                    .service
+                    .jobs()
+                    .iter()
+                    .any(|job| job.status == plakous::tools::JobStatus::Running)
+            })
     }
 
     pub(crate) fn transition_refusal(

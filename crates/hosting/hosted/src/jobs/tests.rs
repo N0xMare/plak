@@ -374,6 +374,29 @@ fn recent_terminal_hook_captures_before_any_product_poll() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn a_bare_job_number_stops_the_one_visible_job() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let registry = JobRegistry::default();
+    let service = registry.attach(
+        owner("00000000-0000-0000-0000-000000000702")?,
+        sessions(root.path())?,
+    )?;
+    let id = start(service.local())?;
+    plakous_tools::internal::promote(service.local(), id)?;
+    let number = JoinedProcessSessions::job_number(id);
+    registry.stop_user(Some(&format!("p{number}")))?;
+    registry.settle_user_stops();
+    assert_eq!(registry.running_count(), 0);
+    assert!(
+        service
+            .jobs()
+            .iter()
+            .all(|job| job.status == JobStatus::Stopped(JobStopReason::User))
+    );
+    Ok(())
+}
+
 /// A job that retires between the number lookup and the stop has
 /// nothing left to stop: that is a stopped job, not a stop failure.
 #[test]
@@ -415,6 +438,12 @@ fn processes_stop_exact_identity_and_stop_all_are_user_attributed() -> TestResul
     registry.settle_user_stops();
     assert_eq!(registry.running_count(), 1);
     assert!(registry.stop_user(Some("foreign:p1")).is_err());
+    let shared = rows[0].id.rsplit(':').next().expect("job number");
+    assert_eq!(shared, rows[1].id.rsplit(':').next().expect("job number"));
+    assert!(
+        registry.stop_user(Some(shared)).is_err(),
+        "a bare number shared by two lines must stop neither"
+    );
     assert_eq!(registry.running_count(), 1);
     registry.stop_user(None)?;
     registry.settle_user_stops();

@@ -823,6 +823,17 @@ fn cut_after_kill(
             .find(|job| job["terminal"] == false)
             .and_then(|job| job["number"].as_u64())
             .expect("retained job number");
+        let reopened = summary::read_converged(fixture);
+        let retained = reopened
+            .jobs
+            .iter()
+            .find(|job| job["number"] == number)
+            .expect("retained job missing on second reopen");
+        assert_eq!(
+            retained["terminal"], false,
+            "retained job was already terminal before stop: {retained}"
+        );
+        shapes::runner::assert_retained_before_stop(fixture, before, &reopened);
         second.send(&json!({
             "v": 1,
             "kind": "stop_processes",
@@ -859,9 +870,63 @@ fn cut_after_kill(
             1,
             "successor published more than one user terminal: {stopped}"
         );
-        // The stop is the successor's ownership proof. The rest of the
-        // relaunch must still match the follow-up.
-        converged.jobs.clone_from(&stable.jobs);
+        let stopped_number = stopped["number"].clone();
+        for (before_job, after_job) in stable.jobs.iter().zip(converged.jobs.iter()) {
+            let mut expected = before_job.clone();
+            if before_job["number"] == stopped_number {
+                expected["terminal"] = json!(true);
+                expected["user_stop"] = json!(true);
+            }
+            assert_eq!(
+                after_job, &expected,
+                "job row diverged beyond the user stop"
+            );
+        }
+        assert_eq!(
+            stable.jobs.len(),
+            converged.jobs.len(),
+            "job row count diverged"
+        );
+        // The stop publishes one checkpoint. Session and branch stay; the
+        // head and locator name that new checkpoint.
+        let branch = |locator: &Option<String>| -> Option<String> {
+            locator
+                .as_deref()
+                .and_then(|value| value.rsplit_once('/'))
+                .map(|(prefix, _)| prefix.to_owned())
+        };
+        assert_eq!(
+            branch(&stable.locator),
+            branch(&converged.locator),
+            "user stop moved the session branch"
+        );
+        assert_ne!(
+            stable.head, converged.head,
+            "user stop did not publish a checkpoint"
+        );
+        converged.jobs.clear();
+        let mut rest = stable.clone();
+        rest.jobs.clear();
+        rest.revision = converged.revision;
+        rest.head.clone_from(&converged.head);
+        rest.locator.clone_from(&converged.locator);
+        assert_eq!(
+            rest, converged,
+            "second relaunch diverged beyond the stopped job"
+        );
+        assert_eq!(
+            dispatched,
+            invariants::dispatches(fixture),
+            "second relaunch dispatched"
+        );
+        assert_eq!(
+            summary_dispatches,
+            invariants::summary_dispatches(fixture),
+            "second relaunch did inference"
+        );
+        invariants::notices_once(fixture);
+        let second_revision = converged.revision;
+        return json!({"outcome": outcome, "invariants": true, "before": before, "after_recovery": recovered, "after_followup": stable, "rehearsal": rehearsal, "dispatches": dispatched, "summary_dispatches": summary_dispatches, "first_summary_dispatch": first_summary_dispatch, "second_relaunch_converged": true, "second_revision": second_revision, "global_order": commits, "global_ordinal": commits.last().unwrap().ordinal, "requeued_lifecycle": requeued_lifecycle});
     }
     let second_revision = converged.revision;
     // Idle attach/quit advances the CAS revision without changing turn authority.

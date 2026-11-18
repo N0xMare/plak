@@ -1818,6 +1818,9 @@ when any of them refuses:
   has such a row. `unpair --abandon-jobs` drops the pin anyway and names
   those processes. Either way unpair removes only this host's
   `runners/<name>/runner.json` and does not edit the runner's allowlist.
+  JSONL `stop_processes` with `process` set to one `pN` id is the user stop
+  for that one visible background job and does not interrupt the turn. The
+  same number on two visible lines is refused and neither job is stopped.
 
 Without `--yes` it asks on a terminal and refuses on a non-terminal stdin.
 Without `--abandon-children`, recovery-required children still refuse deletion.

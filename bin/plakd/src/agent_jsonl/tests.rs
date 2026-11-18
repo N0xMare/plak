@@ -1436,3 +1436,20 @@ fn jsonl_command_span_fields_are_content_free_allowlist() {
         );
     }
 }
+
+#[test]
+fn stop_processes_rejects_a_process_id_that_is_not_a_job() {
+    for process in ["p0", "1", "p", "px"] {
+        let line = format!(r#"{{"v":1,"kind":"stop_processes","id":"s","process":"{process}"}}"#);
+        let ParseOutcome::Diagnostic { message, .. } = parse_command_line(&line) else {
+            panic!("{process} was accepted");
+        };
+        assert!(message.contains("p1"), "{process}: {message}");
+    }
+    let ParseOutcome::Command(AgentCommand::StopProcesses { process, .. }) =
+        parse_command_line(r#"{"v":1,"kind":"stop_processes","id":"s","process":"p1"}"#)
+    else {
+        panic!("p1 was refused");
+    };
+    assert_eq!(process, "p1");
+}

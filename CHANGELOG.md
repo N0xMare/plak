@@ -98,7 +98,8 @@ for one version bump, without native protocol compatibility.
   store is full.
 - An escalated quit keeps daemon-owned background jobs and records that keep,
   instead of racing a stop against the keep.
-- JSONL `stop_processes` stops one background job as a user stop.
+- JSONL `stop_processes` stops one background job (`pN`) as a user stop.
+  Two visible jobs with the same number are refused and neither is stopped.
 - Host wire protocol 11 schema pin covers `DeleteSession.abandon_jobs` and
   the `running_jobs` lifecycle reason. Clients carry the projection from the
   previous protocol pin.
