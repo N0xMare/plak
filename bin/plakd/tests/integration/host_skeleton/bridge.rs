@@ -622,8 +622,8 @@ fn the_stdio_bridge_does_not_consume_a_separate_handshake_or_mask_a_version_refu
         bridge.next(),
         HostFrame::Refused(
             plakous_host_protocol::wire::HandshakeRefusal::VersionMismatch {
-                host: 11,
-                client: 10
+                host: WIRE_VERSION,
+                client: WIRE_VERSION - 1
             }
         )
     ));

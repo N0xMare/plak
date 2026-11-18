@@ -116,6 +116,7 @@ pub(super) fn create(host: &Host, fixture: &Fixture) -> Option<String> {
         workspace: fixture.workspace().display().to_string(),
         template: None,
         request_id: REQUEST.into(),
+        accounts: Vec::new(),
     })
     .ok()?;
     let Outcome::Ok(Answer::Created { session, .. }) = receive.recv_response(WAIT).ok()?.1 else {

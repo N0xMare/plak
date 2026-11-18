@@ -620,7 +620,8 @@ fn every_product_intent_uses_immutable_phase_facts_and_bounded_observations() {
                 | SurfaceIntent::ProbeReload
                 | SurfaceIntent::AcceptReloadRequest { .. }
                 | SurfaceIntent::RefuseReloadRequest { .. }
-                | SurfaceIntent::WatchUsage(_) => {
+                | SurfaceIntent::WatchUsage(_)
+                | SurfaceIntent::ChooseAccount { .. } => {
                     unreachable!("profile, acknowledgement and build intents have their own tests")
                 }
             }
@@ -1074,6 +1075,7 @@ fn apply_with_queue(
         SurfaceIntent::ApplyProfile {
             name: name.to_owned(),
             apply: how,
+            accounts: Vec::new(),
         },
         SurfaceFacts {
             session: None,
@@ -1142,6 +1144,7 @@ fn applying_claude_profile_discards_saved_sdk_selection() {
         SurfaceIntent::ApplyProfile {
             name: "claude-default".into(),
             apply: crate::surface_protocol::ProfileApply::Fork,
+            accounts: Vec::new(),
         },
         SurfaceFacts {
             session: None,
@@ -1178,6 +1181,7 @@ fn applying_claude_profile_discards_saved_sdk_selection() {
         SurfaceIntent::ApplyProfile {
             name: "claude-default".into(),
             apply: crate::surface_protocol::ProfileApply::Default,
+            accounts: Vec::new(),
         },
         SurfaceFacts {
             session: None,
@@ -1334,6 +1338,7 @@ fn an_unattached_empty_session_binds_the_profile_and_reattaches() {
     tx.send(UserAction::Extension(SurfaceIntent::ApplyProfile {
         name: "mine".into(),
         apply: crate::surface_protocol::ProfileApply::Fork,
+        accounts: Vec::new(),
     }))
     .unwrap();
     join.join().unwrap().unwrap();
@@ -1382,6 +1387,7 @@ fn only_local_use_now_can_bootstrap_a_fresh_home_default() {
                 SessionIntent::Extension(SurfaceIntent::ApplyProfile {
                     name: "mine".into(),
                     apply: crate::surface_protocol::ProfileApply::Fork,
+                    accounts: Vec::new(),
                 }),
                 Some("local-attachment:1:local"),
             )
@@ -1524,6 +1530,7 @@ fn moved_remote_requester_use_now_never_bootstraps_a_fresh_home_default() {
                 intent: SessionIntent::Extension(SurfaceIntent::ApplyProfile {
                     name: "mine".into(),
                     apply: crate::surface_protocol::ProfileApply::Fork,
+                    accounts: Vec::new(),
                 }),
             },
         };
@@ -1609,6 +1616,7 @@ fn use_now_keeps_a_loadable_home_default() {
     tx.send(UserAction::Extension(SurfaceIntent::ApplyProfile {
         name: "mine".into(),
         apply: crate::surface_protocol::ProfileApply::Fork,
+        accounts: Vec::new(),
     }))
     .unwrap();
     join.join().unwrap().unwrap();
@@ -1724,6 +1732,7 @@ fn use_now_binds_an_openrouter_or_api_root_from_its_template() {
         tx.send(UserAction::Extension(SurfaceIntent::ApplyProfile {
             name: "api".into(),
             apply: crate::surface_protocol::ProfileApply::Fork,
+            accounts: Vec::new(),
         }))
         .unwrap();
         drop(tx);

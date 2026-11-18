@@ -3,9 +3,9 @@
 use super::{diagnostic, unavailable, validation};
 use crate::home::{paths::PlakPaths, secrets};
 use plakd_wire_types::console::{
-    AccountStatus, Compatibility, Credential, Diagnostic, KeySource, KeyStatus, NativeStatus,
-    ProfileNotice, ReadAction, ReadRefusal, ReadRemedy, ReadScope, UnavailableCode, ValidationCode,
-    Vertical,
+    AccountCustody, AccountStatus, Compatibility, Credential, Diagnostic, KeySource, KeyStatus,
+    NativeStatus, ProfileNotice, ReadAction, ReadRefusal, ReadRemedy, ReadScope, UnavailableCode,
+    ValidationCode, Vertical,
 };
 use plakous_hosted::account::{AccountRef, Vertical as AccountVertical};
 use std::collections::BTreeSet;
@@ -211,6 +211,7 @@ pub(super) async fn status(
         last_refresh: None,
         remedies: Vec::new(),
         diagnostics: Vec::new(),
+        custody: AccountCustody::in_process(),
     };
     if vertical.is_api()
         && let Some(link) = application.custody.admin()

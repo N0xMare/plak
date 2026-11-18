@@ -22,7 +22,13 @@ pub(super) fn wait_local_runner_ready(host: &Host) {
 }
 
 fn local_runner_status(client: &mut Client) -> plakous_host_protocol::wire::RunnerStatus {
-    let outcome = client.request(90, Op::SessionOptions { workspace: None });
+    let outcome = client.request(
+        90,
+        Op::SessionOptions {
+            workspace: None,
+            accounts: Vec::new(),
+        },
+    );
     let Outcome::Ok(Answer::Options { options }) = outcome else {
         panic!("runner options refused: {outcome:?}")
     };

@@ -11,7 +11,7 @@ use serde_json::json;
 
 #[test]
 fn lifecycle_is_a_closed_advisory_frame_with_a_bounded_retry_hint() {
-    assert_eq!(WIRE_VERSION, 11);
+    assert_eq!(WIRE_VERSION, 12);
     for phase in ["draining", "restarting", "stopping", "running"] {
         for reason in ["paired_upgrade", "cross_key_upgrade", "shutdown"] {
             let value = json!({"frame":"host_lifecycle","host_generation":7,

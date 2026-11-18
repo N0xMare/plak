@@ -219,6 +219,7 @@ impl ProductSessions {
             profiles: shared.profiles,
             templates: shared.templates,
             workspace,
+            accounts: Vec::new(),
         })
     }
 }

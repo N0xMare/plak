@@ -26,6 +26,48 @@ pub struct AccountStatus {
     pub last_refresh: Option<CredentialRefreshObservation>,
     pub remedies: Vec<ReadRemedy>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Where this account's credential is held. Omitted when the credential
+    /// is in-process on this machine and no gateway address is set.
+    #[serde(default, skip_serializing_if = "AccountCustody::is_local")]
+    pub custody: AccountCustody,
+}
+
+/// Credential holder reported for one account.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AccountCustody {
+    pub mode: CustodyMode,
+    /// Gateway address when `mode` is [`CustodyMode::Service`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gateway: Option<String>,
+}
+
+impl AccountCustody {
+    /// In-process custody on this machine, with no gateway address.
+    #[must_use]
+    pub fn in_process() -> Self {
+        Self {
+            mode: CustodyMode::InProcess,
+            gateway: None,
+        }
+    }
+
+    fn is_local(custody: &Self) -> bool {
+        custody.mode == CustodyMode::InProcess && custody.gateway.is_none()
+    }
+}
+
+/// Where a credential is held.
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum CustodyMode {
+    /// The host's in-process gateway holds the credential.
+    #[default]
+    InProcess,
+    /// A gateway service holds the credential.
+    Service,
 }
 
 /// Last retained settled outcome for this exact account, not credential state.

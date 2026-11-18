@@ -38,6 +38,10 @@ pub struct ProfileRow {
     pub root: ProfileRole,
     /// Working-set cards, in order.
     pub cards: Vec<ProfileRole>,
+    /// Provider kinds this profile's root and cards name. Empty when the
+    /// row was built before a client asked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub account_kinds: Vec<String>,
 }
 
 /// How a session differs from its nearest profile: the root's own values

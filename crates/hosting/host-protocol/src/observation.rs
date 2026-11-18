@@ -564,6 +564,22 @@ impl TurnPhase {
     }
 }
 
+/// A failed turn stopped on a usage limit. Clients offer one continue action
+/// per alternative; the host does not switch by itself.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UsageLimitNotice {
+    /// Kind of the account that hit the limit.
+    pub kind: String,
+    /// Full account reference that hit the limit.
+    pub account: String,
+    /// When the limit resets, as Unix seconds, when one was reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<i64>,
+    /// Other ready accounts of the same kind.
+    pub alternatives: Vec<String>,
+}
+
 /// Correlated lifecycle evidence for one admitted turn.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct TurnLifecycle {
@@ -575,6 +591,9 @@ pub struct TurnLifecycle {
     pub model_error_kind: Option<String>,
     /// Provider HTTP status at the terminal, when one was reported.
     pub http_status: Option<u16>,
+    /// Set when a failed turn stopped on a usage limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_limit: Option<UsageLimitNotice>,
 }
 
 /// One announced replay of a turn's model request.

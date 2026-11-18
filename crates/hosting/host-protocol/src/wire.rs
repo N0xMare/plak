@@ -39,8 +39,10 @@ use crate::observation::{ObservationClass, SessionObservation};
 use crate::views::PresentationSnapshot;
 use crate::views::transcript::{TranscriptItem, TranscriptScope};
 
+mod accounts;
 mod directory;
 mod runner_label;
+pub use accounts::{AccountChoice, AccountOption, KindAccounts};
 pub use runner_label::RunnerLabel;
 mod draft;
 pub use draft::{ClientDraftId, InvalidClientDraftId};
@@ -72,7 +74,9 @@ pub use tool::WireToolItem;
 /// 9 adds consented operator terminals, independent credited streams and residency.
 /// 10 adds directory creation timestamps and detailed semantic validation issues.
 /// 11 adds host state identity, advisory planned lifecycle and typed bridge refusals.
-pub const WIRE_VERSION: u32 = 11;
+/// 12 adds session account choices, account-choice refusals, the account
+/// switch, the failed-turn usage limit and console custody.
+pub const WIRE_VERSION: u32 = 12;
 
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
@@ -377,6 +381,10 @@ pub enum Op<P: ProtocolExtension> {
         /// the new session's id, so a retry of the same action answers the
         /// session it created and never makes a second one.
         request_id: String,
+        /// Explicit account choices, `kind` to a full account reference.
+        /// Absent means the host fills each kind it uses.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        accounts: Vec<AccountChoice>,
     },
     /// One bounded creation-picker read with request-scoped progress.
     SessionOptions {
@@ -667,6 +675,22 @@ pub enum RequestRefusal {
     Unsupported {
         /// What it does not do.
         detail: String,
+    },
+    /// Creating or applying a profile needs an account choice for these kinds.
+    /// Nothing was created or applied.
+    AccountChoiceRequired {
+        /// Kinds with no single ready account and no explicit choice.
+        kinds: Vec<KindAccounts>,
+    },
+    /// An account choice does not name a ready account of that kind.
+    /// Nothing was created, applied or switched.
+    AccountChoiceInvalid {
+        /// Kind the choice named.
+        kind: String,
+        /// Account the choice named.
+        account: String,
+        /// Why it was refused.
+        reason: String,
     },
 }
 

@@ -309,6 +309,7 @@ impl HostSessions<Core> for Fake {
             profiles: plakous_host_protocol::views::ProfilesView::default(),
             templates: Vec::new(),
             workspace: None,
+            accounts: Vec::new(),
         })
     }
 
@@ -1057,7 +1058,14 @@ fn picker_progress_is_scoped_and_precedes_exactly_one_final_without_opening_a_se
         HostPrincipal::Socket(501),
         || false,
     );
-    request(&mut connection, 7, Op::SessionOptions { workspace: None });
+    request(
+        &mut connection,
+        7,
+        Op::SessionOptions {
+            workspace: None,
+            accounts: Vec::new(),
+        },
+    );
     let frames = out.take();
     assert_eq!(frames.len(), 3);
     assert!(matches!(
@@ -1701,6 +1709,7 @@ fn new_session_answers_created_and_a_replay_answers_the_same() {
         workspace: "/w".into(),
         template: None,
         request_id: id,
+        accounts: Vec::new(),
     };
     let mut changes = host.changes();
     request(&mut connection, 1, new("r1".into()));
@@ -1742,6 +1751,7 @@ fn profile_creation_refuses_both_advanced_overrides_before_product_creation() {
                     model: "model".into(),
                 }),
                 request_id: "r1".into(),
+                accounts: Vec::new(),
             },
         );
         assert!(matches!(
@@ -2773,6 +2783,7 @@ fn a_closed_host_opens_and_creates_nothing() {
             workspace: "/w".into(),
             template: None,
             request_id: "r9".into(),
+            accounts: Vec::new(),
         },
     );
     let frames = out.take();

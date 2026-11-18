@@ -917,6 +917,7 @@ fn turn_lifecycle_survives_replaceable_saturation() {
         phase: TurnPhase::Completed,
         model_error_kind: None,
         http_status: None,
+        usage_limit: None,
     });
     sender.send(lifecycle.clone()).unwrap();
     // Replaceable transcript/delta/progress traffic cannot displace the

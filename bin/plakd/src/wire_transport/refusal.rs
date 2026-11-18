@@ -62,6 +62,17 @@ pub(crate) fn refusal(reason: RequestRefusal) -> CliFailure {
         RequestRefusal::NodeRetiring => "the node is releasing; retry after release".into(),
         RequestRefusal::OutOfReach => "the node is outside this operator's reach".into(),
         RequestRefusal::NotAttached => "attach to a session before sending this request".into(),
+        RequestRefusal::AccountChoiceRequired { kinds } => {
+            let listed = kinds
+                .iter()
+                .map(|kind| kind.kind.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("choose an account for {listed}")
+        }
+        RequestRefusal::AccountChoiceInvalid { kind, account, reason } => {
+            format!("account {account} is not a ready {kind} account: {reason}")
+        }
     };
     CliFailure::classified(kind, text).with_wire_refusal(reason)
 }

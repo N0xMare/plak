@@ -322,6 +322,7 @@ fn hello(socket: &mut WebSocket<UnixStream>) -> NodeAddress {
                 workspace: WORKSPACE.with(|workspace| workspace.borrow().clone()),
                 template: None,
                 request_id: REQUEST.into(),
+                accounts: Vec::new(),
             },
         },
     );

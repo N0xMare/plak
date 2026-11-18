@@ -281,6 +281,7 @@ fn the_directory_requests_round_trip_with_pinned_bytes() {
                     workspace: "/w".into(),
                     template: Some("coder".into()),
                     request_id: "00000000-0000-4000-8000-000000000001".into(),
+                    accounts: Vec::new(),
                 },
             },
             r#"{"frame":"request","id":4,"op":{"op":"new_session","runner":{"name":"local","runner_id":"local"},"workspace":"/w","template":"coder","request_id":"00000000-0000-4000-8000-000000000001"}}"#,

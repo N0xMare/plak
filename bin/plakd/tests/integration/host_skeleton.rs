@@ -134,9 +134,13 @@ fn a_host_launch_directory_containing_its_home_is_not_a_workspace_default() {
     });
     let mut host = serving_host((child, lines)).expect("host serves outside any workspace");
     let mut client = Client::connect(&host);
-    let Outcome::Ok(Answer::Options { options }) =
-        client.request(1, Op::SessionOptions { workspace: None })
-    else {
+    let Outcome::Ok(Answer::Options { options }) = client.request(
+        1,
+        Op::SessionOptions {
+            workspace: None,
+            accounts: Vec::new(),
+        },
+    ) else {
         panic!("options refused")
     };
     let local = options
@@ -511,6 +515,7 @@ fn new_session(workspace: &std::path::Path) -> Op<PlakExtension> {
         workspace: workspace.display().to_string(),
         template: None,
         request_id: REQUEST.into(),
+        accounts: Vec::new(),
     }
 }
 
@@ -1424,6 +1429,7 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
                 workspace: fixture.workspace().display().to_string(),
                 template: None,
                 request_id: "not-a-uuid".into(),
+                accounts: Vec::new(),
             }
         ),
         Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::Malformed { .. })
@@ -1445,6 +1451,7 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
                 workspace: fixture.workspace().display().to_string(),
                 template: Some("no-such-template".into()),
                 request_id: REQUEST.into(),
+                accounts: Vec::new(),
             }
         ),
         Outcome::Refused(
@@ -1485,6 +1492,7 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
         workspace: fixture.workspace().display().to_string(),
         template: template.map(str::to_owned),
         request_id: request_id.into(),
+        accounts: Vec::new(),
     };
     assert!(matches!(
         client.request(11, made(None)),
@@ -1507,6 +1515,7 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
                 workspace: file.display().to_string(),
                 template: None,
                 request_id: "00000000-0000-4000-8000-0000000000a2".into(),
+                accounts: Vec::new(),
             }
         ),
         Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::PlacementRefused { reason, .. })

@@ -113,6 +113,7 @@ fn turn_lifecycle_projects_phase_and_error_context() {
         phase: TurnPhase::Failed,
         model_error_kind: Some("RateLimited".to_owned()),
         http_status: Some(429),
+        usage_limit: None,
     });
     let line = project_host_event(&event, JsonlCorrelation::default()).unwrap();
     let value: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -135,6 +136,7 @@ fn turn_lifecycle_omits_absent_error_context() {
         phase: TurnPhase::Unresolved,
         model_error_kind: None,
         http_status: None,
+        usage_limit: None,
     });
     let line = project_host_event(&event, JsonlCorrelation::default()).unwrap();
     let value: serde_json::Value = serde_json::from_str(&line).unwrap();

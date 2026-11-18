@@ -6,6 +6,7 @@
 )]
 
 use plakous_host_protocol::observation::ObservationClass;
+use plakous_host_protocol::wire::AccountChoice;
 use plakous_host_protocol::{
     CompositionSelection, ObservationExtension, ProtocolExtension, ProtocolSelection,
 };
@@ -300,6 +301,22 @@ pub enum SurfaceIntent {
         name: String,
         /// Where the profile applies.
         apply: ProfileApply,
+        /// Explicit account choices for the profile's kinds. Absent means
+        /// the host fills each kind.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        accounts: Vec<AccountChoice>,
+    },
+    /// Set the session's account for one kind. `continue_failed` resubmits
+    /// the failed root turn after a root-kind rebind; a non-root kind only
+    /// updates the choice.
+    ChooseAccount {
+        /// Provider kind id.
+        kind: String,
+        /// Full account reference.
+        account: String,
+        /// Resubmit the failed root turn after the root kind moves.
+        #[serde(default)]
+        continue_failed: bool,
     },
     /// Record the operator's acknowledgement of one attention occurrence;
     /// answered by [`SurfaceObservation::AgentAcknowledgements`].
@@ -361,6 +378,7 @@ impl fmt::Debug for SurfaceIntent {
             Self::RefreshComposerChrome => "RefreshComposerChrome",
             Self::ShowMcp => "ShowMcp",
             Self::ApplyProfile { .. } => "ApplyProfile{..}",
+            Self::ChooseAccount { .. } => "ChooseAccount{..}",
             Self::AcknowledgeAgent { .. } => "AcknowledgeAgent{..}",
             Self::ListAgentAcknowledgements { .. } => "ListAgentAcknowledgements{..}",
             Self::CheckBuild => "CheckBuild",
@@ -411,6 +429,12 @@ pub enum SurfaceObservation {
         name: String,
         /// How it landed.
         outcome: ProfileOutcome,
+    },
+    /// The session's account for every kind it uses. The root kind is the
+    /// root line head's account, not a stored choice.
+    AccountChoices {
+        /// One entry per kind in use.
+        choices: Vec<AccountChoice>,
     },
     /// A profile was not applied; nothing was saved.
     ProfileRefused {
@@ -477,9 +501,10 @@ impl ObservationExtension for SurfaceObservation {
     /// session's profile and workspace chrome are the session's state.
     fn wire_class(&self) -> ObservationClass {
         match self {
-            Self::SessionProfile(_) | Self::WorkspaceChrome(_) | Self::LookupStatus { .. } => {
-                ObservationClass::State
-            }
+            Self::SessionProfile(_)
+            | Self::WorkspaceChrome(_)
+            | Self::AccountChoices { .. }
+            | Self::LookupStatus { .. } => ObservationClass::State,
             Self::SettingsView(_)
             | Self::SettingsViewApplied(_)
             | Self::SettingsLoadFailed(_)
@@ -525,6 +550,7 @@ impl ObservationExtension for SurfaceObservation {
             Self::UsageCredentialRefreshed { .. } => "usage_credential_refreshed",
             Self::Profiles(_) => "profiles",
             Self::SessionProfile(_) => "session_profile",
+            Self::AccountChoices { .. } => "account_choices",
             Self::WorkspaceChrome(_) => "workspace_chrome",
             Self::McpOverview(_) => "mcp_overview",
             Self::ProfileApplied { .. } => "profile_applied",

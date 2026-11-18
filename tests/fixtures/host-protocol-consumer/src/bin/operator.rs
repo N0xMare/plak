@@ -7,7 +7,7 @@ use plakd_wire_types::{
 use plakous_host_protocol::wire::{Answer, ClientFrame, HostFrame, Op, Outcome, WIRE_VERSION};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    assert_eq!(WIRE_VERSION, 8);
+    assert_eq!(WIRE_VERSION, 12);
     let _ = plakd_wire_types::console::CredentialRefreshObservation {
         outcome: plakd_wire_types::console::CredentialRefreshOutcome::Restored,
         observed_at: "2026-01-01T00:00:00Z".into(), failure_class: Some("timeout".into()),

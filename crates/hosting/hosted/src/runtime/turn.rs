@@ -186,6 +186,7 @@ pub(super) fn turn_lifecycle(result: &TurnResult) -> TurnLifecycle {
         phase,
         model_error_kind,
         http_status,
+        usage_limit: None,
     }
 }
 
@@ -218,6 +219,7 @@ pub(super) fn unresolved_turn_lifecycle(
         phase: TurnPhase::Unresolved,
         model_error_kind,
         http_status,
+        usage_limit: None,
     }
 }
 
@@ -245,6 +247,7 @@ pub(super) fn admitted_turn_lifecycle(turn_id: plakous::model::TurnId) -> TurnLi
         phase: TurnPhase::Admitted,
         model_error_kind: None,
         http_status: None,
+        usage_limit: None,
     }
 }
 

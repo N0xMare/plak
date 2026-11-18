@@ -84,7 +84,7 @@ fn pin_host(value: &str) {
 
 #[test]
 fn protocol_five_directory_requests_have_exact_closed_shapes() {
-    assert_eq!(WIRE_VERSION, 11);
+    assert_eq!(WIRE_VERSION, 12);
     for request in [
         r#"{"frame":"request","id":1,"op":{"op":"new_session","runner":{"name":"machine","runner_id":"pinned-id"},"workspace":"/work","profile":"claude-default","request_id":"00000000-0000-4000-8000-000000000001"}}"#,
         r#"{"frame":"request","id":2,"op":{"op":"session_options","workspace":{"runner":{"name":"machine","runner_id":"pinned-id"},"path":"/work"}}}"#,
@@ -159,5 +159,41 @@ fn discovery_head_states_are_distinct_and_metadata_has_no_second_root() {
             r#"{"name":"repo","head":{"kind":"unavailable"},"commit":null,"root":"/work"}"#
         )
         .is_err()
+    );
+}
+
+#[test]
+fn protocol_twelve_account_choice_round_trips_and_old_new_session_omits_it() {
+    let choice = AccountChoice {
+        kind: "kind".to_owned(),
+        account: "kind/work".to_owned(),
+    };
+    let spelled = r#"{"kind":"kind","account":"kind/work"}"#;
+    assert_eq!(serde_json::to_string(&choice).unwrap(), spelled);
+    assert_eq!(
+        serde_json::from_str::<AccountChoice>(spelled).unwrap(),
+        choice
+    );
+
+    let invalid = RequestRefusal::AccountChoiceInvalid {
+        kind: "kind".to_owned(),
+        account: "kind/work".to_owned(),
+        reason: "not ready".to_owned(),
+    };
+    let invalid_spelling = serde_json::to_string(&invalid).unwrap();
+    assert_eq!(
+        invalid_spelling,
+        r#"{"refusal":"account_choice_invalid","kind":"kind","account":"kind/work","reason":"not ready"}"#
+    );
+    assert_eq!(
+        serde_json::from_str::<RequestRefusal>(&invalid_spelling).unwrap(),
+        invalid
+    );
+
+    pin_host(
+        r#"{"frame":"response","id":1,"outcome":{"refused":{"refusal":"account_choice_required","kinds":[{"kind":"kind","rows":[{"account":"kind/work","ready":true}]}]}}}"#,
+    );
+    pin_client(
+        r#"{"frame":"request","id":1,"op":{"op":"new_session","runner":{"name":"machine","runner_id":"pinned-id"},"workspace":"/work","request_id":"00000000-0000-4000-8000-000000000001","accounts":[{"kind":"kind","account":"kind/work"}]}}"#,
     );
 }

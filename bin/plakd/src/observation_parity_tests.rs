@@ -1929,6 +1929,7 @@ fn cancelled_turn() -> HostEvent {
         phase: TurnPhase::Cancelled,
         model_error_kind: None,
         http_status: None,
+        usage_limit: None,
     })
 }
 

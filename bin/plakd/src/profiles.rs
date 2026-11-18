@@ -473,6 +473,7 @@ fn row(config: &ProductConfig, resolved: &Resolved, aliases: Vec<String>) -> Pro
         aliases,
         root: role("root", &resolved.root.1, 0),
         cards,
+        account_kinds: Vec::new(),
     }
 }
 

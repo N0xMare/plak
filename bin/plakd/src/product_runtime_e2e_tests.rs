@@ -324,6 +324,7 @@ fn profile_fork_action(name: &str) -> crate::surface_protocol::UserAction {
         crate::surface_protocol::SurfaceIntent::ApplyProfile {
             name: name.to_owned(),
             apply: crate::surface_protocol::ProfileApply::Fork,
+            accounts: Vec::new(),
         },
     )
 }
@@ -823,6 +824,7 @@ fn profile_fork_from_native_ptc_onto_direct_commits_a_turn()
             crate::surface_protocol::SurfaceIntent::ApplyProfile {
                 name: "pb".to_owned(),
                 apply: crate::surface_protocol::ProfileApply::Fork,
+                accounts: Vec::new(),
             },
         ),
     )?;
@@ -1022,6 +1024,7 @@ fn profile_fork_now_branches_onto_its_own_tree_and_leaves_the_default()
             crate::surface_protocol::SurfaceIntent::ApplyProfile {
                 name: "pb".to_owned(),
                 apply: crate::surface_protocol::ProfileApply::Fork,
+                accounts: Vec::new(),
             },
         ),
     )?;
@@ -1083,6 +1086,7 @@ fn a_refused_profile_fork_saves_nothing() -> Result<(), Box<dyn Error + Send + S
             crate::surface_protocol::SurfaceIntent::ApplyProfile {
                 name: "pb".to_owned(),
                 apply: crate::surface_protocol::ProfileApply::Fork,
+                accounts: Vec::new(),
             },
         ),
     )?;
@@ -1186,6 +1190,7 @@ fn same_profile_fork(with_tree: bool) -> Result<(), Box<dyn Error + Send + Sync>
             crate::surface_protocol::SurfaceIntent::ApplyProfile {
                 name: "pb".to_owned(),
                 apply: crate::surface_protocol::ProfileApply::Fork,
+                accounts: Vec::new(),
             },
         ),
     )?;

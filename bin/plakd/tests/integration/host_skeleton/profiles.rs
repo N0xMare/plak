@@ -74,6 +74,7 @@ fn apply(
                 intent: SessionIntent::Extension(SurfaceIntent::ApplyProfile {
                     name: name.to_owned(),
                     apply,
+                    accounts: Vec::new(),
                 }),
                 blobs: Vec::new(),
             },
@@ -307,6 +308,7 @@ fn offline_profile_readiness_does_not_admit_other_routes_or_efforts() {
                 intent: SessionIntent::Extension(SurfaceIntent::ApplyProfile {
                     name: "unready".into(),
                     apply: ProfileApply::Default,
+                    accounts: Vec::new(),
                 }),
                 blobs: Vec::new(),
             }

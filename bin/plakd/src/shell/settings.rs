@@ -225,6 +225,7 @@ fn session_profile_row(
             depth: 0,
         },
         cards,
+        account_kinds: Vec::new(),
     }
 }
 
@@ -1220,12 +1221,13 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             SurfaceIntent::RefuseReloadRequest { request_id, reason } => {
                 self.reload.refuse(&request_id, reason);
             }
-            SurfaceIntent::ApplyProfile { name, apply } => {
+            SurfaceIntent::ApplyProfile { name, apply, .. } => {
                 return SurfaceEffect {
                     profile_fork: apply_profile(&self.paths, &name, apply, facts, events),
                     ..SurfaceEffect::default()
                 };
             }
+            SurfaceIntent::ChooseAccount { .. } => {}
         }
         SurfaceEffect::default()
     }

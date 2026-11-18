@@ -1906,6 +1906,7 @@ fn a_single_session_connection_refuses_the_directory_requests() {
                 workspace: "/w".to_owned(),
                 template: None,
                 request_id: "r".to_owned(),
+                accounts: Vec::new(),
             },
             "new_session",
         ),

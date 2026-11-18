@@ -278,4 +278,8 @@ pub struct SessionOptions {
     pub templates: Vec<TemplateRow>,
     /// Optional candidate-path verdict.
     pub workspace: Option<WorkspaceOptions>,
+    /// Accounts of each kind a used profile can bind, with readiness.
+    /// Allowance is the existing accounts-usage read, not this list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accounts: Vec<super::KindAccounts>,
 }

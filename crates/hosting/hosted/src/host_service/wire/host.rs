@@ -688,6 +688,7 @@ where
                 workspace,
                 template,
                 request_id,
+                ..
             } => answered(self.create_session(&Creation {
                 runner: &runner,
                 workspace: &workspace,
@@ -697,7 +698,7 @@ where
                 request_id: &request_id,
             })),
             Op::ReleaseSession { session } => answered(self.release(&session)?),
-            Op::SessionOptions { workspace } => {
+            Op::SessionOptions { workspace, .. } => {
                 answered(self.session_options(request_id, workspace.as_ref()))
             }
             Op::RenameSession { session, title } => {

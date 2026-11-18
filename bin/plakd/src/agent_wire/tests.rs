@@ -352,6 +352,7 @@ fn only_a_local_face_may_probe_or_check_the_installed_build() {
                 SurfaceIntent::ApplyProfile {
                     name: "codex-default".into(),
                     apply: crate::surface_protocol::ProfileApply::Default,
+                    accounts: Vec::new(),
                 },
             ),
             intent(
