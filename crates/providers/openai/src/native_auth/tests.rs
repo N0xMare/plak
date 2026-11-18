@@ -2677,8 +2677,12 @@ async fn resolution_evidence_follows_slot_not_store_path() -> TestResult {
     );
     let observed_at = Timestamp::new(PROFILE_REVIEWED_AT + 3, 0)?;
     let resolver = |manager| {
-        CodexModelResolver::new_for_test(manager, client.clone(), StandardOpenAiHttpConfig::default())
-            .map(|resolver| resolver.clock(Arc::new(FixedClock::new(observed_at))))
+        CodexModelResolver::new_for_test(
+            manager,
+            client.clone(),
+            StandardOpenAiHttpConfig::default(),
+        )
+        .map(|resolver| resolver.clock(Arc::new(FixedClock::new(observed_at))))
     };
     let first_resolver = resolver(first_manager)?;
     let second_resolver = resolver(second_manager)?;
