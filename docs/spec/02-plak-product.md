@@ -755,7 +755,12 @@ Subscription credentials live in the Plakous private store under XDG state —
 `$XDG_STATE_HOME` when it is set, non-empty and absolute, else
 `$HOME/.local/state` — with per-provider record, catalog, compatibility, and
 lock files. A relative `XDG_STATE_HOME` is
-refused rather than resolved.
+refused rather than resolved. `plakd gateway serve` opens this same root,
+through that resolution and with no canonicalization. A `state_root` in
+`<home>/gateway.toml` that is not those exact bytes refuses to start, and
+`gateway status --dry-run` refuses the same way, before the holder lock and
+before any store directory is created. API keys stay the home
+`secrets/<account>.key` files; `gateway.toml` does not name a key directory.
 
 The same hardened subscription metadata owner persists plakd's Claude client
 installation identity in `plak/subscriptions/client-device-id` under that state
@@ -2681,10 +2686,10 @@ version. There is no top-level prompt positional or terminal resume command.
 | `agent [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>]` | the long-lived JSONL host client |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
 | `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags; reports whether account calls stay in-process or name a gateway |
-| `gateway init [--tcp <ip:port>] [--key-dir <dir>]` | writes `<home>/gateway.toml` and creates `<home>/gateway/`; does not open the credential store |
+| `gateway init [--tcp <ip:port>]` | writes `<home>/gateway.toml` and creates `<home>/gateway/`; does not open the credential store. The file names no key directory |
 | `gateway serve` | foreground service; exclusive holder lock, then listeners |
 | `gateway install [--dry-run]`, `gateway uninstall` | user service definition only; does not start or stop the service |
-| `gateway status [--dry-run]` | versions, instance and flags; `--dry-run` prints paths and does not take the lock |
+| `gateway status [--dry-run]` | versions, instance and flags; `--dry-run` prints paths, does not take the lock, and refuses a `state_root` that is not the host state home byte for byte |
 | `gateway caller add <id> --source <net>... [--admin <account>]... [--key-out <file>]`, `gateway caller list`, `gateway caller rm <id>`, `gateway caller rotate <id>` | local-admin caller registry; the key is shown once |
 | `gateway disable [--account <ref>] [--caller <id>] [--cut]`, `gateway enable [--account <ref>] [--caller <id>]` | kill switch; disable may be remote, enable is local-admin |
 | `gateway drain` | local-admin; stop accepting and wait for in-flight work |
@@ -6166,7 +6171,14 @@ socket directory is mode 0700 and the socket mode 0600. A same-UID peer without
 a caller key is the local administrator. TCP always requires a caller key and
 refuses a bind that is not loopback or tailnet (100.64.0.0/10,
 `fd7a:115c:a1e0::/48`) unless the server file sets `allow_non_tailnet`, and the
-address must be assigned on the machine.
+address must be assigned on the machine. The subscription store is the host
+state home in §2.3, the same resolution and the same bytes, with no
+canonicalization and no trailing-slash or symlink folding. `gateway.toml`
+`state_root`, when set, must equal that path byte for byte; any other value
+refuses `gateway serve` and `gateway status --dry-run` before the lock is
+taken and before the store is opened. When `state_root` is absent, serve uses
+the resolution. API keys are read from the home `secrets/` directory, as the
+host reads them; the server file does not name a key directory.
 
 Caller keys have the form `plakgw1.<id>.<secret>`. The registry stores the
 hash, scopes and source networks. The gateway is the only writer of

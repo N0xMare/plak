@@ -8,7 +8,7 @@ impl GatewayAction {
     fn into_command(self) -> Command {
         use crate::command::GatewayCommand;
         let command = match self {
-            Self::Init { tcp, key_dir } => GatewayCommand::Init { tcp, key_dir },
+            Self::Init { tcp } => GatewayCommand::Init { tcp },
             Self::Serve => GatewayCommand::Serve,
             Self::Install { dry_run } => GatewayCommand::Install { dry_run },
             Self::Uninstall => GatewayCommand::Uninstall,

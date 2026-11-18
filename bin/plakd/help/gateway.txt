@@ -1,7 +1,7 @@
 plakd gateway — credential gateway
 
 USAGE:
-  plakd gateway init [--tcp <ip:port>] [--key-dir <dir>]
+  plakd gateway init [--tcp <ip:port>]
   plakd gateway serve
   plakd gateway install [--dry-run]
   plakd gateway uninstall

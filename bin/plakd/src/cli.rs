@@ -513,8 +513,6 @@ enum GatewayAction {
     Init {
         #[arg(long, value_name = "IP:PORT")]
         tcp: Option<String>,
-        #[arg(long, value_name = "DIR")]
-        key_dir: Option<std::path::PathBuf>,
     },
     /// Foreground service. Takes the exclusive holder lock, then listens.
     Serve,

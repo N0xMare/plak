@@ -15,7 +15,7 @@ pub(crate) fn execute(
     stdout: &mut dyn Write,
 ) -> Result<(), String> {
     match command {
-        GatewayCommand::Init { tcp, key_dir } => write_init(home, tcp.as_deref(), key_dir, stdout),
+        GatewayCommand::Init { tcp } => write_init(home, tcp.as_deref(), stdout),
         GatewayCommand::Serve => super::serve(home),
         GatewayCommand::Install { dry_run } => {
             let executable = std::env::current_exe().map_err(|error| error.to_string())?;
@@ -94,18 +94,12 @@ pub(crate) fn execute(
     }
 }
 
-fn write_init(
-    home: &PlakPaths,
-    tcp: Option<&str>,
-    key_dir: Option<std::path::PathBuf>,
-    stdout: &mut dyn Write,
-) -> Result<(), String> {
-    let config = super::init(home, tcp, key_dir)?;
+fn write_init(home: &PlakPaths, tcp: Option<&str>, stdout: &mut dyn Write) -> Result<(), String> {
+    let config = super::init(home, tcp)?;
     writeln!(stdout, "wrote {}", ServerConfig::path(home).display())
         .map_err(|error| error.to_string())?;
     writeln!(stdout, "state_root {}", config.state_root.display())
-        .map_err(|error| error.to_string())?;
-    writeln!(stdout, "key_dir {}", config.key_dir.display()).map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())
 }
 
 fn live_status(home: &PlakPaths, stdout: &mut dyn Write) -> Result<(), String> {
@@ -132,12 +126,12 @@ fn live_check(home: &PlakPaths, stdout: &mut dyn Write) -> Result<(), String> {
 
 fn dry_status(home: &PlakPaths, stdout: &mut dyn Write) -> Result<(), String> {
     let config = ServerConfig::load(home)?;
+    ServerConfig::require_host_state_root(&config.state_root)?;
     writeln!(
         stdout,
-        "gateway.toml {}\nstate_root {}\nkey_dir {}\nsocket {}",
+        "gateway.toml {}\nstate_root {}\nsocket {}",
         ServerConfig::path(home).display(),
         config.state_root.display(),
-        config.key_dir.display(),
         config.socket.display()
     )
     .map_err(|error| error.to_string())

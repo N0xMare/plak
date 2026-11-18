@@ -45,7 +45,6 @@ pub(crate) use subscription_custody::roots_under;
 
 use std::io::Write;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 
 use plakous::gateway::protocol::GatewayAccount;
 use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse, DisableTarget};
@@ -56,6 +55,7 @@ use holder::lock_path;
 /// Runs `plakd gateway serve` until a signal or an admin drain.
 pub(crate) fn serve(home: &crate::home::paths::PlakPaths) -> Result<(), String> {
     let config = ServerConfig::load(home)?;
+    ServerConfig::require_host_state_root(&config.state_root)?;
     let app = crate::commands::application::PlakousApplication::new(config.state_root, None, None)
         .map_err(|error| error.to_string())?
         .with_account_home(Some(home.clone()));
@@ -74,13 +74,12 @@ fn fresh_instance() -> Result<plakous::gateway::protocol::UuidText, String> {
 pub(crate) fn init(
     home: &crate::home::paths::PlakPaths,
     tcp: Option<&str>,
-    key_dir: Option<PathBuf>,
 ) -> Result<ServerConfig, String> {
     let listen_tcp = match tcp {
         Some(text) => Some(parse_listen(text)?),
         None => None,
     };
-    ServerConfig::init(home, listen_tcp, key_dir)
+    ServerConfig::init(home, listen_tcp)
 }
 
 fn parse_listen(text: &str) -> Result<SocketAddr, String> {
@@ -360,6 +359,8 @@ pub(crate) fn read_key_file(path: &std::path::Path) -> Result<String, String> {
     Ok(key.to_owned())
 }
 
+#[cfg(test)]
+mod adoption_tests;
 #[cfg(test)]
 mod tests;
 

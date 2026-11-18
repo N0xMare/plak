@@ -342,6 +342,12 @@ repository can never grant web access.
 | `gateway.key_file` | string | `(unset)` | absolute path; mode 0600; home-scoped | The caller key file for a configured gateway address. The default is the home secrets gateway.key. A same-UID unix peer that is the local administrator does not need it. |
 | `gateway.allow_non_tailnet` | bool | `false` | true or false; home-scoped | Admit a tcp gateway address outside loopback and the tailnet ranges. Default false. |
 
+`<home>/gateway.toml` is the gateway service file, not a key in this table.
+It has no key directory: the service reads API keys from the home `secrets/`
+directory, the same files the host reads. Its `state_root`, when set, must be
+the host state home byte for byte (chapter 02 §2.3); `plakd gateway serve`
+refuses any other path.
+
 `console.workspace_limits` advertises protocol-8 inspection bounds, independent
 of account/configuration limits: 256 KiB page/output, 16 MiB file ceiling,
 two reads/principal, 10 requests/s (burst 20), 4 MiB/s returned raw bytes

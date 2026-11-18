@@ -3,7 +3,7 @@
 
 use std::fs;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -16,7 +16,6 @@ pub(crate) struct ServerConfig {
     pub socket: PathBuf,
     pub listen_tcp: Option<SocketAddr>,
     pub state_root: PathBuf,
-    pub key_dir: PathBuf,
     pub audit_retention_days: u16,
     pub max_inflight: u32,
     pub max_inflight_per_caller: u32,
@@ -30,7 +29,6 @@ struct File {
     socket: Option<String>,
     listen_tcp: Option<String>,
     state_root: Option<String>,
-    key_dir: Option<String>,
     audit_retention_days: Option<u16>,
     max_inflight: Option<u32>,
     max_inflight_per_caller: Option<u32>,
@@ -63,7 +61,6 @@ impl ServerConfig {
                 socket: None,
                 listen_tcp: None,
                 state_root: None,
-                key_dir: None,
                 audit_retention_days: None,
                 max_inflight: None,
                 max_inflight_per_caller: None,
@@ -92,10 +89,6 @@ impl ServerConfig {
             Some(value) => absolute("state_root", &value)?,
             None => paths::application_state_home()?,
         };
-        let key_dir = match file.key_dir {
-            Some(value) => absolute("key_dir", &value)?,
-            None => home.secrets_dir(),
-        };
         let audit_retention_days = file.audit_retention_days.unwrap_or(30);
         if !(1..=365).contains(&audit_retention_days) {
             return Err("audit_retention_days must be 1..=365".to_owned());
@@ -110,7 +103,6 @@ impl ServerConfig {
             socket,
             listen_tcp,
             state_root,
-            key_dir,
             audit_retention_days,
             max_inflight,
             max_inflight_per_caller,
@@ -119,12 +111,23 @@ impl ServerConfig {
         })
     }
 
+    /// The store the host opens. A configured root must be those exact bytes:
+    /// Codex and SuperGrok hash the slot path, so canonicalization, a symlink
+    /// spelling or a trailing slash is a different credential.
+    pub(crate) fn require_host_state_root(state_root: &Path) -> Result<(), String> {
+        let host = paths::application_state_home()?;
+        if state_root.as_os_str().as_encoded_bytes() != host.as_os_str().as_encoded_bytes() {
+            return Err(format!(
+                "gateway state_root {} is not the host state home {}; the gateway adopts that path exactly, with no canonicalization",
+                state_root.display(),
+                host.display()
+            ));
+        }
+        Ok(())
+    }
+
     /// Writes a fresh file. Refuses to replace one that already exists.
-    pub(crate) fn init(
-        home: &PlakPaths,
-        listen_tcp: Option<SocketAddr>,
-        key_dir: Option<PathBuf>,
-    ) -> Result<Self, String> {
+    pub(crate) fn init(home: &PlakPaths, listen_tcp: Option<SocketAddr>) -> Result<Self, String> {
         let path = Self::path(home);
         if path.exists() {
             return Err(format!(
@@ -136,10 +139,6 @@ impl ServerConfig {
         if let Some(addr) = listen_tcp {
             address::admit_ip(addr.ip(), false).map_err(address_message)?;
             config.listen_tcp = Some(addr);
-        }
-        if let Some(dir) = key_dir {
-            address::absolute_file(&dir).map_err(address_message)?;
-            config.key_dir = dir;
         }
         let body = render(&config);
         write_private(&path, body.as_bytes()).map_err(|error| error.to_string())?;
@@ -156,9 +155,8 @@ fn render(config: &ServerConfig) -> String {
         body.push_str(&format!("listen_tcp = \"{addr}\"\n"));
     }
     body.push_str(&format!(
-        "state_root = \"{}\"\nkey_dir = \"{}\"\naudit_retention_days = {}\nmax_inflight = {}\nmax_inflight_per_caller = {}\nmax_request_body_bytes = {}\nallow_non_tailnet = {}\n",
+        "state_root = \"{}\"\naudit_retention_days = {}\nmax_inflight = {}\nmax_inflight_per_caller = {}\nmax_request_body_bytes = {}\nallow_non_tailnet = {}\n",
         config.state_root.display(),
-        config.key_dir.display(),
         config.audit_retention_days,
         config.max_inflight,
         config.max_inflight_per_caller,

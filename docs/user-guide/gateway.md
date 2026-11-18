@@ -37,7 +37,15 @@ address = "unix:/run/user/1000/plak/gateway.sock"
 ```
 
 The server's own file is `<home>/gateway.toml`, separate from `config.toml`.
-`plakd gateway init` writes it and does not touch the store.
+`plakd gateway init` writes it and does not touch the store. It names no key
+directory: API keys are the home `secrets/` files the host already reads.
+
+`state_root` in that file, when set, must be the host state home byte for
+byte: `$XDG_STATE_HOME` when that variable is set, non-empty and absolute,
+otherwise `$HOME/.local/state`. `plakd gateway serve` and
+`plakd gateway status --dry-run` refuse any other spelling, including a
+trailing slash or a symlink's other name, before taking the lock or opening
+the store. Compare the strings; do not canonicalize.
 
 ## What the gateway relays
 

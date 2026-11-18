@@ -6223,7 +6223,9 @@ travel as `grok_selection_epoch`, `grok_subject` and `grok_authority_id`:
 its route binds the raw epoch and authority id, which the one-way digests
 cannot reproduce. The authority id is the digest the gateway computes over
 its own slot path, slot id and account scope, so a gateway adopting the
-store in place reports the bytes a session already bound.
+store in place reports the bytes a session already bound. Adoption is that
+slot path's exact bytes: the host's unresolved state home, with no
+canonicalization. A configured root that differs is not an adoption.
 A login that is neither Ready nor mid-refresh (quarantined, revoked,
 refresh-required, login-required) is reported from its offline status
 alone, and its fields refuse `NotReady` (`credential_not_ready`). A fields

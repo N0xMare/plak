@@ -33,10 +33,9 @@ fn state_for(paths: &PlakPaths) -> Arc<GatewayState> {
     let state_root = paths.home().join("state");
     std::fs::create_dir_all(&state_root).unwrap();
     let text = format!(
-        "socket = \"{}\"\nstate_root = \"{}\"\nkey_dir = \"{}\"\n",
+        "socket = \"{}\"\nstate_root = \"{}\"\n",
         socket.display(),
         state_root.display(),
-        paths.home().join("secrets").display(),
     );
     let config = ServerConfig::parse(paths, &text).unwrap();
     let instance = UuidText::new(uuid::Uuid::new_v4().to_string()).unwrap();

@@ -86,12 +86,6 @@ impl Command {
                 }
                 Self::Host(host)
             }
-            Self::Gateway(GatewayCommand::Init { tcp, key_dir }) => {
-                Self::Gateway(GatewayCommand::Init {
-                    tcp,
-                    key_dir: key_dir.map(at),
-                })
-            }
             Self::Gateway(GatewayCommand::CallerAdd {
                 id,
                 sources,
@@ -113,7 +107,6 @@ impl Command {
 pub(crate) enum GatewayCommand {
     Init {
         tcp: Option<String>,
-        key_dir: Option<PathBuf>,
     },
     Serve,
     Install {

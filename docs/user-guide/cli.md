@@ -995,10 +995,13 @@ See [configuration](configuration.md).
 Same-user credential gateway: listeners, caller keys, the kill switch, audit
 and admin verbs. `serve` is the only foreground service and takes the
 exclusive holder lock. `init` writes `<home>/gateway.toml` and does not open
-the store. `install` writes a user service definition and does not start it.
+the store. Keys come from the home `secrets/` directory; the server file
+names no key directory. `serve` uses the host's state home and refuses a
+`state_root` that is not that path exactly. `install` writes a user service
+definition and does not start it.
 
 ```
-plakd gateway init [--tcp <ip:port>] [--key-dir <dir>]
+plakd gateway init [--tcp <ip:port>]
 plakd gateway serve
 plakd gateway install [--dry-run]
 plakd gateway uninstall
