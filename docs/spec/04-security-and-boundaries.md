@@ -1336,6 +1336,20 @@ with an explicit build-capability diagnostic.
   on any device of an allowed login, yields the serving user's shell.
 - In dev mode any local uid is the dev login.
 
+### 2.11 Gateway listeners
+
+The credential gateway has no TLS. Its Unix socket admits only a same-UID peer;
+that peer without a caller key is the local administrator. Every other failure
+before authentication is a bare 401 with no detail. A TCP listener refuses
+`0.0.0.0`, `::`, and any address that is not loopback or in the tailnet ranges
+100.64.0.0/10 and `fd7a:115c:a1e0::/48`, unless the server file sets
+`allow_non_tailnet`, and it checks that the address is assigned on the machine.
+TCP always requires a caller key, and the key's source list must contain the
+peer address. Caller secrets are stored only as hashes and compared in constant
+time. Remote admin may log in to a signed-out or new slot, or re-login the same
+account; replacing an account requires the local administrator. The audit log
+records metadata only.
+
 ## 3. Credentials
 
 Claude OAuth account UUIDs come only from the authenticated token grant or the
@@ -1362,6 +1376,11 @@ Host-console key set and clear use this same home-local store and exact
 account reference. An environment override refuses both without changing the
 shadowed file. Native host login changes this user's selected machine-wide
 XDG slot for all homes/builds, never a browser-local or copied token family.
+
+When a gateway service holds the store, credentials stay in that same private
+store. Callers do not receive them. The gateway process's environment, not the
+caller's, wins over the key file. The service is the only writer of its caller
+registry and kill-switch file.
 
 Subscription (OAuth) credentials live in a private per-provider store under XDG
 state:

@@ -33,7 +33,9 @@ boundary, because a shell can still do anything you can.
 Subscription OAuth credentials live under `$XDG_STATE_HOME/plak/subscriptions/`
 and API key files under `<plakd home>/secrets/`, as plaintext files, mode `0600`
 inside `0700` directories. There is no OS keychain integration, so any process
-running as you, including a process tool, can read them.
+running as you, including a process tool, can read them. `plakd gateway serve`
+is that same store in one process: callers do not receive credentials, and the
+service has no TLS. See [credential gateway](gateway.md).
 
 ## Claude subscription OAuth
 

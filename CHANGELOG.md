@@ -97,6 +97,12 @@ for one version bump, without native protocol compatibility.
   claimed the child yet says recovery is pending, and `close_agent` is the
   remedy only when no recovery will run.
 
+- Add `plakd gateway`: a same-user service that holds the credential store,
+  caller keys, a kill switch, an audit log and the admin verbs. A configured
+  `[gateway]` address is home-scoped. In-process account commands and the host
+  take the holder lock shared; the service takes it exclusive. Relay execution
+  stays refused until the shared server core is wired, and a host that names
+  an external gateway refuses to start. No persisted format changes.
 ## 0.0.4
 
 ### plakd

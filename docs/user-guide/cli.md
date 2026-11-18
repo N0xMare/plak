@@ -990,6 +990,31 @@ plakd config untrust       # revokes project trust
 `EDITOR`. Keys use their dotted names, for example `compaction.enabled`.
 See [configuration](configuration.md).
 
+### `plakd gateway`
+
+Same-user credential gateway: listeners, caller keys, the kill switch, audit
+and admin verbs. `serve` is the only foreground service and takes the
+exclusive holder lock. `init` writes `<home>/gateway.toml` and does not open
+the store. `install` writes a user service definition and does not start it.
+
+```
+plakd gateway init [--tcp <ip:port>] [--key-dir <dir>]
+plakd gateway serve
+plakd gateway install [--dry-run]
+plakd gateway uninstall
+plakd gateway status [--dry-run]
+plakd gateway caller add|list|rm|rotate
+plakd gateway disable|enable
+plakd gateway drain
+plakd gateway audit [--since <rfc3339>] [--caller <id>]
+plakd gateway check
+```
+
+A same-UID peer on the Unix socket is the local administrator and presents no
+key. TCP requires a caller key. Relay execution is refused until the shared
+server core is available, and a host with `[gateway] address` set refuses to
+start. See [credential gateway](gateway.md).
+
 ## Maintainer commands
 
 `just build debug|release|maintainer` and `just install maintainer` compile with

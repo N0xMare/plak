@@ -22,6 +22,8 @@ Start here:
 - **[Providers and accounts](providers-and-accounts.md)** — the seven accounts,
   OAuth versus API keys, refresh behaviour, compositions, and which models need
   `--effort`.
+- **[Credential gateway](gateway.md)** — one process holding the credential
+  store, caller keys, the kill switch and the client `[gateway]` settings.
 - **[Configuration](configuration.md)** — every `config.toml` and agent-template
   key, with defaults, and the environment variables plakd reads.
 - **[Troubleshooting](troubleshooting.md)** — the errors you are most likely to

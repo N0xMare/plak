@@ -785,9 +785,24 @@ fall-through to the file, because a broken environment must not quietly resolve
 to a different credential. And while the variable is set, `key set` and
 `key clear` refuse and say so, because writing the file would have no effect.
 
+When `[gateway] address` is set, or a local `plakd gateway serve` holds the
+credential holder lock, account commands go to that gateway instead of opening
+the store. The gateway process is then the one whose environment resolves API
+keys. A same-UID Unix peer is the local administrator and sends no caller key.
+The holder lock is `$XDG_STATE_HOME/plak/subscriptions/.custody-holder.lock`:
+the service takes it exclusive and records its socket; in-process holders take
+it shared. The two modes do not overlap. An in-process account command, and
+`plakd host` with no `[gateway] address`, take that shared lock for as long as
+they hold the store. A host that finds the service already holding it refuses
+to start and names `[gateway] address`. Until relay execution is available, a
+host whose `[gateway] address` is set also refuses to start; if provider
+API-key variables are set in that host's environment, the refusal names them.
+
 This precedence belongs to the process resolving the key, not a connected
-client. Explicit CLI `key set` and `key clear` remain in-process and inspect
-their own environment. Host sessions use the serving host's environment;
+client. With no gateway, explicit CLI `key set` and `key clear` stay in this
+process and inspect its environment. With a gateway, the command reads the
+secret here and the gateway's environment decides the override. Host sessions
+use the serving host's environment;
 unit-managed hosts use their unit environment. An explicitly auto-started host
 does not inherit caller API-key variables (see §4.6). Missing-key diagnostics
 name the effective resolver and the relevant variable, never its value.
@@ -2656,7 +2671,16 @@ version. There is no top-level prompt positional or terminal resume command.
 | `run [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] [--leave-jobs-running] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
 | `agent [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>]` | the long-lived JSONL host client |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
-| `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags |
+| `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags; reports whether account calls stay in-process or name a gateway |
+| `gateway init [--tcp <ip:port>] [--key-dir <dir>]` | writes `<home>/gateway.toml` and creates `<home>/gateway/`; does not open the credential store |
+| `gateway serve` | foreground service; exclusive holder lock, then listeners |
+| `gateway install [--dry-run]`, `gateway uninstall` | user service definition only; does not start or stop the service |
+| `gateway status [--dry-run]` | versions, instance and flags; `--dry-run` prints paths and does not take the lock |
+| `gateway caller add <id> --source <net>... [--admin <account>]... [--key-out <file>]`, `gateway caller list`, `gateway caller rm <id>`, `gateway caller rotate <id>` | local-admin caller registry; the key is shown once |
+| `gateway disable [--account <ref>] [--caller <id>] [--cut]`, `gateway enable [--account <ref>] [--caller <id>]` | kill switch; disable may be remote, enable is local-admin |
+| `gateway drain` | local-admin; stop accepting and wait for in-flight work |
+| `gateway audit [--since <rfc3339>] [--caller <id>]` | metadata lines only |
+| `gateway check` | version negotiation and account list |
 | `usage [--account <id>] [--session <uuid>]` | the two options conflict |
 | `session list`, `session show <id>[.cN]`, `session log <id>[.cN] [--kind <k>] [--tail <n>] [--json]`, `session recover <id>`, `session export <id> [--out <path>]`, `session import <path>`, `session delete <id> [--yes] [--abandon-children]`, `session gc <id> \| --all` | log `--tail` defaults to 100; it must be at least 1; `recover` opens the session, abandons an unfinished turn once, and releases it; `export` and `import` implement the cross-build session reference (§2.5.1); `delete` removes a session and its retained history (§2.5.2); `gc` reclaims superseded history (§2.5.3) |
 | `state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` | Confirm and delete unused non-current state and older-schema telemetry (including its SQLite sidecars); retain current/newer telemetry and session references unless explicitly selected; refuse locks or unsafe paths (§2.5). |
@@ -6123,6 +6147,37 @@ Restart=on-failure
 UMask=0077
 # WorkingDirectory is unset: the systemd user default is HOME.
 ```
+
+### 4.7 `plakd gateway`
+
+`plakd gateway serve` is one process. It takes the exclusive credential holder
+lock, listens on its Unix socket, and may listen on one TCP address. The Unix
+socket directory is mode 0700 and the socket mode 0600. A same-UID peer without
+a caller key is the local administrator. TCP always requires a caller key and
+refuses a bind that is not loopback or tailnet (100.64.0.0/10,
+`fd7a:115c:a1e0::/48`) unless the server file sets `allow_non_tailnet`, and the
+address must be assigned on the machine.
+
+Caller keys have the form `plakgw1.<id>.<secret>`. The registry stores the
+hash, scopes and source networks. The gateway is the only writer of
+`gateway/callers.json` and `gateway/flags.json`. Audit lines are appended to
+`gateway/audit/YYYY-MM-DD.jsonl` and carry metadata only: no headers, bodies,
+query strings, keys, tokens or pastes.
+
+`disable` engages the kill switch and may be called remotely with admin scope.
+`enable`, caller management and `drain` are local-admin only. `drain` waits up
+to 30 seconds for in-flight relays and refresh claims. Admin account verbs map
+to today's account operations on a blocking bridge. An authenticated relay is
+refused `internal` until the shared relay server core is wired; nothing is
+dialed.
+
+`gateway install` writes a Linux user unit or macOS LaunchAgent and does not
+start it. The unit runs the executable that wrote it.
+
+A host with `[gateway] address` set does not open the credential store. Until
+relay execution is wired, that host refuses to start rather than serving model
+traffic from a local store. Unset, the host keeps today's in-process credential
+access.
 
 ## 5. External client boundary
 
