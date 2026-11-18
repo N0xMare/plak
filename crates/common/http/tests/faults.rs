@@ -457,7 +457,7 @@ async fn relay_lost_after_head_breaks_the_body() -> TestResult {
     let origin = Origin::parse("https://fault.invalid")?;
     let (status, bytes, failure) = drain(&client, request(&origin, "/v1/messages")?).await?;
     assert_eq!(status, StatusCode::OK);
-    assert!(!bytes.is_empty());
+    assert_ne!(bytes.len(), 0);
     let failure = failure.ok_or("after-head loss ended cleanly")?;
     assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
     assert_eq!(failure.phase(), Phase::ResponseBody);
