@@ -706,27 +706,19 @@ impl MessagesHttpHooks<plakous_messages::MessagesWire> for AnthropicHttpHooks {
             .authorization(attempt, self.prepared.target_binding())
             .map_err(|error| protocol_source(&error))?;
         let oauth = self.route.is_claude_oauth();
-        let credential = authorization
-            .expose_for(
-                attempt,
-                self.prepared.target_binding(),
-                &self.route,
-                |secret| {
-                    if oauth {
-                        sensitive_header_value(format!("Bearer {secret}").into_bytes()).map_err(
-                            |_| {
-                                invalid_configuration(
-                                    "Claude OAuth bearer token could not be represented as an HTTP header",
-                                )
-                            },
-                        )
-                    } else {
-                        anthropic_api_key_header(secret)
-                    }
-                },
-            )
-            .map_err(|error| protocol_source(&error))?
+        let field = authorization
+            .credential_for(attempt, self.prepared.target_binding(), &self.route)
             .map_err(|error| protocol_source(&error))?;
+        let credential = if oauth {
+            sensitive_header_value(field.into_header_bytes()).map_err(|_| {
+                invalid_configuration(
+                    "Claude OAuth bearer token could not be represented as an HTTP header",
+                )
+            })
+        } else {
+            anthropic_api_key_header(field)
+        }
+        .map_err(|error| protocol_source(&error))?;
         let beta = if oauth {
             Some(self.prepared.dialect().beta_header().ok_or_else(|| {
                 protocol_source(&invalid_configuration(
@@ -951,8 +943,10 @@ fn require_loopback_origin(origin: &Origin) -> Result<(), AnthropicError> {
     Ok(())
 }
 
-pub(crate) fn anthropic_api_key_header(secret: &str) -> Result<HeaderValue, AnthropicError> {
-    sensitive_header_value(secret.as_bytes().to_vec()).map_err(|_| {
+pub(crate) fn anthropic_api_key_header(
+    field: plakous_auth::custody::CredentialField,
+) -> Result<HeaderValue, AnthropicError> {
+    sensitive_header_value(field.into_header_bytes()).map_err(|_| {
         invalid_configuration("Anthropic API key could not be represented as an HTTP header")
     })
 }

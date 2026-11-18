@@ -222,7 +222,8 @@ impl MessagesRetrievalTransport for AnthropicRetrieval {
                         .await
                         .map_err(|error| unauthorized(&error))?;
                     let credential = plakous_http::sensitive_header_value(
-                        format!("Bearer {token}").into_bytes(),
+                        plakous_auth::custody::CredentialField::bearer(token.as_bytes())
+                            .into_header_bytes(),
                     )
                     .map_err(|_| {
                         MessagesRetrievalError::new(

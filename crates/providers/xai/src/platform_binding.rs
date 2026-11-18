@@ -120,7 +120,8 @@ pub(crate) fn platform_bearer(
     if text.len() > 16_384 || !text.bytes().all(|byte| byte.is_ascii_graphic()) {
         return Err(XaiPlatformBuildError::Authentication);
     }
-    plakous_http::sensitive_header_value(format!("Bearer {text}").into_bytes())
+    let field = plakous_auth::custody::KeyHeaderForm::Bearer.field(key);
+    plakous_http::sensitive_header_value(field.into_header_bytes())
         .map_err(|_| XaiPlatformBuildError::Authentication)
 }
 

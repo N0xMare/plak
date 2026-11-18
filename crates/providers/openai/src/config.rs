@@ -592,19 +592,24 @@ pub(crate) fn platform_generation_grant(
     Ok(grant)
 }
 
-pub(crate) fn platform_key_for_generation(
+/// The `Bearer` authorization field for an admitted generation, from the key's custodian.
+pub(crate) fn platform_credential_for_generation(
     source: &OpenAiKeySource,
     reference: &CredentialReference,
     origin: &EndpointOrigin,
     expected: &OpenAiKeyGeneration,
-) -> Result<ApiKey, AuthError> {
+) -> Result<plakous_auth::custody::CredentialField, AuthError> {
     if expected.provider() != CredentialProviderTag::OpenAiPlatform
         || expected.authority() != source.authority()
     {
         return Err(AuthError::BindingMismatch);
     }
     source
-        .api_key(&OpenAiApiKeyRequest::new(reference, origin), expected)
+        .credential_field(
+            &OpenAiApiKeyRequest::new(reference, origin),
+            expected,
+            plakous_auth::custody::KeyHeaderForm::Bearer,
+        )
         .map_err(Into::into)
 }
 

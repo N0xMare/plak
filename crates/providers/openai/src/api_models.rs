@@ -10,7 +10,6 @@
 //! lists. `ultra` is Codex-client-only and is not an API effort. `none` is
 //! an explicit effort; an omitted effort stays refused.
 
-use plakous_auth::api_key::ExposeApiKey as _;
 use std::time::Instant;
 
 use plakous_http::{Client, HeaderMap, HeaderName, HeaderValue, Origin, sensitive_header_value};
@@ -175,8 +174,8 @@ pub async fn list_openai_api_models(
     let client = Client::new_http1(plakous_http::Limits::default())
         .map_err(|_| transport_error())?
         .with_observer(observer);
-    let key = platform_key(reference, source)?;
-    let body = get_models(&client, origin, key.expose_secret(), deadline_instant()?).await?;
+    let credential = platform_credential(reference, source)?;
+    let body = get_models(&client, origin, credential, deadline_instant()?).await?;
     parse_openai_models_page(&body)
 }
 
@@ -188,33 +187,27 @@ async fn list_via(
     client: &Client,
     dial_origin: Origin,
 ) -> Result<Vec<OpenAiListedModel>, OpenAiError> {
-    let key = platform_key(reference, source)?;
-    let body = get_models(
-        client,
-        dial_origin,
-        key.expose_secret(),
-        deadline_instant()?,
-    )
-    .await?;
+    let credential = platform_credential(reference, source)?;
+    let body = get_models(client, dial_origin, credential, deadline_instant()?).await?;
     parse_openai_models_page(&body)
 }
 
-fn platform_key(
+fn platform_credential(
     reference: &CredentialReference,
     source: &OpenAiKeySource,
-) -> Result<crate::ApiKey, OpenAiError> {
+) -> Result<plakous_auth::custody::CredentialField, OpenAiError> {
     let endpoint = EndpointOrigin::parse(OPENAI_PLATFORM_ORIGIN)
         .map_err(|_| list_error("origin is invalid"))?;
     let grant = crate::config::platform_generation_grant(source, reference, &endpoint)
         .map_err(|_| list_error("credential is unavailable"))?;
-    crate::config::platform_key_for_generation(source, reference, &endpoint, &grant)
+    crate::config::platform_credential_for_generation(source, reference, &endpoint, &grant)
         .map_err(|_| list_error("credential is unavailable"))
 }
 
 async fn get_models(
     client: &Client,
     origin: Origin,
-    key: &str,
+    credential: plakous_auth::custody::CredentialField,
     deadline: Instant,
 ) -> Result<Vec<u8>, OpenAiError> {
     let mut headers = HeaderMap::new();
@@ -222,11 +215,9 @@ async fn get_models(
         HeaderName::from_static("accept"),
         HeaderValue::from_static("application/json"),
     );
-    let mut bearer = b"Bearer ".to_vec();
-    bearer.extend_from_slice(key.as_bytes());
     headers.insert(
         HeaderName::from_static("authorization"),
-        sensitive_header_value(bearer)
+        sensitive_header_value(credential.into_header_bytes())
             .map_err(|_| list_error("credential is not a header value"))?,
     );
     plakous_exchange::catalog::get_page(

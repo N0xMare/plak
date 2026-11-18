@@ -551,10 +551,9 @@ impl MessagesHttpHooks<plakous_messages::MessagesWire> for OpenRouterMessagesHoo
             .map_err(|_| {
                 MessagesAttemptProtocolError::new("OpenRouter Messages authentication failed")
             })?;
-        let authorization =
-            sensitive_header_value(crate::route::bearer_bytes(&key)).map_err(|_| {
-                MessagesAttemptProtocolError::new("OpenRouter Messages authorization failed")
-            })?;
+        let authorization = sensitive_header_value(key.into_header_bytes()).map_err(|_| {
+            MessagesAttemptProtocolError::new("OpenRouter Messages authorization failed")
+        })?;
         let mut headers = HeaderMap::new();
         headers.insert(
             HeaderName::from_static("accept"),

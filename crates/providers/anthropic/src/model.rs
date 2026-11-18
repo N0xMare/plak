@@ -384,7 +384,8 @@ impl AnthropicLanguageModel {
             .map_err(|_| configuration_error("Anthropic API admission is no longer current"))?;
         self.resolved
             .route()
-            .with_current_key(self.source.as_ref(), crate::http::anthropic_api_key_header)?
+            .current_key_credential(self.source.as_ref())
+            .and_then(crate::http::anthropic_api_key_header)
     }
 
     pub(crate) const fn client(&self) -> &Client {

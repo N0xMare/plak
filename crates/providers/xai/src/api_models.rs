@@ -23,7 +23,7 @@
 
 use std::time::Instant;
 
-use plakous_http::{Client, HeaderMap, HeaderName, HeaderValue, Origin, sensitive_header_value};
+use plakous_http::{Client, HeaderMap, HeaderName, HeaderValue, Origin};
 use plakous_model::ReasoningEffort;
 use serde::Deserialize;
 use serde_json::Value;
@@ -355,8 +355,8 @@ pub async fn list_xai_api_models(
     let client = Client::new_http1(plakous_http::Limits::default())
         .map_err(|_| transport_error())?
         .with_observer(observer);
-    let key = platform_key(source)?;
-    let body = get_models(&client, origin, &key, deadline_instant()?).await?;
+    let authorization = platform_authorization(source)?;
+    let body = get_models(&client, origin, authorization, deadline_instant()?).await?;
     parse_xai_models_page(&body)
 }
 
@@ -367,8 +367,8 @@ async fn list_via(
     client: &Client,
     dial_origin: Origin,
 ) -> Result<Vec<XaiListedModel>, XaiApiModelError> {
-    let key = platform_key(source)?;
-    let body = get_models(client, dial_origin, &key, deadline_instant()?).await?;
+    let authorization = platform_authorization(source)?;
+    let body = get_models(client, dial_origin, authorization, deadline_instant()?).await?;
     parse_xai_models_page(&body)
 }
 
@@ -382,27 +382,20 @@ pub fn xai_api_key_fingerprint(source: &XaiPlatformKeySource) -> Result<String, 
     Ok(grant.listing_fingerprint())
 }
 
-fn platform_key(source: &XaiPlatformKeySource) -> Result<String, XaiApiModelError> {
+fn platform_authorization(source: &XaiPlatformKeySource) -> Result<HeaderValue, XaiApiModelError> {
     let grant = crate::platform_binding::xai_api_key_generation(source)
         .map_err(|_| list_error("credential is unavailable"))?;
     let key = source
         .api_key(&crate::platform_binding::API_KEY_REQUEST, &grant)
         .map_err(|_| list_error("credential is unavailable"))?;
-    let header = crate::platform_binding::platform_bearer(&key)
-        .map_err(|_| list_error("credential is not a header value"))?;
-    let value = header
-        .to_str()
-        .map_err(|_| list_error("credential is not a header value"))?;
-    let token = value
-        .strip_prefix("Bearer ")
-        .ok_or_else(|| list_error("credential is not a header value"))?;
-    Ok(token.to_owned())
+    crate::platform_binding::platform_bearer(&key)
+        .map_err(|_| list_error("credential is not a header value"))
 }
 
 pub(crate) async fn get_models(
     client: &Client,
     origin: Origin,
-    key: &str,
+    authorization: HeaderValue,
     deadline: Instant,
 ) -> Result<Vec<u8>, XaiApiModelError> {
     let mut headers = HeaderMap::new();
@@ -410,13 +403,7 @@ pub(crate) async fn get_models(
         HeaderName::from_static("accept"),
         HeaderValue::from_static("application/json"),
     );
-    let mut bearer = b"Bearer ".to_vec();
-    bearer.extend_from_slice(key.as_bytes());
-    headers.insert(
-        HeaderName::from_static("authorization"),
-        sensitive_header_value(bearer)
-            .map_err(|_| list_error("credential is not a header value"))?,
-    );
+    headers.insert(HeaderName::from_static("authorization"), authorization);
     plakous_exchange::catalog::get_page(
         client,
         origin,

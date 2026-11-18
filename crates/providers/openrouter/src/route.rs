@@ -4,7 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 
 pub use plakous_auth::api_key::ApiKey;
-use plakous_auth::api_key::ExposeApiKey as _;
+use plakous_auth::custody::{CredentialField, KeyHeaderForm};
 use plakous_model::{Digest, DigestDomain, DigestError, IdentityError, RouteId};
 use thiserror::Error;
 
@@ -383,25 +383,20 @@ pub(crate) fn credential_generation(
     Ok(grant)
 }
 
-fn resolve_key(
+/// The `Bearer` authorization field for an admitted request, from the key's custodian.
+fn resolve_credential(
     source: &OpenRouterKeySource,
     request: &OpenRouterCredentialRequest<'_>,
     expected: &OpenRouterKeyGeneration,
-) -> Result<ApiKey, OpenRouterAuthError> {
+) -> Result<CredentialField, OpenRouterAuthError> {
     if expected.provider() != plakous_auth::api_key::CredentialProviderTag::OpenRouterPlatform
         || expected.authority() != source.authority()
     {
         return Err(OpenRouterAuthError::BindingMismatch);
     }
-    source.api_key(request, expected).map_err(Into::into)
-}
-
-pub(crate) fn bearer_bytes(key: &ApiKey) -> Vec<u8> {
-    let text = key.expose_secret();
-    let mut value = Vec::with_capacity(7 + text.len());
-    value.extend_from_slice(b"Bearer ");
-    value.extend_from_slice(text.as_bytes());
-    value
+    source
+        .credential_field(request, expected, KeyHeaderForm::Bearer)
+        .map_err(Into::into)
 }
 
 /// Closed purpose of a privately constructed OpenRouter credential request.
@@ -800,7 +795,7 @@ impl OpenRouterChatRoute {
         &self,
         operation: &Digest,
         expected: &OpenRouterKeyGeneration,
-    ) -> Result<ApiKey, OpenRouterAuthError> {
+    ) -> Result<CredentialField, OpenRouterAuthError> {
         if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
@@ -809,14 +804,14 @@ impl OpenRouterChatRoute {
         if &current != expected {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        resolve_key(self.key_source.as_ref(), &request, expected)
+        resolve_credential(self.key_source.as_ref(), &request, expected)
     }
 
     pub(crate) fn retrieval_credential(
         &self,
         operation: &Digest,
         expected: &OpenRouterKeyGeneration,
-    ) -> Result<ApiKey, OpenRouterAuthError> {
+    ) -> Result<CredentialField, OpenRouterAuthError> {
         if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
@@ -825,14 +820,14 @@ impl OpenRouterChatRoute {
         if &current != expected {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        resolve_key(self.key_source.as_ref(), &request, expected)
+        resolve_credential(self.key_source.as_ref(), &request, expected)
     }
 
     pub(crate) fn chat_credential(
         &self,
         physical: &ChatPhysicalRequestBinding,
         expected: &OpenRouterKeyGeneration,
-    ) -> Result<ApiKey, OpenRouterAuthError> {
+    ) -> Result<CredentialField, OpenRouterAuthError> {
         if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
@@ -841,14 +836,14 @@ impl OpenRouterChatRoute {
         if &current != expected {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        resolve_key(self.key_source.as_ref(), &request, expected)
+        resolve_credential(self.key_source.as_ref(), &request, expected)
     }
 
     pub(crate) fn messages_credential(
         &self,
         physical: &MessagesPhysicalRequestBinding,
         expected: &OpenRouterKeyGeneration,
-    ) -> Result<ApiKey, OpenRouterAuthError> {
+    ) -> Result<CredentialField, OpenRouterAuthError> {
         if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
@@ -857,7 +852,7 @@ impl OpenRouterChatRoute {
         if &current != expected {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        resolve_key(self.key_source.as_ref(), &request, expected)
+        resolve_credential(self.key_source.as_ref(), &request, expected)
     }
 
     pub(crate) fn responses_credential_generation_grant(
@@ -878,7 +873,7 @@ impl OpenRouterChatRoute {
         &self,
         physical: &ResponsesPhysicalRequestBinding,
         expected: &OpenRouterKeyGeneration,
-    ) -> Result<ApiKey, OpenRouterAuthError> {
+    ) -> Result<CredentialField, OpenRouterAuthError> {
         if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
@@ -887,7 +882,7 @@ impl OpenRouterChatRoute {
         if &current != expected {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        resolve_key(self.key_source.as_ref(), &request, expected)
+        resolve_credential(self.key_source.as_ref(), &request, expected)
     }
 
     pub(crate) fn revalidate_responses_credential_generation(

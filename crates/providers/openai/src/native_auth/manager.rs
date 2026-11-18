@@ -14,6 +14,7 @@ use super::{
     parse_stored, require_json_media_type, sensitive_header_value, usage_credential_refusal,
     validate_profile, validate_profile_policy_at,
 };
+use plakous_auth::custody::CredentialField;
 
 /// Plak-owned credential manager for one explicit selected-account slot.
 pub struct CodexSubscriptionCredentialManager {
@@ -312,13 +313,12 @@ impl CodexSubscriptionCredentialManager {
             HeaderName::from_static("accept"),
             HeaderValue::from_static("application/json"),
         );
-        let mut bearer = Vec::with_capacity(7 + credential.access_token.len());
-        bearer.extend_from_slice(b"Bearer ");
-        bearer.extend_from_slice(credential.access_token.as_bytes());
-        let Ok(authorization) = sensitive_header_value(bearer) else {
+        let bearer = CredentialField::bearer(credential.access_token.as_bytes());
+        let Ok(authorization) = sensitive_header_value(bearer.into_header_bytes()) else {
             return unavailable(SubscriptionUsageUnavailable::InvalidResponse);
         };
-        let Ok(account) = sensitive_header_value(credential.account_id.as_bytes().to_vec()) else {
+        let account = CredentialField::exact(credential.account_id.as_bytes().to_vec());
+        let Ok(account) = sensitive_header_value(account.into_header_bytes()) else {
             return unavailable(SubscriptionUsageUnavailable::AccountChanged);
         };
         headers.insert(HeaderName::from_static("authorization"), authorization);

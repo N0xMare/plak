@@ -386,12 +386,13 @@ pub mod runner {
     pub use plakous_runner_protocol as protocol;
 }
 
-/// Unsupported credential gateway seam for official hosting (spec 01 §7.5):
-/// the wire protocol now; the remote custodian and the relay server core
-/// join it as they land.
+/// Unsupported credential gateway seam for official hosting (spec 01 §7.1,
+/// §7.5): the custody seam and the wire protocol; the remote custodian and
+/// the relay server core join it as they land.
 #[cfg(feature = "gateway")]
 #[doc(hidden)]
 pub mod gateway {
+    pub use plakous_auth::custody;
     pub use plakous_gateway_protocol as protocol;
 }
 

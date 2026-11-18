@@ -1,7 +1,7 @@
 use super::{
     ApiKey, ApiKeyGenerationGrant, ApiKeyRequest, ApiKeySource, AuthError, CredentialAuthorityId,
     CredentialReference, EndpointOrigin, OpenAiApiKeyRequest, OpenAiKeyGeneration,
-    StaticOpenAiKeySource, platform_generation_grant, platform_key_for_generation,
+    StaticOpenAiKeySource, platform_credential_for_generation, platform_generation_grant,
     static_openai_api_key_source,
 };
 use plakous_auth::api_key::ApiKeyError;
@@ -53,7 +53,7 @@ fn another_sources_authority_is_refused_before_openai_bearer_resolution()
     ));
     let grant = source.generation_grant(&OpenAiApiKeyRequest::new(&reference, &origin))?;
     assert!(matches!(
-        platform_key_for_generation(&source, &reference, &origin, &grant),
+        platform_credential_for_generation(&source, &reference, &origin, &grant),
         Err(AuthError::BindingMismatch)
     ));
     assert_eq!(source.bearer_reads.load(Ordering::SeqCst), 0);

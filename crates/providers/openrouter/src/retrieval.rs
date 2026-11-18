@@ -155,7 +155,7 @@ impl OpenRouterRetrieval {
             .route
             .retrieval_credential(&operation, &self.generation)
             .map_err(|_| unauthorized("side request authority is not current: credential"))?;
-        let authorization = sensitive_header_value(crate::route::bearer_bytes(&key))
+        let authorization = sensitive_header_value(key.into_header_bytes())
             .map_err(|_| unauthorized("OpenRouter authorization could not be represented"))?;
         let mut headers = HeaderMap::new();
         headers.insert(

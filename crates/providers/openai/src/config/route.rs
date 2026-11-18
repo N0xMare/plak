@@ -2,10 +2,9 @@ use super::{
     AccessMode, AuthError, ConfigError, Digest, DigestDomain, EndpointOrigin,
     OPENAI_PLATFORM_RESPONSES_PATH, OpenAiKeyGeneration, OpenAiRoute, OpenAiRouteConformance,
     PlatformProjectPolicy, ResponsesDialect, Routability, RouteAuth, RouteId, StorageMode, fmt,
-    platform_generation_grant, platform_key_for_generation,
+    platform_credential_for_generation, platform_generation_grant,
 };
 
-use plakous_auth::api_key::ExposeApiKey as _;
 impl OpenAiRoute {
     pub(crate) fn bind_platform_generation(
         mut self,
@@ -144,10 +143,10 @@ impl OpenAiRoute {
         if *local_fixture {
             return Err(AuthError::BindingMismatch);
         }
-        let key = platform_key_for_generation(source.as_ref(), reference, &self.origin, expected)?;
-        let mut bytes = b"Bearer ".to_vec();
-        bytes.extend_from_slice(key.expose_secret().as_bytes());
-        plakous_http::sensitive_header_value(bytes).map_err(|_| AuthError::SourceFailure)
+        let credential =
+            platform_credential_for_generation(source.as_ref(), reference, &self.origin, expected)?;
+        plakous_http::sensitive_header_value(credential.into_header_bytes())
+            .map_err(|_| AuthError::SourceFailure)
     }
 
     #[cfg(feature = "native-auth")]

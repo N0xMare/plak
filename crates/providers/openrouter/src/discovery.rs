@@ -72,7 +72,7 @@ impl OpenRouterChatRoute {
             ],
         )?;
         let generation = self.current_credential_generation_grant()?;
-        let key = self.catalog_credential(&operation, &generation)?;
+        let authorization = authorization_value(self.catalog_credential(&operation, &generation)?)?;
         let deadline = Instant::now()
             .checked_add(config.operation_timeout)
             .ok_or(OpenRouterChatDiscoveryError::InvalidPolicy)?;
@@ -81,7 +81,7 @@ impl OpenRouterChatRoute {
             client,
             Origin::parse(self.identity().origin().as_str())?,
             MODELS_PATH,
-            crate::route::bearer_bytes(&key),
+            authorization,
             deadline,
             config.maximum_body_bytes,
         )
@@ -119,7 +119,7 @@ impl OpenRouterChatRoute {
             ],
         )?;
         let generation = self.current_credential_generation_grant()?;
-        let key = self.catalog_credential(&operation, &generation)?;
+        let authorization = authorization_value(self.catalog_credential(&operation, &generation)?)?;
         let deadline = Instant::now()
             .checked_add(config.operation_timeout)
             .ok_or(OpenRouterChatDiscoveryError::InvalidPolicy)?;
@@ -129,7 +129,7 @@ impl OpenRouterChatRoute {
             client,
             origin.clone(),
             MODELS_PATH,
-            crate::route::bearer_bytes(&key),
+            authorization.clone(),
             deadline,
             config.maximum_body_bytes,
         )
@@ -141,7 +141,7 @@ impl OpenRouterChatRoute {
             client,
             origin,
             &endpoint_path,
-            crate::route::bearer_bytes(&key),
+            authorization,
             deadline,
             config.maximum_body_bytes,
         )
@@ -234,11 +234,19 @@ fn encode_path_component(value: &str) -> String {
     encoded
 }
 
+fn authorization_value(
+    field: plakous_auth::custody::CredentialField,
+) -> Result<HeaderValue, OpenRouterChatDiscoveryError> {
+    sensitive_header_value(field.into_header_bytes()).map_err(|_| {
+        OpenRouterChatDiscoveryError::Authentication(crate::OpenRouterAuthError::CredentialSource)
+    })
+}
+
 async fn get_json(
     client: &Client,
     origin: Origin,
     path: &str,
-    bearer: Vec<u8>,
+    authorization: HeaderValue,
     deadline: plakous_exchange::lookup::LookupBudget,
     maximum_body_bytes: usize,
 ) -> Result<Vec<u8>, OpenRouterChatDiscoveryError> {
@@ -247,14 +255,7 @@ async fn get_json(
         HeaderName::from_static("accept"),
         HeaderValue::from_static("application/json"),
     );
-    headers.insert(
-        HeaderName::from_static("authorization"),
-        sensitive_header_value(bearer).map_err(|_| {
-            OpenRouterChatDiscoveryError::Authentication(
-                crate::OpenRouterAuthError::CredentialSource,
-            )
-        })?,
-    );
+    headers.insert(HeaderName::from_static("authorization"), authorization);
     let request = Request::new(
         origin,
         Method::GET,

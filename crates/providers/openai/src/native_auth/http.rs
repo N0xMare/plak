@@ -8,6 +8,7 @@ use super::{
     USER_AGENT, Url, Zeroizing, decode_json_bounded, map_oauth_workflow_error, network_failure,
     pull_claimed_body, sensitive_header_value, urlencoded_form_bytes, validate_oauth_value,
 };
+use plakous_auth::custody::CredentialField;
 use plakous_auth::oauth_orchestrator::{AuthBodyError, is_json_media_type, pull_auth_body};
 
 pub(super) struct HttpReply {
@@ -325,10 +326,9 @@ pub(super) fn form_headers() -> HeaderMap {
 pub(super) fn bearer_headers(token: &str, json: bool) -> Result<HeaderMap, NativeCodexAuthError> {
     validate_oauth_value(token, MAX_TOKEN_BYTES)?;
     let mut headers = base_headers();
-    let mut bearer = Vec::with_capacity(7 + token.len());
-    bearer.extend_from_slice(b"Bearer ");
-    bearer.extend_from_slice(token.as_bytes());
-    let value = sensitive_header_value(bearer).map_err(|_| NativeCodexAuthError::Validation)?;
+    let bearer = CredentialField::bearer(token.as_bytes());
+    let value = sensitive_header_value(bearer.into_header_bytes())
+        .map_err(|_| NativeCodexAuthError::Validation)?;
     headers.insert(HeaderName::from_static("authorization"), value);
     if json {
         headers.insert(

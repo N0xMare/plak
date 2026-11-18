@@ -24,6 +24,7 @@ use super::{
 };
 #[cfg(test)]
 use super::{COMPATIBILITY_REVIEWED_UNIX, refuse_pinned_test_loopback};
+use plakous_auth::custody::CredentialField;
 
 /// App-owned manager for one explicit xAI selected-account slot.
 ///
@@ -259,7 +260,8 @@ impl XaiNativeAuthManager {
         let Ok(authorization) = bearer_header(&stored.access_token) else {
             return unavailable(SubscriptionUsageUnavailable::InvalidResponse);
         };
-        let Ok(subject) = sensitive_header_value(stored.subject.as_bytes().to_vec()) else {
+        let subject = CredentialField::exact(stored.subject.as_bytes().to_vec());
+        let Ok(subject) = sensitive_header_value(subject.into_header_bytes()) else {
             return unavailable(SubscriptionUsageUnavailable::AccountChanged);
         };
         headers.insert(HEADER_AUTHORIZATION, authorization);

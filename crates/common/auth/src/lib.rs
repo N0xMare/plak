@@ -22,6 +22,8 @@ pub mod api_key;
 mod binding;
 mod compatibility;
 mod credential;
+/// Credential custody: custodians, facts and credential header fields.
+pub mod custody;
 #[cfg(feature = "jwt")]
 mod jwt_crypto;
 #[doc(hidden)]

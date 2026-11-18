@@ -291,6 +291,12 @@ async fn list_from(
 ) -> Result<Vec<AnthropicListedModel>, AnthropicError> {
     let deadline = plakous_exchange::lookup::LookupBudget::from_deadline(deadline);
     let key = crate::route::current_api_key(source)?;
+    let key_header = sensitive_header_value(
+        plakous_auth::custody::KeyHeaderForm::Raw
+            .field(&key)
+            .into_header_bytes(),
+    )
+    .map_err(|_| list_error("credential is not a header value"))?;
     let mut models: Vec<AnthropicListedModel> = Vec::new();
     let mut after: Option<String> = None;
     for _ in 0..MAX_PAGES {
@@ -298,7 +304,7 @@ async fn list_from(
             None => format!("{ANTHROPIC_MODELS_PATH}?limit={PAGE_LIMIT}"),
             Some(cursor) => format!("{ANTHROPIC_MODELS_PATH}?limit={PAGE_LIMIT}&after_id={cursor}"),
         };
-        let body = get_page(client, origin.clone(), &path, key.expose_secret(), deadline).await?;
+        let body = get_page(client, origin.clone(), &path, key_header.clone(), deadline).await?;
         let page = parse_anthropic_models_page(&body)?;
         let last_row = page.models.last().map(|row| row.id.clone());
         for model in page.models {
@@ -325,7 +331,7 @@ async fn get_page(
     client: &Client,
     origin: Origin,
     path: &str,
-    key: &str,
+    key_header: HeaderValue,
     deadline: plakous_exchange::lookup::LookupBudget,
 ) -> Result<Vec<u8>, AnthropicError> {
     let mut headers = HeaderMap::new();
@@ -337,11 +343,7 @@ async fn get_page(
         HeaderName::from_static("anthropic-version"),
         HeaderValue::from_static(ANTHROPIC_API_VERSION),
     );
-    headers.insert(
-        HeaderName::from_static("x-api-key"),
-        sensitive_header_value(key.as_bytes().to_vec())
-            .map_err(|_| list_error("credential is not a header value"))?,
-    );
+    headers.insert(HeaderName::from_static("x-api-key"), key_header);
     plakous_exchange::catalog::get_page(client, origin, path, headers, deadline, MAX_BODY_BYTES)
         .await
         .map_err(|error| list_error(&error.to_string()))

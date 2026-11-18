@@ -1,7 +1,7 @@
 use super::{
     ApiKey, OpenRouterApiKeySelection, OpenRouterAuthError, OpenRouterCredentialBinding,
     OpenRouterCredentialRequest, OpenRouterKeyGeneration, StaticOpenRouterKeySource,
-    credential_generation, resolve_key, static_openrouter_api_key_source,
+    credential_generation, resolve_credential, static_openrouter_api_key_source,
 };
 use plakous_auth::api_key::{ApiKeyError, ApiKeyRequest, ApiKeySource};
 use plakous_model::{Digest, DigestDomain};
@@ -59,7 +59,7 @@ fn another_sources_authority_is_refused_before_openrouter_bearer_resolution()
     let request = OpenRouterCredentialRequest::catalog(&operation);
     let grant = source.generation_grant(&request)?;
     assert!(matches!(
-        resolve_key(&source, &request, &grant),
+        resolve_credential(&source, &request, &grant),
         Err(OpenRouterAuthError::BindingMismatch)
     ));
     assert_eq!(source.bearer_reads.load(Ordering::SeqCst), 0);

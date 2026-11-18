@@ -8,6 +8,7 @@ use plakous_auth::api_key::ExposeApiKey as _;
 use plakous_auth::api_key::{
     ApiKeyAuthorityToken, ApiKeyError, ApiKeyRequest, ApiKeySource, CredentialProviderTag,
 };
+use plakous_auth::custody::{CredentialField, KeyHeaderForm};
 use plakous_messages::{MessagesAttempt, MessagesAttemptBinding};
 use plakous_model::{
     Clock, Digest, DigestDomain, ModelAdapterProfileId, ModelFamilyId, ModelId, ProtocolId,
@@ -298,17 +299,14 @@ impl AnthropicAttemptAuthorization {
         Ok(())
     }
 
-    #[allow(
-        dead_code,
-        reason = "raw access is reserved for the deferred crate-owned production transport"
-    )]
-    pub(crate) fn expose_for<T>(
+    /// The credential field for an admitted exact attempt: `Bearer` for
+    /// Claude OAuth, the raw key for the Platform API.
+    pub(crate) fn credential_for(
         &self,
         attempt: &MessagesAttempt,
         target: &AnthropicMessagesTargetBinding,
         route: &AnthropicPlatformRoute,
-        use_key: impl FnOnce(&str) -> T,
-    ) -> Result<T, AnthropicError> {
+    ) -> Result<CredentialField, AnthropicError> {
         self.validate_for_attempt(attempt)?;
         target.validate_route(route)?;
         if self.auth.audience_origin != route.auth.audience_origin
@@ -316,7 +314,12 @@ impl AnthropicAttemptAuthorization {
         {
             return Err(credential_binding_error());
         }
-        Ok(use_key(self.auth.key.expose_secret()))
+        let form = if route.is_claude_oauth() {
+            KeyHeaderForm::Bearer
+        } else {
+            KeyHeaderForm::Raw
+        };
+        Ok(form.field(&self.auth.key))
     }
 }
 
@@ -379,15 +382,14 @@ impl AnthropicPlatformRoute {
         Ok(())
     }
 
-    /// Runs `use_key` on the route's key after checking it is still the
-    /// source's current key: the one exposure path of an isolated side request.
-    pub(crate) fn with_current_key<T>(
+    /// The route's raw key field after checking it is still the source's
+    /// current key: the one credential path of an isolated side request.
+    pub(crate) fn current_key_credential(
         &self,
         source: &AnthropicKeySource,
-        use_key: impl FnOnce(&str) -> T,
-    ) -> Result<T, AnthropicError> {
+    ) -> Result<CredentialField, AnthropicError> {
         self.validate_current_key(source)?;
-        Ok(use_key(self.auth.key.expose_secret()))
+        Ok(KeyHeaderForm::Raw.field(&self.auth.key))
     }
 
     /// Creates the official API-key route. Custom origins require a distinct

@@ -975,7 +975,9 @@ fn insert_subscription_catalog_headers(
     headers: &mut HeaderMap,
     subject: &AccountBinding,
 ) -> Result<(), XaiNativeAuthError> {
-    let subject = HeaderValue::from_str(subject.as_str())
+    let subject =
+        plakous_auth::custody::CredentialField::exact(subject.as_str().as_bytes().to_vec());
+    let subject = sensitive_header_value(subject.into_header_bytes())
         .map_err(|_| XaiNativeAuthError::CatalogUnavailable)?;
     headers.insert(
         HEADER_XAI_TOKEN_AUTH,
@@ -998,10 +1000,8 @@ fn insert_subscription_catalog_headers(
 }
 
 fn bearer_header(token: &str) -> Result<HeaderValue, XaiNativeAuthError> {
-    let mut value = Vec::with_capacity(7 + token.len());
-    value.extend_from_slice(b"Bearer ");
-    value.extend_from_slice(token.as_bytes());
-    sensitive_header_value(value).map_err(|_| XaiNativeAuthError::Request)
+    let field = plakous_auth::custody::CredentialField::bearer(token.as_bytes());
+    sensitive_header_value(field.into_header_bytes()).map_err(|_| XaiNativeAuthError::Request)
 }
 
 fn decode_json<T: DeserializeOwned>(bytes: &[u8], maximum: usize) -> Result<T, XaiNativeAuthError> {

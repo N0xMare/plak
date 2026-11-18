@@ -4,6 +4,7 @@
 //! loopback listener: local and remote product modes share this paste-complete
 //! handle. Token exchange is JSON against the pinned Platform token origin.
 
+use plakous_auth::custody::CredentialField;
 use plakous_auth::native_auth::usage_credential_refusal;
 
 use std::fmt;
@@ -95,10 +96,8 @@ const CLAUDE_USAGE_BETA: &str = "oauth-2025-04-20";
 
 fn oauth_control_headers(stored: &StoredTokens) -> Result<HeaderMap, SubscriptionUsageUnavailable> {
     let mut headers = HeaderMap::new();
-    let mut bearer = Vec::with_capacity(7 + stored.access_token.len());
-    bearer.extend_from_slice(b"Bearer ");
-    bearer.extend_from_slice(stored.access_token.as_bytes());
-    let Ok(authorization) = sensitive_header_value(bearer) else {
+    let bearer = CredentialField::bearer(stored.access_token.as_bytes());
+    let Ok(authorization) = sensitive_header_value(bearer.into_header_bytes()) else {
         return Err(SubscriptionUsageUnavailable::InvalidResponse);
     };
     headers.insert(HEADER_AUTHORIZATION, authorization);

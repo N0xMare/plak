@@ -236,6 +236,21 @@ pub trait ApiKeySource<R: ApiKeyRequest + ?Sized, A = ()>: Send + Sync {
         request: &R,
         expected: &ApiKeyGenerationGrant<A>,
     ) -> Result<ApiKey, ApiKeyError>;
+
+    /// The credential header value for an admitted request, lowered in
+    /// `form`. Local custody lowers [`Self::api_key`]; a custodian that keeps
+    /// the key elsewhere supplies its own field instead.
+    ///
+    /// # Errors
+    /// Returns [`Self::api_key`]'s error.
+    fn credential_field(
+        &self,
+        request: &R,
+        expected: &ApiKeyGenerationGrant<A>,
+        form: crate::custody::KeyHeaderForm,
+    ) -> Result<crate::custody::CredentialField, ApiKeyError> {
+        Ok(form.field(&self.api_key(request, expected)?))
+    }
 }
 
 /// A single injected key bound to one exact audience and source authority.

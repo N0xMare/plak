@@ -19,6 +19,7 @@ use super::{
     reference_client_envelope_context_contract, require_json_media_type, require_status,
     resolution_route_fingerprint, sensitive_header_value, validate_identifier,
 };
+use plakous_auth::custody::CredentialField;
 
 /// The exact catalog inputs a resolver and its models share, so a running
 /// model renews its receipt through the same resolution that admitted it.
@@ -98,7 +99,8 @@ impl CodexCatalogSource {
                 }
                 other => other,
             })?;
-        let account = sensitive_header_value(credential.account_id.as_bytes().to_vec())
+        let account = CredentialField::exact(credential.account_id.as_bytes().to_vec());
+        let account = sensitive_header_value(account.into_header_bytes())
             .map_err(|_| NativeCodexAuthError::CatalogAccountHeader)?;
         headers.insert(HeaderName::from_static("chatgpt-account-id"), account);
         let reply = execute_catalog_bounded(

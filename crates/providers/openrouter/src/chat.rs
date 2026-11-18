@@ -1050,7 +1050,7 @@ impl ChatHttpHooks<plakous_chat_completions::ChatWire> for OpenRouterChatHooks {
             .route
             .chat_credential(physical, &self.generation)
             .map_err(|_| ChatAttemptProtocolError::new("OpenRouter Chat authentication failed"))?;
-        let authorization = sensitive_header_value(crate::route::bearer_bytes(&key))
+        let authorization = sensitive_header_value(key.into_header_bytes())
             .map_err(|_| ChatAttemptProtocolError::new("OpenRouter Chat authorization failed"))?;
         let mut headers = HeaderMap::new();
         headers.insert(

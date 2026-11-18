@@ -1,5 +1,6 @@
 //! Exact OpenAI Platform execution through the shared Responses host.
 
+use plakous_auth::custody::CredentialField;
 use std::sync::Arc;
 
 use plakous_attempt::LedgerPolicy;
@@ -564,8 +565,11 @@ fn platform_preflight<'a>(
             return Err(ResponsesDispatchRejection::Authentication);
         }
         let authorization = if authority.is_local_fixture() {
-            sensitive_header_value(b"Bearer plakous-openai-platform-local-fixture".to_vec())
-                .map_err(|_| ResponsesDispatchRejection::Binding)?
+            sensitive_header_value(
+                CredentialField::bearer(b"plakous-openai-platform-local-fixture")
+                    .into_header_bytes(),
+            )
+            .map_err(|_| ResponsesDispatchRejection::Binding)?
         } else {
             authority
                 .target()

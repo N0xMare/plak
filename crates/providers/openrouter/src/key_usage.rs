@@ -257,7 +257,7 @@ impl OpenRouterChatRoute {
         );
         headers.insert(
             HeaderName::from_static("authorization"),
-            sensitive_header_value(crate::route::bearer_bytes(&key))
+            sensitive_header_value(key.into_header_bytes())
                 .map_err(|_| OpenRouterAuthError::CredentialSource)?,
         );
         let request = Request::new(

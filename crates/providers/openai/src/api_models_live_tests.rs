@@ -112,9 +112,14 @@ async fn past_deadline_does_not_connect() {
     let client = Client::new_http1(Limits::default()).expect("client");
     let deadline = std::time::Instant::now();
     tokio::time::sleep(Duration::from_millis(5)).await;
-    let error = get_models(&client, origin, "unused", deadline)
-        .await
-        .expect_err("deadline");
+    let error = get_models(
+        &client,
+        origin,
+        plakous_auth::custody::CredentialField::bearer(b"unused"),
+        deadline,
+    )
+    .await
+    .expect_err("deadline");
     assert!(error.to_string().contains("DeadlineExceeded"), "{error}");
     let accepted = tokio::time::timeout(Duration::from_millis(50), listener.accept()).await;
     assert!(

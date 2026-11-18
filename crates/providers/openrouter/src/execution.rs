@@ -486,7 +486,7 @@ fn openrouter_preflight<'a>(
         let key = route
             .responses_credential(request.physical(), &generation)
             .map_err(|_| ResponsesDispatchRejection::Authentication)?;
-        let authorization = sensitive_header_value(crate::route::bearer_bytes(&key))
+        let authorization = sensitive_header_value(key.into_header_bytes())
             .map_err(|_| ResponsesDispatchRejection::Binding)?;
         // Extras follow authorization. Attribution stays referer, title, categories.
         // Physical identity sorts header frames, so this order does not change the digest.

@@ -6,6 +6,7 @@ use super::{
     ReadyCredentialLease, ResponsesPhysicalRequestBinding, StoredCredential, USER_AGENT, fmt,
     sensitive_header_value,
 };
+use plakous_auth::custody::CredentialField;
 
 /// Private one-use inference authorization retaining the exact Ready lease.
 pub(crate) struct NativeCodexAuthorization {
@@ -86,11 +87,11 @@ impl NativeCodexAuthorization {
         {
             return Err(AuthError::BindingMismatch);
         }
-        let mut bearer = Vec::with_capacity(7 + self.credential.access_token.len());
-        bearer.extend_from_slice(b"Bearer ");
-        bearer.extend_from_slice(self.credential.access_token.as_bytes());
-        let authorization = sensitive_header_value(bearer).map_err(|_| AuthError::SourceFailure)?;
-        let account = sensitive_header_value(self.credential.account_id.as_bytes().to_vec())
+        let bearer = CredentialField::bearer(self.credential.access_token.as_bytes());
+        let authorization = sensitive_header_value(bearer.into_header_bytes())
+            .map_err(|_| AuthError::SourceFailure)?;
+        let account = CredentialField::exact(self.credential.account_id.as_bytes().to_vec());
+        let account = sensitive_header_value(account.into_header_bytes())
             .map_err(|_| AuthError::BindingMismatch)?;
         headers.insert(HeaderName::from_static("authorization"), authorization);
         headers.insert(HeaderName::from_static("chatgpt-account-id"), account);

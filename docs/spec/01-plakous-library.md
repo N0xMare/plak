@@ -5189,6 +5189,31 @@ route refuses construction, refresh and every revalidation. The documented
 public API surfaces (OpenAI Platform, xAI Platform, Anthropic API, OpenRouter
 Chat) have no such window; their review-due dates only warn (§6).
 
+Credential custody is the seam between a route and whoever holds its
+credential (`plakous_auth::custody`). A route prepares its request and sends
+it through one `plakous_http::Client`; every credential header value it
+inserts (an authorization bearer, an API-key header, a Codex account id or a
+SuperGrok subject) is a `CredentialField` supplied by the credential's
+custodian, never a value the provider code formats from secret material
+itself. API-key sources supply it through `ApiKeySource::credential_field`,
+which by default lowers the source's own key in the route's form (`Bearer`
+or raw). Under local custody a field is the exact header value, so local
+custody's request bytes are those of direct credential use. A
+`CredentialCustodian` reports an account's non-secret `AccountFacts`
+(status, generation, access expiry, selection-epoch, account-binding and
+credential-authority digests, profile and consent, key source and
+fingerprint, provider-keyed wire identity), runs the single writer's refresh
+(`IfDue`, `AfterRejection` bound to the rejected fence and selection, or
+`Operator`) and hands out the fields of one request only while the
+credential still holds the request's `ExpectedFence` (account-binding digest
+and exact generation): a non-Ready credential refuses `NotReady`, another
+account `AccountChanged` and another generation `FenceMoved`. Custody
+location (machine, path, gateway address) is never a fact and never enters a
+binding. `LocalKeyCustodian` holds API keys from an application key store:
+a key's account binding is a digest of its slot and its generation the
+leading eight bytes of its generation fingerprint, so replacing a key moves
+the fence without changing the account.
+
 ### 7.2 The three OAuth verticals
 
 Subscription contract drift is a typed `CompatibilityDrift`, not ordinary
