@@ -23,7 +23,7 @@ use crate::{
 };
 
 /// Exact Models API path on the Platform origin.
-const OPENAI_MODELS_PATH: &str = "/v1/models";
+pub(crate) const OPENAI_MODELS_PATH: &str = "/v1/models";
 /// Output limit the reviewed GPT-5.x and GPT-6 profiles are admitted under.
 pub(crate) const REVIEWED_OUTPUT_BOUND: u32 = 128_000;
 

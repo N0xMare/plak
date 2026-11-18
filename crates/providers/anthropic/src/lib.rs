@@ -55,10 +55,15 @@ mod retrieval;
 mod route;
 mod stream;
 mod subscription_usage;
+mod upstream_pins;
 
 pub use hosted_support::{ANTHROPIC_API_HOSTED_RETRIEVAL, CLAUDE_OAUTH_HOSTED_RETRIEVAL};
 pub use oauth_identity::{ClaudeAccountUuid, ClaudeClientDeviceId, ClaudeOAuthRequestIdentity};
 pub use retrieval::AnthropicRetrieval;
+pub use upstream_pins::{
+    ANTHROPIC_API_CREDENTIAL_HEADERS, ANTHROPIC_API_UPSTREAM_PINS, CLAUDE_CREDENTIAL_HEADERS,
+    CLAUDE_UPSTREAM_PINS,
+};
 
 pub use api_models::{
     AnthropicApiModel, AnthropicApiModelStatus, AnthropicListedModel,

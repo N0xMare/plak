@@ -1814,6 +1814,20 @@ forbidden.** A child agent never receives another vertical's token: a Grok child
 does not get the Codex credential, and no other account's quota is spent
 without explicit user instruction.
 
+Under a credential gateway (chapter 01 §7.5) a credential is used only at
+the gateway that holds it. The gateway relays a custodied credential only to
+its provider's exact pin rows, compared on the logical URL's origin, method,
+path and query rule, with the custodied header names equal to the row's;
+an off-table origin, path, method or query, a reserved or hop-by-hop header,
+a plain entry reusing a custodied name and a malformed header are refused
+before any upstream byte. Token, device, JWKS, userinfo, discovery and
+profile endpoints are never relayable. The gateway follows no redirect (a
+3xx is relayed unchanged) and never retries. A custodied placeholder that
+reaches a direct exchange is refused unsent, so a route can never send one
+to a provider, and the placeholder carries only the account reference and
+non-secret fence digests. The repository-only dial override that maps a
+pinned origin to a loopback fixture is absent from product builds.
+
 ### 3.5 Credentials never reach a prompt or a hook
 
 Native console login challenges are the sole private operator-response

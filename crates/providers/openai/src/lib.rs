@@ -44,6 +44,7 @@ mod oauth_pins;
 mod platform_local;
 mod retrieval;
 mod subscription_usage;
+mod upstream_pins;
 
 pub use api_models::{
     OpenAiApiModel, OpenAiApiModelStatus, OpenAiListedModel, accept_openai_listed_models,
@@ -107,6 +108,10 @@ pub use plakous_responses::{
 pub use platform_local::{OpenAiPlatformBuildError, OpenAiPlatformLocalModel, OpenAiPlatformModel};
 pub use retrieval::OpenAiRetrieval;
 pub use subscription_usage::decode_codex_subscription_usage;
+pub use upstream_pins::{
+    CODEX_CREDENTIAL_HEADERS, CODEX_UPSTREAM_PINS, OPENAI_API_CREDENTIAL_HEADERS,
+    OPENAI_API_UPSTREAM_PINS,
+};
 
 // Crate-internal paths resolve through the crate root; the public surface is
 // the explicit lists above.

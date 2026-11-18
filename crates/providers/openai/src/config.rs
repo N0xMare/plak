@@ -79,7 +79,6 @@ pub const OPENAI_CODEX_RESPONSES_PATH: &str = "/backend-api/codex/responses";
 /// Exact Codex include selector used to retain replayable reasoning material.
 pub const OPENAI_CODEX_ENCRYPTED_REASONING_INCLUDE: &str = "reasoning.encrypted_content";
 /// The fixed authenticated model-catalog path for the direct Codex route.
-#[cfg(feature = "native-auth")]
 pub(crate) const OPENAI_CODEX_MODELS_PATH: &str = "/backend-api/codex/models";
 /// Exact reference-client release presented to the authenticated catalog.
 ///

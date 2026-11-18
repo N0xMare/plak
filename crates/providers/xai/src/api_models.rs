@@ -31,7 +31,7 @@ use serde_json::Value;
 use crate::{XaiPlatformBuildError, XaiPlatformKeySource, platform::XAI_PLATFORM_API_KEY_ORIGIN};
 
 /// Exact Models API path on the Platform origin.
-const XAI_MODELS_PATH: &str = "/v1/models";
+pub(crate) const XAI_MODELS_PATH: &str = "/v1/models";
 
 const BUNDLED_TABLE: &str = include_str!("api_models.json");
 const MAX_MODELS: usize = 2048;

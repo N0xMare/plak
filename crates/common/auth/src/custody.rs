@@ -19,9 +19,14 @@ use zeroize::Zeroizing;
 
 use crate::CredentialGeneration;
 
+/// Custody through a credential gateway (feature `gateway`).
+#[cfg(feature = "gateway")]
+pub mod gateway;
 mod local_key;
+mod pins;
 
 pub use local_key::{KeyHeaderForm, KeyInjection, LocalKey, LocalKeyCustodian, LocalKeyStore};
+pub use pins::{PathSegment, PinPath, PinQuery, UpstreamPin, pinned};
 
 /// One credential header value as its custodian supplies it.
 ///

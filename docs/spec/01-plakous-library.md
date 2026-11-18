@@ -6093,8 +6093,8 @@ account.**
 `plakous-gateway-protocol` is the portable, I/O-free vocabulary between a
 Plakous caller and a credential gateway: the process that holds credentials,
 injects them into one upstream exchange at a time and reports how far that
-exchange got. Nothing in this build calls it yet; local custody (§7.1-§7.4)
-is unchanged. It is the third cross-build exception (chapter 00): a gateway
+exchange got. Local custody (§7.1-§7.4) is the default; a route reaches a
+gateway only through the custody seam below. It is the third cross-build exception (chapter 00): a gateway
 serves its own protocol version and the immediately previous one, a caller
 speaks the same two, and any change to an endpoint or encoding bumps the
 version. Each version's JSON and binary encodings are pinned by golden files
@@ -6143,6 +6143,54 @@ reads, disable and, for the local administrator only, enable, caller
 management and drain; operation-level refusals are typed, and secret
 inputs (keys, pastes, authorize URLs, user codes, issued caller keys) are
 zeroized and never printed.
+
+The relay client is a `plakous_http::Client` made with `with_relay` over a
+`RelayClient` (a Unix socket, a TCP address or an in-memory duplex, the
+caller key, and the version negotiated once from `GET /versions`). It keeps
+the client's limits, policy and behavior identity, so `Client::execute`
+remains the only send point and no protocol kernel changes. A custodied
+credential field (`CredentialField::custodied`) is a reserved placeholder
+header value at the field's exact position that names the account and the
+fence; the relay sends it as `[name, null]` and every other entry unchanged
+and in order. A direct exchange refuses any request carrying a placeholder,
+unsent (`Internal`, cause `custodied_placeholder`), so a placeholder never
+reaches a provider; a relayed request without one is refused unsent as well.
+`GatewayCustodian` answers facts and refresh through the gateway's calls
+(the operator refresh through the admin `Refresh`), fetched fresh on every
+call, and hands out placeholders for the kind's credential headers.
+
+A `fence_moved` refusal names the credential's current facts. When the
+account binding is unchanged and the generation grew, the relay prepares the
+same request again inside the same logical attempt with the moved fence, at
+most twice (`MAX_FENCE_REPREPARATIONS`), each one proven unsent; otherwise
+it is refused unsent. A changed binding is `account_changed`.
+
+The relay server core (`plakous_http::relay_server`, provider-blind) reads
+each request whole before it validates anything or dials upstream, checks
+the path version (an unserved one is `version_unsupported` with the served
+list), lets the caller's `GatewayService` authenticate, authorize and
+inject, fills each custodied entry at its position, makes exactly one
+upstream exchange (no retry, no redirect: a 3xx is relayed as a `Head`) and
+streams it back: one data frame per server-sent event, split only above the
+frame bound and sent at each event boundary, other bodies chunk for chunk,
+and no keepalive frames. Hop-by-hop response fields are not relayed.
+Dropping the relay connection or its response cancels the upstream
+exchange. `plakous::gateway::server::LocalCustody` supplies injection from
+each kind's local custodian and its provider's exact upstream pin table:
+the request must match a row on origin, method, path and query rule, its
+custodied names must equal that row's credential headers, and the
+credential must hold the request's fence. Pin tables are `pub const` rows
+built from each provider crate's path constants (`CODEX_UPSTREAM_PINS`,
+`CLAUDE_UPSTREAM_PINS`, `SUPERGROK_UPSTREAM_PINS` and the four API-key
+tables, including OpenRouter's per-model endpoint list and the SuperGrok
+credits read); token, device, JWKS, userinfo, discovery and profile
+endpoints are never rows. `InProcessGateway` serves local custody to the
+process's own host (and a same-user Unix socket peer) over an in-memory
+duplex. A repository-only dial override (`plakous-http/fault-injection`,
+absent from product builds) maps a pinned origin to a loopback fixture
+while every check still runs on the logical URL; the gateway's upstream
+client keeps its own transport fault plan, so upstream faults apply to the
+in-process gateway's upstream hop, and the relayed client applies none.
 
 ## 8. Tools and effects
 
@@ -12729,6 +12777,27 @@ value while retaining the label; bare token/credential labels redact only a
 value-shaped token (at least 16 credential-alphabet characters containing a
 digit, or a known credential prefix). Sanitization is idempotent, including
 deserialize/re-encode of retained diagnostics.
+
+A relayed exchange (§7.5) composes the two hops into one transmission fact
+on facts, not phases. A gateway hop that failed before the gateway could
+hold the whole relay request (`NotStarted` or `RequestIncomplete`) is an
+upstream `NotStarted`: the gateway dials only after a full read. A gateway
+refusal (a non-200 answer with `plak-gateway-error`) is unsent: `busy` is a
+`Connect`/`NotStarted` I/O failure that enters the unreachable budget, and
+every other refusal is an unsent `InvalidResponse` with a `gateway_<code>`
+cause that no turn replays (`fence_moved` first re-prepares, above). A hop
+lost after the whole relay request may have been sent, an unmarked non-200
+answer, a wrong content type, `End{cancelled}` or `End{gateway_failed}`
+before the head, and a frame decode error before it are `MayHaveTransmitted`
+in the response head. `End{upstream_failed}` before the head carries the
+gateway's measured upstream phase, transmission and kind verbatim. The
+`Head` frame is the `Response`; any break after it (a lost hop,
+`End{upstream_failed}`, `cancelled` or `gateway_failed`, a decode, sequence
+or offset error, an oversized body) is the ordinary mid-stream
+`ResponseBody`/`MayHaveTransmitted` failure. `End{complete}`, after any
+`Trailers`, is a clean end. The incomplete-write ride-out never applies to
+the gateway hop; it reaches the kernel only as a measured upstream
+`request_incomplete`.
 
 `ModelNetworkFailure` carries a content-free physical phase, transmission fact
 and timeout flag. Its display names DNS, connect, TLS, request write or response

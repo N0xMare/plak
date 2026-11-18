@@ -16,8 +16,15 @@
 
 mod address;
 mod control;
+mod custodied;
 mod error;
+#[cfg(any(feature = "gateway-client", feature = "gateway-server"))]
+mod gateway_wire;
 mod observation;
+#[cfg(feature = "gateway-client")]
+pub mod relay;
+#[cfg(feature = "gateway-server")]
+pub mod relay_server;
 mod request;
 mod sensitive;
 pub mod sse;

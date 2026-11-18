@@ -22,6 +22,7 @@ impl AsyncRead for WireStream {
             Self::Plain(stream) => Pin::new(stream).poll_read(cx, buf),
             #[cfg(test)]
             Self::Duplex(stream) => Pin::new(stream).poll_read(cx, buf),
+            Self::Dialed(stream) => Pin::new(stream.as_mut()).poll_read(cx, buf),
         }
     }
 }
@@ -37,6 +38,7 @@ impl AsyncWrite for WireStream {
             Self::Plain(stream) => Pin::new(stream).poll_write(cx, buf),
             #[cfg(test)]
             Self::Duplex(stream) => Pin::new(stream).poll_write(cx, buf),
+            Self::Dialed(stream) => Pin::new(stream.as_mut()).poll_write(cx, buf),
         }
     }
 
@@ -46,6 +48,7 @@ impl AsyncWrite for WireStream {
             Self::Plain(stream) => stream.is_write_vectored(),
             #[cfg(test)]
             Self::Duplex(stream) => stream.is_write_vectored(),
+            Self::Dialed(stream) => stream.is_write_vectored(),
         }
     }
 
@@ -59,6 +62,7 @@ impl AsyncWrite for WireStream {
             Self::Plain(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
             #[cfg(test)]
             Self::Duplex(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
+            Self::Dialed(stream) => Pin::new(stream.as_mut()).poll_write_vectored(cx, bufs),
         }
     }
 
@@ -68,6 +72,7 @@ impl AsyncWrite for WireStream {
             Self::Plain(stream) => Pin::new(stream).poll_flush(cx),
             #[cfg(test)]
             Self::Duplex(stream) => Pin::new(stream).poll_flush(cx),
+            Self::Dialed(stream) => Pin::new(stream.as_mut()).poll_flush(cx),
         }
     }
 
@@ -77,6 +82,7 @@ impl AsyncWrite for WireStream {
             Self::Plain(stream) => Pin::new(stream).poll_shutdown(cx),
             #[cfg(test)]
             Self::Duplex(stream) => Pin::new(stream).poll_shutdown(cx),
+            Self::Dialed(stream) => Pin::new(stream.as_mut()).poll_shutdown(cx),
         }
     }
 }

@@ -26,7 +26,6 @@ pub(crate) const SUPERGROK_SUBSCRIPTION_BASE_URL: &str = "https://cli-chat-proxy
 /// Exact SuperGrok subscription proxy origin. OAuth has a distinct pinned OIDC origin.
 pub const SUPERGROK_RESPONSES_ORIGIN: &str = "https://cli-chat-proxy.grok.com";
 /// Exact authenticated subscription catalog resource path.
-#[cfg(feature = "native-auth")]
 pub(crate) const SUPERGROK_MODELS_PATH: &str = "/v1/models";
 /// Exact SuperGrok Responses resource path.
 pub const SUPERGROK_RESPONSES_PATH: &str = "/v1/responses";

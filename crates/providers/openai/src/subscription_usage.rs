@@ -8,7 +8,6 @@ use plakous_model::{
 use serde::Deserialize;
 
 /// Exact read-only path in the pinned official Codex client.
-#[cfg(feature = "native-auth")]
 pub(crate) const CODEX_SUBSCRIPTION_USAGE_PATH: &str = "/backend-api/wham/usage";
 /// Maximum body accepted by the usage control-plane decoder.
 pub(crate) const MAX_CODEX_SUBSCRIPTION_USAGE_BODY_BYTES: usize = 256 * 1024;

@@ -14,7 +14,7 @@ use plakous_responses::ResponsesPhysicalRequestBinding;
 
 use crate::{OpenRouterAccessMode, OpenRouterRouteKind};
 
-const OPENROUTER_PLATFORM_ORIGIN: &str = "https://openrouter.ai";
+pub(crate) const OPENROUTER_PLATFORM_ORIGIN: &str = "https://openrouter.ai";
 
 #[cfg(test)]
 mod tests;

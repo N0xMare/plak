@@ -62,6 +62,7 @@ mod messages;
 mod model;
 mod retrieval;
 mod route;
+mod upstream_pins;
 mod wire;
 
 pub use chat::{
@@ -104,3 +105,4 @@ pub use route::{
     OpenRouterRoutingPolicy, StaticOpenRouterKeySource, static_openrouter_api_key_source,
     static_openrouter_api_key_source_with_generation_binding,
 };
+pub use upstream_pins::{OPENROUTER_CREDENTIAL_HEADERS, OPENROUTER_UPSTREAM_PINS};

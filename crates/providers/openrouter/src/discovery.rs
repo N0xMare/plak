@@ -20,7 +20,7 @@ use crate::{
     OpenRouterChatRoute, OpenRouterReasoningFacts, OpenRouterToolChoiceModes,
 };
 
-const MODELS_PATH: &str = "/api/v1/models";
+pub(crate) const MODELS_PATH: &str = "/api/v1/models";
 const ENDPOINTS_PREFIX: &str = "/api/v1/models";
 const MAX_MODELS: usize = 4096;
 const MAX_ENDPOINTS: usize = 256;

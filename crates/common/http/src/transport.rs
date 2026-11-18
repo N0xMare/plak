@@ -29,11 +29,13 @@ use crate::{ExchangeObserver, ExchangeTerminal};
 mod connect;
 mod connection;
 mod exchange;
+pub(crate) mod hooks;
 mod identity;
 mod io;
 mod response;
 
 use connection::{cleanup_failure, establish, wait_task};
+use hooks::{DialedIo, Dialer, FrameSource, Relay};
 pub use identity::{TlsConfigIdentity, TransportBehaviorIdentity};
 use identity::{default_tls_config, default_trust_identity, transport_behavior_identity};
 use response::{request_error_kind, response_from_wire, response_wait_deadline, wait_response};
@@ -185,6 +187,11 @@ struct ClientInner {
     address_policy: Option<AddressPolicy>,
     resolver: Resolver,
     connector: connect::Connector,
+    /// A credential gateway endpoint every fresh connection dials instead of
+    /// resolving its origin.
+    dial: Option<Arc<dyn Dialer>>,
+    /// The credential gateway this client relays every exchange through.
+    relay: Option<Arc<dyn Relay>>,
 }
 
 /// How a fresh connection resolves its origin host.
@@ -369,6 +376,8 @@ impl Client {
                 address_policy: None,
                 resolver: Resolver::System,
                 connector: connect::Connector::default(),
+                dial: None,
+                relay: None,
             }),
         })
     }
@@ -407,6 +416,8 @@ impl Client {
                 address_policy: inner.address_policy,
                 resolver: inner.resolver.clone(),
                 connector: inner.connector.clone(),
+                dial: inner.dial.clone(),
+                relay: inner.relay.clone(),
             }),
         })
     }
@@ -446,6 +457,8 @@ impl Client {
                 address_policy: policy,
                 resolver: inner.resolver.clone(),
                 connector: inner.connector.clone(),
+                dial: inner.dial.clone(),
+                relay: inner.relay.clone(),
             }),
         }
     }
@@ -473,6 +486,8 @@ impl Client {
                 address_policy: inner.address_policy,
                 resolver,
                 connector: inner.connector.clone(),
+                dial: inner.dial.clone(),
+                relay: inner.relay.clone(),
             }),
         }
     }
@@ -513,6 +528,8 @@ impl Client {
                 address_policy: inner.address_policy,
                 resolver: inner.resolver.clone(),
                 connector: inner.connector.clone(),
+                dial: inner.dial.clone(),
+                relay: inner.relay.clone(),
             }),
         }
     }
@@ -521,6 +538,44 @@ impl Client {
     #[must_use]
     pub fn is_pooled(&self) -> bool {
         self.inner.pool.is_some()
+    }
+
+    /// This client with every exchange taken by `relay` instead of its own
+    /// connections, keeping its limits, policy, identity and observer.
+    #[allow(dead_code, reason = "the credential gateway relay client installs it")]
+    pub(crate) fn with_relay_hook(&self, relay: Arc<dyn Relay>) -> Self {
+        self.with_inner(|inner| inner.relay = Some(relay))
+    }
+
+    /// This client dialing `dialer` for every fresh connection.
+    #[allow(dead_code, reason = "the credential gateway relay client installs it")]
+    pub(crate) fn with_dialer(&self, dialer: Arc<dyn Dialer>) -> Self {
+        self.with_inner(|inner| inner.dial = Some(dialer))
+    }
+
+    #[allow(
+        dead_code,
+        reason = "the credential gateway relay client installs hooks"
+    )]
+    fn with_inner(&self, change: impl FnOnce(&mut ClientInner)) -> Self {
+        let inner = &self.inner;
+        let mut next = ClientInner {
+            limits: inner.limits.clone(),
+            policy: inner.policy,
+            trust_identity: inner.trust_identity,
+            behavior_identity: inner.behavior_identity,
+            tls_config: Arc::clone(&inner.tls_config),
+            pool: inner.pool.clone(),
+            address_policy: inner.address_policy,
+            resolver: inner.resolver.clone(),
+            connector: inner.connector.clone(),
+            dial: inner.dial.clone(),
+            relay: inner.relay.clone(),
+        };
+        change(&mut next);
+        let mut client = self.clone();
+        client.inner = Arc::new(next);
+        client
     }
 
     /// Attaches an explicit diagnostic observer without changing transport identity.
@@ -713,7 +768,7 @@ pub struct Response {
 /// A caller-pulled, chunk- and total-bounded response byte stream.
 pub struct ResponseBody {
     observation: Observation,
-    incoming: Incoming,
+    incoming: BodySource,
     connection: ConnectionTask,
     control: ExchangeControl,
     protocol: WireProtocol,
@@ -730,6 +785,17 @@ pub struct ResponseBody {
     terminal: bool,
     #[cfg(feature = "fault-injection")]
     fault: Option<Box<fault::StreamFault>>,
+}
+
+/// Where a response body's frames come from.
+enum BodySource {
+    /// The HTTP connection this client opened.
+    Wire(Incoming),
+    /// A credential gateway's relay frames.
+    /// Another exchange path's frames (a credential gateway relay).
+    Hooked(Box<dyn FrameSource>),
+    /// A hooked source dropped after its failure, which closes its exchange.
+    Closed,
 }
 
 /// The request half of one negotiated connection.
@@ -921,6 +987,8 @@ enum WireStream {
     Plain(TcpStream),
     #[cfg(test)]
     Duplex(tokio::io::DuplexStream),
+    /// A stream another exchange path dialed (a credential gateway hop).
+    Dialed(Box<dyn DialedIo>),
 }
 
 impl RequestIo {

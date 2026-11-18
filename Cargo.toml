@@ -444,7 +444,7 @@ env-sites = ["src/test_hooks.rs"]
 reason = "The test-hooks mid-turn prune minimum and recency margin are the only environment reads. Other builds do not compile that module."
 
 [workspace.metadata.plakous.cfg.plakous-anthropic]
-feature-ceiling = 22
+feature-ceiling = 21
 reason = "Native beta classification and its HTTP hook stay feature-gated; shared API-key construction removes a native-only helper."
 
 [workspace.metadata.plakous.cfg.plakous-auth]
@@ -488,7 +488,7 @@ env-ceiling = 2
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous-openai]
-feature-ceiling = 109
+feature-ceiling = 107
 test-seam-ceiling = 1
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
 
@@ -539,5 +539,5 @@ env-sites = ["src/test_hooks.rs"]
 reason = "Only the test-hook module reads deterministic worker crash-cut controls."
 
 [workspace.metadata.plakous.cfg.plakous-xai]
-feature-ceiling = 83
+feature-ceiling = 82
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."

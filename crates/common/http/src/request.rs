@@ -83,6 +83,18 @@ impl Origin {
         })
     }
 
+    /// The nominal plain-HTTP origin of a credential gateway hop. Its host
+    /// never resolves (`.invalid`); a gateway client dials its own endpoint.
+    #[allow(dead_code, reason = "the credential gateway relay client dials it")]
+    pub(crate) fn gateway() -> Self {
+        Self {
+            authority: Authority::from_static("gateway.invalid"),
+            host: "gateway.invalid".to_owned(),
+            port: 80,
+            plain_loopback: true,
+        }
+    }
+
     /// Whether this is a plain-HTTP [`Origin::loopback_http`] origin.
     #[must_use]
     pub const fn is_loopback_http(&self) -> bool {

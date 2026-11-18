@@ -252,6 +252,12 @@ impl Failure {
         }
     }
 
+    /// Names a closed cause category the transport itself decided.
+    pub(crate) const fn with_cause(mut self, cause: &'static str) -> Self {
+        self.cause = Some(cause);
+        self
+    }
+
     pub(crate) const fn with_connect_attempts(mut self, attempts: ConnectAttempts) -> Self {
         self.connect_attempts = Some(attempts);
         self
@@ -517,6 +523,9 @@ pub enum ConfigError {
     /// A caller-supplied TLS behavior identity omitted its semantic revision.
     #[error("caller TLS behavior identity must use a nonzero revision")]
     UnversionedTlsIdentity,
+    /// A credential gateway caller key is not a header value.
+    #[error("credential gateway caller key is not a header value")]
+    InvalidCallerKey,
 }
 
 /// An invalid immutable request.

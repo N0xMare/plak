@@ -29,6 +29,17 @@ for one version bump, without native protocol compatibility.
 - Refuse a manual Messages tool-loop continuation that lost its initial
   thinking when steering text was merged into the tool-result message.
 
+- Add the credential custody seam: every provider credential header is a
+  custodian-supplied `CredentialField`, `CredentialCustodian` reports
+  account facts, runs the single-writer refresh and hands out the fields of
+  one fenced request, and local key custody holds API keys. Local custody
+  sends the same bytes as before.
+- Add the credential gateway relay client (`Client::with_relay`), the
+  remote `GatewayCustodian`, and the provider-blind relay server core with
+  local custody, exact per-provider upstream pin tables and an in-process
+  gateway. Gateway refusals are unsent, a moved fence is prepared again at
+  most twice, and a direct exchange refuses any custodied placeholder.
+
 ### plakd
 
 - A parent follow-up to a settled child whose account, model and template

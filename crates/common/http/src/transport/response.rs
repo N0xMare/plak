@@ -21,8 +21,8 @@ use crate::{
 };
 
 use super::{
-    ConnectionTask, IdleConnection, Limits, RELEASE_READY_BOUND, RequestProgress, Response,
-    ResponseBody, Reuse, body_pull_deadline, fixed_phase_deadline,
+    BodySource, ConnectionTask, IdleConnection, Limits, RELEASE_READY_BOUND, RequestProgress,
+    Response, ResponseBody, Reuse, body_pull_deadline, fixed_phase_deadline,
 };
 
 impl Response {
@@ -177,11 +177,14 @@ impl ResponseBody {
                         Err(_) => return Some(Err(self.fail(ErrorKind::Protocol).await)),
                     },
                 },
-                Some(Err(error)) => {
+                Some(Err(SourceError::Wire(error))) => {
                     return Some(Err(self
                         .fail(ErrorKind::Protocol)
                         .await
                         .with_protocol_cause(&error)));
+                }
+                Some(Err(SourceError::Hooked(kind))) => {
+                    return Some(Err(self.fail(kind).await));
                 }
                 None => {
                     self.terminal = true;
@@ -270,9 +273,13 @@ impl ResponseBody {
         if self.pending.is_some() {
             return false;
         }
+        let incoming = match &mut self.incoming {
+            BodySource::Wire(incoming) => incoming,
+            BodySource::Hooked(_) | BodySource::Closed => return false,
+        };
         let mut context = Context::from_waker(Waker::noop());
         loop {
-            match Pin::new(&mut self.incoming).poll_frame(&mut context) {
+            match Pin::new(&mut *incoming).poll_frame(&mut context) {
                 Poll::Ready(None) => return true,
                 Poll::Ready(Some(Ok(frame))) => match frame.into_data() {
                     Ok(data) if data.is_empty() => {}
@@ -414,6 +421,9 @@ impl ResponseBody {
         self.terminal = true;
         self.reuse = None;
         self.reusable = false;
+        if matches!(self.incoming, BodySource::Hooked(_)) {
+            self.incoming = BodySource::Closed;
+        }
         let _ = self.connection.abort_and_join().await;
         Failure::new(
             Phase::ResponseBody,
@@ -605,7 +615,30 @@ pub(super) async fn response_from_wire(
         version: parts.version,
         headers: Headers::new(parts.headers),
         connection: connection_use,
-        body: ResponseBody {
+        body: ResponseBody::fresh(
+            BodySource::Wire(incoming),
+            connection,
+            control,
+            protocol,
+            connection_use,
+            reuse,
+            limits,
+        ),
+    })
+}
+
+impl ResponseBody {
+    /// An unread body from `incoming`.
+    pub(super) fn fresh(
+        incoming: BodySource,
+        connection: ConnectionTask,
+        control: ExchangeControl,
+        protocol: WireProtocol,
+        connection_use: Option<ConnectionUse>,
+        reuse: Option<Reuse>,
+        limits: &Limits,
+    ) -> Self {
+        Self {
             observation: Observation::default(),
             incoming,
             connection,
@@ -621,11 +654,11 @@ pub(super) async fn response_from_wire(
             terminal: false,
             #[cfg(feature = "fault-injection")]
             fault: None,
-        },
-    })
+        }
+    }
 }
 
-fn content_length(headers: &HeaderMap) -> Option<u64> {
+pub(super) fn content_length(headers: &HeaderMap) -> Option<u64> {
     headers
         .get(http::header::CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
@@ -647,7 +680,10 @@ fn validate_response_version(version: Version) -> Result<(), Failure> {
     }
 }
 
-fn validate_response_headers(headers: &HeaderMap, limits: &Limits) -> Result<(), ErrorKind> {
+pub(super) fn validate_response_headers(
+    headers: &HeaderMap,
+    limits: &Limits,
+) -> Result<(), ErrorKind> {
     if headers.len() > limits.max_response_headers {
         return Err(ErrorKind::LimitExceeded(LimitKind::ResponseHeaderCount));
     }
@@ -661,5 +697,30 @@ pub(super) fn request_error_kind(error: &RequestError) -> ErrorKind {
     match error {
         RequestError::LimitExceeded(kind) => ErrorKind::LimitExceeded(*kind),
         _ => ErrorKind::Internal,
+    }
+}
+
+/// Why a body source failed.
+pub(super) enum SourceError {
+    /// The HTTP connection failed.
+    Wire(hyper::Error),
+    /// A hooked source failed with this classification.
+    Hooked(ErrorKind),
+}
+
+impl BodySource {
+    /// The next body frame. Cancel-safe: nothing is consumed unless returned.
+    async fn frame(&mut self) -> Option<Result<http_body::Frame<Bytes>, SourceError>> {
+        match self {
+            Self::Wire(incoming) => incoming
+                .frame()
+                .await
+                .map(|frame| frame.map_err(SourceError::Wire)),
+            Self::Hooked(source) => source
+                .frame()
+                .await
+                .map(|frame| frame.map_err(SourceError::Hooked)),
+            Self::Closed => None,
+        }
     }
 }

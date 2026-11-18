@@ -21,7 +21,7 @@ use crate::{
 };
 
 /// Exact Models API path on the Platform origin.
-const ANTHROPIC_MODELS_PATH: &str = "/v1/models";
+pub(crate) const ANTHROPIC_MODELS_PATH: &str = "/v1/models";
 /// The output limit the reviewed adaptive families are admitted under.
 pub(crate) const REVIEWED_ADAPTIVE_OUTPUT_CEILING: u32 = 128_000;
 

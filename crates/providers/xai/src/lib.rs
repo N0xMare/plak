@@ -33,6 +33,7 @@ mod responses_dialect;
 mod retrieval;
 mod route;
 mod subscription_usage;
+mod upstream_pins;
 
 pub use api_models::{
     XaiApiModel, XaiApiModelError, XaiApiModelStatus, XaiListedModel, accept_xai_listed_models,
@@ -83,6 +84,10 @@ pub use platform_binding::{
     xai_platform_selection_for,
 };
 pub use platform_model::XaiPlatformModel;
+pub use upstream_pins::{
+    SUPERGROK_CREDENTIAL_HEADERS, SUPERGROK_UPSTREAM_PINS, XAI_API_CREDENTIAL_HEADERS,
+    XAI_API_UPSTREAM_PINS,
+};
 
 /// UTC date the compiled Platform API facts are due for re-review; it drives
 /// warnings only and never refuses the route.

@@ -24,13 +24,7 @@ impl Client {
         request: Request,
         control: ExchangeControl,
     ) -> Result<Response, Failure> {
-        request.validate(&self.inner.limits).map_err(|error| {
-            Failure::new(
-                Phase::RequestWrite,
-                TransmissionFact::NotStarted,
-                request_error_kind(&error),
-            )
-        })?;
+        self.admit(&request)?;
         if control.cancellation().is_cancelled() {
             return Err(Failure::new(
                 Phase::Resolution,
@@ -46,11 +40,16 @@ impl Client {
             ));
         }
 
+        if let Some(relay) = &self.inner.relay {
+            return relay.execute(&self.inner.limits, request, control).await;
+        }
         let (origin, method, path_and_query, headers, body) = request.into_parts();
         #[cfg(feature = "fault-injection")]
         let stream_fault = match self
             .faults
             .as_ref()
+            // A dialed hop (a credential gateway relay) carries no upstream faults.
+            .filter(|_| self.inner.dial.is_none())
             .and_then(|plan| plan.select(origin.host(), path_and_query.as_str()))
         {
             None => None,
@@ -119,6 +118,22 @@ impl Client {
             response.body.fault = stream_fault;
         }
         Ok(response)
+    }
+
+    /// Validates the request; a direct exchange also refuses any custodied
+    /// placeholder, unsent, so one never reaches a provider.
+    fn admit(&self, request: &Request) -> Result<(), Failure> {
+        request.validate(&self.inner.limits).map_err(|error| {
+            Failure::new(
+                Phase::RequestWrite,
+                TransmissionFact::NotStarted,
+                request_error_kind(&error),
+            )
+        })?;
+        if self.inner.relay.is_some() {
+            return Ok(());
+        }
+        refuse_custodied(request)
     }
 
     /// Sends the request on an idle pooled connection when there is one,
@@ -202,6 +217,17 @@ impl Client {
         origin: &Origin,
         control: &ExchangeControl,
     ) -> Result<(WireStream, WireProtocol), Failure> {
+        if let Some(dialer) = &self.inner.dial {
+            let stream = wait_task(
+                TaskGuard::new(tokio::spawn(dialer.dial())),
+                control,
+                self.inner.limits.connect_timeout,
+                Phase::Connect,
+                TransmissionFact::NotStarted,
+            )
+            .await?;
+            return Ok((WireStream::Dialed(stream), WireProtocol::Http1));
+        }
         let resolver = self.inner.resolver.clone();
         let policy = self.inner.address_policy;
         let target = origin.clone();
@@ -400,4 +426,21 @@ impl Client {
         .await
         .map_err(failed)
     }
+}
+
+/// A custodied placeholder is filled only by a credential gateway.
+fn refuse_custodied(request: &Request) -> Result<(), Failure> {
+    if request
+        .headers()
+        .iter()
+        .any(|(_, value)| crate::custodied::is_placeholder(value.as_bytes()))
+    {
+        return Err(Failure::new(
+            Phase::RequestWrite,
+            TransmissionFact::NotStarted,
+            ErrorKind::Internal,
+        )
+        .with_cause("custodied_placeholder"));
+    }
+    Ok(())
 }
