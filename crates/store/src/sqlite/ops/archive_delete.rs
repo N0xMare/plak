@@ -34,35 +34,7 @@ pub(in super::super) fn archive(
     if session.revision() != r.expected_revision() {
         return Err(SessionStoreError::Conflict);
     }
-    let mut s = tx
-        .prepare("SELECT branch_id FROM branches WHERE session_id=?1")
-        .map_err(map_sqlite)?;
-    let ids = s
-        .query_map([id(r.session_id())], |z| z.get::<_, String>(0))
-        .map_err(map_sqlite)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(map_sqlite)?;
-    drop(s);
-    for value in ids {
-        let row = branch_row(&tx, SessionRef::new(r.session_id(), parse(&value)?))?
-            .ok_or(SessionStoreError::corrupt())?;
-        if row.active.as_ref().map(|l| expired(l, now)).transpose()? == Some(false) {
-            return Err(SessionStoreError::LeaseHeld);
-        }
-        if !r.abandons_jobs() {
-            let stored = load_checkpoint(&tx, row.head.checkpoint().checkpoint_id())?;
-            if stored
-                .checkpoint()
-                .manifest()
-                .jobs()
-                .rows()
-                .iter()
-                .any(|job| job.terminal.is_none())
-            {
-                return Err(SessionStoreError::RunningJobs);
-            }
-        }
-    }
+    refuse_live_branches(&tx, r.session_id(), now, r.abandons_jobs())?;
     let revision = r.expected_revision().checked_next().ok_or_else(|| {
         SessionStoreError::capacity(
             StoreCapacityBound::SessionRevision,
@@ -117,6 +89,47 @@ pub(in super::super) fn archive(
     tx.commit().map_err(map_sqlite)?;
     b.holders.forget_session(r.session_id());
     Ok(receipt)
+}
+
+/// Archive refuses a live lease, and a job row with no terminal evidence unless
+/// the request abandons those jobs. Both checks stay inside the archive
+/// transaction.
+fn refuse_live_branches(
+    tx: &Connection,
+    session: SessionId,
+    now: LeaseInstant,
+    abandon_jobs: bool,
+) -> Result<(), SessionStoreError> {
+    let mut s = tx
+        .prepare("SELECT branch_id FROM branches WHERE session_id=?1")
+        .map_err(map_sqlite)?;
+    let ids = s
+        .query_map([id(session)], |z| z.get::<_, String>(0))
+        .map_err(map_sqlite)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(map_sqlite)?;
+    drop(s);
+    for value in ids {
+        let row = branch_row(tx, SessionRef::new(session, parse(&value)?))?
+            .ok_or(SessionStoreError::corrupt())?;
+        if row.active.as_ref().map(|l| expired(l, now)).transpose()? == Some(false) {
+            return Err(SessionStoreError::LeaseHeld);
+        }
+        if !abandon_jobs {
+            let stored = load_checkpoint(tx, row.head.checkpoint().checkpoint_id())?;
+            if stored
+                .checkpoint()
+                .manifest()
+                .jobs()
+                .rows()
+                .iter()
+                .any(|job| job.terminal.is_none())
+            {
+                return Err(SessionStoreError::RunningJobs);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn load_archive(
