@@ -1,6 +1,7 @@
 //! The app-owned manager for one explicit xAI selected-account slot.
 
 use super::RefreshForce;
+use super::custodied::CustodiedLogin;
 use super::{
     Arc, AsyncMutex, AtomicU64, AuthEndpoints, AuthTransportError, BrowserLoginFlow, Bytes,
     COMPATIBILITY_EXPIRES_UNIX, CallbackBinding, CatalogReceiptCore, Client, CredentialGeneration,
@@ -63,7 +64,49 @@ impl XaiNativeAuthManager {
             core: Arc::new(ManagerCore {
                 source_scope: None,
                 catalog_retries: true,
-                store,
+                store: Some(store),
+                custodied: None,
+                client,
+                acceptance,
+                endpoints: AuthEndpoints::production(),
+                compatibility_expires_unix: AtomicU64::new(COMPATIBILITY_EXPIRES_UNIX),
+                jwks: JwksCache::new(JwksResolvePolicy::xai(), MAX_JWKS_KEYS),
+                refresh_flight: AsyncMutex::new(()),
+                catalog: Mutex::new(None),
+                request_gate: None,
+                refresh_observer: None,
+                catalog_observer: None,
+                #[cfg(test)]
+                resolution_pause: Mutex::new(None),
+            }),
+        })
+    }
+
+    /// Opens the login a credential custodian holds for `slot`: facts,
+    /// fields and refresh are the custodian's, and no local slot is opened.
+    /// `client` is the route's client (relayed through a gateway). The
+    /// credential authority is the custodian's, which it computed over its
+    /// own slot, so a session bound under direct custody revalidates
+    /// unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Fails for an unaccepted or expired profile and for a custodian that
+    /// cannot be read.
+    pub async fn custodied(
+        custodian: Arc<dyn plakous_auth::custody::CredentialCustodian>,
+        slot: plakous_auth::custody::CustodySlot,
+        client: Client,
+        acceptance: XaiCompatibilityAcceptance,
+    ) -> Result<Self, XaiNativeAuthError> {
+        validate_acceptance(&acceptance, system_unix_seconds()?)?;
+        let login = CustodiedLogin::open(custodian, slot).await?;
+        Ok(Self {
+            core: Arc::new(ManagerCore {
+                source_scope: None,
+                catalog_retries: true,
+                store: None,
+                custodied: Some(login),
                 client,
                 acceptance,
                 endpoints: AuthEndpoints::production(),
@@ -160,10 +203,14 @@ impl XaiNativeAuthManager {
     ///
     /// Fails closed on malformed or unsafe storage.
     pub fn status(&self) -> Result<Option<XaiSubscriptionStatus>, XaiNativeAuthError> {
-        let Some(fence) = self.core.store.load()? else {
+        if let Some(login) = &self.core.custodied {
+            return login.status();
+        }
+        let store = self.core.store()?;
+        let Some(fence) = store.load()? else {
             return Ok(None);
         };
-        refuse_retired_payload(&self.core.store, &fence)?;
+        refuse_retired_payload(store, &fence)?;
         Ok(Some(XaiSubscriptionStatus {
             generation: fence.generation(),
             status: fence.status(),
@@ -195,6 +242,12 @@ impl XaiNativeAuthManager {
         if self.core.ensure_active().is_err() {
             return unavailable(SubscriptionUsageUnavailable::Unqualified);
         }
+        if let Some(login) = &self.core.custodied {
+            return self.custodied_usage(login).await;
+        }
+        let Ok(store) = self.core.store() else {
+            return unavailable(SubscriptionUsageUnavailable::LocalState);
+        };
         // Every refusal before the HTTP exchange is local and is named as such:
         // a held refresh flight or store lease is `Busy`, a non-Ready record is
         // its exact `CredentialState`, and unsafe storage or a dead clock is
@@ -202,7 +255,7 @@ impl XaiNativeAuthManager {
         let Some(_lifecycle) = self.core.refresh_flight.try_lock() else {
             return unavailable(SubscriptionUsageUnavailable::Busy);
         };
-        let fence = match self.core.store.try_load() {
+        let fence = match store.try_load() {
             Ok(Some(fence)) => fence,
             Ok(None) => return unavailable(SubscriptionUsageUnavailable::NotConnected),
             Err(PrivateStoreError::StoreBusy) => {
@@ -213,7 +266,7 @@ impl XaiNativeAuthManager {
         // A durable Unknown record whose claim another process still holds is
         // a refresh in flight, not a settled quarantine.
         if fence.status() == CredentialStatus::RefreshOutcomeUnknown {
-            match self.core.store.refresh_outcome_settled(&fence) {
+            match store.refresh_outcome_settled(&fence) {
                 Ok(true) => {}
                 Ok(false) => return unavailable(SubscriptionUsageUnavailable::Busy),
                 Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
@@ -222,7 +275,7 @@ impl XaiNativeAuthManager {
         if let Some(reason) = usage_credential_refusal(fence.status()) {
             return unavailable(reason);
         }
-        let lease = match self.core.store.try_acquire_ready(&fence) {
+        let lease = match store.try_acquire_ready(&fence) {
             Ok(Some(lease)) => lease,
             Ok(None) => return unavailable(SubscriptionUsageUnavailable::Busy),
             Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
@@ -257,7 +310,6 @@ impl XaiNativeAuthManager {
             return unavailable(SubscriptionUsageUnavailable::AccountChanged);
         }
 
-        let mut headers = HeaderMap::new();
         let Ok(authorization) = bearer_header(&stored.access_token) else {
             return unavailable(SubscriptionUsageUnavailable::InvalidResponse);
         };
@@ -265,6 +317,98 @@ impl XaiNativeAuthManager {
         let Ok(subject) = sensitive_header_value(subject.into_header_bytes()) else {
             return unavailable(SubscriptionUsageUnavailable::AccountChanged);
         };
+        self.usage_exchange(authorization, subject, now, || lease.fence() == fence)
+            .await
+    }
+
+    /// The usage read of a custodied login: the same request, its
+    /// credential header values the custodian's fields for fresh facts,
+    /// relayed through the route's client. Refresh stays with the custodian.
+    async fn custodied_usage(&self, login: &CustodiedLogin) -> SubscriptionUsageRead {
+        use plakous_auth::custody::CustodyStatus;
+        let unavailable = |reason| SubscriptionUsageRead::Unavailable {
+            observed_at: Timestamp::new(system_unix_seconds().unwrap_or(0), 0)
+                .unwrap_or_else(|_| unreachable!("Unix epoch is a valid timestamp")),
+            reason,
+        };
+        let Some(_lifecycle) = self.core.refresh_flight.try_lock() else {
+            return unavailable(SubscriptionUsageUnavailable::Busy);
+        };
+        let facts = match login.read().await {
+            Ok(facts) => facts,
+            Err(XaiNativeAuthError::Transport(cause)) => {
+                return unavailable(SubscriptionUsageUnavailable::Transport(cause));
+            }
+            Err(XaiNativeAuthError::StoredCredentialWrittenByNewerBuild) => {
+                return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                    SubscriptionUsageCredentialState::WrittenByNewerBuild,
+                ));
+            }
+            Err(
+                XaiNativeAuthError::StoredCredentialFormatRetired
+                | XaiNativeAuthError::InvalidStoredCredential,
+            ) => {
+                return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                    SubscriptionUsageCredentialState::LoginRequired,
+                ));
+            }
+            Err(_) => return unavailable(SubscriptionUsageUnavailable::NotConnected),
+        };
+        let reason = match facts.status {
+            CustodyStatus::Ready => None,
+            CustodyStatus::SignedOut => Some(SubscriptionUsageUnavailable::NotConnected),
+            CustodyStatus::Refreshing => Some(SubscriptionUsageUnavailable::Busy),
+            CustodyStatus::WrittenByNewerBuild => {
+                Some(SubscriptionUsageUnavailable::CredentialState(
+                    SubscriptionUsageCredentialState::WrittenByNewerBuild,
+                ))
+            }
+            CustodyStatus::LoginRequired | CustodyStatus::ProfileChanged => {
+                Some(SubscriptionUsageUnavailable::CredentialState(
+                    SubscriptionUsageCredentialState::LoginRequired,
+                ))
+            }
+            status => super::custodied::credential_status(status)
+                .and_then(usage_credential_refusal)
+                .or(Some(SubscriptionUsageUnavailable::NotConnected)),
+        };
+        if let Some(reason) = reason {
+            return unavailable(reason);
+        }
+        let Ok(ready) = login.ready() else {
+            return unavailable(SubscriptionUsageUnavailable::NotConnected);
+        };
+        let Ok(now) = system_unix_seconds() else {
+            return unavailable(SubscriptionUsageUnavailable::LocalState);
+        };
+        if ready.expires_at <= now {
+            return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                SubscriptionUsageCredentialState::RefreshRequired,
+            ));
+        }
+        let (Ok(authorization), Ok(subject)) = (ready.authorization(), ready.subject()) else {
+            return unavailable(SubscriptionUsageUnavailable::AccountChanged);
+        };
+        self.usage_exchange(authorization, subject, now, || true)
+            .await
+    }
+
+    /// The usage request with its credential header values, its bounded
+    /// exchange and decode; `held` says whether the credential it was
+    /// prepared from is still held once the reply arrived.
+    async fn usage_exchange(
+        &self,
+        authorization: HeaderValue,
+        subject: HeaderValue,
+        now: u64,
+        held: impl Fn() -> bool,
+    ) -> SubscriptionUsageRead {
+        let unavailable = |reason| SubscriptionUsageRead::Unavailable {
+            observed_at: Timestamp::new(system_unix_seconds().unwrap_or(0), 0)
+                .unwrap_or_else(|_| unreachable!("Unix epoch is a valid timestamp")),
+            reason,
+        };
+        let mut headers = HeaderMap::new();
         headers.insert(HEADER_AUTHORIZATION, authorization);
         headers.insert(HEADER_X_USER_ID, subject);
         headers.insert(
@@ -322,7 +466,7 @@ impl XaiNativeAuthManager {
                 reason: SubscriptionUsageUnavailable::InvalidResponse,
             };
         }
-        if lease.fence() != fence {
+        if !held() {
             return SubscriptionUsageRead::Unavailable {
                 observed_at,
                 reason: SubscriptionUsageUnavailable::AccountChanged,
@@ -390,7 +534,7 @@ impl XaiNativeAuthManager {
             self.core.validate_login_discovery(),
         )
         .await?;
-        let baseline = self.core.store.load()?;
+        let baseline = self.core.store()?.load()?;
         let form = urlencoded_form(&[
             ("client_id", XAI_PUBLIC_CLIENT_ID),
             ("scope", XAI_OAUTH_SCOPE),
@@ -436,18 +580,29 @@ impl XaiNativeAuthManager {
     /// Requires a current Ready selected login and active compatibility profile.
     pub fn subscription_route(&self) -> Result<XaiGrokSubscriptionRoute, XaiNativeAuthError> {
         self.core.ensure_active()?;
+        if let Some(login) = &self.core.custodied {
+            let ready = login.ready()?;
+            let receipt = self.core.active_catalog_receipt(
+                &ready.fence,
+                &ready.selection_epoch,
+                system_unix_seconds()?,
+            )?;
+            return self.subscription_route_from_receipt(&receipt);
+        }
         let fence = self
             .core
-            .store
+            .store()?
             .load()?
             .ok_or(XaiNativeAuthError::NotLoggedIn)?;
         if fence.status() != CredentialStatus::Ready {
             return Err(XaiNativeAuthError::NotReady);
         }
         let stored = self.core.read_stored(&fence)?;
-        let receipt = self
-            .core
-            .active_catalog_receipt(&fence, &stored, system_unix_seconds()?)?;
+        let receipt = self.core.active_catalog_receipt(
+            &fence,
+            &stored.selection_epoch,
+            system_unix_seconds()?,
+        )?;
         self.subscription_route_from_receipt(&receipt)
     }
 
@@ -654,9 +809,12 @@ impl XaiNativeAuthManager {
     ///
     /// Fails for a missing, non-Ready, or unreadable record.
     pub fn access_expires_at(&self) -> Result<u64, XaiNativeAuthError> {
+        if let Some(login) = &self.core.custodied {
+            return Ok(login.ready()?.expires_at);
+        }
         let fence = self
             .core
-            .store
+            .store()?
             .load()?
             .ok_or(XaiNativeAuthError::NotLoggedIn)?;
         Ok(self.core.read_stored(&fence)?.expires_at)
@@ -668,12 +826,9 @@ impl XaiNativeAuthManager {
     ///
     /// Rejects stale or missing state.
     pub fn logout(&self) -> Result<CredentialGeneration, XaiNativeAuthError> {
-        let fence = self
-            .core
-            .store
-            .load()?
-            .ok_or(XaiNativeAuthError::NotLoggedIn)?;
-        Ok(self.core.store.logout(fence.generation())?)
+        let store = self.core.store()?;
+        let fence = store.load()?.ok_or(XaiNativeAuthError::NotLoggedIn)?;
+        Ok(store.logout(fence.generation())?)
     }
 
     /// Revokes the refresh token at the fixed issuer and then writes a local tombstone.
@@ -691,7 +846,7 @@ impl XaiNativeAuthManager {
     ) -> Result<BrowserLoginFlow, XaiNativeAuthError> {
         self.core.ensure_active()?;
         let deadline = self.core.flow_deadline(LOGIN_TIMEOUT)?;
-        let baseline = self.core.store.load()?;
+        let baseline = self.core.store()?.load()?;
         let pkce = PkceS256::generate()?;
         let binding = CallbackBinding::generate()?;
         let authorization_url =
@@ -721,7 +876,8 @@ impl XaiNativeAuthManager {
             core: Arc::new(ManagerCore {
                 source_scope: None,
                 catalog_retries: true,
-                store,
+                store: Some(store),
+                custodied: None,
                 client,
                 acceptance: XaiCompatibilityAcceptance {
                     accepted_at: COMPATIBILITY_REVIEWED_UNIX,
@@ -746,13 +902,15 @@ impl XaiNativeAuthManager {
     ) -> Result<XaiGrokSubscriptionRoute, XaiNativeAuthError> {
         let fence = self
             .core
-            .store
+            .store()?
             .load()?
             .ok_or(XaiNativeAuthError::NotLoggedIn)?;
         let stored = self.core.read_stored(&fence)?;
-        let receipt = self
-            .core
-            .active_catalog_receipt(&fence, &stored, system_unix_seconds()?)?;
+        let receipt = self.core.active_catalog_receipt(
+            &fence,
+            &stored.selection_epoch,
+            system_unix_seconds()?,
+        )?;
         let parts = native_route_authority(&self.core, &receipt)?;
         XaiGrokSubscriptionRoute::from_native_authority_with_origin(
             parts.authority,
@@ -765,9 +923,12 @@ impl XaiNativeAuthManager {
 
 impl fmt::Debug for XaiNativeAuthManager {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("XaiNativeAuthManager")
-            .field("store", &self.core.store)
+        let mut debug = formatter.debug_struct("XaiNativeAuthManager");
+        match (&self.core.store, &self.core.custodied) {
+            (Some(store), _) => debug.field("store", store),
+            (None, login) => debug.field("custodied", login),
+        };
+        debug
             .field("profile", &XAI_GROK_COMPATIBILITY_PROFILE)
             .finish_non_exhaustive()
     }

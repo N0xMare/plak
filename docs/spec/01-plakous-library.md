@@ -6207,10 +6207,13 @@ gateway adopting the store in place keeps), its selection digest names the
 login selection (Codex's route digest; for Claude the login grant, for
 SuperGrok the selection epoch), and Claude's account UUID and client device
 id travel as `claude_account_uuid` and `claude_device_id` wire identity.
-SuperGrok's raw login selection epoch and account subject (the `x-userid`
-value) are non-secret identity facts and travel as `grok_selection_epoch`
-and `grok_subject`: its route binds the raw epoch, which the one-way
-selection digest cannot reproduce.
+SuperGrok's raw login selection epoch, account subject (the `x-userid`
+value) and route credential-authority id are non-secret identity facts and
+travel as `grok_selection_epoch`, `grok_subject` and `grok_authority_id`:
+its route binds the raw epoch and authority id, which the one-way digests
+cannot reproduce. The authority id is the digest the gateway computes over
+its own slot path, slot id and account scope, so a gateway adopting the
+store in place reports the bytes a session already bound.
 Refresh is the single writer's: `IfDue` refreshes only while the caller's
 fence is current and the custodian's own clock says it is due;
 `AfterRejection` waits for any claimed refresh in flight to settle, then
@@ -6240,19 +6243,26 @@ fence again at injection either way.
 Subscription logins follow the same seam. `GatewayCustody::custody()`
 carries the remote custodian with the relayed transport
 (`Custody::custodian`), and `NativeSubscriptions::with_custody` puts a
-facade's Codex and Claude logins under it: the account is `<kind>` or
-`<kind>/<name>` (kinds `codex` and `claude`, the name of
-`for_named_account`). Status and consent come from the gateway's facts
+facade's Codex, Claude and SuperGrok logins under it: the account is
+`<kind>` or `<kind>/<name>` (kinds `codex`, `claude` and `grok`, the name
+of `for_named_account`). Status and consent come from the gateway's facts
 (consent is current only for this build's exact profile id and notice
 revision), and the managers open in a facts-backed mode
 (`CodexSubscriptionCredentialManager::custodied`,
-`ClaudeNativeAuthManager::custodied`) that never opens, creates or locks
-the store. Their preflight, catalog, revalidation and receipt-renewal reads
+`ClaudeNativeAuthManager::custodied`, `XaiNativeAuthManager::custodied`)
+that never opens, creates or locks the store. Their preflight, catalog, revalidation and receipt-renewal reads
 answer from facts fetched per physical attempt (synchronous checks use the
 attempt's facts); the account and credential-authority digests are taken
 from the facts unchanged, so a session bound under direct custody reopens
 with an equal binding, and Claude's request identity comes from its wire
-identity. Each credential header is the custodian's field for the
+identity. A SuperGrok receipt binds the account `grok_subject`, the
+selection epoch `grok_selection_epoch` and the authority `grok_authority_id`,
+each checked against the facts' account, authority and selection digests
+before use; its grant holds the custodian's `authorization` field, and its
+catalog and billing reads carry the custodian's `x-userid` field. Because
+the SuperGrok route's runtime checks are synchronous, the model reads the
+custodian's facts and fields once before each runtime revalidation and
+renewal observation, and the dispatch-time refresh reads them again. Each credential header is the custodian's field for the
 attempt's fence, inserted at the same header position, so catalog,
 inference, side-request and usage GETs relay as pinned rows byte for byte
 as they would be sent directly. Refresh is the custodian's single writer:
@@ -6265,10 +6275,7 @@ Claude allowance carries no e-mail) and, after an `Unauthorized` reply,
 asks `AfterRejection` once and reads again. Store operations (login,
 logout, revoke, consent, named-account listing and removal, the upstream
 account fingerprint and the persisted catalog snapshot) refuse
-`NativeSubscriptionError::GatewayCustody`; they belong to the gateway. A
-SuperGrok route binds the login's raw selection epoch and subject, which
-facts do not carry, so SuperGrok refuses `GatewayCustody` under gateway
-custody.
+`NativeSubscriptionError::GatewayCustody`; they belong to the gateway.
 
 ## 8. Tools and effects
 

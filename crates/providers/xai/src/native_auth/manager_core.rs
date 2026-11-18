@@ -14,9 +14,9 @@ use super::{
     Timestamp, TokenResponse, XAI_GROK_COMPATIBILITY_PROFILE, XAI_PUBLIC_CLIENT_ID,
     XaiNativeAuthError, XaiNativeCatalogReceipt, XaiRefreshCancelGuard, XaiRefreshHooks,
     XaiRevokeHooks, XaiSubscriptionStatus, Zeroizing, access_needs_refresh,
-    authorization_code_token_form, bearer_header, credential_record, decode_json, fixed_headers,
-    headers_are_json, insert_subscription_catalog_headers, network_failure, remaining_until,
-    route_credential_authority_id, run_claimed_refresh, run_claimed_revoke, status_error,
+    authorization_code_token_form, bearer_header, catalog_subject_header, credential_record,
+    decode_json, fixed_headers, headers_are_json, insert_subscription_catalog_headers,
+    network_failure, remaining_until, run_claimed_refresh, run_claimed_revoke, status_error,
     system_unix_elapsed, system_unix_seconds, urlencoded_form, valid_admitted_catalog_entries,
     valid_login_selection_epoch, validate_acceptance_until,
 };
@@ -133,6 +133,9 @@ impl ManagerCore {
         renewal: Option<&CatalogRenewal<'_>>,
     ) -> Result<CatalogReceiptCore, XaiNativeAuthError> {
         self.ensure_active()?;
+        if let Some(login) = &self.custodied {
+            return self.custodied_catalog(login, renewal).await;
+        }
         match self
             .refresh_if_needed(
                 renewal.map(|renewal| renewal.account),
@@ -143,26 +146,29 @@ impl ManagerCore {
         {
             Ok(()) => {}
             Err(XaiNativeAuthError::NotReady) => {
-                let fence = self.store.load()?.ok_or(XaiNativeAuthError::NotLoggedIn)?;
+                let fence = self
+                    .store()?
+                    .load()?
+                    .ok_or(XaiNativeAuthError::NotLoggedIn)?;
                 if fence.status() != CredentialStatus::Ready {
                     return Err(XaiNativeAuthError::NotReady);
                 }
             }
             Err(error) => return Err(error),
         }
-        let fence = self.store.load()?.ok_or(XaiNativeAuthError::NotLoggedIn)?;
+        let store = self.store()?;
+        let fence = store.load()?.ok_or(XaiNativeAuthError::NotLoggedIn)?;
         if fence.status() != CredentialStatus::Ready {
             return Err(XaiNativeAuthError::NotReady);
         }
-        let lease = self.store.acquire_ready(&fence)?;
+        let lease = store.acquire_ready(&fence)?;
         let stored: StoredTokens = serde_json::from_slice(lease.payload().expose_secret())
             .map_err(|_| XaiNativeAuthError::InvalidStoredCredential)?;
         stored.validate(fence.account_binding())?;
         if let Some(renewal) = renewal
             && (fence.account_binding() != renewal.account
                 || stored.selection_epoch != renewal.selection_epoch
-                || route_credential_authority_id(&self.store, self.source_scope.as_deref())
-                    != renewal.authority_id)
+                || !self.authority_is(renewal.authority_id))
         {
             return Err(XaiNativeAuthError::SelectionChanged);
         }
@@ -175,7 +181,30 @@ impl ManagerCore {
                 renewal.is_none() && self.catalog_retries,
             )
             .await?;
-        let catalog: CatalogResponse = decode_json(&response, MAX_AUTH_BODY_BYTES)?;
+        let receipt = self.admit_catalog(
+            &response,
+            renewal,
+            requested_at,
+            fence,
+            stored.selection_epoch.clone(),
+            self.authority_id()?,
+        )?;
+        drop(lease);
+        Ok(receipt)
+    }
+
+    /// Admits one catalog reply into the receipt of `fence`, its login
+    /// selection and credential authority, and keeps it as the current one.
+    pub(super) fn admit_catalog(
+        &self,
+        response: &[u8],
+        renewal: Option<&CatalogRenewal<'_>>,
+        requested_at: u64,
+        fence: CredentialFence,
+        selection_epoch: String,
+        authority_id: String,
+    ) -> Result<CatalogReceiptCore, XaiNativeAuthError> {
+        let catalog: CatalogResponse = decode_json(response, MAX_AUTH_BODY_BYTES)?;
         let admitted_entries = catalog.admitted_coding_entries()?;
         let now = system_unix_seconds()?;
         let observed = renewal.map_or(now, |renewal| renewal.observed_seconds(requested_at));
@@ -193,30 +222,35 @@ impl ManagerCore {
             expires_at: Timestamp::new(expires, 0)?,
         };
         let receipt = CatalogReceiptCore {
-            public: public.clone(),
-            fence: fence.clone(),
-            selection_epoch: stored.selection_epoch.clone(),
-            authority_id: route_credential_authority_id(&self.store, self.source_scope.as_deref()),
+            public,
+            fence,
+            selection_epoch,
+            authority_id,
         };
         *self
             .catalog
             .lock()
             .map_err(|_| XaiNativeAuthError::CatalogUnavailable)? = Some(receipt.clone());
-        drop(lease);
         Ok(receipt)
     }
 
+    /// The Ready lease of `receipt`'s exact credential, held while a
+    /// resolution reads it; a custodied login holds no local lease.
     pub(super) fn acquire_resolution_lease(
         &self,
         receipt: &CatalogReceiptCore,
-    ) -> Result<ReadyCredentialLease, XaiNativeAuthError> {
+    ) -> Result<Option<ReadyCredentialLease>, XaiNativeAuthError> {
         self.ensure_resolution_receipt_current(receipt)?;
-        let current = self.store.load()?.ok_or(XaiNativeAuthError::NotLoggedIn)?;
+        if let Some(login) = &self.custodied {
+            login.require_receipt(receipt)?;
+            return Ok(None);
+        }
+        let store = self.store()?;
+        let current = store.load()?.ok_or(XaiNativeAuthError::NotLoggedIn)?;
         if current != receipt.fence || current.status() != CredentialStatus::Ready {
             return Err(XaiNativeAuthError::SelectionChanged);
         }
-        let lease = self
-            .store
+        let lease = store
             .acquire_ready(&receipt.fence)
             .map_err(|_| XaiNativeAuthError::SelectionChanged)?;
         if lease.fence() != receipt.fence {
@@ -226,12 +260,11 @@ impl ManagerCore {
             .map_err(|_| XaiNativeAuthError::InvalidStoredCredential)?;
         stored.validate(receipt.fence.account_binding())?;
         if stored.selection_epoch != receipt.selection_epoch
-            || receipt.authority_id
-                != route_credential_authority_id(&self.store, self.source_scope.as_deref())
+            || !self.authority_is(&receipt.authority_id)
         {
             return Err(XaiNativeAuthError::SelectionChanged);
         }
-        Ok(lease)
+        Ok(Some(lease))
     }
 
     pub(super) fn ensure_resolution_receipt_current(
@@ -248,8 +281,7 @@ impl ManagerCore {
             || receipt.public.expires_at.seconds() <= now
             || receipt.public.expires_at.seconds() > COMPATIBILITY_EXPIRES_UNIX
             || !valid_login_selection_epoch(&receipt.selection_epoch)
-            || receipt.authority_id
-                != route_credential_authority_id(&self.store, self.source_scope.as_deref())
+            || !self.authority_is(&receipt.authority_id)
         {
             return Err(XaiNativeAuthError::CatalogUnavailable);
         }
@@ -273,7 +305,7 @@ impl ManagerCore {
     pub(super) fn active_catalog_receipt(
         &self,
         fence: &CredentialFence,
-        stored: &StoredTokens,
+        selection_epoch: &str,
         now: u64,
     ) -> Result<CatalogReceiptCore, XaiNativeAuthError> {
         let receipt = self
@@ -285,9 +317,8 @@ impl ManagerCore {
         if !valid_admitted_catalog_entries(&receipt.public.entries)
             || receipt.public.account != *fence.account_binding()
             || receipt.fence != *fence
-            || receipt.selection_epoch != stored.selection_epoch
-            || receipt.authority_id
-                != route_credential_authority_id(&self.store, self.source_scope.as_deref())
+            || receipt.selection_epoch != selection_epoch
+            || !self.authority_is(&receipt.authority_id)
             || receipt.public.observed_at.seconds() > now
             || receipt.public.expires_at.seconds() <= now
             || receipt.public.expires_at.seconds() > COMPATIBILITY_EXPIRES_UNIX
@@ -315,7 +346,7 @@ impl ManagerCore {
             self.core_replace_selected(expected, record)
                 .map_err(|_| XaiNativeAuthError::LoginPersistence)?
         } else {
-            self.store
+            self.store()?
                 .initialize_selected(&record)
                 .map_err(|_| XaiNativeAuthError::LoginPersistence)?;
             record.fence()
@@ -332,7 +363,7 @@ impl ManagerCore {
         expected: &CredentialFence,
         record: CredentialRecord,
     ) -> Result<CredentialFence, XaiNativeAuthError> {
-        self.store
+        self.store()?
             .replace_selected_login(expected, record)
             .map_err(Into::into)
     }
@@ -362,9 +393,21 @@ impl ManagerCore {
         expected_authority: Option<&str>,
         force: RefreshForce,
     ) -> Result<(), XaiNativeAuthError> {
+        if let Some(login) = &self.custodied {
+            return self
+                .custodied_refresh(
+                    login,
+                    expected_account,
+                    expected_selection_epoch,
+                    expected_authority,
+                    force,
+                )
+                .await;
+        }
+        let store = self.store()?;
         let flight = self.refresh_flight.lock().await;
         let mut hooks = XaiRefreshHooks {
-            cancel_guard: XaiRefreshCancelGuard::new(&self.store, self.refresh_observer.as_deref()),
+            cancel_guard: XaiRefreshCancelGuard::new(store, self.refresh_observer.as_deref()),
             core: self,
             expected_account,
             expected_selection_epoch,
@@ -375,7 +418,7 @@ impl ManagerCore {
             force,
             detail: CredentialRefreshDetail::default(),
         };
-        let result = run_claimed_refresh(&self.store, &self.client, &mut hooks).await;
+        let result = run_claimed_refresh(store, &self.client, &mut hooks).await;
         hooks.cancel_guard.finished();
         result
     }
@@ -391,11 +434,7 @@ impl ManagerCore {
         };
         let stored = self.read_stored(fence)?;
         if stored.selection_epoch != expected_epoch
-            || expected_authority
-                != Some(
-                    route_credential_authority_id(&self.store, self.source_scope.as_deref())
-                        .as_str(),
-                )
+            || !expected_authority.is_some_and(|authority| self.authority_is(authority))
         {
             return Err(XaiNativeAuthError::SelectionChanged);
         }
@@ -412,8 +451,11 @@ impl ManagerCore {
                 crate::route::log_authority_rejection("native.route_current.catalog");
             }
         })?;
+        if let Some(login) = &self.custodied {
+            return self.custodied_route_current(login, expected_receipt, witness_failures);
+        }
         let fence = self
-            .store
+            .store()?
             .load()
             .inspect_err(|_| {
                 if witness_failures {
@@ -471,7 +513,7 @@ impl ManagerCore {
             }
         })?;
         let active = self
-            .active_catalog_receipt(&fence, &stored, now)
+            .active_catalog_receipt(&fence, &stored.selection_epoch, now)
             .inspect_err(|_| {
                 if witness_failures {
                     crate::route::log_authority_rejection("native.route_current.catalog");
@@ -526,7 +568,7 @@ impl ManagerCore {
         &self,
         fence: &CredentialFence,
     ) -> Result<StoredTokens, XaiNativeAuthError> {
-        let lease = self.store.acquire_ready(fence)?;
+        let lease = self.store()?.acquire_ready(fence)?;
         let stored: StoredTokens = serde_json::from_slice(lease.payload().expose_secret())
             .map_err(|_| XaiNativeAuthError::InvalidStoredCredential)?;
         stored.validate(fence.account_binding())?;
@@ -537,8 +579,13 @@ impl ManagerCore {
         &self,
         expected_receipt: &CatalogReceiptCore,
     ) -> Result<crate::XaiSubscriptionCredentialGrant, crate::XaiAuthError> {
-        let fence = self
-            .store
+        if let Some(login) = &self.custodied {
+            return self.custodied_grant(login, expected_receipt);
+        }
+        let store = self
+            .store()
+            .map_err(|_| crate::XaiAuthError::CredentialSource)?;
+        let fence = store
             .load()
             .map_err(|_| crate::XaiAuthError::CredentialSource)?
             .ok_or(crate::XaiAuthError::MissingCredential)?;
@@ -548,8 +595,7 @@ impl ManagerCore {
         {
             return Err(crate::XaiAuthError::BindingMismatch);
         }
-        let lease = self
-            .store
+        let lease = store
             .acquire_ready(&expected_receipt.fence)
             .map_err(|_| crate::XaiAuthError::CredentialSource)?;
         if lease.fence() != expected_receipt.fence {
@@ -561,14 +607,13 @@ impl ManagerCore {
             .validate(&expected_receipt.public.account)
             .map_err(|_| crate::XaiAuthError::CredentialSource)?;
         if stored.selection_epoch != expected_receipt.selection_epoch
-            || route_credential_authority_id(&self.store, self.source_scope.as_deref())
-                != expected_receipt.authority_id
+            || !self.authority_is(&expected_receipt.authority_id)
         {
             return Err(crate::XaiAuthError::BindingMismatch);
         }
         let now = system_unix_seconds().map_err(|_| crate::XaiAuthError::CredentialSource)?;
         let active = self
-            .active_catalog_receipt(&fence, &stored, now)
+            .active_catalog_receipt(&fence, &stored.selection_epoch, now)
             .map_err(|_| crate::XaiAuthError::BindingMismatch)?;
         if active != *expected_receipt {
             return Err(crate::XaiAuthError::BindingMismatch);
@@ -602,7 +647,7 @@ impl ManagerCore {
             core: self,
             _flight: flight,
         };
-        run_claimed_revoke(&self.store, &self.client, &mut hooks).await
+        run_claimed_revoke(self.store()?, &self.client, &mut hooks).await
     }
 
     pub(super) async fn send_form(
@@ -681,16 +726,29 @@ impl ManagerCore {
         catalog_subject: Option<&AccountBinding>,
         retry: bool,
     ) -> Result<Zeroizing<Vec<u8>>, XaiNativeAuthError> {
+        let authorization = bearer_token.map(bearer_header).transpose()?;
+        let subject = catalog_subject.map(catalog_subject_header).transpose()?;
+        self.get_with(endpoint, authorization, subject, retry).await
+    }
+
+    /// [`Self::get`] with the credential header values already prepared.
+    pub(super) async fn get_with(
+        &self,
+        endpoint: &Endpoint,
+        authorization: Option<HeaderValue>,
+        catalog_subject: Option<HeaderValue>,
+        retry: bool,
+    ) -> Result<Zeroizing<Vec<u8>>, XaiNativeAuthError> {
         let mut headers = fixed_headers("application/json");
         headers.insert(HEADER_ACCEPT, HeaderValue::from_static("application/json"));
-        if let Some(token) = bearer_token {
-            headers.insert(HEADER_AUTHORIZATION, bearer_header(token)?);
+        if let Some(authorization) = authorization {
+            headers.insert(HEADER_AUTHORIZATION, authorization);
         }
         if endpoint.path == CATALOG_PATH {
             insert_subscription_catalog_headers(
                 &mut headers,
                 catalog_subject.ok_or(XaiNativeAuthError::CatalogUnavailable)?,
-            )?;
+            );
         } else if catalog_subject.is_some() {
             return Err(XaiNativeAuthError::CatalogUnavailable);
         }

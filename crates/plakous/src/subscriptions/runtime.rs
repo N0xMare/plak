@@ -19,6 +19,12 @@ pub struct NativeSubscriptions {
     pub(super) child_backoff: Option<child::BackoffHook>,
     #[cfg(test)]
     pub(super) codex_test_transport: Option<(plakous_http::Client, plakous_openai::EndpointOrigin)>,
+    /// The client every SuperGrok exchange dials through, in tests.
+    #[cfg(test)]
+    pub(super) xai_test_transport: Option<plakous_http::Client>,
+    /// The client Claude inference dials through, in tests.
+    #[cfg(test)]
+    pub(super) claude_test_transport: Option<plakous_http::Client>,
     pub(super) catalog_retries: bool,
     pub(super) state: SubscriptionState,
     pub(super) exchange_observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
@@ -168,6 +174,10 @@ impl NativeSubscriptions {
             child_backoff: None,
             #[cfg(test)]
             codex_test_transport: None,
+            #[cfg(test)]
+            xai_test_transport: None,
+            #[cfg(test)]
+            claude_test_transport: None,
             state,
             exchange_observer: None,
             catalog_retries: true,
@@ -183,6 +193,10 @@ impl NativeSubscriptions {
             child_backoff: None,
             #[cfg(test)]
             codex_test_transport: None,
+            #[cfg(test)]
+            xai_test_transport: None,
+            #[cfg(test)]
+            claude_test_transport: None,
             state: SubscriptionState::new(paths),
             exchange_observer: None,
             catalog_retries: true,

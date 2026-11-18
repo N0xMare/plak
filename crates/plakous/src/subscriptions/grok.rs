@@ -24,7 +24,8 @@ pub(super) fn xai_native_http_config()
 
 pub(super) struct XaiOnline {
     pub(super) manager: Arc<plakous_xai::XaiNativeAuthManager>,
-    pub(super) acceptance: LoadedAcceptance,
+    /// The local consent receipt; `None` under gateway custody.
+    pub(super) acceptance: Option<LoadedAcceptance>,
 }
 
 pub(super) fn xai_inference_client(
@@ -49,11 +50,80 @@ impl NativeSubscriptions {
         request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
         enforce_login_recovery: bool,
     ) -> Result<XaiOnline, NativeSubscriptionError> {
-        // A SuperGrok route binds the login's raw selection epoch and
-        // subject, which gateway facts do not carry yet.
-        self.require_local_custody()?;
-        self.xai_online_local(request_gate, enforce_login_recovery)
-            .await
+        match &self.gateway {
+            Some(gateway) => self.xai_custodied(gateway, request_gate).await,
+            None => {
+                self.xai_online_local(request_gate, enforce_login_recovery)
+                    .await
+            }
+        }
+    }
+
+    /// The SuperGrok surface of a login a credential gateway holds: consent
+    /// is the gateway's, the manager answers from its facts and its client
+    /// relays through it.
+    async fn xai_custodied(
+        &self,
+        gateway: &super::custody::SubscriptionGateway,
+        request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
+    ) -> Result<XaiOnline, NativeSubscriptionError> {
+        let provider = NativeProvider::Xai;
+        let notice = Self::notice(provider)?;
+        self.require_gateway_consent(gateway, provider).await?;
+        let timestamp =
+            Timestamp::new(self.state.now()?, 0).map_err(|_| NativeSubscriptionError::Internal)?;
+        let acceptance = plakous_xai::XaiCompatibilityAcceptance::accept_exact(
+            notice.profile_id,
+            notice.source_revision,
+            notice
+                .secondary_source_revision
+                .ok_or(NativeSubscriptionError::Internal)?,
+            notice.notice_revision,
+            notice.kill_switch_revision,
+            timestamp,
+        )
+        .map_err(map_xai_error)?;
+        let client = gateway.transport.client(
+            plakous_http::Client::new_http1(plakous_http::Limits::default())
+                .map_err(|_| NativeSubscriptionError::Internal)?,
+        );
+        let mut manager = plakous_xai::XaiNativeAuthManager::custodied(
+            Arc::clone(&gateway.custodian),
+            self.custody_slot(provider)?,
+            client,
+            acceptance,
+        )
+        .await
+        .map_err(map_xai_error)?
+        .with_catalog_observer(self.exchange_observer.clone())
+        .map_err(map_xai_error)?;
+        if !self.catalog_retries {
+            manager = manager.without_catalog_retries().map_err(map_xai_error)?;
+        }
+        if let Some(gate) = request_gate {
+            manager = manager
+                .with_subscription_request_gate(gate)
+                .map_err(map_xai_error)?;
+        }
+        Ok(XaiOnline {
+            manager: Arc::new(manager),
+            acceptance: None,
+        })
+    }
+
+    /// The auth and catalog client of a local login. Auth and catalog keep
+    /// the default phase bounds; inference uses its own H1 client with the
+    /// model's longer response-head budget.
+    #[cfg_attr(
+        not(test),
+        allow(clippy::unused_self, reason = "only tests read the fixture transport")
+    )]
+    fn xai_auth_client(&self) -> Result<plakous_http::Client, NativeSubscriptionError> {
+        let client = plakous_http::Client::new_http1(plakous_http::Limits::default())
+            .map_err(|_| NativeSubscriptionError::Internal)?;
+        #[cfg(test)]
+        let client = self.xai_test_transport.clone().unwrap_or(client);
+        Ok(client)
     }
 
     async fn xai_online_local(
@@ -107,6 +177,7 @@ impl NativeSubscriptions {
         }
         let catalog_observer = self.exchange_observer.clone();
         let catalog_retries = self.catalog_retries;
+        let client = self.xai_auth_client()?;
         let source_scope = self.state.source_scope();
         let refresh_observer =
             credential_refresh_observer(NativeProvider::Xai, source_scope.clone());
@@ -125,10 +196,6 @@ impl NativeSubscriptions {
                 timestamp,
             )
             .map_err(map_xai_error)?;
-            // Auth and catalog keep the default phase bounds. Inference uses
-            // its own H1 client with the model's longer response-head budget.
-            let client = plakous_http::Client::new_http1(plakous_http::Limits::default())
-                .map_err(|_| NativeSubscriptionError::Internal)?;
 
             let mut manager = plakous_xai::XaiNativeAuthManager::open_selected_slot(
                 path,
@@ -160,7 +227,7 @@ impl NativeSubscriptions {
             }
             Ok(XaiOnline {
                 manager: Arc::new(manager),
-                acceptance: loaded_acceptance,
+                acceptance: Some(loaded_acceptance),
             })
         })
         .await?
@@ -262,6 +329,7 @@ pub(super) fn map_xai_error(error: plakous_xai::XaiNativeAuthError) -> NativeSub
             NativeSubscriptionError::CredentialWrittenByNewerBuild
         }
         plakous_xai::XaiNativeAuthError::Store(_) => NativeSubscriptionError::UnsafeStorage,
+        plakous_xai::XaiNativeAuthError::Custodied => NativeSubscriptionError::GatewayCustody,
         plakous_xai::XaiNativeAuthError::NotLoggedIn
         | plakous_xai::XaiNativeAuthError::NotReady
         | plakous_xai::XaiNativeAuthError::RefreshQuarantined => {
@@ -615,12 +683,21 @@ impl NativeVertical for Vertical {
                 let config = xai_native_http_config().map_err(|error| {
                     NativeModelResolutionError::after_selection(selected_model.clone(), error)
                 })?;
-                let inference_client = xai_inference_client(
-                    subscriptions.exchange_observer.clone(),
-                )
-                .map_err(|error| {
-                    NativeModelResolutionError::after_selection(selected_model.clone(), error)
-                })?;
+                let inference_client = subscriptions.route_client(
+                    xai_inference_client(subscriptions.exchange_observer.clone()).map_err(
+                        |error| {
+                            NativeModelResolutionError::after_selection(
+                                selected_model.clone(),
+                                error,
+                            )
+                        },
+                    )?,
+                );
+                #[cfg(test)]
+                let inference_client = subscriptions
+                    .xai_test_transport
+                    .clone()
+                    .unwrap_or(inference_client);
                 let (model, resolution, retrieval, images) = online
                     .manager
                     .resolve_model_with_retrieval(selected_model.as_str(), inference_client, config)
@@ -696,12 +773,16 @@ impl NativeVertical for Vertical {
             let provider = NativeProvider::Xai;
             {
                 let online = subscriptions.xai_online_for_login().await?;
+                let acceptance = online
+                    .acceptance
+                    .as_ref()
+                    .ok_or(NativeSubscriptionError::GatewayCustody)?;
                 let consent = PendingCompatibilityConsent {
                     effects: crate::subscriptions::NativeLoginEffects(Arc::default()),
                     state: subscriptions.state.clone(),
                     notice: NativeSubscriptions::notice(provider)?,
-                    exact_receipt: online.acceptance.exact_bytes.clone(),
-                    generation: online.acceptance.generation.clone(),
+                    exact_receipt: acceptance.exact_bytes.clone(),
+                    generation: acceptance.generation.clone(),
                 };
                 // xAI's hosted page always shows a code to paste into Grok Build,
                 // local or remote. Do not bind or wait on loopback.

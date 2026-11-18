@@ -11,7 +11,7 @@ use super::{
     SubscriptionRequestClass, SubscriptionRequestPermit, TokenResponse, XAI_PUBLIC_CLIENT_ID,
     XaiNativeAuthError, Zeroizing, claimed_response_is_json, credential_record, decode_json,
     network_failure, pull_claimed_body, refresh_token_form, retired_or_quarantined,
-    route_credential_authority_id, system_unix_seconds, urlencoded_form,
+    system_unix_seconds, urlencoded_form,
 };
 
 /// Prepared refresh state carried through form-body claimed refresh.
@@ -67,7 +67,7 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
         let fence = self
             .core
-            .store
+            .store()?
             .load()?
             .ok_or(XaiNativeAuthError::NotLoggedIn)?;
         if self
@@ -133,14 +133,9 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
         }
         if let Some(expected_epoch) = self.expected_selection_epoch
             && (old.selection_epoch != expected_epoch
-                || self.expected_authority
-                    != Some(
-                        route_credential_authority_id(
-                            &self.core.store,
-                            self.core.source_scope.as_deref(),
-                        )
-                        .as_str(),
-                    ))
+                || !self
+                    .expected_authority
+                    .is_some_and(|authority| self.core.authority_is(authority)))
         {
             return Err(BuildRequestFailure::LeaveQuarantined(
                 XaiNativeAuthError::SelectionChanged,
@@ -348,7 +343,7 @@ impl ClaimedRevokeHooks for XaiRevokeHooks<'_> {
 
     async fn fence_to_revoke(&mut self) -> Result<CredentialFence, Self::Error> {
         self.core
-            .store
+            .store()?
             .load()?
             .ok_or(XaiNativeAuthError::NotLoggedIn)
     }

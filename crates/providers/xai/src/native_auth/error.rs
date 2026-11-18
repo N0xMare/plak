@@ -90,6 +90,10 @@ pub enum XaiNativeAuthError {
     /// Refresh entered durable Unknown and cannot be retried automatically.
     #[error("the xAI refresh outcome is quarantined")]
     RefreshQuarantined,
+    /// A credential custodian holds this login, so the operation that needs
+    /// its local store (login, logout, revoke) is refused.
+    #[error("a credential custodian holds this xAI login")]
+    Custodied,
     /// A fixed HTTPS request could not be constructed.
     #[error("the fixed xAI authentication request is invalid")]
     Request,

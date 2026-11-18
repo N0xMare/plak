@@ -45,6 +45,13 @@ mod custody;
 mod drift;
 use plakous_auth::oauth_workflow::parse_absolute_redirect_query;
 
+impl ManagerCore {
+    /// The selected slot of a test manager, which is under local custody.
+    fn local_store(&self) -> &PrivateCredentialStore {
+        self.store.as_ref().expect("a test manager holds its store")
+    }
+}
+
 #[test]
 fn named_grok_sources_keep_default_authority_bytes_and_scope_only_named_sources() -> TestResult {
     use sha2::{Digest as _, Sha256};
@@ -94,7 +101,7 @@ async fn local_grok_upstream_comparison_uses_authenticated_subject_not_slot_or_t
             system_unix_seconds()? + 3_600,
         )?;
         let admin = XaiOfflineSelectedSlot::open_explicit(
-            manager.core.store.path(),
+            manager.core.local_store().path(),
             CredentialSlotId::new("test-selected")?,
         )?;
         digests.push(
@@ -907,7 +914,11 @@ async fn subscription_usage_expired_access_reports_refresh_required_and_never_cl
         "opaque-usage-refresh",
         system_unix_seconds()?,
     )?;
-    let before = manager.core.store.load()?.ok_or("missing Ready fence")?;
+    let before = manager
+        .core
+        .local_store()
+        .load()?
+        .ok_or("missing Ready fence")?;
     let _ = tokio::time::timeout(Duration::ZERO, manager.subscription_usage()).await;
     // A liveness bound only: generous, so load never trips it.
     assert!(matches!(
@@ -919,7 +930,7 @@ async fn subscription_usage_expired_access_reports_refresh_required_and_never_cl
             ..
         }
     ));
-    assert_eq!(manager.core.store.load()?, Some(before.clone()));
+    assert_eq!(manager.core.local_store().load()?, Some(before.clone()));
     assert_eq!(before.status(), CredentialStatus::Ready);
     assert!(peer.requests.lock().await.is_empty());
     peer.abort_join().await?;
@@ -1001,7 +1012,7 @@ async fn subscription_usage_names_local_contention_and_credential_state_without_
     }
     manager
         .core
-        .store
+        .local_store()
         .mark_refresh_intent(CredentialGeneration::new(1)?)?;
     assert!(matches!(
         manager.subscription_usage().await,
@@ -1375,7 +1386,7 @@ async fn browser_and_device_login_failures_report_only_the_narrow_stage() -> Tes
         system_unix_seconds()? + 3_600,
     )?;
     let fence = required(
-        persistence_manager.core.store.load()?,
+        persistence_manager.core.local_store().load()?,
         "persistence stage-test fence",
     )?;
     let stored = persistence_manager.core.read_stored(&fence)?;
@@ -1966,7 +1977,7 @@ async fn refresh_is_same_account_single_flight_and_rotates_durably() -> TestResu
     let status = required(manager.status()?, "refresh status")?;
     assert_eq!(status.status(), CredentialStatus::Ready);
     assert_eq!(status.generation().get(), 3);
-    let refreshed_fence = required(manager.core.store.load()?, "refreshed fence")?;
+    let refreshed_fence = required(manager.core.local_store().load()?, "refreshed fence")?;
     let refreshed = manager.core.read_stored(&refreshed_fence)?;
     assert_eq!(
         refreshed.selection_epoch, "selection-epoch-one-0123456789abcdefghijklm",
@@ -2262,7 +2273,7 @@ async fn post_start_failure_restore_leaves_a_peer_reclaimed_unknown_alone() -> T
 
     let core = &*manager.core;
     let mut hooks = XaiRefreshHooks {
-        cancel_guard: XaiRefreshCancelGuard::new(&core.store, None),
+        cancel_guard: XaiRefreshCancelGuard::new(core.local_store(), None),
         core,
         expected_account: None,
         expected_selection_epoch: None,
@@ -2274,7 +2285,7 @@ async fn post_start_failure_restore_leaves_a_peer_reclaimed_unknown_alone() -> T
         detail: CredentialRefreshDetail::default(),
     };
     hooks.cancel_guard.claimed(ours);
-    hooks.after_post_start_failure(&core.store, &XaiNativeAuthError::Transport(None));
+    hooks.after_post_start_failure(core.local_store(), &XaiNativeAuthError::Transport(None));
     hooks.cancel_guard.finished();
     drop(hooks);
 
@@ -2300,7 +2311,11 @@ async fn claimed_store_busy_rejects_before_wire_and_restores_exact_claim() -> Te
     )?;
 
     let sibling = PrivateCredentialStore::open_slot(
-        manager.core.store.path().with_file_name("sibling.json"),
+        manager
+            .core
+            .local_store()
+            .path()
+            .with_file_name("sibling.json"),
         auth_profile_id()?,
         CredentialSlotId::new("sibling")?,
     )?;
@@ -2317,7 +2332,11 @@ async fn claimed_store_busy_rejects_before_wire_and_restores_exact_claim() -> Te
         AuthEndpoints::test(&held.origin).token(),
         urlencoded_form(&[("fixture", "held")]),
     )?;
-    let primary_before = manager.core.store.load()?.ok_or("missing primary")?;
+    let primary_before = manager
+        .core
+        .local_store()
+        .load()?
+        .ok_or("missing primary")?;
     let sibling_claim = sibling.begin_refresh(&sibling.load()?.ok_or("missing sibling")?)?;
     let held_response = sibling
         .execute_claimed_http(
@@ -2343,7 +2362,11 @@ async fn claimed_store_busy_rejects_before_wire_and_restores_exact_claim() -> Te
     );
     assert!(target.requests.lock().await.is_empty());
     assert_eq!(
-        manager.core.store.load()?.ok_or("missing primary")?,
+        manager
+            .core
+            .local_store()
+            .load()?
+            .ok_or("missing primary")?,
         primary_before
     );
 
@@ -2358,7 +2381,7 @@ async fn claimed_store_busy_rejects_before_wire_and_restores_exact_claim() -> Te
     ));
     let restored = manager
         .core
-        .store
+        .local_store()
         .load()?
         .ok_or("missing restored primary")?;
     assert_eq!(restored.status(), CredentialStatus::Ready);
@@ -2786,7 +2809,7 @@ async fn child_spawn_gate_refreshes_a_quarantined_xai_record() -> TestResult {
     )?;
     manager
         .core
-        .store
+        .local_store()
         .mark_refresh_intent(CredentialGeneration::new(1)?)?;
     assert_eq!(
         required(manager.status()?, "seeded quarantine")?.status(),
@@ -3119,7 +3142,7 @@ async fn resolver_rejects_generation_only_relogin_race_before_return() -> TestRe
     // A liveness bound only: generous, so load never trips it.
     tokio::time::timeout(Duration::from_secs(30), reached.notified()).await?;
 
-    let baseline = required(manager.core.store.load()?, "resolution race fence")?;
+    let baseline = required(manager.core.local_store().load()?, "resolution race fence")?;
     let replacement = StoredTokens {
         version: STORED_TOKENS_VERSION,
         issuer: XAI_ISSUER.to_owned(),
@@ -3131,7 +3154,7 @@ async fn resolver_rejects_generation_only_relogin_race_before_return() -> TestRe
         expires_at: system_unix_seconds()? + 3_600,
         selection_epoch: "selection-epoch-one-0123456789abcdefghijklm".to_owned(),
     };
-    let mutation = manager.core.store.replace_selected_login(
+    let mutation = manager.core.local_store().replace_selected_login(
         &baseline,
         credential_record(
             AccountBinding::new("generation-race-subject")?,
@@ -4045,7 +4068,7 @@ async fn same_account_relogin_wait_renews_captured_route_without_inference() -> 
     let prepared = prepare_model_call(Arc::clone(&model), request, None).await?;
     let prepared_identity = prepared.record().identity();
 
-    let baseline = required(manager.core.store.load()?, "baseline fence")?;
+    let baseline = required(manager.core.local_store().load()?, "baseline fence")?;
     let replacement = StoredTokens {
         version: STORED_TOKENS_VERSION,
         issuer: XAI_ISSUER.to_owned(),
@@ -4064,7 +4087,7 @@ async fn same_account_relogin_wait_renews_captured_route_without_inference() -> 
     )?;
     manager
         .core
-        .store
+        .local_store()
         .replace_selected_login(&baseline, record)?;
 
     assert!(
@@ -4091,8 +4114,8 @@ async fn same_account_relogin_wait_renews_captured_route_without_inference() -> 
     );
     assert_eq!(auth.requests.lock().await.len(), 2);
     enqueue_admitted_catalog(&auth).await?;
-    manager.core.store.logout_local()?;
-    let logged_out = required(manager.core.store.load()?, "logged out fence")?;
+    manager.core.local_store().logout_local()?;
+    let logged_out = required(manager.core.local_store().load()?, "logged out fence")?;
     let waiting_model = Arc::clone(&model);
     let mut waiters = tokio::spawn(async move {
         tokio::join!(
@@ -4107,7 +4130,7 @@ async fn same_account_relogin_wait_renews_captured_route_without_inference() -> 
         "unchanged unavailable credentials must remain parked"
     );
     let ready_generation = logged_out.generation().next()?;
-    manager.core.store.replace_selected_login(
+    manager.core.local_store().replace_selected_login(
         &logged_out,
         credential_record(
             AccountBinding::new("epoch-subject")?,
@@ -4185,7 +4208,7 @@ async fn different_account_login_ends_native_credential_wait_without_catalog_or_
         now_timestamp()?,
     )?;
     let model = permitted_subscription_model(resolved, inference.client.clone())?;
-    let before = required(manager.core.store.load()?, "ready credential")?;
+    let before = required(manager.core.local_store().load()?, "ready credential")?;
     let replacement = stored_record(
         "wait-different-account",
         "other-access",
@@ -4195,7 +4218,7 @@ async fn different_account_login_ends_native_credential_wait_without_catalog_or_
     )?;
     manager
         .core
-        .store
+        .local_store()
         .replace_selected_login(&before, replacement)?;
     assert_eq!(
         Arc::clone(&model)
@@ -4305,7 +4328,7 @@ async fn generation_rotation_before_dispatch_keeps_prepared_wire_and_uses_renewe
         system_unix_seconds()? + 3_600,
     )?;
     admit_catalog(&manager, &auth).await?;
-    let qualified_fence = required(manager.core.store.load()?, "qualified fence")?;
+    let qualified_fence = required(manager.core.local_store().load()?, "qualified fence")?;
     let qualified = manager.core.read_stored(&qualified_fence)?;
 
     let inference = mock_peer().await?;
@@ -4406,7 +4429,7 @@ async fn generation_rotation_between_tool_rounds_renews_before_later_dispatch() 
         system_unix_seconds()? + 3_600,
     )?;
     admit_catalog(&manager, &auth).await?;
-    let qualified_fence = required(manager.core.store.load()?, "qualified fence")?;
+    let qualified_fence = required(manager.core.local_store().load()?, "qualified fence")?;
     let qualified = manager.core.read_stored(&qualified_fence)?;
 
     let inference = mock_peer().await?;
@@ -4525,7 +4548,7 @@ async fn refresh_lead_mid_turn_renews_receipt_once_and_dispatches_the_new_grant(
     )?;
     admit_catalog(&manager, &auth).await?;
     // The running model's own receipt names a grant inside the refresh lead.
-    let baseline = required(manager.core.store.load()?, "baseline fence")?;
+    let baseline = required(manager.core.local_store().load()?, "baseline fence")?;
     let in_lead = stored_record(
         "lead-subject",
         "lead-access-two",
@@ -4535,7 +4558,7 @@ async fn refresh_lead_mid_turn_renews_receipt_once_and_dispatches_the_new_grant(
     )?;
     let fence = manager
         .core
-        .store
+        .local_store()
         .replace_selected_login(&baseline, in_lead)?;
     required(
         manager
@@ -4589,7 +4612,7 @@ async fn refresh_lead_mid_turn_renews_receipt_once_and_dispatches_the_new_grant(
     })
     .await?;
     // A claimed refresh writes its claim and its completion as generations.
-    let refreshed = required(manager.core.store.load()?, "refreshed fence")?;
+    let refreshed = required(manager.core.local_store().load()?, "refreshed fence")?;
     assert_eq!(first?.credential_generation(), refreshed.generation().get());
     assert_eq!(
         second?.credential_generation(),
@@ -4721,7 +4744,7 @@ fn put_selected_grant_in_refresh_lead(
     access: &str,
     refresh: &str,
 ) -> TestResult<CredentialFence> {
-    let store = &managers.first().ok_or("no manager")?.core.store;
+    let store = &managers.first().ok_or("no manager")?.core.local_store();
     let baseline = required(store.load()?, "baseline fence")?;
     let in_lead = stored_record(
         subject,
@@ -4979,7 +5002,7 @@ async fn two_managers_renew_concurrently_with_one_claimed_refresh() -> TestResul
         )
     })
     .await?;
-    let current = required(first_manager.core.store.load()?, "refreshed fence")?;
+    let current = required(first_manager.core.local_store().load()?, "refreshed fence")?;
     assert_eq!(current.status(), CredentialStatus::Ready);
     assert_eq!(first?.credential_generation(), current.generation().get());
     assert_eq!(second?.credential_generation(), current.generation().get());
@@ -5061,7 +5084,7 @@ async fn renewal_racing_the_rejected_grant_refresh_adopts_its_generation() -> Te
     // A liveness bound only: generous, so load never trips it.
     tokio::time::timeout(Duration::from_secs(30), rejected).await???;
     let renewed = tokio::time::timeout(Duration::from_secs(30), renewal).await???;
-    let current = required(manager.core.store.load()?, "forced fence")?;
+    let current = required(manager.core.local_store().load()?, "forced fence")?;
     assert_eq!(renewed.credential_generation(), current.generation().get());
     complete_model_round(
         Arc::clone(&model),
@@ -5125,7 +5148,7 @@ async fn cancelled_renewal_restores_the_claim_and_installs_nothing() -> TestResu
     let joined = tokio::time::timeout(Duration::from_secs(1), renewal).await?;
     assert!(joined.is_err_and(|error| error.is_cancelled()));
     drop(release_token);
-    let restored = required(manager.core.store.load()?, "restored fence")?;
+    let restored = required(manager.core.local_store().load()?, "restored fence")?;
     assert_eq!(restored.status(), CredentialStatus::Ready);
     assert_eq!(
         manager.core.read_stored(&restored)?.access_token,
@@ -5462,14 +5485,15 @@ async fn final_native_grant_rechecks_exact_catalog_expiry() -> TestResult {
     admit_catalog(&manager, &auth).await?;
     let fence = manager
         .core
-        .store
+        .local_store()
         .load()?
         .ok_or(XaiNativeAuthError::NotLoggedIn)?;
     let stored = manager.core.read_stored(&fence)?;
-    let mut receipt =
-        manager
-            .core
-            .active_catalog_receipt(&fence, &stored, system_unix_seconds()?)?;
+    let mut receipt = manager.core.active_catalog_receipt(
+        &fence,
+        &stored.selection_epoch,
+        system_unix_seconds()?,
+    )?;
     let now = system_unix_seconds()?;
     manager
         .core
@@ -5868,13 +5892,13 @@ async fn native_ready_lease_is_held_through_head_and_released_before_stream_body
     let mut logout = tokio::task::spawn_blocking(move || {
         // Probe the same exclusive store lock logout needs, without a timed
         // absence assertion or a race against the blocking worker's scheduling.
-        let writer = fs::File::open(logout_manager.core.store.lock_path())
+        let writer = fs::File::open(logout_manager.core.local_store().lock_path())
             .expect("credential record lock exists");
         assert!(
             matches!(writer.try_lock(), Err(fs::TryLockError::WouldBlock)),
             "logout must remain blocked while the inference response head is gated"
         );
-        assert!(logout_manager.core.store.try_load().is_ok());
+        assert!(logout_manager.core.local_store().try_load().is_ok());
         logout_started.send(()).expect("logout-start receiver lost");
         logout_manager.logout()
     });
@@ -6675,7 +6699,7 @@ fn install_stored(
         expires_at,
         CredentialGeneration::new(1)?,
     )?;
-    manager.core.store.initialize_selected(&record)?;
+    manager.core.local_store().initialize_selected(&record)?;
     Ok(())
 }
 
@@ -6709,7 +6733,7 @@ fn rotate_selected_generation(
 ) -> Result<CredentialFence, XaiNativeAuthError> {
     let baseline = manager
         .core
-        .store
+        .local_store()
         .load()?
         .ok_or(XaiNativeAuthError::NotLoggedIn)?;
     let replacement = stored_record(
@@ -6721,7 +6745,7 @@ fn rotate_selected_generation(
     )?;
     manager
         .core
-        .store
+        .local_store()
         .replace_selected_login(&baseline, replacement)
         .map_err(Into::into)
 }
@@ -6734,7 +6758,7 @@ fn expire_selected_access(
 ) -> Result<CredentialFence, XaiNativeAuthError> {
     let baseline = manager
         .core
-        .store
+        .local_store()
         .load()?
         .ok_or(XaiNativeAuthError::NotLoggedIn)?;
     let replacement = stored_record(
@@ -6746,7 +6770,7 @@ fn expire_selected_access(
     )?;
     manager
         .core
-        .store
+        .local_store()
         .replace_selected_login(&baseline, replacement)
         .map_err(Into::into)
 }
@@ -7745,11 +7769,14 @@ async fn retired_hex_epoch_record_needs_a_new_login_without_network() -> TestRes
         expires_at: system_unix_seconds()? + 1,
         selection_epoch: "ab".repeat(32),
     };
-    manager.core.store.initialize_selected(&credential_record(
-        AccountBinding::new("retired-subject")?,
-        CredentialGeneration::new(1)?,
-        &retired,
-    )?)?;
+    manager
+        .core
+        .local_store()
+        .initialize_selected(&credential_record(
+            AccountBinding::new("retired-subject")?,
+            CredentialGeneration::new(1)?,
+            &retired,
+        )?)?;
     assert!(matches!(
         manager.status(),
         Err(XaiNativeAuthError::StoredCredentialFormatRetired)
@@ -7767,7 +7794,7 @@ async fn retired_hex_epoch_record_needs_a_new_login_without_network() -> TestRes
         manager.refresh_if_needed().await,
         Err(XaiNativeAuthError::StoredCredentialFormatRetired)
     ));
-    let restored = required(manager.core.store.load()?, "restored retired fence")?;
+    let restored = required(manager.core.local_store().load()?, "restored retired fence")?;
     assert_eq!(restored.status(), CredentialStatus::Ready);
     assert!(matches!(
         manager.refresh_catalog().await,

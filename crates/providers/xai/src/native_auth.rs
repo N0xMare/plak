@@ -1,6 +1,7 @@
 //! Plakous-owned xAI OIDC authentication and selected-slot credential authority.
 
 mod catalog;
+mod custodied;
 mod custody;
 mod dispatch;
 mod error;
@@ -15,7 +16,9 @@ mod verify;
 
 use plakous_auth::native_auth::usage_credential_refusal;
 
-pub use custody::{SUPERGROK_SELECTION_EPOCH_IDENTITY, SUPERGROK_SUBJECT_IDENTITY};
+pub use custody::{
+    SUPERGROK_AUTHORITY_ID_IDENTITY, SUPERGROK_SELECTION_EPOCH_IDENTITY, SUPERGROK_SUBJECT_IDENTITY,
+};
 use error::LoginHttpStage;
 pub use error::XaiNativeAuthError;
 pub use evidence::XaiModelResolutionEvidence;
@@ -389,7 +392,10 @@ struct ResolutionPause {
 struct ManagerCore {
     source_scope: Option<String>,
     catalog_retries: bool,
-    store: PrivateCredentialStore,
+    /// The selected slot under local custody; `None` when a custodian holds
+    /// the login.
+    store: Option<PrivateCredentialStore>,
+    custodied: Option<custodied::CustodiedLogin>,
     client: Client,
     catalog_observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
     acceptance: XaiCompatibilityAcceptance,
@@ -973,14 +979,15 @@ fn insert_subscription_inference_headers(headers: &mut HeaderMap) {
     );
 }
 
-fn insert_subscription_catalog_headers(
-    headers: &mut HeaderMap,
-    subject: &AccountBinding,
-) -> Result<(), XaiNativeAuthError> {
+/// The `x-userid` value of the catalog read for `subject`.
+fn catalog_subject_header(subject: &AccountBinding) -> Result<HeaderValue, XaiNativeAuthError> {
     let subject =
         plakous_auth::custody::CredentialField::exact(subject.as_str().as_bytes().to_vec());
-    let subject = sensitive_header_value(subject.into_header_bytes())
-        .map_err(|_| XaiNativeAuthError::CatalogUnavailable)?;
+    sensitive_header_value(subject.into_header_bytes())
+        .map_err(|_| XaiNativeAuthError::CatalogUnavailable)
+}
+
+fn insert_subscription_catalog_headers(headers: &mut HeaderMap, subject: HeaderValue) {
     headers.insert(
         HEADER_XAI_TOKEN_AUTH,
         HeaderValue::from_static(XAI_TOKEN_AUTH_VALUE),
@@ -998,7 +1005,6 @@ fn insert_subscription_catalog_headers(
         HEADER_GROK_CLIENT_MODE,
         HeaderValue::from_static(PLAKOUS_XAI_CLIENT_MODE),
     );
-    Ok(())
 }
 
 fn bearer_header(token: &str) -> Result<HeaderValue, XaiNativeAuthError> {

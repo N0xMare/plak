@@ -961,6 +961,7 @@ mod shared_host_model {
                     .route()
                     .credential_authority()
                     .ok_or(RuntimeModelAuthorityError::Unavailable)?;
+                authority.observe().await?;
                 let reader = Arc::clone(authority);
                 let checked = tokio::task::spawn_blocking(move || reader.ensure_credential_ready())
                     .await
@@ -979,6 +980,7 @@ mod shared_host_model {
                             .credential_authority()
                             .ok_or(RuntimeModelAuthorityError::Unavailable)?,
                     );
+                    reader.observe().await?;
                     tokio::task::spawn_blocking(move || reader.ensure_credential_ready())
                         .await
                         .map_err(|_| RuntimeModelAuthorityError::Unavailable)?
@@ -1010,6 +1012,7 @@ mod shared_host_model {
                     if !Arc::ptr_eq(&self.current_target()?, &stale) {
                         return Ok(());
                     }
+                    authority.observe().await?;
                     let reader = Arc::clone(authority);
                     let observation = tokio::task::spawn_blocking(move || reader.ready_selection())
                         .await

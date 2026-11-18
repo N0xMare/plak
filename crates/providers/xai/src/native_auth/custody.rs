@@ -9,10 +9,9 @@ use plakous_auth::custody::{
 
 use super::{
     Arc, CredentialFence, RefreshForce, StoredTokens, XaiNativeAuthError, XaiNativeAuthManager,
-    route_credential_authority_id,
 };
 
-const SELECTION_DOMAIN: &[u8] = b"plak.custody.grok-selection.v1";
+pub(super) const SELECTION_DOMAIN: &[u8] = b"plak.custody.grok-selection.v1";
 
 /// The wire-identity key of the login's raw selection epoch, which a
 /// SuperGrok route binds a session to (non-secret identity).
@@ -20,6 +19,10 @@ pub const SUPERGROK_SELECTION_EPOCH_IDENTITY: &str = "grok_selection_epoch";
 /// The wire-identity key of the account subject the catalog and billing
 /// reads carry as `x-userid` (non-secret identity).
 pub const SUPERGROK_SUBJECT_IDENTITY: &str = "grok_subject";
+/// The wire-identity key of the route credential-authority id the custodian
+/// computed over its own store, which a SuperGrok route binds a session to
+/// (non-secret identity).
+pub const SUPERGROK_AUTHORITY_ID_IDENTITY: &str = "grok_authority_id";
 
 /// How often a facts read retries when the record moves under it.
 const SNAPSHOT_ATTEMPTS: usize = 3;
@@ -35,7 +38,7 @@ fn store_error(_: XaiNativeAuthError) -> CustodyError {
 
 /// The account and credential-authority bindings the SuperGrok route binds a
 /// session to, for a stored `account` under its route `authority`.
-fn grok_subscription_bindings(
+pub(super) fn grok_subscription_bindings(
     account: &str,
     authority: &str,
 ) -> Option<(plakous_model::Digest, plakous_model::Digest)> {
@@ -52,7 +55,7 @@ fn grok_subscription_bindings(
     ))
 }
 
-fn identity(digest: plakous_model::Digest) -> IdentityDigest {
+pub(super) fn identity(digest: plakous_model::Digest) -> IdentityDigest {
     IdentityDigest::from_bytes(*digest.bytes())
 }
 
@@ -92,8 +95,9 @@ impl XaiNativeAuthManager {
     ) -> Result<(AccountFacts, Option<(CredentialFence, String)>), CustodyError> {
         let core = Arc::clone(&self.core);
         let read = tokio::task::spawn_blocking(move || {
-            let lifecycle = core.store.offline_lifecycle()?;
-            let Some(fence) = core.store.load()? else {
+            let store = core.store()?;
+            let lifecycle = store.offline_lifecycle()?;
+            let Some(fence) = store.load()? else {
                 return Ok::<_, XaiNativeAuthError>((lifecycle, None));
             };
             let stored = (lifecycle == plakous_auth::OfflineCredentialLifecycle::Ready)
@@ -123,8 +127,7 @@ impl XaiNativeAuthManager {
             }
             Err(error) => return Err(store_error(error)),
         };
-        let authority =
-            route_credential_authority_id(&self.core.store, self.core.source_scope.as_deref());
+        let authority = self.core.authority_id().map_err(store_error)?;
         let (account_binding, authority_binding) =
             grok_subscription_bindings(fence.account_binding().as_str(), &authority)
                 .ok_or(CustodyError::Internal)?;
@@ -143,6 +146,9 @@ impl XaiNativeAuthManager {
             SUPERGROK_SUBJECT_IDENTITY.to_owned(),
             fence.account_binding().as_str().to_owned(),
         );
+        facts
+            .wire_identity
+            .insert(SUPERGROK_AUTHORITY_ID_IDENTITY.to_owned(), authority);
         let epoch = stored.selection_epoch.clone();
         Ok((facts, Some((fence, epoch))))
     }
@@ -169,7 +175,7 @@ impl XaiNativeAuthManager {
         let (fence, _) = fence.ok_or(CustodyError::Internal)?;
         let core = Arc::clone(&self.core);
         let leased = tokio::task::spawn_blocking(move || {
-            let lease = core.store.acquire_ready(&fence).ok()?;
+            let lease = core.store().ok()?.acquire_ready(&fence).ok()?;
             (lease.fence() == fence).then_some(lease)
         })
         .await
@@ -222,8 +228,7 @@ impl XaiNativeAuthManager {
         {
             return Ok(facts);
         }
-        let authority =
-            route_credential_authority_id(&self.core.store, self.core.source_scope.as_deref());
+        let authority = self.core.authority_id().map_err(store_error)?;
         if let Err(XaiNativeAuthError::Store(_)) = self
             .core
             .refresh_with_force(

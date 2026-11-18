@@ -363,6 +363,11 @@ pub(crate) trait XaiSubscriptionCredentialAuthority: Send + Sync + 'static {
         input_liability: u64,
     ) -> Result<Option<Box<dyn SubscriptionRequestPermit>>, XaiAuthError>;
     fn revalidate(&self, outgoing: &XaiSubscriptionCredentialGrant) -> Result<(), XaiAuthError>;
+    /// Reads a custodian's current facts for the synchronous checks that
+    /// follow; nothing under local custody.
+    fn observe(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<(), RuntimeModelAuthorityError>> + Send + '_>>;
 }
 
 /// The earliest `checked_at` among the revalidations one renewal answers.
@@ -572,24 +577,37 @@ impl fmt::Debug for NativeXaiCatalogAdmission {
     }
 }
 
-/// One non-cloneable OAuth grant retained through response head.
+/// One non-cloneable OAuth grant retained through response head: the
+/// custodian's `authorization` field and, under local custody, the exact
+/// Ready lease it was read under.
 #[cfg(feature = "native-auth")]
 pub(crate) struct XaiSubscriptionCredentialGrant {
-    token: Zeroizing<String>,
-    _native_lease: ReadyCredentialLease,
+    authorization: Arc<Zeroizing<Vec<u8>>>,
+    _native_lease: Option<ReadyCredentialLease>,
 }
 
 #[cfg(feature = "native-auth")]
 impl XaiSubscriptionCredentialGrant {
     pub(crate) fn native(token: &SecretString, lease: ReadyCredentialLease) -> Self {
+        let field =
+            plakous_auth::custody::CredentialField::bearer(token.expose_secret().as_bytes());
         Self {
-            token: Zeroizing::new(token.expose_secret().to_owned()),
-            _native_lease: lease,
+            authorization: Arc::new(Zeroizing::new(field.into_header_bytes())),
+            _native_lease: Some(lease),
         }
     }
 
-    pub(crate) fn expose(&self) -> &str {
-        &self.token
+    /// A custodian's `authorization` field for the grant's fence.
+    pub(crate) const fn custodied(authorization: Arc<Zeroizing<Vec<u8>>>) -> Self {
+        Self {
+            authorization,
+            _native_lease: None,
+        }
+    }
+
+    /// The `authorization` header value; `None` when it is not one.
+    pub(crate) fn authorization(&self) -> Option<plakous_http::HeaderValue> {
+        plakous_http::sensitive_header_value(self.authorization.to_vec()).ok()
     }
 }
 

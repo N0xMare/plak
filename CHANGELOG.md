@@ -51,13 +51,16 @@ for one version bump, without native protocol compatibility.
   (`ApiKeySource::prepare`). The xAI Platform route takes its authorization
   from `credential_field`. Local custody sends the same bytes as before.
 - Remove the unused `facts_revision` from gateway account facts.
-- Add gateway custody for the Codex and Claude subscriptions
+- Add gateway custody for the Codex, Claude and SuperGrok subscriptions
   (`NativeSubscriptions::with_custody`): status, consent, catalogs,
   resolution, inference, side requests and usage answer from the gateway's
   facts and relay through it with the same session binding and request
   bytes, refresh is the gateway's (`IfDue` before dispatch,
   `AfterRejection` after a 401), and the host never opens the store; store
-  operations refuse `GatewayCustody`. SuperGrok refuses gateway custody.
+  operations refuse `GatewayCustody`. A SuperGrok gateway reports the
+  route's raw selection epoch, subject and credential-authority id
+  (`grok_authority_id`) as wire identity, so a SuperGrok session reopens
+  through it with an unchanged binding.
 - Fix revalidation of a named Claude account: it now binds the account's
   source scope as resolution does instead of refusing every dispatch as
   Stale.

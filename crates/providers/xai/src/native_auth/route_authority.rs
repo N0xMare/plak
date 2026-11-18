@@ -1,6 +1,9 @@
 //! The immutable route authority bound to one catalog receipt.
 
+use plakous_auth::custody::CustodyStatus;
+
 use super::RefreshForce;
+use super::custodied::CustodiedLogin;
 use super::{
     ACCESS_REFRESH_LEAD_SECONDS, Arc, CatalogReceiptCore, CatalogRenewal, Future,
     GrokCodingProfile, ManagerCore, RuntimeModelAuthorityError, SubscriptionRequestPermit,
@@ -37,16 +40,20 @@ struct NativeRouteAuthority {
 
 impl NativeRouteAuthority {
     fn ready_selection(&self) -> Result<String, RuntimeModelAuthorityError> {
-        let fence = self
+        if let Some(login) = &self.core.custodied {
+            return self.custodied_ready_selection(login);
+        }
+        let store = self
             .core
-            .store
+            .store()
+            .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
+        let fence = store
             .load()
             .map_err(|_| RuntimeModelAuthorityError::Invalid)?
             .ok_or(RuntimeModelAuthorityError::AwaitingCredential)?;
         if fence.status() != plakous_auth::CredentialStatus::Ready {
             if matches!(
-                self.core
-                    .store
+                store
                     .offline_lifecycle()
                     .map_err(|_| RuntimeModelAuthorityError::Invalid)?,
                 plakous_auth::OfflineCredentialLifecycle::Refreshing
@@ -68,17 +75,43 @@ impl NativeRouteAuthority {
             .map_err(|_| RuntimeModelAuthorityError::Invalid)
     }
 
+    /// The custodied counterpart of [`Self::ready_selection`], on the kept
+    /// facts.
+    fn custodied_ready_selection(
+        &self,
+        login: &CustodiedLogin,
+    ) -> Result<String, RuntimeModelAuthorityError> {
+        match login.facts().status {
+            CustodyStatus::Ready => {}
+            CustodyStatus::Refreshing => return Err(RuntimeModelAuthorityError::Stale),
+            _ => return Err(RuntimeModelAuthorityError::AwaitingCredential),
+        }
+        let ready = login
+            .ready()
+            .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
+        if ready.fence.account_binding() != &self.expected_receipt.public.account {
+            return Err(RuntimeModelAuthorityError::AccountChanged);
+        }
+        if ready.fence.generation() < self.expected_receipt.fence.generation() {
+            return Err(RuntimeModelAuthorityError::ForeignAuthority);
+        }
+        Ok(ready.selection_epoch.clone())
+    }
+
     async fn route_refresh(&self, force: bool) -> Result<(), crate::XaiAuthError> {
+        // A custodian refreshes a rejected grant only while it still holds
+        // this receipt's generation.
+        let force = match (force, &self.core.custodied) {
+            (false, _) => RefreshForce::IfDue,
+            (true, None) => RefreshForce::Always,
+            (true, Some(_)) => RefreshForce::WhileCurrent(self.expected_receipt.fence.generation()),
+        };
         self.core
             .refresh_with_force(
                 Some(&self.expected_receipt.public.account),
                 Some(&self.expected_receipt.selection_epoch),
                 Some(&self.expected_receipt.authority_id),
-                if force {
-                    RefreshForce::Always
-                } else {
-                    RefreshForce::IfDue
-                },
+                force,
             )
             .await
             .map_err(|error| match error {
@@ -204,6 +237,10 @@ impl crate::XaiSubscriptionCredentialAuthority for NativeRouteAuthority {
             if let Ok(renewed) = result {
                 return Ok(renewed);
             }
+            self.core
+                .observe()
+                .await
+                .map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
             let reader = self.clone();
             let current = tokio::task::spawn_blocking(move || reader.ready_selection())
                 .await
@@ -231,30 +268,32 @@ impl crate::XaiSubscriptionCredentialAuthority for NativeRouteAuthority {
             crate::route::log_authority_rejection("native.catalog_time");
             return Err(RuntimeModelAuthorityError::Stale);
         }
-        let stored = self
-            .core
-            .read_stored(&self.expected_receipt.fence)
-            .map_err(|_| {
-                crate::route::log_authority_rejection("native.stored_selection");
-                RuntimeModelAuthorityError::Stale
-            })?;
-        if stored.selection_epoch != self.expected_receipt.selection_epoch {
+        let held = match &self.core.custodied {
+            Some(login) => login
+                .ready()
+                .map(|ready| (ready.selection_epoch.clone(), ready.expires_at)),
+            None => self
+                .core
+                .read_stored(&self.expected_receipt.fence)
+                .map(|stored| (stored.selection_epoch.clone(), stored.expires_at)),
+        };
+        let (selection_epoch, expires_at) = held.map_err(|_| {
+            crate::route::log_authority_rejection("native.stored_selection");
+            RuntimeModelAuthorityError::Stale
+        })?;
+        if selection_epoch != self.expected_receipt.selection_epoch {
             crate::route::log_authority_rejection("native.stored_selection");
             return Err(RuntimeModelAuthorityError::Stale);
         }
         let current_unix =
             system_unix_seconds().map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
-        if access_needs_refresh(stored.expires_at, current_unix, ACCESS_REFRESH_LEAD_SECONDS) {
+        if access_needs_refresh(expires_at, current_unix, ACCESS_REFRESH_LEAD_SECONDS) {
             crate::route::log_authority_rejection("native.credential_time");
             return Err(RuntimeModelAuthorityError::Stale);
         }
-        let credential_valid_until = Timestamp::new(
-            stored
-                .expires_at
-                .saturating_sub(ACCESS_REFRESH_LEAD_SECONDS),
-            0,
-        )
-        .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
+        let credential_valid_until =
+            Timestamp::new(expires_at.saturating_sub(ACCESS_REFRESH_LEAD_SECONDS), 0)
+                .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
         if credential_valid_until <= checked_at {
             crate::route::log_authority_rejection("native.credential_time");
             return Err(RuntimeModelAuthorityError::Stale);
@@ -318,6 +357,18 @@ impl crate::XaiSubscriptionCredentialAuthority for NativeRouteAuthority {
         self.core
             .ensure_route_receipt_current_while_leased(&self.expected_receipt)
             .map_err(|_| crate::XaiAuthError::BindingMismatch)
+    }
+
+    fn observe(
+        &self,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), RuntimeModelAuthorityError>> + Send + '_>>
+    {
+        Box::pin(async move {
+            self.core
+                .observe()
+                .await
+                .map_err(|_| RuntimeModelAuthorityError::Unavailable)
+        })
     }
 }
 

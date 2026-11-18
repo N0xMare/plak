@@ -92,6 +92,19 @@ impl NativeSubscriptions {
         })
     }
 
+    /// The token and usage client of a local login.
+    #[cfg_attr(
+        not(test),
+        allow(clippy::unused_self, reason = "only tests read the fixture transport")
+    )]
+    fn claude_auth_client(&self) -> Result<plakous_http::Client, NativeSubscriptionError> {
+        let client = plakous_http::Client::new_http1(plakous_http::Limits::default())
+            .map_err(|_| NativeSubscriptionError::Internal)?;
+        #[cfg(test)]
+        let client = self.claude_test_transport.clone().unwrap_or(client);
+        Ok(client)
+    }
+
     async fn claude_online_local(
         &self,
         request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
@@ -145,6 +158,7 @@ impl NativeSubscriptions {
             }
         }
         let identity_paths = self.state.clone();
+        let client = self.claude_auth_client()?;
         run_blocking(move || {
             let timestamp =
                 Timestamp::new(accepted_at, 0).map_err(|_| NativeSubscriptionError::Internal)?;
@@ -157,9 +171,6 @@ impl NativeSubscriptions {
                     timestamp,
                 )
                 .map_err(map_claude_error)?;
-            let client = plakous_http::Client::new_http1(plakous_http::Limits::default())
-                .map_err(|_| NativeSubscriptionError::Internal)?;
-
             let mut manager = plakous_anthropic::ClaudeNativeAuthManager::open_selected_slot(
                 path,
                 slot,
@@ -597,6 +608,11 @@ impl NativeVertical for Vertical {
                         .pooled()
                         .with_observer(subscriptions.exchange_observer.clone()),
                 );
+                #[cfg(test)]
+                let client = subscriptions
+                    .claude_test_transport
+                    .clone()
+                    .unwrap_or(client);
                 if !attach {
                     online.manager.refresh_if_needed().await.map_err(|error| {
                         NativeModelResolutionError::after_selection(

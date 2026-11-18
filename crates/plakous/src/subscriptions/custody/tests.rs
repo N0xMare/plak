@@ -29,8 +29,9 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 const CHATGPT: &str = "https://chatgpt.com/";
 
-/// A loopback TLS upstream recording each whole request: the Codex catalog
-/// and usage reads answer their fixtures, every other request a final `400`.
+/// A loopback TLS upstream recording each whole request: the Codex and
+/// SuperGrok catalog and usage reads answer their fixtures, every other
+/// request a final `400`.
 struct Upstream {
     client: plakous_http::Client,
     origin: plakous_http::Origin,
@@ -97,6 +98,10 @@ async fn upstream() -> TestResult<Upstream> {
                     ("200 OK", catalog_body())
                 } else if request.starts_with(b"GET /backend-api/wham/usage ") {
                     ("200 OK", usage_body())
+                } else if request.starts_with(b"GET /v1/models ") {
+                    ("200 OK", grok_catalog_body())
+                } else if request.starts_with(b"GET /v1/billing?format=credits ") {
+                    ("200 OK", grok_usage_body())
                 } else {
                     (
                         "400 Bad Request",
@@ -143,6 +148,29 @@ fn usage_body() -> Vec<u8> {
     }}}))
     .unwrap_or_default()
 }
+
+fn grok_catalog_body() -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({"object": "list", "data": [{
+        "id": GROK_MODEL, "object": "model", "created": 1, "owned_by": "xai",
+        "contextWindow": 256_000
+    }]}))
+    .unwrap_or_default()
+}
+
+fn grok_usage_body() -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({"config": {
+        "creditUsagePercent": 12.25,
+        "currentPeriod": {
+            "type": "USAGE_PERIOD_TYPE_WEEKLY",
+            "start": "2020-01-01T00:00:00Z",
+            "end": "2099-01-01T00:00:00Z"
+        }
+    }}))
+    .unwrap_or_default()
+}
+
+/// The SuperGrok model the fixture catalog admits.
+const GROK_MODEL: &str = "grok-4.5";
 
 impl Upstream {
     fn take(&self) -> Vec<Vec<u8>> {
@@ -244,6 +272,9 @@ async fn dispatch_once(provider: &ResolvedProvider) -> TestResult {
     }
     Ok(())
 }
+
+#[cfg(feature = "grok")]
+mod grok;
 
 /// Custody through an in-process gateway that serves the Codex logins of
 /// `paths` and dials the production origin at `upstream`.

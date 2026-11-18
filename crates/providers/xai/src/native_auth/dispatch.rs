@@ -34,8 +34,8 @@ use super::{
     ResponsesHeaderBinding, ResponsesPreflightFuture, ResponsesPreflightRequest,
     ResponsesPreparedPhysicalRequest, ResponsesRevalidationRequest,
     SUBSCRIPTION_INPUT_TOKEN_OVERHEAD, SUPERGROK_CLIENT_COMPATIBILITY_VERSION, SensitiveBytes,
-    SubscriptionRequestPermit, USER_AGENT, XAI_TOKEN_AUTH_VALUE, XaiDialect, XaiResolvedModel,
-    bearer_header, fmt, insert_subscription_inference_headers,
+    SubscriptionRequestPermit, USER_AGENT, XAI_TOKEN_AUTH_VALUE, XaiDialect, XaiResolvedModel, fmt,
+    insert_subscription_inference_headers,
 };
 
 /// Immutable native SuperGrok construction data used by shared preflight.
@@ -172,8 +172,9 @@ pub(crate) fn supergrok_responses_preflight<'a>(
         );
         headers.insert(
             HEADER_AUTHORIZATION,
-            bearer_header(grant.expose())
-                .map_err(|_| ResponsesDispatchRejection::Authentication)?,
+            grant
+                .authorization()
+                .ok_or(ResponsesDispatchRejection::Authentication)?,
         );
         headers.insert(HEADER_USER_AGENT, HeaderValue::from_static(USER_AGENT));
         insert_subscription_inference_headers(&mut headers);
@@ -313,7 +314,9 @@ pub(crate) async fn supergrok_side_request(
     );
     headers.insert(
         HEADER_AUTHORIZATION,
-        bearer_header(grant.expose()).map_err(|_| "SuperGrok grant is not a header value")?,
+        grant
+            .authorization()
+            .ok_or("SuperGrok grant is not a header value")?,
     );
     headers.insert(HEADER_USER_AGENT, HeaderValue::from_static(USER_AGENT));
     insert_subscription_inference_headers(&mut headers);

@@ -74,7 +74,7 @@ async fn foreign_oidc_token_endpoint_refuses_before_token_or_device_dispatch() -
         })
     ));
     assert!(failure.to_string().contains("install a newer build"));
-    assert!(manager.core.store.load()?.is_none());
+    assert!(manager.core.local_store().load()?.is_none());
     peer.await??;
     Ok(())
 }
@@ -142,7 +142,7 @@ async fn foreign_oidc_issuer_refuses_a_browser_callback_before_the_code_exchange
     ));
     assert!(failure.to_string().contains("install a newer build"));
     assert!(!failure.to_string().contains("foreign.invalid"));
-    assert!(manager.core.store.load()?.is_none());
+    assert!(manager.core.local_store().load()?.is_none());
     Ok(())
 }
 
@@ -163,7 +163,7 @@ async fn refresh_accepts_a_differing_granted_scope() -> TestResult {
     assert_eq!(refreshed.subject, expected.as_str());
     assert_eq!(refreshed.access_token, "fixture-access");
     assert!(peer.requests.lock().await.is_empty());
-    assert!(manager.core.store.load()?.is_none());
+    assert!(manager.core.local_store().load()?.is_none());
     peer.abort_join().await?;
     Ok(())
 }

@@ -136,6 +136,72 @@ pub(in crate::subscriptions) fn seed(paths: &SubscriptionPaths, now: u64) -> Tes
     Ok(())
 }
 
+/// Seeds a consented Ready SuperGrok login for `subject` at the provider's
+/// test time, with its login recovery cleared.
+#[cfg(feature = "grok")]
+pub(in crate::subscriptions) fn seed_grok(paths: &SubscriptionPaths, subject: &str) -> TestResult {
+    let provider = NativeProvider::Xai;
+    let notice = NativeSubscriptions::notice(provider).unwrap();
+    let now = notice.reviewed_at() + 60;
+    paths.prepare()?;
+    store_acceptance(paths, notice, now)?;
+    let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
+    let store = plakous_auth::PrivateCredentialStore::open_slot(
+        paths.provider_record(provider),
+        profile.clone(),
+        plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?,
+    )?;
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "version": 3,
+        "issuer": "https://auth.x.ai",
+        "client_id": "b1a00492-073a-47ea-816f-4c329264a828",
+        "subject": subject,
+        "scope": "openid profile email offline_access grok-cli:access api:access",
+        "access_token": "opaque-seeded-grok-access",
+        "refresh_token": "opaque-seeded-grok-refresh",
+        "expires_at": now + 3_600,
+        "selection_epoch": plakous_auth::generate_login_selection_epoch()?,
+    }))?;
+    store.initialize_selected(&plakous_auth::CredentialRecord::new(
+        profile,
+        plakous_auth::AccountBinding::new(subject)?,
+        plakous_auth::CredentialGeneration::new(1)?,
+        plakous_auth::CredentialStatus::Ready,
+        plakous_auth::SecretBytes::new(payload),
+    )?)?;
+    let consent = load_acceptance_exact(paths, notice, now)?;
+    let operation = arm_login_recovery(paths, provider, &consent.generation)?;
+    clear_login_recovery(paths, provider, &operation, 1)?;
+    Ok(())
+}
+
+/// A SuperGrok selection of `model`.
+#[cfg(feature = "grok")]
+pub(in crate::subscriptions) fn grok_selection(
+    model: &str,
+) -> TestResult<SelectedProviderConfiguration> {
+    Ok(SelectedProviderConfiguration::new(
+        native_provider_route_selection(NativeProvider::Xai, ModelId::new(model)?)?,
+        ProviderBehaviorConfiguration {
+            reasoning_summary: ReasoningSummaryDisposition::Concise,
+            parallel_tools: ParallelToolDisposition::Disabled,
+            output_bound: OutputBoundDisposition::Enforced(
+                std::num::NonZeroU32::new(
+                    plakous_xai::grok_max_output_tokens(model).ok_or("grok output ceiling")?,
+                )
+                .ok_or("grok output ceiling")?,
+            ),
+            retention: RetentionDisposition::RouteContract {
+                profile: ModelAdapterProfileId::new(plakous_xai::XAI_GROK_COMPATIBILITY_PROFILE)?,
+                revision: ProviderProfileRevisionId::new(
+                    plakous_xai::XAI_RESPONSES_ADAPTER_REVISION,
+                )?,
+            },
+            ..selection()?.behavior().clone()
+        },
+    )?)
+}
+
 pub(in crate::subscriptions) fn selection() -> TestResult<SelectedProviderConfiguration> {
     Ok(SelectedProviderConfiguration::new(
         native_provider_route_selection(NativeProvider::Codex, ModelId::new(MODEL)?)?,
