@@ -262,7 +262,7 @@ pub(super) async fn source_revision(
     deadline: Instant,
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<[u8; 32], ReadRefusal> {
-    let application = accounts::reader(state)?;
+    let application = accounts::reader_at(state, Some(paths))?;
     let roster = accounts::roster(&application, paths, selected).await?;
     let mut hash = Sha256::new();
     for account in roster.accounts {

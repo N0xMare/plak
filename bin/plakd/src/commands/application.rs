@@ -437,6 +437,11 @@ impl PlakousApplication {
             None
         };
         let subscriptions = NativeSubscriptions::new(paths);
+        let subscriptions = match &product {
+            Some(home) => crate::gateway::with_subscription_custody(subscriptions, home)
+                .map_err(CliFailure::new)?,
+            None => subscriptions,
+        };
         let subscriptions = subscriptions.with_exchange_observer(exchange_observer.clone());
         Ok(Self {
             executor,

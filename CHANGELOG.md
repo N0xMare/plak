@@ -102,8 +102,10 @@ for one version bump, without native protocol compatibility.
   `[gateway]` address is home-scoped. In-process account commands take the
   holder lock shared; the service takes it exclusive. The listener relays
   API-key accounts and the subscription logins through the shared server
-  core. A host that names a gateway relays API-key routes through it and does
-  not take the holder lock; its subscription routes stay in-process. OpenRouter
+  core. A host that names a gateway relays API-key and subscription routes
+  through it and does not take the holder lock or open the subscription
+  store. Login, logout, consent and account listing use the gateway admin
+  verbs. OpenRouter
   allowance is one gateway-side `GET /api/v1/key`; other API-key kinds report
   `not-observed`. No persisted format changes.
 ## 0.0.4

@@ -25,9 +25,17 @@ use crate::surface_protocol::PlakExtension;
 /// Product construction resolves the state home and supplies the resulting
 /// service to the hosted session.
 pub fn open_product_subscriptions() -> Option<NativeSubscriptions> {
+    open_subscriptions(None)
+}
+
+pub(crate) fn open_subscriptions(home: Option<&PlakPaths>) -> Option<NativeSubscriptions> {
     let state_home = crate::home::paths::application_state_home().ok()?;
     let paths = SubscriptionPaths::from_xdg_state_home(state_home).ok()?;
-    Some(NativeSubscriptions::new(paths))
+    let subscriptions = NativeSubscriptions::new(paths);
+    let Some(home) = home else {
+        return Some(subscriptions);
+    };
+    crate::gateway::with_subscription_custody(subscriptions, home).ok()
 }
 
 /// Whether a Settings save carries an identity change for the root template.
@@ -105,7 +113,7 @@ impl ShellHostRunner<PlakExtension> for ProductShellHost {
             binding: crate::shell::binding_document::ProductRootBindingDocument::shared(
                 &self.paths,
             ),
-            subscriptions: open_product_subscriptions(),
+            subscriptions: open_subscriptions(Some(&self.paths)),
             openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
                 &self.paths,
             ),

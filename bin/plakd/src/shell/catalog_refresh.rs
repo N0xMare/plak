@@ -58,7 +58,12 @@ fn spawn(
         let Ok(sub_paths) = SubscriptionPaths::from_xdg_state_home(state_home) else {
             return;
         };
-        let subscriptions = NativeSubscriptions::new(sub_paths).without_model_lookup_retries();
+        let Ok(subscriptions) =
+            crate::gateway::with_subscription_custody(NativeSubscriptions::new(sub_paths), &paths)
+        else {
+            return;
+        };
+        let subscriptions = subscriptions.without_model_lookup_retries();
         let Ok(executor) = ApplicationExecutor::new() else {
             return;
         };

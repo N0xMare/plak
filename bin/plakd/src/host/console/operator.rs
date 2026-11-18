@@ -100,7 +100,7 @@ impl Console {
                     ValidationCode::InvalidValue,
                 )));
             }
-            let subscriptions = match super::accounts::reader(&self.state)
+            let subscriptions = match super::accounts::reader_at(&self.state, Some(&self.paths))
                 .and_then(|reader| reader.subscriptions_for(&account))
             {
                 Ok(subscriptions) => subscriptions,

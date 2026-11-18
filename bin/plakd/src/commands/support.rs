@@ -585,6 +585,9 @@ pub fn native_subscription_failure(
         E::DeviceCodeExpired => auth(format!(
             "the device code expired before it was approved; run `plakd login {name} --remote` for a new code"
         )),
+        E::GatewayCustody => auth(format!(
+            "the {name} login is held by the credential gateway; login, logout, consent and account changes go through its admin verbs"
+        )),
         E::ModelUnavailable
         | E::ProviderConfigurationRejected
         | E::ProviderConfigurationPolicyMismatch(_)

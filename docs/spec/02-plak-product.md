@@ -798,8 +798,10 @@ to start and names `[gateway] address`. The gateway listener relays the
 API-key accounts (`openai`, `xai-api`, `anthropic`, `openrouter`) and the
 subscription logins (`codex`, `claude`, `grok`) through the shared server
 core. A host whose `[gateway] address` is set does not take the holder lock
-and does not resolve API keys: its API-key routes relay through that gateway.
-Subscription routes on that host stay in-process. If provider API-key
+and does not resolve API keys or open the subscription store. Its API-key
+routes and its Codex, Claude and SuperGrok routes use that gateway's
+custody. Login, logout, consent and account listing stay on the gateway's
+admin verbs. If provider API-key
 variables are set in that host's environment, the host refuses to start and
 names them. OpenRouter allowance is the gateway's Allowance verb: one
 `GET /api/v1/key` answered in the gateway process. The other API-key kinds
@@ -6186,10 +6188,12 @@ with `not-observed`.
 `gateway install` writes a Linux user unit or macOS LaunchAgent and does not
 start it. The unit runs the executable that wrote it.
 
-A host with `[gateway] address` set does not take the credential holder lock
-and does not resolve API keys. Its API-key routes relay through the gateway.
-Subscription routes stay in-process. Unset, the host keeps in-process
-credential access and takes the holder lock shared.
+A host with `[gateway] address` set does not take the credential holder lock,
+does not resolve API keys, and does not open the subscription store. Its
+API-key routes and its subscription routes use the gateway's custody.
+Login, logout, consent and account listing use the gateway's admin verbs.
+Unset, the host keeps in-process credential access and takes the holder
+lock shared.
 
 ## 5. External client boundary
 

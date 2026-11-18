@@ -47,9 +47,11 @@ and `grok` logins, and only to those providers' pinned upstreams. Facts and
 refresh for those accounts are served from that custody. Other admin verbs
 stay on the account bridge.
 
-A host whose `[gateway] address` is set sends API-key model traffic through
-the gateway and does not take the holder lock. Its subscription routes stay
-in-process. If that host's environment sets `OPENAI_API_KEY`, `XAI_API_KEY`,
+A host whose `[gateway] address` is set sends API-key and subscription
+model traffic through the gateway and does not take the holder lock or open
+the subscription store. Login, logout, consent and account listing use the
+gateway's admin verbs. If that host's environment sets `OPENAI_API_KEY`,
+`XAI_API_KEY`,
 `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`, the host refuses to start and
 names those variables. OpenRouter allowance is `plakd` usage through the
 gateway: the gateway reads `GET /api/v1/key` and returns the amounts, never

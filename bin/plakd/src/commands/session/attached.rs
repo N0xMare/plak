@@ -289,7 +289,7 @@ fn build_attached_host_config(
     }
     // After the offline model's early return: the probe never renews a login.
     if purpose == AttachedPurpose::Verify
-        && let Some(probe) = crate::carry::reopen_credential_gate(record.account.as_deref())
+        && let Some(probe) = crate::carry::reopen_credential_gate(paths, record.account.as_deref())
     {
         return Err(AttachedConfigError::Answered(Box::new(probe)));
     }

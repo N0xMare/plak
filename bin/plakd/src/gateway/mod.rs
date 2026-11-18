@@ -1,7 +1,7 @@
 //! The plakd credential gateway: listeners, caller keys, the kill switch,
 //! audit and the admin bridge. The listener relays API-key accounts and the
 //! subscription logins through the shared server core. A host that names a
-//! gateway sends API-key routes through it; subscription routes stay local.
+//! gateway sends API-key and subscription routes through it.
 
 mod address;
 mod allowance;
@@ -33,6 +33,7 @@ pub(crate) use install::{install, uninstall};
 pub(crate) use remote_account::{hold_in_process, try_remote_account};
 pub(crate) use route::{AccountRoute, provider_key_env_set, select};
 pub(crate) use route_custody::connect as host_gateway;
+pub(crate) use route_custody::with_subscription_custody;
 pub(crate) use server_config::ServerConfig;
 pub(crate) use service::Gateway;
 

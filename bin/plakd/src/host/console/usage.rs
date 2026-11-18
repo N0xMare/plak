@@ -23,7 +23,7 @@ impl Console {
             .ok_or_else(|| unavailable(ReadScope::Usage, UnavailableCode::Storage))?;
         let from = to - i64::try_from(window.seconds()).unwrap_or(0) * 1_000;
         let paths = self.paths.clone();
-        let reader = accounts::reader(&self.state)?;
+        let reader = accounts::reader_at(&self.state, Some(&self.paths))?;
         let roster = accounts::roster(&reader, &paths, selected.as_deref()).await?;
         let selection = selected.clone();
         let cancel = Arc::clone(&cancelled);
@@ -146,8 +146,8 @@ impl Console {
                 "this API account has no provider allowance endpoint",
             );
         };
-        let subscriptions =
-            accounts::reader(&self.state).and_then(|reader| reader.subscriptions_for(account));
+        let subscriptions = accounts::reader_at(&self.state, Some(&self.paths))
+            .and_then(|reader| reader.subscriptions_for(account));
         let Ok(subscriptions) = subscriptions else {
             return missing(account, "local_state", "allowance state could not be read");
         };

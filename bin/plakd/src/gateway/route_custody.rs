@@ -1,7 +1,7 @@
 //! Host-side custody through a configured credential gateway.
 //!
-//! API-key routes take this client. Subscription routes stay in-process until
-//! their constructors take custody.
+//! API-key routes and subscription logins take this client when `[gateway]
+//! address` is set. Unset stays local.
 
 use plakous::gateway::{GatewayCustody, GatewayEndpoint, SensitiveBytes};
 
@@ -9,6 +9,19 @@ use super::address::GatewayAddress;
 use super::route::AccountRoute;
 use crate::home::paths::PlakPaths;
 use crate::product_config::ProductConfig;
+
+/// Subscriptions under the same gateway the API-key routes use. Local custody
+/// leaves them unchanged. The store is not opened when a gateway holds the
+/// logins.
+pub(crate) fn with_subscription_custody(
+    subscriptions: plakous::subscriptions::NativeSubscriptions,
+    home: &PlakPaths,
+) -> Result<plakous::subscriptions::NativeSubscriptions, String> {
+    Ok(match connect(home)? {
+        Some(gateway) => subscriptions.with_custody(&gateway.custody()),
+        None => subscriptions,
+    })
+}
 
 /// The gateway a host or credential provider should use, when `[gateway]
 /// address` is set. Unset is local custody.

@@ -23,11 +23,22 @@ pub(super) struct Reader {
 }
 
 pub(super) fn reader(state: &std::path::Path) -> Result<Reader, ReadRefusal> {
+    reader_at(state, None)
+}
+
+pub(super) fn reader_at(
+    state: &std::path::Path,
+    home: Option<&PlakPaths>,
+) -> Result<Reader, ReadRefusal> {
     let paths = plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(state.to_path_buf())
         .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))?;
-    Ok(Reader {
-        subscriptions: plakous::subscriptions::NativeSubscriptions::new(paths),
-    })
+    let subscriptions = plakous::subscriptions::NativeSubscriptions::new(paths);
+    let subscriptions = match home {
+        Some(home) => crate::gateway::with_subscription_custody(subscriptions, home)
+            .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))?,
+        None => subscriptions,
+    };
+    Ok(Reader { subscriptions })
 }
 impl Reader {
     pub fn subscriptions_for(
