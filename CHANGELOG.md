@@ -108,8 +108,9 @@ for one version bump, without native protocol compatibility.
   verbs. OpenRouter
   allowance is one gateway-side `GET /api/v1/key`; other API-key kinds report
   `not-observed`. Host sessions, child agents and `plakd run` take the
-  gateway's custody too. A host with no gateway address keeps direct
-  in-process custody. No persisted format changes.
+  gateway's custody too, and `plakd key status` through a gateway names the
+  key's source. A host with no gateway address keeps direct in-process
+  custody. No persisted format changes.
 
 ## 0.0.4
 

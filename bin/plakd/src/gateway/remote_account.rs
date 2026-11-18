@@ -12,7 +12,7 @@ use std::time::Duration;
 use plakous::gateway::protocol::admin::{
     AdminRefusal, AdminRequest, AdminResponse, LoginMethod, LoginPhase, LogoutMode,
 };
-use plakous::gateway::protocol::facts::CredentialStatus;
+use plakous::gateway::protocol::facts::{CredentialStatus, KeySource};
 use plakous::gateway::protocol::{BoundedText, GatewayAccount, SecretText};
 use plakous::subscriptions::{NativeLoginMode, NativeSubscriptions};
 use plakous_hosted::account::AccountRef;
@@ -311,9 +311,19 @@ fn status(
     match ask(address, key, AdminRequest::Status { accounts })? {
         AdminResponse::Status { rows } => {
             for row in rows {
+                let source = row.facts.key.as_ref().map_or_else(String::new, |key| {
+                    match (&key.source, &key.env_var) {
+                        (KeySource::Environment, Some(variable)) => {
+                            format!(" source=environment ({})", variable.as_str())
+                        }
+                        (KeySource::Environment, None) => " source=environment".to_owned(),
+                        (KeySource::File, _) => " source=file".to_owned(),
+                        (KeySource::Missing, _) => " source=missing".to_owned(),
+                    }
+                });
                 writeln!(
                     stdout,
-                    "{}: credential={}",
+                    "{}: credential={}{source}",
                     row.facts.account,
                     credential_word(row.facts.credential.status)
                 )

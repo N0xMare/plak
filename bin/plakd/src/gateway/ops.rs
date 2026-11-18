@@ -64,16 +64,28 @@ impl OpsBridge {
 
     fn facts_for(&mut self, account: &GatewayAccount) -> Result<AccountFacts, GatewayRefusal> {
         let parsed = Self::account(account).map_err(|_| GatewayRefusal::AccountUnknown {})?;
-        let status = self
-            .app
-            .offline_status(&parsed)
-            .map_err(|_| GatewayRefusal::Internal {})?;
+        let key = key_facts(account.as_str(), &self.home);
+        // An API-key account has no login state: it is ready exactly when a
+        // key resolves.
+        let status = if crate::home::secrets::is_api_key_account(account.as_str()) {
+            match key.as_ref().map(|key| &key.source) {
+                Some(KeySource::Environment | KeySource::File) => CredentialStatus::Ready,
+                Some(KeySource::Missing) | None => CredentialStatus::SignedOut,
+            }
+        } else {
+            credential_status(
+                self.app
+                    .offline_status(&parsed)
+                    .map_err(|_| GatewayRefusal::Internal {})?
+                    .credential,
+            )
+        };
         Ok(AccountFacts {
             account: account.clone(),
             instance: self.instance.clone(),
             observed_at_unix_ms: super::callers::now_ms(),
             credential: CredentialFacts {
-                status: credential_status(status.credential),
+                status,
                 generation: None,
                 access_expires_at_unix_ms: None,
                 selection_epoch_digest: None,
@@ -81,7 +93,7 @@ impl OpsBridge {
             identity: None,
             wire_identity: WireIdentity::default(),
             profile: None,
-            key: key_facts(account.as_str(), &self.home),
+            key,
         })
     }
 }
