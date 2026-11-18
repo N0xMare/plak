@@ -318,6 +318,93 @@ fn assert_failed_turn(store: &dyn SessionRecordStore, session: &str, turn: &str)
     );
 }
 
+struct ReadinessGate {
+    entered: std::sync::mpsc::Sender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+struct BlockingReadiness {
+    gate: Mutex<Option<ReadinessGate>>,
+    phase: std::sync::mpsc::Sender<crate::runtime::SurfacePhase>,
+}
+
+impl SurfaceHandler<TestExtension> for BlockingReadiness {
+    fn accounts_read(
+        &self,
+        _: &ProbeIntent,
+        _: &SurfaceFacts<'_>,
+    ) -> Option<surface::AccountsRead> {
+        let ReadinessGate { entered, release } = self.gate.lock().unwrap().take().unwrap();
+        Some(Box::new(move || {
+            entered.send(()).unwrap();
+            release.recv().map_err(|error| error.to_string())?;
+            Ok(Vec::new())
+        }))
+    }
+
+    fn dispatch(&self, _: ProbeIntent, facts: SurfaceFacts<'_>, _: &Sender) -> SurfaceEffect {
+        assert!(matches!(facts.accounts, Some(Ok(rows)) if rows.is_empty()));
+        self.phase.send(facts.phase).unwrap();
+        SurfaceEffect::default()
+    }
+
+    fn publish_template_readiness(
+        &self,
+        _: &[plakous_host_protocol::views::ProviderSection],
+        _: &Sender,
+    ) {
+    }
+
+    fn readiness_read(&self) -> ReadinessRead {
+        Box::new(|| Ok((Vec::new(), Vec::new())))
+    }
+}
+
+#[test]
+fn a_blocked_readiness_read_does_not_hold_the_root_turn_or_its_controls() {
+    let root = tempfile::tempdir().unwrap();
+    let gate = root.path().join("release-turn");
+    let (mut config, _) = continue_host_scripted(
+        root.path(),
+        None,
+        b"offline-loopback-account",
+        &serde_json::json!([{
+            "stream": [{"gate": {"file": gate}}],
+            "output": {"text": "finished"},
+        }]),
+        1,
+    );
+    let (entered, reading) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let (phase, dispatched) = std::sync::mpsc::channel();
+    config.surface = Some(Box::new(BlockingReadiness {
+        gate: Mutex::new(Some(ReadinessGate {
+            entered,
+            release: released,
+        })),
+        phase,
+    }));
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Extension(ProbeIntent::InspectUsage));
+    reading.recv_timeout(Duration::from_secs(30)).unwrap();
+    send_attached_action(&actions, UserAction::Prompt("go on while waiting".into()));
+    wait_for(&events, &mut seen, 0, |events| {
+        !lifecycle(events, TurnPhase::Admitted).is_empty()
+    });
+    release.send(()).unwrap();
+    assert_eq!(
+        dispatched.recv_timeout(Duration::from_secs(30)).unwrap(),
+        crate::runtime::SurfacePhase::Busy
+    );
+    std::fs::write(gate, "finish").unwrap();
+    wait_for(&events, &mut seen, 0, |events| {
+        idle_after(events, TurnPhase::Completed)
+    });
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+}
+
 /// A usage-limit failure, then `ChooseAccount` with a continue: one rebind
 /// onto the new account and exactly one admitted root turn of the exact
 /// prompt on the line head. The root's node, profile and tree epoch do not

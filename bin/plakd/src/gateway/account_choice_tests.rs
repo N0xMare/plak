@@ -56,6 +56,9 @@ fn choose_openai(
             account_choices: std::collections::BTreeMap::new(),
         }),
     };
+    facts.phase = SurfacePhase::Busy;
+    assert!(surface.accounts_read(&intent, &facts).is_none());
+    facts.phase = SurfacePhase::Idle;
     let read = surface
         .accounts_read(&intent, &facts)
         .expect("ChooseAccount reads readiness");
@@ -183,6 +186,7 @@ fn the_gateway_reports_the_default_and_named_subscription_slots() {
         .mode(0o700)
         .create(gateway_home.home())
         .unwrap();
+    gateway_home.ensure_layout().unwrap();
     std::fs::DirBuilder::new()
         .mode(0o700)
         .create(&state)
@@ -212,8 +216,25 @@ fn the_gateway_reports_the_default_and_named_subscription_slots() {
     )
     .unwrap();
     let custody = super::HostCustody::resolve(&host).unwrap();
+    use plakous::gateway::protocol::GatewayAccount;
+    use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
+    let status = custody.admin().unwrap().call(&AdminRequest::Status {
+        accounts: ["codex", "codex/work"]
+            .into_iter()
+            .map(|account| GatewayAccount::new(account).unwrap())
+            .collect(),
+    });
     let catalog = account_choice::ready_catalog(&host, &custody);
     drain(&socket, served);
+    let AdminResponse::Status { rows } = status.unwrap() else {
+        panic!("the gateway did not answer the subscription status request");
+    };
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.facts.account.as_str())
+            .collect::<Vec<_>>(),
+        ["codex", "codex/work"]
+    );
     let catalog = catalog.expect("the gateway reports status for both subscription slots");
     assert_eq!(ready(&catalog, "codex"), Some(false), "{catalog:?}");
     assert_eq!(ready(&catalog, "codex/work"), Some(false), "{catalog:?}");

@@ -5,6 +5,12 @@ use crate::agent::children::runtime_factory::{
 use crate::agent::children::{
     ProductChildController, ProductChildSessionBinder, ProductLiveCanceller, ProductMailDeliverer,
 };
+use crate::agent_tree::TopologyError;
+use crate::agent_tree_protocol::TemplateName;
+use crate::agent_tree_tools::{
+    ChildController, ChildServices, SpawnBindError, SpawnBound, SpawnStart,
+};
+use crate::orchestration::RosterBinding;
 use plakous::gateway::custody::{
     AccountFacts, CredentialCustodian, CredentialFields, CustodyError, CustodyFuture, CustodySlot,
     CustodyStatus, ExpectedFence, RefreshRequest,
@@ -256,25 +262,52 @@ async fn alias_cards_freeze_the_default_and_named_accounts_through_followup() {
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
 
-// This publication observer runs after the durable spawn receipt, before
-// startup can be reserved. Losing the caller here leaves no child lease.
-#[derive(Default)]
-struct CutAfterReceipt(Mutex<Option<tokio::task::AbortHandle>>);
+// The real product admits and resolves the spawn. The cut holds just before
+// the binder can reserve startup, so no child lease survives the caller.
+struct CutAfterReceipt {
+    product: ProductChildController,
+    reached: Arc<tokio::sync::Notify>,
+}
 
-impl crate::agent_tree::TopologyObserver for CutAfterReceipt {
-    fn node_spawned(&self, _tree: &str, _node: &str, _parent: Option<&str>, _template: &str) {
-        self.0.lock().unwrap().take().unwrap().abort();
+type Answer<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+impl ChildController for CutAfterReceipt {
+    fn services(&self) -> ChildServices {
+        ChildServices::BIND
     }
-    fn turn_usage(&self, _terminal: crate::agent_tree::ProjectedChildTurnUsage) {}
-    fn node_detached(
+
+    fn admit_spawn(&self, caller: &str, request: &SpawnAgentRequest) -> Result<(), TopologyError> {
+        self.product.admit_spawn(caller, request)
+    }
+
+    fn spawn_parent_composition(
         &self,
-        _tree: &str,
-        _node: &str,
-        _parent: Option<&str>,
-        _status: crate::agent_tree::NodeDetach,
-    ) {
+        caller: &str,
+    ) -> Option<plakous_host_protocol::CompositionSelection> {
+        self.product.spawn_parent_composition(caller)
     }
-    fn epoch_advanced(&self, _tree: &str) {}
+
+    fn admit_binding<'a>(
+        &'a self,
+        template: &'a TemplateName,
+        binding: &'a RosterBinding,
+    ) -> Answer<'a, Result<(), TopologyError>> {
+        self.product.admit_binding(template, binding)
+    }
+
+    fn resolve_account<'a>(
+        &'a self,
+        card: &'a str,
+    ) -> Answer<'a, Result<Option<String>, TopologyError>> {
+        self.product.resolve_account(card)
+    }
+
+    fn bind(&self, _start: SpawnStart) -> Answer<'_, Result<SpawnBound, SpawnBindError>> {
+        Box::pin(async {
+            self.reached.notify_one();
+            std::future::pending().await
+        })
+    }
 }
 
 #[tokio::test]
@@ -289,17 +322,15 @@ async fn spawn_account_receipt_replays_after_relaunch() {
     tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
     reattach(&mut fixture, store.clone(), tree).await;
 
-    let cut = Arc::new(CutAfterReceipt::default());
+    let reached = Arc::new(tokio::sync::Notify::new());
     let arguments = request("grok-review", "replay the exact receipt");
     let operation = "spawn-account-cut";
-    let (go, start) = tokio::sync::oneshot::channel();
     let task = tokio::spawn({
         let runtime = fixture.runtime.clone();
         let parent = fixture.parent.clone();
-        let observer = cut.clone();
+        let reached = reached.clone();
         let arguments = arguments.clone();
         async move {
-            start.await.unwrap();
             let controller = ProductChildController {
                 binder: ProductChildSessionBinder {
                     parent: parent.clone(),
@@ -320,16 +351,20 @@ async fn spawn_account_receipt_replays_after_relaunch() {
                 &arguments,
                 operation.into(),
                 crate::agent_tree_tools::TopologyHostPorts {
-                    controller: Some(Arc::new(controller)),
-                    observer: Some(observer),
+                    controller: Some(Arc::new(CutAfterReceipt {
+                        product: controller,
+                        reached,
+                    })),
                     ..Default::default()
                 },
             )
             .await
         }
     });
-    *cut.0.lock().unwrap() = Some(task.abort_handle());
-    go.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(30), reached.notified())
+        .await
+        .unwrap();
+    task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
 
     let persisted = ProductAgentTree::reopen(store.load(&fixture.tree_id).unwrap().unwrap());
