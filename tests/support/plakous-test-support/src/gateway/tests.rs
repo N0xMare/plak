@@ -400,7 +400,6 @@ fn facts() -> TestResult<AccountFacts> {
     Ok(AccountFacts {
         account: plakous_gateway_protocol::GatewayAccount::new(ACCOUNT)?,
         instance: plakous_gateway_protocol::UuidText::new("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")?,
-        facts_revision: 2,
         observed_at_unix_ms: 1,
         credential: CredentialFacts {
             status: CredentialStatus::Ready,

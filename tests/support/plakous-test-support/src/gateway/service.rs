@@ -191,7 +191,6 @@ fn scripted_facts(generation: u64) -> Result<AccountFacts, GatewayRefusal> {
         account: GatewayAccount::new(ACCOUNT).map_err(|_| GatewayRefusal::Internal {})?,
         instance: UuidText::new("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
             .map_err(|_| GatewayRefusal::Internal {})?,
-        facts_revision: 1,
         observed_at_unix_ms: 1,
         credential: CredentialFacts {
             status: CredentialStatus::Ready,
