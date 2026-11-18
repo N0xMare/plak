@@ -650,12 +650,14 @@ fn lifecycle_archive_refuses_running_process_without_a_turn() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn delete_and_unpair_refuse_until_the_running_job_ends() -> TestResult {
-    use plakous::tools::JobHost as _;
-    use plakous_hosted::sessions::RunnerDisplay;
+fn open_session_with_a_running_job(
+    f: &mut Fixture,
+) -> TestResult<(
+    Arc<plakous::tools::LocalJobHost>,
+    OpenedSession,
+    product_sessions::SessionRecord,
+)> {
     use plakous_offline_crash_harness::evidence::EvidenceKind;
-    let mut f = fixture(false)?;
     let host = Arc::new(plakous::tools::LocalJobHost::new());
     let evidence = f.paths.home().join("process-evidence.jsonl");
     let controller =
@@ -672,7 +674,7 @@ fn delete_and_unpair_refuse_until_the_running_job_ends() -> TestResult {
             {"stream": [{"text": "waiting"}, {"stall": 30000}]}
         ]
     }))?);
-    let mut record = product_sessions::SessionRecord::new(f.paths.home().to_path_buf());
+    let record = product_sessions::SessionRecord::new(f.paths.home().to_path_buf());
     let binding =
         plakous_offline_crash_harness::scripted_runtime_binding(f.paths.home(), controller, plan)
             .checked()?
@@ -687,7 +689,6 @@ fn delete_and_unpair_refuse_until_the_running_job_ends() -> TestResult {
     else {
         return Err("expected created session".into());
     };
-    let line = session.line();
     let agent = session.agent().clone();
     f.runtime
         .executor
@@ -713,6 +714,16 @@ fn delete_and_unpair_refuse_until_the_running_job_ends() -> TestResult {
             TestResult::Ok(())
         })
         .checked()??;
+    Ok((host, session, record))
+}
+
+#[test]
+fn delete_and_unpair_refuse_until_the_running_job_ends() -> TestResult {
+    use plakous::tools::JobHost as _;
+    use plakous_hosted::sessions::RunnerDisplay;
+    let mut f = fixture(false)?;
+    let (host, session, mut record) = open_session_with_a_running_job(&mut f)?;
+    let line = session.line();
     let pin_dir = f.paths.home().join("runners").join("build");
     std::fs::create_dir_all(&pin_dir).checked()?;
     std::fs::write(

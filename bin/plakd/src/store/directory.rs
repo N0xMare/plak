@@ -209,10 +209,6 @@ impl ProductStore {
     }
 
     /// Every record's identity for startup recovery, without the face's row limit.
-    #[allow(
-        dead_code,
-        reason = "the optional hosting product reads the full directory"
-    )]
     /// Sessions whose display runner is `runner_id`, including archived rows.
     ///
     /// # Errors
@@ -224,12 +220,16 @@ impl ProductStore {
             )
             .and_then(|mut statement| {
                 statement
-                    .query_map(rusqlite::params![runner_id], |row| row.get(0))?
+                    .query_map([runner_id], |row| row.get(0))?
                     .collect()
             })
             .map_err(|error| format!("sessions for runner {runner_id} could not be read: {error}"))
     }
 
+    #[allow(
+        dead_code,
+        reason = "the optional hosting product reads the full directory"
+    )]
     pub(crate) fn session_ids(&self) -> Result<Vec<String>, String> {
         self.connection
             .prepare("SELECT id FROM sessions ORDER BY id")

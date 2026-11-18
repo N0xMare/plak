@@ -127,7 +127,6 @@ impl AgentSessions {
     /// # Errors
     /// Returns the same typed lookup, stale-locator, integrity or storage
     /// failure as [`Self::export_history_sqlite`].
-    #[cfg(feature = "sessions-sqlite")]
     pub fn unsettled_job_labels(
         path: impl AsRef<Path>,
         locator: SessionLocator,
