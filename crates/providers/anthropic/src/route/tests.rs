@@ -110,11 +110,12 @@ fn oauth_access_token_rotation_retains_prepared_credential_authority() -> Result
         route.auth().credential_authority(),
         rotated.auth().credential_authority()
     );
-    assert_eq!(route.auth.key.authority(), rotated.auth.key.authority());
-    assert_ne!(
-        route.auth.key.expose_secret(),
-        rotated.auth.key.expose_secret()
-    );
+    let key = |route: &AnthropicPlatformRoute| match &route.auth.credential {
+        RouteCredential::Key(key) => Arc::clone(key),
+        RouteCredential::Source(_) => panic!("an OAuth route holds its token"),
+    };
+    assert_eq!(key(&route).authority(), key(&rotated).authority());
+    assert_ne!(key(&route).expose_secret(), key(&rotated).expose_secret());
     Ok(())
 }
 

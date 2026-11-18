@@ -37,7 +37,8 @@ mod upstream_pins;
 
 pub use api_models::{
     XaiApiModel, XaiApiModelError, XaiApiModelStatus, XaiListedModel, accept_xai_listed_models,
-    list_xai_api_models, xai_api_bundled_listing, xai_api_key_fingerprint, xai_api_models,
+    list_xai_api_models, list_xai_api_models_over, xai_api_bundled_listing,
+    xai_api_key_fingerprint, xai_api_models,
 };
 pub(crate) use api_models::{xai_platform_capacity_admitted, xai_platform_effort_admitted};
 pub use dialect::{XaiAccessMode, XaiDialect, XaiRouteKind, XaiTerminalConvention};

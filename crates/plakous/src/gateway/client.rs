@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use plakous_auth::api_key::{
     ApiKey, ApiKeyError, ApiKeyFuture, ApiKeyGenerationGrant, ApiKeyRequest, ApiKeySource,
-    CredentialGenerationFingerprint, CredentialProviderTag,
+    CredentialGenerationFingerprint, CredentialProviderTag, KEY_BINDING_IDENTITY,
+    reported_key_binding,
 };
 use plakous_auth::custody::gateway::GatewayCustodian;
 use plakous_auth::custody::{
@@ -104,13 +105,18 @@ impl GatewayCustody {
 struct KeyGeneration {
     fingerprint: CredentialGenerationFingerprint,
     fence: ExpectedFence,
+    /// The key binding the gateway reported, for a provider whose route
+    /// binds one.
+    key_binding: Option<plakous_model::Digest>,
 }
 
 /// An API-key source whose key a credential gateway holds.
 ///
 /// Its generation is the fingerprint the gateway reports, so a route admits
-/// exactly the generation a local source of the same key would; its field
-/// is a custodied placeholder the gateway fills at that header's position.
+/// exactly the generation a local source of the same key would; its key
+/// binding is the digest the gateway reports
+/// ([`plakous_auth::api_key::KEY_BINDING_IDENTITY`]); its field is a
+/// custodied placeholder the gateway fills at that header's position.
 /// [`ApiKeySource::prepare`] fetches the gateway's facts once per physical
 /// attempt; the synchronous reads use those facts and the gateway checks
 /// the fence again at injection.
@@ -145,6 +151,23 @@ impl<A> CustodiedKeySource<A> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .ok_or(ApiKeyError::Unavailable)
+    }
+
+    /// The current generation, when it is the one `expected` admitted for
+    /// `request`.
+    fn admitted(
+        &self,
+        request: &(impl ApiKeyRequest + ?Sized),
+        expected: &ApiKeyGenerationGrant<A>,
+    ) -> Result<KeyGeneration, ApiKeyError> {
+        let current = self.current()?;
+        if !self.accepts(request)
+            || expected.provider() != self.provider
+            || expected.fingerprint() != current.fingerprint
+        {
+            return Err(ApiKeyError::BindingMismatch);
+        }
+        Ok(current)
     }
 }
 
@@ -194,6 +217,10 @@ where
                             facts.key.as_ref()?.fingerprint.as_deref()?,
                         )?,
                         fence: facts.expected_fence()?,
+                        key_binding: match facts.wire_identity.get(KEY_BINDING_IDENTITY) {
+                            Some(value) => Some(reported_key_binding(value)?),
+                            None => None,
+                        },
                     })
                 })
                 .flatten();
@@ -208,14 +235,18 @@ where
         expected: &ApiKeyGenerationGrant<A>,
         _form: KeyHeaderForm,
     ) -> Result<CredentialField, ApiKeyError> {
-        let current = self.current()?;
-        if !self.accepts(request)
-            || expected.provider() != self.provider
-            || expected.fingerprint() != current.fingerprint
-        {
-            return Err(ApiKeyError::BindingMismatch);
-        }
+        let current = self.admitted(request, expected)?;
         Ok(CredentialField::custodied(&self.slot, &current.fence))
+    }
+
+    fn key_binding(
+        &self,
+        request: &R,
+        expected: &ApiKeyGenerationGrant<A>,
+    ) -> Result<plakous_model::Digest, ApiKeyError> {
+        self.admitted(request, expected)?
+            .key_binding
+            .ok_or(ApiKeyError::Unavailable)
     }
 }
 

@@ -1433,6 +1433,9 @@ impl plakous_auth::api_key::ApiKeySource<crate::AnthropicApiKeyRequest> for Coun
         _: &dyn plakous_auth::api_key::ApiKeyRequest,
     ) -> Result<plakous_auth::api_key::ApiKeyGenerationGrant, plakous_auth::api_key::ApiKeyError>
     {
+        // A generation read is a credential read: the route revalidates
+        // through it before each dispatch.
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         key_grant("offline-configuration-key")
     }
     fn api_key(
@@ -1694,6 +1697,7 @@ impl plakous_auth::api_key::ApiKeySource<crate::AnthropicApiKeyRequest> for Work
         _: &dyn plakous_auth::api_key::ApiKeyRequest,
     ) -> Result<plakous_auth::api_key::ApiKeyGenerationGrant, plakous_auth::api_key::ApiKeyError>
     {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         key_grant(*self.key.lock().unwrap())
     }
     fn api_key(

@@ -6238,7 +6238,13 @@ route builds its own client as before and passes it through
 custody. A key the gateway holds is a `CustodiedKeySource`: its generation
 grant carries the fingerprint the gateway reports (the local key's exact
 fingerprint, so a session admits and binds the same generation), its field
-is a custodied placeholder, and it never yields the key. Because
+is a custodied placeholder, and it never yields the key. A route that binds
+a digest of the key's bytes reads it through `ApiKeySource::key_binding`
+(`plakous_auth::api_key::provider_key_binding`): the Anthropic Platform's
+`anthropic.platform.credential.v1` model-binding digest, which
+`LocalKeyCustodian` reports as the non-secret wire identity `key_binding`,
+so an Anthropic Platform route over a custodied key binds the bytes a local
+key binds and takes its raw `x-api-key` field from `credential_field`. Because
 `ApiKeySource` reads are synchronous, routes await the provided
 `ApiKeySource::prepare` before each physical attempt (and constructions and
 listings before they read a generation): a custodied source fetches the

@@ -9,7 +9,9 @@ use super::{
     RefreshRequest,
 };
 use crate::CredentialGeneration;
-use crate::api_key::{ApiKey, CredentialProviderTag, ExposeApiKey as _};
+use crate::api_key::{
+    ApiKey, CredentialProviderTag, ExposeApiKey as _, KEY_BINDING_IDENTITY, provider_key_binding,
+};
 
 const KEY_ACCOUNT_DOMAIN: &[u8] = b"plak.custody.key-account.v1";
 const KEY_AUTHORITY_DOMAIN: &[u8] = b"plak.custody.key-authority.v1";
@@ -70,7 +72,9 @@ pub trait LocalKeyStore: Send + Sync {
 ///
 /// A key's account binding is a digest of its slot; its generation is the
 /// leading eight bytes of its generation fingerprint, so replacing the key
-/// moves the fence without changing the account.
+/// moves the fence without changing the account. A key whose route binds a
+/// digest of its bytes ([`provider_key_binding`]) reports that digest as
+/// wire identity under [`KEY_BINDING_IDENTITY`].
 #[derive(Clone)]
 pub struct LocalKeyCustodian {
     store: Arc<dyn LocalKeyStore>,
@@ -124,6 +128,12 @@ impl LocalKeyCustodian {
             fingerprint: Some(fingerprint.to_hex()),
             env_var: local.env_var.clone(),
         });
+        if let Some(binding) = provider_key_binding(injection.provider, &local.key) {
+            facts.wire_identity.insert(
+                KEY_BINDING_IDENTITY.to_owned(),
+                IdentityDigest::from_bytes(*binding.bytes()).to_hex(),
+            );
+        }
         Ok((facts, Some(local)))
     }
 }

@@ -13,6 +13,54 @@ pub use generation::{
 
 const MAX_API_KEY_BYTES: usize = 64 * 1024;
 
+/// The wire-identity key under which a custodian reports a held key's
+/// [`provider_key_binding`], as 64 lowercase hex digits.
+pub const KEY_BINDING_IDENTITY: &str = "key_binding";
+
+// The Anthropic Platform route binds a session to this digest of its key.
+const ANTHROPIC_PLATFORM_CREDENTIAL_DOMAIN: &[u8] = b"anthropic.platform.credential.v1";
+const KEY_BINDING_VERSION: u32 = 2;
+
+/// The non-secret digest of `key`'s bytes that `provider`'s route binds a
+/// session to, for a provider whose route binds one: the Anthropic Platform's
+/// `anthropic.platform.credential.v1` model-binding digest. A custodian that
+/// holds the key reports it as a non-secret fact
+/// ([`KEY_BINDING_IDENTITY`]), so a route that never sees the key binds the
+/// same bytes.
+#[must_use]
+pub fn provider_key_binding(
+    provider: CredentialProviderTag,
+    key: &ApiKey,
+) -> Option<plakous_model::Digest> {
+    match provider {
+        CredentialProviderTag::AnthropicPlatform => plakous_model::Digest::sha256(
+            plakous_model::DigestDomain::ModelBinding,
+            KEY_BINDING_VERSION,
+            &[
+                ANTHROPIC_PLATFORM_CREDENTIAL_DOMAIN,
+                key.expose_secret().as_bytes(),
+            ],
+        )
+        .ok(),
+        CredentialProviderTag::OpenAiPlatform
+        | CredentialProviderTag::OpenRouterPlatform
+        | CredentialProviderTag::XaiPlatform => None,
+    }
+}
+
+/// A [`provider_key_binding`] a custodian reported under
+/// [`KEY_BINDING_IDENTITY`].
+#[must_use]
+pub fn reported_key_binding(value: &str) -> Option<plakous_model::Digest> {
+    let digest = crate::custody::IdentityDigest::from_hex(value)?;
+    plakous_model::Digest::from_sha256_bytes(
+        plakous_model::DigestDomain::ModelBinding,
+        KEY_BINDING_VERSION,
+        *digest.as_bytes(),
+    )
+    .ok()
+}
+
 /// A non-cloneable, non-serializable API key, zeroized on drop.
 ///
 /// ```compile_fail
@@ -121,6 +169,16 @@ impl fmt::Display for ApiKey {
 /// Non-linkable identity of one immutable API-key container.
 #[derive(Clone)]
 pub struct ApiKeyAuthorityToken(Arc<()>);
+
+impl ApiKeyAuthorityToken {
+    /// A new authority for a credential this process does not hold as an
+    /// [`ApiKey`], such as a custodied key's admitted generation. It equals
+    /// only its own clones.
+    #[must_use]
+    pub fn fresh() -> Self {
+        Self(Arc::new(()))
+    }
+}
 
 impl PartialEq for ApiKeyAuthorityToken {
     fn eq(&self, other: &Self) -> bool {
@@ -280,6 +338,22 @@ pub trait ApiKeySource<R: ApiKeyRequest + ?Sized, A = ()>: Send + Sync {
         form: crate::custody::KeyHeaderForm,
     ) -> Result<crate::custody::CredentialField, ApiKeyError> {
         Ok(form.field(&self.api_key(request, expected)?))
+    }
+
+    /// The admitted generation's [`provider_key_binding`]. Local custody
+    /// digests [`Self::api_key`]; a custodian that keeps the key elsewhere
+    /// reports the digest it computed.
+    ///
+    /// # Errors
+    /// Returns [`Self::api_key`]'s error, or [`ApiKeyError::Unavailable`]
+    /// when the provider's route binds no key digest.
+    fn key_binding(
+        &self,
+        request: &R,
+        expected: &ApiKeyGenerationGrant<A>,
+    ) -> Result<plakous_model::Digest, ApiKeyError> {
+        provider_key_binding(expected.provider(), &self.api_key(request, expected)?)
+            .ok_or(ApiKeyError::Unavailable)
     }
 }
 

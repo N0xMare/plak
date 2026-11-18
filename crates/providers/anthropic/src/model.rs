@@ -267,9 +267,8 @@ impl AnthropicLanguageModel {
         crate::config::preflight_platform_admission(&config)?;
         plakous_messages::validate_messages_api_behavior(&behavior).map_err(configuration_error)?;
         let account_identity = AnthropicAccountIdentity::new(account)?;
-        let key = crate::route::current_api_key(source.as_ref())
+        let route = AnthropicPlatformRoute::for_source(Arc::clone(&source), account_identity)
             .map_err(|_| configuration_error("Anthropic API credential unavailable"))?;
-        let route = AnthropicPlatformRoute::for_account(key, account_identity)?;
         let account_binding = route
             .account()
             .stable_binding()
@@ -392,6 +391,10 @@ impl AnthropicLanguageModel {
     pub(crate) async fn side_request_credential(
         self: &Arc<Self>,
     ) -> Result<plakous_http::HeaderValue, AnthropicError> {
+        self.source
+            .prepare()
+            .await
+            .map_err(crate::route::api_key_error)?;
         Arc::clone(self)
             .revalidate_runtime_authority(SystemClock.now())
             .await
@@ -581,13 +584,17 @@ impl LanguageModel for AnthropicLanguageModel {
                                 "Anthropic admission expired",
                             )
                         })?;
+                    let unavailable = |_| {
+                        ModelError::new(
+                            ModelErrorKind::Authentication,
+                            "Anthropic API credential changed or unavailable",
+                        )
+                    };
+                    model.source.prepare().await.map_err(unavailable)?;
                     route
                         .validate_current_key(model.source.as_ref())
                         .map_err(|_| {
-                            ModelError::new(
-                                ModelErrorKind::Authentication,
-                                "Anthropic API credential changed or unavailable",
-                            )
+                            unavailable(plakous_auth::api_key::ApiKeyError::Unavailable)
                         })?;
                     let factory = match &model.dial_origin {
                         Some(origin) => AnthropicLocalHttpServiceFactory::with_runtime(
@@ -640,14 +647,18 @@ impl LanguageModel for AnthropicLanguageModel {
                                             "Anthropic retry admission expired",
                                         )
                                     })?;
+                                let changed = |_| {
+                                    AnthropicError::new(
+                                        AnthropicErrorKind::Authentication,
+                                        AnthropicErrorPhase::Connect,
+                                        "Anthropic retry credential changed",
+                                    )
+                                };
+                                retry_model.source.prepare().await.map_err(changed)?;
                                 route
                                     .validate_current_key(retry_model.source.as_ref())
                                     .map_err(|_| {
-                                        AnthropicError::new(
-                                            AnthropicErrorKind::Authentication,
-                                            AnthropicErrorPhase::Connect,
-                                            "Anthropic retry credential changed",
-                                        )
+                                        changed(plakous_auth::api_key::ApiKeyError::Unavailable)
                                     })?;
                                 Ok(crate::AnthropicRetryGrant::for_api_key(route))
                             })

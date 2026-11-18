@@ -68,7 +68,7 @@ pub use upstream_pins::{
 pub use api_models::{
     AnthropicApiModel, AnthropicApiModelStatus, AnthropicListedModel,
     accept_anthropic_listed_models, anthropic_api_bundled_listing, anthropic_api_key_fingerprint,
-    anthropic_api_models, list_anthropic_api_models,
+    anthropic_api_models, list_anthropic_api_models, list_anthropic_api_models_over,
 };
 pub use cch::{
     attest_claude_oauth_cch, claude_oauth_billing_header, claude_oauth_cch_matches_body,

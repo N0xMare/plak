@@ -313,12 +313,16 @@ async fn revalidate(provider: &ResolvedProvider) -> TestResult {
     Ok(())
 }
 
+#[cfg(feature = "anthropic")]
+mod anthropic_api;
 #[cfg(feature = "claude")]
 mod claude;
 #[cfg(feature = "grok")]
 mod grok;
 #[cfg(feature = "openrouter")]
 mod openrouter;
+#[cfg(feature = "xai")]
+mod xai_api;
 
 /// Custody through an in-process gateway that serves the Codex logins of
 /// `paths` and dials the production origin at `upstream`.

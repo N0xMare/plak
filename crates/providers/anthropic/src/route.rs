@@ -7,6 +7,7 @@ pub use plakous_auth::api_key::ApiKey;
 use plakous_auth::api_key::ExposeApiKey as _;
 use plakous_auth::api_key::{
     ApiKeyAuthorityToken, ApiKeyError, ApiKeyRequest, ApiKeySource, CredentialProviderTag,
+    provider_key_binding,
 };
 use plakous_auth::custody::{CredentialField, KeyHeaderForm};
 use plakous_messages::{MessagesAttempt, MessagesAttemptBinding};
@@ -119,6 +120,10 @@ impl AnthropicCredentialAuthority {
     fn from_key(key: &ApiKey) -> Self {
         Self(key.authority().clone())
     }
+
+    fn fresh() -> Self {
+        Self(ApiKeyAuthorityToken::fresh())
+    }
 }
 
 impl PartialEq for AnthropicCredentialAuthority {
@@ -195,13 +200,41 @@ impl ApiKeyRequest for AnthropicApiKeyRequest {
 /// Caller-owned API-key source for the exact Anthropic request context.
 pub type AnthropicKeySource = dyn ApiKeySource<AnthropicApiKeyRequest>;
 
-pub(crate) fn current_api_key(source: &AnthropicKeySource) -> Result<ApiKey, AnthropicError> {
-    let request = AnthropicApiKeyRequest::platform();
-    let grant = source.generation_grant(&request).map_err(api_key_error)?;
+/// Source-owned Anthropic Platform generation authority.
+pub(crate) type AnthropicKeyGeneration = plakous_auth::api_key::ApiKeyGenerationGrant;
+
+/// The source's current Platform generation, without reading a key.
+pub(crate) fn platform_grant(
+    source: &AnthropicKeySource,
+) -> Result<AnthropicKeyGeneration, AnthropicError> {
+    let grant = source
+        .generation_grant(&AnthropicApiKeyRequest::platform())
+        .map_err(api_key_error)?;
     if grant.provider() != CredentialProviderTag::AnthropicPlatform {
         return Err(api_key_error(ApiKeyError::BindingMismatch));
     }
-    source.api_key(&request, &grant).map_err(api_key_error)
+    Ok(grant)
+}
+
+/// The raw `x-api-key` field of `grant`, from the key's custodian.
+pub(crate) fn platform_key_field(
+    source: &AnthropicKeySource,
+    grant: &AnthropicKeyGeneration,
+) -> Result<CredentialField, AnthropicError> {
+    source
+        .credential_field(
+            &AnthropicApiKeyRequest::platform(),
+            grant,
+            KeyHeaderForm::Raw,
+        )
+        .map_err(api_key_error)
+}
+
+fn current_api_key(source: &AnthropicKeySource) -> Result<ApiKey, AnthropicError> {
+    let grant = platform_grant(source)?;
+    source
+        .api_key(&AnthropicApiKeyRequest::platform(), &grant)
+        .map_err(api_key_error)
 }
 
 pub(crate) fn api_key_error(error: ApiKeyError) -> AnthropicError {
@@ -216,12 +249,29 @@ pub(crate) fn api_key_error(error: ApiKeyError) -> AnthropicError {
     AnthropicError::new(kind, AnthropicErrorPhase::Prepare, error.to_string())
 }
 
+/// What a route's credential is.
+#[derive(Clone)]
+enum RouteCredential {
+    /// A key or OAuth token this process holds.
+    Key(Arc<ApiKey>),
+    /// A key source's admitted Platform generation; the source's custodian
+    /// supplies the field and the key binding, so a key a credential
+    /// gateway holds binds and dispatches exactly as a local one.
+    Source(Arc<SourceCredential>),
+}
+
+struct SourceCredential {
+    source: Arc<AnthropicKeySource>,
+    grant: AnthropicKeyGeneration,
+    binding: Digest,
+}
+
 /// Resolved API-key authentication bound to the official Platform origin.
 ///
 /// Clone shares the non-`Clone` key via [`Arc`] without duplicating secret bytes.
 #[derive(Clone)]
 pub struct AnthropicApiKeyAuth {
-    key: Arc<ApiKey>,
+    credential: RouteCredential,
     audience_origin: &'static str,
     credential_authority: AnthropicCredentialAuthority,
     /// A credential custodian's exact `authorization` value, which replaces
@@ -235,9 +285,18 @@ impl AnthropicApiKeyAuth {
     pub fn platform(key: ApiKey) -> Self {
         let credential_authority = AnthropicCredentialAuthority::from_key(&key);
         Self {
-            key: Arc::new(key),
+            credential: RouteCredential::Key(Arc::new(key)),
             audience_origin: ANTHROPIC_PLATFORM_ORIGIN,
             credential_authority,
+            custodied: None,
+        }
+    }
+
+    fn from_source(credential: SourceCredential) -> Self {
+        Self {
+            credential: RouteCredential::Source(Arc::new(credential)),
+            audience_origin: ANTHROPIC_PLATFORM_ORIGIN,
+            credential_authority: AnthropicCredentialAuthority::fresh(),
             custodied: None,
         }
     }
@@ -261,7 +320,7 @@ impl fmt::Debug for AnthropicApiKeyAuth {
             .debug_struct("AnthropicApiKeyAuth")
             .field("audience_origin", &self.audience_origin)
             .field("credential_authority", &self.credential_authority)
-            .field("key", &"<redacted>")
+            .field("credential", &"<redacted>")
             .field("custodied", &self.custodied.is_some())
             .finish()
     }
@@ -323,12 +382,20 @@ impl AnthropicAttemptAuthorization {
             use secrecy::ExposeSecret as _;
             return Ok(CredentialField::exact(field.expose_secret().to_vec()));
         }
-        let form = if route.is_claude_oauth() {
-            KeyHeaderForm::Bearer
-        } else {
-            KeyHeaderForm::Raw
-        };
-        Ok(form.field(&self.auth.key))
+        match &self.auth.credential {
+            RouteCredential::Key(key) => {
+                let form = if route.is_claude_oauth() {
+                    KeyHeaderForm::Bearer
+                } else {
+                    KeyHeaderForm::Raw
+                };
+                Ok(form.field(key))
+            }
+            RouteCredential::Source(held) if !route.is_claude_oauth() => {
+                platform_key_field(held.source.as_ref(), &held.grant)
+            }
+            RouteCredential::Source(_) => Err(credential_binding_error()),
+        }
     }
 }
 
@@ -373,19 +440,42 @@ impl AnthropicPlatformRoute {
         digest_identity(b"anthropic.platform.replay-account.v1", &scope).map(Some)
     }
 
+    /// The digest of the route's key bytes a session binds to
+    /// ([`plakous_auth::api_key::provider_key_binding`]): computed over a
+    /// held key, or the one a key source's custodian reported.
     pub(crate) fn credential_binding(&self) -> Result<Digest, AnthropicError> {
-        digest_identity(
-            b"anthropic.platform.credential.v1",
-            self.auth.key.expose_secret().as_bytes(),
-        )
+        match &self.auth.credential {
+            RouteCredential::Key(key) => {
+                provider_key_binding(CredentialProviderTag::AnthropicPlatform, key).ok_or_else(
+                    || {
+                        AnthropicError::new(
+                            AnthropicErrorKind::InvalidConfiguration,
+                            AnthropicErrorPhase::Prepare,
+                            "failed to derive an Anthropic credential binding",
+                        )
+                    },
+                )
+            }
+            RouteCredential::Source(held) => Ok(held.binding),
+        }
     }
 
+    /// Refuses unless `source` still holds the route's exact key: the same
+    /// text for a held key, the same admitted generation for a source's.
     pub(crate) fn validate_current_key(
         &self,
         source: &AnthropicKeySource,
     ) -> Result<(), AnthropicError> {
-        let key = current_api_key(source)?;
-        if self.is_claude_oauth() || key.expose_secret() != self.auth.key.expose_secret() {
+        if self.is_claude_oauth() {
+            return Err(credential_binding_error());
+        }
+        let current = match &self.auth.credential {
+            RouteCredential::Key(key) => {
+                current_api_key(source)?.expose_secret() == key.expose_secret()
+            }
+            RouteCredential::Source(held) => platform_grant(source)? == held.grant,
+        };
+        if !current {
             return Err(credential_binding_error());
         }
         Ok(())
@@ -398,7 +488,42 @@ impl AnthropicPlatformRoute {
         source: &AnthropicKeySource,
     ) -> Result<CredentialField, AnthropicError> {
         self.validate_current_key(source)?;
-        Ok(KeyHeaderForm::Raw.field(&self.auth.key))
+        match &self.auth.credential {
+            RouteCredential::Key(key) => Ok(KeyHeaderForm::Raw.field(key)),
+            RouteCredential::Source(held) => platform_key_field(source, &held.grant),
+        }
+    }
+
+    /// The official API-key route over `source`'s current generation: its
+    /// credential binding is the source's key binding and every request's
+    /// `x-api-key` the source's raw field, so a key a credential gateway
+    /// holds binds and dispatches byte for byte as the same key held here.
+    /// Await [`ApiKeySource::prepare`] first.
+    pub(crate) fn for_source(
+        source: Arc<AnthropicKeySource>,
+        account: AnthropicAccountIdentity,
+    ) -> Result<Self, AnthropicError> {
+        let grant = platform_grant(source.as_ref())?;
+        let binding = source
+            .key_binding(&AnthropicApiKeyRequest::platform(), &grant)
+            .map_err(api_key_error)?;
+        Ok(Self {
+            id: RouteId::new("anthropic.platform").map_err(|error| {
+                AnthropicError::new(
+                    AnthropicErrorKind::InvalidConfiguration,
+                    AnthropicErrorPhase::Prepare,
+                    error.to_string(),
+                )
+            })?,
+            origin: ANTHROPIC_PLATFORM_ORIGIN,
+            account,
+            transport: AnthropicMessagesTransport::HttpsSse,
+            auth: AnthropicApiKeyAuth::from_source(SourceCredential {
+                source,
+                grant,
+                binding,
+            }),
+        })
     }
 
     /// Creates the official API-key route. Custom origins require a distinct
@@ -512,7 +637,10 @@ impl AnthropicPlatformRoute {
                 Some(Arc::new(secrecy::SecretSlice::from(field.to_vec()))),
             ),
         };
-        let key = self.auth.key.renew_with(token).map_err(api_key_error)?;
+        let RouteCredential::Key(held) = &self.auth.credential else {
+            return Err(credential_binding_error());
+        };
+        let key = held.renew_with(token).map_err(api_key_error)?;
         let credential_authority = AnthropicCredentialAuthority::from_key(&key);
         Ok(Self {
             id: self.id.clone(),
@@ -520,7 +648,7 @@ impl AnthropicPlatformRoute {
             account: self.account.clone(),
             transport: self.transport,
             auth: AnthropicApiKeyAuth {
-                key: Arc::new(key),
+                credential: RouteCredential::Key(Arc::new(key)),
                 audience_origin: self.auth.audience_origin,
                 credential_authority,
                 custodied,

@@ -7,8 +7,9 @@
 //! rule's decision, and pricing thresholds and hosted-feature support come
 //! only from the bundled table a reviewer checked in.
 
-use plakous_auth::api_key::ExposeApiKey as _;
 use std::time::Instant;
+
+use plakous_auth::api_key::ExposeApiKey as _;
 
 use plakous_http::{Client, HeaderMap, HeaderName, HeaderValue, Origin, sensitive_header_value};
 use plakous_model::ReasoningEffort;
@@ -241,13 +242,19 @@ fn list_error(reason: &str) -> AnthropicError {
 }
 
 /// Unchanged owner-only fingerprint used by the hosted model-list cache.
+/// A key this process never holds (a credential gateway's) is keyed by its
+/// generation's listing fingerprint instead
+/// ([`plakous_auth::api_key::ApiKeyGenerationGrant::listing_fingerprint`]).
 ///
 /// # Errors
 /// Returns an error when the exact API-key source is unavailable.
 pub fn anthropic_api_key_fingerprint(
     source: &AnthropicKeySource,
 ) -> Result<String, AnthropicError> {
-    let key = crate::route::current_api_key(source)?;
+    let grant = crate::route::platform_grant(source)?;
+    let Ok(key) = source.api_key(&crate::AnthropicApiKeyRequest::platform(), &grant) else {
+        return Ok(grant.listing_fingerprint());
+    };
     let mut fingerprint = plakous_model::sha256_hex(&[
         b"anthropic.api-key-fingerprint.v1",
         key.expose_secret().as_bytes(),
@@ -270,18 +277,32 @@ pub async fn list_anthropic_api_models(
     observer: Option<std::sync::Arc<dyn plakous_http::ExchangeObserver>>,
     transport: &plakous_http::RouteTransport,
 ) -> Result<Vec<AnthropicListedModel>, AnthropicError> {
-    let origin =
-        Origin::parse(ANTHROPIC_PLATFORM_ORIGIN).map_err(|_| list_error("origin is invalid"))?;
     let client = transport.client(
         Client::new_http1(plakous_http::Limits::default())
             .map_err(transport_error)?
             .with_observer(observer),
     );
+    list_anthropic_api_models_over(source, &client).await
+}
+
+/// [`list_anthropic_api_models`] over `client`, whose requests still name
+/// the Platform origin: a relayed client, or a repository test's client
+/// dialing a loopback fixture in the origin's place.
+///
+/// # Errors
+/// As [`list_anthropic_api_models`].
+#[doc(hidden)]
+pub async fn list_anthropic_api_models_over(
+    source: &AnthropicKeySource,
+    client: &Client,
+) -> Result<Vec<AnthropicListedModel>, AnthropicError> {
+    let origin =
+        Origin::parse(ANTHROPIC_PLATFORM_ORIGIN).map_err(|_| list_error("origin is invalid"))?;
     source
         .prepare()
         .await
         .map_err(crate::route::api_key_error)?;
-    list_from(source, &client, origin, list_deadline()?).await
+    list_from(source, client, origin, list_deadline()?).await
 }
 
 fn list_deadline() -> Result<Instant, AnthropicError> {
@@ -297,11 +318,9 @@ async fn list_from(
     deadline: Instant,
 ) -> Result<Vec<AnthropicListedModel>, AnthropicError> {
     let deadline = plakous_exchange::lookup::LookupBudget::from_deadline(deadline);
-    let key = crate::route::current_api_key(source)?;
+    let grant = crate::route::platform_grant(source)?;
     let key_header = sensitive_header_value(
-        plakous_auth::custody::KeyHeaderForm::Raw
-            .field(&key)
-            .into_header_bytes(),
+        crate::route::platform_key_field(source, &grant)?.into_header_bytes(),
     )
     .map_err(|_| list_error("credential is not a header value"))?;
     let mut models: Vec<AnthropicListedModel> = Vec::new();

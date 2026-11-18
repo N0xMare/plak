@@ -351,19 +351,33 @@ pub async fn list_xai_api_models(
     observer: Option<std::sync::Arc<dyn plakous_http::ExchangeObserver>>,
     transport: &plakous_http::RouteTransport,
 ) -> Result<Vec<XaiListedModel>, XaiApiModelError> {
-    let origin =
-        Origin::parse(XAI_PLATFORM_API_KEY_ORIGIN).map_err(|_| list_error("origin is invalid"))?;
     let client = transport.client(
         Client::new_http1(plakous_http::Limits::default())
             .map_err(|_| transport_error())?
             .with_observer(observer),
     );
+    list_xai_api_models_over(source, &client).await
+}
+
+/// [`list_xai_api_models`] over `client`, whose request still names the
+/// Platform origin: a relayed client, or a repository test's client dialing
+/// a loopback fixture in the origin's place.
+///
+/// # Errors
+/// As [`list_xai_api_models`].
+#[doc(hidden)]
+pub async fn list_xai_api_models_over(
+    source: &XaiPlatformKeySource,
+    client: &Client,
+) -> Result<Vec<XaiListedModel>, XaiApiModelError> {
+    let origin =
+        Origin::parse(XAI_PLATFORM_API_KEY_ORIGIN).map_err(|_| list_error("origin is invalid"))?;
     source
         .prepare()
         .await
         .map_err(|_| list_error("credential is unavailable"))?;
     let authorization = platform_authorization(source)?;
-    let body = get_models(&client, origin, authorization, deadline_instant()?).await?;
+    let body = get_models(client, origin, authorization, deadline_instant()?).await?;
     parse_xai_models_page(&body)
 }
 
