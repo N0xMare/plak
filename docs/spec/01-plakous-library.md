@@ -3976,7 +3976,7 @@ thinking on API-key Anthropic and OpenRouter Messages. This history-rewrite
 fix does not refuse profile switches or rebinds; Claude OAuth already drops
 mismatched thinking server-side. A later release must add a transient
 prefix-binding proof at lowering, rather than a persisted-format change or
-a blanket rebind refusal.
+a blanket rebind refusal. A mid-turn fold on manual thinking ends the turn.
 
 No predecessor replay decoder is retained. Responses-family continuation and encrypted reasoning
 are used only under exact binding. An unchanged binding and canonical item prefix
@@ -11130,6 +11130,10 @@ source start, using the same append formula as the planner. It equals the
 planner's pre-omission retained-tail identity only when omission removes or
 rewrites nothing. Decode stores the digest and does not recompute it, so the
 context-state encoding stays version 4 and this remains runtime epoch 38.
+A receipt check compares that retained-tail digest by the value recorded on
+the provenance, including a pre-omission planner identity from the previous
+build, and still checks the successor history and that the recorded count is
+the successor tail.
 Native provenance carries strategy revision 2. Its encoded bound and the
 prepared-call recovery-record bound are each 4 MiB. Item digests use compact
 hex strings, not digest structs with integer arrays. The full request anchor is

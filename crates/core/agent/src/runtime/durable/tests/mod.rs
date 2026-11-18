@@ -77,6 +77,7 @@ mod provider_outcome_tests;
 #[path = "../reresolution_tests.rs"]
 mod reresolution_tests;
 mod residency;
+mod retained_tail_receipt;
 mod round_limit;
 mod saturated_retask;
 mod scheduling_diagnostics;

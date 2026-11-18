@@ -9,6 +9,7 @@
     reason = "offline assertions"
 )]
 mod carry_replay;
+mod manual_fold;
 
 use super::*;
 use futures_util::StreamExt as _;

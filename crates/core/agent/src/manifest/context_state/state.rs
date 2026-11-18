@@ -520,6 +520,37 @@ impl RuntimeContextState {
         Self::from_parts(affinity, None, Some(transition), Some(provenance))
     }
 
+    /// Reseals this state around a retained tail the receipt already recorded.
+    ///
+    /// Semantic publication records the post-omission digest. A receipt from
+    /// the previous build recorded the planner's pre-omission digest and the
+    /// post-omission count. Receipt validation compares that recorded pair
+    /// instead of recomputing the digest, which would refuse a same-key upgrade.
+    pub(crate) fn with_recorded_retained_tail(
+        &self,
+        retained_tail_identity: Digest,
+        retained_segment_count: u32,
+    ) -> Result<Self, RuntimeManifestError> {
+        validate_digest(retained_tail_identity, DigestDomain::ContextPlan)?;
+        let mut state = self.clone();
+        let provenance = state
+            .compaction
+            .as_mut()
+            .ok_or(RuntimeManifestError::InvalidCompactionProvenance)?;
+        if provenance.strategy != RuntimeCompactionStrategy::SemanticSummaryPrefixV1 {
+            return Err(RuntimeManifestError::InvalidCompactionProvenance);
+        }
+        provenance.retained_tail_identity = retained_tail_identity;
+        provenance.retained_segment_count = retained_segment_count;
+        provenance.target_segment_count = retained_segment_count
+            .checked_add(1)
+            .ok_or(RuntimeManifestError::InvalidCompactionProvenance)?;
+        provenance.identity = compaction_provenance_identity(provenance)?;
+        state.validate_shape()?;
+        state.identity = runtime_context_state_identity(&state)?;
+        Ok(state)
+    }
+
     pub(super) fn branch_transition(
         &self,
         kind: RuntimeContextTransitionKind,

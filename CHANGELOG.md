@@ -11,10 +11,17 @@ for one version bump, without native protocol compatibility.
 
 ### Plakous
 
-- Keep prefix-bound replay reasoning byte-exact, including OpenRouter Chat
-  `reasoning_details`, and omit only reasoning after the first changed content.
-  A semantic summary is that change, so the retained tail drops invalidated
-  replay instead of resending it.
+- State the existing prefix rule for replay reasoning, including OpenRouter Chat
+  `reasoning_details`: an unchanged prefix stays byte-exact, and only reasoning
+  after the first changed content is omitted. A semantic summary is that change,
+  so the retained tail drops invalidated replay instead of resending it.
+- Accept a semantic compaction receipt's recorded retained-tail digest on
+  replay, including one whose digest is the planner's pre-omission identity,
+  while still checking the successor history and retained count. The
+  context-state encoding is unchanged.
+- A mid-turn semantic fold on manual Messages thinking ends the turn: the
+  continuation note merged into the tool-result message does not close the
+  loop, and preparation stops with protected history.
 - Measure a semantic cut's retained-tail fit on the sanitized tail the next
   request sends, including a pending prompt at the idle fence.
 - Record a semantic compaction's retained-tail count and digest from that same
@@ -184,6 +191,7 @@ for one version bump, without native protocol compatibility.
   preventing Messages thinking-signature failures while preserving unchanged replay.
 - Known limitation: API-key Anthropic and OpenRouter Messages may reject retained
   thinking after an explicit system/tool recompile; transient lowering proofs are planned.
+
 - Add durable agent lines: only the head branch commits, head-advancing rebinds
   and same-store carries continue that line, and forks start new lines.
   Superseded branches are read-only; predecessor history is reclaimed by

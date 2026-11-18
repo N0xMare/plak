@@ -474,6 +474,20 @@ pub(in crate::runtime) fn validate_compaction_receipt(
         {
             return Err(AgentError::from_store(SessionStoreError::corrupt()));
         }
+        let context_matches = if native {
+            manifest.canonical().context() == &expected.context
+        } else {
+            // The digest is whatever publication recorded. Recomputing the
+            // post-omission digest refuses a previous build's receipt, whose
+            // count is already the successor tail and whose digest is the
+            // planner's pre-omission identity.
+            recorded_semantic_tail_context_matches(
+                manifest.canonical().context(),
+                &expected.context,
+                provenance.retained_tail(),
+                successor.segments().len(),
+            )
+        };
         if !manifest
             .jobs()
             .is_terminal_extension_of(previous_stored.checkpoint().manifest().jobs())
@@ -488,7 +502,7 @@ pub(in crate::runtime) fn validate_compaction_receipt(
                 manifest.ledger(),
                 manifest.lifecycle(),
             )
-            || manifest.canonical().context() != &expected.context
+            || !context_matches
         {
             return Err(AgentError::from_store(SessionStoreError::corrupt()));
         }
@@ -535,6 +549,29 @@ pub(in crate::runtime) fn validate_compaction_receipt(
         }
     }
     Ok(())
+}
+
+/// Whether a semantic receipt's context is the recomputed fold aside from the
+/// retained-tail digest, which is taken from the receipt.
+///
+/// The recorded count must be the successor groups after the summary. The
+/// digest is not recomputed: a same-key upgrade still carries receipts whose
+/// digest is the planner's pre-omission identity.
+fn recorded_semantic_tail_context_matches(
+    recorded: &crate::RuntimeContextState,
+    expected: &crate::RuntimeContextState,
+    recorded_tail: (Digest, u32),
+    successor_segments: usize,
+) -> bool {
+    let Ok(count) = u32::try_from(successor_segments.saturating_sub(1)) else {
+        return false;
+    };
+    if recorded_tail.1 != count {
+        return false;
+    }
+    expected
+        .with_recorded_retained_tail(recorded_tail.0, recorded_tail.1)
+        .is_ok_and(|comparable| recorded == &comparable)
 }
 
 /// Whether `published` is the fold's `successor` followed by nothing but what

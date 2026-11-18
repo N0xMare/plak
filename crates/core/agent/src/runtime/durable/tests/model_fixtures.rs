@@ -183,6 +183,9 @@ pub(super) struct ArtifactModel {
     pub(super) fail_compaction_prepare: AtomicBool,
     pub(super) opaque_tool_history: AtomicBool,
     pub(super) tiny_reasoning_history: AtomicBool,
+    /// Replay-bearing reasoning on a tool-call response, so a later semantic
+    /// fold omits it and the retained-tail digest changes.
+    pub(super) replay_tool_reasoning: AtomicBool,
     pub(super) artifact_gated_reasoning_bytes: AtomicUsize,
     pub(super) gated_fresh_wires: Mutex<Vec<(Digest, Digest, bool)>>,
     pub(super) refuse_native_until_round: AtomicUsize,
@@ -310,6 +313,7 @@ impl ArtifactModel {
             fail_compaction_prepare: AtomicBool::new(false),
             opaque_tool_history: AtomicBool::new(false),
             tiny_reasoning_history: AtomicBool::new(false),
+            replay_tool_reasoning: AtomicBool::new(false),
             artifact_gated_reasoning_bytes: AtomicUsize::new(0),
             gated_fresh_wires: Mutex::new(Vec::new()),
             refuse_native_until_round: AtomicUsize::new(0),
@@ -1306,6 +1310,27 @@ impl LanguageModel for ArtifactModel {
                         )
                         .expect("fixture tiny reasoning"),
                     ));
+                }
+                if tool_call && self.replay_tool_reasoning.load(Ordering::Acquire) {
+                    let replay = plakous_model::ReplayEnvelope::new(
+                        ProtocolId::new("fixture.protocol").expect("fixture protocol"),
+                        None,
+                        plakous_model::ReplayScope::Protocol,
+                        plakous_model::ReplayKindId::new("fixture.reasoning")
+                            .expect("fixture kind"),
+                        1,
+                        plakous_model::DataClassification::Sensitive,
+                        serde_json::value::RawValue::from_string("\"synthetic\"".into())
+                            .expect("fixture replay"),
+                    )
+                    .expect("fixture envelope");
+                    blocks.insert(
+                        0,
+                        ContentBlock::Reasoning(
+                            ReasoningBlock::new(ReasoningVisibility::Omitted, None, Some(replay))
+                                .expect("fixture replay reasoning"),
+                        ),
+                    );
                 }
                 if tool_call && self.opaque_tool_history.load(Ordering::Acquire) {
                     blocks.push(ContentBlock::Reasoning(

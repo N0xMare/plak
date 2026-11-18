@@ -353,15 +353,51 @@ impl Driver {
     }
 }
 
-/// The history a retained-tail fit probe measures: the sanitized tail, then
-/// an optional pending prompt.
+/// The history a retained-tail fit probe measures: the tail
+/// [`SemanticCompactionCut::build_successor`] sends, then an optional pending
+/// prompt.
+///
+/// The summary is a placeholder absent from the source. Measuring
+/// [`SemanticCompactionCut::sanitized_retained_history`] separately could
+/// drift from that sent tail.
 fn retained_tail_fit_history(
     cut: &SemanticCompactionCut,
     pending: Option<plakous_model::HistorySegment>,
 ) -> Option<plakous_model::CanonicalHistory> {
-    let mut segments = cut.sanitized_retained_history().ok()?.segments().to_vec();
+    let summary = fit_probe_summary(cut)?;
+    let successor = cut.build_successor(&summary).ok()?;
+    let mut segments = successor
+        .segments()
+        .iter()
+        .skip(1)
+        .cloned()
+        .collect::<Vec<_>>();
     segments.extend(pending);
     plakous_model::CanonicalHistory::new(segments).ok()
+}
+
+fn fit_probe_summary(cut: &SemanticCompactionCut) -> Option<plakous_model::HistorySegment> {
+    for seed in [u128::MAX, u128::MAX - 1, u128::MAX - 2] {
+        let entry = plakous_model::EntryId::try_from(uuid::Uuid::from_u128(seed)).ok()?;
+        let item = plakous_model::ConversationItem::new(
+            entry,
+            plakous_model::Actor::Assistant,
+            vec![plakous_model::ContentBlock::Compaction(
+                plakous_model::CompactionBlock::new("fit probe").ok()?,
+            )],
+            plakous_model::Provenance::ModelOutput,
+        )
+        .ok()?;
+        let segment = plakous_model::HistorySegment::new(
+            plakous_model::HistorySegmentKind::Compaction,
+            vec![item],
+        )
+        .ok()?;
+        if cut.build_successor(&segment).is_ok() {
+            return Some(segment);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
