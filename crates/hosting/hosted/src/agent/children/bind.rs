@@ -366,7 +366,7 @@ impl Drop for StartupCaller {
 
 async fn freeze_spawn_choice(
     parent: &SpawnParent,
-    agent_id: &str,
+    _agent_id: &str,
     card: &str,
 ) -> Result<String, SpawnBindError> {
     let inputs = parent.child_inputs();
@@ -382,23 +382,13 @@ async fn freeze_spawn_choice(
     if card.parse::<crate::account::AccountRef>().is_err() {
         return Ok(card.to_owned());
     }
-    let resolved = session
+    // The child session binds the resolved reference. The node already carries
+    // the card; rewriting it here re-enters the tree writer the spawn tool is
+    // waiting on. A kind with no stored choice keeps the card, and spawn fails
+    // closed later if that card cannot authenticate.
+    Ok(session
         .resolve_spawn_account(card)
-        .map_err(|message| SpawnBindError::Refused(message.into()))?;
-    if resolved == card {
-        return Ok(resolved);
-    }
-    let runtime = crate::topology_runtime::lookup(inputs.tree_id)
-        .ok_or_else(|| SpawnBindError::Refused("topology hub is not attached".into()))?;
-    let account = resolved.clone();
-    let id = agent_id.to_owned();
-    runtime
-        .record_then_apply(agent_id, move |tree| {
-            tree.freeze_spawn_account(&id, &account)
-        })
-        .await
-        .map_err(|message| SpawnBindError::Refused(message.into()))?;
-    Ok(resolved)
+        .unwrap_or_else(|_| card.to_owned()))
 }
 
 /// Creates the child session and starts its assignment turn in one step.

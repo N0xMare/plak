@@ -406,7 +406,7 @@ async fn templates_profiles_and_defaults_publish_in_separate_validated_steps() -
     );
     assert_eq!(
         new_roster.binding(&name).ok_or("named selection")?.account,
-        "codex/work"
+        "codex"
     );
     assert_eq!(
         definitions::Snapshot::read(&console.paths, &console.definition_nonce)
