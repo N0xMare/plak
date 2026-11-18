@@ -8,10 +8,7 @@ use crate::command::GatewayCommand;
 use crate::home::paths::{self, PlakPaths};
 
 fn home() -> (tempfile::TempDir, PlakPaths) {
-    let dir = tempfile::tempdir().unwrap();
-    let paths = PlakPaths::explicit(dir.path().join("plak"));
-    std::fs::create_dir_all(paths.home()).unwrap();
-    (dir, paths)
+    PlakPaths::isolated_test_home()
 }
 
 fn write_gateway(paths: &PlakPaths, body: &str) {
@@ -42,7 +39,7 @@ fn a_state_root_that_differs_by_one_byte_is_refused_without_opening_it() {
         "{error}"
     );
     let other = Path::new("/plak-gateway-not-the-host-state");
-    assert!(other != host.as_path());
+    assert_ne!(other, host.as_path());
     assert!(ServerConfig::require_host_state_root(other).is_err());
     assert!(!other.exists());
 }
@@ -63,7 +60,7 @@ fn serve_and_dry_status_refuse_a_foreign_state_root_before_creating_it() {
     )
     .unwrap_err();
     assert!(dry.contains("is not the host state home"), "{dry}");
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, Vec::<u8>::new());
     assert!(!foreign.exists());
 }
 
