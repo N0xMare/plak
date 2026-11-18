@@ -75,8 +75,16 @@ in-process, then `plakd gateway serve` adopting that home and the machine's
 subscription store in place, reached by a keyless host through `[gateway]
 address` on its Unix socket. A binary without `plakd gateway serve` fails as a
 harness error before any provider call. Tailnet TCP from a second machine,
-remote login, the kill switch and `hop=gateway` faults are not driven. No paid
-gateway run is recorded.
+remote login, the kill switch and `hop=gateway` faults are not driven.
+
+`just live gateway --paid` passed at `bb356f99` on Linux x86_64 (glibc), a
+`plakd/test-hooks` release build (`plakd` SHA-256 `c0bbfd4e…`, unchanged
+across the run): all 37 steps on the first attempt, with no rerun.
+
+| Topology | Steps | Outcome |
+| --- | --- | --- |
+| in-process | turn and reopen on `codex`, `claude-haiku55-low`, `grok`, `api-openai`, `api-anthropic`, `api-xai`, `or-nemotron-free`; forced refresh of codex, claude and grok | pass |
+| unix-socket | gateway start; turn on each of the seven routes; restart onto a new instance id; reopen of every session; forced refresh of codex, claude and grok, each answering `credential=ready` | pass; the keyless host held no key file, and every turn and reopen added gateway audit lines |
 
 ## History
 
