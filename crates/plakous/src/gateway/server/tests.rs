@@ -230,3 +230,17 @@ async fn gateway_custody_reports_the_same_identity_as_local_custody() {
         Err(CustodyError::UnknownAccount)
     );
 }
+
+#[test]
+fn the_upstream_hop_never_shortens_a_streaming_callers_silence_bounds() {
+    let upstream = super::http1_upstream().unwrap();
+    let streaming = plakous_http::Limits::for_streaming_inference();
+    assert_eq!(
+        upstream.limits().response_head_timeout,
+        streaming.response_head_timeout
+    );
+    assert_eq!(
+        upstream.limits().response_body_timeout,
+        streaming.response_body_timeout
+    );
+}

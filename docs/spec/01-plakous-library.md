@@ -6173,7 +6173,10 @@ inject, fills each custodied entry at its position, makes exactly one
 upstream exchange (no retry, no redirect: a 3xx is relayed as a `Head`) and
 streams it back: one data frame per server-sent event, split only above the
 frame bound and sent at each event boundary, other bodies chunk for chunk,
-and no keepalive frames. Hop-by-hop response fields are not relayed.
+and no keepalive frames. Hop-by-hop response fields are not relayed. The
+upstream exchange's head, idle and body bounds are the gateway client's,
+narrowed by the caller's; `plakous::gateway::server::http1_upstream` carries
+streaming-inference bounds, so a caller's own bounds always govern.
 Dropping the relay connection or its response cancels the upstream
 exchange. `plakous::gateway::server::LocalCustody` supplies injection from
 each kind's local custodian and its provider's exact upstream pin table:

@@ -66,6 +66,9 @@ for one version bump, without native protocol compatibility.
   Stale.
 - Fix a Claude or SuperGrok custody facts read failing `Store` when a
   concurrent refresh moved the record; it reads again.
+- Fix the gateway's upstream hop cutting a model stream after 30 seconds of
+  silence: `http1_upstream` now carries streaming-inference bounds, which each
+  relay narrows to the caller's.
 
 - Host `PLAK_TEST_FAULTS` plans take `hop=gateway|upstream`. Upstream rules
   apply to an in-process gateway and are refused when an external gateway is

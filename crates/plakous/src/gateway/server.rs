@@ -264,7 +264,10 @@ impl LocalCustody {
 
 /// The HTTP/1.1 client a product gateway uses for its upstream hop.
 ///
-/// The client has the transport's default limits and no fault plan. A product
+/// The client has streaming-inference limits and no fault plan. Each relay
+/// narrows them to the caller's own, so a bound here only ever shortens a
+/// caller's: the default 30-second head and idle bounds would cut every
+/// model stream that a caller allows to stay silent longer. A product
 /// gateway passes it to [`RelayServer::new`]; plakd does not name the HTTP
 /// crate.
 ///
@@ -272,7 +275,7 @@ impl LocalCustody {
 ///
 /// Returns the transport configuration error.
 pub fn http1_upstream() -> Result<plakous_http::Client, plakous_http::ConfigError> {
-    plakous_http::Client::new_http1(plakous_http::Limits::default())
+    plakous_http::Client::new_http1(plakous_http::Limits::for_streaming_inference())
 }
 
 fn now_unix_ms() -> u64 {
