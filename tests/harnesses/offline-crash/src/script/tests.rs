@@ -74,6 +74,20 @@ fn a_foreign_version_is_refused() {
 }
 
 #[test]
+fn a_fold_gate_holds_without_a_clock() {
+    let plan: ScriptPlan = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "fold_gate": {"file": "paid-fold-release"},
+    }))
+    .expect("fold gate");
+    plan.validate().expect("admitted");
+    assert!(matches!(
+        plan.fold_gate,
+        Some(crate::gate::ScriptGate::File(ref path)) if path.ends_with("paid-fold-release")
+    ));
+}
+
+#[test]
 fn an_unknown_field_is_refused() {
     assert!(serde_json::from_str::<ScriptPlan>(r#"{"version":1,"nope":true}"#).is_err());
 }

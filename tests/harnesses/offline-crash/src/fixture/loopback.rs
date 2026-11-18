@@ -374,6 +374,14 @@ impl LanguageModel for LoopbackModel {
                 | LoopbackScenario::ScriptedSummary(script, _) = &self.scenario
                     && is_summary_request
                 {
+                    if let Some(gate) = script.fold_gate.clone() {
+                        crate::gate::wait_gate(
+                            &gate,
+                            &cancellation,
+                            script.stall_ignores_cancellation,
+                        )
+                        .await?;
+                    }
                     match script.fold {
                         FoldDisposition::Fail => {
                             return Err(ModelError::new(

@@ -97,6 +97,12 @@ pub struct ScriptPlan {
     /// (fold) request.
     #[serde(default)]
     pub fold: FoldDisposition,
+    /// Hold a dispatched summary until this gate releases, then apply [`Self::fold`].
+    ///
+    /// The hold is not a clock. A drain test can observe the paid fold however
+    /// long the upgrade command takes to arrive, then release it.
+    #[serde(default)]
+    pub fold_gate: Option<crate::gate::ScriptGate>,
     /// The tool policy the scripted binding is built with.
     #[serde(default)]
     pub tool_policy: ScriptToolPolicy,

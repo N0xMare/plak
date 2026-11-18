@@ -12,10 +12,14 @@ pub(super) fn in_turn_refusal(live: bool) {
     let mut script = json!({
         "version":1, "maximum_projected_input":20_000,
         "scheduled_compaction":true, "content_sensitive_projection":true,
-        "tool_result_bytes":7_500, "fold":{"stall":75_000},
+        "tool_result_bytes":7_500,
         "steps":[{"output":{"text":"retained answer"},"finish":"stop"}]
     });
     let session = folding_seed_with(&fixture, &script);
+    // A clocked stall can end before a loaded host finishes `upgrade --drain 0`.
+    // The gate keeps this fold in flight until the refusal has been observed.
+    let release = fixture.root.join("paid-fold-release");
+    script["fold_gate"] = json!({"file": &release});
     script["steps"] = json!([
         {"output":{"tool":{"name":"loopback_effect","arguments":{}}},"finish":"tool_calls","usage":{}},
         {"output":{"tool":{"name":"loopback_effect","arguments":{}}},"finish":"tool_calls","usage":{}},
@@ -36,6 +40,8 @@ pub(super) fn in_turn_refusal(live: bool) {
         .unwrap()
         .node;
     let attachment = client.attach(2, &node);
+    let summaries = fixture.root.join("evidence.summary.jsonl");
+    let seeded = read_evidence(&summaries).map_or(0, |rows| rows.len());
     prompt(
         &mut client,
         attachment,
@@ -47,9 +53,8 @@ pub(super) fn in_turn_refusal(live: bool) {
         client.request(9, Op::Detach { attachment }),
         Outcome::Ok(Answer::Detached)
     );
-    let summaries = fixture.root.join("evidence.summary.jsonl");
     let deadline = Instant::now() + WAIT;
-    while !read_evidence(&summaries).is_ok_and(|rows| !rows.is_empty()) {
+    while read_evidence(&summaries).map_or(0, |rows| rows.len()) <= seeded {
         assert!(
             Instant::now() < deadline,
             "scheduled paid fold never dispatched"
@@ -86,10 +91,11 @@ pub(super) fn in_turn_refusal(live: bool) {
     ));
     assert!(!fixture.home().join("host/upgrades").exists());
     assert_eq!(root_record(&fixture, &session).1, 0);
+    std::fs::write(&release, "release the paid fold").unwrap();
     settled(&fixture, &session);
     assert_eq!(
         read_evidence(&summaries).unwrap().len(),
-        1,
+        seeded + 1,
         "rollback must neither cancel nor redispatch the paid fold"
     );
     assert!(
