@@ -15,6 +15,7 @@ mod verify;
 
 use plakous_auth::native_auth::usage_credential_refusal;
 
+pub use custody::{SUPERGROK_SELECTION_EPOCH_IDENTITY, SUPERGROK_SUBJECT_IDENTITY};
 use error::LoginHttpStage;
 pub use error::XaiNativeAuthError;
 pub use evidence::XaiModelResolutionEvidence;

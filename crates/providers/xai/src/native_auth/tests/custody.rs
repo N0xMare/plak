@@ -51,6 +51,20 @@ async fn custody_facts_carry_the_exact_route_binding() -> TestResult {
         facts.generation.map(CredentialGeneration::get),
         Some(evidence.selected_credential_generation())
     );
+    assert_eq!(
+        facts
+            .wire_identity
+            .get(SUPERGROK_SELECTION_EPOCH_IDENTITY)
+            .map(String::as_str),
+        Some(evidence.credential_selection_epoch())
+    );
+    assert_eq!(
+        facts
+            .wire_identity
+            .get(SUPERGROK_SUBJECT_IDENTITY)
+            .map(String::as_str),
+        Some("custody-subject")
+    );
     let expected = facts.expected_fence().ok_or("no fence")?;
     let mut fields = manager.custody_fields(&slot, &expected).await?;
     assert!(fields.take_hold().is_some(), "the Ready lease is held");

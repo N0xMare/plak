@@ -50,15 +50,15 @@ pub use model::{
 pub use model::{StandardXaiHttpConfig, XaiLanguageModel, XaiLanguageModelConfigError};
 #[cfg(feature = "native-auth")]
 pub use native_auth::{
-    XAI_GROK_46_CODING_MODEL, XAI_GROK_BUILD_MODEL, XAI_GROK_BUILD_SOURCE_REVISION,
-    XAI_GROK_COMPATIBILITY_PROFILE, XAI_GROK_PRIMARY_CODING_MODEL, XaiBrowserLogin,
-    XaiCatalogDiagnosticFacts, XaiCompatibilityAcceptance, XaiCompatibilityProvenance,
-    XaiDeviceLogin, XaiModelResolutionEvidence, XaiNativeAuthError, XaiNativeAuthManager,
-    XaiNativeCatalogEntry, XaiNativeCatalogReceipt, XaiOfflineCredentialStatus,
-    XaiOfflineSelectedSlot, XaiRemoteBrowserLogin, XaiSubscriptionIntegrationProfile,
-    XaiSubscriptionStatus, grok_max_output_tokens, is_subscription_coding_model_id,
-    subscription_coding_model_ids, subscription_model_reasoning_effort_options,
-    subscription_model_supports_reasoning,
+    SUPERGROK_SELECTION_EPOCH_IDENTITY, SUPERGROK_SUBJECT_IDENTITY, XAI_GROK_46_CODING_MODEL,
+    XAI_GROK_BUILD_MODEL, XAI_GROK_BUILD_SOURCE_REVISION, XAI_GROK_COMPATIBILITY_PROFILE,
+    XAI_GROK_PRIMARY_CODING_MODEL, XaiBrowserLogin, XaiCatalogDiagnosticFacts,
+    XaiCompatibilityAcceptance, XaiCompatibilityProvenance, XaiDeviceLogin,
+    XaiModelResolutionEvidence, XaiNativeAuthError, XaiNativeAuthManager, XaiNativeCatalogEntry,
+    XaiNativeCatalogReceipt, XaiOfflineCredentialStatus, XaiOfflineSelectedSlot,
+    XaiRemoteBrowserLogin, XaiSubscriptionIntegrationProfile, XaiSubscriptionStatus,
+    grok_max_output_tokens, is_subscription_coding_model_id, subscription_coding_model_ids,
+    subscription_model_reasoning_effort_options, subscription_model_supports_reasoning,
 };
 pub use plakous_responses::{ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource};
 pub use plakous_responses::{

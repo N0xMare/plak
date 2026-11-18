@@ -14,6 +14,13 @@ use super::{
 
 const SELECTION_DOMAIN: &[u8] = b"plak.custody.grok-selection.v1";
 
+/// The wire-identity key of the login's raw selection epoch, which a
+/// SuperGrok route binds a session to (non-secret identity).
+pub const SUPERGROK_SELECTION_EPOCH_IDENTITY: &str = "grok_selection_epoch";
+/// The wire-identity key of the account subject the catalog and billing
+/// reads carry as `x-userid` (non-secret identity).
+pub const SUPERGROK_SUBJECT_IDENTITY: &str = "grok_subject";
+
 /// How often a facts read retries when the record moves under it.
 const SNAPSHOT_ATTEMPTS: usize = 3;
 
@@ -128,6 +135,14 @@ impl XaiNativeAuthManager {
             SELECTION_DOMAIN,
             &[authority.as_bytes(), stored.selection_epoch.as_bytes()],
         ));
+        facts.wire_identity.insert(
+            SUPERGROK_SELECTION_EPOCH_IDENTITY.to_owned(),
+            stored.selection_epoch.clone(),
+        );
+        facts.wire_identity.insert(
+            SUPERGROK_SUBJECT_IDENTITY.to_owned(),
+            fence.account_binding().as_str().to_owned(),
+        );
         let epoch = stored.selection_epoch.clone();
         Ok((facts, Some((fence, epoch))))
     }

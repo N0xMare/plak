@@ -6207,6 +6207,10 @@ gateway adopting the store in place keeps), its selection digest names the
 login selection (Codex's route digest; for Claude the login grant, for
 SuperGrok the selection epoch), and Claude's account UUID and client device
 id travel as `claude_account_uuid` and `claude_device_id` wire identity.
+SuperGrok's raw login selection epoch and account subject (the `x-userid`
+value) are non-secret identity facts and travel as `grok_selection_epoch`
+and `grok_subject`: its route binds the raw epoch, which the one-way
+selection digest cannot reproduce.
 Refresh is the single writer's: `IfDue` refreshes only while the caller's
 fence is current and the custodian's own clock says it is due;
 `AfterRejection` waits for any claimed refresh in flight to settle, then
