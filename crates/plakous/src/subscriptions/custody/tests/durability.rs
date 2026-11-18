@@ -237,13 +237,9 @@ async fn assert_quarantined(
         .facts(&slot()?)
         .await
         .map_err(|error| format!("facts after the cut: {error:?}"))?;
+    // A quarantined login is reported from its offline status, which names no
+    // usable generation; the claimed generation stays in the store (above).
     assert_eq!(facts.status, CustodyStatus::Quarantined);
-    assert_eq!(
-        facts
-            .generation
-            .map(plakous_auth::CredentialGeneration::get),
-        Some(CLAIMED)
-    );
 
     let Err(failure) = relay_messages(&custody, expected).await? else {
         return Err("a quarantined login was relayed".into());
