@@ -35,7 +35,7 @@ class LiveHomeTests(unittest.TestCase):
         return home
 
     def test_every_route_lane_and_attempt_fits_both_platforms_with_current_formats(self):
-        self.assertEqual(live.socket_layout(), ("r28.e38.p39.t11", 9, 1))
+        self.assertEqual(live.socket_layout(), ("r28.e39.p39.t11", 9, 1))
         seen = set()
         for route in live.ROUTES:
             for lane in qualification.LANES:

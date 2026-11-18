@@ -22,8 +22,12 @@ pub(crate) use object::{component_object_digest, object_address};
 /// object address carries it and nothing from another epoch decodes. Any
 /// pre-release change to a persisted runtime encoding bumps this one number;
 /// component revisions change only with an explicit semantic format cut.
+/// Epoch 39 drops the credential-store path from Codex and SuperGrok
+/// credential-authority digests. Checkpoint fields are unchanged; every
+/// object address still carries this epoch, so an epoch-38 checkpoint does
+/// not decode.
 /// Epoch 38 adds context-codec-4 imported compaction selections without old grants.
-pub const RUNTIME_FORMAT_EPOCH: u32 = 38;
+pub const RUNTIME_FORMAT_EPOCH: u32 = 39;
 
 const OBJECT_ADDRESS_BYTES: usize = 1 + 4 + 32;
 const MAX_CHECKPOINT_OBJECTS: usize =

@@ -236,7 +236,7 @@ async fn recovery_publish_original_code_golden() -> TestResult {
     assert_eq!(store.commit_calls.load(Ordering::Acquire), 1);
     assert_eq!(
         fingerprint(&store)?,
-        "86088a218685852824552f6bfb68528a33ba7ded44a6fa48b1ff11f8c2ca4f83"
+        "b49cb6ee50968e9ec1682c2599de44d7cb4c6fb21a8453e633702bf83331743a"
     );
     Ok(())
 }
@@ -265,7 +265,7 @@ async fn root_abandonment_original_code_golden() -> TestResult {
     assert_eq!(store.commit_calls.load(Ordering::Acquire), 1);
     assert_eq!(
         fingerprint(&store)?,
-        "aafdc4d8439be10bdcd41f1829a35be7d632229f040f1b107923c58f2b81090a"
+        "d0de2b9b18444b98a572256295259805bfa281f93ff92caaadf471bfb12fc3f7"
     );
     Ok(())
 }

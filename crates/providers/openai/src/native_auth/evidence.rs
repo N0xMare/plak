@@ -8,9 +8,10 @@ use super::{
 
 /// Credential-free exact evidence for one native Codex model resolution.
 ///
-/// Identifying account and storage-path inputs are represented only by
-/// domain-separated digests. The value contains no credential material and
-/// serializes no raw account label, origin, or resource path.
+/// Identifying account and credential-slot inputs are represented only by
+/// domain-separated digests. The store path is not an input. The value
+/// contains no credential material and serializes no raw account label,
+/// origin, or resource path.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CodexModelResolutionEvidence {

@@ -41,7 +41,8 @@ impl CodexSubscriptionCredentialManager {
     /// the account fingerprint and credential authority (model-binding
     /// digests, version 1) and the login selection epoch (version 2). A
     /// session bound under direct custody therefore revalidates unchanged
-    /// through a gateway serving the same store. The profile is the caller's
+    /// through a gateway for the same profile and slot, wherever the store
+    /// file lives. The profile is the caller's
     /// to report.
     ///
     /// # Errors

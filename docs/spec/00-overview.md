@@ -210,8 +210,8 @@ directly. Older native state remains untouched for its matching build.
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **28** (adds operation-bound runtime retirement and invisible semantic-install batches, with exact operation/session membership, immutable captured terminal sets in `runtime_move_members`, and imported-row inventories) |
-| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **38** (context codec **4** adds semantic imported-compaction selections and recorded strategy/count facts, with destination-native identities and no carried admission/cache grants) |
-| Product store (`product.sqlite3`): intents and feed-derived views | plakd | schema **38** (adds immutable semantic move seeds and permanent identity claims; terminal state is process-local) |
+| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **39** (location-independent Codex and SuperGrok credential authority; retains context codec **4** for semantic imported-compaction selections and recorded strategy/count facts) |
+| Product store (`product.sqlite3`): intents and feed-derived views | plakd | schema **39** (session account choices; retains immutable semantic move seeds and permanent identity claims; terminal state is process-local) |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), plakd (location) | schema **11** (adds immutable semantic move bases and imported custody floors) |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | plakd | schema **22**, disposable, never recovery authority |
 | Session export document | plakd | version **13** (closed portable-session and reserved host-upgrade kinds), imports **13** and **12**; 0.0.3 v11 exports cannot be carried directly |
@@ -252,10 +252,8 @@ batch fingerprints and recovered from schema 28; this finalizes the same
 unshipped `r28.e38.p38.t11` cut, not a second version transition. Export v13's
 host-upgrade job family pins allocation identity separately from optional
 terminal evidence. Retained metadata is neither liveness nor execution authority;
-public live cross-key move capability remains disabled. Product schema 39
-(session account choices, chapter 02 §4.4.1) then moves the key to
-`r28.e38.p39.t11`.
-Its execution-open marker distinguishes ordinary durable drivers from read-only
+public live cross-key move capability remains disabled. The move seam's
+execution-open marker distinguishes ordinary durable drivers from read-only
 verification and lease-only importer reconciliation before guarded withdrawal.
 Move receipt fingerprints use version-1 length-framed semantic fields, not
 debug formatting. No native migration or foreign native-store reader is added.
@@ -287,11 +285,14 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. plakd
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r28.e38.p39.t11`, so a build never opens files from another version tuple as
-session authority. Explicit legacy pruning may take schema-blind SQLite and
-holder locks to prove a directory is
-unused (chapter 02 §2.5). A session another build wrote is
-refused with one message (chapter 01 §5.4).
+(chapter 02 §2.5), currently `r28.e39.p39.t11`. Product schema 39 stores session
+account choices (chapter 02 §4.4.1). Runtime epoch 39 removes the store path
+from Codex and SuperGrok credential-authority digests, changing persisted
+binding bytes without changing checkpoint fields. A build never opens another
+version tuple as session authority. Exact reopen of an epoch-38 session refuses;
+use export and import to carry it (chapter 01 §5.4). Explicit legacy pruning may
+take schema-blind SQLite and holder locks to prove a directory is unused
+(chapter 02 §2.5).
 
 The second exception is the runner job-retention endpoint: a runner daemon MUST
 serve, and the next build's daemon MUST speak, the retention endpoint of its own

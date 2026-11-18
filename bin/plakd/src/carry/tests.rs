@@ -216,6 +216,33 @@ fn a_document_past_the_transcript_bound_is_refused() {
 }
 
 #[test]
+fn an_old_epoch_session_refuses_exact_reopen_and_imports() {
+    let previous = "r28.e38.p38.t11";
+    assert_eq!(crate::home::state::state_key(), "r28.e39.p39.t11");
+    let root = tempfile::tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("home")).for_workspace(root.path());
+    paths.ensure_layout().unwrap();
+    let session_id = "5f0e2a43-7d3c-4c1e-9a55-4b1f7f0c9a11";
+    let foreign = paths.state_root().join(previous).join("sessions");
+    fs::create_dir_all(&foreign).unwrap();
+    fs::write(foreign.join(format!("{session_id}.events.jsonl")), b"{}\n").unwrap();
+    let refusal = crate::home::state::incompatible_session_refusal(&paths, session_id)
+        .expect("old-epoch session");
+    assert!(refusal.contains(previous), "{refusal}");
+    assert!(refusal.contains("session export"), "{refusal}");
+    let mut document = sample_document();
+    document.source.state_key = previous.into();
+    let CarriedImport { record, note, .. } = document.into_import().unwrap();
+    assert_eq!(
+        record.carried_forward_from(),
+        Some((session_id, previous))
+    );
+    assert!(note.contains(previous), "{note}");
+    assert_ne!(record.id, session_id);
+    record.validate_for_store().unwrap();
+}
+
+#[test]
 fn an_import_links_back_and_holds_its_queue() {
     let CarriedImport {
         record,

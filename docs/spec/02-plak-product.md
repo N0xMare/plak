@@ -330,9 +330,9 @@ another session's jobs.
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   cache/subscription-catalogs/<slot>-<binding>.json  gateway-custodied native model snapshots (§4.7), disposable
   state/
-    r28.e38.p39.t11/            this build's state (§2.5)
+    r28.e39.p39.t11/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
-      runtime.sqlite3             Plakous semantic runtime and change feed, schema 28, epoch 38
+      runtime.sqlite3             Plakous semantic runtime and change feed, schema 28, epoch 39
       product.sqlite3             plakd intents and feed-derived views, schema 39
       subagents.sqlite3           the agent tree, schema 11
       custody-hosts/<instance>.lock  each live host process's custody liveness lock (chapter 03 §14)
@@ -1095,9 +1095,14 @@ recovery authority.
 plakd does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r28.e38.p39.t11`. The key is derived from the stores'
+schema>`, for example `r28.e39.p39.t11`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
-move it. Product schema 39 stores `sessions.account_choices`, a JSON object of non-root provider kinds to full account references. The root kind's account is the root line head and is not a map entry. A cross-key cut is the only move; nothing is migrated in place. A build therefore never finds another build's files in its own
+move it. Runtime epoch 39 removes the credential-store path from the Codex and
+SuperGrok credential-authority digests. Product schema 39 stores
+`sessions.account_choices`, a JSON object mapping non-root provider kinds to full
+account references. The root kind's account is the root line head and is not a
+map entry. A cross-key cut is the only move; nothing is migrated in place. A
+build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup. State-directory
 file formats outside the four stores ride the same key: a change to the runtime
 store's holder-claim files (chapter 01 §5.1) must ship with a bump of one of

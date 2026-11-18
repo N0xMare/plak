@@ -929,7 +929,10 @@ refused), `followup_recovery_required`, and
 `followup_workspace_gone` (discarded or removed). Refusal never opens a new
 attempt or changes the prior attempt's result. `followup_binding_changed`
 names the cause and tells the caller to spawn a new child from the template;
-the child stays in its prior settled state.
+the child stays in its prior settled state. This check uses the child's frozen
+account reference, not the root's current choice. For Codex and SuperGrok it
+compares location-independent credential authority (chapter 01 §7); a store
+path alone does not change that authority.
 
 Mail is **not a second spawn** and is not how a prompt is assigned.
 

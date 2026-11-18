@@ -11,6 +11,11 @@ for one version bump, without native protocol compatibility.
 
 ### Plakous
 
+- Bind Codex and SuperGrok credential authority to the profile id, slot id
+  and, for SuperGrok, the account scope. The store path is not an input, so
+  the same login served from two paths binds the same session. Claude stays
+  the validated account UUID plus source scope. `grok_authority_id` remains
+  the raw location-independent digest the SuperGrok route binds.
 - Transfer daemon jobs only when the runtime has a job host.
 - A keeper-less quit records each stopped job once, including while the turn
   is still working. The stop is attributed to quit. A later commit cannot
@@ -104,7 +109,7 @@ for one version bump, without native protocol compatibility.
   when a job is still non-terminal, and does not race a stop against the keep.
 - JSONL `stop_processes` stops one background job (`pN`) as a user stop.
   Two visible jobs with the same number are refused and neither is stopped.
-- Host wire protocol 11 schema pin covers `DeleteSession.abandon_jobs` and
+- Host wire protocol 12 schema pin covers `DeleteSession.abandon_jobs` and
   the `running_jobs` lifecycle reason. Clients carry the projection from the
   previous protocol pin.
 
@@ -182,7 +187,7 @@ for one version bump, without native protocol compatibility.
   fingerprints.
 
 - Add session account choice (host wire protocol 12, product schema 39,
-  state key `r28.e38.p39.t11`). Templates name a provider kind; a named
+  state key `r28.e39.p39.t11`). Templates name a provider kind; a named
   account in a template is a load error. A session holds the account it uses
   per kind: the root kind's is the root line head's, every other used kind's
   is stored on the session. Host `new_session`, `ApplyProfile`, `plakd run`
@@ -417,8 +422,10 @@ for one version bump, without native protocol compatibility.
 
 ### Persisted formats
 
-- State key `r28.e38.p38.t11`: runtime SQLite schema 28, runtime format epoch
-  38, product schema 38 and agent tree schema 11. Native 0.0.3 state
+- State key `r28.e39.p38.t11`: runtime SQLite schema 28, runtime format epoch
+  39, product schema 38 and agent tree schema 11. Epoch 39 removes the
+  credential-store path from Codex and SuperGrok credential-authority digests.
+  An epoch-38 session does not reopen; export and import carry it. Native 0.0.3 state
   (`r26.e34.p35.t9`) is neither opened nor migrated; keep it with its matching
   build.
 - Write session export v13 and import v13/v12 only; v11 and older refuse.

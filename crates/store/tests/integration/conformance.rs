@@ -477,7 +477,7 @@ where
         durability,
     )?;
     let genesis_bundle = bundle(&genesis_checkpoint, None)?;
-    assert_eq!(RUNTIME_FORMAT_EPOCH, 38);
+    assert_eq!(RUNTIME_FORMAT_EPOCH, 39);
     assert!(
         genesis_bundle
             .supplied_objects()

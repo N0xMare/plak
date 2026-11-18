@@ -126,13 +126,16 @@ impl CodexSubscriptionCredentialManager {
                 .as_ref()
                 .map(|fence| fence.account_binding().clone()),
         };
+        // Profile and slot only. The store path is custody location, not
+        // session identity: the same login moved to another path binds the
+        // same digest. The provider account stays the account binding.
         let authority_binding = Digest::sha256(
             DigestDomain::ModelBinding,
             1,
             &[
-                b"plak-native-codex-authority",
+                b"plak-native-codex-authority-v2",
                 OPENAI_CODEX_COMPATIBILITY_PROFILE_ID.as_bytes(),
-                slot_path.as_os_str().as_encoded_bytes(),
+                store.slot_id().as_str().as_bytes(),
             ],
         )
         .map_err(|_| NativeCodexAuthError::Validation)?;

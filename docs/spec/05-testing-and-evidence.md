@@ -118,7 +118,9 @@ current capability/executor compatibility and reject a different capability
 sharing the executor. Constructor/export tests assert no model dispatch.
 Previous-build native fixture bytes and their hash remain pinned: a different
 state key refuses native reopen and requires the export carrier, not migration.
-Context codec 4 / epoch 38 has fresh graph and publication goldens. Imported
+Context codec 4 shipped with epoch 38. Epoch 39 refreshes the graph and
+publication goldens because every object address carries the format epoch;
+the credential-authority change adds no checkpoint field. Imported
 compaction data is boxed internally so its optional semantic facts do not grow
 the live driver's stack frame; nested settlement keeps its normal stack budget.
 

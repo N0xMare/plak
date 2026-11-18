@@ -774,14 +774,15 @@ fn auth_profile_id() -> Result<plakous_auth::SubscriptionIntegrationProfileId, X
 }
 
 fn route_credential_authority_id(
-    store: &PrivateCredentialStore,
+    profile_id: &str,
+    slot_id: &str,
     source_scope: Option<&str>,
 ) -> String {
     use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(store.path().as_os_str().as_encoded_bytes());
-    hasher.update(b"\0xai-route-credential-authority-v2\0");
-    hasher.update(store.slot_id().as_str().as_bytes());
+    hasher.update(profile_id.as_bytes());
+    hasher.update(b"\0xai-route-credential-authority-v3\0");
+    hasher.update(slot_id.as_bytes());
     if let Some(scope) = source_scope {
         hasher.update(b"\0plak.account-scope.v1\0");
         hasher.update(scope.as_bytes());

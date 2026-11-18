@@ -355,7 +355,8 @@ impl ManagerCore {
     pub(super) fn authority_id(&self) -> Result<String, XaiNativeAuthError> {
         if let Some(store) = &self.store {
             return Ok(route_credential_authority_id(
-                store,
+                store.profile_id().as_str(),
+                store.slot_id().as_str(),
                 self.source_scope.as_deref(),
             ));
         }

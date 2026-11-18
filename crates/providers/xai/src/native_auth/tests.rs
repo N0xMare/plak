@@ -53,29 +53,41 @@ impl ManagerCore {
 }
 
 #[test]
-fn named_grok_sources_keep_default_authority_bytes_and_scope_only_named_sources() -> TestResult {
+fn grok_authority_ignores_store_path_and_differs_by_slot_and_account_scope() -> TestResult {
     use sha2::{Digest as _, Sha256};
     use std::fmt::Write as _;
-    let temporary = tempdir()?;
-    let directory = temporary.path().join("credentials");
-    fs::create_dir(&directory)?;
-    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
-    let store = PrivateCredentialStore::open_slot(
-        directory.join("credential.json"),
-        auth_profile_id()?,
-        CredentialSlotId::new("primary")?,
-    )?;
+    let open = |root: &TempDir, name: &str, slot: &str| -> TestResult<PrivateCredentialStore> {
+        let directory = root.path().join(name);
+        fs::create_dir(&directory)?;
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+        Ok(PrivateCredentialStore::open_slot(
+            directory.join("credential.json"),
+            auth_profile_id()?,
+            CredentialSlotId::new(slot)?,
+        )?)
+    };
+    let first_root = tempdir()?;
+    let second_root = tempdir()?;
+    let first = open(&first_root, "credentials", "primary")?;
+    let moved = open(&second_root, "moved", "primary")?;
+    let other_slot = open(&second_root, "other-slot", "named-work")?;
+    let authority = |store: &PrivateCredentialStore, scope: Option<&str>| {
+        route_credential_authority_id(store.profile_id().as_str(), store.slot_id().as_str(), scope)
+    };
     let mut original = Sha256::new();
-    original.update(store.path().as_os_str().as_encoded_bytes());
-    original.update(b"\0xai-route-credential-authority-v2\0");
+    original.update(XAI_GROK_COMPATIBILITY_PROFILE.as_bytes());
+    original.update(b"\0xai-route-credential-authority-v3\0");
     original.update(b"primary");
     let mut expected = String::from("plak-native-xai-route:");
     for byte in original.finalize() {
         write!(&mut expected, "{byte:02x}")?;
     }
-    assert_eq!(route_credential_authority_id(&store, None), expected);
-    let work = route_credential_authority_id(&store, Some("grok/work"));
-    let other = route_credential_authority_id(&store, Some("grok/other"));
+    assert!(!expected.contains(first.path().to_string_lossy().as_ref()));
+    assert_eq!(authority(&first, None), expected);
+    assert_eq!(authority(&first, None), authority(&moved, None));
+    assert_ne!(authority(&first, None), authority(&other_slot, None));
+    let work = authority(&moved, Some("grok/work"));
+    let other = authority(&moved, Some("grok/other"));
     assert_ne!(expected, work);
     assert_ne!(work, other);
     Ok(())

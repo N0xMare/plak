@@ -905,10 +905,18 @@ fn manager_for_endpoint(
     slot: &Path,
     endpoint: &TestEndpoint,
 ) -> Result<Arc<CodexSubscriptionCredentialManager>, NativeCodexAuthError> {
+    manager_for_endpoint_slot(slot, "primary", endpoint)
+}
+
+fn manager_for_endpoint_slot(
+    slot: &Path,
+    slot_id: &str,
+    endpoint: &TestEndpoint,
+) -> Result<Arc<CodexSubscriptionCredentialManager>, NativeCodexAuthError> {
     Ok(Arc::new(
         CodexSubscriptionCredentialManager::new_with_endpoints(
             slot,
-            CredentialSlotId::new("primary").map_err(|_| NativeCodexAuthError::Validation)?,
+            CredentialSlotId::new(slot_id).map_err(|_| NativeCodexAuthError::Validation)?,
             endpoint.client.clone(),
             acceptance()?,
             ProfileEndpoints {
@@ -2626,14 +2634,15 @@ async fn resolution_evidence_changes_for_exact_model_mutation() -> TestResult {
 }
 
 #[tokio::test]
-async fn resolution_evidence_binds_exact_credential_authority_mutation() -> TestResult {
+async fn resolution_evidence_follows_slot_not_store_path() -> TestResult {
     let endpoint = test_endpoint().await?;
     let client = endpoint.client.clone();
     let (_first_directory, first_slot) = private_slot()?;
     let (_second_directory, second_slot) = private_slot()?;
+    let (_third_directory, third_slot) = private_slot()?;
     let account = "account-resolution-authority";
     let model_id = "gpt-5.6-luna";
-    // One access window for both slots: catalog evidence lasts that window.
+    // One access window for every slot: catalog evidence lasts that window.
     let access_expires_at = now_unix_secs() + 3_600;
     seed_ready_credential(
         &first_slot,
@@ -2647,53 +2656,71 @@ async fn resolution_evidence_binds_exact_credential_authority_mutation() -> Test
         "resolution-authority-subject",
         access_expires_at,
     )?;
+    seed_ready_credential_for_slot(
+        &third_slot,
+        CredentialSlotId::new("named-work")?,
+        account,
+        "resolution-authority-subject",
+        access_expires_at,
+    )?;
     let first_manager = manager_for_endpoint(&first_slot, &endpoint)?;
     let second_manager = manager_for_endpoint(&second_slot, &endpoint)?;
+    let third_manager = manager_for_endpoint_slot(&third_slot, "named-work", &endpoint)?;
     let body = catalog_body(&[model_id])?;
     let server = spawn_sequence(
         endpoint,
         vec![
             response("200 OK", "application/json", &body, ""),
             response("200 OK", "application/json", &body, ""),
+            response("200 OK", "application/json", &body, ""),
         ],
     );
     let observed_at = Timestamp::new(PROFILE_REVIEWED_AT + 3, 0)?;
-    let first_resolver = CodexModelResolver::new_for_test(
-        first_manager,
-        client.clone(),
-        StandardOpenAiHttpConfig::default(),
-    )?
-    .clock(Arc::new(FixedClock::new(observed_at)));
-    let second_resolver = CodexModelResolver::new_for_test(
-        second_manager,
-        client,
-        StandardOpenAiHttpConfig::default(),
-    )?
-    .clock(Arc::new(FixedClock::new(observed_at)));
+    let resolver = |manager| {
+        CodexModelResolver::new_for_test(manager, client.clone(), StandardOpenAiHttpConfig::default())
+            .map(|resolver| resolver.clock(Arc::new(FixedClock::new(observed_at))))
+    };
+    let first_resolver = resolver(first_manager)?;
+    let second_resolver = resolver(second_manager)?;
+    let third_resolver = resolver(third_manager)?;
     first_resolver.refresh_catalog().await?;
     second_resolver.refresh_catalog().await?;
+    third_resolver.refresh_catalog().await?;
     let (_, first) = first_resolver.resolve_with_evidence(model_id)?;
     let (_, second) = second_resolver.resolve_with_evidence(model_id)?;
+    let (_, third) = third_resolver.resolve_with_evidence(model_id)?;
     assert_eq!(first.account_fingerprint(), second.account_fingerprint());
+    assert_eq!(first.account_fingerprint(), third.account_fingerprint());
     assert_eq!(
         first.selected_credential_generation(),
         second.selected_credential_generation()
     );
-    assert_ne!(first.descriptor_digest(), second.descriptor_digest());
-    assert_ne!(first.catalog_receipt(), second.catalog_receipt());
+    assert_eq!(first.descriptor_digest(), second.descriptor_digest());
+    assert_eq!(first.catalog_receipt(), second.catalog_receipt());
     assert_eq!(first.catalog_observed_at(), second.catalog_observed_at());
     assert_eq!(first.catalog_expires_at(), second.catalog_expires_at());
     assert_eq!(first.profile_revision(), second.profile_revision());
-    assert_ne!(
+    assert_eq!(
         first.credential_authority_binding(),
         second.credential_authority_binding()
     );
-    assert_ne!(
+    assert_eq!(
         first.credential_selection_epoch(),
         second.credential_selection_epoch()
     );
-    assert_ne!(first.route_fingerprint(), second.route_fingerprint());
-    assert_eq!(server.await??.len(), 2);
+    assert_eq!(first.route_fingerprint(), second.route_fingerprint());
+    assert_ne!(
+        first.credential_authority_binding(),
+        third.credential_authority_binding()
+    );
+    assert_ne!(
+        first.credential_selection_epoch(),
+        third.credential_selection_epoch()
+    );
+    assert_ne!(first.route_fingerprint(), third.route_fingerprint());
+    assert_ne!(first.descriptor_digest(), third.descriptor_digest());
+    assert_ne!(first.catalog_receipt(), third.catalog_receipt());
+    assert_eq!(server.await??.len(), 3);
     Ok(())
 }
 

@@ -1350,7 +1350,7 @@ that spells the string with escapes is refused because decoding a segment
 requires its bytes to equal their re-encoding. Canonical segment bytes and
 identities are therefore a function of the media bytes alone. The encoded
 text is bounded before decoding, and inline media bytes are bounded at 16 MiB
-like every canonical block. This is runtime checkpoint format epoch 38.
+like every canonical block. This is runtime checkpoint format epoch 39.
 
 Reconstructive components have a 4 MiB byte budget except `Operation`, whose
 budget is 64 MiB because it retains complete requests and outcomes. This is a
@@ -2736,7 +2736,7 @@ keeps the original checkpoint and conversation bindings and dispatches nothing;
 a different canonical input under the same command identity remains refused.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 38 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 39 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -4109,7 +4109,7 @@ committed and the working bounds, the two parts of the request's encoding the
 view identity leaves out. Plan validation therefore never re-serializes the
 request or its history. The plan digest is recorded in prepared-call and
 response records and re-derived on recovery, so it is part of runtime
-checkpoint format epoch 38.
+checkpoint format epoch 39.
 
 **Read-only model lookup exchanges.** The shared bounded GET retry in
 `plakous-exchange` applies where the operator is waiting on a bind: `plakd run`,
@@ -4382,9 +4382,9 @@ is either in the reference fixture, in sanitized authenticated evidence from
 that client version, or on an explicit reviewed API-only Direct list.
 Moving the reference-client pin rotates the Codex OAuth binding identity and
 requires a runtime format epoch cut. This pin move belongs to the same unshipped
-epoch 38 / `r28.e38.p38.t11` cut as the pending runtime changes; it adds no
-second bump. Product schema 39 later moves the state key to `r28.e38.p39.t11`
-without a runtime format change. Cross-build session transfer uses export
+epoch 38 / `r28.e38.p38.t11` cut as the runtime move changes; it adds no
+second bump. Runtime epoch 39 and product schema 39 then move the state key
+to `r28.e39.p39.t11` (chapter 00). Cross-build session transfer uses export
 and import (§5.4).
 
 On a sampling request, a Responses `response.incomplete` with reason
@@ -5170,9 +5170,16 @@ Default callers pass `primary`; named callers derive `named-<name>`. Claude and
 Grok facade entries use the selected token for online and offline maintenance.
 Foreign-slot records refuse before use. Claude/Grok managers accept an explicit
 credential-source scope; the facade sets the full named reference only for named
-slots. Default authority bytes remain unchanged, and this scope never changes
-provider-defined upstream account or replay identity. Codex's existing path-bound
-source authority remains unchanged.
+slots. That scope never changes provider-defined upstream account or replay
+identity. Credential-authority digests do not include the store path. Codex
+hashes the compatibility profile id and the slot id (`primary` or
+`named-<name>`). SuperGrok hashes the compatibility profile id, the slot id
+and, for a named source only, the account scope (`grok/<name>`). The same
+login served from two paths therefore binds the same session; a different
+slot, or a different SuperGrok account scope, binds a different digest. The
+provider account inside a Codex slot stays the separate account binding.
+Claude already binds the validated account UUID with the source scope and is
+unchanged.
 
 Credentials are secret values owned by credential managers. Public values,
 logs, snapshots, errors, events, and debug output contain only redacted
@@ -6230,8 +6237,9 @@ SuperGrok) under a store, the default account and its named accounts: each
 call opens the login as the library's own operations do, so consent,
 profile windows and newer-build refusals apply unchanged. Its facts' account
 and credential-authority digests are the exact bytes the kind's route binds
-a session to (the Codex authority digest still hashes the slot path, which a
-gateway adopting the store in place keeps), its selection digest names the
+a session to (Codex hashes the profile id and slot id, not the store path, so
+a gateway and a direct route bind the same bytes wherever the store file
+lives), its selection digest names the
 login selection (Codex's route digest; for Claude the login grant, for
 SuperGrok the selection epoch), and Claude's account UUID and client device
 id travel as `claude_account_uuid` and `claude_device_id` wire identity.
@@ -6239,11 +6247,10 @@ SuperGrok's raw login selection epoch, account subject (the `x-userid`
 value) and route credential-authority id are non-secret identity facts and
 travel as `grok_selection_epoch`, `grok_subject` and `grok_authority_id`:
 its route binds the raw epoch and authority id, which the one-way digests
-cannot reproduce. The authority id is the digest the gateway computes over
-its own slot path, slot id and account scope, so a gateway adopting the
-store in place reports the bytes a session already bound. Adoption is that
-slot path's exact bytes: the host's unresolved state home, with no
-canonicalization. A configured root that differs is not an adoption.
+cannot reproduce. The authority id (`grok_authority_id`) is the digest over
+the profile id, slot id and account scope, not the store path, so a gateway
+and a direct route report the same bytes for the same login wherever the
+store file lives.
 A login that is neither Ready nor mid-refresh (quarantined, revoked,
 refresh-required, login-required) is reported from its offline status
 alone, and its fields refuse `NotReady` (`credential_not_ready`). A fields
@@ -6427,7 +6434,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 38.
+runtime checkpoint format epoch 39.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -9443,7 +9450,7 @@ runtime under the ordinary mutating write-ahead claim, so a crash after the
 claim settles `OutcomeUnknown` and is never replayed. Provider-hosted MCP and
 connectors stay in the stop class below. Its
 serialized variant names are part of the canonical history encoding and so of
-runtime checkpoint format epoch 38.
+runtime checkpoint format epoch 39.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse
@@ -11388,6 +11395,9 @@ absent; this value is not evidence that a provider request was dispatched or
 admitted in the destination. Native compaction provenance and the imported
 selection are mutually exclusive; a later genuine compaction publishes its own
 native provenance. This is runtime epoch 38, not a migration of epoch 37.
+Epoch 39 carries the same context codec. It bumps because Codex and
+SuperGrok credential-authority digests no longer include the store path,
+which changes persisted session-binding bytes.
 Compaction provenance
 records the retained segment count and how many of those segments follow the
 summary segment: a native successor's protected current-round tail, zero for
@@ -11398,7 +11408,7 @@ successor groups after the summary. The identity is the
 source start, using the same append formula as the planner. It equals the
 planner's pre-omission retained-tail identity only when omission removes or
 rewrites nothing. Decode stores the digest and does not recompute it, so the
-context-state encoding stays version 4 and this remains runtime epoch 38.
+context-state encoding stays version 4, including in runtime epoch 39.
 A receipt check compares that retained-tail digest by the value recorded on
 the provenance, including a pre-omission planner identity from the previous
 build, and still checks the successor history and that the recorded count is
