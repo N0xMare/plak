@@ -5276,10 +5276,10 @@ picker knows which kinds a profile needs. `ApplyProfile` keeps the session's
 current account for a kind when that account is still Ready (the line head's
 for the root kind, the stored choice for the others) before falling back to
 steps 2 to 4, and a profile whose binding is unchanged but whose filled
-choices differ still rebinds. The host's Ready catalog has one section per
-kind's default slot, so a rebind onto a named account admits its model and
-effort against its kind's section and then resolves the named account's own
-route and catalog.
+choices differ still rebinds. A profile rebind onto a named account does not
+require its kind's default slot to be Ready. The target resolver admits the
+model and effort against that account's own route and authenticated catalog,
+not the default slot's catalog.
 
 **`ChooseAccount {kind, account, continue_failed}`** validates the choice as
 step 1 does. A non-root kind is saved on the attached record by the session's

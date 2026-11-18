@@ -131,7 +131,14 @@ fn profile_ready_catalog(
     catalog: &plakous_host_protocol::views::ReadyCatalog,
 ) -> plakous_host_protocol::views::ReadyCatalog {
     let mut catalog = catalog.clone();
+    let ready = ready_accounts();
     for mut offline in crate::profile_test_catalog::ready_catalog(&[SELECTOR]).accounts {
+        if ready
+            .as_ref()
+            .is_some_and(|ready| !ready.contains(&offline.account))
+        {
+            continue;
+        }
         if let Some(section) = catalog
             .accounts
             .iter_mut()

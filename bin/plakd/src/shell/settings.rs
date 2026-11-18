@@ -378,15 +378,15 @@ fn apply_profile(
         }
     };
     let root = &prepared.root;
-    if !profile_route_ready(facts.catalog, &root.account, &root.model) {
-        refuse_profile(
-            &prepared.id,
-            format!("{} is not ready; log in before applying it", root.account),
-            events,
-        );
-        return None;
-    }
     if apply == crate::surface_protocol::ProfileApply::Default {
+        if !profile_route_ready(facts.catalog, &root.account, &root.model) {
+            refuse_profile(
+                &prepared.id,
+                format!("{} is not ready; log in before applying it", root.account),
+                events,
+            );
+            return None;
+        }
         commit_profile(
             paths,
             prepared.id,

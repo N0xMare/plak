@@ -175,8 +175,8 @@ fn profile_moved(client: &mut Client) -> Result<NodeAddress, String> {
 
 /// A named root through the host (spec 02 §4.4.1): `new_session` with an
 /// explicit named root account binds and runs on it, and `ApplyProfile` with
-/// another named account switches the root's line onto that account, whose
-/// successor runs as well.
+/// another named account switches the root's line onto that account while
+/// the default slot is not Ready. The successor runs as well.
 #[test]
 fn a_named_root_creates_runs_and_switches_through_the_host() {
     use plakd_wire_types::{ProfileApply, SurfaceIntent};

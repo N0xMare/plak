@@ -539,10 +539,12 @@ fn profile_rebind_selection<P: plakous_host_protocol::ProtocolExtension>(
         )
         .map_err(CliFailure::new)?
     } else {
-        (
-            validate_rebind_effort(&config.ready_catalog.accounts, account, model, effort)?,
-            composition.unwrap_or(config.session.composition),
-        )
+        let effort = if account.parse::<crate::account::AccountRef>()?.is_named() {
+            effort.map(str::to_owned)
+        } else {
+            validate_rebind_effort(&config.ready_catalog.accounts, account, model, effort)?
+        };
+        (effort, composition.unwrap_or(config.session.composition))
     };
     Ok((target_selection, api_root, effort_label, composition))
 }
@@ -1247,20 +1249,9 @@ pub(super) fn validate_rebind_effort(
     if effort.is_some() && !explicit {
         return Err(CliFailure::new("rebind target effort is invalid"));
     }
-    // The host's catalog has one section per kind's default slot; a named
-    // account of the kind serves the same provider's models.
-    let kind = account
-        .parse::<crate::account::AccountRef>()
-        .ok()
-        .map(|parsed| parsed.vertical().as_str());
     let entry = ready_catalog
         .iter()
         .find(|section| section.ready && section.account == account)
-        .or_else(|| {
-            ready_catalog
-                .iter()
-                .find(|section| section.ready && Some(section.account.as_str()) == kind)
-        })
         .and_then(|section| section.entries.iter().find(|entry| entry.id == model))
         .ok_or_else(|| CliFailure::new("rebind target is absent from the exact Ready catalog"))?;
     if entry.effort_options.is_empty() {
