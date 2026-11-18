@@ -269,7 +269,6 @@ async fn assert_quarantined(
 }
 
 #[tokio::test]
-#[ignore = "defect: a quarantined login reports CustodyError::Internal instead of NotReady (credential_not_ready); un-ignore with the custodian fix"]
 async fn a_refresh_killed_after_its_claim_is_quarantined_without_a_grant_sent() -> TestResult {
     let root = tempfile::tempdir()?;
     let paths = SubscriptionPaths::from_xdg_state_home(root.path())?;
@@ -287,7 +286,6 @@ async fn a_refresh_killed_after_its_claim_is_quarantined_without_a_grant_sent() 
 }
 
 #[tokio::test]
-#[ignore = "defect: a quarantined login reports CustodyError::Internal instead of NotReady (credential_not_ready); un-ignore with the custodian fix"]
 async fn a_refresh_killed_after_the_provider_answered_is_quarantined() -> TestResult {
     let root = tempfile::tempdir()?;
     let paths = SubscriptionPaths::from_xdg_state_home(root.path())?;

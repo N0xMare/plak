@@ -4402,9 +4402,7 @@ see quarantined facts and a `credential_not_ready` refusal of a relayed
 request without a dial, and the operator's forced refresh sends no grant,
 because Claude never reclaims. The post-commit cut is Ready at the generation
 after the claim, and a request prepared on the seeded generation is
-re-prepared onto it and carries the rotated token. The two pre-commit cuts are
-ignored until the custodian reports a quarantined login as `NotReady`; it
-answers `internal` today.
+re-prepared onto it and carries the rotated token.
 
 `just live gateway` prints the plan and a `just live estimate` line, and
 calls no provider. `just live gateway --paid` drives the shared live route
