@@ -312,6 +312,20 @@ impl Agent {
         );
     }
 
+    /// Whether release leaves running jobs for a daemon or paired runner.
+    ///
+    /// This is the runtime's own transfer decision, set when a keeper and a
+    /// `JobHost` were both present at construction.
+    #[must_use]
+    pub fn retains_background_jobs(&self) -> bool {
+        *self
+            .inner
+            .job_release_mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            == super::JobReleaseMode::Transfer
+    }
+
     /// Returns live and terminal-but-unconsumed session-owned processes.
     #[must_use]
     pub fn jobs(&self) -> Vec<plakous_tools::JobView> {

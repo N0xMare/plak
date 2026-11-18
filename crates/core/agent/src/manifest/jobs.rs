@@ -234,6 +234,29 @@ impl JobLedger {
         &self.rows
     }
 
+    /// Keeps terminal evidence `prior` already recorded on a surviving row.
+    ///
+    /// A successor may fill a row that had none. It cannot clear or replace
+    /// evidence, including when its snapshot was taken before that evidence
+    /// was published. Rows the successor dropped stay dropped.
+    pub(crate) fn retaining_recorded_terminals(
+        mut self,
+        prior: &Self,
+    ) -> Result<Self, RuntimeManifestError> {
+        for row in &mut self.rows {
+            if let Some(before) = prior.rows.iter().find(|before| {
+                before.number == row.number
+                    && before.session_id == row.session_id
+                    && before.owner_generation == row.owner_generation
+            }) && let Some(terminal) = &before.terminal
+                && row.terminal.as_ref() != Some(terminal)
+            {
+                row.terminal = Some(terminal.clone());
+            }
+        }
+        Self::new(self.next_id, self.rows)
+    }
+
     /// Copies terminal snapshots without replacing already durable evidence.
     pub fn with_terminals(&self, views: &[JobView]) -> Result<Self, RuntimeManifestError> {
         let mut rows = self.rows.clone();
@@ -415,6 +438,38 @@ mod tests {
         let next = JobLedger::new(3, Vec::new()).expect("next");
         assert!(next.is_terminal_extension_of(&prior));
         assert!(!prior.is_terminal_extension_of(&next));
+    }
+
+    #[test]
+    fn a_later_snapshot_keeps_a_stop_already_recorded() {
+        let stopped = JobTerminal {
+            status: JobTerminalStatus::Stopped,
+            exit_code: None,
+            stopper: Some(JobStopReason::SessionExit),
+            elapsed: Duration::from_millis(5),
+            tail: String::new(),
+        };
+        let row = |terminal: Option<JobTerminal>| JobRow {
+            number: 1,
+            command: "sleep".into(),
+            started_at: Timestamp::new(1, 0).expect("timestamp"),
+            owner: fixture_job_owner(),
+            session_id: ProcessSessionId::new([1; 16]).expect("session"),
+            owner_generation: ProcessSessionOwnerGeneration::new(1).expect("generation"),
+            terminal,
+        };
+        let prior = JobLedger::new(2, vec![row(Some(stopped.clone()))]).expect("prior");
+        let stale = JobLedger::new(2, vec![row(None)]).expect("stale");
+        let kept = stale.retaining_recorded_terminals(&prior).expect("kept");
+        assert_eq!(kept.rows()[0].terminal, Some(stopped));
+        let consumed = JobLedger::new(2, Vec::new()).expect("consumed");
+        assert!(
+            consumed
+                .retaining_recorded_terminals(&prior)
+                .expect("consumed stays dropped")
+                .rows()
+                .is_empty()
+        );
     }
     #[test]
     fn review_row_without_stopper_is_unknown() {

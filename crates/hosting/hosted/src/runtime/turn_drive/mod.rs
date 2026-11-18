@@ -63,14 +63,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnHost<'_, P> {
             return;
         }
         self.quit_started_at.get_or_insert_with(Instant::now);
-        // Keep wins over a stop that quit escalation would start. Release
-        // already skips stops when a daemon owns the jobs; starting the stop
-        // here would lose that race.
-        if self.roots.daemon_processes() {
-            let text = "background jobs were kept across quit; a local daemon or paired runner still owns them";
-            let row = sessions::TranscriptRow::info(sessions::NoticeScope::Session, text);
-            self.session.record_notice(row.clone());
-            let _ = self.events.send(ContentEvent::Row(row));
+        // Keep wins over a stop that quit escalation would start. The
+        // decision is the runtime's own transfer mode, the same one release
+        // uses, so a second predicate cannot start the stop this skips.
+        if self.job_agent.retains_background_jobs() {
+            let running = self
+                .job_agent
+                .jobs()
+                .iter()
+                .any(|job| job.status == plakous::tools::JobStatus::Running)
+                || self.roots.job_registry().has_running_jobs();
+            if running {
+                let text = "background jobs were kept across quit; a local daemon or paired runner still owns them";
+                let row = sessions::TranscriptRow::info(sessions::NoticeScope::Session, text);
+                self.session.record_notice(row.clone());
+                let _ = self.events.send(ContentEvent::Row(row));
+            }
             return;
         }
         self.job_agent.begin_job_stop();

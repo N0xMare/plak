@@ -212,6 +212,51 @@ pub(super) fn scripted_host_with(
     (config, evidence)
 }
 
+fn scripted_host_retaining(
+    root: &std::path::Path,
+    script: Arc<ScriptPlan>,
+    retain: bool,
+) -> crate::runtime::HostConfig<TestExtension> {
+    let (mut config, _) = fresh_injected_attached_host(root);
+    let evidence = root.join("recover-evidence.jsonl");
+    let controller =
+        BoundaryController::quiet_from_evidence_path(CrashBoundary::None, evidence).unwrap();
+    let cursor = Arc::new(AtomicU64::new(1));
+    let workspace = config.cwd.clone();
+    let target = scripted_runtime_binding_with_cursor(
+        &workspace,
+        controller.clone(),
+        Arc::clone(&script),
+        Arc::clone(&cursor),
+    )
+    .unwrap()
+    .target_binding();
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
+        runtime: Arc::new(move |_| {
+            scripted_runtime_binding_with_cursor(
+                &workspace,
+                controller.clone(),
+                Arc::clone(&script),
+                Arc::clone(&cursor),
+            )
+            .map(|binding| {
+                if retain {
+                    binding.with_retained_jobs_for_test()
+                } else {
+                    binding
+                }
+            })
+            .map_err(|error| error.to_string())
+        }),
+        rebind_target: target,
+        observe: Arc::new(|_, _| {}),
+        child_runtime: None,
+        profile_route: None,
+        rebind_builds: std::sync::Mutex::new(Vec::new()),
+    });
+    config
+}
+
 pub(super) fn wait_for(
     events: &crate::surface_protocol::HostEventReceiver<TestExtension>,
     seen: &mut Vec<HostEvent>,
@@ -827,4 +872,119 @@ fn reopening_a_source_after_its_fork_published_keeps_the_forks_tree() {
     let opened = rows.tree(&fork_id).unwrap().expect("the fork's tree");
     assert!(opened.forked_from().is_some());
     assert!(trees.custody_port().custody(&fork_id).unwrap().is_some());
+}
+
+fn running_job_script() -> Arc<ScriptPlan> {
+    Arc::new(
+        serde_json::from_value(serde_json::json!({
+            "version": SCRIPT_VERSION,
+            "process_tools": true,
+            "stall_ignores_cancellation": true,
+            "steps": [
+                {"output": {"tool": {"name": "process_session_start", "arguments": {
+                    "command": "sleep 60", "workdir": ".", "login": false,
+                    "tty": false, "keep_stdin_open": false, "yield_time_ms": 0,
+                    "max_output_bytes": 8192
+                }}}, "finish": "tool_calls"},
+                {"stream": [{"text": "waiting"}, {"stall": 30000}]}
+            ]
+        }))
+        .unwrap(),
+    )
+}
+
+fn keep_notices(record: &crate::sessions::SessionRecord) -> usize {
+    record
+        .transcript
+        .rows()
+        .into_iter()
+        .filter(|(line, _)| {
+            line.text()
+                .is_some_and(|text| text.contains("kept across quit"))
+        })
+        .count()
+}
+
+/// Escalated quit uses the runtime's transfer decision. A keeper with a
+/// running job records one notice and leaves the row non-terminal; no job
+/// records no notice; without a keeper the job is stopped.
+#[test]
+fn escalated_quit_keeps_a_running_job_only_when_the_runtime_retains_it() {
+    let root = tempfile::tempdir().unwrap();
+    let config = scripted_host_retaining(root.path(), running_job_script(), true);
+    let session_id = config.session.id.clone();
+    let store = Arc::clone(&config.store);
+    let roots = config.state_roots.clone();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("start".into()));
+    wait_for(
+        &events,
+        &mut seen,
+        "the stalled turn",
+        |event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("waiting")),
+    );
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+    let record = store.load(&session_id).unwrap();
+    assert_eq!(keep_notices(&record), 1, "{seen:#?}");
+    let locator = record.plakous_locator.expect("released locator");
+    let labels = AgentSessions::unsettled_job_labels(roots.runtime_database(), locator).unwrap();
+    assert_eq!(labels, vec!["p1".to_owned()]);
+    if let Some(service) = roots
+        .job_registry()
+        .service_of_head(locator.session_id(), locator.branch_id())
+    {
+        service
+            .stop_jobs(
+                plakous::tools::JobStopReason::User,
+                Duration::from_millis(200),
+            )
+            .ok();
+    }
+
+    let idle = tempfile::tempdir().unwrap();
+    let config = scripted_host_retaining(
+        idle.path(),
+        script(&serde_json::json!([
+            {"stream": [{"text": "idle"}, {"stall": 30000}]}
+        ])),
+        true,
+    );
+    let session_id = config.session.id.clone();
+    let store = Arc::clone(&config.store);
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("start".into()));
+    wait_for(
+        &events,
+        &mut seen,
+        "the idle stall",
+        |event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("idle")),
+    );
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+    assert_eq!(keep_notices(&store.load(&session_id).unwrap()), 0);
+
+    let stopped = tempfile::tempdir().unwrap();
+    let config = scripted_host_retaining(stopped.path(), running_job_script(), false);
+    let session_id = config.session.id.clone();
+    let store = Arc::clone(&config.store);
+    let roots = config.state_roots.clone();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("start".into()));
+    wait_for(
+        &events,
+        &mut seen,
+        "the stalled turn",
+        |event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("waiting")),
+    );
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+    let record = store.load(&session_id).unwrap();
+    assert_eq!(keep_notices(&record), 0);
+    let locator = record.plakous_locator.expect("released locator");
+    let labels = AgentSessions::unsettled_job_labels(roots.runtime_database(), locator).unwrap();
+    assert!(labels.is_empty(), "the keeper-less quit left {labels:?}");
 }

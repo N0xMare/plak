@@ -207,6 +207,9 @@ pub struct AgentBuilder {
     /// target's own.
     #[cfg(test)]
     target_backend: Option<plakous_tools::ExecutionBackendDescriptor>,
+    /// Test-only stand-in for a local daemon or paired runner. Production
+    /// never sets it. Transfer still requires a job host.
+    retain_jobs_for_test: bool,
 }
 
 /// Derives a note to append after a committed compaction from its source and
@@ -871,16 +874,14 @@ mod daemon_process_transfer_tests {
 
     #[test]
     fn transfer_needs_a_keeper_and_a_job_host() {
-        for local_daemon in [false, true] {
-            for runner_backend in [false, true] {
-                for job_host in [false, true] {
-                    assert_eq!(
-                        daemon_process_transfer(local_daemon, runner_backend, job_host),
-                        (local_daemon || runner_backend) && job_host
-                    );
-                }
-            }
-        }
+        assert!(!daemon_process_transfer(false, false, false));
+        assert!(!daemon_process_transfer(false, false, true));
+        assert!(!daemon_process_transfer(true, false, false));
+        assert!(!daemon_process_transfer(false, true, false));
+        assert!(!daemon_process_transfer(true, true, false));
+        assert!(daemon_process_transfer(true, false, true));
+        assert!(daemon_process_transfer(false, true, true));
+        assert!(daemon_process_transfer(true, true, true));
     }
 }
 

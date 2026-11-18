@@ -129,6 +129,12 @@ pub mod internal {
         BoundaryError, BoundaryHold, BoundaryPhase, BoundaryProgress,
     };
     pub use crate::test_hooks::commit_classes as commit_trace;
+    /// Test stand-in for a keeper. Production hosts do not call this.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn retain_jobs_for_test(builder: AgentBuilder) -> AgentBuilder {
+        builder.retain_jobs_for_test()
+    }
     /// Selects a home-local transport without changing the runner binding.
     #[must_use]
     pub fn select_local_daemon(

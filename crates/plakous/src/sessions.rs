@@ -289,6 +289,16 @@ impl SessionRuntimeBinding {
         self
     }
 
+    /// Test stand-in for a local daemon or paired runner. Transfer still
+    /// requires the job host `with_job_host` installs. Production hosts do
+    /// not call this.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_retained_jobs_for_test(mut self) -> Self {
+        self.builder = plakous_agent::internal::retain_jobs_for_test(self.builder);
+        self
+    }
+
     /// Binds an exact builder for sealed Plakous-owned revalidation.
     ///
     /// A caller-supplied revalidation witness is intentionally not accepted:

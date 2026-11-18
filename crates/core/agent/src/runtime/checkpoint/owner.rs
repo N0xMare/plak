@@ -432,6 +432,12 @@ impl CheckpointOwner {
                 .with_line_terminals(&pending_line_terminals)
                 .map_err(crate::runtime::continuation::runtime_manifest_error)?;
         }
+        // A stop recorded under this gate must survive a publisher that
+        // snapshotted the ledger before the stop. Consumption still drops rows.
+        facts.jobs = facts
+            .jobs
+            .retaining_recorded_terminals(prior_manifest.jobs())
+            .map_err(crate::runtime::continuation::runtime_manifest_error)?;
         let consumed_line_terminals = pending_line_terminals
             .iter()
             .map(|terminal| terminal.number)
@@ -837,9 +843,9 @@ impl CheckpointReader {
             )
         };
         let manifest = prior.manifest();
-        if manifest.lifecycle() != &crate::RuntimeLifecycle::Quiescent {
-            return Ok(());
-        }
+        // A Quiescent head stays quiescent. A Working head keeps its turn for
+        // recovery and gains only the stop this release just performed.
+        let lifecycle = manifest.lifecycle().clone();
         let jobs = manifest
             .jobs()
             .with_terminals(views)
@@ -857,7 +863,7 @@ impl CheckpointReader {
             &bundle,
             SuccessorFacts {
                 checkpoint_id,
-                lifecycle: crate::RuntimeLifecycle::Quiescent,
+                lifecycle,
                 history: manifest.canonical().history().clone(),
                 ledger: manifest.ledger().clone(),
                 jobs,

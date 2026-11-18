@@ -322,7 +322,18 @@ impl AgentBuilder {
             local_daemon: None,
             #[cfg(test)]
             target_backend: None,
+            retain_jobs_for_test: false,
         }
+    }
+
+    /// Pretend a daemon or paired runner keeps jobs. Tests use this so an
+    /// escalated quit can take the keep path without a live runner. A job
+    /// host is still required.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn retain_jobs_for_test(mut self) -> Self {
+        self.retain_jobs_for_test = true;
+        self
     }
 
     pub(crate) fn with_local_daemon(
@@ -964,7 +975,7 @@ impl PreparedAgent {
         Ok(Self {
             job_sessions,
             daemon_processes: super::daemon_process_transfer(
-                builder.local_daemon.is_some(),
+                builder.local_daemon.is_some() || builder.retain_jobs_for_test,
                 builder.runner_backend.is_some(),
                 builder.job_host.is_some(),
             ),

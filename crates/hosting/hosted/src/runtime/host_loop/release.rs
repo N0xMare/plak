@@ -56,7 +56,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .saturating_sub(std::time::Duration::from_millis(150))
                 .min(std::time::Duration::from_millis(400))
         };
-        let keep_jobs = self.role.config.state_roots.daemon_processes();
+        let keep_jobs = self
+            .opened
+            .agent()
+            .is_some_and(plakous::agent::Agent::retains_background_jobs);
         let stop_failure = if keep_jobs {
             None
         } else if abandon {

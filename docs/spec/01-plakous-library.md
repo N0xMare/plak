@@ -200,9 +200,12 @@ the lease until release.
 `Agent::abandon_and_release` is the process-exit exception to joined shutdown.
 It closes admission, fires cancellation, stops heartbeat renewal, stops promoted
 process groups concurrently with a 200 ms TERM grace, and records newly available
-job terminals on a Quiescent head before releasing the exact lease. That
-manifest-only exit publication holds the lease gate after fencing the actor;
-a Working head is left for recovery. Job terminals are published per agent,
+job terminals before releasing the exact lease. On a Quiescent head that
+manifest-only publication stays quiescent. On a Working head it records only
+those terminals (the quit stop) and leaves the turn for recovery. Evidence
+already on a row is not recorded again, and a later commit cannot clear or
+replace it. The publication holds the lease gate after fencing the actor.
+Job terminals are published per agent,
 one settlement checkpoint on each agent's own branch; closing a tree publishes
 one per child, not a batched multi-agent commit. It does not join the driver, save a shutdown receipt, or
 flush the store. The exiting host MUST enforce a one-second process bound.
@@ -8930,7 +8933,8 @@ changing row metadata or already durable evidence.
 Every publish copies newly available terminal evidence without overwriting
 durable facts. `Agent::record_job_terminals` publishes a history-unchanged,
 manifest-only successor on a Quiescent head when terminal evidence changes;
-it does nothing on a Working head.
+it does nothing on a Working head. Process-exit abandonment records that
+evidence on a Working head as well and leaves the head Working (§2.4).
 
 Promotion rows commit with the enclosing tool exchange, including overflow
 shrink, interrupted close and restored-turn resume; nested promotion commits

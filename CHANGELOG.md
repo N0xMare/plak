@@ -12,6 +12,9 @@ for one version bump, without native protocol compatibility.
 ### Plakous
 
 - Transfer daemon jobs only when the runtime has a job host.
+- A keeper-less quit records each stopped job once, including while the turn
+  is still working. The stop is attributed to quit. A later commit cannot
+  clear that evidence.
 - Process-tool descriptions state that a daemon or paired runner keeps
   background jobs across quit, including an escalated quit, and across upgrade.
 
@@ -96,8 +99,9 @@ for one version bump, without native protocol compatibility.
   `--abandon-jobs` archives anyway and names the processes left running.
   Unpair removes only the local pairing pin. Delete stays available when the
   store is full.
-- An escalated quit keeps daemon-owned background jobs and records that keep,
-  instead of racing a stop against the keep.
+- An escalated quit keeps background jobs when the runtime itself is
+  transferring them to a daemon or paired runner. It records that keep only
+  when a job is still non-terminal, and does not race a stop against the keep.
 - JSONL `stop_processes` stops one background job (`pN`) as a user stop.
   Two visible jobs with the same number are refused and neither is stopped.
 - Host wire protocol 11 schema pin covers `DeleteSession.abandon_jobs` and
