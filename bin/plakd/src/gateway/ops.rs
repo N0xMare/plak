@@ -71,7 +71,6 @@ impl OpsBridge {
         Ok(AccountFacts {
             account: account.clone(),
             instance: self.instance.clone(),
-            facts_revision: 1,
             observed_at_unix_ms: super::callers::now_ms(),
             credential: CredentialFacts {
                 status: credential_status(status.credential),

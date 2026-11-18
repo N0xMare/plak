@@ -366,7 +366,6 @@ fn fact(instance: &UuidText, account: &GatewayAccount, signed_in: bool) -> Accou
     AccountFacts {
         account: account.clone(),
         instance: instance.clone(),
-        facts_revision: 1,
         observed_at_unix_ms: super::callers::now_ms(),
         credential: CredentialFacts {
             status: if signed_in {
