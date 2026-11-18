@@ -1379,7 +1379,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 self.assertEqual(validator(workspace), [])
 
     def test_product_does_not_hard_enable_provider_facade_features(self) -> None:
-        expected = {"sessions-sqlite"}
+        expected = {"gateway", "sessions-sqlite"}
         self.assertEqual(set(self.workspace.policy.facade_features["plakd"]), expected)
         self.assertEqual(workspace_policy.validate_facade_features(self.workspace), [])
         product = self.workspace.packages["plakd"]
@@ -3059,7 +3059,7 @@ class FeaturePolicyTests(unittest.TestCase):
             )
             for package in packages
         }
-        self.assertEqual(profile_counts["plakous"], 2 * 14 + 3)
+        self.assertEqual(profile_counts["plakous"], 2 * 15 + 3)
         # sqlite, perf-instrumentation, repository-only commit-trace.
         self.assertEqual(profile_counts["plakous-store"], 2 * 3 + 3)
         self.assertEqual(profile_counts["plakd"], 2 * 19 + 3)
