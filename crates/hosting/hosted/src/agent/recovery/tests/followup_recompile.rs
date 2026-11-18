@@ -1,9 +1,5 @@
 //! A settled child whose provider configuration changed is recompiled by the
 //! parent's follow-up, or the follow-up is refused, and neither path wedges it.
-#![allow(
-    clippy::too_many_lines,
-    reason = "each follow-up admission path stays in one test"
-)]
 
 use std::sync::Arc;
 
@@ -652,6 +648,14 @@ async fn an_acknowledged_interrupted_followup_recompiles_after_recovery_settles(
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
 
+struct ClearCut;
+
+impl Drop for ClearCut {
+    fn drop(&mut self) {
+        crate::agent::children::CUT_AFTER_REBIND.store(false, Ordering::Release);
+    }
+}
+
 #[tokio::test]
 async fn list_says_recovery_is_pending_until_the_claim_is_held() {
     let fixture = Fixture::new("list-recovery-pending");
@@ -687,12 +691,6 @@ async fn a_crash_after_rebind_and_before_the_tree_save_converges() {
     let (id, before) = settled_scripted_child(&fixture).await;
     install_script(&fixture, b"offline-loopback-account", 8_000_000);
     let dispatched = fixture.dispatches();
-    struct ClearCut;
-    impl Drop for ClearCut {
-        fn drop(&mut self) {
-            crate::agent::children::CUT_AFTER_REBIND.store(false, Ordering::Release);
-        }
-    }
     let _clear = ClearCut;
     crate::agent::children::CUT_AFTER_REBIND.store(true, Ordering::Release);
     let tree_id = fixture.tree_id.clone();
@@ -755,7 +753,21 @@ async fn a_crash_after_rebind_and_before_the_tree_save_converges() {
     );
     let locator: SessionLocator = fixture.locator(&id).unwrap().parse().unwrap();
     let sessions = fixture.sessions();
-    let archived = sessions.archive(locator).await.expect("archive");
+    let archived = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            match sessions.archive(locator).await {
+                Ok(archived) => return archived,
+                Err(error)
+                    if error.kind() == plakous::sessions::AgentSessionsErrorKind::Ownership =>
+                {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("archive: {error:?}"),
+            }
+        }
+    })
+    .await
+    .expect("the follow-up released its session");
     sessions
         .delete(archived.session_id(), archived.archived_revision())
         .await

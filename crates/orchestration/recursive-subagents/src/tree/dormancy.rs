@@ -559,6 +559,7 @@ impl ProductAgentTree {
             self.has_current_turn_owner(agent),
             request.output_schema_json.as_deref(),
             request.acknowledge_recovery.as_ref(),
+            true,
         )?;
         let Some(mut evidence) = self
             .reclamation(&id)?

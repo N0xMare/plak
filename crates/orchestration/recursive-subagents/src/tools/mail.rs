@@ -395,7 +395,14 @@ impl TopologyTool {
             .await?
         {
             Ok(recompile) => recompile,
-            Err(error) => return ToolOutcome::failure_text(error.to_value().to_string()),
+            Err(error) => {
+                let outcome = ToolOutcome::failure_text(error.to_value().to_string())?;
+                return if recovered {
+                    Self::warn_recovered_refusal(outcome)
+                } else {
+                    Ok(outcome)
+                };
+            }
         };
         let outcome = self
             .send_after_recovery(operation_id, value, cancelled, caller, recompile)

@@ -135,11 +135,10 @@ impl ProductMailDeliverer {
                 }
                 match binding_change_of(&failure) {
                     Some(change) if !recompilable(&change) => Err(refused(change.to_string())),
-                    Some(_) => self.recompile(&sessions, &facts, locator, runtime).await,
                     None if same_configuration(&recorded, &runtime) => {
                         Ok(moved_locator(&facts, locator))
                     }
-                    None => self.recompile(&sessions, &facts, locator, runtime).await,
+                    Some(_) | None => self.recompile(&sessions, &facts, locator, runtime).await,
                 }
             }
         }
@@ -455,12 +454,13 @@ async fn line_head_locator(
         return Ok(locator);
     }
     let operation_id = recompile_operation_id(tree_id, &facts.agent_id, facts.generation)?;
-    let held = sessions
+    let opened = sessions
         .open_lease_only(&operation_id, head.line())
         .await
         .map_err(|error| session_refusal(&error))?;
-    let current = held.locator();
-    held.release()
+    let current = opened.locator();
+    opened
+        .release()
         .await
         .map_err(|error| session_refusal(&error))?;
     Ok(current)

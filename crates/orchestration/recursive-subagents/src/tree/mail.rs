@@ -367,6 +367,7 @@ impl ProductAgentTree {
             active_turn,
             request.output_schema_json.as_deref(),
             request.acknowledge_recovery.as_ref(),
+            false,
         )?;
         self.check_mailbox_budget(&request.agent_id, request.message.len())?;
         Ok(())
@@ -440,6 +441,7 @@ impl ProductAgentTree {
                 target_active_turn,
                 request.output_schema_json.as_deref(),
                 request.acknowledge_recovery.as_ref(),
+                true,
             )?)
         } else {
             if target_status == NodeStatus::Closed {

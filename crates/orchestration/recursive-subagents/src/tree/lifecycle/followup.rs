@@ -27,11 +27,15 @@ impl ProductAgentTree {
         active_turn: bool,
         output_schema_json: Option<&str>,
         acknowledge_recovery: Option<&AttemptId>,
+        block_pending_refresh: bool,
     ) -> Result<(String, String), TopologyError> {
-        if self
-            .nodes
-            .get(agent_id)
-            .is_some_and(|node| self.refresh_pending(&node.workspace_id))
+        // A follow-up settles its own pending refresh before this admission
+        // runs again. The preflight must not refuse that refresh first.
+        if block_pending_refresh
+            && self
+                .nodes
+                .get(agent_id)
+                .is_some_and(|node| self.refresh_pending(&node.workspace_id))
         {
             return Err(TopologyError::new(
                 TopologyErrorCode::WorkspaceRecoveryRequired,
