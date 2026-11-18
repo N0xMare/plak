@@ -21,9 +21,24 @@ hash. The default scope is `relay:*`. Add `--admin <account>` for admin scope.
 ## Kill switch and drain
 
 `disable` can be remote. It stops new calls and, with `--cut`, cancels
-matching relays already in flight. `enable` and `drain` are local only.
-`drain` stops accepting, waits up to 30 seconds for in-flight work, then the
-service exits.
+matching relays already in flight. `enable` and `drain` are local only. A
+global disable still lets the local administrator run `enable`, `disable`,
+`drain`, `caller list` and `status`, so it can always be cleared; relays, facts and
+refreshes stay blocked for everyone until then.
+`drain` stops accepting and waits up to 30 seconds for in-flight relays and
+refresh claims; the service exits and only then releases the store.
+
+`plakd gateway audit --since 2026-11-18T00:00:00Z` filters by an RFC 3339
+time. `plakd gateway status` shows how many audit lines failed to append.
+
+## Install
+
+`plakd gateway install` writes `~/.config/systemd/user/plak-gateway.service`
+running the executable that wrote it, with `UMask=0077`, the `PLAK_HOME` and
+`XDG_STATE_HOME` of the shell you ran it from, `EnvironmentFile=-%h/.config/plak/gateway.env`
+for API-key variables, `Restart=on-failure`, `RestartSec=2` and a stop timeout
+longer than the drain. Point `ExecStart` at an immutable build before enabling
+it.
 
 ## Client configuration
 
@@ -35,6 +50,17 @@ address = "unix:/run/user/1000/plak/gateway.sock"
 # key_file = "/home/user/.plak/secrets/gateway.key"
 # allow_non_tailnet = false
 ```
+
+A same-user unix gateway needs no key: without `key_file` the caller is the
+local administrator. A `tcp:` address always sends a key, by default
+`<home>/secrets/gateway.key`. The key file must be mode 0600.
+
+A process reads `[gateway]` once. A running host keeps the custody it started
+with; restart it after changing `[gateway]`. If `config.toml` does not parse,
+the host refuses to start rather than opening the store itself. A host with a
+unix address also refuses to start unless the gateway that holds this home's
+state store advertises that exact socket; `plakd gateway check` and
+`plakd doctor` report the same mismatch.
 
 The server's own file is `<home>/gateway.toml`, separate from `config.toml`.
 `plakd gateway init` writes it and does not touch the store. It names no key
@@ -56,9 +82,17 @@ refresh for those accounts are served from that custody. Other admin verbs
 stay on the account bridge.
 
 A host whose `[gateway] address` is set sends API-key and subscription
-model traffic through the gateway and does not take the holder lock or open
-the subscription store. Existing sessions reopen unchanged. Login, logout, consent and account listing use the
-gateway's admin verbs. If that host's environment sets `OPENAI_API_KEY`,
+model traffic through the gateway and does not take the holder lock, read
+`secrets/` or open the subscription store. Existing sessions reopen
+unchanged. Login, logout, consent, key status and account listing use the
+gateway's admin verbs; `plakd key status` prints each key's fingerprint so you
+can compare it before and after moving to the gateway. `plakd run`,
+`continue` and `models` work the same way through the gateway.
+
+A login through a remote caller key with admin scope may sign in an empty
+slot or log the same provider account in again. If the new login is a
+different account, the gateway refuses it before storing anything
+(`local_admin_required`); run that login on the gateway machine. If that host's environment sets `OPENAI_API_KEY`,
 `XAI_API_KEY`,
 `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`, the host refuses to start and
 names those variables. OpenRouter allowance is `plakd` usage through the

@@ -70,17 +70,18 @@ for one version bump, without native protocol compatibility.
   silence: `http1_upstream` now carries streaming-inference bounds, which each
   relay narrows to the caller's.
 
-- Host `PLAK_TEST_FAULTS` plans take `hop=gateway|upstream`. Upstream rules
-  apply to an in-process gateway and are refused when an external gateway is
-  configured. `relay-lost` and `gateway-refusal` fault the gateway hop only.
-  A gateway service reads the existing provider grammar for its own upstream
-  hop.
 - Host `PLAK_TEST_FAULTS` plans take `hop=gateway|upstream`. A relaying
   client does not apply its own plan, and a dialed hop is excluded from
   fault selection. Upstream rules apply to the gateway's upstream client and
   are refused when an external gateway is configured. `relay-lost` and
-  `gateway-refusal` fault the gateway hop only. The test fixture is a
+  `gateway-refusal` fault the gateway hop only. A gateway service reads the
+  existing provider grammar for its own upstream hop. The test fixture is a
   scripted service on the shared relay server core.
+- Add `PendingNativeLogin::keep_signed_in_account`: the private store refuses
+  a login that would replace the slot's provider account before it writes
+  (`AccountReplacementRefused`, `LoginReplacement::SameAccount`).
+- The relay server core ends a relay whose `Injection::cut_by` token is
+  cancelled with an `End` `cancelled` frame and drops the upstream exchange.
 
 ### plakd
 
@@ -114,6 +115,30 @@ for one version bump, without native protocol compatibility.
   gateway's custody too, and `plakd key status` through a gateway names the
   key's source. A host with no gateway address keeps direct in-process
   custody. No persisted format changes.
+- Resolve credential custody once per process from the home `config.toml`:
+  a host resolves it at startup and every route, console read and write,
+  carry probe and catalog refresh uses it. `[gateway]` changes need a host
+  restart; a config that does not parse refuses instead of falling back to
+  in-process custody. A unix-gateway host refuses to start, and `gateway
+  check` and `doctor` fail, unless the gateway holds this host's own store at
+  the configured socket. Doctor reads credential rows from the gateway and
+  counts a gateway failure.
+- A remote admin login is held to the slot's signed-in provider account;
+  replacing it with another account needs the local administrator.
+- A global disable no longer locks out the local administrator's `enable`,
+  `disable`, `drain`, `caller list` and `status`, and a flag verb is not
+  blocked by its own target's flag. `disable --cut` now ends matching relays in flight.
+- `plakd run`, `continue` and `models` run under a configured gateway instead
+  of refusing.
+- Drain lets refresh claims finish on their own task and releases the holder
+  lock only after the runtime shut down. The caller key file must be
+  owner-only, and a unix gateway gets a key only from an explicit
+  `gateway.key_file`. Failed audit appends are counted in `gateway status`;
+  `audit --since` takes an RFC 3339 timestamp. The service replaces only its
+  own stale socket. `gateway install` writes `UMask=0077`, the installing
+  `PLAK_HOME`/`XDG_STATE_HOME`, `EnvironmentFile=-%h/.config/plak/gateway.env`,
+  `RestartSec` and `TimeoutStopSec=45`. Remote `key status` prints
+  fingerprints.
 
 ## 0.0.4
 
