@@ -439,6 +439,7 @@ fn response_events(
     blocks: Vec<ContentBlock>,
     finish: FinishReason,
     call: usize,
+    tokens: u64,
 ) -> Result<Vec<Result<ModelEvent, ModelError>>, ModelError> {
     let item = ConversationItem::new(
         EntryId::try_from(uuid::Uuid::from_u128(9_000 + call as u128)).map_err(|_| {
@@ -468,7 +469,9 @@ fn response_events(
         Ok(ModelEvent::ResponseCompleted(ModelResponse::new(
             vec![item],
             FinishDetails::new(finish, None),
-            None,
+            // The tool-group fence schedules from an anchored provider count.
+            // A response with no usage never reaches the occupancy trigger.
+            Some(Usage::new(tokens, 2, 0, 0, 0)),
             None,
             plan.digest(),
         ))),
@@ -567,7 +570,7 @@ impl LanguageModel for ManualFoldModel {
                         )
                     }
                 };
-                let events = response_events(&plan, blocks, finish, call)?;
+                let events = response_events(&plan, blocks, finish, call, tokens)?;
                 Ok(Box::pin(futures_util::stream::iter(events)) as ModelStream)
             })
         }))
