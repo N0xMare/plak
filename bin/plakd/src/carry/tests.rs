@@ -233,10 +233,7 @@ fn an_old_epoch_session_refuses_exact_reopen_and_imports() {
     let mut document = sample_document();
     document.source.state_key = previous.into();
     let CarriedImport { record, note, .. } = document.into_import().unwrap();
-    assert_eq!(
-        record.carried_forward_from(),
-        Some((session_id, previous))
-    );
+    assert_eq!(record.carried_forward_from(), Some((session_id, previous)));
     assert!(note.contains(previous), "{note}");
     assert_ne!(record.id, session_id);
     record.validate_for_store().unwrap();

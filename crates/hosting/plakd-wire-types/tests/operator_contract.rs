@@ -8,7 +8,7 @@ use plakous_host_protocol::{
 use serde_json::{Value, json};
 
 #[test]
-fn protocol_eleven_operator_fixtures_are_addressed_and_secret_debug_is_redacted()
+fn protocol_twelve_operator_fixtures_are_addressed_and_secret_debug_is_redacted()
 -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(WIRE_VERSION, 12);
     for line in include_str!("fixtures/operator-v9.jsonl").lines() {
