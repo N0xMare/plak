@@ -2124,7 +2124,13 @@ queries (already-emitted numbers, not recovery authority). None treats the
 view's `released` bit as lease authority. Reload rehearsal first dry-runs the
 projector without writing, then inspects the resulting head; export and gc run
 the common lease-free projector before using a head. Open, live fork, rebind,
-clear, and queue actions project before their semantic decisions. The
+clear, and queue actions project before their semantic decisions. Fork,
+rebind, Switch now, clear and compact take their exact source from that
+pass: the head the projected views name on the record's branch must be the
+attached head, and the live record is bound to it. The live record's own head
+is refreshed only by a terminal publication that finished inside its bound,
+so after a timed-out pass it can lag the attached head while the session is
+idle. That copy is never source-check evidence. The
 post-release pass is still required: release can commit terminals after the
 pre-release pass, and there may be no later reader or open to apply them.
 Context-capacity terminals are rendered from their runtime facts by that same

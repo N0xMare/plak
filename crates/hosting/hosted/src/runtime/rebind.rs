@@ -1153,11 +1153,6 @@ async fn publish_rebind_intent<P: plakous_host_protocol::ProtocolExtension>(
         started,
     } = intent;
     let attached_locator = opened.locator();
-    if config.session.plakous_locator != Some(attached_locator) {
-        return Err(CliFailure::new(
-            "rebind source does not match the exact durable product binding",
-        ));
-    }
     if config.session.store_revision == 0 {
         config
             .store
@@ -1192,6 +1187,11 @@ async fn publish_rebind_intent<P: plakous_host_protocol::ProtocolExtension>(
         .load_views(&config.session.id)
         .map_err(CliFailure::new)?
         .ok_or_else(|| CliFailure::new("rebind requires projected views"))?;
+    if !super::projection::bind_attached_head(&mut config.session, &views, attached_locator) {
+        return Err(CliFailure::new(
+            "rebind source does not match the exact durable product binding",
+        ));
+    }
     if intents.workflow_requests.iter().any(|request| {
         views
             .state

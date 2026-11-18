@@ -85,6 +85,14 @@ for one version bump, without native protocol compatibility.
 
 ### plakd
 
+- Fork, profile rebind, Switch now and `/new` no longer refuse an idle root
+  with "source does not match the exact durable product binding" after a
+  turn whose terminal projector pass ran past its 400 ms bound. The host's
+  live record kept the previous turn's head until the next turn settled
+  inside the bound. These workflows now check the attached head against
+  views projected to the feed's tail, as compact already did. No persisted
+  format changes.
+
 - A parent follow-up to a settled child whose account, model and template
   binding are unchanged recompiles provider configuration at the quiescent
   checkpoint, records `configuration_notice` on the send receipt, and

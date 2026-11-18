@@ -46,7 +46,20 @@ pub async fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     super::jobs_transition_guard(config, opened)?;
     let started = Instant::now();
     let attached_locator = opened.locator();
-    if config.session.plakous_locator != Some(attached_locator) {
+    let bound = if config.session.store_revision == 0 {
+        config.session.plakous_locator == Some(attached_locator)
+    } else {
+        let views = super::projection::project_to_tail(
+            opened.sessions(),
+            &config.store,
+            &config.session.id,
+            attached_locator,
+        )
+        .await
+        .map_err(CliFailure::new)?;
+        super::projection::bind_attached_head(&mut config.session, &views, attached_locator)
+    };
+    if !bound {
         return Err(CliFailure::new(
             "clear source does not match the exact durable product binding",
         ));

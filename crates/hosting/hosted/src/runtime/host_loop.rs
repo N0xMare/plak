@@ -846,6 +846,8 @@ pub(in crate::runtime) const FINAL_PROJECTION_BOUND: Duration = Duration::from_m
 #[cfg(test)]
 pub(in crate::runtime) mod loss_policy_tests;
 #[cfg(test)]
+mod stale_head_tests;
+#[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;
 #[cfg(test)]

@@ -174,6 +174,24 @@ pub fn projected_head(
     views.projected_locator(Some(recorded)).unwrap_or(recorded)
 }
 
+/// The exact-source check of a fork, rebind, switch or clear, made on views
+/// projected to the feed's tail: the head they name on the record's branch
+/// must be the attached head, and the record is bound to it. The live
+/// record's own copy is refreshed only by a terminal publication that
+/// finished inside its bound, so it can lag the attached head while idle.
+/// A refusal leaves the record unchanged.
+pub(super) fn bind_attached_head(
+    session: &mut SessionRecord,
+    views: &SessionViews,
+    attached: plakous::sessions::SessionLocator,
+) -> bool {
+    if views.projected_locator(session.plakous_locator) != Some(attached) {
+        return false;
+    }
+    session.plakous_locator = Some(attached);
+    true
+}
+
 /// The head the views name.
 pub(crate) fn head_locator(views: &SessionViews) -> Option<plakous::sessions::SessionLocator> {
     views.state.head.map(|head| {

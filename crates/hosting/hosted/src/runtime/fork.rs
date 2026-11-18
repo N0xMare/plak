@@ -83,7 +83,7 @@ pub(super) async fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
         ));
     }
     let attached_locator = opened.locator();
-    if config.session.plakous_locator != Some(attached_locator) {
+    if !super::projection::bind_attached_head(&mut config.session, &views, attached_locator) {
         return Err(CliFailure::new(
             "fork source does not match the exact durable product binding",
         ));
