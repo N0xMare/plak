@@ -88,7 +88,7 @@ impl ProductMailDeliverer {
                     sessions
                         .created_request_output_bound(locator)
                         .await
-                        .map_err(|error| session_refusal(error))?
+                        .map_err(|error| session_refusal(&error))?
                 }
                 None => return session_read(error),
             },
@@ -211,7 +211,7 @@ impl ProductMailDeliverer {
         if !sessions
             .head_is_quiescent(locator)
             .await
-            .map_err(session_refusal)?
+            .map_err(|error| session_refusal(&error))?
         {
             return Err(refused(
                 "the child's session is not at a quiescent checkpoint",
@@ -233,7 +233,7 @@ impl ProductMailDeliverer {
         .map_err(|error| {
             let cause = error
                 .binding_change()
-                .map_or_else(|| error.to_string(), |change| change.to_string());
+                .map_or_else(|| error.to_string(), std::string::ToString::to_string);
             if error.kind() == AgentSessionsErrorKind::NotQuiescent {
                 refused("the child's session is not at a quiescent checkpoint")
             } else {
@@ -272,7 +272,7 @@ async fn recorded_binding(
     let frozen = sessions
         .created_tool_presentation(locator)
         .await
-        .map_err(session_refusal)?;
+        .map_err(|error| session_refusal(&error))?;
     let configuration = frozen
         .configuration()
         .ok_or_else(|| refused("the child session has no recorded provider configuration"))?;
@@ -365,16 +365,16 @@ fn binding_failure(failure: &crate::CliFailure) -> TopologyError {
 
 fn session_read(error: AgentSessionsError) -> Result<Option<FollowupRecompile>, TopologyError> {
     if error.kind() == AgentSessionsErrorKind::IncompatibleBuild {
-        Err(session_refusal(error))
+        Err(session_refusal(&error))
     } else {
         Ok(None)
     }
 }
 
-fn session_refusal(error: AgentSessionsError) -> TopologyError {
+fn session_refusal(error: &AgentSessionsError) -> TopologyError {
     let cause = error
         .binding_change()
-        .map_or_else(|| error.to_string(), |change| change.to_string());
+        .map_or_else(|| error.to_string(), std::string::ToString::to_string);
     refused(cause)
 }
 
@@ -394,10 +394,10 @@ fn recompile_operation_id(
     if let Ok(id) = SessionOperationId::new(&preferred) {
         return Ok(id);
     }
-    let mut hash = 0xcbf29ce484222325u64;
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in preferred.as_bytes() {
         hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     SessionOperationId::new(format!("plak:child-recompile:{hash:016x}"))
         .map_err(|_| refused("child recompile operation identity is invalid"))

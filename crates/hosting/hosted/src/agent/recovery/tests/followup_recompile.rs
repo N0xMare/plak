@@ -82,7 +82,7 @@ async fn settled_scripted_child(fixture: &Fixture) -> (String, String) {
 fn install_script(fixture: &Fixture, account: &'static [u8], maximum_projected_input: u64) {
     let workspace = fixture.root.path().to_path_buf();
     let evidence = fixture.evidence.clone();
-    let _guard = fixture.binding.install(Arc::new(move |_, _, _| {
+    let guard = fixture.binding.install(Arc::new(move |_, _, _| {
         let controller =
             BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence)
                 .map_err(|error| error.to_string())?;
@@ -102,7 +102,7 @@ fn install_script(fixture: &Fixture, account: &'static [u8], maximum_projected_i
         .map_err(|error| error.to_string())
     }));
     // The guard must outlive the follow-up. Leak it for the process-local test.
-    std::mem::forget(_guard);
+    std::mem::forget(guard);
 }
 
 #[tokio::test]
