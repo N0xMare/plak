@@ -110,7 +110,11 @@ pub enum RelayCut {
 
 /// A parsed fault plan. Clones share their per-rule request counters.
 #[derive(Clone, Debug)]
-pub struct FaultPlan(Arc<Vec<Rule>>);
+pub struct FaultPlan {
+    rules: Arc<Vec<Rule>>,
+    /// The hop this holder applies. Rules for the other hop are not counted.
+    hop: FaultHop,
+}
 
 /// A `PLAK_TEST_FAULTS` value that does not parse.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
@@ -270,20 +274,25 @@ impl FaultPlan {
                 }
             }
         }
-        Ok(Self(Arc::new(rules)))
+        Ok(Self {
+            rules: Arc::new(rules),
+            hop: FaultHop::Upstream,
+        })
     }
 
-    /// Counts this request against every rule on `hop` and returns the fault
-    /// of the first rule whose ordinal it is. Rules on the other hop are not
-    /// counted.
-    pub(super) fn select(
-        &self,
-        hop: FaultHop,
-        host: &str,
-        path_and_query: &str,
-    ) -> Option<Selected> {
+    /// Applies this plan on `hop`. The rules and their counters are shared.
+    pub(super) fn with_hop(mut self, hop: FaultHop) -> Self {
+        self.hop = hop;
+        self
+    }
+
+    /// Counts this request against every rule on this plan's hop and returns
+    /// the fault of the first rule whose ordinal it is. Rules on the other
+    /// hop are not counted.
+    pub(super) fn select(&self, host: &str, path_and_query: &str) -> Option<Selected> {
         let mut selected = None;
-        for rule in self.0.iter() {
+        let hop = self.hop;
+        for rule in self.rules.iter() {
             if rule.hop.is_some_and(|rule_hop| rule_hop != hop) {
                 continue;
             }
@@ -333,13 +342,8 @@ fn selected_fault(fault: &Fault) -> Selected {
 /// client so request ordinals are process-wide.
 pub(super) fn from_env() -> Option<FaultPlan> {
     static PLAN: OnceLock<Option<FaultPlan>> = OnceLock::new();
-    PLAN.get_or_init(|| {
-        plan_from_placement(
-            std::env::var(FAULTS_ENV).ok().as_deref(),
-            placement_from_env(),
-        )
-    })
-    .clone()
+    PLAN.get_or_init(|| plan_from_placement(read_env(FAULTS_ENV).as_deref(), placement_from_env()))
+        .clone()
 }
 
 /// The gateway service's provider-hop plan, from [`FAULTS_ENV`], in today's
@@ -349,18 +353,21 @@ pub(super) fn from_env() -> Option<FaultPlan> {
 pub fn provider_from_env() -> Option<FaultPlan> {
     static PLAN: OnceLock<Option<FaultPlan>> = OnceLock::new();
     PLAN.get_or_init(|| {
-        let spec = std::env::var(FAULTS_ENV).ok()?;
+        let spec = read_env(FAULTS_ENV)?;
         Some(FaultPlan::parse_provider(&spec).unwrap_or_else(|_| invalid_plan()))
     })
     .clone()
 }
 
+fn read_env(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
 fn placement_from_env() -> Option<FaultPlacement> {
-    match std::env::var(PLAK_TEST_GATEWAY) {
-        Err(_) => Some(FaultPlacement::Local),
-        Ok(value) if value.is_empty() || value == "in-process" => Some(FaultPlacement::Local),
-        Ok(value) if value == "external" => Some(FaultPlacement::ExternalGateway),
-        Ok(_) => None,
+    match read_env(PLAK_TEST_GATEWAY).as_deref() {
+        None | Some("") | Some("in-process") => Some(FaultPlacement::Local),
+        Some("external") => Some(FaultPlacement::ExternalGateway),
+        Some(_) => None,
     }
 }
 
@@ -368,6 +375,7 @@ fn placement_from_env() -> Option<FaultPlacement> {
 /// transport cannot report it on stderr (the product may hold the stderr
 /// lock), so every exchange then fails before it starts with a failure no
 /// network event produces: `Failure(Resolution, NotStarted, Internal)`.
+#[cfg(test)]
 fn plan_from(spec: Option<&str>) -> Option<FaultPlan> {
     plan_from_placement(spec, Some(FaultPlacement::Local))
 }
@@ -381,14 +389,17 @@ fn plan_from_placement(spec: Option<&str>, placement: Option<FaultPlacement>) ->
 }
 
 fn invalid_plan() -> FaultPlan {
-    FaultPlan(Arc::new(vec![Rule {
-        host: None,
-        path: None,
-        nth: None,
-        hop: None,
-        fault: Fault::Invalid,
-        matched: AtomicU64::new(0),
-    }]))
+    FaultPlan {
+        rules: Arc::new(vec![Rule {
+            host: None,
+            path: None,
+            nth: None,
+            hop: None,
+            fault: Fault::Invalid,
+            matched: AtomicU64::new(0),
+        }]),
+        hop: FaultHop::Upstream,
+    }
 }
 
 struct RuleFields {
@@ -696,6 +707,66 @@ fn reason_phrase(status: u16) -> &'static str {
 
 fn to_usize(value: u64) -> Result<usize, String> {
     usize::try_from(value).map_err(|_| format!("`{value}` is too large"))
+}
+
+pub(super) enum Applied {
+    Done(Response),
+    Continue(ExchangeControl, Option<Box<StreamFault>>),
+}
+
+pub(super) async fn apply(
+    plan: Option<&FaultPlan>,
+    host: &str,
+    path_and_query: &str,
+    control: ExchangeControl,
+    limits: &Limits,
+) -> Result<Applied, Failure> {
+    let selected = plan.and_then(|plan| plan.select(host, path_and_query));
+    match selected {
+        None => Ok(Applied::Continue(control, None)),
+        Some(Selected::Invalid) => Err(Failure::new(
+            Phase::Resolution,
+            TransmissionFact::NotStarted,
+            ErrorKind::Internal,
+        )),
+        Some(Selected::Connect) => {
+            Err(
+                Failure::new(Phase::Connect, TransmissionFact::NotStarted, ErrorKind::Io)
+                    .with_io_cause(&std::io::Error::from(std::io::ErrorKind::ConnectionRefused)),
+            )
+        }
+        Some(Selected::Hang(duration)) => Err(injected_hang(duration, &control).await),
+        Some(Selected::WriteReset) => Err(Failure::new(
+            Phase::RequestWriteOrResponseHead,
+            TransmissionFact::RequestIncomplete,
+            ErrorKind::Protocol,
+        )),
+        Some(Selected::RecordRejected) => Err(Failure::new(
+            Phase::RequestWriteOrResponseHead,
+            TransmissionFact::RequestIncomplete,
+            ErrorKind::Protocol,
+        )
+        .with_peer_rejected_record()
+        .with_wire_protocol(WireProtocol::Http1)),
+        Some(Selected::Status {
+            status,
+            retry_after,
+        }) => Ok(Applied::Done(
+            injected_status(status, retry_after, control, limits).await?,
+        )),
+        Some(Selected::RelayLost(RelayCut::BeforeHead)) => Err(Failure::new(
+            Phase::ResponseHead,
+            TransmissionFact::MayHaveTransmitted,
+            ErrorKind::Io,
+        )),
+        Some(Selected::RelayLost(RelayCut::AfterHead)) => Ok(Applied::Done(
+            injected_relay_lost_after_head(control, limits).await?,
+        )),
+        Some(Selected::GatewayRefusal(refusal)) => Ok(Applied::Done(
+            injected_reply(refusal.reply(), control, limits).await?,
+        )),
+        Some(Selected::Stream(stream_fault)) => Ok(Applied::Continue(control, Some(stream_fault))),
+    }
 }
 
 pub(super) async fn injected_hang(duration: Duration, control: &ExchangeControl) -> Failure {

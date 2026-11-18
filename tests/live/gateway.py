@@ -61,9 +61,7 @@ def plan_text() -> str:
         lines.append(f"  - {name}")
         for step in PER_TOPOLOGY:
             lines.append(f"      {step}")
-    lines.append(
-        "estimate: just live estimate --rate-card RATE_CARD --soak-row grok"
-    )
+    lines.append("estimate: just live estimate --rate-card RATE_CARD --soak-row grok")
     lines.append(
         "gateway_api_turns "
         f"{priced_turns} "

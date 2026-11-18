@@ -5,17 +5,20 @@ fn fired(plan: &FaultPlan, host: &str, path: &str) -> Option<&'static str> {
 }
 
 fn fired_on(plan: &FaultPlan, hop: FaultHop, host: &str, path: &str) -> Option<&'static str> {
-    plan.select(hop, host, path).map(|selected| match selected {
-        Selected::Status { .. } => "status",
-        Selected::Connect => "connect",
-        Selected::Hang(_) => "hang",
-        Selected::WriteReset => "write-reset",
-        Selected::RecordRejected => "record-rejected",
-        Selected::Invalid => "invalid",
-        Selected::RelayLost(_) => "relay-lost",
-        Selected::GatewayRefusal(_) => "gateway-refusal",
-        Selected::Stream(_) => "stream",
-    })
+    plan.clone()
+        .with_hop(hop)
+        .select(host, path)
+        .map(|selected| match selected {
+            Selected::Status { .. } => "status",
+            Selected::Connect => "connect",
+            Selected::Hang(_) => "hang",
+            Selected::WriteReset => "write-reset",
+            Selected::RecordRejected => "record-rejected",
+            Selected::Invalid => "invalid",
+            Selected::RelayLost(_) => "relay-lost",
+            Selected::GatewayRefusal(_) => "gateway-refusal",
+            Selected::Stream(_) => "stream",
+        })
 }
 
 #[test]
@@ -503,7 +506,7 @@ fn gateway_refusal_bodies_decode() -> Result<(), String> {
 
 fn take_refusal(spec: &str) -> Result<GatewayRefusalFault, String> {
     let plan = FaultPlan::parse(spec).map_err(|error| error.to_string())?;
-    match plan.select(FaultHop::Gateway, "h", "/") {
+    match plan.with_hop(FaultHop::Gateway).select("h", "/") {
         Some(Selected::GatewayRefusal(refusal)) => Ok(refusal),
         _ => Err(format!("`{spec}` did not select a gateway refusal")),
     }
@@ -568,24 +571,26 @@ fn map_relay_is_the_hop_one_composition() {
             ("transport-refund", RelayKernel::Unsent(unsent)) => {
                 assert_eq!(unsent.transmission, TransmissionFact::NotStarted);
                 assert!(unsent.refund && unsent.unreachable_budget);
-                assert!(!unsent.reprepare && !unsent.incomplete_write_allowance);
+                assert!(!unsent.reprepare);
                 assert_eq!(unsent.class, UnsentClass::Transport);
             }
             ("write-reset", RelayKernel::Unsent(unsent)) => {
                 assert_eq!(unsent.transmission, TransmissionFact::NotStarted);
                 assert!(unsent.refund);
-                assert!(!unsent.unreachable_budget && !unsent.incomplete_write_allowance);
+                assert!(!unsent.unreachable_budget);
             }
-            ("maybe", RelayKernel::MayHaveTransmitted) => {}
+            ("maybe", RelayKernel::MayHaveTransmitted)
+            | ("mid", RelayKernel::MidStream)
+            | ("trailers", RelayKernel::Clean { trailers: true })
+            | ("clean", RelayKernel::Clean { trailers: false }) => {}
             ("measured", RelayKernel::Measured(got)) => assert_eq!(got, measured),
             ("busy", RelayKernel::Unsent(unsent)) => {
                 assert!(unsent.refund && unsent.unreachable_budget);
-                assert!(!unsent.incomplete_write_allowance);
                 assert_eq!(unsent.class, UnsentClass::Busy);
             }
             ("fence", RelayKernel::Unsent(unsent)) => {
                 assert!(unsent.refund && unsent.reprepare);
-                assert!(!unsent.unreachable_budget && !unsent.incomplete_write_allowance);
+                assert!(!unsent.unreachable_budget);
                 assert_eq!(unsent.class, UnsentClass::FenceMoved);
             }
             ("internal", RelayKernel::Unsent(unsent)) => {
@@ -593,12 +598,9 @@ fn map_relay_is_the_hop_one_composition() {
                 assert_eq!(unsent.class, UnsentClass::Internal);
             }
             ("refusal", RelayKernel::Unsent(unsent)) => {
-                assert!(!unsent.refund && !unsent.reprepare && !unsent.incomplete_write_allowance);
+                assert!(!unsent.refund && !unsent.reprepare);
                 assert_eq!(unsent.class, UnsentClass::Refusal);
             }
-            ("mid", RelayKernel::MidStream) => {}
-            ("trailers", RelayKernel::Clean { trailers: true }) => {}
-            ("clean", RelayKernel::Clean { trailers: false }) => {}
             (expect, got) => panic!("{expect} mapped to {got:?}"),
         }
     }

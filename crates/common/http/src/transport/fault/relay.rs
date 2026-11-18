@@ -68,8 +68,7 @@ pub enum UnsentClass {
     Refusal,
 }
 
-/// An unsent decision. The incomplete-write allowance is never used: that
-/// ride-out does not apply to hop 1.
+/// An unsent decision. Hop 1 never spends the incomplete-write allowance.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Unsent {
     /// Always [`TransmissionFact::NotStarted`].
@@ -80,8 +79,6 @@ pub struct Unsent {
     pub unreachable_budget: bool,
     /// Re-prepare inside the same logical attempt, at most twice.
     pub reprepare: bool,
-    /// The sixteen-request incomplete-write allowance. Always false on hop 1.
-    pub incomplete_write_allowance: bool,
     /// Which refusal or transport class this is.
     pub class: UnsentClass,
 }
@@ -147,7 +144,6 @@ fn unsent(class: UnsentClass, unreachable_budget: bool, refund: bool) -> Unsent 
         refund,
         unreachable_budget,
         reprepare: false,
-        incomplete_write_allowance: false,
         class,
     }
 }

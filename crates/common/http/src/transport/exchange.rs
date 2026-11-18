@@ -45,74 +45,17 @@ impl Client {
         }
         let (origin, method, path_and_query, headers, body) = request.into_parts();
         #[cfg(feature = "fault-injection")]
-        let stream_fault = match self
-            .faults
-            .as_ref()
-            .and_then(|plan| plan.select(self.fault_hop, origin.host(), path_and_query.as_str()))
+        let (control, stream_fault) = match super::fault::apply(
+            self.faults.as_ref(),
+            origin.host(),
+            path_and_query.as_str(),
+            control,
+            &self.inner.limits,
+        )
+        .await?
         {
-            None => None,
-            Some(super::fault::Selected::Invalid) => {
-                return Err(Failure::new(
-                    Phase::Resolution,
-                    TransmissionFact::NotStarted,
-                    ErrorKind::Internal,
-                ));
-            }
-            Some(super::fault::Selected::Connect) => {
-                return Err(Failure::new(
-                    Phase::Connect,
-                    TransmissionFact::NotStarted,
-                    ErrorKind::Io,
-                )
-                .with_io_cause(&std::io::Error::from(std::io::ErrorKind::ConnectionRefused)));
-            }
-            Some(super::fault::Selected::Hang(duration)) => {
-                return Err(super::fault::injected_hang(duration, &control).await);
-            }
-            Some(super::fault::Selected::WriteReset) => {
-                return Err(Failure::new(
-                    Phase::RequestWriteOrResponseHead,
-                    TransmissionFact::RequestIncomplete,
-                    ErrorKind::Protocol,
-                ));
-            }
-            Some(super::fault::Selected::RecordRejected) => {
-                return Err(Failure::new(
-                    Phase::RequestWriteOrResponseHead,
-                    TransmissionFact::RequestIncomplete,
-                    ErrorKind::Protocol,
-                )
-                .with_peer_rejected_record()
-                .with_wire_protocol(WireProtocol::Http1));
-            }
-            Some(super::fault::Selected::Status {
-                status,
-                retry_after,
-            }) => {
-                return super::fault::injected_status(
-                    status,
-                    retry_after,
-                    control,
-                    &self.inner.limits,
-                )
-                .await;
-            }
-            Some(super::fault::Selected::RelayLost(super::fault::RelayCut::BeforeHead)) => {
-                return Err(Failure::new(
-                    Phase::ResponseHead,
-                    TransmissionFact::MayHaveTransmitted,
-                    ErrorKind::Io,
-                ));
-            }
-            Some(super::fault::Selected::RelayLost(super::fault::RelayCut::AfterHead)) => {
-                return super::fault::injected_relay_lost_after_head(control, &self.inner.limits)
-                    .await;
-            }
-            Some(super::fault::Selected::GatewayRefusal(refusal)) => {
-                return super::fault::injected_reply(refusal.reply(), control, &self.inner.limits)
-                    .await;
-            }
-            Some(super::fault::Selected::Stream(stream_fault)) => Some(stream_fault),
+            super::fault::Applied::Done(response) => return Ok(response),
+            super::fault::Applied::Continue(control, fault) => (control, fault),
         };
         let parts = RequestParts {
             origin,
