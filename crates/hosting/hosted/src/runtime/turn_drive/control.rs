@@ -139,6 +139,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         .unwrap_or(false)
     }
 
+    fn surface_facts(&self, with_tools: bool) -> surface::SurfaceFacts<'_> {
+        surface::SurfaceFacts {
+            session: Some(surface::session_facts(
+                self.host.session,
+                Some(self.host.rows),
+                with_tools,
+            )),
+            phase: surface::SurfacePhase::Busy,
+            attached_one_shot: self.host.attached_one_shot,
+            catalog: self.host.ready_catalog,
+            queue_len: self.host.session.pending_queue.len(),
+            usage_reads: self.host.subscription_usage_refresh.reads(),
+            accounts: None,
+        }
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "The running-turn owner serializes queue edits, steering, cancellation, navigation, usage, and shutdown intents against one admission."
@@ -177,16 +193,32 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         if self.takes_actions() {
             let mut acknowledgement = None;
             let mut command_reply = false;
-            let received =
-                take_next(self.host.deferred, || self.host.actions.try_recv()).map(|delivery| {
-                    if let Some(started) = delivery.started() {
-                        command_reply = delivery.correlated();
-                        let _ = self.host.events.send(started);
-                    }
-                    let (action, guard) = delivery.into_parts();
-                    acknowledgement = Some(guard);
-                    action
-                });
+            let received = take_next(self.host.deferred, || self.host.actions.try_recv());
+            let read = match received.as_deref() {
+                Ok(UserAction::Extension(intent)) => surface::accounts_read(
+                    self.host.surface.as_deref(),
+                    intent,
+                    &self.surface_facts(false),
+                ),
+                _ => None,
+            };
+            let Some((received, accounts)) = self.host.account_reads.poll(
+                &self.host.session.id,
+                received,
+                TryRecvError::Empty,
+                read,
+            ) else {
+                return true;
+            };
+            let received = received.map(|delivery| {
+                if let Some(started) = delivery.started() {
+                    command_reply = delivery.correlated();
+                    let _ = self.host.events.send(started);
+                }
+                let (action, guard) = delivery.into_parts();
+                acknowledgement = Some(guard);
+                action
+            });
             let received = match received {
                 Ok(UserAction::ReleaseForReopen { ticket, .. }) => {
                     let _ = self.host.actions.settle_release_for_reopen(
@@ -857,22 +889,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     }
                     let with_tools =
                         surface::needs_session_tools(self.host.surface.as_deref(), &intent);
-                    let mut facts = surface::SurfaceFacts {
-                        session: Some(surface::session_facts(
-                            self.host.session,
-                            Some(self.host.rows),
-                            with_tools,
-                        )),
-                        phase: surface::SurfacePhase::Busy,
-                        attached_one_shot: self.host.attached_one_shot,
-                        catalog: self.host.ready_catalog,
-                        queue_len: self.host.session.pending_queue.len(),
-                        usage_reads: self.host.subscription_usage_refresh.reads(),
-                        accounts: None,
-                    };
-                    let read =
-                        surface::accounts_read(self.host.surface.as_deref(), &intent, &facts);
-                    let accounts = surface::read_accounts(read).await;
+                    let mut facts = self.surface_facts(with_tools);
                     facts.accounts = accounts.as_ref();
                     let effect = surface::dispatch(
                         self.host.surface.as_deref(),

@@ -72,6 +72,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 attached_one_shot: self.role.config.attached_one_shot,
                 ready_catalog: &self.role.config.ready_catalog.accounts,
                 surface: &self.role.config.surface,
+                account_reads: &mut self.role.account_reads,
                 log: self.role.log.as_ref(),
                 subscription_service: self.role.config.target.native_subscriptions().cloned(),
                 subscription_usage_refresh: &self.role.subscription_usage_refresh,

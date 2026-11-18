@@ -191,8 +191,8 @@ fn keep_current_choices(
 }
 
 /// The account readiness read for `ChooseAccount` and `ApplyProfile`. The
-/// host runs it on its own thread before the dispatch
-/// ([`SurfaceFacts::accounts`]), so the host loop never waits on a gateway.
+/// attached host runs it in the background before dispatch
+/// ([`SurfaceFacts::accounts`]), so a gateway cannot stall the driver.
 pub(super) fn catalog_read(
     paths: PlakPaths,
     custody: crate::gateway::HostCustody,
@@ -201,9 +201,9 @@ pub(super) fn catalog_read(
 }
 
 /// The readiness a surface fill reads: every known account the host read
-/// before the dispatch, and the host's own Ready catalog for the default
-/// slots it serves. An unread or unreadable catalog is a refusal, never an
-/// empty catalog.
+/// before dispatch. The host's catalog can add a route it serves only when
+/// the readiness read did not report it; cached model facts cannot turn a
+/// known Not-Ready slot into a Ready one. A failed read never admits anything.
 fn host_catalog(
     facts: &SurfaceFacts<'_>,
 ) -> Result<Vec<account_choice::ReadyAccount>, AccountChoiceRefusal> {
@@ -221,16 +221,12 @@ fn host_catalog(
         }
     };
     for section in facts.catalog.iter().filter(|section| section.ready) {
-        match catalog
-            .iter_mut()
-            .find(|row| row.account == section.account)
-        {
-            Some(row) => row.ready = true,
-            None => catalog.push(account_choice::ReadyAccount {
+        if !catalog.iter().any(|row| row.account == section.account) {
+            catalog.push(account_choice::ReadyAccount {
                 account: section.account.clone(),
                 ready: true,
                 label: Some(section.label.clone()),
-            }),
+            });
         }
     }
     Ok(catalog)

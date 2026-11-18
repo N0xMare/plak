@@ -567,15 +567,102 @@ pub(super) fn accounts_read<P: ProtocolExtension>(
     surface.and_then(|handler| handler.accounts_read(intent, facts))
 }
 
-/// Runs the product's account readiness read off the host loop.
-pub(super) async fn read_accounts(read: Option<AccountsRead>) -> Option<AccountReadiness> {
-    let read = read?;
-    Some(
-        crate::off_loop::await_read("plak-account-readiness", read, || {
-            Err("the account readiness read could not run".to_owned())
-        })
-        .await,
-    )
+type AccountDelivery<P> = crate::surface_protocol::UserActionDelivery<P>;
+type AccountDispatch<P, E> = (Result<AccountDelivery<P>, E>, Option<AccountReadiness>);
+
+struct PendingAccountRead<P: ProtocolExtension> {
+    session: String,
+    delivery: AccountDelivery<P>,
+    answer: tokio::sync::oneshot::Receiver<AccountReadiness>,
+}
+
+/// Readiness never owns the root driver. Retain the original intent (including
+/// its reply correlation) until the read settles, then dispatch it on the
+/// current phase, without letting it mutate a different line head.
+pub(super) struct AccountReads<P: ProtocolExtension>(
+    std::collections::VecDeque<PendingAccountRead<P>>,
+);
+
+impl<P: ProtocolExtension> Default for AccountReads<P> {
+    fn default() -> Self {
+        Self(std::collections::VecDeque::new())
+    }
+}
+
+impl<P: ProtocolExtension> AccountReads<P> {
+    /// Give incoming controls priority over a completed read. `None` means
+    /// the incoming delivery is now owned by the background read.
+    pub(super) fn poll<E: PartialEq>(
+        &mut self,
+        session: &str,
+        incoming: Result<AccountDelivery<P>, E>,
+        empty: E,
+        read: Option<AccountsRead>,
+    ) -> Option<AccountDispatch<P, E>> {
+        match incoming {
+            Ok(delivery) => match read {
+                Some(read) => self
+                    .start(session, delivery, read)
+                    .map(|(delivery, answer)| (Ok(delivery), Some(answer))),
+                None => Some((Ok(delivery), None)),
+            },
+            Err(error) if error == empty => Some(
+                self.take_ready(session)
+                    .map_or((Err(error), None), |(delivery, answer)| {
+                        (Ok(delivery), Some(answer))
+                    }),
+            ),
+            Err(error) => Some((Err(error), None)),
+        }
+    }
+
+    fn start(
+        &mut self,
+        session: &str,
+        delivery: AccountDelivery<P>,
+        read: AccountsRead,
+    ) -> Option<(AccountDelivery<P>, AccountReadiness)> {
+        if self.0.len() >= 8 {
+            return Some((
+                delivery,
+                Err("too many account readiness reads are pending".into()),
+            ));
+        }
+        let (send, answer) = tokio::sync::oneshot::channel();
+        let started = std::thread::Builder::new()
+            .name("plak-account-readiness".into())
+            .spawn(move || {
+                let _ = send.send(read());
+            });
+        if started.is_err() {
+            return Some((
+                delivery,
+                Err("the account readiness read could not run".into()),
+            ));
+        }
+        self.0.push_back(PendingAccountRead {
+            session: session.to_owned(),
+            delivery,
+            answer,
+        });
+        None
+    }
+
+    fn take_ready(&mut self, session: &str) -> Option<(AccountDelivery<P>, AccountReadiness)> {
+        use tokio::sync::oneshot::error::TryRecvError;
+        let next = self.0.front_mut()?;
+        let answer = match next.answer.try_recv() {
+            Ok(answer) => answer,
+            Err(TryRecvError::Empty) => return None,
+            Err(TryRecvError::Closed) => Err("the account readiness read did not complete".into()),
+        };
+        let answer = if next.session == session {
+            answer
+        } else {
+            Err("the session moved while reading account readiness".into())
+        };
+        self.0.pop_front().map(|ready| (ready.delivery, answer))
+    }
 }
 
 /// Tells the surface the host serves `session` now.

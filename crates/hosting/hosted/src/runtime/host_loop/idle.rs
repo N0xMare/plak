@@ -80,6 +80,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
     }
 
+    fn surface_facts(&self, with_tools: bool) -> surface::SurfaceFacts<'_> {
+        surface::SurfaceFacts {
+            session: Some(surface::session_facts(
+                &self.role.config.session,
+                Some(&self.role.config.topology_rows()),
+                with_tools,
+            )),
+            phase: surface::SurfacePhase::Idle,
+            attached_one_shot: self.role.config.attached_one_shot,
+            catalog: &self.role.config.ready_catalog.accounts,
+            queue_len: self.role.config.session.pending_queue.len(),
+            usage_reads: self.role.subscription_usage_refresh.reads(),
+            accounts: None,
+        }
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "The idle owner arbitrates operator intents, queued work, child wakes, transient retries, and shutdown without a second dispatcher."
@@ -175,8 +191,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             let received = match deferred {
                 Some(delivery) => Ok(delivery),
                 None => self.receive(IDLE_OBSERVE_POLL_INTERVAL).await,
-            }
-            .map(|delivery| {
+            };
+            let read = match received.as_deref() {
+                Ok(UserAction::Extension(intent)) => surface::accounts_read(
+                    self.role.config.surface.as_deref(),
+                    intent,
+                    &self.surface_facts(false),
+                ),
+                _ => None,
+            };
+            let Some((received, accounts)) = self.role.account_reads.poll(
+                &self.role.config.session.id,
+                received,
+                RecvTimeoutError::Timeout,
+                read,
+            ) else {
+                self.role.idle_since = None;
+                return Ok(HostStep::Continue);
+            };
+            let received = received.map(|delivery| {
                 if let Some(started) = delivery.started() {
                     command_reply = delivery.correlated();
                     let _ = self.role.events.send(started);
@@ -965,25 +998,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     }
                     let with_tools =
                         surface::needs_session_tools(self.role.config.surface.as_deref(), &intent);
-                    let mut facts = surface::SurfaceFacts {
-                        session: Some(surface::session_facts(
-                            &self.role.config.session,
-                            Some(&self.role.config.topology_rows()),
-                            with_tools,
-                        )),
-                        phase: surface::SurfacePhase::Idle,
-                        attached_one_shot: self.role.config.attached_one_shot,
-                        catalog: &self.role.config.ready_catalog.accounts,
-                        queue_len: self.role.config.session.pending_queue.len(),
-                        usage_reads: self.role.subscription_usage_refresh.reads(),
-                        accounts: None,
-                    };
-                    let read = surface::accounts_read(
-                        self.role.config.surface.as_deref(),
-                        &intent,
-                        &facts,
-                    );
-                    let accounts = surface::read_accounts(read).await;
+                    let mut facts = self.surface_facts(with_tools);
                     facts.accounts = accounts.as_ref();
                     let effect = surface::dispatch(
                         self.role.config.surface.as_deref(),

@@ -47,6 +47,7 @@ pub(super) struct TurnHost<'a, P: plakous_host_protocol::ProtocolExtension> {
     pub(super) attached_one_shot: bool,
     pub(super) ready_catalog: &'a [plakous_host_protocol::views::ProviderSection],
     pub(super) surface: &'a Surface<P>,
+    pub(super) account_reads: &'a mut surface::AccountReads<P>,
     pub(super) log: Option<&'a SessionLog>,
     pub(super) subscription_service: Option<NativeSubscriptions>,
     pub(super) subscription_usage_refresh: &'a SubscriptionUsageRefresh<P>,

@@ -5284,7 +5284,11 @@ model and effort against that account's own route and authenticated catalog,
 not the default slot's catalog.
 
 **`ChooseAccount {kind, account, continue_failed}`** validates the choice as
-step 1 does. A non-root kind is saved on the attached record by the session's
+step 1 does. The attached host reads readiness in the background and only
+dispatches the result on the same session, against the phase then in effect.
+It does not read readiness for choices it can already refuse, including a
+root-kind choice or an apply-now profile request received during a turn.
+A non-root kind is saved on the attached record by the session's
 own host loop and nothing rebinds; running children keep their bindings and
 new spawns use it. A root-kind choice while the root runs a turn is refused
 `root_busy` with nothing written. Otherwise the root continues its line on the

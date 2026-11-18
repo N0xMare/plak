@@ -175,6 +175,7 @@ struct RootRole<'a, P: plakous_host_protocol::ProtocolExtension> {
     pending_usage: std::sync::Arc<std::sync::Mutex<super::projection::presentation::ProcessUsage>>,
     subscription_usage_refresh: SubscriptionUsageRefresh<P>,
     readiness: super::shell::ReadinessRefresh,
+    account_reads: surface::AccountReads<P>,
     /// The session's projector task, spawned on the first tick.
     live: Option<super::projection::live::LiveProjector>,
     projection_finished: bool,
