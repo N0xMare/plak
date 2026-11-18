@@ -45,7 +45,7 @@ tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 plakous-recursive-subagents-store = { workspace = true, features = ["test-support"], default-features = true }
-plakous = { workspace = true, features = ["auth", "test-clock"] }
+plakous = { workspace = true, features = ["auth", "test-clock", "test-hooks"] }
 plakous-tools.workspace = true
 plakous-host-protocol = { workspace = true, features = ["test-support"] }
 plakous-recursive-subagents = { workspace = true, features = ["test-support"] }
