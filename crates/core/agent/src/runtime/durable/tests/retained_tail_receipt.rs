@@ -2,6 +2,7 @@
 //! retained-tail digest and the post-omission count. Replay must accept it.
 
 use super::*;
+use crate::manifest::RuntimeContextState;
 use crate::runtime::compaction::DurableCompactionRequestRecord;
 use crate::runtime::compaction::fold::reconstruct_compaction_cut;
 use std::sync::atomic::Ordering;

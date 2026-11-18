@@ -558,8 +558,8 @@ pub(in crate::runtime) fn validate_compaction_receipt(
 /// digest is not recomputed: a same-key upgrade still carries receipts whose
 /// digest is the planner's pre-omission identity.
 fn recorded_semantic_tail_context_matches(
-    recorded: &crate::RuntimeContextState,
-    expected: &crate::RuntimeContextState,
+    recorded: &crate::manifest::RuntimeContextState,
+    expected: &crate::manifest::RuntimeContextState,
     recorded_tail: (Digest, u32),
     successor_segments: usize,
 ) -> bool {
