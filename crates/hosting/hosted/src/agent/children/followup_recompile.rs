@@ -38,6 +38,11 @@ const NOTICE: &str = "the follow-up recompiled provider configuration onto the c
 #[cfg(test)]
 pub(crate) static CUT_AFTER_REBIND: AtomicBool = AtomicBool::new(false);
 
+/// Set only after `rebind` returns. The fork receipt is visible earlier, while
+/// the branch lease is still held; aborting on that receipt cancels the release.
+#[cfg(test)]
+pub(crate) static CUT_AFTER_REBIND_HELD: AtomicBool = AtomicBool::new(false);
+
 struct RecordedBinding {
     protocol: ProtocolId,
     route: RouteId,
@@ -266,6 +271,7 @@ impl ProductMailDeliverer {
             RebindSessionOutcome::Rebound { target, .. } => {
                 #[cfg(test)]
                 if CUT_AFTER_REBIND.load(Ordering::Acquire) {
+                    CUT_AFTER_REBIND_HELD.store(true, Ordering::Release);
                     std::future::pending::<()>().await;
                 }
                 Ok(Some(FollowupRecompile {

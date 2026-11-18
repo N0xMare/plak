@@ -653,6 +653,7 @@ struct ClearCut;
 impl Drop for ClearCut {
     fn drop(&mut self) {
         crate::agent::children::CUT_AFTER_REBIND.store(false, Ordering::Release);
+        crate::agent::children::CUT_AFTER_REBIND_HELD.store(false, Ordering::Release);
     }
 }
 
@@ -692,6 +693,7 @@ async fn a_crash_after_rebind_and_before_the_tree_save_converges() {
     install_script(&fixture, b"offline-loopback-account", 8_000_000);
     let dispatched = fixture.dispatches();
     let _clear = ClearCut;
+    crate::agent::children::CUT_AFTER_REBIND_HELD.store(false, Ordering::Release);
     crate::agent::children::CUT_AFTER_REBIND.store(true, Ordering::Release);
     let tree_id = fixture.tree_id.clone();
     let child = id.clone();
@@ -711,12 +713,13 @@ async fn a_crash_after_rebind_and_before_the_tree_save_converges() {
         .await;
     });
     tokio::time::timeout(Duration::from_secs(30), async {
-        while rebind_checkpoints(&fixture) == 0 {
+        while !crate::agent::children::CUT_AFTER_REBIND_HELD.load(Ordering::Acquire) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
     .await
-    .expect("the rebind committed");
+    .expect("the rebind released its lease before the cut");
+    assert_eq!(rebind_checkpoints(&fixture), 1);
     assert_eq!(fixture.locator(&id).as_deref(), Some(before.as_str()));
     task.abort();
     let _ = task.await;
