@@ -191,6 +191,7 @@ fn composer_refresh_uses_the_launch_workspace() {
             catalog: &[],
             queue_len: 0,
             usage_reads: UsageReads::default(),
+            accounts: Some(&Ok(Vec::new())),
             session: Some(session),
         },
         &events,
@@ -469,6 +470,7 @@ fn an_agent_acknowledgement_is_persisted_and_answered_with_the_complete_set() {
         catalog: &[],
         queue_len: 0,
         usage_reads: UsageReads::default(),
+        accounts: None,
         session: None,
     };
     let (events, rx) = host_event_sink();
@@ -557,6 +559,7 @@ fn every_product_intent_uses_immutable_phase_facts_and_bounded_observations() {
                     catalog: &[],
                     queue_len: 7,
                     usage_reads: reads,
+                    accounts: Some(&Ok(Vec::new())),
                 },
                 &events,
             );
@@ -769,6 +772,7 @@ fn usage_posture_waits_for_the_host_usage_read_to_settle() {
             catalog: &[],
             queue_len: 0,
             usage_reads: reads,
+            accounts: Some(&Ok(Vec::new())),
         },
         &events,
     );
@@ -809,6 +813,7 @@ fn refused_product_save_returns_no_binding_effect_and_preserves_the_file() {
             catalog: &[],
             queue_len: 3,
             usage_reads: UsageReads::default(),
+            accounts: Some(&Ok(Vec::new())),
         },
         &events,
     );
@@ -1090,6 +1095,7 @@ fn apply_with_queue(
             catalog: &catalog,
             queue_len,
             usage_reads: UsageReads::default(),
+            accounts: Some(&Ok(Vec::new())),
         },
         &events,
     );
@@ -1159,6 +1165,7 @@ fn applying_claude_profile_discards_saved_sdk_selection() {
             catalog: &catalog,
             queue_len: 0,
             usage_reads: UsageReads::default(),
+            accounts: Some(&Ok(Vec::new())),
         },
         &events,
     );
@@ -1196,6 +1203,7 @@ fn applying_claude_profile_discards_saved_sdk_selection() {
             catalog: &catalog,
             queue_len: 0,
             usage_reads: UsageReads::default(),
+            accounts: Some(&Ok(Vec::new())),
         },
         &events,
     );
@@ -1424,6 +1432,7 @@ fn only_local_use_now_can_bootstrap_a_fresh_home_default() {
                     catalog: &catalog,
                     queue_len: 0,
                     usage_reads: UsageReads::default(),
+                    accounts: Some(&Ok(Vec::new())),
                 },
                 &answering,
             );
@@ -1565,6 +1574,7 @@ fn moved_remote_requester_use_now_never_bootstraps_a_fresh_home_default() {
                     catalog: &catalog,
                     queue_len: 0,
                     usage_reads: UsageReads::default(),
+                    accounts: Some(&Ok(Vec::new())),
                 },
                 &events,
             );
@@ -1991,6 +2001,7 @@ fn usage_watch_follows_the_open_tab_and_does_not_read() {
         catalog: &[],
         queue_len: 0,
         usage_reads: UsageReads::default(),
+        accounts: None,
     };
     let (events, received) = host_event_sink();
     handler.dispatch(SurfaceIntent::WatchUsage(true), facts(), &events);
@@ -2056,6 +2067,7 @@ fn a_failed_config_loads_no_profile_templates_and_does_not_say_custom() {
             catalog: &[],
             queue_len: 0,
             usage_reads: UsageReads::default(),
+            accounts: Some(&Ok(Vec::new())),
             session: Some(session),
         },
         &events,

@@ -79,12 +79,15 @@ impl SurfaceHandler<TestExtension> for Arc<Chooser> {
         }
     }
 
-    fn ready_alternatives(&self, account: &str) -> Vec<String> {
-        ["codex", "codex/b"]
-            .into_iter()
-            .filter(|other| *other != account)
-            .map(str::to_owned)
-            .collect()
+    fn alternatives_read(&self, account: &str) -> Option<surface::AlternativesRead> {
+        let account = account.to_owned();
+        Some(Box::new(move || {
+            ["codex", "codex/b"]
+                .into_iter()
+                .filter(|other| *other != account)
+                .map(str::to_owned)
+                .collect()
+        }))
     }
 
     fn publish_template_readiness(

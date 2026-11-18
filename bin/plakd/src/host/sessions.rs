@@ -984,6 +984,7 @@ fn creation_fill(
     config: &crate::product_config::ProductConfig,
     creation: &plakous_hosted::host_service::wire::Creation<'_>,
     context: &crate::home::paths::PlakPaths,
+    custody: &crate::gateway::HostCustody,
 ) -> Result<crate::account_choice::FilledChoices, RequestRefusal> {
     let root_kind = match creation.model {
         Some(model) => Some(
@@ -1012,7 +1013,7 @@ fn creation_fill(
         &kinds,
         root_kind.as_deref(),
         &explicit,
-        &crate::account_choice::ready_catalog(context)
+        &crate::account_choice::ready_catalog(context, custody)
             .map_err(|detail| RequestRefusal::SessionUnavailable { detail })?,
         crate::account_choice::FillMode::Require,
     )
@@ -1062,7 +1063,12 @@ fn new_record(
         template.account.clone_from(&model.account);
         template.model.clone_from(&model.model);
     }
-    let filled = creation_fill(&config, creation, &context)?;
+    let custody = services
+        .custody()
+        .map_err(|failure| RequestRefusal::SessionUnavailable {
+            detail: failure.message().to_owned(),
+        })?;
+    let filled = creation_fill(&config, creation, &context, &custody)?;
     let account: Option<plakous_hosted::account::AccountRef> = filled
         .root_account
         .as_deref()

@@ -103,7 +103,10 @@ fn genesis_refuses_an_unreadable_config_and_defaults_only_when_absent() {
         error.message()
     );
 
-    let source = crate::roster_input::ProductRosterSource::new(Some(paths.clone()));
+    let source = crate::roster_input::ProductRosterSource::new(
+        Some(paths.clone()),
+        crate::gateway::HostCustody::Local,
+    );
     assert!(
         source
             .topology_admitted()

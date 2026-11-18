@@ -216,7 +216,7 @@ impl ProductSessions {
         // Every known account per kind, named ones included, with the
         // readiness the creation fill reads.
         let accounts = crate::account_choice::kind_accounts(
-            &crate::account_choice::ready_catalog(&home).map_err(unavailable)?,
+            &crate::account_choice::ready_catalog(&home, &custody).map_err(unavailable)?,
         );
         Ok(wire::SessionOptions {
             runners,

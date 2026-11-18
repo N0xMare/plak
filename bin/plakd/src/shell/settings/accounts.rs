@@ -107,7 +107,6 @@ pub(super) fn send_choices(
 /// root's route. `None` after publishing the typed refusal and the profile
 /// refusal.
 pub(super) fn fill_profile(
-    paths: &PlakPaths,
     prepared: &crate::profiles::Prepared,
     accounts: &[AccountChoice],
     facts: &SurfaceFacts<'_>,
@@ -121,7 +120,7 @@ pub(super) fn fill_profile(
             account: choice.account.clone(),
         })
         .collect::<Vec<_>>();
-    let catalog = match host_catalog(paths, facts) {
+    let catalog = match host_catalog(facts) {
         Ok(catalog) => catalog,
         Err(refusal) => {
             refuse(events, refusal);
@@ -191,14 +190,36 @@ fn keep_current_choices(
     }
 }
 
-/// The readiness a surface fill reads: every known account, and the host's
-/// own Ready catalog for the default slots it serves.
+/// The account readiness read for `ChooseAccount` and `ApplyProfile`. The
+/// host runs it on its own thread before the dispatch
+/// ([`SurfaceFacts::accounts`]), so the host loop never waits on a gateway.
+pub(super) fn catalog_read(
+    paths: PlakPaths,
+    custody: crate::gateway::HostCustody,
+) -> plakous_hosted::runtime::AccountsRead {
+    Box::new(move || account_choice::ready_catalog(&paths, &custody))
+}
+
+/// The readiness a surface fill reads: every known account the host read
+/// before the dispatch, and the host's own Ready catalog for the default
+/// slots it serves. An unread or unreadable catalog is a refusal, never an
+/// empty catalog.
 fn host_catalog(
-    paths: &PlakPaths,
     facts: &SurfaceFacts<'_>,
 ) -> Result<Vec<account_choice::ReadyAccount>, AccountChoiceRefusal> {
-    let mut catalog = account_choice::ready_catalog(paths)
-        .map_err(|reason| AccountChoiceRefusal::Failed { reason })?;
+    let mut catalog = match facts.accounts {
+        Some(Ok(catalog)) => catalog.clone(),
+        Some(Err(reason)) => {
+            return Err(AccountChoiceRefusal::Failed {
+                reason: reason.clone(),
+            });
+        }
+        None => {
+            return Err(AccountChoiceRefusal::Failed {
+                reason: "the host did not read account readiness".to_owned(),
+            });
+        }
+    };
     for section in facts.catalog.iter().filter(|section| section.ready) {
         match catalog
             .iter_mut()
@@ -219,7 +240,6 @@ fn host_catalog(
 /// non-root kind or continue the root on the account. A busy root is refused
 /// `root_busy` with nothing written.
 pub(super) fn choose_account(
-    paths: &PlakPaths,
     kind: Vertical,
     account: String,
     continue_failed: bool,
@@ -236,7 +256,7 @@ pub(super) fn choose_account(
         return SurfaceEffect::default();
     };
     let kind = kind_id(kind);
-    let catalog = match host_catalog(paths, facts) {
+    let catalog = match host_catalog(facts) {
         Ok(catalog) => catalog,
         Err(refusal) => {
             refuse(events, refusal);
@@ -316,12 +336,26 @@ fn host_refusal(refusal: plakous_hosted::runtime::AccountChoiceRefusal) -> Accou
     }
 }
 
+/// The read of the other Ready accounts of `account`'s kind, which the host
+/// runs off its loop for a failed turn's usage-limit notice.
+pub(super) fn alternatives_read(
+    paths: PlakPaths,
+    custody: crate::gateway::HostCustody,
+    account: String,
+) -> plakous_hosted::runtime::AlternativesRead {
+    Box::new(move || ready_alternatives(&paths, &custody, &account))
+}
+
 /// The other Ready accounts of `account`'s kind.
-pub(super) fn ready_alternatives(paths: &PlakPaths, account: &str) -> Vec<String> {
+fn ready_alternatives(
+    paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
+    account: &str,
+) -> Vec<String> {
     let Ok(current) = account.parse::<plakous_hosted::account::AccountRef>() else {
         return Vec::new();
     };
-    account_choice::ready_catalog(paths)
+    account_choice::ready_catalog(paths, custody)
         .unwrap_or_default()
         .into_iter()
         .filter(|row| {

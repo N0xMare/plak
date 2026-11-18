@@ -349,11 +349,17 @@ pub fn genesis_orchestration_config(paths: Option<&PlakPaths>) -> CliResult<Prod
 /// nothing configured, and the topology gate is closed.
 pub(crate) struct ProductRosterSource {
     paths: Option<PlakPaths>,
+    /// The process's latched credential custody, for the spawn fill's
+    /// readiness read.
+    custody: crate::gateway::HostCustody,
 }
 
 impl ProductRosterSource {
-    pub(crate) const fn new(paths: Option<PlakPaths>) -> Self {
-        Self { paths }
+    pub(crate) const fn new(
+        paths: Option<PlakPaths>,
+        custody: crate::gateway::HostCustody,
+    ) -> Self {
+        Self { paths, custody }
     }
 }
 
@@ -389,9 +395,14 @@ impl plakous_hosted::agent::RosterSource for ProductRosterSource {
         crate::oauth_ui::account_cli_name(provider)
     }
 
-    fn fill_spawn_account(&self, kind: &str) -> Option<String> {
-        let catalog = crate::account_choice::ready_catalog(self.paths.as_ref()?).ok()?;
-        crate::account_choice::automatic(kind, &catalog)
+    fn fill_spawn_account(&self, kind: &str) -> Option<plakous_hosted::agent::SpawnAccountRead> {
+        let paths = self.paths.clone()?;
+        let custody = self.custody.clone();
+        let kind = kind.to_owned();
+        Some(Box::new(move || {
+            let catalog = crate::account_choice::ready_catalog(&paths, &custody).ok()?;
+            crate::account_choice::automatic(&kind, &catalog)
+        }))
     }
 
     fn topology_admitted(&self) -> CliResult<bool> {

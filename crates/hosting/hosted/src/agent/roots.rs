@@ -42,6 +42,10 @@ pub trait TreeStoreFactory: Send + Sync {
     fn open(&self) -> CliResult<Arc<dyn TreeStore>>;
 }
 
+/// A product read of the account a spawn binds for one kind
+/// ([`RosterSource::fill_spawn_account`]).
+pub type SpawnAccountRead = Box<dyn FnOnce() -> Option<String> + Send>;
+
 /// The product policy one tree epoch freezes, and the gate that admits a fresh
 /// one.
 ///
@@ -81,11 +85,12 @@ pub trait RosterSource: Send + Sync {
     /// permission to create a tree.
     fn topology_admitted(&self) -> CliResult<bool>;
 
-    /// The account a spawn binds for `kind` when the session has no choice
-    /// for it: the product's fill rule in best-effort mode (the kind's bare
-    /// default slot if Ready, else its single Ready account). `None` refuses
-    /// the spawn.
-    fn fill_spawn_account(&self, _kind: &str) -> Option<String> {
+    /// The read of the account a spawn binds for `kind` when the session has
+    /// no choice for it: the product's fill rule in best-effort mode (the
+    /// kind's bare default slot if Ready, else its single Ready account). The
+    /// spawn runs it off its runtime threads. `None`, or a read answering
+    /// `None`, refuses the spawn.
+    fn fill_spawn_account(&self, _kind: &str) -> Option<SpawnAccountRead> {
         None
     }
 }

@@ -244,10 +244,10 @@ pub use startup::{
     SeededSessionCreation, create_seeded_session, create_seeded_session_with_preflight,
 };
 pub use surface::{
-    AccountChoiceOutcome, AccountChoiceRefusal, ProfileForkOutcome, ReadinessRead, Surface,
-    SurfaceAccountChoice, SurfaceAccountEffect, SurfaceEffect, SurfaceFacts, SurfaceHandler,
-    SurfaceMcp, SurfacePhase, SurfaceProfileFork, SurfaceRefusal, SurfaceSaved, SurfaceSession,
-    UsageRead, UsageReads,
+    AccountChoiceOutcome, AccountChoiceRefusal, AccountReadiness, AccountsRead, AlternativesRead,
+    ProfileForkOutcome, ReadinessRead, ReadyAccount, Surface, SurfaceAccountChoice,
+    SurfaceAccountEffect, SurfaceEffect, SurfaceFacts, SurfaceHandler, SurfaceMcp, SurfacePhase,
+    SurfaceProfileFork, SurfaceRefusal, SurfaceSaved, SurfaceSession, UsageRead, UsageReads,
 };
 pub use topology_state::{HostRows, TopologyRows, TreeRows, TreeWriteError};
 pub use topology_state::{

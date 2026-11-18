@@ -139,6 +139,7 @@ pub(crate) fn import_prepared(
 /// other kinds are filled without refusing and never wait on a picker.
 fn fill_imported_accounts(
     paths: &crate::home::paths::PlakPaths,
+    custody: Option<&crate::gateway::HostCustody>,
     profile: Option<&crate::profiles::SessionSelection>,
     record: &mut product_sessions::SessionRecord,
 ) {
@@ -152,7 +153,9 @@ fn fill_imported_accounts(
         record,
         &crate::account_choice::profile_kinds(&config),
         // Best effort: an unreadable catalog leaves the kinds for spawn to fill.
-        &crate::account_choice::ready_catalog(paths).unwrap_or_default(),
+        &custody
+            .and_then(|custody| crate::account_choice::ready_catalog(paths, custody).ok())
+            .unwrap_or_default(),
     );
 }
 
@@ -208,7 +211,12 @@ pub(super) fn import_prepared_with_fallback(
     }
     record.validate_for_store().map_err(CliFailure::new)?;
     let profile = profile.or(document_profile);
-    fill_imported_accounts(&paths, profile.as_ref(), &mut record);
+    fill_imported_accounts(
+        &paths,
+        services.custody().ok().as_ref(),
+        profile.as_ref(),
+        &mut record,
+    );
     if upgrade_successor.is_some() {
         let (_, selected) = successor_profile(&paths, profile.as_ref()).map_err(CliFailure::new)?;
         record.root_profile = Some(plakous_hosted::sessions::RootProfile {

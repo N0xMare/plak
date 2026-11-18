@@ -75,6 +75,9 @@ pub struct SurfaceFacts<'a> {
     pub session: Option<SurfaceSession>,
     /// The host's queued and running subscription usage reads.
     pub usage_reads: UsageReads,
+    /// Every known account's readiness, read off the host loop before the
+    /// dispatch when [`SurfaceHandler::accounts_read`] asked for it.
+    pub accounts: Option<&'a AccountReadiness>,
 }
 
 /// The host's queued and running subscription usage reads, as a surface waits
@@ -131,6 +134,30 @@ impl Drop for UsageRead {
 /// or a redaction-safe failure. The host runs it on its own thread.
 pub type ReadinessRead =
     Box<dyn FnOnce() -> Result<(Vec<ProviderDef>, Vec<ProviderSection>), String> + Send>;
+
+/// One account a session account choice may select (spec 02 §4.4.1).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReadyAccount {
+    /// Full account reference.
+    pub account: String,
+    /// The credential can serve a new dispatch now.
+    pub ready: bool,
+    /// Operator-facing label, when the catalog has one.
+    pub label: Option<String>,
+}
+
+/// Every known account with its readiness, or a redaction-safe reason the
+/// read failed. A failed read is never an empty catalog.
+pub type AccountReadiness = Result<Vec<ReadyAccount>, String>;
+
+/// A product's account readiness read. It may wait on a credential gateway
+/// or subscription locks, so the host runs it on its own thread and awaits
+/// it; the host loop never blocks on it.
+pub type AccountsRead = Box<dyn FnOnce() -> AccountReadiness + Send>;
+
+/// A product's read of the other Ready accounts of one account's kind, run
+/// like [`AccountsRead`].
+pub type AlternativesRead = Box<dyn FnOnce() -> Vec<String> + Send>;
 
 /// Frozen session facts for product-owned identity and workspace presentation.
 pub struct SurfaceSession {
@@ -456,10 +483,16 @@ pub trait SurfaceHandler<P: ProtocolExtension>: Send {
     /// nothing of it carries over to the next session.
     fn leaving_session(&self, _session_id: &str) {}
 
-    /// The other accounts of `account`'s kind that are Ready now, for a
-    /// failed turn's usage-limit notice.
-    fn ready_alternatives(&self, _account: &str) -> Vec<String> {
-        Vec::new()
+    /// The read of the other accounts of `account`'s kind that are Ready
+    /// now, for a failed turn's usage-limit notice; `None` reports none.
+    fn alternatives_read(&self, _account: &str) -> Option<AlternativesRead> {
+        None
+    }
+
+    /// The account readiness `intent`'s dispatch reads
+    /// ([`SurfaceFacts::accounts`]); `None` when it reads none.
+    fn accounts_read(&self, _intent: &P::Intent) -> Option<AccountsRead> {
+        None
     }
 
     /// The host serves `session` on this attachment's line head: after an
@@ -502,12 +535,42 @@ pub(super) fn leaving_session<P: ProtocolExtension>(
     }
 }
 
-/// The Ready alternatives the product reports for `account`.
-pub(super) fn ready_alternatives<P: ProtocolExtension>(
+/// The product's read of the Ready alternatives to `account`, if any.
+pub(super) fn alternatives_read<P: ProtocolExtension>(
     surface: Option<&dyn SurfaceHandler<P>>,
     account: &str,
-) -> Vec<String> {
-    surface.map_or_else(Vec::new, |handler| handler.ready_alternatives(account))
+) -> Option<AlternativesRead> {
+    surface.and_then(|handler| handler.alternatives_read(account))
+}
+
+/// Runs the product's alternatives read off the host loop.
+pub(super) async fn ready_alternatives(read: Option<AlternativesRead>) -> Vec<String> {
+    match read {
+        Some(read) => {
+            crate::off_loop::await_read("plak-account-alternatives", read, Vec::new).await
+        }
+        None => Vec::new(),
+    }
+}
+
+/// The product's account readiness read for `intent`, if its dispatch
+/// reads one.
+pub(super) fn accounts_read<P: ProtocolExtension>(
+    surface: Option<&dyn SurfaceHandler<P>>,
+    intent: &P::Intent,
+) -> Option<AccountsRead> {
+    surface.and_then(|handler| handler.accounts_read(intent))
+}
+
+/// Runs the product's account readiness read off the host loop.
+pub(super) async fn read_accounts(read: Option<AccountsRead>) -> Option<AccountReadiness> {
+    let read = read?;
+    Some(
+        crate::off_loop::await_read("plak-account-readiness", read, || {
+            Err("the account readiness read could not run".to_owned())
+        })
+        .await,
+    )
 }
 
 /// Tells the surface the host serves `session` now.

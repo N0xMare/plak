@@ -965,6 +965,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     }
                     let with_tools =
                         surface::needs_session_tools(self.role.config.surface.as_deref(), &intent);
+                    let accounts_read =
+                        surface::accounts_read(self.role.config.surface.as_deref(), &intent);
+                    let accounts = surface::read_accounts(accounts_read).await;
                     let effect = surface::dispatch(
                         self.role.config.surface.as_deref(),
                         intent,
@@ -979,6 +982,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                             catalog: &self.role.config.ready_catalog.accounts,
                             queue_len: self.role.config.session.pending_queue.len(),
                             usage_reads: self.role.subscription_usage_refresh.reads(),
+                            accounts: accounts.as_ref(),
                         },
                         &self.role.events,
                     );

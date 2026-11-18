@@ -47,18 +47,21 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
         self.binder.admit_binding(template, binding)
     }
 
-    fn resolve_account(
-        &self,
-        card_account: &str,
-    ) -> Result<Option<String>, crate::agent_tree::TopologyError> {
-        super::bind::spawn_account(&self.binder.parent, card_account)
-            .map(|account| (account != card_account).then_some(account))
-            .map_err(|message| {
-                crate::agent_tree::TopologyError::new(
-                    crate::agent_tree_protocol::TopologyErrorCode::ModelNotAdmitted,
-                    format!("{message}; no agent was spawned"),
-                )
-            })
+    fn resolve_account<'a>(
+        &'a self,
+        card_account: &'a str,
+    ) -> Boxed<'a, Result<Option<String>, crate::agent_tree::TopologyError>> {
+        Box::pin(async move {
+            super::bind::spawn_account(&self.binder.parent, card_account)
+                .await
+                .map(|account| (account != card_account).then_some(account))
+                .map_err(|message| {
+                    crate::agent_tree::TopologyError::new(
+                        crate::agent_tree_protocol::TopologyErrorCode::ModelNotAdmitted,
+                        format!("{message}; no agent was spawned"),
+                    )
+                })
+        })
     }
 
     fn bind(

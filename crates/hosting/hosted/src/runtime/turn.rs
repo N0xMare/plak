@@ -191,13 +191,13 @@ pub(super) fn turn_lifecycle(result: &TurnResult) -> TurnLifecycle {
 }
 
 /// The usage-limit facts of a turn whose provider reported exhausted quota
-/// (spec 02 §4.4.1): the account, when the provider says it resets, and the
-/// other Ready accounts of its kind. Clients offer one continue per
-/// alternative; the host never switches by itself.
+/// (spec 02 §4.4.1): the account and when the provider says it resets. The
+/// caller adds the other Ready accounts of its kind from the product's
+/// off-loop read. Clients offer one continue per alternative; the host never
+/// switches by itself.
 pub(super) fn usage_limit_notice(
     result: &TurnResult,
     account: Option<&str>,
-    alternatives: impl FnOnce(&str) -> Vec<String>,
 ) -> Option<plakous_host_protocol::observation::UsageLimitNotice> {
     let error = result.error()?;
     if error.model_kind() != Some(plakous::model::ModelErrorKind::QuotaExceeded) {
@@ -220,7 +220,7 @@ pub(super) fn usage_limit_notice(
         kind: account.vertical().as_str().to_owned(),
         account: account.to_string(),
         resets_at,
-        alternatives: alternatives(account.as_str()),
+        alternatives: Vec::new(),
     })
 }
 

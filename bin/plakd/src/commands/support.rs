@@ -72,9 +72,10 @@ pub(crate) fn product_state_roots_from(
         state_home,
         Arc::new(telemetry),
         Arc::new(tree_store),
-        Arc::new(crate::roster_input::ProductRosterSource::new(Some(
-            paths_for_roster,
-        ))),
+        Arc::new(crate::roster_input::ProductRosterSource::new(
+            Some(paths_for_roster),
+            custody.clone(),
+        )),
         Arc::new(crate::sidecars::ProductSidecarLocator),
         credentials,
         platform_credentials,

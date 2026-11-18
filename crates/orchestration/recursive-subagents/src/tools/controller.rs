@@ -131,9 +131,12 @@ pub trait ChildController: Send + Sync {
     /// # Errors
     ///
     /// Refuses when the choice cannot be read or nothing fills the kind.
-    fn resolve_account(&self, card_account: &str) -> Result<Option<String>, TopologyError> {
+    fn resolve_account<'a>(
+        &'a self,
+        card_account: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TopologyError>> + Send + 'a>> {
         let _ = card_account;
-        Ok(None)
+        Box::pin(async { Ok(None) })
     }
 
     /// Binds a spawned child to a real session **and starts its assignment

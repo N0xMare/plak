@@ -369,7 +369,10 @@ impl Drop for StartupCaller {
 /// head: the root kind is that head's account, any other kind its stored
 /// choice, else the product's best-effort fill. A store read failure or a
 /// kind nothing fills refuses the spawn; nothing falls back.
-pub(in crate::agent) fn spawn_account(parent: &SpawnParent, card: &str) -> Result<String, String> {
+pub(in crate::agent) async fn spawn_account(
+    parent: &SpawnParent,
+    card: &str,
+) -> Result<String, String> {
     let Ok(card_ref) = card.parse::<crate::account::AccountRef>() else {
         return Ok(card.to_owned());
     };
@@ -390,16 +393,20 @@ pub(in crate::agent) fn spawn_account(parent: &SpawnParent, card: &str) -> Resul
     if let Some(account) = head.chosen_account(kind) {
         return Ok(account);
     }
-    parent
+    let fill = parent
         .state_roots()
         .roster_source()
-        .fill_spawn_account(kind.as_str())
-        .ok_or_else(|| {
-            format!(
-                "no {} account is chosen for this session; choose one before spawning",
-                kind.as_str()
-            )
-        })
+        .fill_spawn_account(kind.as_str());
+    let filled = match fill {
+        Some(read) => crate::off_loop::await_read("plak-spawn-account", read, || None).await,
+        None => None,
+    };
+    filled.ok_or_else(|| {
+        format!(
+            "no {} account is chosen for this session; choose one before spawning",
+            kind.as_str()
+        )
+    })
 }
 
 /// Creates the child session and starts its assignment turn in one step.
@@ -428,7 +435,9 @@ pub(in crate::agent) async fn create_spawned_child_session(
     let tree_id = parent.child_inputs().tree_id.to_owned();
     let operation_id = spawn_child_operation_id(&tree_id, &spawned.agent_id)?;
     let fence = occupancy_session_fence(start.tier);
-    let resolved = spawn_account(parent, &start.account).map_err(SpawnBindError::from)?;
+    let resolved = spawn_account(parent, &start.account)
+        .await
+        .map_err(SpawnBindError::from)?;
     let account = Some(resolved.as_str()).filter(|account| !account.is_empty());
     let start_kind = ChildAssignmentStartKind::from_composition(prompt_composition(
         spawn_child_start_composition(parent, &spawned.agent_id, account)?,

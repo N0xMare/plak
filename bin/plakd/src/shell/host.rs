@@ -122,9 +122,10 @@ pub fn product_state_roots(
         std::sync::Arc::new(crate::store::tree::ProductTreeStoreFactory::new(
             paths.clone(),
         )),
-        std::sync::Arc::new(crate::roster_input::ProductRosterSource::new(Some(
-            paths.clone(),
-        ))),
+        std::sync::Arc::new(crate::roster_input::ProductRosterSource::new(
+            Some(paths.clone()),
+            crate::gateway::HostCustody::Local,
+        )),
         std::sync::Arc::new(crate::sidecars::ProductSidecarLocator),
         crate::openrouter_product::ProductOpenRouterCredentials::shared(
             paths,

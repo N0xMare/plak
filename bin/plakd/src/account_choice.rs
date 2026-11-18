@@ -15,16 +15,7 @@ use crate::home::paths::PlakPaths;
 use crate::product_config::{AgentTemplate, ProductConfig};
 use crate::store::sessions::SessionRecord;
 
-/// One account the fill rule may select.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReadyAccount {
-    /// Full account reference.
-    pub account: String,
-    /// The credential can serve a new dispatch now.
-    pub ready: bool,
-    /// Operator-facing label, when the catalog has one.
-    pub label: Option<String>,
-}
+pub use plakous_hosted::runtime::ReadyAccount;
 
 /// Whether an unfilled kind refuses.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,13 +35,17 @@ pub struct FilledChoices {
     pub choices: BTreeMap<String, String>,
 }
 
-/// Every known account with its readiness, as the gateway or this home's
-/// stores report it. The read runs on its own thread, so it is safe from
-/// inside the host's runtime.
+/// Every known account with its readiness, as the gateway `custody` names
+/// or this home's stores report it. The read blocks its caller on a thread
+/// of its own; the host loop never calls it directly, it awaits the read off
+/// the loop (`SurfaceHandler::accounts_read`, `RosterSource::fill_spawn_account`).
 ///
 /// # Errors
 /// The roster or a status could not be read; nothing is guessed.
-pub fn ready_catalog(paths: &PlakPaths) -> Result<Vec<ReadyAccount>, String> {
+pub fn ready_catalog(
+    paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
+) -> Result<Vec<ReadyAccount>, String> {
     if let Some(accounts) = crate::test_hooks::ready_accounts() {
         return Ok(accounts
             .into_iter()
@@ -69,7 +64,7 @@ pub fn ready_catalog(paths: &PlakPaths) -> Result<Vec<ReadyAccount>, String> {
                     .enable_all()
                     .build()
                     .map_err(|_| "the account readiness read could not start".to_owned())?
-                    .block_on(crate::host::ready_accounts(&state, paths))
+                    .block_on(crate::host::ready_accounts(&state, paths, custody))
             })
             .join()
             .unwrap_or_else(|_| Err("the account readiness read failed".to_owned()))
@@ -355,7 +350,7 @@ pub fn split_account_flags(
 /// The typed refusal, as operator text.
 pub fn fill_cli(
     config: &ProductConfig,
-    paths: &PlakPaths,
+    catalog: impl FnOnce() -> Result<Vec<ReadyAccount>, String>,
     root_account: Option<&str>,
     explicit: &[AccountChoice],
 ) -> Result<BTreeMap<String, String>, crate::CliFailure> {
@@ -369,7 +364,7 @@ pub fn fill_cli(
     if explicit.is_empty() && kinds.is_empty() {
         return Ok(BTreeMap::new());
     }
-    let catalog = ready_catalog(paths).map_err(crate::CliFailure::new)?;
+    let catalog = catalog().map_err(crate::CliFailure::new)?;
     fill(&kinds, None, explicit, &catalog, FillMode::BestEffort)
         .map(|filled| filled.choices)
         .map_err(|refusal| crate::CliFailure::new(refusal_text(&refusal)))

@@ -193,8 +193,8 @@ pub(super) async fn roster(
 
 /// Where this home's credentials are held: the configured gateway or the
 /// local gateway service that holds the store, else in process.
-fn custody(paths: &PlakPaths) -> AccountCustody {
-    match crate::gateway::route_for(paths) {
+fn custody(paths: &PlakPaths, host: &crate::gateway::HostCustody) -> AccountCustody {
+    match crate::gateway::route_for(paths, host) {
         Ok(route) => route
             .remote()
             .map_or_else(AccountCustody::in_process, |address| AccountCustody {
@@ -297,7 +297,7 @@ pub(super) async fn status(
         last_refresh: None,
         remedies: Vec::new(),
         diagnostics: Vec::new(),
-        custody: custody(paths),
+        custody: custody(paths, &application.custody),
     };
     if vertical.is_api()
         && let Some(link) = application.custody.admin()

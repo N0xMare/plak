@@ -28,7 +28,7 @@ fn one_shared_source_resolves_each_saved_profile_without_selector_leakage() {
     use plakous_hosted::agent::RosterSource as _;
     use plakous_hosted::sessions::RootProfile;
 
-    let source = ProductRosterSource::new(None);
+    let source = ProductRosterSource::new(None, crate::gateway::HostCustody::Local);
     let first = RootProfile {
         root_template: Some("claude-default-root".into()),
         working_set: vec!["claude-default-worker".into()],
@@ -79,7 +79,7 @@ fn one_shared_source_resolves_each_saved_profile_without_selector_leakage() {
 #[test]
 fn frozen_root_overrides_do_not_change_a_child_card_with_the_same_template_name() {
     use plakous_hosted::agent::RosterSource as _;
-    let source = ProductRosterSource::new(None);
+    let source = ProductRosterSource::new(None, crate::gateway::HostCustody::Local);
     let selection = plakous_hosted::sessions::RootProfile {
         root_template: Some("claude-default-root".into()),
         working_set: vec!["claude-default-root".into()],

@@ -230,7 +230,7 @@ pub(crate) enum AgentSession {
 )]
 fn fill_agent_accounts(
     cfg: &product_config::ProductConfig,
-    paths: &crate::home::paths::PlakPaths,
+    catalog: impl FnOnce() -> Result<Vec<crate::account_choice::ReadyAccount>, String>,
     account: Option<plakous_hosted::account::AccountRef>,
     provider: Option<NativeProvider>,
     platform: Option<plakous_hosted::binding::PlatformProvider>,
@@ -249,7 +249,7 @@ fn fill_agent_accounts(
             .or_else(|| {
                 provider.map(|provider| crate::oauth_ui::account_cli_name(provider).to_owned())
             });
-        let choices = crate::account_choice::fill_cli(cfg, paths, root.as_deref(), explicit)?;
+        let choices = crate::account_choice::fill_cli(cfg, catalog, root.as_deref(), explicit)?;
         return Ok((account, platform, wire, choices));
     }
     let root_kind = crate::account_choice::root_kind(cfg);
@@ -257,7 +257,7 @@ fn fill_agent_accounts(
         &crate::account_choice::profile_kinds(cfg),
         root_kind.as_deref(),
         explicit,
-        &crate::account_choice::ready_catalog(paths).map_err(CliFailure::new)?,
+        &catalog().map_err(CliFailure::new)?,
         crate::account_choice::FillMode::Require,
     )
     .map_err(|refusal| CliFailure::new(crate::account_choice::refusal_text(&refusal)))?;
@@ -333,9 +333,10 @@ pub(crate) fn run_agent_after_admission(
             &mut io::stderr().lock(),
         )?,
         AgentSession::New => {
+            let custody = services.custody()?;
             let (account, platform, wire, choices) = fill_agent_accounts(
                 &cfg,
-                paths,
+                || crate::account_choice::ready_catalog(paths, &custody),
                 account.clone(),
                 provider,
                 platform,

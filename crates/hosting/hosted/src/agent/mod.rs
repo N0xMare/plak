@@ -143,7 +143,8 @@ pub(crate) use recovery::{
 };
 pub use roots::TelemetryHealth;
 pub use roots::{
-    ExtraTelemetrySink, ProductTelemetry, RosterSource, TelemetrySinkFactory, TreeStoreFactory,
+    ExtraTelemetrySink, ProductTelemetry, RosterSource, SpawnAccountRead, TelemetrySinkFactory,
+    TreeStoreFactory,
 };
 pub use roots::{ProcessJobs, ProductStateRoots};
 

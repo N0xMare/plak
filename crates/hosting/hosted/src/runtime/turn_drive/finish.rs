@@ -62,13 +62,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 lifecycle.usage_limit = crate::runtime::turn::usage_limit_notice(
                     &result,
                     self.host.session.account.as_deref(),
-                    |account| {
-                        crate::runtime::surface::ready_alternatives(
-                            self.host.surface.as_deref(),
-                            account,
-                        )
-                    },
                 );
+                if let Some(notice) = lifecycle.usage_limit.as_mut() {
+                    let read = crate::runtime::surface::alternatives_read(
+                        self.host.surface.as_deref(),
+                        &notice.account,
+                    );
+                    notice.alternatives = crate::runtime::surface::ready_alternatives(read).await;
+                }
                 let outcome = match result.outcome() {
                     TurnResultOutcome::Completed(response) => {
                         observe_terminal_tool_activity(

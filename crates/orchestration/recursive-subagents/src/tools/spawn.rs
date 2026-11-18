@@ -627,7 +627,7 @@ impl TopologyTool {
                 return Self::topology_failure(&error);
             }
             if let Some(mut binding) = binding {
-                match binder.resolve_account(&binding.account) {
+                match binder.resolve_account(&binding.account).await {
                     Ok(Some(account)) => {
                         resolved_account = Some(account.clone());
                         binding.account = account;

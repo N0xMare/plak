@@ -67,6 +67,7 @@ pub mod agent_tree_protocol;
 mod driver;
 pub(crate) mod jobs;
 mod node_usage;
+pub(crate) mod off_loop;
 /// Host terminal-pin admission for destructive workspace operations.
 pub mod workspace_reclamation;
 // The hosted driver composes the tree runtime through its public vocabulary.

@@ -96,9 +96,10 @@ impl PlakousApplication {
         let configured = config.default_binding();
         let composition = run_composition(composition, &configured, selection, model);
         crate::build_features::admit_selected(config, Some(account), Some(model), composition)?;
+        let paths = self.product_paths()?;
         let choices = crate::account_choice::fill_cli(
             config,
-            self.product_paths()?,
+            || crate::account_choice::ready_catalog(paths, &self.custody),
             Some(account),
             accounts,
         )?;
@@ -278,9 +279,10 @@ impl PlakousApplication {
         if run_expired(limits) {
             return run_timeout(stderr);
         }
+        let paths = self.product_paths()?;
         let choices = crate::account_choice::fill_cli(
             config,
-            self.product_paths()?,
+            || crate::account_choice::ready_catalog(paths, &self.custody),
             Some(account.as_str()),
             accounts,
         )?;

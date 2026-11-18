@@ -402,8 +402,7 @@ fn apply_profile(
         refuse_profile(&prepared.id, reason, events);
         return None;
     }
-    let (root_account, choices) =
-        accounts::fill_profile(paths, &prepared, accounts, &facts, events)?;
+    let (root_account, choices) = accounts::fill_profile(&prepared, accounts, &facts, events)?;
     let roster = crate::roster_input::roster_input_from_config(
         &prepared.config,
         root_account.clone(),
@@ -1113,8 +1112,26 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
         accounts::serving(session, events);
     }
 
-    fn ready_alternatives(&self, account: &str) -> Vec<String> {
-        accounts::ready_alternatives(&self.paths, account)
+    fn alternatives_read(
+        &self,
+        account: &str,
+    ) -> Option<plakous_hosted::runtime::AlternativesRead> {
+        Some(accounts::alternatives_read(
+            self.paths.clone(),
+            self.custody.clone(),
+            account.to_owned(),
+        ))
+    }
+
+    fn accounts_read(
+        &self,
+        intent: &SurfaceIntent,
+    ) -> Option<plakous_hosted::runtime::AccountsRead> {
+        matches!(
+            intent,
+            SurfaceIntent::ApplyProfile { .. } | SurfaceIntent::ChooseAccount { .. }
+        )
+        .then(|| accounts::catalog_read(self.paths.clone(), self.custody.clone()))
     }
 
     #[allow(
@@ -1269,14 +1286,7 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
                 account,
                 continue_failed,
             } => {
-                return accounts::choose_account(
-                    &self.paths,
-                    kind,
-                    account,
-                    continue_failed,
-                    &facts,
-                    events,
-                );
+                return accounts::choose_account(kind, account, continue_failed, &facts, events);
             }
         }
         SurfaceEffect::default()
