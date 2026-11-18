@@ -192,7 +192,7 @@ pub enum WireFailureKind {
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RelayEnd {
     /// The upstream body ended cleanly.
-    Complete,
+    Complete {},
     /// The upstream exchange failed.
     UpstreamFailed {
         /// Where it failed.
@@ -205,9 +205,9 @@ pub enum RelayEnd {
         timeout: bool,
     },
     /// The gateway's kill switch cut the exchange.
-    Cancelled,
+    Cancelled {},
     /// The gateway failed internally after the upstream exchange started.
-    GatewayFailed,
+    GatewayFailed {},
 }
 
 /// One relay response frame.

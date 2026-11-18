@@ -167,28 +167,28 @@ const fn refusal_name(refusal: &GatewayRefusal) -> &'static str {
 
 pub(crate) fn refusal_samples() -> Vec<GatewayRefusal> {
     vec![
-        GatewayRefusal::Unauthenticated,
-        GatewayRefusal::ScopeDenied,
+        GatewayRefusal::Unauthenticated {},
+        GatewayRefusal::ScopeDenied {},
         GatewayRefusal::VersionUnsupported { supported: vec![1] },
-        GatewayRefusal::GatewayDisabled,
-        GatewayRefusal::AccountDisabled,
-        GatewayRefusal::AccountUnknown,
+        GatewayRefusal::GatewayDisabled {},
+        GatewayRefusal::AccountDisabled {},
+        GatewayRefusal::AccountUnknown {},
         GatewayRefusal::CredentialNotReady {
             status: CredentialStatus::Quarantined,
         },
         GatewayRefusal::FenceMoved {
             facts: Box::new(facts_sample()),
         },
-        GatewayRefusal::AccountChanged,
-        GatewayRefusal::UpstreamNotPinned,
-        GatewayRefusal::ReservedHeader,
-        GatewayRefusal::CustodiedHeadersMismatch,
-        GatewayRefusal::EnvelopeInvalid,
-        GatewayRefusal::LimitExceeded,
+        GatewayRefusal::AccountChanged {},
+        GatewayRefusal::UpstreamNotPinned {},
+        GatewayRefusal::ReservedHeader {},
+        GatewayRefusal::CustodiedHeadersMismatch {},
+        GatewayRefusal::EnvelopeInvalid {},
+        GatewayRefusal::LimitExceeded {},
         GatewayRefusal::Busy {
             retry_after_ms: 250,
         },
-        GatewayRefusal::Internal,
+        GatewayRefusal::Internal {},
     ]
 }
 
@@ -263,7 +263,7 @@ fn request_samples() -> Vec<AdminRequest> {
             account: account("claude/work"),
         },
         AdminRequest::Disable {
-            target: DisableTarget::All,
+            target: DisableTarget::All {},
             cut: true,
         },
         AdminRequest::Disable {
@@ -277,7 +277,7 @@ fn request_samples() -> Vec<AdminRequest> {
             cut: false,
         },
         AdminRequest::Enable {
-            target: DisableTarget::All,
+            target: DisableTarget::All {},
         },
         AdminRequest::CallerAdd {
             caller: caller(),
@@ -319,47 +319,47 @@ const fn response_name(response: &AdminResponse) -> &'static str {
 
 const fn admin_refusal_name(refusal: &AdminRefusal) -> &'static str {
     match refusal {
-        AdminRefusal::WrongAccountClass => "wrong_account_class",
-        AdminRefusal::AccountSignedIn => "account_signed_in",
-        AdminRefusal::AccountBusy => "account_busy",
-        AdminRefusal::DefaultNotRemovable => "default_not_removable",
+        AdminRefusal::WrongAccountClass {} => "wrong_account_class",
+        AdminRefusal::AccountSignedIn {} => "account_signed_in",
+        AdminRefusal::AccountBusy {} => "account_busy",
+        AdminRefusal::DefaultNotRemovable {} => "default_not_removable",
         AdminRefusal::EnvironmentOverride { .. } => "environment_override",
-        AdminRefusal::NoticeMismatch => "notice_mismatch",
-        AdminRefusal::WrittenByNewerBuild => "written_by_newer_build",
-        AdminRefusal::DeviceLoginUnavailable => "device_login_unavailable",
-        AdminRefusal::PasteInvalid => "paste_invalid",
-        AdminRefusal::AttemptUnknown => "attempt_unknown",
-        AdminRefusal::AttemptLimit => "attempt_limit",
-        AdminRefusal::ProviderRejected => "provider_rejected",
-        AdminRefusal::OutcomeUnknown => "outcome_unknown",
-        AdminRefusal::Unavailable => "unavailable",
-        AdminRefusal::LocalAdminRequired => "local_admin_required",
-        AdminRefusal::CallerExists => "caller_exists",
-        AdminRefusal::CallerUnknown => "caller_unknown",
+        AdminRefusal::NoticeMismatch {} => "notice_mismatch",
+        AdminRefusal::WrittenByNewerBuild {} => "written_by_newer_build",
+        AdminRefusal::DeviceLoginUnavailable {} => "device_login_unavailable",
+        AdminRefusal::PasteInvalid {} => "paste_invalid",
+        AdminRefusal::AttemptUnknown {} => "attempt_unknown",
+        AdminRefusal::AttemptLimit {} => "attempt_limit",
+        AdminRefusal::ProviderRejected {} => "provider_rejected",
+        AdminRefusal::OutcomeUnknown {} => "outcome_unknown",
+        AdminRefusal::Unavailable {} => "unavailable",
+        AdminRefusal::LocalAdminRequired {} => "local_admin_required",
+        AdminRefusal::CallerExists {} => "caller_exists",
+        AdminRefusal::CallerUnknown {} => "caller_unknown",
     }
 }
 
 fn admin_refusal_samples() -> Vec<AdminRefusal> {
     vec![
-        AdminRefusal::WrongAccountClass,
-        AdminRefusal::AccountSignedIn,
-        AdminRefusal::AccountBusy,
-        AdminRefusal::DefaultNotRemovable,
+        AdminRefusal::WrongAccountClass {},
+        AdminRefusal::AccountSignedIn {},
+        AdminRefusal::AccountBusy {},
+        AdminRefusal::DefaultNotRemovable {},
         AdminRefusal::EnvironmentOverride {
             variable: text("OPENAI_API_KEY"),
         },
-        AdminRefusal::NoticeMismatch,
-        AdminRefusal::WrittenByNewerBuild,
-        AdminRefusal::DeviceLoginUnavailable,
-        AdminRefusal::PasteInvalid,
-        AdminRefusal::AttemptUnknown,
-        AdminRefusal::AttemptLimit,
-        AdminRefusal::ProviderRejected,
-        AdminRefusal::OutcomeUnknown,
-        AdminRefusal::Unavailable,
-        AdminRefusal::LocalAdminRequired,
-        AdminRefusal::CallerExists,
-        AdminRefusal::CallerUnknown,
+        AdminRefusal::NoticeMismatch {},
+        AdminRefusal::WrittenByNewerBuild {},
+        AdminRefusal::DeviceLoginUnavailable {},
+        AdminRefusal::PasteInvalid {},
+        AdminRefusal::AttemptUnknown {},
+        AdminRefusal::AttemptLimit {},
+        AdminRefusal::ProviderRejected {},
+        AdminRefusal::OutcomeUnknown {},
+        AdminRefusal::Unavailable {},
+        AdminRefusal::LocalAdminRequired {},
+        AdminRefusal::CallerExists {},
+        AdminRefusal::CallerUnknown {},
     ]
 }
 
@@ -544,7 +544,7 @@ const KINDS: [WireFailureKind; 10] = [
 /// Names each variant, so a new one fails to compile until it has a sample.
 const fn end_name(end: RelayEnd) -> &'static str {
     match end {
-        RelayEnd::Complete => "complete",
+        RelayEnd::Complete {} => "complete",
         RelayEnd::UpstreamFailed {
             phase:
                 WirePhase::Resolution
@@ -572,8 +572,8 @@ const fn end_name(end: RelayEnd) -> &'static str {
                 | WireFailureKind::Internal,
             ..
         } => "upstream_failed",
-        RelayEnd::Cancelled => "cancelled",
-        RelayEnd::GatewayFailed => "gateway_failed",
+        RelayEnd::Cancelled {} => "cancelled",
+        RelayEnd::GatewayFailed {} => "gateway_failed",
     }
 }
 
@@ -608,9 +608,9 @@ fn frame_samples() -> Vec<Frame> {
         Frame::Trailers(Trailers {
             headers: vec![header("x-trailer", "1")],
         }),
-        Frame::End(RelayEnd::Complete),
-        Frame::End(RelayEnd::Cancelled),
-        Frame::End(RelayEnd::GatewayFailed),
+        Frame::End(RelayEnd::Complete {}),
+        Frame::End(RelayEnd::Cancelled {}),
+        Frame::End(RelayEnd::GatewayFailed {}),
     ];
     samples.extend(KINDS.iter().enumerate().map(|(index, kind)| {
         Frame::End(RelayEnd::UpstreamFailed {

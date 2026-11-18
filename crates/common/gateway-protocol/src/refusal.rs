@@ -14,20 +14,20 @@ use crate::facts::{AccountFacts, CredentialStatus};
 #[serde(tag = "code", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GatewayRefusal {
     /// No valid caller key. Carries no further detail.
-    Unauthenticated,
+    Unauthenticated {},
     /// The caller's scopes do not cover this call and account.
-    ScopeDenied,
+    ScopeDenied {},
     /// The path names a protocol version the gateway does not serve.
     VersionUnsupported {
         /// The versions it serves.
         supported: Vec<u16>,
     },
     /// The gateway's kill switch refuses every call.
-    GatewayDisabled,
+    GatewayDisabled {},
     /// The kill switch refuses this account.
-    AccountDisabled,
+    AccountDisabled {},
     /// The gateway holds no such account.
-    AccountUnknown,
+    AccountUnknown {},
     /// The credential is not usable.
     CredentialNotReady {
         /// Its state.
@@ -39,24 +39,24 @@ pub enum GatewayRefusal {
         facts: Box<AccountFacts>,
     },
     /// The credential now belongs to another provider account.
-    AccountChanged,
+    AccountChanged {},
     /// The upstream origin, method or path is not pinned for this credential.
-    UpstreamNotPinned,
+    UpstreamNotPinned {},
     /// The request carries a header the caller may not send.
-    ReservedHeader,
+    ReservedHeader {},
     /// The custodied entries' names differ from the credential's injection rule.
-    CustodiedHeadersMismatch,
+    CustodiedHeadersMismatch {},
     /// The request or call body is malformed.
-    EnvelopeInvalid,
+    EnvelopeInvalid {},
     /// The request exceeds a gateway limit.
-    LimitExceeded,
+    LimitExceeded {},
     /// The gateway is at capacity; try again after the advice.
     Busy {
         /// Advised wait.
         retry_after_ms: u64,
     },
     /// The gateway failed before dispatch.
-    Internal,
+    Internal {},
 }
 
 impl GatewayRefusal {
@@ -64,22 +64,22 @@ impl GatewayRefusal {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::Unauthenticated => "unauthenticated",
-            Self::ScopeDenied => "scope_denied",
+            Self::Unauthenticated {} => "unauthenticated",
+            Self::ScopeDenied {} => "scope_denied",
             Self::VersionUnsupported { .. } => "version_unsupported",
-            Self::GatewayDisabled => "gateway_disabled",
-            Self::AccountDisabled => "account_disabled",
-            Self::AccountUnknown => "account_unknown",
+            Self::GatewayDisabled {} => "gateway_disabled",
+            Self::AccountDisabled {} => "account_disabled",
+            Self::AccountUnknown {} => "account_unknown",
             Self::CredentialNotReady { .. } => "credential_not_ready",
             Self::FenceMoved { .. } => "fence_moved",
-            Self::AccountChanged => "account_changed",
-            Self::UpstreamNotPinned => "upstream_not_pinned",
-            Self::ReservedHeader => "reserved_header",
-            Self::CustodiedHeadersMismatch => "custodied_headers_mismatch",
-            Self::EnvelopeInvalid => "envelope_invalid",
-            Self::LimitExceeded => "limit_exceeded",
+            Self::AccountChanged {} => "account_changed",
+            Self::UpstreamNotPinned {} => "upstream_not_pinned",
+            Self::ReservedHeader {} => "reserved_header",
+            Self::CustodiedHeadersMismatch {} => "custodied_headers_mismatch",
+            Self::EnvelopeInvalid {} => "envelope_invalid",
+            Self::LimitExceeded {} => "limit_exceeded",
             Self::Busy { .. } => "busy",
-            Self::Internal => "internal",
+            Self::Internal {} => "internal",
         }
     }
 
@@ -87,18 +87,20 @@ impl GatewayRefusal {
     #[must_use]
     pub const fn http_status(&self) -> u16 {
         match self {
-            Self::Unauthenticated => 401,
-            Self::ScopeDenied => 403,
-            Self::AccountUnknown => 404,
-            Self::CredentialNotReady { .. } | Self::FenceMoved { .. } | Self::AccountChanged => 409,
-            Self::LimitExceeded => 413,
-            Self::UpstreamNotPinned
-            | Self::ReservedHeader
-            | Self::CustodiedHeadersMismatch
-            | Self::EnvelopeInvalid => 422,
+            Self::Unauthenticated {} => 401,
+            Self::ScopeDenied {} => 403,
+            Self::AccountUnknown {} => 404,
+            Self::CredentialNotReady { .. } | Self::FenceMoved { .. } | Self::AccountChanged {} => {
+                409
+            }
+            Self::LimitExceeded {} => 413,
+            Self::UpstreamNotPinned {}
+            | Self::ReservedHeader {}
+            | Self::CustodiedHeadersMismatch {}
+            | Self::EnvelopeInvalid {} => 422,
             Self::VersionUnsupported { .. } => 426,
-            Self::Internal => 500,
-            Self::GatewayDisabled | Self::AccountDisabled | Self::Busy { .. } => 503,
+            Self::Internal {} => 500,
+            Self::GatewayDisabled {} | Self::AccountDisabled {} | Self::Busy { .. } => 503,
         }
     }
 }

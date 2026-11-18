@@ -337,7 +337,7 @@ fn stream() -> Vec<Frame> {
             bytes: b"event: b\n\n".to_vec(),
         }),
         Frame::Trailers(Trailers { headers: vec![] }),
-        Frame::End(RelayEnd::Complete),
+        Frame::End(RelayEnd::Complete {}),
     ]
 }
 
@@ -502,8 +502,8 @@ fn refusal_codes_statuses_and_bodies_agree() {
     );
     assert_eq!(body.gateway_error.code(), "busy");
     assert_eq!(body.gateway_error.http_status(), 503);
-    assert_eq!(GatewayRefusal::Unauthenticated.http_status(), 401);
-    assert_eq!(GatewayRefusal::UpstreamNotPinned.http_status(), 422);
+    assert_eq!(GatewayRefusal::Unauthenticated {}.http_status(), 401);
+    assert_eq!(GatewayRefusal::UpstreamNotPinned {}.http_status(), 422);
     for sample in crate::pinned_tests::refusal_samples() {
         let value = serde_json::to_value(&sample).unwrap();
         assert_eq!(value["code"], json!(sample.code()));
@@ -694,4 +694,29 @@ fn an_issued_caller_key_never_prints() {
         key: SecretText::new(zeroize::Zeroizing::new("plakgw1.host-a.secret".to_owned())).unwrap(),
     };
     assert!(!format!("{response:?}").contains("plakgw1"));
+}
+
+#[test]
+fn field_free_variants_refuse_unknown_fields() {
+    assert!(
+        serde_json::from_value::<RefusalBody>(
+            json!({"gateway_error": {"code": "unauthenticated", "detail": "x"}})
+        )
+        .is_err()
+    );
+    assert!(serde_json::from_value::<RelayEnd>(json!({"outcome": "complete", "x": 1})).is_err());
+    assert!(
+        serde_json::from_value::<crate::admin::DisableTarget>(json!({"target": "all", "x": 1}))
+            .is_err()
+    );
+    assert!(
+        serde_json::from_value::<crate::admin::AdminRefusal>(
+            json!({"reason": "paste_invalid", "x": 1})
+        )
+        .is_err()
+    );
+    assert_eq!(
+        serde_json::to_value(GatewayRefusal::Unauthenticated {}).unwrap(),
+        json!({"code": "unauthenticated"})
+    );
 }

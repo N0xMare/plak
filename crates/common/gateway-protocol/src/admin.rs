@@ -32,7 +32,7 @@ pub enum LogoutMode {
 #[serde(tag = "target", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DisableTarget {
     /// Every call.
-    All,
+    All {},
     /// One account.
     Account {
         /// The account.
@@ -230,43 +230,43 @@ pub struct AccountStatusRow {
 pub enum AdminRefusal {
     /// The account is the wrong class for this call (a key call on a
     /// subscription, or the reverse).
-    WrongAccountClass,
+    WrongAccountClass {},
     /// The account still holds a credential.
-    AccountSignedIn,
+    AccountSignedIn {},
     /// Another writer holds the account.
-    AccountBusy,
+    AccountBusy {},
     /// Default accounts cannot be removed.
-    DefaultNotRemovable,
+    DefaultNotRemovable {},
     /// The gateway's environment variable wins, so the file write has no effect.
     EnvironmentOverride {
         /// The variable's name.
         variable: BoundedText<64>,
     },
     /// The notice revision is not the compiled one.
-    NoticeMismatch,
+    NoticeMismatch {},
     /// A newer build wrote the stored record and replacement was not requested.
-    WrittenByNewerBuild,
+    WrittenByNewerBuild {},
     /// The provider offers no device-code login for this account.
-    DeviceLoginUnavailable,
+    DeviceLoginUnavailable {},
     /// The paste is malformed or does not match the attempt; the attempt stays.
-    PasteInvalid,
+    PasteInvalid {},
     /// No such pending attempt.
-    AttemptUnknown,
+    AttemptUnknown {},
     /// The pending-login bounds are reached.
-    AttemptLimit,
+    AttemptLimit {},
     /// The provider rejected the call; nothing changed.
-    ProviderRejected,
+    ProviderRejected {},
     /// A started effect's outcome is unknown; read status before retrying.
-    OutcomeUnknown,
+    OutcomeUnknown {},
     /// The provider or store is temporarily unavailable; nothing changed.
-    Unavailable,
+    Unavailable {},
     /// Only the local administrator may make this call, or make it replace
     /// one provider account with another.
-    LocalAdminRequired,
+    LocalAdminRequired {},
     /// The caller id is in use or was used before.
-    CallerExists,
+    CallerExists {},
     /// No such caller.
-    CallerUnknown,
+    CallerUnknown {},
 }
 
 /// One caller, without its key.
