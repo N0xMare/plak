@@ -974,6 +974,19 @@ impl MemorySessionStore {
         let state = &mut *guard;
         require_open(state)?;
         let now = self.lease_now()?;
+        if let Some(session) = state.sessions.get(&request.session_id())
+            && session.archive_receipt.is_none()
+        {
+            for lease in session
+                .branches
+                .values()
+                .filter_map(|branch| branch.active_lease.as_ref())
+            {
+                if !expired(lease, now)? {
+                    return Err(SessionStoreError::LeaseHeld);
+                }
+            }
+        }
         if !request.abandons_jobs()
             && let Some(ids) = state
                 .sessions
@@ -1018,15 +1031,6 @@ impl MemorySessionStore {
         }
         if session.head.revision() != request.expected_revision() {
             return Err(SessionStoreError::Conflict);
-        }
-        for lease in session
-            .branches
-            .values()
-            .filter_map(|branch| branch.active_lease.as_ref())
-        {
-            if !expired(lease, now)? {
-                return Err(SessionStoreError::LeaseHeld);
-            }
         }
         let revision = request.expected_revision().checked_next().ok_or_else(|| {
             SessionStoreError::capacity(

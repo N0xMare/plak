@@ -109,13 +109,17 @@ fn refuse_live_branches(
         .collect::<Result<Vec<_>, _>>()
         .map_err(map_sqlite)?;
     drop(s);
-    for value in ids {
-        let row = branch_row(tx, SessionRef::new(session, parse(&value)?))?
+    for value in &ids {
+        let row = branch_row(tx, SessionRef::new(session, parse(value)?))?
             .ok_or(SessionStoreError::corrupt())?;
         if row.active.as_ref().map(|l| expired(l, now)).transpose()? == Some(false) {
             return Err(SessionStoreError::LeaseHeld);
         }
-        if !abandon_jobs {
+    }
+    if !abandon_jobs {
+        for value in &ids {
+            let row = branch_row(tx, SessionRef::new(session, parse(value)?))?
+                .ok_or(SessionStoreError::corrupt())?;
             let stored = load_checkpoint(tx, row.head.checkpoint().checkpoint_id())?;
             if stored
                 .checkpoint()
