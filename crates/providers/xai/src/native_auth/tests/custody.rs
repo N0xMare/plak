@@ -92,6 +92,44 @@ async fn custody_facts_carry_the_exact_route_binding() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refresh_between_the_reads_moves_the_fence_with_the_current_facts() -> TestResult {
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let temp = tempdir()?;
+    let auth = mock_peer().await?;
+    let manager = manager(&temp, &auth)?;
+    install_stored(
+        &manager,
+        "race-subject",
+        "race-access",
+        "race-refresh",
+        system_unix_seconds()? + 3_600,
+    )?;
+    let slot = CustodySlot::new("grok")?;
+    let expected = manager
+        .custody_facts(&slot)
+        .await?
+        .expected_fence()
+        .ok_or("no fence")?;
+    manager.refresh_between_custody_reads()?;
+    let refusal = manager.custody_fields(&slot, &expected).await;
+    let Err(CustodyError::FenceMoved { facts }) = refusal else {
+        return Err(format!("the moved record was not named: {refusal:?}").into());
+    };
+    assert_eq!(facts.generation, Some(expected.generation.next()?));
+    assert_eq!(facts.account_binding, Some(expected.account_binding));
+    let moved = facts.expected_fence().ok_or("no moved fence")?;
+    assert!(
+        manager
+            .custody_fields(&slot, &moved)
+            .await?
+            .take_hold()
+            .is_some()
+    );
+    auth.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn concurrent_rejections_of_one_generation_claim_exactly_one_grant() -> TestResult {
     let _serial = AUTH_TEST_GATE.lock().await;
     let temp = tempdir()?;

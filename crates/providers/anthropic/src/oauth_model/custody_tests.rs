@@ -268,3 +268,35 @@ async fn a_custodied_login_binds_and_sends_exactly_what_the_local_login_does() -
     assert!(custodied.logout_local().is_err());
     Ok(())
 }
+
+#[tokio::test]
+async fn a_refresh_between_the_reads_moves_the_fence_with_the_current_facts() -> TestResult {
+    let temp = tempfile::tempdir()?;
+    let manager = manager_with_client(
+        private_store(&temp),
+        Client::new_http1(plakous_http::Limits::default())?,
+    );
+    manager.persist_test_grant("access", "refresh", 3600, CLAUDE_OAUTH_INFERENCE_SCOPE)?;
+    let slot = CustodySlot::new("claude")?;
+    let expected = manager
+        .custody_facts(&slot)
+        .await?
+        .expected_fence()
+        .ok_or("no fence")?;
+    manager.refresh_between_custody_reads()?;
+    let refusal = manager.custody_fields(&slot, &expected).await;
+    let Err(CustodyError::FenceMoved { facts }) = refusal else {
+        return Err(format!("the moved record was not named: {refusal:?}").into());
+    };
+    assert_eq!(facts.generation, Some(expected.generation.next()?));
+    assert_eq!(facts.account_binding, Some(expected.account_binding));
+    let moved = facts.expected_fence().ok_or("no moved fence")?;
+    assert!(
+        manager
+            .custody_fields(&slot, &moved)
+            .await?
+            .take_hold()
+            .is_some()
+    );
+    Ok(())
+}

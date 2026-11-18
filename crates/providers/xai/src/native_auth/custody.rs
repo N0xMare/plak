@@ -27,6 +27,10 @@ pub const SUPERGROK_AUTHORITY_ID_IDENTITY: &str = "grok_authority_id";
 /// How often a facts read retries when the record moves under it.
 const SNAPSHOT_ATTEMPTS: usize = 3;
 
+/// How often a fields read judges the record when it moves between the
+/// facts read and the Ready lease.
+const FENCE_READS: usize = 2;
+
 /// How long a refresh after a rejection waits for another caller's claimed
 /// refresh to settle before it judges the record, and how often it looks.
 const SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -165,25 +169,40 @@ impl XaiNativeAuthManager {
         slot: &CustodySlot,
         expected: &ExpectedFence,
     ) -> Result<CredentialFields, CustodyError> {
-        let (facts, fence) = self.custody_snapshot(slot).await?;
-        facts.check_fence(expected)?;
-        if self.core.ensure_active().is_err() {
-            return Err(CustodyError::NotReady {
-                facts: Box::new(facts),
-            });
-        }
-        let (fence, _) = fence.ok_or(CustodyError::Internal)?;
-        let core = Arc::clone(&self.core);
-        let leased = tokio::task::spawn_blocking(move || {
-            let lease = core.store().ok()?.acquire_ready(&fence).ok()?;
-            (lease.fence() == fence).then_some(lease)
-        })
-        .await
-        .map_err(|_| CustodyError::Internal)?;
-        let Some(lease) = leased else {
-            return Err(CustodyError::FenceMoved {
-                facts: Box::new(facts),
-            });
+        let mut reads = 1;
+        let lease = loop {
+            // A record that moved after the first read is judged again once
+            // any claimed refresh settles, so a refusal names current facts.
+            let (facts, fence) = if reads == 1 {
+                self.custody_snapshot(slot).await?
+            } else {
+                self.settled_snapshot(slot).await?
+            };
+            facts.check_fence(expected)?;
+            if self.core.ensure_active().is_err() {
+                return Err(CustodyError::NotReady {
+                    facts: Box::new(facts),
+                });
+            }
+            let (fence, _) = fence.ok_or(CustodyError::Internal)?;
+            #[cfg(test)]
+            between_reads::run(fence.account_binding().as_str());
+            let core = Arc::clone(&self.core);
+            let leased = tokio::task::spawn_blocking(move || {
+                let lease = core.store().ok()?.acquire_ready(&fence).ok()?;
+                (lease.fence() == fence).then_some(lease)
+            })
+            .await
+            .map_err(|_| CustodyError::Internal)?;
+            match leased {
+                Some(lease) => break lease,
+                None if reads < FENCE_READS => reads += 1,
+                None => {
+                    return Err(CustodyError::Busy {
+                        retry_after_ms: 100,
+                    });
+                }
+            }
         };
         let stored: StoredTokens = serde_json::from_slice(lease.payload().expose_secret())
             .map_err(|_| CustodyError::Store)?;
@@ -260,5 +279,81 @@ impl XaiNativeAuthManager {
             }
             tokio::time::sleep(SETTLE_POLL).await;
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "a test fixture's store write")]
+impl XaiNativeAuthManager {
+    /// Commits a refresh of the stored login between the next fields read's
+    /// facts and its Ready lease.
+    pub(super) fn refresh_between_custody_reads(&self) -> Result<(), XaiNativeAuthError> {
+        let fence = self
+            .core
+            .store()?
+            .load()?
+            .ok_or(XaiNativeAuthError::NotLoggedIn)?;
+        let core = Arc::clone(&self.core);
+        between_reads::install(
+            fence.account_binding().as_str(),
+            Box::new(move || {
+                between_reads::commit_refresh(core.store().expect("a local store"));
+            }),
+        );
+        Ok(())
+    }
+}
+
+/// A test's action between a fields read's facts and its Ready lease, such
+/// as committing a refresh there.
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "a test fixture's store write")]
+pub(super) mod between_reads {
+    type Hook = Box<dyn FnOnce() + Send>;
+
+    static HOOKS: std::sync::Mutex<Vec<(String, Hook)>> = std::sync::Mutex::new(Vec::new());
+
+    /// Runs `hook` once, in the next fields read of `account`.
+    pub(super) fn install(account: &str, hook: Hook) {
+        HOOKS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((account.to_owned(), hook));
+    }
+
+    pub(super) fn run(account: &str) {
+        let hook = {
+            let mut hooks = HOOKS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            hooks
+                .iter()
+                .position(|(owner, _)| owner == account)
+                .map(|index| hooks.remove(index).1)
+        };
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
+    /// Commits `store`'s next generation with its payload unchanged, as
+    /// another holder's completed refresh leaves the record.
+    pub(super) fn commit_refresh(store: &plakous_auth::PrivateCredentialStore) {
+        let fence = store.load().ok().flatten().expect("a stored record");
+        let payload = {
+            let lease = store.acquire_ready(&fence).expect("a Ready record");
+            plakous_auth::SecretBytes::new(lease.payload().expose_secret().to_vec())
+        };
+        let record = plakous_auth::CredentialRecord::new(
+            fence.profile_id().clone(),
+            fence.account_binding().clone(),
+            fence.generation().next().expect("a next generation"),
+            plakous_auth::CredentialStatus::Ready,
+            payload,
+        )
+        .expect("a record");
+        store
+            .replace(fence.generation(), &record)
+            .expect("the refresh commits");
     }
 }

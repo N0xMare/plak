@@ -3994,6 +3994,7 @@ dependencies = [
  "plakous-attempt",
  "plakous-auth",
  "plakous-exchange",
+ "plakous-gateway-protocol",
  "plakous-http",
  "plakous-model",
  "plakous-responses",
