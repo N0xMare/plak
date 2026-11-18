@@ -132,7 +132,7 @@ struct Rule {
     matched: AtomicU64,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum Fault {
     Status {
         status: u16,
