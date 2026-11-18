@@ -509,6 +509,7 @@ fn production_api_rebind_projects_complete_staging_lineage() {
         account_binding: serde_json::to_string(&binding.account_binding()).unwrap(),
         // Staged on the source's tree (LookupOnly), so it stays on it.
         own_tree: None,
+        account_choices: None,
     };
     let request = sessions::projector::WorkflowRequest {
         operation_id: operation.into(),
@@ -620,6 +621,7 @@ fn reopening_with_an_unadmitted_rebind_withdraws_once_without_branching() {
             .unwrap(),
             account_binding: serde_json::to_string(&binding.account_binding()).unwrap(),
             own_tree: Some(sessions::RootProfile::default()),
+            account_choices: None,
         })),
     };
     config

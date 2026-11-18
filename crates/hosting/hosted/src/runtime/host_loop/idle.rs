@@ -9,8 +9,8 @@ use super::{
     clear_session_rebuild, commit_session_update, compact_may_resume_queue,
     compact_reason_for_disposition, dispatch_invoke_tool, dispatch_topology_navigator,
     drop_last_mutable, edit_mutable, emit_queue_snapshot, emit_tree_snapshot_if_revision_advanced,
-    emit_unavailable_context, handle_compact, handle_fork, handle_rebind, handle_resume_picker,
-    move_mutable, native_compact_facet, observe_compact, query_context, queue, queue_edit_applied,
+    emit_unavailable_context, handle_compact, handle_fork, handle_resume_picker, move_mutable,
+    native_compact_facet, observe_compact, query_context, queue, queue_edit_applied,
     queue_edit_refused, queue_refusal, record_emitted_tree_revision, recovery_blocked_action,
     refuse_recovery_blocked_action, reject_draft, reject_stale_queue_action, remove_mutable,
     report_context, resume_session_switch, sessions, surface,
@@ -996,20 +996,23 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                                 model: fork.model.clone(),
                             }),
                         });
-                        let result = Box::pin(handle_rebind(
+                        let result = Box::pin(crate::runtime::rebind::handle_profile_rebind(
                             InterruptWatch::new(self.role.actions, &self.role.interrupt_state),
                             &mut self.role.config,
                             &mut self.opened,
                             &mut self.role.stderr_buf,
                             &self.role.events,
-                            &fork.account,
-                            &fork.model,
-                            fork.effort.as_deref(),
-                            fork.extra.as_deref(),
-                            fork.composition,
-                            fork.protocol,
-                            &fork.roster,
-                            fork.switch.as_deref(),
+                            crate::runtime::rebind::ProfileRebind {
+                                account: &fork.account,
+                                model: &fork.model,
+                                effort: fork.effort.as_deref(),
+                                extra: fork.extra.as_deref(),
+                                composition: fork.composition,
+                                protocol: fork.protocol,
+                                roster: &fork.roster,
+                                switch: fork.switch.as_deref(),
+                                account_choices: fork.account_choices.as_ref(),
+                            },
                         ))
                         .await;
                         let _ = self.role.events.send(ContentEvent::SetBusy(false));
@@ -1030,7 +1033,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                             }
                         });
                     }
-                    None
+                    match effect.account {
+                        Some(account) => self.choose_account(account).await,
+                        None => None,
+                    }
                 }
                 Ok(UserAction::RefreshReadiness) => {
                     self.role.readiness.start(&self.role.config);

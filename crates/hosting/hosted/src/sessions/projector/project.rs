@@ -435,12 +435,15 @@ impl Applier<'_> {
                             items
                         });
                     }
+                    self.root_history(*turn_id, *segment, items.as_deref());
                     self.items(
                         turn_id.map(|turn| turn.to_string()),
                         *first_ordinal,
                         items,
                         *segment,
                     );
+                } else {
+                    self.root_history(*turn_id, *segment, None);
                 }
                 for call_id in tool_results {
                     self.tool_result(*call_id, turn_id.map(|turn| turn.to_string()))?;

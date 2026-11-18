@@ -6,12 +6,13 @@
 )]
 
 use plakous_host_protocol::observation::ObservationClass;
-use plakous_host_protocol::wire::AccountChoice;
 use plakous_host_protocol::{
     CompositionSelection, ObservationExtension, ProtocolExtension, ProtocolSelection,
 };
 use std::fmt;
 
+mod accounts;
+pub use accounts::{AccountChoice, AccountChoiceRefusal};
 pub mod console;
 pub mod lifecycle;
 
@@ -310,8 +311,8 @@ pub enum SurfaceIntent {
     /// the failed root turn after a root-kind rebind; a non-root kind only
     /// updates the choice.
     ChooseAccount {
-        /// Provider kind id.
-        kind: String,
+        /// Provider kind.
+        kind: console::Vertical,
         /// Full account reference.
         account: String,
         /// Resubmit the failed root turn after the root kind moves.
@@ -430,12 +431,16 @@ pub enum SurfaceObservation {
         /// How it landed.
         outcome: ProfileOutcome,
     },
-    /// The session's account for every kind it uses. The root kind is the
-    /// root line head's account, not a stored choice.
+    /// The session's account for every kind it holds one for: the root
+    /// kind's is the root line head's account, the rest are stored choices.
+    /// Sent on attach and after each change.
     AccountChoices {
-        /// One entry per kind in use.
+        /// One entry per kind, the root kind first.
         choices: Vec<AccountChoice>,
     },
+    /// An `ApplyProfile` or `ChooseAccount` account choice was refused;
+    /// nothing changed.
+    AccountChoiceRefused(AccountChoiceRefusal),
     /// A profile was not applied; nothing was saved.
     ProfileRefused {
         /// Profile name as requested.
@@ -516,6 +521,7 @@ impl ObservationExtension for SurfaceObservation {
             | Self::McpOverview(_)
             | Self::ProfileApplied { .. }
             | Self::ProfileRefused { .. }
+            | Self::AccountChoiceRefused(_)
             | Self::AgentAcknowledgements { .. }
             | Self::AgentAcknowledgementsUnavailable { .. }
             | Self::BuildStatus { .. }
@@ -555,6 +561,7 @@ impl ObservationExtension for SurfaceObservation {
             Self::McpOverview(_) => "mcp_overview",
             Self::ProfileApplied { .. } => "profile_applied",
             Self::ProfileRefused { .. } => "profile_refused",
+            Self::AccountChoiceRefused(_) => "account_choice_refused",
             Self::AgentAcknowledgements { .. } => "agent_acknowledgements",
             Self::AgentAcknowledgementsUnavailable { .. } => "agent_acknowledgements_unavailable",
             Self::BuildStatus { .. } => "build_status",

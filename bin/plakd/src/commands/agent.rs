@@ -227,6 +227,65 @@ pub(crate) enum AgentSession {
     clippy::too_many_lines,
     reason = "Agent admission carries the explicit binding overrides through capability checks, session selection, and host configuration."
 )]
+/// Spec 02 §4.4.3: the fill picks every used kind's account before the root's
+/// route, wire and probe resolve. A bare `--account` (or `--provider`) is the
+/// root's own choice; `--account <kind>=<ref>` names the others.
+#[allow(
+    clippy::type_complexity,
+    reason = "the root's account, its platform and wire, and the stored choices resolve together"
+)]
+fn fill_agent_accounts(
+    cfg: &product_config::ProductConfig,
+    paths: &crate::home::paths::PlakPaths,
+    account: Option<plakous_hosted::account::AccountRef>,
+    provider: Option<NativeProvider>,
+    platform: Option<plakous_hosted::binding::PlatformProvider>,
+    wire: Option<product_config::ProductWireBinding>,
+    explicit: &[plakous_host_protocol::wire::AccountChoice],
+) -> CliResult<(
+    Option<plakous_hosted::account::AccountRef>,
+    Option<plakous_hosted::binding::PlatformProvider>,
+    Option<product_config::ProductWireBinding>,
+    std::collections::BTreeMap<String, String>,
+)> {
+    if account.is_some() || provider.is_some() {
+        let root = account
+            .as_ref()
+            .map(|account| account.as_str().to_owned())
+            .or_else(|| {
+                provider.map(|provider| crate::oauth_ui::account_cli_name(provider).to_owned())
+            });
+        let choices = crate::account_choice::fill_cli(cfg, paths, root.as_deref(), explicit)?;
+        return Ok((account, platform, wire, choices));
+    }
+    let root_kind = crate::account_choice::root_kind(cfg);
+    let filled = crate::account_choice::fill(
+        &crate::account_choice::profile_kinds(cfg),
+        root_kind.as_deref(),
+        explicit,
+        &crate::account_choice::ready_catalog(paths),
+        crate::account_choice::FillMode::Require,
+    )
+    .map_err(|refusal| CliFailure::new(crate::account_choice::refusal_text(&refusal)))?;
+    let account = filled
+        .root_account
+        .as_deref()
+        .map(str::parse::<plakous_hosted::account::AccountRef>)
+        .transpose()?;
+    let platform = platform.or_else(|| {
+        account.as_ref().and_then(|account| {
+            plakous_hosted::binding::PlatformProvider::for_account(account.as_str())
+        })
+    });
+    let wire = wire.or_else(|| {
+        account
+            .as_ref()
+            .filter(|account| account.vertical() == plakous_hosted::account::Vertical::OpenRouter)
+            .map(|_| product_config::ProductWireBinding::resolve(cfg.default_protocol()))
+    });
+    Ok((account, platform, wire, filled.choices))
+}
+
 pub(crate) fn run_agent_after_admission(
     services: &crate::shell::services::Services,
     context: Option<&crate::home::paths::PlakPaths>,
@@ -274,10 +333,19 @@ pub(crate) fn run_agent_after_admission(
             &mut io::stderr().lock(),
         )?,
         AgentSession::New => {
+            let (account, platform, wire, choices) = fill_agent_accounts(
+                &cfg,
+                paths,
+                account.clone(),
+                provider,
+                platform,
+                wire,
+                &accounts,
+            )?;
             let mut record = new_agent_record(
                 &cfg,
                 cwd.clone(),
-                account.clone(),
+                account,
                 provider,
                 platform,
                 wire,
@@ -287,7 +355,7 @@ pub(crate) fn run_agent_after_admission(
                 composition,
                 None,
             )?;
-            crate::account_choice::store_explicit(&mut record, &accounts);
+            record.account_choices = choices;
             crate::build_features::admit_selected(
                 &cfg,
                 record.account.as_deref(),

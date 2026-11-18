@@ -280,6 +280,11 @@ pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> 
                 credential_command(*account)
             )
         },
+        R::ContinueOnAccount { account, .. } => match face {
+            Wire => format!("choose Continue on {account} to submit it"),
+            Run => format!("run the prompt again with `--account` naming {account}"),
+            Jsonl => format!("submit the prompt again on {account}"),
+        },
         R::RepairThenAttach {} => match face {
             Wire => "\
                 address the attach failure, then retry attach; profile actions only selects a different \

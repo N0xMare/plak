@@ -13,6 +13,7 @@
 
 mod bridge;
 mod console;
+pub(crate) use console::ready_accounts;
 mod idle;
 pub(crate) mod lifecycle;
 mod lock;

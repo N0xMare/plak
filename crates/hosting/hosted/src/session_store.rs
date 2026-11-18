@@ -330,6 +330,14 @@ pub trait SessionRecordStore: Send + Sync {
     /// A message when the store cannot be read or a row is invalid.
     fn load_views(&self, id: &str) -> Result<Option<SessionViews>, String>;
 
+    /// The record at the head of `tree_id`'s root line: the root node's
+    /// record no successor on the same node supersedes. A tree's root agent
+    /// is named after the tree.
+    ///
+    /// # Errors
+    /// A message when the store cannot be read or a row is invalid.
+    fn root_line_head(&self, tree_id: &str) -> Result<Option<SessionRecord>, String>;
+
     /// Joins stored submissions with delivery state without hydrating transcript
     /// rows or per-call views.
     ///
@@ -982,6 +990,34 @@ mod memory {
                     record
                 })
                 .ok_or_else(|| "session not found".to_owned())
+        }
+
+        fn root_line_head(&self, tree_id: &str) -> Result<Option<SessionRecord>, String> {
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let on_root = |record: &SessionRecord| {
+                record.node.tree_id == tree_id && record.node.agent_id == tree_id
+            };
+            Ok(state
+                .records
+                .values()
+                .filter(|record| on_root(record))
+                .filter(|record| {
+                    !state.records.values().any(|successor| {
+                        on_root(successor)
+                            && successor.source_product_session_id.as_deref()
+                                == Some(record.id.as_str())
+                    })
+                })
+                .max_by(|left, right| {
+                    left.updated_at_unix
+                        .cmp(&right.updated_at_unix)
+                        .then_with(|| right.id.cmp(&left.id))
+                })
+                .cloned()
+                .map(|record| loaded(&state, record)))
         }
 
         fn load_queue_head(&self, id: &str) -> Result<super::SessionQueueHead, String> {

@@ -38,8 +38,9 @@ pub use reads::{
 };
 pub(crate) use reads::{TranscriptPart, TranscriptRead, transcript_tail};
 pub use views::{
-    Anchored, CallView, Counters, Delivery, Lane, LineageStep, OpenTurn, PauseCause, ProcessTrack,
-    RowKey, SessionViewState, SessionViews, WorkflowCompletion, WorkflowSettlement,
+    Anchored, CallView, Counters, Delivery, Lane, LastRootOutcome, LastRootTurn, LineageStep,
+    OpenTurn, PauseCause, ProcessTrack, RowKey, SessionViewState, SessionViews, WorkflowCompletion,
+    WorkflowSettlement,
 };
 
 use plakous::sessions::AgentSessions;

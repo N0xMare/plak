@@ -213,18 +213,10 @@ impl ProductSessions {
                 }
             })
             .transpose()?;
-        let accounts = crate::account_choice::kind_accounts(
-            &shared
-                .models
-                .accounts
-                .iter()
-                .map(|section| crate::account_choice::ReadyAccount {
-                    account: section.account.clone(),
-                    ready: section.ready,
-                    label: Some(section.label.clone()),
-                })
-                .collect::<Vec<_>>(),
-        );
+        // Every known account per kind, named ones included, with the
+        // readiness the creation fill reads.
+        let accounts =
+            crate::account_choice::kind_accounts(&crate::account_choice::ready_catalog(&home));
         Ok(wire::SessionOptions {
             runners,
             models: shared.models,

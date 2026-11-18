@@ -78,6 +78,7 @@ mod tests {
             roster: None,
             live_children: false,
             mcp: None,
+            account_choices: std::collections::BTreeMap::new(),
         };
         let shown = super::read_session(&session);
         assert_eq!(shown.path, root.path());

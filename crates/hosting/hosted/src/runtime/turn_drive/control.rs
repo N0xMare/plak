@@ -880,6 +880,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     if let Some(fork) = effect.profile_fork {
                         fork.refuse("a turn is running; fork onto a profile when the root is idle");
                     }
+                    if let Some(account) = effect.account {
+                        self.choose_account_busy(account);
+                    }
                 }
                 Ok(UserAction::CloseAgentTranscript) => {
                     self.host
@@ -961,5 +964,46 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         }
 
         false
+    }
+}
+
+impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
+    /// An account choice while the root runs a turn: a non-root kind is
+    /// stored now (the running turn and its children keep their bindings);
+    /// the root kind is refused `root_busy`.
+    fn choose_account_busy(&mut self, effect: surface::SurfaceAccountEffect) {
+        let surface::SurfaceAccountEffect { choice, finish } = effect;
+        let surface::SurfaceAccountChoice::Store { kind, account } = choice else {
+            finish(surface::AccountChoiceOutcome::Refused(
+                surface::AccountChoiceRefusal::RootBusy,
+            ));
+            return;
+        };
+        let saved = commit_session_update(
+            self.host.store,
+            self.host.home,
+            self.host.session,
+            |candidate| {
+                if candidate.account_choices.get(&kind) == Some(&account) {
+                    return false;
+                }
+                candidate.account_choices.insert(kind, account);
+                candidate.validate_for_store().is_ok()
+            },
+        );
+        finish(match saved {
+            Ok(_) => surface::AccountChoiceOutcome::Chosen {
+                root: self.host.session.account.clone(),
+                choices: self.host.session.account_choices.clone(),
+            },
+            Err(error) => {
+                surface::AccountChoiceOutcome::Refused(surface::AccountChoiceRefusal::Failed(
+                    crate::CliFailure::new(format!(
+                        "the account choice could not be saved: {error}"
+                    ))
+                    .host_failure(),
+                ))
+            }
+        });
     }
 }

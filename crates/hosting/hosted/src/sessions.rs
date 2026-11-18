@@ -429,6 +429,24 @@ impl SessionRecord {
         queue::enqueue(&mut self.pending_queue, draft)
     }
 
+    /// Queue a host-submitted root-start under a derived item id, so a repeat
+    /// of the same action names the same queue item and command.
+    pub(crate) fn enqueue_live_as(
+        &mut self,
+        text: String,
+        id: &str,
+    ) -> Result<QueueItem, queue::Refusal> {
+        if self.pending_queue.iter().any(|item| item.id == id) {
+            return Err(queue::Refusal::Stale);
+        }
+        let mut item = self.enqueue_live(text)?;
+        id.clone_into(&mut item.id);
+        if let Some(queued) = self.pending_queue.last_mut() {
+            id.clone_into(&mut queued.id);
+        }
+        Ok(item)
+    }
+
     /// Project a loaded record for recovery without changing its durable
     /// revision or history. Outstanding work never resumes draining implicitly.
     pub fn pause_restored_work(&mut self) {
@@ -680,34 +698,19 @@ impl SessionRecord {
         Ok(())
     }
 
-    /// The account a spawn freezes for a card.
-    ///
-    /// A named reference is already frozen. A kind uses the root line head
-    /// when it is the root kind, otherwise the stored choice. No choice is
-    /// fail-closed: spawn does not guess.
-    ///
-    /// # Errors
-    /// Returns a message when a kind has no stored choice and is not the root.
-    pub fn resolve_spawn_account(&self, kind_or_frozen: &str) -> Result<String, String> {
-        let card = kind_or_frozen
-            .parse::<crate::account::AccountRef>()
-            .map_err(|error| error.to_string())?;
-        if card.is_named() {
-            return Ok(card.to_string());
-        }
-        let kind = card.vertical().as_str();
+    /// The session's account for `kind`: the root line head's own account
+    /// for the root kind, else the stored non-root choice.
+    #[must_use]
+    pub fn chosen_account(&self, kind: crate::account::Vertical) -> Option<String> {
         if let Some(root) = self
             .account
             .as_deref()
             .and_then(|account| account.parse::<crate::account::AccountRef>().ok())
-            && root.vertical().as_str() == kind
+            && root.vertical() == kind
         {
-            return Ok(root.to_string());
+            return Some(root.to_string());
         }
-        self.account_choices
-            .get(kind)
-            .cloned()
-            .ok_or_else(|| format!("no ready account for {kind}; choose one before spawning"))
+        self.account_choices.get(kind.as_str()).cloned()
     }
 
     /// When the root changes kind, keep the previous root account for any

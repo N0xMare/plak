@@ -39,7 +39,7 @@ use super::logging::{
     elapsed_ms_since, log_ev, log_host_attached, log_host_ready, log_session_ready,
 };
 use super::native_compact_facet;
-use super::rebind::{Rebound, durable_tree_id, handle_rebind};
+use super::rebind::{Rebound, durable_tree_id};
 use super::reconcile::{
     commit_definite_failure_projection, commit_exceptional_terminal_projection, persist,
 };
@@ -204,6 +204,9 @@ enum HostStep {
     },
 }
 
+mod account;
+pub use account::CONTINUATION_PROMPT;
+pub(crate) use account::unsent_continue_notice;
 mod handoff;
 #[cfg(test)]
 pub(in crate::runtime) use handoff::hooks as handoff_hooks;

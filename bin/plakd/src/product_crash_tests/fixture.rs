@@ -712,6 +712,7 @@ async fn run_rebind(
                 )?,
                 account_binding: serde_json::to_string(&binding.account_binding())?,
                 own_tree: Some(plakous_hosted::sessions::RootProfile::default()),
+                account_choices: None,
             })),
         },
     )?;
@@ -788,6 +789,7 @@ async fn run_switch(
                         )?,
                         account_binding: serde_json::to_string(&binding.account_binding())?,
                         own_tree: None,
+                        account_choices: None,
                     },
                     profile: "crash-switch".into(),
                     root: plakous_hosted::sessions::RootProfile::default(),

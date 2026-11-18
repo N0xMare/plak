@@ -246,6 +246,7 @@ impl ProductSessions {
                         roster,
                         live_children: false,
                         mcp: None,
+                        account_choices: std::collections::BTreeMap::new(),
                     },
                     read.profiles
                         .map_or(&[], |profiles| profiles.profiles.as_slice()),
@@ -946,6 +947,14 @@ fn replays(
             existing.account.as_deref() == Some(model.account.as_str())
                 && existing.model.as_deref() == Some(model.model.as_str())
         })
+        && creation.accounts.iter().all(|choice| {
+            plakous_hosted::account::Vertical::ALL
+                .into_iter()
+                .find(|kind| kind.as_str() == choice.kind)
+                .and_then(|kind| existing.chosen_account(kind))
+                .as_deref()
+                == Some(choice.account.as_str())
+        })
 }
 
 /// The session a `new_session` request creates: a name-based uuid of the
@@ -1012,9 +1021,41 @@ fn new_record(
         template.account.clone_from(&model.account);
         template.model.clone_from(&model.model);
     }
-    let account: Option<plakous_hosted::account::AccountRef> = creation
-        .model
-        .map(|model| model.account.parse())
+    // Spec 02 §4.4.3: the fill picks every used kind's account before the
+    // route, wire and probe resolve. An advanced model override is the root
+    // kind's explicit choice.
+    let root_kind = match creation.model {
+        Some(model) => Some(
+            model
+                .account
+                .parse::<plakous_hosted::account::AccountRef>()
+                .map_err(|_| binding(BindingRefusalKind::ModelUnavailable))?
+                .vertical()
+                .as_str()
+                .to_owned(),
+        ),
+        None => crate::account_choice::root_kind(&config),
+    };
+    let mut explicit = creation.accounts.to_vec();
+    if let (Some(model), Some(kind)) = (creation.model, root_kind.as_ref()) {
+        explicit.push(plakous_host_protocol::wire::AccountChoice {
+            kind: kind.clone(),
+            account: model.account.clone(),
+        });
+    }
+    let mut kinds = crate::account_choice::profile_kinds(&config);
+    kinds.extend(root_kind.clone());
+    let filled = crate::account_choice::fill(
+        &kinds,
+        root_kind.as_deref(),
+        &explicit,
+        &crate::account_choice::ready_catalog(&context),
+        crate::account_choice::FillMode::Require,
+    )?;
+    let account: Option<plakous_hosted::account::AccountRef> = filled
+        .root_account
+        .as_deref()
+        .map(str::parse)
         .transpose()
         .map_err(|_| binding(BindingRefusalKind::ModelUnavailable))?;
     let selected_model = creation.model.map(|model| model.model.clone());
@@ -1039,16 +1080,7 @@ fn new_record(
         Some(validated.probe.as_ref()),
     )
     .map_err(|_| binding(BindingRefusalKind::ModelUnavailable))?;
-    crate::account_choice::store_explicit(&mut record, creation.accounts);
-    let kinds = crate::account_choice::profile_kinds(&config);
-    if let Some(root) = crate::account_choice::root_kind(&config) {
-        record.account_choices.remove(&root);
-    }
-    let filled = crate::account_choice::FilledChoices {
-        root_account: record.account.clone(),
-        choices: record.account_choices.clone(),
-    };
-    crate::account_choice::apply_fill(&mut record, &filled, &kinds);
+    record.account_choices = filled.choices;
     record.runner = validated.runner;
     record.root_profile = Some(plakous_hosted::sessions::RootProfile {
         root_template: config.root_agent.clone(),
@@ -1081,11 +1113,6 @@ fn open_session(
     session: &str,
     idle_release: std::time::Duration,
 ) -> CliResult<OpenedSession<PlakExtension>> {
-    if crate::account_choice::should_resubmit_on_reopen() {
-        return Err(CliFailure::new(
-            "an account switch is not resubmitted after reopen",
-        ));
-    }
     let record = services
         .session_records()?
         .load(session)
@@ -1260,6 +1287,7 @@ mod tests {
                 roster: Some(tree.current_epoch().clone()),
                 live_children: false,
                 mcp: None,
+                account_choices: std::collections::BTreeMap::new(),
             },
         );
         let actual = product.rows(None, None, false).unwrap().remove(0);

@@ -1321,6 +1321,7 @@ fn a_switch_request_round_trips_and_a_corrupt_selection_refuses_the_load() {
                 effective_configuration: "{}".to_owned(),
                 account_binding: "{}".to_owned(),
                 own_tree: Some(RootProfile::default()),
+                account_choices: None,
             },
             profile: "codex-default".to_owned(),
             root: RootProfile {

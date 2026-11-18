@@ -155,6 +155,10 @@ impl SessionRecordStore for PresentingStore {
         self.inner.load_views(id)
     }
 
+    fn root_line_head(&self, tree_id: &str) -> Result<Option<SessionRecord>, String> {
+        self.inner.root_line_head(tree_id)
+    }
+
     fn load_queue_commands(&self, id: &str) -> Result<crate::sessions::QueueCommands, String> {
         self.inner.load_queue_commands(id)
     }

@@ -69,6 +69,10 @@ pub(crate) fn all_remedies() -> Vec<NoticeRemedy> {
             account: AccountTarget::Grok,
         },
         R::RepairThenAttach {},
+        R::ContinueOnAccount {
+            account: "codex/work".into(),
+            command_id: "plak.queue.00112233-4455-4677-8899-aabbccddeeff.1".into(),
+        },
         R::RepairCredentialOrChooseProfile {
             account: AccountTarget::Grok,
             condition: CredentialCondition::NewerBuild,
@@ -275,6 +279,12 @@ fn remedies_are_exhaustive(remedy: &NoticeRemedy) {
         }
         R::RepairCredentialOrChooseProfile { account, condition } => {
             let _ = (account, condition);
+        }
+        R::ContinueOnAccount {
+            account,
+            command_id,
+        } => {
+            let _ = (account, command_id);
         }
     }
 }

@@ -191,6 +191,48 @@ pub(super) async fn roster(
     })
 }
 
+/// Every known account with whether its credential can serve a new dispatch
+/// now: the session account-choice fill reads this (spec 02 §4.4.3). A
+/// gateway configured for this home answers the roster and readiness.
+pub(crate) async fn ready_accounts(
+    state: &std::path::Path,
+    paths: &PlakPaths,
+) -> Vec<crate::account_choice::ReadyAccount> {
+    let Ok(reader) = reader_at(state, Some(paths)) else {
+        return Vec::new();
+    };
+    let Ok(roster) = roster(&reader, paths, None).await else {
+        return Vec::new();
+    };
+    let mut rows = Vec::with_capacity(roster.accounts.len());
+    for account in roster.accounts {
+        let vertical = account.vertical();
+        let ready = if !vertical.capability().compiled {
+            false
+        } else if vertical.is_api() {
+            secrets::key_status(paths, account.as_str())
+                .is_ok_and(|key| key.source != secrets::KeySource::Missing)
+        } else if let Some(provider) = vertical.capability().native_provider()
+            && let Ok(subscriptions) = reader.subscriptions_for(&account)
+        {
+            crate::commands::support::offline_subscription_status(&subscriptions, provider)
+                .await
+                .is_ok_and(|status| {
+                    status.compatibility == crate::presentation::CompatibilityState::Current
+                        && status.credential == crate::presentation::CredentialState::Ready
+                })
+        } else {
+            false
+        };
+        rows.push(crate::account_choice::ReadyAccount {
+            account: account.to_string(),
+            ready,
+            label: None,
+        });
+    }
+    rows
+}
+
 pub(super) async fn status(
     application: &Reader,
     paths: &PlakPaths,

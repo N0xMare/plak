@@ -248,6 +248,11 @@ impl<F: StoreFaults + 'static> SessionRecordStore for FaultStore<F> {
         self.inner.load_views(id)
     }
 
+    fn root_line_head(&self, tree_id: &str) -> Result<Option<SessionRecord>, String> {
+        self.faults.before(StoreCall::Load, None)?;
+        self.inner.root_line_head(tree_id)
+    }
+
     fn load_queue_commands(&self, id: &str) -> Result<sessions::QueueCommands, String> {
         self.faults.before(StoreCall::LoadQueueCommands, None)?;
         self.inner.load_queue_commands(id)

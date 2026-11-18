@@ -26,17 +26,21 @@ pub(in crate::runtime) enum SuccessionChange {
     /// A virtual tree of one: the successor epoch's bytes travel in the
     /// product intent and no tree rows are written.
     Virtual(Arc<OrchestrationSnapshot>),
+    /// The root continues on another account of its kind: an ordinary
+    /// rebind workflow, and the tree is not written at all.
+    Account,
 }
 
 /// One switch's tree half.
 #[derive(Clone, Debug)]
 pub(in crate::runtime) struct Succession {
-    /// The profile switched to, as the Agents list names it.
+    /// The profile switched to, as the Agents list names it, or the account
+    /// an account switch continues on.
     pub(in crate::runtime) profile: String,
     /// The tree the root node belongs to.
     pub(in crate::runtime) tree_id: String,
-    /// The successor epoch the profile freezes.
-    pub(in crate::runtime) snapshot: Arc<OrchestrationSnapshot>,
+    /// The digest of the successor epoch the profile freezes.
+    roster_digest: String,
     /// Its root template and working set.
     root: sessions::RootProfile,
     /// What changes in that tree.
@@ -74,10 +78,30 @@ impl Succession {
         Ok(Self {
             profile: profile.to_owned(),
             tree_id,
-            snapshot,
+            roster_digest: snapshot.digest.clone(),
             root: sessions::RootProfile::from_roster(roster),
             change,
         })
+    }
+
+    /// The root continuing its line on `account`: it keeps its epoch, cards
+    /// and profile, so nothing of the tree moves.
+    pub(in crate::runtime) fn account<P: plakous_host_protocol::ProtocolExtension>(
+        config: &HostConfig<P>,
+        account: &str,
+    ) -> Self {
+        Self {
+            profile: account.to_owned(),
+            tree_id: durable_tree_id(&config.topology_rows(), &config.session),
+            roster_digest: String::new(),
+            root: config.session.root_profile.clone().unwrap_or_default(),
+            change: SuccessionChange::Account,
+        }
+    }
+
+    /// Whether this is an account switch rather than a profile switch.
+    pub(in crate::runtime) const fn is_account(&self) -> bool {
+        matches!(self.change, SuccessionChange::Account)
     }
 
     /// The epoch the successor's root compiles against before its
@@ -85,7 +109,9 @@ impl Succession {
     pub(in crate::runtime) fn pending_epoch(&self) -> Option<Arc<OrchestrationSnapshot>> {
         match &self.change {
             SuccessionChange::Append(snapshot) => Some(Arc::clone(snapshot)),
-            SuccessionChange::RootBind | SuccessionChange::Virtual(_) => None,
+            SuccessionChange::RootBind
+            | SuccessionChange::Virtual(_)
+            | SuccessionChange::Account => None,
         }
     }
 
@@ -99,6 +125,9 @@ impl Succession {
                 serde_json::to_string(snapshot.as_ref())
                     .map_err(|_| CliFailure::new("the profile's epoch could not be encoded"))?,
             ),
+            SuccessionChange::Account => {
+                return Ok(sessions::SessionWorkflowKind::Rebind(Box::new(rebind)));
+            }
             SuccessionChange::Append(_) | SuccessionChange::RootBind => None,
         };
         Ok(sessions::SessionWorkflowKind::Switch(Box::new(
@@ -106,7 +135,7 @@ impl Succession {
                 rebind,
                 profile: self.profile.clone(),
                 root: self.root.clone(),
-                roster_digest: self.snapshot.digest.clone(),
+                roster_digest: self.roster_digest.clone(),
                 pending_snapshot,
             },
         )))
@@ -169,7 +198,7 @@ impl Succession {
                     .await
                     .map_err(CliFailure::new)?;
             }
-            SuccessionChange::Virtual(_) => {}
+            SuccessionChange::Virtual(_) | SuccessionChange::Account => {}
         }
         Ok(())
     }

@@ -3,6 +3,7 @@ use super::{
     OpenTurn, PauseCause, ROUND_PROSE_ORDINAL, ReadActor, ReadItem, ReadPart, RowKey,
     TranscriptRow, control_error_label, host_owns_subject, item_rows, session_wide, tool_row,
 };
+use crate::sessions::projector::LastRootTurn;
 use crate::sessions::projector::{RootContinuationCause, RootContinuationDecision};
 
 impl Applier<'_> {
@@ -55,6 +56,15 @@ impl Applier<'_> {
                 let host_wake = origin == plakous::model::TurnOrigin::HostWake;
                 self.views.state.counters.root_turns += 1;
                 if let Some(turn_id) = turn_id {
+                    // A host wake has no operator prompt to resubmit.
+                    self.views.state.last_root_turn = Some(LastRootTurn {
+                        turn_id: turn_id.to_string(),
+                        command_id: command_id.to_owned(),
+                        outcome: None,
+                        prompt: None,
+                        committed_after_prompt: false,
+                        history_seen: host_wake,
+                    });
                     self.views.state.open_turns.insert(
                         turn_id.to_string(),
                         OpenTurn {
@@ -119,6 +129,28 @@ impl Applier<'_> {
             }
             _ => {}
         }
+    }
+
+    /// Records where history lands relative to the newest root turn's
+    /// prompt: its first segment is the prompt, anything after is a round.
+    pub(super) fn root_history(
+        &mut self,
+        turn_id: Option<plakous::model::TurnId>,
+        segment: plakous::model::HistorySegmentKind,
+        items: Option<&[ReadItem]>,
+    ) {
+        let Some(last) = self.views.state.last_root_turn.as_mut() else {
+            return;
+        };
+        let owned = turn_id.is_some_and(|turn| turn.to_string() == last.turn_id);
+        if owned && !last.history_seen {
+            last.history_seen = true;
+            if segment == plakous::model::HistorySegmentKind::RecentIntent {
+                last.prompt = items.and_then(operator_text);
+            }
+            return;
+        }
+        last.committed_after_prompt = true;
     }
 
     #[allow(
@@ -201,4 +233,22 @@ impl Applier<'_> {
             }
         }
     }
+}
+
+/// The text of a prompt segment that is one operator message of text alone.
+fn operator_text(items: &[ReadItem]) -> Option<String> {
+    let [item] = items else {
+        return None;
+    };
+    if item.actor != ReadActor::User || item.harness_authored || item.parts.is_empty() {
+        return None;
+    }
+    let mut text = String::new();
+    for part in &item.parts {
+        let ReadPart::Text(part) = part else {
+            return None;
+        };
+        text.push_str(part);
+    }
+    Some(text)
 }

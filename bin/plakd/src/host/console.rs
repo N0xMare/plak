@@ -11,6 +11,8 @@ mod operator;
 mod recorded;
 pub(super) mod terminals;
 
+pub(crate) use accounts::ready_accounts;
+
 use crate::home::paths::PlakPaths;
 use plakd_wire_types::{
     PlakExtension,

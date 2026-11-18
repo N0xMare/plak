@@ -156,6 +156,8 @@ pub struct SurfaceSession {
     /// The MCP tools this session froze at creation; `None` unless the
     /// handler asked for them ([`SurfaceHandler::needs_session_tools`]).
     pub mcp: Option<SurfaceMcp>,
+    /// The stored account choice of every non-root kind, kind to account.
+    pub account_choices: std::collections::BTreeMap<String, String>,
 }
 
 /// A session's frozen MCP tools, for an operator view.
@@ -262,6 +264,7 @@ pub(super) fn session_facts(
         roster,
         live_children,
         mcp: with_tools.then(|| SurfaceMcp::of(session)),
+        account_choices: session.account_choices.clone(),
     }
 }
 
@@ -315,6 +318,9 @@ pub struct SurfaceProfileFork {
     /// `Some(profile name)` continues the root node on its own line as that
     /// profile (Switch now) instead of forking a new session.
     pub switch: Option<String>,
+    /// The profile's filled non-root account choices, which the successor
+    /// takes; `None` keeps the session's.
+    pub account_choices: Option<std::collections::BTreeMap<String, String>>,
     /// Receives the outcome.
     pub finish: Box<dyn FnOnce(ProfileForkOutcome) + Send>,
 }
@@ -338,6 +344,80 @@ impl std::fmt::Debug for SurfaceProfileFork {
     }
 }
 
+/// An account choice the product validated (spec 02 §4.4.3).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SurfaceAccountChoice {
+    /// Store `account` as the session's choice for the non-root `kind`.
+    /// Nothing rebinds; new spawns of that kind use it.
+    Store {
+        /// Provider kind.
+        kind: String,
+        /// Full account reference of that kind.
+        account: String,
+    },
+    /// Continue the root on `account` through the rebind workflow. With
+    /// `continue_failed`, the line head's failed root turn is submitted again
+    /// once the rebind publishes.
+    Root {
+        /// Full account reference of the root kind.
+        account: String,
+        /// Submit the failed root turn again.
+        continue_failed: bool,
+    },
+}
+
+/// Why the host did not apply an account choice.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AccountChoiceRefusal {
+    /// The root is running a turn; a root-kind choice waits for idle.
+    RootBusy,
+    /// A continue needs the line head's last root turn to have failed.
+    NoFailedTurn,
+    /// This continue was already submitted for that turn and account.
+    AlreadyContinued,
+    /// Nothing changed; the reason is operator-facing.
+    Failed(plakous_host_protocol::status::HostFailure),
+}
+
+/// How an account choice ended. `Chosen` carries the line head's root
+/// account and stored choices after it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AccountChoiceOutcome {
+    /// The choice holds.
+    Chosen {
+        /// The line head's root account.
+        root: Option<String>,
+        /// The line head's stored non-root choices.
+        choices: std::collections::BTreeMap<String, String>,
+    },
+    /// Nothing changed.
+    Refused(AccountChoiceRefusal),
+}
+
+/// An account choice for the host to apply, and where its outcome goes.
+pub struct SurfaceAccountEffect {
+    /// What to apply.
+    pub choice: SurfaceAccountChoice,
+    /// Receives the outcome exactly once.
+    pub finish: Box<dyn FnOnce(AccountChoiceOutcome) + Send>,
+}
+
+impl SurfaceAccountEffect {
+    /// Ends the request without changing anything.
+    pub fn refuse(self, refusal: AccountChoiceRefusal) {
+        (self.finish)(AccountChoiceOutcome::Refused(refusal));
+    }
+}
+
+impl std::fmt::Debug for SurfaceAccountEffect {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SurfaceAccountEffect")
+            .field("choice", &self.choice)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The host-owned consequence of an extension intent.
 #[derive(Debug, Default)]
 pub struct SurfaceEffect {
@@ -345,6 +425,8 @@ pub struct SurfaceEffect {
     pub saved: Option<SurfaceSaved>,
     /// Use this profile now.
     pub profile_fork: Option<SurfaceProfileFork>,
+    /// Apply this account choice.
+    pub account: Option<SurfaceAccountEffect>,
 }
 
 /// Driver policy for its own typed extension. No canonical authority is exposed.
@@ -373,6 +455,17 @@ pub trait SurfaceHandler<P: ProtocolExtension>: Send {
     /// keeps for that session settles here, before the switch completes:
     /// nothing of it carries over to the next session.
     fn leaving_session(&self, _session_id: &str) {}
+
+    /// The other accounts of `account`'s kind that are Ready now, for a
+    /// failed turn's usage-limit notice.
+    fn ready_alternatives(&self, _account: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// The host serves `session` on this attachment's line head: after an
+    /// open, and after a workflow moved the line head. The product publishes
+    /// the session state it owns (its account choices).
+    fn serving(&self, _session: &SurfaceSession, _events: &Sender<P>) {}
 
     /// Whether the dispatch reads the session's frozen MCP tools
     /// ([`SurfaceSession::mcp`]); they are gathered only when it does.
@@ -406,6 +499,25 @@ pub(super) fn leaving_session<P: ProtocolExtension>(
         && let Some(handler) = surface
     {
         handler.leaving_session(from);
+    }
+}
+
+/// The Ready alternatives the product reports for `account`.
+pub(super) fn ready_alternatives<P: ProtocolExtension>(
+    surface: Option<&dyn SurfaceHandler<P>>,
+    account: &str,
+) -> Vec<String> {
+    surface.map_or_else(Vec::new, |handler| handler.ready_alternatives(account))
+}
+
+/// Tells the surface the host serves `session` now.
+pub(super) fn serving<P: ProtocolExtension>(
+    surface: Option<&dyn SurfaceHandler<P>>,
+    session: &crate::sessions::SessionRecord,
+    events: &Sender<P>,
+) {
+    if let Some(handler) = surface {
+        handler.serving(&session_facts(session, None, false), events);
     }
 }
 

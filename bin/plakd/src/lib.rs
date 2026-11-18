@@ -202,6 +202,9 @@ mod test_hooks {
     ) -> Option<bool> {
         None
     }
+    pub(crate) const fn ready_accounts() -> Option<Vec<String>> {
+        None
+    }
     pub(crate) fn refresh_profile_ready_catalog(
         sections: Vec<plakous_host_protocol::views::ProviderSection>,
     ) -> Vec<plakous_host_protocol::views::ProviderSection> {

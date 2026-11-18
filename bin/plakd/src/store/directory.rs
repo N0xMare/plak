@@ -294,6 +294,28 @@ impl ProductStore {
     pub fn head_of_tree(&mut self, tree_id: &str) -> Result<Option<String>, String> {
         head_of_tree_on(&self.connection, tree_id)
     }
+
+    /// The record at the head of `tree_id`'s root line: the root node (named
+    /// after its tree) that no successor on the same node supersedes.
+    ///
+    /// # Errors
+    ///
+    /// The read failed or the record is invalid.
+    pub fn root_line_head(
+        &mut self,
+        tree_id: &str,
+    ) -> Result<Option<sessions::SessionRecord>, String> {
+        let id: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT s.id FROM sessions s WHERE s.node_tree_id=?1 AND s.node_agent_id=?1 AND NOT EXISTS (SELECT 1 FROM sessions successor WHERE successor.source_session_id=s.id AND successor.node_tree_id=s.node_tree_id AND successor.node_agent_id=s.node_agent_id) ORDER BY s.updated_at DESC, s.id ASC LIMIT 1",
+                [tree_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| "could not read the root line of a tree".to_owned())?;
+        id.map(|id| self.load(&id)).transpose()
+    }
 }
 
 pub(super) fn head_of_tree_on(

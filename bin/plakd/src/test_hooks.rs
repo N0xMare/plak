@@ -161,6 +161,20 @@ pub(crate) fn refresh_profile_ready_catalog(
     profile_ready_catalog(&sections.into()).accounts
 }
 
+/// `PLAK_TEST_READY_ACCOUNTS`, a comma list, replaces the readiness the
+/// session account-choice fill reads: exactly those accounts are Ready.
+pub(crate) fn ready_accounts() -> Option<Vec<String>> {
+    let value = hook_environment("PLAK_TEST_READY_ACCOUNTS")?;
+    Some(
+        value
+            .to_string_lossy()
+            .split(',')
+            .filter(|account| !account.is_empty())
+            .map(str::to_owned)
+            .collect(),
+    )
+}
+
 /// An injected account section grants readiness only to its exact model.
 pub(crate) fn profile_route_ready(
     catalog: &[plakous_host_protocol::views::ProviderSection],

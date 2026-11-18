@@ -58,7 +58,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
 
         match self.turn_result {
             Some(Ok(result)) => {
-                let lifecycle = turn_lifecycle(&result);
+                let mut lifecycle = turn_lifecycle(&result);
+                lifecycle.usage_limit = crate::runtime::turn::usage_limit_notice(
+                    &result,
+                    self.host.session.account.as_deref(),
+                    |account| {
+                        crate::runtime::surface::ready_alternatives(
+                            self.host.surface.as_deref(),
+                            account,
+                        )
+                    },
+                );
                 let outcome = match result.outcome() {
                     TurnResultOutcome::Completed(response) => {
                         observe_terminal_tool_activity(

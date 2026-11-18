@@ -1,129 +1,116 @@
-//! Session account choice: fill a profile's kinds, and plan a one-step switch.
+//! Session account choice (spec 02 §4.4.3): the fill rule, its refusals and
+//! the CLI's `--account <kind>=<ref>`.
 //!
 //! Templates name a provider kind. The root kind's account is the root line
-//! head and is not stored in the choice map. Every other kind the profile uses
-//! is a map entry. Creation refuses when a used kind cannot be filled;
-//! import and carry fill what is Ready and leave the rest unset.
+//! head's and is never a map entry; every other kind the profile uses is.
+//! Creation, `ApplyProfile` and the CLI fill with [`FillMode::Require`];
+//! import and carry fill [`FillMode::BestEffort`] and never refuse.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use plakous_host_protocol::wire::{AccountChoice, AccountOption, KindAccounts, RequestRefusal};
 use plakous_hosted::account::{AccountRef, Vertical};
 
+use crate::home::paths::PlakPaths;
 use crate::product_config::{AgentTemplate, ProductConfig};
 use crate::store::sessions::SessionRecord;
 
-/// The prompt submitted when a failed root turn already committed a round
-/// after its prompt. Pinned: spec 02 §5.5.
-pub const CONTINUATION_PROMPT: &str = "Continue the previous request from where it stopped. The tool results above are what actually ran.";
-
-/// One catalog account the fill rule may select.
+/// One account the fill rule may select.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReadyAccount {
     /// Full account reference.
     pub account: String,
-    /// The credential is ready for a new dispatch.
+    /// The credential can serve a new dispatch now.
     pub ready: bool,
     /// Operator-facing label, when the catalog has one.
     pub label: Option<String>,
 }
 
-/// Whether an unfilled kind refuses the operation.
+/// Whether an unfilled kind refuses.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FillMode {
-    /// Creation, ApplyProfile and fork.
+    /// Creation, `ApplyProfile` and the CLI run and agent paths.
     Require,
-    /// Import and carry. Spawn still fails closed when nothing is Ready.
+    /// Import and carry. Spawn still fails closed for a kind left unset.
     BestEffort,
 }
 
-/// What a successful fill wrote onto the record.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// What a fill chose.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FilledChoices {
-    /// The root kind's account, derived, not stored in the map.
+    /// The root kind's account: the line head binds it, it is not stored.
     pub root_account: Option<String>,
-    /// Non-root kinds only.
+    /// Every other used kind.
     pub choices: BTreeMap<String, String>,
 }
 
-/// How a `ChooseAccount` intent is carried out. No new intent kind.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SwitchPlan {
-    /// A non-root kind: update the map and stop.
-    MapOnly {
-        /// The kind being replaced.
-        kind: String,
-        /// The full account reference.
-        account: String,
-    },
-    /// The root is mid-turn. Nothing is written.
-    RootBusy,
-    /// The root kind: an existing rebind, then at most one root-start.
-    Root {
-        /// The full account the line head rebinds to.
-        account: String,
-        /// `Some` only when `continue_failed` asks for a root-start.
-        prompt: Option<SwitchPrompt>,
-        /// Stable workflow operation id for this switch.
-        operation_id: String,
-        /// Stable root-start command id. A repeat is the same command.
-        command_id: String,
-    },
+/// Every known account with its readiness, as the gateway or this home's
+/// stores report it. Runs off the caller's thread, so it is safe inside an
+/// async runtime.
+pub fn ready_catalog(paths: &PlakPaths) -> Vec<ReadyAccount> {
+    if let Some(accounts) = crate::test_hooks::ready_accounts() {
+        return accounts
+            .into_iter()
+            .map(|account| ReadyAccount {
+                account,
+                ready: true,
+                label: None,
+            })
+            .collect();
+    }
+    let Ok(state) = crate::home::paths::application_state_home() else {
+        return Vec::new();
+    };
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                else {
+                    return Vec::new();
+                };
+                runtime.block_on(crate::host::ready_accounts(&state, paths))
+            })
+            .join()
+            .unwrap_or_default()
+    })
 }
 
-/// The one root-start a continue-on switch may submit.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SwitchPrompt {
-    /// The failed turn's canonical prompt segment. No round committed after it.
-    Exact(String),
-    /// A round committed after the failed prompt.
-    Continuation,
-}
-
-/// What reopen does with a switch that did not finish. Never an automatic prompt.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SwitchRecovery {
-    /// The rebind has no publication fact. Withdraw it and do not resubmit.
-    WithdrawRequest,
-    /// The rebind published and the root-start was not written. Notice only.
-    NoticeNoPrompt,
-    /// The root-start command id is already durable. Do not write another.
-    KeepExistingCommand,
-}
-
-/// The kinds a profile's root and working set name.
+/// The kinds a profile's root and working-set cards name.
 pub fn profile_kinds(config: &ProductConfig) -> BTreeSet<String> {
     let mut kinds = BTreeSet::new();
-    if let Some(name) = &config.root_agent
-        && let Some(template) = config.templates.get(name)
-    {
-        insert_kind(&mut kinds, template);
-    }
-    for name in config.working_set.names() {
-        if let Some(template) = config.templates.get(name.as_str()) {
-            insert_kind(&mut kinds, template);
+    let root = config
+        .root_agent
+        .as_ref()
+        .and_then(|name| config.templates.get(name));
+    let cards = config
+        .working_set
+        .names()
+        .iter()
+        .filter_map(|name| config.templates.get(name.as_str()));
+    for template in root.into_iter().chain(cards) {
+        if let Some(kind) = template_kind(template) {
+            kinds.insert(kind);
         }
     }
     kinds
 }
 
-fn insert_kind(kinds: &mut BTreeSet<String>, template: &AgentTemplate) {
-    if let Ok(account) = template.account.parse::<AccountRef>()
-        && !account.is_named()
-    {
-        kinds.insert(account.vertical().as_str().to_owned());
-    }
+fn template_kind(template: &AgentTemplate) -> Option<String> {
+    template
+        .account
+        .parse::<AccountRef>()
+        .ok()
+        .map(|account| account.vertical().as_str().to_owned())
 }
 
-/// The root template's kind, when it names one.
+/// The root template's kind, when the profile has a root template.
 pub fn root_kind(config: &ProductConfig) -> Option<String> {
-    let name = config.root_agent.as_ref()?;
-    let template = config.templates.get(name)?;
-    let account = template.account.parse::<AccountRef>().ok()?;
-    (!account.is_named()).then(|| account.vertical().as_str().to_owned())
+    template_kind(config.templates.get(config.root_agent.as_ref()?)?)
 }
 
-/// Group catalog sections into picker rows, one per kind.
+/// Group accounts into picker rows, one per kind.
 pub fn kind_accounts(catalog: &[ReadyAccount]) -> Vec<KindAccounts> {
     let mut grouped: BTreeMap<String, Vec<AccountOption>> = BTreeMap::new();
     for row in catalog {
@@ -145,115 +132,104 @@ pub fn kind_accounts(catalog: &[ReadyAccount]) -> Vec<KindAccounts> {
         .collect()
 }
 
-/// Fill `kinds` from `explicit` choices and `catalog`.
+/// Fill `kinds`: an explicit choice wins (its kind must be its account's),
+/// else the kind's bare default slot if Ready, else its single Ready account.
+/// `Require` refuses the kinds left unfilled, listing their accounts. The root
+/// kind's account is returned apart from the stored choices.
 ///
-/// An explicit choice wins. Otherwise the kind's bare default slot if Ready,
-/// otherwise the single Ready account. `Require` refuses the unfilled kinds.
-/// The root kind is returned separately and is not inserted into the map.
+/// # Errors
+/// `AccountChoiceInvalid` for a malformed, repeated, unused or unready
+/// explicit choice; `AccountChoiceRequired` for unfilled kinds under `Require`.
 pub fn fill(
     kinds: &BTreeSet<String>,
-    root_kind: &str,
+    root_kind: Option<&str>,
     explicit: &[AccountChoice],
     catalog: &[ReadyAccount],
     mode: FillMode,
 ) -> Result<FilledChoices, RequestRefusal> {
-    let mut seen = BTreeSet::new();
     let mut chosen: BTreeMap<String, String> = BTreeMap::new();
     for choice in explicit {
-        if !seen.insert(choice.kind.clone()) {
-            return Err(RequestRefusal::AccountChoiceInvalid {
-                kind: choice.kind.clone(),
-                account: choice.account.clone(),
-                reason: "repeated choice".to_owned(),
-            });
-        }
         let account = admit_choice(&choice.kind, &choice.account, catalog)?;
-        chosen.insert(choice.kind.clone(), account);
+        if chosen.insert(choice.kind.clone(), account).is_some() {
+            return Err(invalid(&choice.kind, &choice.account, "repeated choice"));
+        }
     }
     let mut missing = Vec::new();
-    let mut filled = FilledChoices {
-        root_account: None,
-        choices: BTreeMap::new(),
-    };
+    let mut filled = FilledChoices::default();
     for kind in kinds {
-        if let Some(account) = chosen.remove(kind) {
-            assign(&mut filled, root_kind, kind, account);
-            continue;
-        }
-        match automatic(kind, catalog) {
-            Some(account) => assign(&mut filled, root_kind, kind, account),
+        let account = chosen.remove(kind).or_else(|| automatic(kind, catalog));
+        match account {
+            Some(account) if Some(kind.as_str()) == root_kind => {
+                filled.root_account = Some(account);
+            }
+            Some(account) => {
+                filled.choices.insert(kind.clone(), account);
+            }
             None if mode == FillMode::Require => missing.push(kind.clone()),
             None => {}
         }
     }
     if let Some((kind, account)) = chosen.into_iter().next() {
-        return Err(RequestRefusal::AccountChoiceInvalid {
-            kind,
-            account,
-            reason: "kind is not used by this profile".to_owned(),
-        });
+        return Err(invalid(&kind, &account, "kind is not used by this profile"));
     }
-    if !missing.is_empty() {
-        let rows = kind_accounts(catalog);
-        let kinds = missing
-            .into_iter()
-            .map(|kind| {
-                rows.iter()
-                    .find(|row| row.kind == kind)
-                    .cloned()
-                    .unwrap_or(KindAccounts {
-                        kind,
-                        rows: Vec::new(),
-                    })
-            })
-            .collect();
-        return Err(RequestRefusal::AccountChoiceRequired { kinds });
+    if missing.is_empty() {
+        return Ok(filled);
     }
-    Ok(filled)
+    let rows = kind_accounts(catalog);
+    let kinds = missing
+        .into_iter()
+        .map(|kind| {
+            rows.iter()
+                .find(|row| row.kind == kind)
+                .cloned()
+                .unwrap_or(KindAccounts {
+                    kind,
+                    rows: Vec::new(),
+                })
+        })
+        .collect();
+    Err(RequestRefusal::AccountChoiceRequired { kinds })
 }
 
-fn assign(filled: &mut FilledChoices, root_kind: &str, kind: &str, account: String) {
-    if kind == root_kind {
-        filled.root_account = Some(account);
-    } else {
-        filled.choices.insert(kind.to_owned(), account);
+fn invalid(kind: &str, account: &str, reason: &str) -> RequestRefusal {
+    RequestRefusal::AccountChoiceInvalid {
+        kind: kind.to_owned(),
+        account: account.to_owned(),
+        reason: reason.to_owned(),
     }
 }
 
-fn admit_choice(
+/// An explicit choice: a full reference of a known kind, of that kind, and
+/// Ready now.
+///
+/// # Errors
+/// `AccountChoiceInvalid` naming why.
+pub fn admit_choice(
     kind: &str,
     account: &str,
     catalog: &[ReadyAccount],
 ) -> Result<String, RequestRefusal> {
-    let parsed =
-        account
-            .parse::<AccountRef>()
-            .map_err(|_| RequestRefusal::AccountChoiceInvalid {
-                kind: kind.to_owned(),
-                account: account.to_owned(),
-                reason: "not an account reference".to_owned(),
-            })?;
-    if parsed.vertical().as_str() != kind || !is_kind(kind) {
-        return Err(RequestRefusal::AccountChoiceInvalid {
-            kind: kind.to_owned(),
-            account: account.to_owned(),
-            reason: "not an account of this kind".to_owned(),
-        });
+    if !is_kind(kind) {
+        return Err(invalid(kind, account, "not a provider kind"));
     }
-    let ready = catalog
+    let parsed = account
+        .parse::<AccountRef>()
+        .map_err(|_| invalid(kind, account, "not an account reference"))?;
+    if parsed.vertical().as_str() != kind {
+        return Err(invalid(kind, account, "not an account of this kind"));
+    }
+    if !catalog
         .iter()
-        .any(|row| row.account == parsed.as_str() && row.ready);
-    if !ready {
-        return Err(RequestRefusal::AccountChoiceInvalid {
-            kind: kind.to_owned(),
-            account: parsed.to_string(),
-            reason: "not ready".to_owned(),
-        });
+        .any(|row| row.ready && row.account == parsed.as_str())
+    {
+        return Err(invalid(kind, parsed.as_str(), "not ready"));
     }
     Ok(parsed.to_string())
 }
 
-fn automatic(kind: &str, catalog: &[ReadyAccount]) -> Option<String> {
+/// The fill rule without an explicit choice: the kind's bare default slot if
+/// Ready, else its single Ready account.
+pub fn automatic(kind: &str, catalog: &[ReadyAccount]) -> Option<String> {
     let ready: Vec<&ReadyAccount> = catalog
         .iter()
         .filter(|row| {
@@ -267,10 +243,10 @@ fn automatic(kind: &str, catalog: &[ReadyAccount]) -> Option<String> {
     if ready.iter().any(|row| row.account == kind) {
         return Some(kind.to_owned());
     }
-    if ready.len() == 1 {
-        return Some(ready[0].account.clone());
+    match ready.as_slice() {
+        [only] => Some(only.account.clone()),
+        _ => None,
     }
-    None
 }
 
 fn is_kind(kind: &str) -> bool {
@@ -279,30 +255,8 @@ fn is_kind(kind: &str) -> bool {
         .any(|vertical| vertical.as_str() == kind)
 }
 
-/// Write a filled choice onto `record`. The root account replaces the line
-/// head only when the fill named one. A kind change keeps the previous root
-/// account in the map when that kind is still used.
-pub fn apply_fill(record: &mut SessionRecord, filled: &FilledChoices, kinds: &BTreeSet<String>) {
-    let previous = record.account.clone();
-    if let Some(root) = &filled.root_account {
-        record.account = Some(root.clone());
-    }
-    record.account_choices.clone_from(&filled.choices);
-    if let Some(previous) = previous.as_deref() {
-        record.retain_previous_root_kind(previous);
-    }
-    let root = record
-        .account
-        .as_deref()
-        .and_then(|account| account.parse::<AccountRef>().ok())
-        .map(|account| account.vertical().as_str().to_owned());
-    record
-        .account_choices
-        .retain(|kind, _| kinds.contains(kind) && Some(kind.as_str()) != root.as_deref());
-}
-
-/// Import and carry: keep the imported root account, fill other kinds without
-/// refusing, and do not block on a picker.
+/// Import and carry: the root keeps the imported binding's account; every
+/// other kind the profile uses is filled without refusing.
 pub fn fill_imported(
     record: &mut SessionRecord,
     kinds: &BTreeSet<String>,
@@ -312,39 +266,36 @@ pub fn fill_imported(
         .account
         .as_deref()
         .and_then(|account| account.parse::<AccountRef>().ok())
-        .map(|account| account.vertical().as_str().to_owned())
-        .unwrap_or_default();
-    let Ok(filled) = fill(kinds, &root, &[], catalog, FillMode::BestEffort) else {
-        return;
-    };
-    let mut choices = filled.choices;
-    choices.retain(|kind, _| kind != &root);
-    record.account_choices = choices;
-    if let Some(account) = record.account.clone() {
-        record.retain_previous_root_kind(&account);
+        .map(|account| account.vertical().as_str().to_owned());
+    if let Ok(filled) = fill(kinds, root.as_deref(), &[], catalog, FillMode::BestEffort) {
+        record.account_choices = filled.choices;
     }
 }
 
-/// Store explicit choices. A choice of the current root kind replaces the line
-/// head. Every other kind is the non-root map.
-pub fn store_explicit(record: &mut SessionRecord, choices: &[AccountChoice]) {
-    for choice in choices {
-        let root_kind = record
-            .account
-            .as_deref()
-            .and_then(|account| account.parse::<AccountRef>().ok())
-            .map(|account| account.vertical().as_str().to_owned());
-        if Some(choice.kind.as_str()) == root_kind.as_deref() {
-            record.account = Some(choice.account.clone());
-        } else {
-            record
-                .account_choices
-                .insert(choice.kind.clone(), choice.account.clone());
-        }
-    }
+/// The session's account for every kind it holds one for, the root kind
+/// first: what `AccountChoices` reports.
+pub fn session_choices(
+    root: Option<&str>,
+    choices: &BTreeMap<String, String>,
+) -> Vec<(String, String)> {
+    let root = root
+        .and_then(|account| account.parse::<AccountRef>().ok())
+        .map(|account| (account.vertical().as_str().to_owned(), account.to_string()));
+    root.clone()
+        .into_iter()
+        .chain(
+            choices
+                .iter()
+                .filter(|(kind, _)| root.as_ref().is_none_or(|(root, _)| root != *kind))
+                .map(|(kind, account)| (kind.clone(), account.clone())),
+        )
+        .collect()
 }
 
 /// Parse one `--account <kind>=<ref>` flag.
+///
+/// # Errors
+/// An operator-facing usage message.
 pub fn parse_kind_choice(value: &str) -> Result<AccountChoice, String> {
     let Some((kind, account)) = value.split_once('=') else {
         return Err(format!(
@@ -370,7 +321,11 @@ pub fn parse_kind_choice(value: &str) -> Result<AccountChoice, String> {
     })
 }
 
-/// Split repeatable `--account` values into one bare root account and kind choices.
+/// Split repeatable `--account` values into one bare root account and kind
+/// choices.
+///
+/// # Errors
+/// A second bare account, or a malformed kind choice.
 pub fn split_account_flags(
     flags: Vec<String>,
 ) -> Result<(Option<String>, Vec<AccountChoice>), String> {
@@ -391,495 +346,58 @@ pub fn split_account_flags(
     Ok((bare, choices))
 }
 
-/// The continue-on facts of one root switch. Grouped so the plan stays readable.
-pub struct SwitchContinue<'a> {
-    /// Submit a root-start after the rebind.
-    pub continue_failed: bool,
-    /// The failed turn's prompt, when one was recorded.
-    pub failed_prompt: Option<&'a str>,
-    /// A round committed after that prompt, so the start uses the continuation.
-    pub round_committed_after_prompt: bool,
-    /// Stable workflow operation id for this switch.
-    pub operation_id: String,
-    /// Stable root-start command id. A repeat is the same command.
-    pub command_id: String,
-}
-
-/// Plan one `ChooseAccount`. `root_busy` refuses a root switch before any write.
-pub fn plan_switch(
-    kind: &str,
-    account: &str,
-    root_kind: &str,
-    root_busy: bool,
-    continue_on: SwitchContinue<'_>,
-) -> Result<SwitchPlan, RequestRefusal> {
-    let account = admit_choice(kind, account, &[]).or_else(|refusal| match refusal {
-        RequestRefusal::AccountChoiceInvalid { reason, .. } if reason == "not ready" => {
-            // Readiness of the selected account is checked by the caller
-            // against the live catalog. This admission checks shape only
-            // when the catalog is empty, so a unit plan can name a ref.
-            let parsed = account.parse::<AccountRef>().map_err(|_| {
-                RequestRefusal::AccountChoiceInvalid {
-                    kind: kind.to_owned(),
-                    account: account.to_owned(),
-                    reason: "not an account reference".to_owned(),
-                }
-            })?;
-            if parsed.vertical().as_str() != kind {
-                return Err(RequestRefusal::AccountChoiceInvalid {
-                    kind: kind.to_owned(),
-                    account: account.to_owned(),
-                    reason: "not an account of this kind".to_owned(),
-                });
-            }
-            Ok(parsed.to_string())
-        }
-        other => Err(other),
-    })?;
-    if kind != root_kind {
-        return Ok(SwitchPlan::MapOnly {
-            kind: kind.to_owned(),
-            account,
-        });
+/// The CLI fill for a session whose root account is already chosen: every
+/// other kind the profile uses, from `--account <kind>=<ref>` and the fill
+/// rule.
+///
+/// # Errors
+/// The typed refusal, as operator text.
+pub fn fill_cli(
+    config: &ProductConfig,
+    paths: &PlakPaths,
+    root_account: Option<&str>,
+    explicit: &[AccountChoice],
+) -> Result<BTreeMap<String, String>, crate::CliFailure> {
+    let root = root_account
+        .and_then(|account| account.parse::<AccountRef>().ok())
+        .map(|account| account.vertical().as_str().to_owned());
+    let mut kinds = profile_kinds(config);
+    if let Some(root) = &root {
+        kinds.remove(root);
     }
-    if root_busy {
-        return Ok(SwitchPlan::RootBusy);
+    if explicit.is_empty() && kinds.is_empty() {
+        return Ok(BTreeMap::new());
     }
-    let prompt = continue_on.continue_failed.then(|| {
-        match (
-            continue_on.round_committed_after_prompt,
-            continue_on.failed_prompt,
-        ) {
-            (false, Some(prompt)) if !prompt.is_empty() => SwitchPrompt::Exact(prompt.to_owned()),
-            _ => SwitchPrompt::Continuation,
-        }
-    });
-    Ok(SwitchPlan::Root {
-        account,
-        prompt,
-        operation_id: continue_on.operation_id,
-        command_id: continue_on.command_id,
-    })
-}
-
-/// The prompt bytes a root-start submits, when the plan has one.
-pub fn switch_prompt_text(prompt: &SwitchPrompt) -> &str {
-    match prompt {
-        SwitchPrompt::Exact(text) => text,
-        SwitchPrompt::Continuation => CONTINUATION_PROMPT,
-    }
-}
-
-/// Reopen never resubmits a switch. An unpublished rebind is withdrawn.
-/// A published rebind without its command gets a notice. A written command
-/// stays the one command of its id.
-pub const fn recover_switch(request_published: bool, command_written: bool) -> SwitchRecovery {
-    if !request_published {
-        SwitchRecovery::WithdrawRequest
-    } else if !command_written {
-        SwitchRecovery::NoticeNoPrompt
-    } else {
-        SwitchRecovery::KeepExistingCommand
-    }
-}
-
-/// A crashed switch is never submitted again by reopen.
-pub const fn auto_resubmit_after_reopen() -> bool {
-    false
-}
-
-/// Reopen never submits a prompt for an account switch. An unpublished rebind
-/// stays withdrawn; a written command stays the one command of its id.
-pub(crate) fn should_resubmit_on_reopen() -> bool {
-    let resubmit = auto_resubmit_after_reopen();
-    let withdraw = matches!(
-        recover_switch(false, false),
-        SwitchRecovery::WithdrawRequest
-    );
-    let keep = matches!(
-        recover_switch(true, true),
-        SwitchRecovery::KeepExistingCommand
-    );
-    resubmit && withdraw && keep
-}
-
-/// Stable ids for one continue-on action, derived from the session and account
-/// so a repeat of the same action is the same command.
-pub fn switch_ids(session_id: &str, kind: &str, account: &str) -> (String, String) {
-    let digest =
-        crate::store::sessions::digest_parts(&["plak:account-switch", session_id, kind, account]);
-    (
-        format!("plak:rebind:account:{digest}"),
-        format!("plak:root-start:account:{digest}"),
+    fill(
+        &kinds,
+        None,
+        explicit,
+        &ready_catalog(paths),
+        FillMode::Require,
     )
+    .map(|filled| filled.choices)
+    .map_err(|refusal| crate::CliFailure::new(refusal_text(&refusal)))
 }
 
-#[cfg(test)]
-fn test_continue<'a>(
-    prompt: Option<&'a str>,
-    committed: bool,
-    operation_id: &str,
-    command_id: &str,
-) -> SwitchContinue<'a> {
-    SwitchContinue {
-        continue_failed: true,
-        failed_prompt: prompt,
-        round_committed_after_prompt: committed,
-        operation_id: operation_id.to_owned(),
-        command_id: command_id.to_owned(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn ready(account: &str) -> ReadyAccount {
-        ReadyAccount {
-            account: account.to_owned(),
-            ready: true,
-            label: None,
-        }
-    }
-
-    fn unready(account: &str) -> ReadyAccount {
-        ReadyAccount {
-            account: account.to_owned(),
-            ready: false,
-            label: None,
-        }
-    }
-
-    fn kinds(names: &[&str]) -> BTreeSet<String> {
-        names.iter().map(|name| (*name).to_owned()).collect()
-    }
-
-    #[test]
-    fn fill_refuses_zero_ready_accounts_and_accepts_one_or_an_explicit_choice() {
-        let used = kinds(&["codex", "claude"]);
-        let none = fill(&used, "codex", &[], &[], FillMode::Require);
-        match none {
-            Err(RequestRefusal::AccountChoiceRequired { kinds }) => {
-                assert_eq!(
-                    kinds
-                        .iter()
-                        .map(|row| row.kind.as_str())
-                        .collect::<Vec<_>>(),
-                    ["claude", "codex"]
-                );
-            }
-            other => panic!("expected required, got {other:?}"),
-        }
-        let one = fill(
-            &used,
-            "codex",
-            &[],
-            &[ready("codex/work"), ready("claude")],
-            FillMode::Require,
-        )
-        .unwrap();
-        assert_eq!(one.root_account.as_deref(), Some("codex/work"));
-        assert_eq!(
-            one.choices.get("claude").map(String::as_str),
-            Some("claude")
-        );
-        let many = fill(
-            &kinds(&["codex"]),
-            "codex",
-            &[],
-            &[ready("codex/a"), ready("codex/b")],
-            FillMode::Require,
-        );
-        assert!(matches!(
-            many,
-            Err(RequestRefusal::AccountChoiceRequired { .. })
-        ));
-        let bare = fill(
-            &kinds(&["codex"]),
-            "codex",
-            &[],
-            &[ready("codex"), ready("codex/work")],
-            FillMode::Require,
-        )
-        .unwrap();
-        assert_eq!(bare.root_account.as_deref(), Some("codex"));
-        let explicit = fill(
-            &kinds(&["codex"]),
-            "codex",
-            &[AccountChoice {
-                kind: "codex".into(),
-                account: "codex/work".into(),
-            }],
-            &[ready("codex"), ready("codex/work")],
-            FillMode::Require,
-        )
-        .unwrap();
-        assert_eq!(explicit.root_account.as_deref(), Some("codex/work"));
-        assert!(explicit.choices.is_empty());
-    }
-
-    #[test]
-    fn account_choice_required_lists_the_unfilled_kind() {
-        let error = fill(
-            &kinds(&["grok"]),
-            "codex",
-            &[],
-            &[ready("grok/a"), ready("grok/b"), unready("grok")],
-            FillMode::Require,
-        )
-        .unwrap_err();
-        let RequestRefusal::AccountChoiceRequired { kinds } = error else {
-            panic!("expected required");
-        };
-        assert_eq!(kinds.len(), 1);
-        assert_eq!(kinds[0].kind, "grok");
-        assert_eq!(kinds[0].rows.len(), 3);
-    }
-
-    #[test]
-    fn import_fill_does_not_refuse_when_nothing_is_ready() {
-        let filled = fill(
-            &kinds(&["codex", "claude"]),
-            "codex",
-            &[],
-            &[unready("claude"), ready("codex/ops")],
-            FillMode::BestEffort,
-        )
-        .unwrap();
-        assert_eq!(filled.root_account.as_deref(), Some("codex/ops"));
-        assert!(filled.choices.is_empty());
-    }
-
-    #[test]
-    fn a_named_template_account_is_not_a_kind_flag() {
-        let error = parse_kind_choice("codex").unwrap_err();
-        assert!(error.contains("<kind>=<ref>"), "{error}");
-        let choice = parse_kind_choice("codex=codex/work").unwrap();
-        assert_eq!(choice.kind, "codex");
-        assert_eq!(choice.account, "codex/work");
-    }
-
-    #[test]
-    fn spawn_keeps_a_frozen_named_ref_and_resolves_a_kind_through_the_choice() {
-        let mut session = SessionRecord::new(std::path::PathBuf::from("/tmp/plak-choice"));
-        session.account = Some("codex/work".into());
-        session
-            .account_choices
-            .insert("claude".into(), "claude/alt".into());
-        assert_eq!(
-            session.resolve_spawn_account("claude/old").unwrap(),
-            "claude/old"
-        );
-        assert_eq!(
-            session.resolve_spawn_account("claude").unwrap(),
-            "claude/alt"
-        );
-        assert_eq!(
-            session.resolve_spawn_account("codex").unwrap(),
-            "codex/work"
-        );
-        let error = session.resolve_spawn_account("grok").unwrap_err();
-        assert!(error.contains("no ready account"), "{error}");
-    }
-
-    #[test]
-    fn a_non_root_switch_does_not_rebind_and_a_busy_root_is_root_busy() {
-        let map = plan_switch(
-            "claude",
-            "claude/alt",
-            "codex",
-            true,
-            test_continue(Some("do the thing"), false, "op", "cmd"),
-        )
-        .unwrap();
-        assert!(matches!(map, SwitchPlan::MapOnly { .. }));
-        let busy = plan_switch(
-            "codex",
-            "codex/work",
-            "codex",
-            true,
-            test_continue(Some("do the thing"), false, "op", "cmd"),
-        )
-        .unwrap();
-        assert_eq!(busy, SwitchPlan::RootBusy);
-    }
-
-    #[test]
-    fn a_root_switch_uses_the_exact_prompt_or_the_pinned_continuation() {
-        let exact = plan_switch(
-            "codex",
-            "codex/work",
-            "codex",
-            false,
-            test_continue(Some("do the thing"), false, "op", "cmd"),
-        )
-        .unwrap();
-        let SwitchPlan::Root {
-            prompt, command_id, ..
-        } = exact
-        else {
-            panic!("root plan");
-        };
-        assert_eq!(command_id, "cmd");
-        assert_eq!(switch_prompt_text(prompt.as_ref().unwrap()), "do the thing");
-        let continued = plan_switch(
-            "codex",
-            "codex/work",
-            "codex",
-            false,
-            test_continue(Some("do the thing"), true, "op", "cmd"),
-        )
-        .unwrap();
-        let SwitchPlan::Root { prompt, .. } = continued else {
-            panic!("root plan");
-        };
-        assert_eq!(
-            switch_prompt_text(prompt.as_ref().unwrap()),
-            CONTINUATION_PROMPT
-        );
-    }
-
-    #[test]
-    fn the_same_switch_ids_repeat_and_reopen_never_auto_resubmits() {
-        let first = switch_ids("session", "codex", "codex/work");
-        assert_eq!(first, switch_ids("session", "codex", "codex/work"));
-        assert_ne!(first, switch_ids("session", "codex", "codex/other"));
-        assert!(!auto_resubmit_after_reopen());
-        assert_eq!(
-            recover_switch(false, false),
-            SwitchRecovery::WithdrawRequest
-        );
-        assert_eq!(recover_switch(true, false), SwitchRecovery::NoticeNoPrompt);
-        assert_eq!(
-            recover_switch(true, true),
-            SwitchRecovery::KeepExistingCommand
-        );
-    }
-}
-
-#[cfg(test)]
-mod durability {
-    use super::*;
-    use crate::home::paths::PlakPaths;
-    use crate::store::ProductStore;
-    use plakous_hosted::sessions::SessionWorkflowKind;
-    use plakous_hosted::sessions::projector::{Submission, SubmissionKind, WorkflowRequest};
-
-    fn project_switch_views(store: &mut ProductStore, session_id: &str) {
-        use plakous_hosted::sessions::projector::{SessionViews, ViewWrites};
-        let mut views = SessionViews::empty();
-        views.cursor = plakous::sessions::feed::FeedSeq::new(1);
-        let writes = ViewWrites {
-            expected_cursor: plakous::sessions::feed::FeedSeq::ZERO,
-            cursor: views.cursor,
-            upserts: Vec::new(),
-            deletes: Vec::new(),
-            calls: Vec::new(),
-            open_turns: Vec::new(),
-            processes: Vec::new(),
-            successors: Vec::new(),
-        };
-        store
-            .commit_projection_views(session_id, &writes, &views.state)
-            .unwrap();
-    }
-
-    fn locator() -> plakous::sessions::SessionLocator {
-        "00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-000000000003"
-            .parse()
-            .unwrap()
-    }
-
-    #[test]
-    fn a_switch_crash_withdraws_an_unpublished_rebind_and_never_writes_a_second_command() {
-        let root = tempfile::tempdir().unwrap();
-        let paths = PlakPaths::explicit(root.path().join("home"));
-        let mut store = ProductStore::open(&paths).unwrap();
-        let mut session = SessionRecord::new(root.path().join("workspace"));
-        session.account = Some("codex".into());
-        session
-            .account_choices
-            .insert("claude".into(), "claude/alt".into());
-        store.commit(&mut session).unwrap();
-        let (operation_id, command_id) = switch_ids(&session.id, "codex", "codex/work");
-        let plan = plan_switch(
-            "codex",
-            "codex/work",
-            "codex",
-            false,
-            test_continue(Some("do the thing"), false, &operation_id, &command_id),
-        )
-        .unwrap();
-        let SwitchPlan::Root {
+/// Operator text for a fill refusal.
+pub fn refusal_text(refusal: &RequestRefusal) -> String {
+    match refusal {
+        RequestRefusal::AccountChoiceRequired { kinds } => format!(
+            "account_choice_required: choose an account for {}; pass --account <kind>=<ref>",
+            kinds
+                .iter()
+                .map(|row| row.kind.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        RequestRefusal::AccountChoiceInvalid {
+            kind,
             account,
-            prompt,
-            operation_id,
-            command_id,
-        } = plan
-        else {
-            panic!("root plan");
-        };
-        let request = WorkflowRequest {
-            operation_id: operation_id.clone(),
-            kind: SessionWorkflowKind::Rebind(Box::new(
-                plakous_hosted::sessions::RebindSelection {
-                    provider: "codex".into(),
-                    account: account.clone(),
-                    model: "gpt".into(),
-                    effort: None,
-                    composition: session.composition,
-                    target_selection: session.target_selection.clone(),
-                    protocol: "native".into(),
-                    route: "native".into(),
-                    requested_model: "gpt".into(),
-                    selected_configuration: "{}".into(),
-                    effective_configuration: "{}".into(),
-                    account_binding: "\"binding\"".into(),
-                    own_tree: None,
-                },
-            )),
-            source_locator: locator(),
-        };
-        store.write_workflow_request(&session.id, &request).unwrap();
-        drop(store);
-        let mut reopened = ProductStore::open(&paths).unwrap();
-        project_switch_views(&mut reopened, &session.id);
-        assert_eq!(
-            recover_switch(false, false),
-            SwitchRecovery::WithdrawRequest
-        );
-        assert!(!auto_resubmit_after_reopen());
-        reopened
-            .withdraw_unadmitted_workflows(&mut session)
-            .unwrap();
-        let intents = reopened.load_intents(&session.id).unwrap();
-        assert!(intents.workflow_request(&operation_id).is_none());
-        assert_eq!(intents.submissions, Vec::new());
-        let submission = Submission {
-            command_id: command_id.clone(),
-            kind: SubmissionKind::RootStart,
-            queue_item_id: command_id.clone(),
-            queue_item_revision: 1,
-            target_turn_id: None,
-            canonical_command: switch_prompt_text(prompt.as_ref().unwrap()).to_owned(),
-            submitted_at_ms: 1,
-        };
-        reopened.write_submission(&session.id, &submission).unwrap();
-        assert_eq!(
-            recover_switch(true, true),
-            SwitchRecovery::KeepExistingCommand
-        );
-        let again = reopened.write_submission(&session.id, &submission);
-        assert!(again.is_ok());
-        let loaded = reopened.load_intents(&session.id).unwrap();
-        assert_eq!(loaded.submissions.len(), 1);
-        assert_eq!(loaded.submissions[0].command_id, command_id);
-        assert_eq!(loaded.submissions[0].canonical_command, "do the thing");
-        let persisted = reopened.load(&session.id).unwrap();
-        assert_eq!(
-            persisted.account_choices.get("claude").map(String::as_str),
-            Some("claude/alt")
-        );
-        assert!(!persisted.account_choices.contains_key("codex"));
+            reason,
+        } => format!("account_choice_invalid: {kind}={account}: {reason}"),
+        other => format!("{other:?}"),
     }
 }
+
+#[cfg(test)]
+mod tests;

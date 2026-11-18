@@ -187,6 +187,19 @@ pub(super) fn import_prepared_with_fallback(
     }
     record.validate_for_store().map_err(CliFailure::new)?;
     let profile = profile.or(document_profile);
+    // Spec 02 §4.4.3: the root kind is the imported binding's; the profile's
+    // other kinds are filled without refusing and never wait on a picker.
+    if let Ok(loaded) = product_config::ProductConfig::load(&paths) {
+        let config = profile
+            .as_ref()
+            .and_then(|selection| crate::profiles::selection_config(&loaded, selection).ok())
+            .unwrap_or(loaded);
+        crate::account_choice::fill_imported(
+            &mut record,
+            &crate::account_choice::profile_kinds(&config),
+            &crate::account_choice::ready_catalog(&paths),
+        );
+    }
     if upgrade_successor.is_some() {
         let (_, selected) = successor_profile(&paths, profile.as_ref()).map_err(CliFailure::new)?;
         record.root_profile = Some(plakous_hosted::sessions::RootProfile {

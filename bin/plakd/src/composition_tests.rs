@@ -853,6 +853,7 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
             effective_configuration: "effective".into(),
             account_binding: "account".into(),
             own_tree: Some(plakous_hosted::sessions::RootProfile::default()),
+            account_choices: None,
         })),
     };
     let store = crate::store::session_records::SqliteSessionStore::new(paths.clone());

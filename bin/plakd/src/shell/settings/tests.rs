@@ -86,6 +86,7 @@ fn nearest_profile_ties_keep_the_first_profile_list_row() {
         workspace: paths.home().to_path_buf(),
         live_children: false,
         mcp: None,
+        account_choices: std::collections::BTreeMap::new(),
         roster: Some(crate::roster_input::snapshot_from_config(
             &prepared.config,
             "claude",
@@ -119,6 +120,7 @@ fn stale_composer_refresh_cannot_publish_profile_or_workspace() {
         roster: None,
         live_children: false,
         mcp: None,
+        account_choices: std::collections::BTreeMap::new(),
     };
     let row = session_profile(&config, std::path::Path::new("."), &session);
     let (events, rx) = host_event_sink();
@@ -179,6 +181,7 @@ fn composer_refresh_uses_the_launch_workspace() {
         roster: None,
         live_children: false,
         mcp: None,
+        account_choices: std::collections::BTreeMap::new(),
     };
     ProductSurface::new(paths, crate::gateway::HostCustody::Local).dispatch(
         SurfaceIntent::RefreshComposerChrome,
@@ -225,6 +228,7 @@ fn session_identity_uses_frozen_cards_not_current_config() {
         roster: Some(frozen),
         live_children: false,
         mcp: None,
+        account_choices: std::collections::BTreeMap::new(),
     };
     let matched = session_profile(&prepared.config, dir.path(), &session);
     assert_eq!(matched.id, "claude-default");
@@ -323,6 +327,7 @@ fn session_profile_keeps_config_order_and_sibling_references() {
         )),
         live_children: false,
         mcp: None,
+        account_choices: std::collections::BTreeMap::new(),
     };
     let shape = |cards: &[crate::surface_protocol::ProfileRole]| {
         cards
@@ -378,6 +383,7 @@ fn default_effort_identity_survives_none_and_explicit_default() {
         )),
         live_children: false,
         mcp: None,
+        account_choices: std::collections::BTreeMap::new(),
     };
     assert_eq!(
         session_profile(&prepared.config, dir.path(), &session).id,
@@ -2016,6 +2022,7 @@ fn a_failed_config_loads_no_profile_templates_and_does_not_say_custom() {
         roster: None,
         live_children: false,
         mcp: None,
+        account_choices: std::collections::BTreeMap::new(),
     };
     let (events, rx) = host_event_sink();
     send_profiles(&paths, &events);

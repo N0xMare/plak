@@ -364,27 +364,42 @@ impl Drop for StartupCaller {
     }
 }
 
-fn freeze_spawn_choice(parent: &SpawnParent, _agent_id: &str, card: &str) -> String {
-    let inputs = parent.child_inputs();
-    let records = inputs.state_roots.session_records();
-    let session = records
-        .load(inputs.tree_id)
-        .ok()
-        .or_else(|| records.load(parent.product_session_id()).ok());
-    let Some(session) = session else {
-        return card.to_owned();
+/// The account a spawned child binds for its card (spec 03 §2.3). A named
+/// reference is already frozen. A kind resolves through the tree's root line
+/// head: the root kind is that head's account, any other kind its stored
+/// choice, else the product's best-effort fill. A store read failure or a
+/// kind nothing fills refuses the spawn; nothing falls back.
+fn spawn_account(parent: &SpawnParent, card: &str) -> Result<String, SpawnBindError> {
+    let Ok(card_ref) = card.parse::<crate::account::AccountRef>() else {
+        return Ok(card.to_owned());
     };
-    // A card that is not an account reference keeps the binding it already had.
-    if card.parse::<crate::account::AccountRef>().is_err() {
-        return card.to_owned();
+    if card_ref.is_named() {
+        return Ok(card_ref.to_string());
     }
-    // The child session binds the resolved reference. The node already carries
-    // the card; rewriting it here re-enters the tree writer the spawn tool is
-    // waiting on. A kind with no stored choice keeps the card, and spawn fails
-    // closed later if that card cannot authenticate.
-    session
-        .resolve_spawn_account(card)
-        .unwrap_or_else(|_| card.to_owned())
+    let inputs = parent.child_inputs();
+    let head = inputs
+        .state_roots
+        .session_records()
+        .root_line_head(inputs.tree_id)
+        .map_err(|error| format!("the session's account choices could not be read: {error}"))?
+        .ok_or_else(|| {
+            "the session's account choices could not be read: the tree has no root session"
+                .to_owned()
+        })?;
+    let kind = card_ref.vertical();
+    if let Some(account) = head.chosen_account(kind) {
+        return Ok(account);
+    }
+    parent
+        .state_roots()
+        .roster_source()
+        .fill_spawn_account(kind.as_str())
+        .ok_or_else(|| {
+            SpawnBindError::from(format!(
+                "no {} account is chosen for this session; choose one before spawning",
+                kind.as_str()
+            ))
+        })
 }
 
 /// Creates the child session and starts its assignment turn in one step.
@@ -413,7 +428,7 @@ pub(in crate::agent) async fn create_spawned_child_session(
     let tree_id = parent.child_inputs().tree_id.to_owned();
     let operation_id = spawn_child_operation_id(&tree_id, &spawned.agent_id)?;
     let fence = occupancy_session_fence(start.tier);
-    let resolved = freeze_spawn_choice(parent, &spawned.agent_id, &start.account);
+    let resolved = spawn_account(parent, &start.account)?;
     let account = Some(resolved.as_str()).filter(|account| !account.is_empty());
     let start_kind = ChildAssignmentStartKind::from_composition(prompt_composition(
         spawn_child_start_composition(parent, &spawned.agent_id, account)?,

@@ -278,6 +278,11 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 for row in withdrawn {
                     let _ = events.send(ContentEvent::Row(row));
                 }
+                // A continue that published its rebind and crashed before its
+                // root-start is reported, never resubmitted.
+                if let Some(row) = super::unsent_continue_notice(&config.session, &views) {
+                    let _ = events.send(ContentEvent::Row(row));
+                }
                 // This head holds its lease, so an epoch still pending is a
                 // switch from it that never published.
                 super::super::rebind::withdraw_after_open(&config).await?;

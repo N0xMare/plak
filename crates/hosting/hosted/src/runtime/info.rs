@@ -192,6 +192,7 @@ pub(super) fn send_binding<P: plakous_host_protocol::ProtocolExtension>(
         .to_owned(),
     });
     send_session_info(events, config);
+    super::surface::serving(config.surface.as_deref(), &config.session, events);
 }
 
 /// Projects the typed session facts the Usage Session section renders

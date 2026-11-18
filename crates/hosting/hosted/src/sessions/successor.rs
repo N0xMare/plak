@@ -56,19 +56,11 @@ impl SessionRecord {
                     target.node = crate::sessions::SessionNode::genesis(&target.id);
                     target.root_profile = Some(profile.clone());
                 }
-                let previous = self.account.clone();
-                target.bind_selection(selection);
-                if let Some(previous) = previous.as_deref() {
-                    target.retain_previous_root_kind(previous);
-                }
+                target.bind_selection(selection, self.account.as_deref());
             }
             SessionWorkflowKind::Switch(switch) => {
-                let previous = self.account.clone();
-                target.bind_selection(&switch.rebind);
+                target.bind_selection(&switch.rebind, self.account.as_deref());
                 target.root_profile = Some(switch.root.clone());
-                if let Some(previous) = previous.as_deref() {
-                    target.retain_previous_root_kind(previous);
-                }
             }
             _ => {}
         }
@@ -129,11 +121,26 @@ impl SessionRecord {
         Ok(target)
     }
 
-    fn bind_selection(&mut self, selection: &crate::sessions::RebindSelection) {
+    /// Binds the request's selection. Its account choices replace the
+    /// source's when it carries them; otherwise a root that changed kind
+    /// keeps `previous` for that kind's cards.
+    fn bind_selection(
+        &mut self,
+        selection: &crate::sessions::RebindSelection,
+        previous: Option<&str>,
+    ) {
         self.account = Some(selection.account.clone());
         self.model = Some(selection.model.clone());
         self.effort.clone_from(&selection.effort);
         self.composition = selection.composition;
         self.target_selection = selection.target_selection.clone();
+        match &selection.account_choices {
+            Some(choices) => self.account_choices.clone_from(choices),
+            None => {
+                if let Some(previous) = previous {
+                    self.retain_previous_root_kind(previous);
+                }
+            }
+        }
     }
 }

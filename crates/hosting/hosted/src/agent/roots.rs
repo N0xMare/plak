@@ -80,6 +80,14 @@ pub trait RosterSource: Send + Sync {
     /// Refuses a product-policy read failure rather than treating unavailable policy as
     /// permission to create a tree.
     fn topology_admitted(&self) -> CliResult<bool>;
+
+    /// The account a spawn binds for `kind` when the session has no choice
+    /// for it: the product's fill rule in best-effort mode (the kind's bare
+    /// default slot if Ready, else its single Ready account). `None` refuses
+    /// the spawn.
+    fn fill_spawn_account(&self, _kind: &str) -> Option<String> {
+        None
+    }
 }
 
 #[must_use]

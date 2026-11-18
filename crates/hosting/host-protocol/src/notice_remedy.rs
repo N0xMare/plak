@@ -302,6 +302,14 @@ pub enum NoticeRemedy {
     },
     /// Repair the attach failure, then reopen. Choosing another profile is not that repair.
     RepairThenAttach {},
+    /// Submit the continue prompt an account switch published without:
+    /// choose the same account with `continue_failed` again.
+    ContinueOnAccount {
+        /// Full account reference the session continued on.
+        account: String,
+        /// The continue's derived root-start command id.
+        command_id: String,
+    },
     /// Repair the credential for its condition, or choose another profile.
     RepairCredentialOrChooseProfile {
         /// Original account identity.

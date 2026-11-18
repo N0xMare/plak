@@ -432,8 +432,44 @@ enum ProfileTarget {
     Api(Box<SessionRecord>),
 }
 
+/// What a rebind does with the root node.
+#[derive(Clone, Copy)]
+enum RebindMode<'a> {
+    /// A profile fork: a new line with a tree of its own frozen on `roster`.
+    Fork(&'a crate::orchestration::RosterInput, AccountChoices<'a>),
+    /// Switch now: the root continues its line as the named profile.
+    Switch(
+        &'a str,
+        &'a crate::orchestration::RosterInput,
+        AccountChoices<'a>,
+    ),
+    /// The root continues its line on another account of its kind with the
+    /// same model, effort, composition, target, epoch and profile (spec 02
+    /// §4.4.3). The operation is the switch's derived workflow id.
+    Account(&'a str),
+}
+
+/// The non-root account choices a profile's fill gives the successor;
+/// `None` keeps the source's.
+type AccountChoices<'a> = Option<&'a std::collections::BTreeMap<String, String>>;
+
+impl RebindMode<'_> {
+    /// The root node keeps its line, its running processes and its children.
+    const fn continues_line(self) -> bool {
+        !matches!(self, Self::Fork(..))
+    }
+
+    fn account_choices(self) -> Option<std::collections::BTreeMap<String, String>> {
+        match self {
+            Self::Fork(_, choices) | Self::Switch(_, _, choices) => choices.cloned(),
+            Self::Account(_) => None,
+        }
+    }
+}
+
 /// Forks the attached session onto a profile's root: the branch opens a
 /// tree of its own frozen on `roster`, so the source keeps its tree and cards.
+#[cfg(test)]
 #[allow(
     clippy::too_many_arguments,
     reason = "Profile rebinding receives the attached source, interrupt watch, target tuple, and frozen roster as distinct authorities."
@@ -453,30 +489,158 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     roster: &crate::orchestration::RosterInput,
     switch: Option<&str>,
 ) -> CliResult<Rebound> {
+    handle_profile_rebind(
+        watch,
+        config,
+        opened,
+        stderr_buf,
+        events,
+        ProfileRebind {
+            account,
+            model,
+            effort,
+            extra,
+            composition,
+            protocol,
+            roster,
+            switch,
+            account_choices: None,
+        },
+    )
+    .await
+}
+
+/// One profile's root binding for [`handle_profile_rebind`].
+pub(super) struct ProfileRebind<'a> {
+    pub(super) account: &'a str,
+    pub(super) model: &'a str,
+    pub(super) effort: Option<&'a str>,
+    pub(super) extra: Option<&'a str>,
+    pub(super) composition: Option<crate::binding::CompositionSelection>,
+    pub(super) protocol: Option<crate::binding::ProtocolSelection>,
+    pub(super) roster: &'a crate::orchestration::RosterInput,
+    /// `Some(profile)` continues the root's line as that profile.
+    pub(super) switch: Option<&'a str>,
+    /// The profile's filled non-root account choices for the successor.
+    pub(super) account_choices: AccountChoices<'a>,
+}
+
+/// [`handle_rebind`] with the profile's account fill.
+pub(super) async fn handle_profile_rebind<P: plakous_host_protocol::ProtocolExtension>(
+    watch: InterruptWatch<'_, P>,
+    config: &mut HostConfig<P>,
+    opened: &mut AttachedCodingSession,
+    stderr_buf: &mut Vec<u8>,
+    events: &Sender<P>,
+    profile: ProfileRebind<'_>,
+) -> CliResult<Rebound> {
+    let ProfileRebind {
+        account,
+        model,
+        effort,
+        extra,
+        composition,
+        protocol,
+        roster,
+        switch,
+        account_choices,
+    } = profile;
+    let mode = switch.map_or(RebindMode::Fork(roster, account_choices), |profile| {
+        RebindMode::Switch(profile, roster, account_choices)
+    });
+    let selection =
+        profile_rebind_selection(config, account, model, effort, extra, composition, protocol);
+    rebind_root(
+        watch, config, opened, stderr_buf, events, account, model, selection, mode,
+    )
+    .await
+}
+
+/// Continues the root on `account` (`ChooseAccount` for the root kind): an
+/// ordinary rebind workflow that keeps every other binding fact and the
+/// tree's epoch, published under `operation`.
+pub(super) async fn handle_account_rebind<P: plakous_host_protocol::ProtocolExtension>(
+    watch: InterruptWatch<'_, P>,
+    config: &mut HostConfig<P>,
+    opened: &mut AttachedCodingSession,
+    stderr_buf: &mut Vec<u8>,
+    events: &Sender<P>,
+    account: &str,
+    operation: &str,
+) -> CliResult<Rebound> {
+    let Some(model) = config.session.model.clone() else {
+        return Err(CliFailure::new(
+            "the root has no model to continue on another account",
+        ));
+    };
+    let target_selection = config.session.target_selection.clone();
+    let api_root = target_selection.is_api();
+    let selection = if api_root {
+        Ok((
+            target_selection,
+            true,
+            config.session.effort.clone(),
+            config.session.composition,
+        ))
+    } else {
+        validate_rebind_effort(
+            &config.ready_catalog.accounts,
+            account,
+            &model,
+            config.session.effort.as_deref(),
+        )
+        .map(|effort| (target_selection, false, effort, config.session.composition))
+    };
+    rebind_root(
+        watch,
+        config,
+        opened,
+        stderr_buf,
+        events,
+        account,
+        &model,
+        selection,
+        RebindMode::Account(operation),
+    )
+    .await
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Every rebind receives the attached source, interrupt watch, target tuple and mode as distinct authorities."
+)]
+async fn rebind_root<P: plakous_host_protocol::ProtocolExtension>(
+    watch: InterruptWatch<'_, P>,
+    config: &mut HostConfig<P>,
+    opened: &mut AttachedCodingSession,
+    stderr_buf: &mut Vec<u8>,
+    events: &Sender<P>,
+    account: &str,
+    model: &str,
+    selection: CliResult<(
+        TargetSelection,
+        bool,
+        Option<String>,
+        crate::binding::CompositionSelection,
+    )>,
+    mode: RebindMode<'_>,
+) -> CliResult<Rebound> {
     let rebound: CliResult<Rebound> = Box::pin(async {
         // A switch hands running processes to the successor on the same
         // line; a fork leaves them with the source.
-        if switch.is_none() {
+        if !mode.continues_line() {
             super::jobs_transition_guard(config, opened)?;
         }
         watch.begin();
         let started = Instant::now();
-        refuse_unready_rebind(config, switch.is_some())?;
+        refuse_unready_rebind(config, mode.continues_line())?;
         let account = account.to_owned();
         // A Code Mode (native-ptc) prefix is replayable onto every presentation:
         // each kernel re-projects `exec`/`wait` cells truthfully at dispatch
         // (Responses/Chat carry the original string input, Messages wraps it as
         // `{"input": ...}`), so the rebind branches at the canonical checkpoint
         // like any other and nothing is refused up front.
-        let (target_selection, api_root, effort_label, composition) = profile_rebind_selection(
-            config,
-            &account,
-            model,
-            effort,
-            extra,
-            composition,
-            protocol,
-        )?;
+        let (target_selection, api_root, effort_label, composition) = selection?;
         // refuse before the first resolution round-trip,
         // while no durable rebind work exists to roll back.
         if watch.observe_now() {
@@ -487,7 +651,13 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
             && config.session.effort.as_deref() == effort_label.as_deref()
             && config.session.composition == composition
             && config.session.target_selection == target_selection;
-        if same_binding && profile_cards_active(config, roster)? {
+        let cards_active = match mode {
+            RebindMode::Fork(roster, _) | RebindMode::Switch(_, roster, _) => {
+                profile_cards_active(config, roster)?
+            }
+            RebindMode::Account(_) => true,
+        };
+        if same_binding && cards_active {
             return Ok(Rebound::Unchanged);
         }
         if let Some(refusal) = frozen_tools_rebind_refusal(config, &account, &target_selection) {
@@ -500,7 +670,13 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
         let inherited = source_skills_on(opened).await?;
         config.state_roots.set_inherited_skills(inherited);
         let (operation, target_product_id, own_tree, topology_tree_id, succession) =
-            stage_rebind(config, opened, switch, &account, model, composition, roster).await?;
+            stage_rebind(config, opened, mode, &account, model, composition).await?;
+        let profile = match mode {
+            RebindMode::Fork(roster, _) | RebindMode::Switch(_, roster, _) => {
+                sessions::RootProfile::from_roster(roster)
+            }
+            RebindMode::Account(_) => config.session.root_profile.clone().unwrap_or_default(),
+        };
         let target = resolve_profile_target(
             watch,
             config,
@@ -534,7 +710,7 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
             ProfileBranchInput {
                 target,
                 own_tree,
-                profile: sessions::RootProfile::from_roster(roster),
+                profile,
                 topology_tree_id: &topology_tree_id,
                 effort_label: &effort_label,
                 attached_tree: &mut attached_tree,
@@ -545,6 +721,7 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
                 target_selection,
                 operation: &operation,
                 succession: succession.as_ref(),
+                account_choices: mode.account_choices(),
             },
         ))
         .await;
@@ -607,6 +784,7 @@ struct ProfileBranchInput<'a> {
     target_selection: TargetSelection,
     operation: &'a str,
     succession: Option<&'a Succession>,
+    account_choices: Option<std::collections::BTreeMap<String, String>>,
 }
 
 /// Refuses a rebind the session cannot take now. A switch continues the
@@ -671,18 +849,30 @@ fn profile_rebind_selection<P: plakous_host_protocol::ProtocolExtension>(
 async fn stage_rebind<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     opened: &AttachedCodingSession,
-    switch: Option<&str>,
+    mode: RebindMode<'_>,
     account: &str,
     model: &str,
     composition: crate::binding::CompositionSelection,
-    roster: &crate::orchestration::RosterInput,
 ) -> CliResult<(String, String, bool, String, Option<Succession>)> {
-    let Some(profile) = switch else {
-        let (operation, target, own_tree, tree_id) =
-            stage_profile_fork(config, opened, account, model, composition, roster).await?;
-        return Ok((operation, target, own_tree, tree_id, None));
+    let (profile, roster) = match mode {
+        RebindMode::Fork(roster, _) => {
+            let (operation, target, own_tree, tree_id) =
+                stage_profile_fork(config, opened, account, model, composition, roster).await?;
+            return Ok((operation, target, own_tree, tree_id, None));
+        }
+        RebindMode::Account(operation) => {
+            let (operation, target, own_tree, tree_id) =
+                stage_switch(config, opened, operation.to_owned());
+            let succession = Succession::account(config, account);
+            return Ok((operation, target, own_tree, tree_id, Some(succession)));
+        }
+        RebindMode::Switch(profile, roster, _) => (profile, roster),
     };
-    let (operation, target, own_tree, tree_id) = stage_switch(config, opened);
+    let (operation, target, own_tree, tree_id) = stage_switch(
+        config,
+        opened,
+        format!("plak:switch:{}", uuid::Uuid::new_v4()),
+    );
     let succession = Succession::plan(config, profile, roster)?;
     config
         .state_roots
@@ -694,8 +884,8 @@ async fn stage_rebind<P: plakous_host_protocol::ProtocolExtension>(
 fn stage_switch<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
     opened: &AttachedCodingSession,
+    operation: String,
 ) -> (String, String, bool, String) {
-    let operation = format!("plak:switch:{}", uuid::Uuid::new_v4());
     let target_product_id = sessions::projector::WorkflowRequest {
         operation_id: operation.clone(),
         source_locator: opened.locator(),
@@ -813,6 +1003,7 @@ async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
         target_selection,
         operation,
         succession,
+        account_choices,
     } = input;
     let (runtime, target) = prepare_profile_runtime(
         watch,
@@ -843,7 +1034,7 @@ async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
     // otherwise, and always for a switch, the source's tree.
     let own_tree = (own_tree || composition == crate::binding::CompositionSelection::PySdk)
         && succession.is_none();
-    let selection = rebind_selection(
+    let mut selection = rebind_selection(
         &target,
         own_tree.then(|| profile.clone()),
         account,
@@ -852,6 +1043,7 @@ async fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
         composition,
         target_selection,
     )?;
+    selection.account_choices = account_choices;
     let workflow_kind = profile_workflow_kind(selection, succession)?;
     let attached_locator = publish_rebind_intent(
         watch,
@@ -1131,6 +1323,7 @@ fn rebind_selection(
         account_binding: serde_json::to_string(&target.binding.account_binding())
             .map_err(|_| CliFailure::new("account binding could not be persisted"))?,
         own_tree,
+        account_choices: None,
     })
 }
 

@@ -668,6 +668,7 @@ fn rebind_selection(model: &str) -> Box<RebindSelection> {
         effective_configuration: "effective-config".into(),
         account_binding: "account-binding".into(),
         own_tree: Some(RootProfile::default()),
+        account_choices: None,
     })
 }
 

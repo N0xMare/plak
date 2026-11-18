@@ -620,8 +620,13 @@ fn switched_note(opened: &AttachedCodingSession, succession: &Succession) -> Str
     let plural = |count: usize, one: &str, many: &str| {
         format!("{count} {}", if count == 1 { one } else { many })
     };
+    let subject = if succession.is_account() {
+        "account"
+    } else {
+        "profile"
+    };
     format!(
-        "switched to profile {}; {} and {} kept running",
+        "switched to {subject} {}; {} and {} kept running",
         succession.profile,
         plural(agents, "agent", "agents"),
         plural(processes, "process", "processes")

@@ -132,6 +132,7 @@ pub(crate) mod events;
 mod extension_tests;
 mod fork;
 mod host_loop;
+pub use host_loop::CONTINUATION_PROMPT;
 mod info;
 pub(crate) mod job_events;
 mod ledger;
@@ -243,7 +244,8 @@ pub use startup::{
     SeededSessionCreation, create_seeded_session, create_seeded_session_with_preflight,
 };
 pub use surface::{
-    ProfileForkOutcome, ReadinessRead, Surface, SurfaceEffect, SurfaceFacts, SurfaceHandler,
+    AccountChoiceOutcome, AccountChoiceRefusal, ProfileForkOutcome, ReadinessRead, Surface,
+    SurfaceAccountChoice, SurfaceAccountEffect, SurfaceEffect, SurfaceFacts, SurfaceHandler,
     SurfaceMcp, SurfacePhase, SurfaceProfileFork, SurfaceRefusal, SurfaceSaved, SurfaceSession,
     UsageRead, UsageReads,
 };

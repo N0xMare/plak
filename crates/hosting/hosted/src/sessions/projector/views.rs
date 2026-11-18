@@ -115,6 +115,44 @@ pub struct Counters {
     pub compactions: u64,
 }
 
+/// The newest root turn on the followed lineage: what a continue on another
+/// account reads (spec 02 §4.4.3). A successor's views inherit it with the
+/// rest of its source's state.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LastRootTurn {
+    /// The root turn.
+    pub turn_id: String,
+    /// The root command that admitted it.
+    pub command_id: String,
+    /// How it ended; `None` while it is open.
+    pub outcome: Option<LastRootOutcome>,
+    /// The exact text of its prompt segment, when that segment was operator
+    /// text alone (a host wake or an image has none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// History was committed after its prompt segment.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub committed_after_prompt: bool,
+    /// Its first history segment, the prompt's place, was applied.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub history_seen: bool,
+}
+
+/// How the newest root turn ended.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LastRootOutcome {
+    /// It completed.
+    Completed,
+    /// It failed.
+    Failed,
+    /// It was cancelled or abandoned.
+    Cancelled,
+    /// It requires recovery.
+    RecoveryRequired,
+}
+
 /// A root turn the projector has seen admitted and not yet terminal.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -209,6 +247,9 @@ pub struct SessionViewState {
     pub wake: Option<Anchored<bool>>,
     /// The counters.
     pub counters: Counters,
+    /// The newest root turn on the followed lineage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_root_turn: Option<LastRootTurn>,
     /// Admitted root turns without a terminal.
     #[serde(skip)]
     pub open_turns: BTreeMap<String, OpenTurn>,

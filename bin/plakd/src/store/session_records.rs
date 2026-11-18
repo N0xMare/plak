@@ -327,6 +327,10 @@ impl SessionRecordStore for SqliteSessionStore {
         self.with_store(|store| store.load_views(id))
     }
 
+    fn root_line_head(&self, tree_id: &str) -> Result<Option<SessionRecord>, String> {
+        self.with_store(|store| store.root_line_head(tree_id))
+    }
+
     fn load_queue_commands(
         &self,
         id: &str,

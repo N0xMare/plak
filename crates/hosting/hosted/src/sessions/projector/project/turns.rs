@@ -1,3 +1,5 @@
+use crate::sessions::projector::LastRootOutcome;
+
 use super::{
     Anchored, Applier, FeedCancelCause, FeedFact, FeedTurnOutcome, NoticeScope, PauseCause,
     ProjectError, ProjectedAbandonment, ReadRequest, ReadValue, RowKey, TerminalRead,
@@ -13,6 +15,20 @@ impl Applier<'_> {
         steering_unapplied: bool,
     ) -> Result<(), ProjectError> {
         let turn = turn_id.to_string();
+        if let Some(last) = self
+            .views
+            .state
+            .last_root_turn
+            .as_mut()
+            .filter(|last| last.turn_id == turn)
+        {
+            last.outcome = Some(match outcome {
+                FeedTurnOutcome::Completed { .. } => LastRootOutcome::Completed,
+                FeedTurnOutcome::Failed { .. } => LastRootOutcome::Failed,
+                FeedTurnOutcome::RecoveryRequired => LastRootOutcome::RecoveryRequired,
+                _ => LastRootOutcome::Cancelled,
+            });
+        }
         let open_turn = self.views.state.open_turns.remove(&turn);
         // The operator's interrupt: a requested cancel, or any cancel of a
         // turn an accepted operator cancel named (its in-flight work may be

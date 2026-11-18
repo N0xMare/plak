@@ -544,6 +544,15 @@ fn handle_shell_extension<P: plakous_host_protocol::ProtocolExtension>(
         },
         events,
     );
+    if let Some(account) = effect.account {
+        account.refuse(super::surface::AccountChoiceRefusal::Failed(
+            crate::CliFailure::new(
+                "this session is not attached; attach it before choosing an account",
+            )
+            .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Attach {})
+            .host_failure(),
+        ));
+    }
     let Some(fork) = effect.profile_fork else {
         return ShellStep::Continue;
     };

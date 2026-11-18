@@ -96,6 +96,12 @@ impl PlakousApplication {
         let configured = config.default_binding();
         let composition = run_composition(composition, &configured, selection, model);
         crate::build_features::admit_selected(config, Some(account), Some(model), composition)?;
+        let choices = crate::account_choice::fill_cli(
+            config,
+            self.product_paths()?,
+            Some(account),
+            accounts,
+        )?;
         // The repository gate's offline model; see `crate::test_hooks`. A
         // scripted lifecycle binds the requested tuple without a credential
         // refresh or a catalog row, because there is no provider to admit.
@@ -108,7 +114,7 @@ impl PlakousApplication {
             session.effort = effort.map(product_host::effort_label);
             session.composition = composition;
             session.target_selection = product_config::ProductTargetSelection::Native;
-            crate::account_choice::store_explicit(&mut session, accounts);
+            session.account_choices.clone_from(&choices);
             return self.run_hosted(
                 config,
                 session,
@@ -208,7 +214,7 @@ impl PlakousApplication {
         session.effort = selected_effort.map(product_host::effort_label);
         session.composition = composition;
         session.target_selection = target_selection;
-        crate::account_choice::store_explicit(&mut session, accounts);
+        session.account_choices = choices;
         let target = product_host::HostTargetAuthority::Native {
             provider,
             resolved,
@@ -272,12 +278,18 @@ impl PlakousApplication {
         if run_expired(limits) {
             return run_timeout(stderr);
         }
+        let choices = crate::account_choice::fill_cli(
+            config,
+            self.product_paths()?,
+            Some(account.as_str()),
+            accounts,
+        )?;
         let api = selection
             .api_target(&account)?
             .ok_or_else(|| CliFailure::new("API run requires an API target"))?;
         let cwd = self.workspace()?;
         let mut session = api_run_record(cwd, &account, model, effort, composition, selection)?;
-        crate::account_choice::store_explicit(&mut session, accounts);
+        session.account_choices = choices;
         self.product_paths()?
             .ensure_layout()
             .map_err(CliFailure::new)?;

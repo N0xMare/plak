@@ -73,35 +73,6 @@ impl ProductAgentTree {
         }
     }
 
-    /// Freeze a spawned node's account to the session's full reference.
-    ///
-    /// A kind-only card account (`codex`) may become `codex` or `codex/name`.
-    /// A named reference already on the node is the frozen bind and is not moved.
-    pub fn freeze_spawn_account(&mut self, id: &str, account: &str) -> Result<(), TopologyError> {
-        let Some(node) = self.nodes.get_mut(id) else {
-            return Err(TopologyError::new(
-                TopologyErrorCode::SchemaMismatch,
-                "spawn account names no node",
-            ));
-        };
-        if node.account == account || node.account.contains('/') {
-            return Ok(());
-        }
-        let same_kind = account == node.account
-            || account
-                .strip_prefix(&node.account)
-                .is_some_and(|rest| rest.starts_with('/'));
-        if node.account.is_empty() || !same_kind {
-            return Err(TopologyError::new(
-                TopologyErrorCode::SchemaMismatch,
-                "spawn account does not match the card kind",
-            ));
-        }
-        node.account = account.to_owned();
-        self.bump();
-        Ok(())
-    }
-
     /// The card a spawn binds, from the caller's epoch. A child binds
     /// exactly what its card names — account, model, effort and tier — and
     /// never its caller's.

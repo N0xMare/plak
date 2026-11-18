@@ -209,12 +209,9 @@ fn session_profile_row(
         })
         .collect()
     });
-    let account_kinds = session_account_kinds(
-        &session.account.clone().unwrap_or_default(),
-        &cards
-            .iter()
-            .map(|card| card.account.clone())
-            .collect::<Vec<_>>(),
+    let account_kinds = accounts::used_kinds(
+        session.account.as_deref(),
+        cards.iter().map(|card| card.account.as_str()),
     );
     ProfileRow {
         id,
@@ -234,18 +231,6 @@ fn session_profile_row(
         cards,
         account_kinds,
     }
-}
-
-fn session_account_kinds(root: &str, cards: &[String]) -> Vec<String> {
-    let mut kinds = std::collections::BTreeSet::new();
-    for account in std::iter::once(root.to_owned()).chain(cards.iter().cloned()) {
-        if let Ok(parsed) = account.parse::<plakous_hosted::account::AccountRef>()
-            && !parsed.is_named()
-        {
-            kinds.insert(parsed.vertical().as_str().to_owned());
-        }
-    }
-    kinds.into_iter().collect()
 }
 
 /// The frozen working set is a set, so it has no config order. Prefer the
@@ -355,6 +340,7 @@ fn apply_profile(
     paths: &PlakPaths,
     name: &str,
     apply: crate::surface_protocol::ProfileApply,
+    accounts: &[plakd_wire_types::AccountChoice],
     facts: SurfaceFacts<'_>,
     events: &Sender<PlakExtension>,
 ) -> Option<SurfaceProfileFork> {
@@ -410,14 +396,20 @@ fn apply_profile(
         refuse_profile(&prepared.id, reason, events);
         return None;
     }
+    let Some(filled) =
+        accounts::fill_profile(paths, &prepared.id, &prepared.config, accounts, events)
+    else {
+        return None;
+    };
+    let root_account = filled.root_account.unwrap_or_else(|| root.account.clone());
     let roster = crate::roster_input::roster_input_from_config(
         &prepared.config,
-        root.account.clone(),
+        root_account.clone(),
         root.model.clone(),
         root.effort.clone(),
     );
     let fork = SurfaceProfileFork {
-        account: root.account.clone(),
+        account: root_account,
         model: root.model.clone(),
         effort: root.effort.clone(),
         extra: root.is_fast().then(|| "priority".to_owned()),
@@ -427,6 +419,7 @@ fn apply_profile(
         protocol: root.protocol,
         roster,
         switch: switch.then(|| prepared.id.clone()),
+        account_choices: Some(filled.choices),
         finish: Box::new({
             let paths = paths.clone();
             let events = events.answering();
@@ -470,187 +463,6 @@ fn profile_route_ready(
 /// Why the profile cannot apply in this session now: a running turn, or for
 /// Switch now, queued prompts (the switch continues this root, so nothing
 /// may wait on the predecessor).
-fn choose_account(
-    paths: &PlakPaths,
-    kind: &str,
-    account: &str,
-    continue_failed: bool,
-    facts: SurfaceFacts<'_>,
-    events: &Sender<PlakExtension>,
-) -> SurfaceEffect {
-    let Some(session) = facts.session.as_ref() else {
-        note(events, "choose account requires an open session");
-        return SurfaceEffect::default();
-    };
-    let root_kind = session
-        .account
-        .as_deref()
-        .and_then(|value| value.parse::<plakous_hosted::account::AccountRef>().ok())
-        .map(|value| value.vertical().as_str().to_owned());
-    let root = root_kind.as_deref() == Some(kind);
-    if root && facts.phase == SurfacePhase::Busy {
-        note(
-            events,
-            "root_busy: the root is busy; choose an account when it is idle",
-        );
-        return SurfaceEffect::default();
-    }
-    if let Err(error) = crate::account_choice::parse_kind_choice(&format!("{kind}={account}")) {
-        note(events, &error);
-        return SurfaceEffect::default();
-    }
-    if !root {
-        if let Err(error) = write_non_root_choice(paths, &session.id, kind, account) {
-            note(events, &error);
-        }
-        return SurfaceEffect::default();
-    }
-    let Some(model) = session.model.clone() else {
-        note(events, "the root has no model to rebind");
-        return SurfaceEffect::default();
-    };
-    let config = match ProductConfig::load(paths) {
-        Ok(config) => config,
-        Err(error) => {
-            note(events, &error);
-            return SurfaceEffect::default();
-        }
-    };
-    let roster = crate::roster_input::roster_input_from_config(
-        &config,
-        account,
-        model.clone(),
-        session.effort.clone(),
-    );
-    let paths = paths.clone();
-    let session_id = session.id.clone();
-    let kind = kind.to_owned();
-    let account_owned = account.to_owned();
-    let (failed, committed) = if continue_failed {
-        failed_prompt(paths.clone(), &session_id)
-    } else {
-        (String::new(), false)
-    };
-    let (operation_id, command_id) =
-        crate::account_choice::switch_ids(&session_id, &kind, &account_owned);
-    let prompt = crate::account_choice::plan_switch(
-        &kind,
-        &account_owned,
-        root_kind.as_deref().unwrap_or(kind.as_str()),
-        facts.phase == SurfacePhase::Busy,
-        crate::account_choice::SwitchContinue {
-            continue_failed,
-            failed_prompt: (!failed.is_empty()).then_some(failed.as_str()),
-            round_committed_after_prompt: committed,
-            operation_id,
-            command_id,
-        },
-    )
-    .ok()
-    .and_then(|plan| match plan {
-        crate::account_choice::SwitchPlan::Root {
-            prompt: Some(prompt),
-            ..
-        } => Some(crate::account_choice::switch_prompt_text(&prompt).to_owned()),
-        crate::account_choice::SwitchPlan::Root { prompt: None, .. }
-        | crate::account_choice::SwitchPlan::MapOnly { .. }
-        | crate::account_choice::SwitchPlan::RootBusy => None,
-    });
-    SurfaceEffect {
-        profile_fork: Some(SurfaceProfileFork {
-            account: account_owned.clone(),
-            model,
-            effort: session.effort.clone(),
-            extra: session.fast.then(|| "priority".to_owned()),
-            composition: None,
-            protocol: None,
-            roster,
-            switch: config.root_agent.clone().or(Some("root".to_owned())),
-            finish: Box::new(move |outcome| {
-                let Some(text) = prompt else {
-                    return;
-                };
-                if !matches!(outcome, ProfileForkOutcome::Switched) {
-                    return;
-                }
-                let _ = write_root_start(&paths, &session_id, &kind, &account_owned, &text);
-            }),
-        }),
-        ..SurfaceEffect::default()
-    }
-}
-
-fn note(events: &Sender<PlakExtension>, text: &str) {
-    let _ = events.send(ContentEvent::Row(TranscriptRow::info(
-        NoticeScope::Session,
-        text,
-    )));
-}
-
-fn write_non_root_choice(
-    paths: &PlakPaths,
-    session_id: &str,
-    kind: &str,
-    account: &str,
-) -> Result<(), String> {
-    let mut store = crate::store::ProductStore::open(paths).map_err(|error| error.to_string())?;
-    let mut record = store.load(session_id)?;
-    record
-        .account_choices
-        .insert(kind.to_owned(), account.to_owned());
-    store.commit(&mut record).map_err(|error| error.to_string())
-}
-
-fn failed_prompt(paths: PlakPaths, session_id: &str) -> (String, bool) {
-    let Ok(mut store) = crate::store::ProductStore::open(&paths) else {
-        return (String::new(), true);
-    };
-    let Ok(record) = store.load(session_id) else {
-        return (String::new(), true);
-    };
-    let mut last_user = String::new();
-    let mut committed = false;
-    for row in record.transcript.iter() {
-        match row {
-            TranscriptRow::User { text, .. } => {
-                last_user.clone_from(text);
-                committed = false;
-            }
-            TranscriptRow::Assistant { .. } | TranscriptRow::Tool(_) if !last_user.is_empty() => {
-                committed = true;
-            }
-            _ => {}
-        }
-    }
-    (last_user, committed)
-}
-
-fn write_root_start(
-    paths: &PlakPaths,
-    session_id: &str,
-    kind: &str,
-    account: &str,
-    prompt: &str,
-) -> Result<(), String> {
-    use plakous_hosted::sessions::projector::{Submission, SubmissionKind};
-    let (_, command_id) = crate::account_choice::switch_ids(session_id, kind, account);
-    let mut store = crate::store::ProductStore::open(paths).map_err(|error| error.to_string())?;
-    store
-        .write_submission(
-            session_id,
-            &Submission {
-                command_id: command_id.clone(),
-                kind: SubmissionKind::RootStart,
-                queue_item_id: command_id,
-                queue_item_revision: 1,
-                target_turn_id: None,
-                canonical_command: prompt.to_owned(),
-                submitted_at_ms: 0,
-            },
-        )
-        .map_err(|error| error.to_string())
-}
-
 fn now_refusal(switch: bool, facts: &SurfaceFacts<'_>) -> Option<String> {
     if facts.phase == SurfacePhase::Busy {
         let verb = if switch { "switch to" } else { "fork onto" };
@@ -1291,6 +1103,18 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
         matches!(intent, SurfaceIntent::ShowMcp)
     }
 
+    fn serving(
+        &self,
+        session: &plakous_hosted::runtime::SurfaceSession,
+        events: &Sender<PlakExtension>,
+    ) {
+        accounts::serving(session, events);
+    }
+
+    fn ready_alternatives(&self, account: &str) -> Vec<String> {
+        accounts::ready_alternatives(&self.paths, account)
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "The product intent dispatcher handles each settings, session, topology, and account action against one immutable host snapshot."
@@ -1421,9 +1245,20 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             SurfaceIntent::RefuseReloadRequest { request_id, reason } => {
                 self.reload.refuse(&request_id, reason);
             }
-            SurfaceIntent::ApplyProfile { name, apply, .. } => {
+            SurfaceIntent::ApplyProfile {
+                name,
+                apply,
+                accounts,
+            } => {
                 return SurfaceEffect {
-                    profile_fork: apply_profile(&self.paths, &name, apply, facts, events),
+                    profile_fork: apply_profile(
+                        &self.paths,
+                        &name,
+                        apply,
+                        &accounts,
+                        facts,
+                        events,
+                    ),
                     ..SurfaceEffect::default()
                 };
             }
@@ -1432,12 +1267,12 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
                 account,
                 continue_failed,
             } => {
-                return choose_account(
+                return accounts::choose_account(
                     &self.paths,
-                    &kind,
-                    &account,
+                    kind,
+                    account,
                     continue_failed,
-                    facts,
+                    &facts,
                     events,
                 );
             }
@@ -1468,6 +1303,8 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
         })
     }
 }
+
+mod accounts;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]

@@ -388,6 +388,11 @@ impl plakous_hosted::agent::RosterSource for ProductRosterSource {
         crate::oauth_ui::account_cli_name(provider)
     }
 
+    fn fill_spawn_account(&self, kind: &str) -> Option<String> {
+        let catalog = crate::account_choice::ready_catalog(self.paths.as_ref()?);
+        crate::account_choice::automatic(kind, &catalog)
+    }
+
     fn topology_admitted(&self) -> CliResult<bool> {
         self.paths.as_ref().map_or(Ok(false), |paths| {
             crate::product_config::SessionPolicy::load(paths)

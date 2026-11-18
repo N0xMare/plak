@@ -52,6 +52,10 @@ pub struct RebindSelection {
     /// the source's tree.
     #[serde(deserialize_with = "Option::deserialize")]
     pub own_tree: Option<RootProfile>,
+    /// The non-root account choices a profile's fill gives the successor;
+    /// `None`, omitted, keeps the source's (spec 02 §4.4.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_choices: Option<std::collections::BTreeMap<String, String>>,
 }
 
 /// A profile switch of the root node onto the same line (live succession):
