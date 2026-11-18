@@ -519,6 +519,61 @@ async fn a_dispatch_and_a_rejection_during_a_claimed_refresh_answer_the_settled_
 }
 
 #[tokio::test]
+async fn a_named_codex_session_reopens_through_a_gateway_over_its_named_slot() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let paths = SubscriptionPaths::from_xdg_state_home(root.path())?;
+    seed(
+        &crate::subscriptions::state::tests::child_catalog::named_account(
+            &paths,
+            NativeProvider::Codex,
+            "work",
+        )?,
+        super::super::unix_now()?,
+    )?;
+    let upstream = upstream().await?;
+
+    let mut direct =
+        NativeSubscriptions::new(paths.clone()).for_named_account(NativeProvider::Codex, "work")?;
+    let dialing = plakous_http::Client::new_http1(plakous_http::Limits::default())?
+        .with_test_dial_override(
+            plakous_http::Origin::parse(CHATGPT)?,
+            upstream.origin.clone(),
+            upstream.client.clone(),
+        );
+    direct.codex_test_transport = Some((dialing, plakous_openai::EndpointOrigin::parse(CHATGPT)?));
+    let bound = direct
+        .resolve_turn_scoped_provider(selection()?, limits()?, SessionLineage::Root)
+        .await?;
+    dispatch_once(&bound).await?;
+    let direct_requests = upstream.take();
+
+    // The account is `codex/work`: the gateway adopts the same named slot in
+    // place, so the authority digest over its path is the one bound.
+    let gateway = NativeSubscriptions::new(paths.clone())
+        .for_named_account(NativeProvider::Codex, "work")?
+        .with_custody(&gateway_custody(&paths, &upstream)?);
+    assert_eq!(
+        gateway.status(NativeProvider::Codex).await?,
+        direct.status(NativeProvider::Codex).await?
+    );
+    let reopened = gateway
+        .resolve_turn_scoped_provider(selection()?, limits()?, SessionLineage::Root)
+        .await?;
+    assert_eq!(binding(&reopened)?, binding(&bound)?);
+    dispatch_once(&reopened).await?;
+    let gateway_requests = upstream.take();
+    assert_eq!(direct_requests.len(), 2, "{direct_requests:?}");
+    assert_eq!(gateway_requests.len(), direct_requests.len());
+    for (direct, relayed) in direct_requests.iter().zip(&gateway_requests) {
+        assert_eq!(
+            String::from_utf8_lossy(relayed),
+            String::from_utf8_lossy(direct)
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_quarantined_login_reports_its_status_and_refuses_fields_not_ready() -> TestResult {
     use plakous_auth::custody::{
         CredentialCustodian as _, CustodyError, CustodySlot, CustodyStatus,

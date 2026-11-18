@@ -200,3 +200,50 @@ async fn a_relayed_401_is_refreshed_once_by_the_gateway_before_one_redispatch() 
     assert!(claude_generation(&paths)? > 1);
     Ok(())
 }
+
+#[tokio::test]
+async fn a_named_claude_session_reopens_through_a_gateway_with_its_scoped_authority() -> TestResult
+{
+    let root = tempfile::tempdir()?;
+    let paths = SubscriptionPaths::from_xdg_state_home(root.path())?;
+    seed_claude(
+        &crate::subscriptions::state::tests::child_catalog::named_account(
+            &paths, PROVIDER, "work",
+        )?,
+        "access-one",
+        "refresh-one",
+    )?;
+    let upstream = upstream().await?;
+
+    let mut direct = subscriptions(&paths)?.for_named_account(PROVIDER, "work")?;
+    direct.claude_test_transport = Some(dialing(&upstream)?);
+    let bound = direct
+        .resolve_turn_scoped_provider_for_attach(claude_selection(MODEL)?, limits()?)
+        .await?;
+    dispatch_once(&bound).await?;
+    let direct_requests = upstream.take();
+
+    // The account is `claude/work`: the gateway opens the same named slot,
+    // whose credential authority is scoped to that name.
+    let gateway = subscriptions(&paths)?
+        .for_named_account(PROVIDER, "work")?
+        .with_custody(&gateway_custody(&paths, &upstream)?);
+    assert_eq!(
+        gateway.status(PROVIDER).await?,
+        direct.status(PROVIDER).await?
+    );
+    let reopened = gateway
+        .resolve_turn_scoped_provider_for_attach(claude_selection(MODEL)?, limits()?)
+        .await?;
+    assert_eq!(binding(&reopened)?, binding(&bound)?);
+    revalidate(&reopened).await?;
+    dispatch_once(&reopened).await?;
+    let gateway_requests = upstream.take();
+    assert_eq!(direct_requests.len(), 1, "{direct_requests:?}");
+    assert_eq!(gateway_requests.len(), 1, "{gateway_requests:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&gateway_requests[0]),
+        String::from_utf8_lossy(&direct_requests[0])
+    );
+    Ok(())
+}

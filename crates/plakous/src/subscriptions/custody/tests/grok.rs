@@ -121,3 +121,58 @@ async fn a_supergrok_session_reopens_through_a_gateway_with_an_equal_binding_and
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn a_named_supergrok_session_reopens_through_a_gateway_with_its_scoped_authority_id()
+-> TestResult {
+    let root = tempfile::tempdir()?;
+    let paths = SubscriptionPaths::from_xdg_state_home(root.path())?;
+    let provider = NativeProvider::Xai;
+    seed_grok(
+        &crate::subscriptions::state::tests::child_catalog::named_account(
+            &paths, provider, "work",
+        )?,
+        "fixture-grok-work-subject",
+    )?;
+    let upstream = upstream().await?;
+
+    let mut direct = at_review(&paths, provider)?.for_named_account(provider, "work")?;
+    direct.xai_test_transport = Some(
+        plakous_http::Client::new_http1(plakous_http::Limits::default())?.with_test_dial_override(
+            plakous_http::Origin::parse(&format!("{SUPERGROK}/"))?,
+            upstream.origin.clone(),
+            upstream.client.clone(),
+        ),
+    );
+    let bound = direct
+        .resolve_turn_scoped_provider_for_attach(grok_selection(GROK_MODEL)?, limits()?)
+        .await?;
+    dispatch_once(&bound).await?;
+    let direct_requests = upstream.take();
+
+    // The account is `grok/work`: the gateway reports the authority id it
+    // computes over that named slot, which the session bound.
+    let gateway = at_review(&paths, provider)?
+        .for_named_account(provider, "work")?
+        .with_custody(&gateway_custody(&paths, &upstream)?);
+    assert_eq!(
+        gateway.status(provider).await?,
+        direct.status(provider).await?
+    );
+    let reopened = gateway
+        .resolve_turn_scoped_provider_for_attach(grok_selection(GROK_MODEL)?, limits()?)
+        .await?;
+    assert_eq!(binding(&reopened)?, binding(&bound)?);
+    revalidate(&reopened).await?;
+    dispatch_once(&reopened).await?;
+    let gateway_requests = upstream.take();
+    assert_eq!(direct_requests.len(), 2, "{direct_requests:?}");
+    assert_eq!(gateway_requests.len(), direct_requests.len());
+    for (direct, relayed) in direct_requests.iter().zip(&gateway_requests) {
+        assert_eq!(
+            String::from_utf8_lossy(relayed),
+            String::from_utf8_lossy(direct)
+        );
+    }
+    Ok(())
+}

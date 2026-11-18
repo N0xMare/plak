@@ -136,6 +136,31 @@ pub(in crate::subscriptions) fn seed(paths: &SubscriptionPaths, now: u64) -> Tes
     Ok(())
 }
 
+/// The paths of `provider`'s named account `name` under `paths`, with its
+/// private directory created as a login creates it.
+pub(in crate::subscriptions) fn named_account(
+    paths: &SubscriptionPaths,
+    provider: NativeProvider,
+    name: &str,
+) -> TestResult<SubscriptionPaths> {
+    use std::os::unix::fs::PermissionsExt as _;
+    paths.prepare()?;
+    let named = paths.for_named_account(provider, name)?;
+    let slot = named.named.as_ref().ok_or("named slot")?;
+    let accounts = paths.state_root.join("plak/subscriptions/accounts");
+    for directory in [
+        accounts.clone(),
+        accounts.join(slot.vertical),
+        accounts.join(slot.vertical).join(&slot.name),
+    ] {
+        if !directory.exists() {
+            fs::create_dir(&directory)?;
+        }
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(named)
+}
+
 /// The credential slot id of `paths`: the primary slot, or a named one's.
 fn slot_of(paths: &SubscriptionPaths) -> TestResult<plakous_auth::CredentialSlotId> {
     let token = paths.named.as_ref().map_or_else(
