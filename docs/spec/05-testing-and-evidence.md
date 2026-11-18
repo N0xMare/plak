@@ -4406,22 +4406,21 @@ re-prepared onto it and carries the rotated token. The two pre-commit cuts are
 ignored until the custodian reports a quarantined login as `NotReady`; it
 answers `internal` today.
 
-`just live gateway` prints the paid plan and does not call a provider.
-`just live gateway --paid` is the opt-in run. Until `plakd gateway serve` is
-in the tree it refuses before any provider call. When that command is
-present it starts the service under an isolated home with no copied
-credentials, stops it, and still makes no provider call: host dispatch
-through the gateway is not in this tree. The plan drives seven routes
-(`codex`, `claude-haiku55-low`, `grok`, `api-openai`, `api-anthropic`,
-`api-xai`, `or-nemotron-free`) through an in-process gateway, a same-machine
-Unix socket, and a second machine over tailnet TCP with a scoped key. Each
-topology does one turn per route, a reopen across a gateway restart, a forced
-refresh of each OAuth kind (codex, claude, grok), remote device-code and paste
-login, the kill switch, and one `hop=gateway` fault run. Results are recorded
-in `tests/live/STATUS.md`. The recipe prints the `just live estimate` line
-for the API-key turns; subscription routes stay quota. `plakd gateway serve`
-adopts the machine's existing test logins, and the host sets `[gateway]
-address`. Each route records the gateway audit line count and certainty.
+`just live gateway` prints the plan and a `just live estimate` line, and
+calls no provider. `just live gateway --paid` drives the shared live route
+drivers through two host topologies. In the first, a host with no `[gateway]
+address` holds its copied keys and the machine's logins in-process. In the
+second, `plakd gateway serve` adopts that home and the machine's subscription
+store in place, and a keyless host sets `[gateway] address` to the service's
+Unix socket. Each topology runs one turn on each of seven routes (`codex`,
+`claude-haiku55-low`, `grok`, `api-openai`, `api-anthropic`, `api-xai`,
+`or-nemotron-free`), restarts its gateway, reopens every session and forces a
+refresh of each OAuth kind (codex, claude, grok). Each unix-socket turn and
+reopen records the gateway audit line count. A binary without `plakd gateway
+serve` fails as a harness error before any provider call. Tailnet TCP from a
+second machine, remote login, the kill switch and a `hop=gateway` fault run
+are not driven. The estimate line covers the API-key turns; subscription
+routes stay quota. Results are recorded in `tests/live/STATUS.md`.
 
 ## 3. Evidence classes
 

@@ -69,7 +69,7 @@ qualify *ARGS:
     tests/live/qualification.py {{ARGS}}
 
 # Credential gateway matrix. The default prints the plan and an estimate line.
-# `--paid` starts `plakd gateway serve` when it exists and still makes no provider call.
-[doc("credential gateway plan; --paid starts serve when present and calls no provider")]
+# `--paid` runs every route in-process and through `plakd gateway serve`. Paid.
+[doc("credential gateway plan; --paid drives the routes through a gateway; paid")]
 gateway *ARGS:
     tests/live/gateway.py {{ARGS}}

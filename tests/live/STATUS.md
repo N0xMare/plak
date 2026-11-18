@@ -67,12 +67,16 @@ Rung 3 rows are sparing and run only for a targeted confirmation.
 
 ## Credential gateway
 
-`just live gateway` prints the offline plan (seven routes, three topologies,
-reopen, OAuth refresh, remote login, kill switch, one `hop=gateway` fault
-run) and a `just live estimate` line. No paid gateway run is recorded.
-`just live gateway --paid` makes no provider call. Until `plakd gateway
-serve` is in the tree it refuses; when that command exists it starts the
-service under an isolated home and stops it.
+`just live gateway` prints the offline plan (seven routes, two topologies,
+a reopen of every session across a gateway restart, a forced refresh of each
+OAuth kind) and a `just live estimate` line, and calls no provider.
+`just live gateway --paid` runs that plan: a host holding its logins and keys
+in-process, then `plakd gateway serve` adopting that home and the machine's
+subscription store in place, reached by a keyless host through `[gateway]
+address` on its Unix socket. A binary without `plakd gateway serve` fails as a
+harness error before any provider call. Tailnet TCP from a second machine,
+remote login, the kill switch and `hop=gateway` faults are not driven. No paid
+gateway run is recorded.
 
 ## History
 
