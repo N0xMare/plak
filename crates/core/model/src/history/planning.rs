@@ -879,6 +879,57 @@ impl SemanticCompactionCut {
         }
         Ok(successor.without_invalidated_reasoning(self.source.history())?)
     }
+
+    /// Retained groups as [`Self::build_successor`] sends them, summary excluded.
+    ///
+    /// Replay reasoning invalidated by the summary is already omitted. A fit
+    /// check of the pre-omission handles would count bytes the request does
+    /// not send.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed error if the retained groups cannot be canonicalized
+    /// after omission.
+    pub fn sanitized_retained_history(
+        &self,
+    ) -> Result<CanonicalHistory, SemanticCompactionCutError> {
+        Ok(CanonicalHistory::new(self.retained.to_vec())?.without_replay_reasoning()?)
+    }
+
+    /// Post-omission retained-tail identity and count for one successor.
+    ///
+    /// The count is the successor groups after the summary. The identity is the
+    /// `context-retained-tail-v1` digest of those groups at the planner tail's
+    /// source start. It equals [`Self::retained_tail_identity`] only when
+    /// omission removes or rewrites nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed error when the successor has no summary segment or the
+    /// digest cannot be constructed.
+    pub fn published_retained_tail(
+        &self,
+        successor: &CanonicalHistory,
+    ) -> Result<(Digest, u32), SemanticCompactionCutError> {
+        let segments = successor.segments();
+        if segments.is_empty() {
+            return Err(SemanticCompactionCutError::InvalidRetainedSemantics);
+        }
+        let start = self
+            .plan
+            .retained_tail()
+            .ok_or(SemanticCompactionCutError::InvalidRetainedSemantics)?
+            .start_position();
+        let count = u32::try_from(segments.len().saturating_sub(1))
+            .map_err(|_| SemanticCompactionCutError::InvalidRetainedSemantics)?;
+        let identity = retained_tail_digest(
+            &self.source.identity(),
+            start,
+            count,
+            segments.iter().skip(1).map(HistorySegment::identity),
+        )?;
+        Ok((identity, count))
+    }
 }
 
 fn is_canonical_compaction_summary(segment: &HistorySegment) -> bool {
@@ -1226,32 +1277,47 @@ fn context_retained_tail(
     };
     let segment_count =
         u32::try_from(retained.len()).map_err(|_| HistoryPlanningError::LimitExceeded)?;
+    let identity = retained_tail_digest(
+        &source.identity(),
+        start,
+        segment_count,
+        retained.iter().map(|segment| segment.identity()),
+    )?;
+    Ok(ContextRetainedTail {
+        start_position: start,
+        segment_count,
+        identity,
+    })
+}
+
+fn retained_tail_digest(
+    source_projection: &Digest,
+    start: u32,
+    segment_count: u32,
+    segment_identities: impl Iterator<Item = Digest>,
+) -> Result<Digest, DigestError> {
     let mut identity = Digest::sha256(
         DigestDomain::ContextPlan,
         1,
         &[
             b"plakous-model/context-retained-tail-v1",
-            &source.identity().identity_bytes(),
+            &source_projection.identity_bytes(),
             &start.to_be_bytes(),
             &segment_count.to_be_bytes(),
         ],
     )?;
-    for segment in retained {
+    for segment in segment_identities {
         identity = Digest::sha256(
             DigestDomain::ContextPlan,
             1,
             &[
                 b"plakous-model/context-retained-tail-append-v1",
                 &identity.identity_bytes(),
-                &segment.identity().identity_bytes(),
+                &segment.identity_bytes(),
             ],
         )?;
     }
-    Ok(ContextRetainedTail {
-        start_position: start,
-        segment_count,
-        identity,
-    })
+    Ok(identity)
 }
 
 fn context_history_plan_identity(

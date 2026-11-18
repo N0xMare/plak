@@ -452,20 +452,22 @@ pub fn lower_request_with_active_artifact(
 fn validate_manual_thinking_loop(
     messages: &[super::MessageParam],
 ) -> Result<(), MessagesRequestError> {
-    let tool_results_only = |message: &super::MessageParam| {
+    let has_tool_result = |message: &super::MessageParam| {
         message.role == MessageRole::User
-            && !message.content.is_empty()
             && message
                 .content
                 .iter()
-                .all(|block| matches!(block, super::MessageBlock::ToolResult { .. }))
+                .any(|block| matches!(block, super::MessageBlock::ToolResult { .. }))
     };
-    if !messages.last().is_some_and(tool_results_only) {
+    // Steering text merged into the tool-result user message does not close
+    // the loop: that message still carries tool results. Only a later user
+    // message with no tool result does.
+    if !messages.last().is_some_and(has_tool_result) {
         return Ok(());
     }
     let start = messages
         .iter()
-        .rposition(|message| message.role == MessageRole::User && !tool_results_only(message))
+        .rposition(|message| message.role == MessageRole::User && !has_tool_result(message))
         .map_or(0, |index| index + 1);
     let first_assistant = messages[start..]
         .iter()

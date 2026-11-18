@@ -7,6 +7,21 @@ cross-build session carrier (a build imports its own and the previous version).
 The separate runner job-retention endpoint also retains its previous speaker
 for one version bump, without native protocol compatibility.
 
+## Unreleased
+
+### Plakous
+
+- Keep prefix-bound replay reasoning byte-exact, including OpenRouter Chat
+  `reasoning_details`, and omit only reasoning after the first changed content.
+  A semantic summary is that change, so the retained tail drops invalidated
+  replay instead of resending it.
+- Measure a semantic cut's retained-tail fit on the sanitized tail the next
+  request sends, including a pending prompt at the idle fence.
+- Record a semantic compaction's retained-tail count and digest from that same
+  post-omission tail. The context-state encoding is unchanged.
+- Refuse a manual Messages tool-loop continuation that lost its initial
+  thinking when steering text was merged into the tool-result message.
+
 ## 0.0.4
 
 ### plakd
@@ -169,7 +184,6 @@ for one version bump, without native protocol compatibility.
   preventing Messages thinking-signature failures while preserving unchanged replay.
 - Known limitation: API-key Anthropic and OpenRouter Messages may reject retained
   thinking after an explicit system/tool recompile; transient lowering proofs are planned.
-
 - Add durable agent lines: only the head branch commits, head-advancing rebinds
   and same-store carries continue that line, and forks start new lines.
   Superseded branches are read-only; predecessor history is reclaimed by

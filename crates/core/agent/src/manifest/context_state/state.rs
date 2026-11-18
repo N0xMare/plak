@@ -456,9 +456,6 @@ impl RuntimeContextState {
             .position()
             .checked_add(1)
             .ok_or(RuntimeManifestError::InvalidCompactionProvenance)?;
-        // The sealed successor above is the authority: a replay-only retained
-        // segment can disappear when its prefix changes.
-        let retained_segment_count = sealed_successor.segments().len().saturating_sub(1);
         let next_epoch = self
             .affinity
             .epoch()
@@ -480,6 +477,12 @@ impl RuntimeContextState {
         let invalidation = CompactionInvalidation::new(&self.affinity, &affinity)?;
         let target_projection =
             ConversationView::from_shared(successor_history.clone(), WorkingProjection::default());
+        // Count and digest both name the post-omission successor tail. A
+        // replay-only retained segment can disappear when its prefix changes,
+        // and a rewritten segment keeps a new identity.
+        let (retained_tail_identity, retained_segment_count) = cut
+            .published_retained_tail(&sealed_successor)
+            .map_err(|_| RuntimeManifestError::InvalidCompactionProvenance)?;
         let mut provenance = CompactionProvenance {
             source_checkpoint: publication.source_checkpoint,
             source_history: cut.source_history_identity(),
@@ -498,10 +501,9 @@ impl RuntimeContextState {
             selected_segment_count: u32::try_from(selected.len())
                 .map_err(|_| RuntimeManifestError::InvalidCompactionProvenance)?,
             selected_identity: cut.selection_identity(),
-            retained_segment_count: u32::try_from(retained_segment_count)
-                .map_err(|_| RuntimeManifestError::InvalidCompactionProvenance)?,
+            retained_segment_count,
             trailing_segment_count: 0,
-            retained_tail_identity: cut.retained_tail_identity(),
+            retained_tail_identity,
             target_history: successor_history.identity(),
             target_segment_count: u32::try_from(successor_history.segments().len())
                 .map_err(|_| RuntimeManifestError::InvalidCompactionProvenance)?,

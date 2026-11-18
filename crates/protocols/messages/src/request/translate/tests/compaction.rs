@@ -234,3 +234,106 @@ fn compaction_never_replays_thinking_bound_to_the_replaced_prefix() -> TestResul
     }
     Ok(())
 }
+
+fn steering_item(id: u128, value: &str) -> TestResult<ConversationItem> {
+    Ok(ConversationItem::new(
+        TestEntryId::try_from(TestUuid::from_u128(id))?,
+        Actor::User,
+        vec![ContentBlock::Text(TestTextBlock::new(value, None)?)],
+        Provenance::Instruction,
+    )?)
+}
+
+fn manual_budget() -> plakous_model::ReasoningPolicy {
+    ReasoningPolicy::Enabled {
+        effort: Some(ReasoningEffort::TokenBudget(
+            std::num::NonZeroU32::new(1024).expect("budget"),
+        )),
+        requirement: CapabilityRequirement::Required,
+    }
+}
+
+#[test]
+fn manual_validator_treats_steering_merged_into_tool_results_as_an_open_loop() -> TestResult {
+    let limits = plakous_model::GenerationLimits::new(std::num::NonZeroU32::new(4096), Vec::new())?;
+    let (_, policy) = lowering_fixture_with_tool_choice_and_history(
+        ToolChoice::Auto,
+        vec![text_item(1, Actor::User, "task")?],
+        limits.clone(),
+        manual_budget(),
+    )?;
+    let thinking = ContentBlock::Reasoning(ReasoningBlock::new(
+        ReasoningVisibility::Omitted,
+        None,
+        Some(bind_replay_payload(
+            &policy,
+            ModelId::new("model/exact")?,
+            SIGNATURE_REPLAY_KIND,
+            raw("\"synthetic-tool-signature\"")?,
+        )?),
+    )?);
+    let open = vec![
+        text_item(1, Actor::User, "task")?,
+        batch_item(2, Actor::Assistant, vec![batch_call(10)?])?,
+        batch_item(3, Actor::Tool, vec![batch_result(10)?])?,
+        steering_item(4, "steer: continue")?,
+    ];
+    let (plan, policy) = lowering_fixture_with_tool_choice_and_history(
+        ToolChoice::Auto,
+        open,
+        limits.clone(),
+        manual_budget(),
+    )?;
+    let error = lower_request(&plan, &policy, ToolOwnership::default())
+        .err()
+        .ok_or("merged steering must still refuse a tool loop that lost its thinking")?;
+    assert_eq!(error.kind(), MessagesRequestErrorKind::ProtectedHistory);
+
+    let (plan, policy) = lowering_fixture_with_tool_choice_and_history(
+        ToolChoice::Auto,
+        vec![
+            text_item(1, Actor::User, "task")?,
+            batch_item(2, Actor::Assistant, vec![thinking, batch_call(10)?])?,
+            batch_item(3, Actor::Tool, vec![batch_result(10)?])?,
+            steering_item(4, "steer: continue")?,
+        ],
+        limits.clone(),
+        manual_budget(),
+    )?;
+    let lowered = lower_request(&plan, &policy, ToolOwnership::default())?;
+    let wire: Value = serde_json::from_slice(lowered.body())?;
+    assert_eq!(
+        wire["messages"][1]["content"][0]["signature"],
+        "synthetic-tool-signature"
+    );
+    let last = wire["messages"]
+        .as_array()
+        .and_then(|messages| messages.last())
+        .ok_or("messages")?;
+    let content = last["content"].as_array().ok_or("content")?;
+    assert!(content.iter().any(|block| block["type"] == "tool_result"));
+    assert!(
+        content
+            .iter()
+            .any(|block| block["text"] == "steer: continue")
+    );
+
+    let (plan, policy) = lowering_fixture_with_tool_choice_and_history(
+        ToolChoice::Auto,
+        vec![
+            text_item(1, Actor::User, "task")?,
+            batch_item(2, Actor::Assistant, vec![batch_call(10)?])?,
+            batch_item(3, Actor::Tool, vec![batch_result(10)?])?,
+            batch_item(
+                6,
+                Actor::Assistant,
+                vec![ContentBlock::Text(TestTextBlock::new("done", None)?)],
+            )?,
+            text_item(7, Actor::User, "next question")?,
+        ],
+        limits,
+        manual_budget(),
+    )?;
+    lower_request(&plan, &policy, ToolOwnership::default())?;
+    Ok(())
+}

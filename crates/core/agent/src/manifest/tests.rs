@@ -1058,6 +1058,42 @@ fn semantic_compaction_publication_accepts_the_prefix_safe_retained_tail() -> Te
         RuntimeContextState::decode(&compacted.encode()?)?,
         compacted
     );
+    let projection = ConversationView::from_shared(source, WorkingProjection::default());
+    let cut = SemanticCompactionCut::seal(&projection, &ContextHistoryPlan::new(&projection)?)?;
+    let (identity, count) = compacted
+        .compaction_provenance()
+        .ok_or("semantic provenance")?
+        .retained_tail();
+    assert_eq!(count as usize, successor.segments().len() - 1);
+    assert_eq!(cut.published_retained_tail(&successor)?, (identity, count));
+    assert_ne!(
+        identity,
+        cut.retained_tail_identity(),
+        "a post-omission count must not keep the pre-omission digest"
+    );
+    assert_ne!(
+        count as usize,
+        cut.retained_segments().len(),
+        "omission removed a replay-only retained segment"
+    );
+    Ok(())
+}
+
+#[test]
+fn semantic_provenance_retained_tail_matches_when_omission_changes_nothing() -> TestResult {
+    let history = context_history(3)?;
+    let projection = ConversationView::from_shared(history.clone(), WorkingProjection::default());
+    let cut = SemanticCompactionCut::seal(&projection, &ContextHistoryPlan::new(&projection)?)?;
+    let context = RuntimeContextState::genesis(id(90_010)?, id(90_011)?, [4; 32])?;
+    let (compacted, successor, _) = compact_context(&context, &history, id(90_012)?, [5; 32])?;
+    let (identity, count) = compacted
+        .compaction_provenance()
+        .ok_or("semantic provenance")?
+        .retained_tail();
+    assert_eq!(count as usize, successor.segments().len() - 1);
+    assert_eq!(count as usize, cut.retained_segments().len());
+    assert_eq!(identity, cut.retained_tail_identity());
+    assert_eq!(cut.published_retained_tail(&successor)?, (identity, count));
     Ok(())
 }
 

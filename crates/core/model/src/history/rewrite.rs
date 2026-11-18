@@ -9,15 +9,38 @@ impl CanonicalHistory {
     /// An unchanged prefix, including its reasoning, is shared exactly. Appended
     /// content does not invalidate earlier reasoning. Once a prefix changes, all
     /// subsequent replay-bearing reasoning is omitted, never converted to text;
-    /// other content and tool correlations remain intact.
+    /// other content and tool correlations remain intact. Exact-model replay
+    /// envelopes follow the same rule as protocol-scoped ones.
     ///
     /// # Errors
     ///
     /// Returns a history validation error if a rewritten group is invalid.
     pub fn without_invalidated_reasoning(&self, source: &Self) -> Result<Self, HistoryError> {
-        let source_segments = source.segments();
-        let mut originals = source_segments.iter().flat_map(HistorySegment::items);
-        let mut changed_prefix = false;
+        self.project_reasoning(
+            source.segments().iter().flat_map(HistorySegment::items),
+            false,
+        )
+    }
+
+    /// Omits every replay-bearing reasoning block.
+    ///
+    /// A semantic summary is changed content in front of the retained tail. The
+    /// tail alone does not contain that summary, so this is the omission
+    /// [`Self::without_invalidated_reasoning`] applies to the tail once the
+    /// summary has already been compared.
+    ///
+    /// # Errors
+    ///
+    /// Returns a history validation error if a rewritten group is invalid.
+    pub(crate) fn without_replay_reasoning(&self) -> Result<Self, HistoryError> {
+        self.project_reasoning(std::iter::empty(), true)
+    }
+
+    fn project_reasoning<'a>(
+        &self,
+        mut originals: impl Iterator<Item = &'a ConversationItem>,
+        mut changed_prefix: bool,
+    ) -> Result<Self, HistoryError> {
         let mut changed_history = false;
         let mut segments = Vec::with_capacity(self.segments().len());
         for segment in self.segments() {
@@ -174,6 +197,57 @@ mod tests {
         let cut = CanonicalHistory::new(vec![segment(3, vec![text("summary")?])?])?;
         let new_round = cut.append(segment(4, vec![reasoning()?, text("new answer")?])?)?;
         assert_eq!(new_round.without_invalidated_reasoning(&cut)?, new_round);
+        Ok(())
+    }
+
+    fn exact_model_reasoning(payload: &str) -> TestResult<ContentBlock> {
+        Ok(ContentBlock::Reasoning(ReasoningBlock::new(
+            ReasoningVisibility::Omitted,
+            None,
+            Some(ReplayEnvelope::new(
+                ProtocolId::new("fixture.protocol")?,
+                None,
+                ReplayScope::ExactModel(crate::ModelId::new("fixture-model")?),
+                ReplayKindId::new("fixture.reasoning-detail")?,
+                1,
+                DataClassification::Sensitive,
+                RawValue::from_string(payload.into())?,
+            )?),
+        )?))
+    }
+
+    #[test]
+    fn exact_model_replay_stays_byte_exact_until_the_first_changed_content() -> TestResult {
+        let first = exact_model_reasoning(r#"{"data":"prefix-bound"}"#)?;
+        let later = exact_model_reasoning(r#"{"data":"after-the-change"}"#)?;
+        let source = CanonicalHistory::new(vec![
+            segment(1, vec![first.clone(), text("original")?])?,
+            segment(2, vec![later.clone(), text("answer")?])?,
+        ])?;
+        let appended = source.append(segment(3, vec![text("next")?])?)?;
+        let kept = appended.without_invalidated_reasoning(&source)?;
+        assert_eq!(kept, appended);
+        assert_eq!(
+            kept.segments().get(0).ok_or("first")?.items()[0].blocks()[0],
+            first
+        );
+
+        let rewritten = CanonicalHistory::new(vec![
+            segment(1, vec![first.clone(), text("changed")?])?,
+            segment(2, vec![later, text("answer")?])?,
+        ])?;
+        let projected = rewritten.without_invalidated_reasoning(&source)?;
+        assert_eq!(
+            projected.segments().get(0).ok_or("kept")?.items()[0].blocks()[0],
+            first
+        );
+        assert_eq!(
+            projected.segments().get(1).ok_or("suffix")?.items()[0].blocks(),
+            &[text("answer")?]
+        );
+        let wire = serde_json::to_string(&projected)?;
+        assert!(wire.contains("prefix-bound"));
+        assert!(!wire.contains("after-the-change"));
         Ok(())
     }
 }

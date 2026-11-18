@@ -3948,11 +3948,27 @@ tool-use turn, thinking accompanies its tool calls complete and unmodified.
 After an intentional prefix rewrite the invalid thinking suffix is removed
 with all other content and tool correlations preserved; this follows the
 provider's prefix-mismatch remediation, not a retry or server-side drop policy.
-Manual thinking's final-assistant constraint still applies: a tool-result-only
-continuation whose assistant turn lost its initial thinking refuses preparation
-with typed `ProtectedHistory`, rather than sending an invalid manual request.
-A new non-tool user turn closes that loop. Adaptive thinking has no requirement
-that each assistant message begin with thinking.
+The rule is neutral across replay scopes. Exact-model envelopes, including
+OpenRouter Chat `reasoning_details` (`chat.reasoning_detail`), stay byte-exact
+on an unchanged prefix and are omitted only after the first changed content.
+A semantic summary is changed content in front of the retained tail, so the
+tail alone is not an unchanged prefix and its replay-bearing reasoning is
+omitted. OpenRouter preserving-reasoning requires that consecutive
+`reasoning_details` be passed unmodified, and Gemini's stateless
+thought-signature contract requires thought blocks resent exactly as received.
+Both bind the content those blocks were produced against. Resending them after
+a prefix rewrite would present a signature for content that is no longer
+there, so omission is the remediation; there is no special case that keeps
+invalidated `reasoning_details`. Gemini is not a reviewed catalog row.
+Whether a Gemini-class model behind OpenRouter Chat rejects that omitted tail
+is outside this rule.
+Manual thinking's final-assistant constraint still applies: a continuation
+whose assistant turn lost its initial thinking, and whose latest user message
+still contains a tool result, refuses preparation with typed
+`ProtectedHistory`, rather than sending an invalid manual request. Steering
+text merged into that tool-result message does not close the loop. Only a
+later user message that contains no tool result does. Adaptive thinking has
+no requirement that each assistant message begin with thinking.
 
 Known limitation: an explicit recompile-for-target that changes system content,
 instructions or tools while retaining signed reasoning can still invalidate
@@ -11106,7 +11122,15 @@ native provenance. This is runtime epoch 38, not a migration of epoch 37.
 Compaction provenance
 records the retained segment count and how many of those segments follow the
 summary segment: a native successor's protected current-round tail, zero for
-every other strategy. Native provenance carries strategy revision 2. Its encoded bound and the
+every other strategy. For a semantic publication both that count and the
+retained-tail identity name the post-omission successor tail. The count is the
+successor groups after the summary. The identity is the
+`context-retained-tail-v1` digest of those groups, at the planner tail's
+source start, using the same append formula as the planner. It equals the
+planner's pre-omission retained-tail identity only when omission removes or
+rewrites nothing. Decode stores the digest and does not recompute it, so the
+context-state encoding stays version 4 and this remains runtime epoch 38.
+Native provenance carries strategy revision 2. Its encoded bound and the
 prepared-call recovery-record bound are each 4 MiB. Item digests use compact
 hex strings, not digest structs with integer arrays. The full request anchor is
 stored once in context state; prepared records and continuation frames reference
@@ -11346,11 +11370,13 @@ no second fold of the same source.
 Before overflow recovery dispatches a harness fold, a legal semantic cut or
 eligible placeholder span must exist; protected material alone cannot authorize
 a paid request. When the source does not fit, the cut's retained tail must also
-fit on its own, measured like a successor: a tail over the window means no
+fit on its own, measured like the successor sends it: the sanitized tail,
+with replay-bearing reasoning invalidated by the summary already omitted,
+not the pre-omission retained handles. A tail over the window means no
 summary can produce a fitting successor, so the ladder takes the placeholder
 rung without paying. At the idle fence a pending prompt that does not fit beside
-the source runs the same gate with that prompt after the retained tail, since
-the successor must hold it too. Enrolled native facets and the placeholder rung may still act on
+the source runs the same gate with that prompt after the sanitized retained
+tail, since the successor must hold it too. Enrolled native facets and the placeholder rung may still act on
 protected-only projections. The disposition requests compaction; the ladder
 checks which strategy can act, and the protected-only refusal belongs to the
 `NoEligibleRange` outcome that an exhausted ladder reports.

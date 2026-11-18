@@ -967,6 +967,29 @@ fn semantic_compaction_invalidates_native_reasoning_in_the_retained_tail() {
         [ContentBlock::ToolCall(_)]
     ));
     assert_eq!(retained.items()[1], source.items()[4]);
+    let sanitized = cut
+        .sanitized_retained_history()
+        .expect("sanitized retained tail");
+    assert_eq!(
+        sanitized.segments().to_vec(),
+        successor
+            .segments()
+            .iter()
+            .skip(1)
+            .cloned()
+            .collect::<Vec<_>>(),
+        "the fit tail is the tail the successor sends"
+    );
+    assert!(
+        cut.retained_segments().iter().any(|segment| {
+            segment
+                .items()
+                .iter()
+                .flat_map(ConversationItem::blocks)
+                .any(|block| matches!(block, ContentBlock::Reasoning(_)))
+        }),
+        "the pre-omission handles still carry the replay the request drops"
+    );
 }
 
 #[test]

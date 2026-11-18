@@ -924,9 +924,15 @@ Offline compaction regressions use synthetic native-reasoning envelopes only.
 They check that a retained tool exchange loses invalidated reasoning but keeps
 calls/results, that Messages translation after a cut omits signed, omitted and
 redacted thinking under both exact and portable policies, and that unchanged
-prefixes and post-cut append-only reasoning retain exact replay. Prefix-change
-cases also cover tool-result placeholders and image retirement. These tests
-prove request/history projection, not provider acceptance or live qualification.
+prefixes and post-cut append-only reasoning retain exact replay. Exact-model
+replay follows that same prefix rule. A semantic fit probe measures the
+sanitized tail the request sends. Semantic provenance's retained-tail count
+and digest both name the post-omission tail, and a negative test fails when
+they diverge. The manual Messages validator still refuses a tool-result
+continuation that lost its thinking when steering text was merged into that
+user message. Prefix-change cases also cover tool-result placeholders and
+image retirement. These tests prove request/history projection, not provider
+acceptance or live qualification.
 
 ## 1. Gate layers
 

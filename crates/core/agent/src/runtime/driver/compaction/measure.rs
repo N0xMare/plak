@@ -200,9 +200,11 @@ impl Driver {
 
     /// Whether the cut's retained tail alone is definitely over the window.
     ///
-    /// Measured like a successor (fresh, without the live request anchor). A
-    /// measurement that cannot be made answers `false`, leaving the paid fold
-    /// and its own successor check to decide.
+    /// Measured like the successor sends it: replay reasoning invalidated by
+    /// the summary is already omitted, and the summary itself is not included.
+    /// Fresh, without the live request anchor. A measurement that cannot be
+    /// made answers `false`, leaving the paid fold and its own successor check
+    /// to decide.
     pub(super) async fn retained_tail_cannot_fit(
         &mut self,
         runtime: &ExactCompactionRuntime,
@@ -212,9 +214,7 @@ impl Driver {
         identity: DurableCompactionIdentity,
         affinity: ModelCacheAffinity,
     ) -> bool {
-        let mut segments = cut.retained_segments().to_vec();
-        segments.extend(pending);
-        let Ok(tail) = plakous_model::CanonicalHistory::new(segments) else {
+        let Some(tail) = retained_tail_fit_history(cut, pending) else {
             return false;
         };
         let Ok(attempt) = compaction_attempt_id(identity.workflow_id, b"retained-tail-fit") else {
@@ -350,5 +350,182 @@ impl Driver {
         };
         let audit = context_status_audit(&status)?;
         Ok((status, audit, wire_digest))
+    }
+}
+
+/// The history a retained-tail fit probe measures: the sanitized tail, then
+/// an optional pending prompt.
+fn retained_tail_fit_history(
+    cut: &SemanticCompactionCut,
+    pending: Option<plakous_model::HistorySegment>,
+) -> Option<plakous_model::CanonicalHistory> {
+    let mut segments = cut.sanitized_retained_history().ok()?.segments().to_vec();
+    segments.extend(pending);
+    plakous_model::CanonicalHistory::new(segments).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retained_tail_fit_history;
+    use plakous_model::{
+        Actor, CallId, CanonicalHistory, ContentBlock, ContextHistoryPlan, ConversationItem,
+        ConversationView, DataClassification, EntryId, HistorySegment, HistorySegmentKind,
+        ProtocolId, Provenance, ReasoningBlock, ReasoningVisibility, ReplayEnvelope, ReplayKindId,
+        ReplayScope, SemanticCompactionCut, TextBlock, ToolCallBlock, ToolCallState,
+        ToolCorrelation, ToolExecutionOwner, ToolName, ToolResultBlock, ToolResultKind,
+        ToolResultPart, WorkingProjection,
+    };
+    use uuid::Uuid;
+
+    fn text(id: u128, actor: Actor, value: &str) -> ConversationItem {
+        ConversationItem::new(
+            EntryId::try_from(Uuid::from_u128(id)).expect("entry"),
+            actor,
+            vec![ContentBlock::Text(
+                TextBlock::new(value, None).expect("text"),
+            )],
+            if actor == Actor::User {
+                Provenance::UserInput
+            } else {
+                Provenance::ModelOutput
+            },
+        )
+        .expect("item")
+    }
+
+    fn replay() -> ContentBlock {
+        let envelope = ReplayEnvelope::new(
+            ProtocolId::new("fixture.protocol").expect("protocol"),
+            None,
+            ReplayScope::Protocol,
+            ReplayKindId::new("fixture.reasoning").expect("kind"),
+            1,
+            DataClassification::Sensitive,
+            serde_json::value::RawValue::from_string("\"synthetic\"".into()).expect("payload"),
+        )
+        .expect("replay");
+        ContentBlock::Reasoning(
+            ReasoningBlock::new(ReasoningVisibility::Omitted, None, Some(envelope))
+                .expect("reasoning"),
+        )
+    }
+
+    fn tool_exchange() -> Vec<ConversationItem> {
+        let call_id = CallId::try_from(Uuid::from_u128(10)).expect("call");
+        let correlation = ToolCorrelation::default();
+        let call = ConversationItem::new(
+            EntryId::try_from(Uuid::from_u128(11)).expect("entry"),
+            Actor::Assistant,
+            vec![
+                replay(),
+                ContentBlock::ToolCall(
+                    ToolCallBlock::new(
+                        call_id,
+                        ToolName::new("read").expect("tool"),
+                        ToolExecutionOwner::Local,
+                        ToolCallState::Requested,
+                        correlation.clone(),
+                        "{}",
+                    )
+                    .expect("call"),
+                ),
+            ],
+            Provenance::ModelOutput,
+        )
+        .expect("assistant");
+        let result = ConversationItem::new(
+            EntryId::try_from(Uuid::from_u128(12)).expect("entry"),
+            Actor::Tool,
+            vec![ContentBlock::ToolResult(
+                ToolResultBlock::new(
+                    call_id,
+                    ToolExecutionOwner::Local,
+                    ToolResultKind::Success,
+                    vec![ToolResultPart::Text(
+                        TextBlock::new("ok", None).expect("text"),
+                    )],
+                    correlation,
+                )
+                .expect("result"),
+            )],
+            Provenance::ToolExecution,
+        )
+        .expect("result");
+        vec![call, result]
+    }
+
+    fn cut_with_replay_tail() -> SemanticCompactionCut {
+        let source = ConversationView::from_shared(
+            CanonicalHistory::new(vec![
+                HistorySegment::new(
+                    HistorySegmentKind::RecentIntent,
+                    vec![text(1, Actor::User, "old intent")],
+                )
+                .expect("old"),
+                HistorySegment::new(
+                    HistorySegmentKind::Conversation,
+                    vec![text(2, Actor::Assistant, "old answer")],
+                )
+                .expect("answer"),
+                HistorySegment::new(
+                    HistorySegmentKind::RecentIntent,
+                    vec![text(3, Actor::User, "latest intent")],
+                )
+                .expect("latest"),
+                HistorySegment::new(HistorySegmentKind::ToolExchange, tool_exchange())
+                    .expect("exchange"),
+            ])
+            .expect("history"),
+            WorkingProjection::default(),
+        );
+        SemanticCompactionCut::seal(&source, &ContextHistoryPlan::new(&source).expect("plan"))
+            .expect("cut")
+    }
+
+    fn has_reasoning(segments: &[HistorySegment]) -> bool {
+        segments.iter().any(|segment| {
+            segment.items().iter().any(|item| {
+                item.blocks()
+                    .iter()
+                    .any(|block| matches!(block, ContentBlock::Reasoning(_)))
+            })
+        })
+    }
+
+    #[test]
+    fn retained_tail_fit_history_measures_the_sanitized_tail() {
+        let cut = cut_with_replay_tail();
+        let summary = HistorySegment::new(
+            HistorySegmentKind::Compaction,
+            vec![
+                ConversationItem::new(
+                    EntryId::try_from(Uuid::from_u128(20)).expect("entry"),
+                    Actor::Assistant,
+                    vec![ContentBlock::Compaction(
+                        plakous_model::CompactionBlock::new("synthetic summary").expect("summary"),
+                    )],
+                    Provenance::ModelOutput,
+                )
+                .expect("summary item"),
+            ],
+        )
+        .expect("summary");
+        let successor = cut.build_successor(&summary).expect("successor");
+        let pending = HistorySegment::new(
+            HistorySegmentKind::RecentIntent,
+            vec![text(30, Actor::User, "queued prompt")],
+        )
+        .expect("pending");
+        let measured = retained_tail_fit_history(&cut, Some(pending.clone())).expect("fit history");
+        let mut expected = successor
+            .segments()
+            .iter()
+            .skip(1)
+            .cloned()
+            .collect::<Vec<_>>();
+        expected.push(pending);
+        assert_eq!(measured.segments().to_vec(), expected);
+        assert!(has_reasoning(cut.retained_segments()));
+        assert!(!has_reasoning(measured.segments()));
     }
 }
