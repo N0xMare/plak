@@ -156,6 +156,8 @@ pub(super) struct ProductProbeReport {
     pub(super) source_workflow_operation_id: Option<String>,
     pub(super) provider_dispatches: usize,
     pub(super) effect_dispatches: usize,
+    pub(super) account_continue_warnings:
+        Vec<plakous_host_protocol::notice_remedy::AccountContinuation>,
 }
 
 pub(super) fn write_reply(reply: &ChildReply) -> io::Result<()> {

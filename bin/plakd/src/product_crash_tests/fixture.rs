@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::test_support::{
     ActualHostAction, ActualHostBoundary, ActualHostInjection, ActualHostWorkflow,
-    InjectedRuntimeRole, ProductJournal, run_actual_host,
+    InjectedRuntimeRole, ProductJournal, run_actual_host, run_actual_host_observing,
 };
 use plakous::model::ContextStatusKind;
 use plakous::sessions::{
@@ -580,10 +580,36 @@ pub(crate) fn recover_actual_host_fixture(
     } else {
         vec![ActualHostAction::Quit]
     };
-    std::thread::spawn(move || run_actual_host(host_home, &product_id, injection, actions))
-        .join()
-        .map_err(|_| "actual host recovery thread panicked")??;
-    probe_product_fixture(home, state_path)
+    let observations = std::thread::spawn(move || {
+        run_actual_host_observing(host_home, &product_id, injection, actions)
+    })
+    .join()
+    .map_err(|_| "actual host recovery thread panicked")??;
+    let mut report = probe_product_fixture(home, state_path)?;
+    report.account_continue_warnings = observations
+        .into_iter()
+        .filter_map(|event| {
+            let crate::surface_protocol::HostEvent::Row(
+                crate::product_sessions::TranscriptRow::Notice(notice),
+            ) = event
+            else {
+                return None;
+            };
+            match notice.remedy {
+                Some(plakous_host_protocol::notice_remedy::NoticeRemedy::ContinueOnAccount {
+                    continuation,
+                }) => {
+                    assert_eq!(
+                        notice.tone,
+                        plakous_host_protocol::views::transcript::NoticeTone::Warning
+                    );
+                    Some(*continuation)
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    Ok(report)
 }
 
 struct ProductBoundaryController {
@@ -1156,5 +1182,6 @@ pub(crate) fn probe_product_fixture(
             .iter()
             .filter(|record| record.kind == EvidenceKind::EffectDispatched)
             .count(),
+        account_continue_warnings: Vec::new(),
     })
 }

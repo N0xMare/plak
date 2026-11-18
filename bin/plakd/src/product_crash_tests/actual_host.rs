@@ -609,7 +609,7 @@ fn account_continue_sigkill_cuts_reopen_without_resubmitting() -> TestResult {
                 .ok_or("the root line has no head")?)
         };
         let before = evidence(&fixture)?;
-        let (_, startup) = relaunch_report(&fixture.recover(false), &fixture.probe())?;
+        let (first_report, startup) = relaunch_report(&fixture.recover(false), &fixture.probe())?;
         assert_eq!(startup, None, "{cut:?}: the line head reopens");
         let after = evidence(&fixture)?;
         assert_eq!(after, before, "{cut:?}: the reopen dispatched nothing");
@@ -680,8 +680,40 @@ fn account_continue_sigkill_cuts_reopen_without_resubmitting() -> TestResult {
             _ => unreachable!("the continue cells"),
         }
         // A second reopen converges and still admits nothing.
-        let (_, repeated) = relaunch_report(&fixture.recover(false), &fixture.probe())?;
+        let (second_report, repeated) = relaunch_report(&fixture.recover(false), &fixture.probe())?;
         assert_eq!(repeated, None);
+        let expected = if cut == ProductCrashBoundary::ProductPublished {
+            let store = crate::store::ProductStore::open(&paths)?;
+            let failed = store
+                .load_views(&source.id)?
+                .ok_or("missing source views")?
+                .state
+                .last_root_turn
+                .ok_or("missing source turn")?;
+            let digest = plakous_hosted::sessions::digest_parts(&[
+                "plak:account-continue",
+                &source.id,
+                &failed.turn_id,
+                "codex/b",
+            ]);
+            let mut bytes = [0_u8; 16];
+            for (index, byte) in bytes.iter_mut().enumerate() {
+                *byte = u8::from_str_radix(&digest[index * 2..index * 2 + 2], 16)?;
+            }
+            let item = uuid::Builder::from_random_bytes(bytes).into_uuid();
+            vec![plakous_host_protocol::notice_remedy::AccountContinuation {
+                account: "codex/b".into(),
+                command_id: format!("plak.queue.{item}.1"),
+            }]
+        } else {
+            Vec::new()
+        };
+        for report in [first_report, second_report] {
+            assert_eq!(
+                report.account_continue_warnings, expected,
+                "{cut:?}: each open reports exactly the missing continue"
+            );
+        }
         assert_eq!(
             evidence(&fixture)?,
             after,

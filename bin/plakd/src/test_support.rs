@@ -107,6 +107,15 @@ pub fn run_actual_host(
     injection: ActualHostInjection,
     actions: Vec<ActualHostAction>,
 ) -> Result<(), String> {
+    run_actual_host_observing(home, product_session_id, injection, actions).map(|_| ())
+}
+
+pub(crate) fn run_actual_host_observing(
+    home: PathBuf,
+    product_session_id: &str,
+    injection: ActualHostInjection,
+    actions: Vec<ActualHostAction>,
+) -> Result<Vec<crate::surface_protocol::HostEvent>, String> {
     let paths = PlakPaths::explicit(home);
     let session = product_sessions::load_session(&paths, product_session_id)?;
     let cwd = session.workspace_root.clone();
@@ -234,7 +243,8 @@ pub fn run_actual_host(
             .collect::<Vec<_>>();
         let bytes = serde_json::to_vec(&lost_jobs).map_err(|error| error.to_string())?;
         std::fs::write(paths.home().join("actual-host-lost-jobs.json"), bytes)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        Ok(observations)
     })
 }
 
