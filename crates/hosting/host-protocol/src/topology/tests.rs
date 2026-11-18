@@ -184,6 +184,10 @@ fn error_codes_serialize_snake_case() {
         (TopologyErrorCode::FollowupNotIdle, "followup_not_idle"),
         (TopologyErrorCode::FollowupClosed, "followup_closed"),
         (
+            TopologyErrorCode::FollowupBindingChanged,
+            "followup_binding_changed",
+        ),
+        (
             TopologyErrorCode::FollowupRecoveryRequired,
             "followup_recovery_required",
         ),

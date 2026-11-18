@@ -424,6 +424,10 @@ pub struct SendMessageOutput {
     pub message_id: String,
     /// Whether it started, steered, or queued behind the recipient's turn.
     pub disposition: MailDisposition,
+    /// Set when this follow-up recompiled provider configuration onto the
+    /// current catalog at the child's quiescent checkpoint. Not failover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration_notice: Option<String>,
 }
 
 /// One inbox row of `list_agents`. A caller with no session

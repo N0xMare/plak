@@ -510,6 +510,7 @@ impl ProductAgentTree {
             refresh,
             message_id,
             disposition,
+            configuration_notice: None,
         };
         if let Some(id) = operation_id {
             self.remember_success(id, caller_id, "send_agent_message", request, &output)?;

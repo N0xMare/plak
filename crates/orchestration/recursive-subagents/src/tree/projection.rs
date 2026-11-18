@@ -357,12 +357,22 @@ impl ProductAgentTree {
                         refusal.kind, refusal.message
                     ));
                 }
-                // The host recovers the session itself; nothing for the
-                // caller to call.
+                // The recovering sentence is only true while this process
+                // holds the child's recovery claim. A settled refusal that
+                // has not started says so, and close_agent ends the node.
                 None => {
-                    value["recovery"] = serde_json::Value::String(
-                        "the host is recovering its session; no call is needed".to_owned(),
-                    );
+                    let recovering = crate::hub::lookup(&self.tree_id)
+                        .is_some_and(|runtime| runtime.is_recovering(&node.agent_id));
+                    if recovering {
+                        value["recovery"] = serde_json::Value::String(
+                            "the host is recovering its session; no call is needed".to_owned(),
+                        );
+                    } else {
+                        value["remedy"] = serde_json::Value::String("close_agent".to_owned());
+                        value["recovery"] = serde_json::Value::String(
+                            "recovery has not started; close_agent ends the node".to_owned(),
+                        );
+                    }
                 }
             },
             RecoveryNeed::Workspace { reason, .. } => {

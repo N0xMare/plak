@@ -95,6 +95,20 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
         self.canceller.cancel_agents(agent_ids, signalled)
     }
 
+    fn prepare_followup(
+        &self,
+        agent_id: String,
+        acknowledged: bool,
+    ) -> Boxed<
+        '_,
+        Result<
+            Option<crate::agent_tree_tools::FollowupRecompile>,
+            crate::agent_tree::TopologyError,
+        >,
+    > {
+        self.deliverer.prepare_followup(agent_id, acknowledged)
+    }
+
     fn recover_followup(
         &self,
         agent_id: String,

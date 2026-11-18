@@ -625,6 +625,7 @@ pub fn projected_terminal_failure_runtime_binding(
         account,
         plakous::tools::CodingPresentation::Codex,
         Vec::new(),
+        None,
     )?;
     Ok(SessionRuntimeBinding::new(builder))
 }
@@ -640,8 +641,35 @@ pub fn projected_scripted_runtime_binding(
     controller: BoundaryController,
     script: Arc<ScriptPlan>,
 ) -> HarnessResult<SessionRuntimeBinding> {
-    let account = b"offline-loopback-account";
-    let descriptor = descriptor(account)?;
+    projected_scripted_runtime_binding_with(
+        workspace,
+        controller,
+        script,
+        None,
+        b"offline-loopback-account",
+        10_000_000,
+    )
+}
+
+/// [`projected_scripted_runtime_binding`] with an explicit reasoning effort,
+/// account binding, and projected-input ceiling.
+///
+/// The ceiling is a catalog fact inside the provider configuration identity.
+/// Account is the authority fact. `None` disables reasoning, matching
+/// [`projected_scripted_runtime_binding`]. The ordinary ceiling is `10_000_000`.
+///
+/// # Errors
+///
+/// Returns an error when the model, the coding packs, or the projection is invalid.
+pub fn projected_scripted_runtime_binding_with(
+    workspace: &Path,
+    controller: BoundaryController,
+    script: Arc<ScriptPlan>,
+    effort: Option<plakous::model::ReasoningEffort>,
+    account: &[u8],
+    maximum_projected_input: u64,
+) -> HarnessResult<SessionRuntimeBinding> {
+    let descriptor = descriptor_with_projected_input(account, maximum_projected_input)?;
     let mut model = LoopbackModel::with_descriptor(controller, account, true, descriptor.clone())?;
     model.scenario = LoopbackScenario::Scripted(script);
     let builder = projected_coding_builder(
@@ -651,6 +679,7 @@ pub fn projected_scripted_runtime_binding(
         account,
         plakous::tools::CodingPresentation::Codex,
         Vec::new(),
+        effort,
     )?;
     Ok(SessionRuntimeBinding::new(builder))
 }
@@ -702,6 +731,7 @@ pub fn scripted_pi_runtime_binding_with_extensions(
         account,
         plakous::tools::CodingPresentation::Pi,
         extensions,
+        None,
     )?
     .config(scripted_agent_config(script))
     .tool_policy(scripted_tool_policy(script));
@@ -718,6 +748,7 @@ fn projected_coding_builder(
     account: &[u8],
     presentation: plakous::tools::CodingPresentation,
     extensions: Vec<ToolRegistration>,
+    effort: Option<plakous::model::ReasoningEffort>,
 ) -> HarnessResult<AgentBuilder> {
     use plakous::tools::CodingPresentationExt as _;
     // A fixed plan-state identity, so a reopen's fresh binding names the same
@@ -753,7 +784,7 @@ fn projected_coding_builder(
         account,
         None,
         plakous::model::ToolPresentationMode::Direct,
-        None,
+        effort,
     )?;
     let effective = configured.configuration().effective();
     let facts = effective.descriptor();

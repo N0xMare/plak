@@ -27,6 +27,7 @@ use serde_json::json;
 use super::*;
 
 mod face;
+mod followup_recompile;
 mod parent_followup;
 mod saturated_retask;
 use crate::agent::{ApiTopologyParent, NATIVE_RUN_MAX_MODEL_ROUNDS, ProductStateRoots};

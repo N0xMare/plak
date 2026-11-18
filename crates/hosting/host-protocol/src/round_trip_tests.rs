@@ -274,6 +274,7 @@ fn every_error_code_has_a_distinct_snake_case_wire_form() {
         TopologyErrorCode::DiscardNotApplicable,
         TopologyErrorCode::FollowupNotIdle,
         TopologyErrorCode::FollowupClosed,
+        TopologyErrorCode::FollowupBindingChanged,
         TopologyErrorCode::FollowupRecoveryRequired,
         TopologyErrorCode::FollowupWorkspaceGone,
         TopologyErrorCode::QuotaBlocked,

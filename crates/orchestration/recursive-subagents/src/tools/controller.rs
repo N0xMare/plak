@@ -46,6 +46,17 @@ impl ChildServices {
     };
 }
 
+/// The locator and notice a follow-up's recompiling configuration transition
+/// publishes with its send receipt.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FollowupRecompile {
+    /// Visible notice that this follow-up recompiled provider configuration.
+    /// Not a failover.
+    pub notice: String,
+    /// The rebound head the child's node records when the send is admitted.
+    pub locator: String,
+}
+
 /// Opens, feeds and cancels the sessions behind a tree's children.
 ///
 /// The tree decides; the controller acts on sessions, which the tree cannot
@@ -159,6 +170,23 @@ pub trait ChildController: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<(), TopologyError>> + Send + '_>> {
         let _ = (driver, agent_id, message_id, receipt);
         Box::pin(async { Err(unprovided()) })
+    }
+
+    /// Product admission of an explicit follow-up before the tree opens an attempt.
+    ///
+    /// The default admits and changes nothing. A controller that recompiles
+    /// provider configuration returns the notice and the locator the tree
+    /// records on the same successful send. A refusal is the send's outcome:
+    /// no attempt is opened and the child is left as it was. Replay of a send
+    /// that already has a receipt must not call this.
+    fn prepare_followup(
+        &self,
+        agent_id: String,
+        acknowledged: bool,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<FollowupRecompile>, TopologyError>> + Send + '_>>
+    {
+        let _ = (agent_id, acknowledged);
+        Box::pin(async { Ok(None) })
     }
 
     /// Settles the exact attempt acknowledged by its parent before a fresh followup.

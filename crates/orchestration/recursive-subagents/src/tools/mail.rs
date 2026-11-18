@@ -390,8 +390,15 @@ impl TopologyTool {
         } else {
             false
         };
+        let recompile = match self
+            .prepare_followup_recompile(value, &operation_id)
+            .await?
+        {
+            Ok(recompile) => recompile,
+            Err(error) => return ToolOutcome::failure_text(error.to_value().to_string()),
+        };
         let outcome = self
-            .send_after_recovery(operation_id, value, cancelled, caller)
+            .send_after_recovery(operation_id, value, cancelled, caller, recompile)
             .await?;
         if recovered {
             Self::warn_recovered_refusal(outcome)
@@ -404,12 +411,50 @@ impl TopologyTool {
         clippy::too_many_lines,
         reason = "mail admission and delivery retain the same attempt and independently owned operation receipt"
     )]
+    /// Recompiles or refuses a follow-up before any attempt opens. A send that
+    /// already has a receipt is left alone so replay does not rebind.
+    async fn prepare_followup_recompile(
+        &self,
+        value: &Value,
+        operation_id: &str,
+    ) -> Result<Result<Option<FollowupRecompile>, TopologyError>, ToolRuntimeError> {
+        let Ok(request) = decode::<SendAgentMessageRequest>(value) else {
+            return Ok(Ok(None));
+        };
+        if request.purpose != Some(MessagePurpose::Followup) {
+            return Ok(Ok(None));
+        }
+        let answered = self
+            .driver
+            .read(|tree| {
+                tree.operations().get(operation_id).is_some_and(|row| {
+                    row.terminal_response.is_some() || row.terminal_code.is_some()
+                })
+            })
+            .map_err(|_| {
+                ToolRuntimeError::new(
+                    ToolRuntimeErrorKind::Execution,
+                    "topology tree lock is poisoned",
+                )
+            })?;
+        if answered {
+            return Ok(Ok(None));
+        }
+        let Some(deliverer) = self.deliverer() else {
+            return Ok(Ok(None));
+        };
+        Ok(deliverer
+            .prepare_followup(request.agent_id, request.acknowledge_recovery.is_some())
+            .await)
+    }
+
     async fn send_after_recovery(
         &self,
         operation_id: String,
         value: &Value,
         mut cancelled: SendCancelled<'_>,
         caller: String,
+        recompile: Option<FollowupRecompile>,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
         if let Ok(request) = decode::<SendAgentMessageRequest>(value)
             && request.purpose == Some(MessagePurpose::Followup)
@@ -458,7 +503,25 @@ impl TopologyTool {
                         "send_agent_message",
                         &request,
                         |tree, caller, request, operation_id| {
-                            tree.send_agent_message(caller, request, operation_id)
+                            let mut output =
+                                tree.send_agent_message(caller, request, operation_id)?;
+                            if let Some(recompile) = recompile.as_ref() {
+                                tree.advance_session_locator(
+                                    &request.agent_id,
+                                    recompile.locator.clone(),
+                                )?;
+                                output.configuration_notice = Some(recompile.notice.clone());
+                                if let Some(id) = operation_id {
+                                    tree.remember_success(
+                                        id,
+                                        caller,
+                                        "send_agent_message",
+                                        request,
+                                        &output,
+                                    )?;
+                                }
+                            }
+                            Ok(output)
                         },
                     )
                     .map(|(output, _replayed)| output)

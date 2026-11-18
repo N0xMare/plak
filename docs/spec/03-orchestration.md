@@ -853,10 +853,13 @@ Required `agent_id` and `message`.
 `purpose=result` is host-authored and MUST be refused from a model. There is no
 `delegate` purpose: it would also replace a running task.
 
-Receipt: `{ message_id, disposition, refresh?, recovery_warning? }`. An acknowledged
+Receipt: `{ message_id, disposition, refresh?, recovery_warning?, configuration_notice? }`. An acknowledged
 recovery followup retains `recovery_warning`: a tool may have changed this
 workspace; inspect the child workspace or candidate, and never replay the
-uncertain turn or effects. Ordinary sends omit it. `refresh` reports
+uncertain turn or effects. Ordinary sends omit it. A follow-up that recompiled
+provider configuration at the child's quiescent checkpoint (§5.3) retains
+`configuration_notice`. That notice names the explicit recompile; it is not
+failover. Replay of the send returns the stored notice and does not rebind again. `refresh` reports
 `status: refreshed | skipped | conflict`, the new `base` on success, or bounded
 `reason` / conflict `paths` and `paths_total` (at most 16 entries, with
 `paths_truncated` when cut). Unchanged and design-ineligible copies omit it.
@@ -904,9 +907,13 @@ MUST NOT drop a result push. The full result stays on the attempt.
 
 Followup refusal codes distinguish `followup_not_idle` (a turn, seal, or adoption
 is still active), `followup_closed` (a closed node, or a failed spawn that
-never produced a session), `followup_recovery_required`, and
+never produced a session), `followup_binding_changed` (the account, model,
+template or authority changed, or the recompiling configuration transition was
+refused), `followup_recovery_required`, and
 `followup_workspace_gone` (discarded or removed). Refusal never opens a new
-attempt or changes the prior attempt's result.
+attempt or changes the prior attempt's result. `followup_binding_changed`
+names the cause and tells the caller to spawn a new child from the template;
+the child stays in its prior settled state.
 
 Mail is **not a second spawn** and is not how a prompt is assigned.
 
@@ -1435,7 +1442,8 @@ The complete `TopologyErrorCode` set, in wire spelling:
 `operation_recovery_required`, `candidate_unknown`,
 `not_sealed`, `not_authorized`, `evidence_mismatch`, `target_changed`,
 `merge_conflict`, `adopt_not_applicable`, `discard_not_applicable`,
-`followup_not_idle`, `followup_closed`, `followup_recovery_required`,
+`followup_not_idle`, `followup_closed`, `followup_binding_changed`,
+`followup_recovery_required`,
 `followup_workspace_gone`, `quota_blocked`, `attempt_mismatch`,
 `no_pending_children`, `wait_caller_settled`, `recovery_lease_held`, `recovery_owner_live`,
 `recovery_storage_unavailable`, `recovery_effect_evidence_refused`,
@@ -1685,7 +1693,23 @@ settle before another attempt. Use an urgent steer for an active turn.
 produced a session (attempt failure kind `spawn_refused`): there is no session
 to re-task, so the caller spawns a new agent; `followup_recovery_required`
 identifies unresolved session ownership; `followup_workspace_gone` identifies
-a discarded or removed working copy. These refusals do not open a new attempt.
+a discarded or removed working copy. `followup_binding_changed` identifies a
+settled child whose account, model, template or authority no longer matches
+the follow-up's runtime, or whose recompiling configuration transition was
+refused (the head is not quiescent, running jobs cannot move, or spec 01 §5.7
+refused the target). The message names the cause and the remedy: spawn a new
+child from the template. The child stays in its prior settled state, listable
+and closable. These refusals do not open a new attempt.
+
+When the account, requested model and template adapter profile are unchanged
+and only provider configuration or compiled presentation differs, the explicit
+follow-up performs the head-advancing recompiling rebind of spec 01 §5.7 at
+the child's quiescent checkpoint before it opens an attempt. The receipt's
+`configuration_notice` records that recompile. It is the parent's act, not
+automatic failover, and an exact reopen still refuses a changed configuration
+on its own. The node's session locator advances to the rebound head in the
+same successful send. A replay of that send returns the stored receipt and
+does not rebind again.
 A Start rejected for storage pressure before admission is likewise a definite
 refusal: the attempted follow-up is rolled back, the existing child session and
 its prior history remain intact, and the caller receives `capacity`. Lost or
@@ -4626,9 +4650,11 @@ whose seal or adopt is still ambiguous is listed as refused
 
 `list_agents` lists `recovery_required` rows even without
 `include_completed`, and a full row carries a `recovery` note saying the host
-is recovering its session, with no remedy, when a session recovery would
-settle it, or `remedy: "close_agent"` with a
-`recovery` reason when only a workspace ambiguity remains or a terminal
+is recovering its session, with no remedy, only while a recovery claim for
+that child is held. When a session recovery would settle it but none has
+started, the row carries `remedy: "close_agent"` and a `recovery` note that
+recovery has not started. The same remedy and a `recovery` reason are carried
+when only a workspace ambiguity remains or a terminal
 refusal holds it. A failed copy removal (`workspace_cleanup`) is a workspace
 ambiguity, not a session recovery. Interrupted seals,
 adopts and copy removals are never settled automatically or by the

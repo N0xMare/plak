@@ -29,6 +29,16 @@ for one version bump, without native protocol compatibility.
 - Refuse a manual Messages tool-loop continuation that lost its initial
   thinking when steering text was merged into the tool-result message.
 
+### plakd
+
+- A parent follow-up to a settled child whose account, model and template
+  binding are unchanged recompiles provider configuration at the quiescent
+  checkpoint, records `configuration_notice` on the send receipt, and
+  continues. A changed account, model, template or authority, or a refused
+  recompile, refuses the follow-up as `followup_binding_changed` and leaves
+  the child settled. `list_agents` says the host is recovering a child only
+  while that recovery is in progress.
+
 ## 0.0.4
 
 ### plakd

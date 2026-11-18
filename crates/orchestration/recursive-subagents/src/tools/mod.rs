@@ -61,7 +61,7 @@ mod storage;
 mod wait;
 
 pub use cancel::{LiveCancelFailure, LiveCancelOutcome};
-pub use controller::{ChildController, ChildServices};
+pub use controller::{ChildController, ChildServices, FollowupRecompile};
 pub use driver::{HeldEffects, HostShutdown, TreeDriver};
 pub use mail::{MailDeliveryAck, MailDeliveryFailure, MailDeliveryRequest};
 pub use registrations::{

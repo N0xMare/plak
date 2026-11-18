@@ -261,6 +261,14 @@ impl AgentBuilder {
         )
     }
 
+    pub(crate) fn adapter_profile(&self) -> plakous_model::ModelAdapterProfileId {
+        self.provider_configuration
+            .effective()
+            .descriptor()
+            .profile()
+            .clone()
+    }
+
     /// Creates a builder from an exact resolved model, frozen tools, and workspace policy.
     #[must_use]
     #[allow(

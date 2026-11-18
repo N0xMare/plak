@@ -72,6 +72,18 @@ pub fn agent_builder_input_window(builder: &AgentBuilder) -> Option<(Option<u64>
     builder.session_input_window()
 }
 
+/// The adapter profile this builder's effective configuration names.
+///
+/// Template and authority comparison uses this fact. It is not a provider
+/// configuration identity and does not change when only catalog presentation
+/// is recompiled.
+#[must_use]
+pub fn agent_builder_adapter_profile(
+    builder: &AgentBuilder,
+) -> plakous_model::ModelAdapterProfileId {
+    builder.adapter_profile()
+}
+
 /// Projects reconstruction-safe target identity from an exact runtime builder.
 #[must_use]
 pub fn agent_builder_target_authority(

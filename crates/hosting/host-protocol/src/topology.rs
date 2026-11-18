@@ -515,6 +515,10 @@ pub enum TopologyErrorCode {
     FollowupNotIdle,
     /// A closed node cannot accept another attempt.
     FollowupClosed,
+    /// The child's account, model, template or authority changed, or the
+    /// recompiling configuration transition was refused. The child stays in
+    /// its prior settled state. Spawn a new child from the template.
+    FollowupBindingChanged,
     /// An uncertain earlier operation must settle before another attempt.
     FollowupRecoveryRequired,
     /// The child workspace was discarded or removed.

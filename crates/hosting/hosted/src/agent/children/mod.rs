@@ -35,6 +35,7 @@ mod continuation;
 mod controller;
 mod deliver;
 mod failed_worktree;
+mod followup_recompile;
 mod reopen;
 mod turns;
 mod waiter;

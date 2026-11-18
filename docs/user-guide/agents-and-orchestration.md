@@ -266,7 +266,9 @@ toward the tree's node budget until it is closed.
 
 Such a child is settled by reopening its session once more, without replaying
 anything it ran. Recovery is plakd's job, not the model's: no agent has a
-recovery tool, and `list_agents` says the host is recovering that child. It
+recovery tool, and `list_agents` says the host is recovering that child only
+while recovery is actually in progress. Before a recovery claim is held, the
+row says recovery has not started and `close_agent` ends the node. It
 runs:
 
 - automatically, in the background, when the tree is reopened;

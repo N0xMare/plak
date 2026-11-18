@@ -57,8 +57,9 @@ use plakous_agent::CommandId;
 use plakous_agent::internal::facade_support::{
     AgentCompactSessionOutcome, AgentCompactSessionRequest, AgentCompactionReason,
     AgentSessionEndpointError, CompactionSummary, ModelRouteBinding, RuntimeCheckpoint,
-    SessionStoreOrigin, agent_builder_target_authority, agent_checkpoint, agent_store_origin,
-    checkpoint_instruction_sources, checkpoint_job_config, checkpoint_registers_tool,
+    SessionStoreOrigin, agent_builder_adapter_profile, agent_builder_target_authority,
+    agent_checkpoint, agent_store_origin, checkpoint_instruction_sources, checkpoint_job_config,
+    checkpoint_registers_tool,
 };
 use plakous_agent::internal::{
     ArchiveSession, DeleteSession, DurableCodeCellAbandonmentOutcome,
@@ -316,6 +317,16 @@ impl SessionRuntimeBinding {
         let (protocol, route, model, selected, effective, account) =
             agent_builder_target_authority(&self.builder);
         SessionTargetBinding::new(protocol, route, model, selected, effective, account)
+    }
+
+    /// The adapter profile of this runtime's effective configuration.
+    ///
+    /// This is the template and authority fact. A recompiling configuration
+    /// transition may change provider configuration identities and compiled
+    /// presentation, and it may not change this profile.
+    #[must_use]
+    pub fn adapter_profile(&self) -> ModelAdapterProfileId {
+        agent_builder_adapter_profile(&self.builder)
     }
 
     /// Narrows generation limits to the harness compaction bound derived from
